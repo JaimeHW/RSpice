@@ -13,11 +13,11 @@ use cadence_psf_type_meta::TypeMetaCache;
 
 mod binary_io;
 use binary_io::{
-    parse_string, peek_u32, read_f64, read_i32, read_u32, read_u8_padded, skip_opaque_scalar,
+    parse_string, peek_u32, read_f64, read_i32, read_u8_padded, read_u32, skip_opaque_scalar,
 };
 
 mod toc;
-use toc::{parse_toc, SectionKind, TocEntry};
+use toc::{SectionKind, TocEntry, parse_toc};
 
 mod value_decode;
 use value_decode::{decode_windowed_dynamic_signal_samples, read_type_value_with_numeric_visit};
@@ -1007,26 +1007,28 @@ fn collect_channel_specs_for_array_element(
     parent_type_id: Option<u32>,
 ) -> Result<(), CadencePsfError> {
     match resolve_array_element_type(element_type_raw, types, parent_type_id)? {
-        ArrayElementType::Primitive(dtype) => {
-            match dtype {
-                DataType::Int8 | DataType::Int32 | DataType::Real => specs.push(ChannelSpec {
-                    suffix: prefix.to_string(),
-                    kind: ChannelKind::Real,
-                }),
-                DataType::Complex => specs.push(ChannelSpec {
-                    suffix: prefix.to_string(),
-                    kind: ChannelKind::Complex,
-                }),
-                DataType::String => {}
-                DataType::Array => return Err(CadencePsfError::new(
+        ArrayElementType::Primitive(dtype) => match dtype {
+            DataType::Int8 | DataType::Int32 | DataType::Real => specs.push(ChannelSpec {
+                suffix: prefix.to_string(),
+                kind: ChannelKind::Real,
+            }),
+            DataType::Complex => specs.push(ChannelSpec {
+                suffix: prefix.to_string(),
+                kind: ChannelKind::Complex,
+            }),
+            DataType::String => {}
+            DataType::Array => {
+                return Err(CadencePsfError::new(
                     "array element descriptor resolved to ARRAY without a concrete type reference",
-                )),
-                DataType::Struct => return Err(CadencePsfError::new(
-                    "array element descriptor resolved to STRUCT without a concrete type reference",
-                )),
-                DataType::Other(_) => {}
+                ));
             }
-        }
+            DataType::Struct => {
+                return Err(CadencePsfError::new(
+                    "array element descriptor resolved to STRUCT without a concrete type reference",
+                ));
+            }
+            DataType::Other(_) => {}
+        },
         ArrayElementType::TypeRef(type_id) => {
             collect_channel_specs_for_type(type_id, types, prefix, specs)?;
         }

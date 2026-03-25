@@ -3,8 +3,8 @@ use super::{
     parse_runner_netlist, run_ac_analysis_with_source_path,
 };
 use num_complex::Complex64;
-use rspice_core::engine::Engine;
 use rspice_core::Value;
+use rspice_core::engine::Engine;
 use std::fmt;
 use std::path::Path;
 

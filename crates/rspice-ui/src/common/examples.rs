@@ -480,14 +480,18 @@ mod tests {
         let mut state = SchematicState::default();
         load_example("RC Lowpass Filter", &mut state);
         assert!(!state.components.is_empty());
-        assert!(state
-            .components
-            .iter()
-            .any(|c| c.kind == ComponentType::Resistor));
-        assert!(state
-            .components
-            .iter()
-            .any(|c| c.kind == ComponentType::Capacitor));
+        assert!(
+            state
+                .components
+                .iter()
+                .any(|c| c.kind == ComponentType::Resistor)
+        );
+        assert!(
+            state
+                .components
+                .iter()
+                .any(|c| c.kind == ComponentType::Capacitor)
+        );
     }
 
     #[test]
@@ -506,24 +510,30 @@ mod tests {
     fn test_load_common_emitter() {
         let mut state = SchematicState::default();
         load_example("Common Emitter Amplifier", &mut state);
-        assert!(state
-            .components
-            .iter()
-            .any(|c| c.kind == ComponentType::NpnBjt));
+        assert!(
+            state
+                .components
+                .iter()
+                .any(|c| c.kind == ComponentType::NpnBjt)
+        );
     }
 
     #[test]
     fn test_load_cmos_inverter() {
         let mut state = SchematicState::default();
         load_example("CMOS Inverter", &mut state);
-        assert!(state
-            .components
-            .iter()
-            .any(|c| c.kind == ComponentType::Nmos));
-        assert!(state
-            .components
-            .iter()
-            .any(|c| c.kind == ComponentType::Pmos));
+        assert!(
+            state
+                .components
+                .iter()
+                .any(|c| c.kind == ComponentType::Nmos)
+        );
+        assert!(
+            state
+                .components
+                .iter()
+                .any(|c| c.kind == ComponentType::Pmos)
+        );
     }
 
     #[test]

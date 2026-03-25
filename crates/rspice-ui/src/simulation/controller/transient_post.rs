@@ -5,7 +5,7 @@ use crate::common::app::AppState;
 use crate::state::AnalysisType;
 use crate::viewers::ActiveViewer;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DerivedViewerLoadState {
@@ -94,13 +94,13 @@ impl SimulationController {
         };
 
         match viewer {
-            ActiveViewer::EyeDiagram if state.eye_diagram_state.trace_count() > 0 => {
+            ActiveViewer::EyeDiagram if state.analysis.eye_diagram_state.trace_count() > 0 => {
                 self.transient_post.eye_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
                 });
             }
-            ActiveViewer::Fft if state.fft_state.has_data() => {
+            ActiveViewer::Fft if state.analysis.fft_state.has_data() => {
                 self.transient_post.fft_loaded = Some(LoadedDerivedView {
                     analysis,
                     availability: DerivedViewAvailability::Ready,
@@ -121,7 +121,10 @@ impl SimulationController {
             .map(|loaded| Some(loaded.analysis) != active_analysis)
             .unwrap_or(false)
         {
-            state.eye_diagram_state.load_data(EyeData::default());
+            state
+                .analysis
+                .eye_diagram_state
+                .load_data(EyeData::default());
             self.transient_post.eye_loaded = None;
         }
 
@@ -131,7 +134,7 @@ impl SimulationController {
             .map(|loaded| Some(loaded.analysis) != active_analysis)
             .unwrap_or(false)
         {
-            state.fft_state.clear();
+            state.analysis.fft_state.clear();
             self.transient_post.fft_loaded = None;
         }
 
@@ -144,8 +147,11 @@ impl SimulationController {
         self.cancel_task_slot(DerivedViewKind::Fft);
         self.transient_post.eye_loaded = None;
         self.transient_post.fft_loaded = None;
-        state.eye_diagram_state.load_data(EyeData::default());
-        state.fft_state.clear();
+        state
+            .analysis
+            .eye_diagram_state
+            .load_data(EyeData::default());
+        state.analysis.fft_state.clear();
     }
 
     pub(super) fn prime_transient_fft_source_selection(&mut self, state: &mut AppState) {
@@ -153,12 +159,13 @@ impl SimulationController {
             return;
         };
         state
+            .analysis
             .fft_state
             .set_selected_source(Some(source.source_name.clone()));
     }
 
     fn ensure_eye_diagram_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
-        if state.eye_diagram_state.trace_count() > 0 {
+        if state.analysis.eye_diagram_state.trace_count() > 0 {
             self.mark_transient_view_ready(state, ActiveViewer::EyeDiagram);
             return DerivedViewerLoadState::Ready;
         }
@@ -196,7 +203,7 @@ impl SimulationController {
     }
 
     fn ensure_fft_data(&mut self, state: &mut AppState) -> DerivedViewerLoadState {
-        if state.fft_state.has_data() {
+        if state.analysis.fft_state.has_data() {
             self.mark_transient_view_ready(state, ActiveViewer::Fft);
             return DerivedViewerLoadState::Ready;
         }
@@ -230,6 +237,7 @@ impl SimulationController {
             return DerivedViewerLoadState::Unavailable;
         };
         state
+            .analysis
             .fft_state
             .set_selected_source(Some(source.source_name.clone()));
         self.spawn_derived_view_task(DerivedViewKind::Fft, source);
@@ -264,13 +272,16 @@ impl SimulationController {
         match (view, message.payload) {
             (DerivedViewKind::EyeDiagram, DerivedViewResultPayload::Eye(result)) => {
                 if let Some(eye_data) = result {
-                    state.eye_diagram_state.load_data(eye_data);
+                    state.analysis.eye_diagram_state.load_data(eye_data);
                     self.transient_post.eye_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Ready,
                     });
                 } else {
-                    state.eye_diagram_state.load_data(EyeData::default());
+                    state
+                        .analysis
+                        .eye_diagram_state
+                        .load_data(EyeData::default());
                     self.transient_post.eye_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Unavailable,
@@ -279,13 +290,13 @@ impl SimulationController {
             }
             (DerivedViewKind::Fft, DerivedViewResultPayload::Fft(result)) => {
                 if let Some(prepared) = result {
-                    state.fft_state.load_prepared_input(prepared);
+                    state.analysis.fft_state.load_prepared_input(prepared);
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Ready,
                     });
                 } else {
-                    state.fft_state.clear();
+                    state.analysis.fft_state.clear();
                     self.transient_post.fft_loaded = Some(LoadedDerivedView {
                         analysis: message.analysis,
                         availability: DerivedViewAvailability::Unavailable,
@@ -384,7 +395,7 @@ impl SimulationController {
     fn current_transient_waveform_source(&self, state: &AppState) -> Option<DerivedWaveformSource> {
         let analysis = state.simulation.active_analysis()?;
         let analysis_key = self.active_transient_analysis_key(state)?;
-        let preferred_source = state.fft_state.selected_source.as_deref();
+        let preferred_source = state.analysis.fft_state.selected_source.as_deref();
         let (source_name, waveform) =
             Self::fft_source_waveform_from_state(&analysis.waveforms, preferred_source)?;
 
@@ -393,7 +404,10 @@ impl SimulationController {
             source_name,
             time: Arc::clone(&waveform.x),
             values: Arc::clone(&waveform.y),
-            fft_options: state.fft_state.input_options_for_waveform(&waveform.x),
+            fft_options: state
+                .analysis
+                .fft_state
+                .input_options_for_waveform(&waveform.x),
         })
     }
 

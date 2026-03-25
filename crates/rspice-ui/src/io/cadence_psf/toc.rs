@@ -1,5 +1,5 @@
-use super::binary_io::peek_u32;
 use super::CadencePsfError;
+use super::binary_io::peek_u32;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

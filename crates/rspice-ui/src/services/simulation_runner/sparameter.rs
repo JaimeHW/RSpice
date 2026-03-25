@@ -2,10 +2,10 @@
 
 use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
 use num_complex::Complex64;
+use rspice_core::Value;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{Element, ElementKind, SourceSpec};
-use rspice_core::Value;
 use std::fmt;
 use std::path::Path;
 

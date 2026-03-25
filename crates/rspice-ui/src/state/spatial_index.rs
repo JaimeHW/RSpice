@@ -29,10 +29,10 @@
 //! let hit = index.component_at_point(x, y);
 //! ```
 
-use rstar::{RTree, RTreeObject, AABB};
+use rstar::{AABB, RTree, RTreeObject};
 
-use crate::state::schematic::{Component, Wire};
 use crate::state::Viewport;
+use crate::state::schematic::{Component, Wire};
 
 // =============================================================================
 // Spatial Objects for R-tree
@@ -349,8 +349,8 @@ impl SpatialIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::schematic::ComponentType;
     use crate::state::Point;
+    use crate::state::schematic::ComponentType;
 
     /// Helper to create a test component
     fn make_component(id: u64, x: i32, y: i32) -> Component {

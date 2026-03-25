@@ -8,8 +8,8 @@
 
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex, MutexGuard,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::{self, JoinHandle};
 

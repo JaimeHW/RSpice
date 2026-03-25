@@ -1,9 +1,9 @@
 #![allow(clippy::type_complexity)]
 
 use super::{build_engine_config, parse_runner_netlist};
+use rspice_core::Value;
 use rspice_core::analysis::PssConfig;
 use rspice_core::engine::Engine;
-use rspice_core::Value;
 use std::path::Path;
 
 /// PSS analysis data

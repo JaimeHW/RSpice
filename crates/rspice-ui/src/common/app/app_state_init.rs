@@ -1,14 +1,6 @@
-use super::{AppState, DialogState, PanelSizes, PanelVisibility, RSpiceTheme};
-
-pub(super) struct AnalysisViewerDefaults {
-    pub pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
-    pub bode_plot_state: crate::analysis::bode::BodePlotState,
-    pub nyquist_state: crate::analysis::nyquist::NyquistState,
-    pub eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
-    pub fft_state: crate::analysis::fft::FftState,
-    pub smith_chart_state: crate::analysis::smith_chart::SmithChartState,
-    pub histogram_state: crate::analysis::histogram::HistogramState,
-}
+use super::{
+    AnalysisWorkspaceState, AppState, DialogState, PanelSizes, PanelVisibility, RSpiceTheme,
+};
 
 pub(super) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
@@ -16,8 +8,8 @@ pub(super) fn default_model_library_manager() -> crate::state::model_library::Mo
     manager
 }
 
-pub(super) fn default_analysis_viewers() -> AnalysisViewerDefaults {
-    AnalysisViewerDefaults {
+pub(super) fn default_analysis_viewers() -> AnalysisWorkspaceState {
+    AnalysisWorkspaceState {
         pole_zero_state: crate::analysis::pole_zero::PoleZeroState::default(),
         bode_plot_state: crate::analysis::bode::BodePlotState::default(),
         nyquist_state: crate::analysis::nyquist::NyquistState::default(),
@@ -56,13 +48,7 @@ pub(super) fn default_app_state() -> AppState {
         model_library_manager: default_model_library_manager(),
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
-        pole_zero_state: analysis.pole_zero_state,
-        bode_plot_state: analysis.bode_plot_state,
-        nyquist_state: analysis.nyquist_state,
-        eye_diagram_state: analysis.eye_diagram_state,
-        fft_state: analysis.fft_state,
-        smith_chart_state: analysis.smith_chart_state,
-        histogram_state: analysis.histogram_state,
+        analysis,
     }
 }
 

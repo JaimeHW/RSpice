@@ -1,7 +1,7 @@
 use egui::Ui;
 
 use crate::common::app::{AppState, ConsoleMessage};
-use crate::common::examples::{load_example, EXAMPLES};
+use crate::common::examples::{EXAMPLES, load_example};
 
 pub(super) fn render_examples_menu(ui: &mut Ui, state: &mut AppState) {
     for example in EXAMPLES {

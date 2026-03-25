@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(goal.calculate_cost(1.2), 0.0); // Exact match
         assert!(goal.calculate_cost(1.1) > 0.0); // Below target
         assert!(goal.calculate_cost(1.3) > 0.0); // Above target
-                                                 // Symmetric around target
+        // Symmetric around target
         let cost_below = goal.calculate_cost(1.0);
         let cost_above = goal.calculate_cost(1.4);
         assert!((cost_below - cost_above).abs() < 1e-10);

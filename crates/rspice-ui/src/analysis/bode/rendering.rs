@@ -49,7 +49,7 @@ fn text_color() -> Color32 {
 pub fn render_bode_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let available_rect = ui.available_rect_before_wrap();
     let close_requested = {
-        let state = &mut app_state.bode_plot_state;
+        let state = &mut app_state.analysis.bode_plot_state;
         let layout = calculate_layout(available_rect, state);
         let close_requested = render_header(ui, &layout, state);
         render_plots(ui, &layout, state);
@@ -188,7 +188,7 @@ fn render_header(ui: &mut Ui, layout: &BodeLayout, state: &mut BodePlotState) ->
             // Toggle buttons
             if ui
                 .small_button(if state.show_margins {
-                    "Margins ✓"
+                    "Margins âœ“"
                 } else {
                     "Margins"
                 })
@@ -198,7 +198,11 @@ fn render_header(ui: &mut Ui, layout: &BodeLayout, state: &mut BodePlotState) ->
             }
 
             if ui
-                .small_button(if state.show_grid { "Grid ✓" } else { "Grid" })
+                .small_button(if state.show_grid {
+                    "Grid âœ“"
+                } else {
+                    "Grid"
+                })
                 .clicked()
             {
                 state.toggle_grid();
@@ -206,7 +210,7 @@ fn render_header(ui: &mut Ui, layout: &BodeLayout, state: &mut BodePlotState) ->
 
             if ui
                 .small_button(if state.show_cursor {
-                    "Cursor ✓"
+                    "Cursor âœ“"
                 } else {
                     "Cursor"
                 })
@@ -218,7 +222,7 @@ fn render_header(ui: &mut Ui, layout: &BodeLayout, state: &mut BodePlotState) ->
             // Right-aligned close button
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("âœ•").clicked() {
                     close_requested = true;
                 }
             });
@@ -305,7 +309,7 @@ fn render_phase_plot(painter: &Painter, rect: Rect, state: &BodePlotState) {
         render_log_grid(painter, rect, state.phase_min, state.phase_max);
     }
 
-    // -180° line (for stability)
+    // -180Â° line (for stability)
     let minus180_y = map_to_y(-180.0, state.phase_min, state.phase_max, rect);
     if minus180_y >= rect.min.y && minus180_y <= rect.max.y {
         painter.line_segment(
@@ -328,7 +332,7 @@ fn render_phase_plot(painter: &Painter, rect: Rect, state: &BodePlotState) {
     painter.text(
         Pos2::new(rect.min.x + 5.0, rect.min.y + 5.0),
         egui::Align2::LEFT_TOP,
-        "Phase (°)",
+        "Phase (Â°)",
         FontId::proportional(10.0),
         text_color(),
     );

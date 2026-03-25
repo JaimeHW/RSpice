@@ -1,7 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use rspice_ui::analysis::fft::{
-    prepare_fft_input_with_options, render_fft_plot, FftData, FftInputOptions, FftInputPolicy,
-    FftState, WindowFunction,
+    FftData, FftInputOptions, FftInputPolicy, FftState, WindowFunction,
+    prepare_fft_input_with_options, render_fft_plot,
 };
 use rspice_ui::common::AppState;
 use rspice_ui::state::WaveformData;

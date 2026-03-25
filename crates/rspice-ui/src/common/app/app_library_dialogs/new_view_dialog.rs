@@ -1,4 +1,4 @@
-use super::shared::{validate_lcv_name, DialogActionOutcome};
+use super::shared::{DialogActionOutcome, validate_lcv_name};
 use super::{ConsoleMessage, Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
 
 impl RSpiceApp {

@@ -25,10 +25,10 @@ pub mod tabbed_dialog;
 // Re-export main types
 pub use design_variables::{DesignVariable, DesignVariablesState};
 pub use dialog::{
-    format_engineering_value, parse_engineering_value, render_properties_dialog, EditedProperties,
-    PropertiesDialogResult, PropertyEditorState,
+    EditedProperties, PropertiesDialogResult, PropertyEditorState, format_engineering_value,
+    parse_engineering_value, render_properties_dialog,
 };
 pub use property_bridge::parse_params_string;
 pub use tabbed_dialog::{
-    render_tabbed_property_dialog, TabInfo, TabbedDialogResult, TabbedPropertyDialogState,
+    TabInfo, TabbedDialogResult, TabbedPropertyDialogState, render_tabbed_property_dialog,
 };

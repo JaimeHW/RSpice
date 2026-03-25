@@ -85,10 +85,12 @@ fn test_run_parametric_analysis_executes_step_param_command() {
     assert_eq!(result.target, "PARAM RVAL");
     assert_eq!(result.sweep_values.len(), 4);
     assert_eq!(result.num_points, 4);
-    assert!(result
-        .voltages
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+    assert!(
+        result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+    );
 }
 
 #[test]
@@ -168,12 +170,14 @@ fn test_run_parametric_analysis_with_config_ac_base_mode() {
         .expect("temperature sweep AC base mode should execute");
     assert_eq!(result.target, "TEMP");
     assert_eq!(result.num_points, 3);
-    assert!(result
-        .voltages
-        .iter()
-        .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-            && values.len() == 3
-            && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+    assert!(
+        result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+    );
 }
 
 #[test]
@@ -248,10 +252,12 @@ fn test_run_corner_analysis_executes_temp_directives() {
     assert_eq!(result.corner_labels.len(), 3);
     assert!(result.corner_labels[0].starts_with("TT_1.000000V_"));
     assert_eq!(result.num_points, 3);
-    assert!(result
-        .voltages
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("V(out)")));
+    assert!(
+        result
+            .voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(out)"))
+    );
 }
 
 #[test]
@@ -343,10 +349,12 @@ fn test_run_corner_analysis_with_config_executes_full_matrix() {
     assert_eq!(result.temperatures_c.len(), 8);
     assert_eq!(result.corner_labels.len(), 8);
     assert_eq!(result.num_failures, 0);
-    assert!(result
-        .corner_labels
-        .iter()
-        .any(|label| label.contains("FF_1.100000V_125.000000C")));
+    assert!(
+        result
+            .corner_labels
+            .iter()
+            .any(|label| label.contains("FF_1.100000V_125.000000C"))
+    );
 }
 
 #[test]
@@ -436,12 +444,14 @@ fn test_run_corner_analysis_with_config_ac_base_mode() {
     assert_eq!(result.x_label, "Temperature");
     assert_eq!(result.x_unit, "C");
     assert_eq!(result.x_values, vec![-40.0, 25.0, 125.0]);
-    assert!(result
-        .voltages
-        .iter()
-        .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
-            && values.len() == 3
-            && values.iter().all(|v| v.is_finite() && *v >= 0.0)));
+    assert!(
+        result
+            .voltages
+            .iter()
+            .any(|(name, values)| name.eq_ignore_ascii_case("|V(out)|")
+                && values.len() == 3
+                && values.iter().all(|v| v.is_finite() && *v >= 0.0))
+    );
 }
 
 #[test]

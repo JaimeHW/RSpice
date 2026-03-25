@@ -2,8 +2,8 @@
 
 use super::{build_engine_config, parse_runner_netlist};
 use crate::output_spec::resolve_node_or_ground_index;
-use rspice_core::engine::Engine;
 use rspice_core::Value;
+use rspice_core::engine::Engine;
 use std::path::Path;
 
 /// Pole-zero analysis data

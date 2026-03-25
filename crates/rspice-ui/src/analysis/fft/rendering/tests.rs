@@ -244,9 +244,11 @@ fn test_collect_fft_cursor_label_obstacles_samples_top_band_trace_points() {
     let obstacles = collect_fft_cursor_label_obstacles(plot, &data, &state, plot.min.y + 64.0);
 
     assert!(!obstacles.is_empty());
-    assert!(obstacles
-        .iter()
-        .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3));
+    assert!(
+        obstacles
+            .iter()
+            .all(|r| r.max.y <= plot.min.y + 64.0 + 1e-3)
+    );
 }
 
 #[test]
@@ -287,9 +289,11 @@ fn test_build_spectrum_polyline_decimates_dense_visible_range() {
     let points = build_spectrum_polyline(rect, &data, &state);
     assert!(points.len() >= rect.width() as usize);
     assert!(points.len() < n / 4);
-    assert!(points
-        .iter()
-        .all(|point| point.x.is_finite() && point.y.is_finite()));
+    assert!(
+        points
+            .iter()
+            .all(|point| point.x.is_finite() && point.y.is_finite())
+    );
 }
 
 #[test]
@@ -551,12 +555,14 @@ fn test_refresh_fft_from_source_waveform_reference_mode_preserves_large_uniform_
             "V(out)", time, values, "#4aa3ff",
         ));
     app_state
+        .analysis
         .fft_state
         .set_input_fidelity(InputFidelity::Reference);
 
     refresh_fft_from_source_waveform(&mut app_state, "V(out)");
 
     let source = app_state
+        .analysis
         .fft_state
         .source_cache
         .as_ref()
@@ -581,12 +587,14 @@ fn test_refresh_fft_from_source_waveform_interactive_mode_caps_large_uniform_inp
             "V(out)", time, values, "#4aa3ff",
         ));
     app_state
+        .analysis
         .fft_state
         .set_input_fidelity(InputFidelity::Interactive);
 
     refresh_fft_from_source_waveform(&mut app_state, "V(out)");
 
     let source = app_state
+        .analysis
         .fft_state
         .source_cache
         .as_ref()
@@ -611,19 +619,24 @@ fn test_refresh_fft_from_source_waveform_syncs_auto_n_control_to_effective_sampl
             "V(out)", time, values, "#4aa3ff",
         ));
     app_state
+        .analysis
         .fft_state
         .set_input_fidelity(InputFidelity::Interactive);
-    app_state.fft_state.sample_count_auto = true;
-    app_state.fft_state.sample_count = 2048;
+    app_state.analysis.fft_state.sample_count_auto = true;
+    app_state.analysis.fft_state.sample_count = 2048;
 
     refresh_fft_from_source_waveform(&mut app_state, "V(out)");
 
     let source = app_state
+        .analysis
         .fft_state
         .source_cache
         .as_ref()
         .expect("source cache");
-    assert_eq!(app_state.fft_state.sample_count, source.samples.len());
+    assert_eq!(
+        app_state.analysis.fft_state.sample_count,
+        source.samples.len()
+    );
 }
 
 #[test]
@@ -642,17 +655,19 @@ fn test_refresh_fft_from_source_waveform_applies_manual_time_window_and_sample_t
             "V(out)", time, values, "#4aa3ff",
         ));
     app_state
+        .analysis
         .fft_state
         .set_input_fidelity(InputFidelity::Reference);
-    app_state.fft_state.time_window_auto = false;
-    app_state.fft_state.time_window_start = 0.2;
-    app_state.fft_state.time_window_end = 0.4;
-    app_state.fft_state.sample_count_auto = false;
-    app_state.fft_state.sample_count = 2048;
+    app_state.analysis.fft_state.time_window_auto = false;
+    app_state.analysis.fft_state.time_window_start = 0.2;
+    app_state.analysis.fft_state.time_window_end = 0.4;
+    app_state.analysis.fft_state.sample_count_auto = false;
+    app_state.analysis.fft_state.sample_count = 2048;
 
     refresh_fft_from_source_waveform(&mut app_state, "V(out)");
 
     let source = app_state
+        .analysis
         .fft_state
         .source_cache
         .as_ref()
@@ -685,6 +700,7 @@ fn test_current_fft_source_time_bounds_uses_selected_source() {
             "#abcdef",
         ));
     app_state
+        .analysis
         .fft_state
         .set_selected_source(Some("B".to_string()));
 
@@ -729,15 +745,21 @@ fn test_frequency_ticks_log_has_major_decades() {
     state.freq_max = 1_000_000.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 10.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9));
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 10.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 1000.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| t.major && (t.value - 100000.0).abs() < 1e-9)
+    );
 }
 
 #[test]
@@ -748,15 +770,21 @@ fn test_frequency_ticks_log_contains_minor_subdivisions() {
     state.freq_max = 100.0;
 
     let ticks = frequency_ticks(&state, 10);
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9));
-    assert!(ticks
-        .iter()
-        .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9));
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 20.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 50.0).abs() < 1e-9)
+    );
+    assert!(
+        ticks
+            .iter()
+            .any(|t| !t.major && (t.value - 90.0).abs() < 1e-9)
+    );
 }
 
 #[test]
@@ -772,10 +800,12 @@ fn test_frequency_ticks_linear_contains_minor_gridlines() {
 
     assert!(major_count >= 3);
     assert!(minor_count > 0);
-    assert!(ticks
-        .iter()
-        .filter(|t| !t.major)
-        .all(|t| t.label.is_empty()));
+    assert!(
+        ticks
+            .iter()
+            .filter(|t| !t.major)
+            .all(|t| t.label.is_empty())
+    );
 }
 
 #[test]
@@ -796,9 +826,11 @@ fn test_linear_ticks_minor_do_not_overlap_major_values() {
     let majors: Vec<f64> = ticks.iter().filter(|t| t.major).map(|t| t.value).collect();
     let epsilon = 1e-9;
     for minor in ticks.iter().filter(|t| !t.major) {
-        assert!(majors
-            .iter()
-            .all(|&major| (major - minor.value).abs() > epsilon));
+        assert!(
+            majors
+                .iter()
+                .all(|&major| (major - minor.value).abs() > epsilon)
+        );
     }
 }
 

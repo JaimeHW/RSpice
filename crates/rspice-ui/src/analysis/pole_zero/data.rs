@@ -637,9 +637,11 @@ mod tests {
         let dominant = data.dominant_poles();
         assert!(!dominant.is_empty());
         assert!(dominant.iter().all(|root| root.real.is_finite()));
-        assert!(dominant
-            .iter()
-            .any(|root| approx_eq_rel(root.real, -0.05, 0.01)));
+        assert!(
+            dominant
+                .iter()
+                .any(|root| approx_eq_rel(root.real, -0.05, 0.01))
+        );
     }
 
     #[test]
@@ -652,9 +654,11 @@ mod tests {
         let dominant = data.dominant_poles();
         assert!(!dominant.is_empty());
         assert!(dominant.iter().all(|root| root.magnitude().is_finite()));
-        assert!(dominant
-            .iter()
-            .any(|root| approx_eq_rel(root.real, 0.95, 0.01)));
+        assert!(
+            dominant
+                .iter()
+                .any(|root| approx_eq_rel(root.real, 0.95, 0.01))
+        );
     }
 
     #[test]

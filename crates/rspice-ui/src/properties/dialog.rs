@@ -169,7 +169,7 @@ pub fn parse_engineering_value(input: &str) -> Result<f64, String> {
             return Err(format!(
                 "Unknown suffix: '{}' (normalized: '{}')",
                 suffix, normalized_suffix
-            ))
+            ));
         }
     };
 

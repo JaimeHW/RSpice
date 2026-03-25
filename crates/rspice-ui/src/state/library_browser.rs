@@ -1111,11 +1111,12 @@ mod tests {
         mgr.add_library(Library::new("lib1"));
 
         assert!(mgr.create_cell("lib1", "new_cell"));
-        assert!(mgr
-            .get_library("lib1")
-            .unwrap()
-            .get_cell("new_cell")
-            .is_some());
+        assert!(
+            mgr.get_library("lib1")
+                .unwrap()
+                .get_cell("new_cell")
+                .is_some()
+        );
     }
 
     #[test]
@@ -1253,9 +1254,10 @@ mod tests {
     fn test_with_primitives_creates_two_libraries() {
         let mgr = LibraryManager::with_primitives();
         assert_eq!(mgr.library_count(), 2);
-        assert!(mgr
-            .get_library(LibraryManager::PRIMITIVES_LIBRARY)
-            .is_some());
+        assert!(
+            mgr.get_library(LibraryManager::PRIMITIVES_LIBRARY)
+                .is_some()
+        );
         assert!(mgr.get_library(LibraryManager::USER_LIBRARY).is_some());
     }
 

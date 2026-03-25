@@ -96,32 +96,34 @@ pub fn render_eye_diagram_viewer(ui: &mut Ui, app_state: &mut AppState) {
     // Claim full available space so parent resizable panels keep user-set size
     // instead of snapping back to a content-driven natural size.
     let (_id, _rect) = ui.allocate_space(available_rect.size());
-    let auto_width = preferred_measurements_pane_width(ui, &app_state.eye_diagram_state);
+    let auto_width = preferred_measurements_pane_width(ui, &app_state.analysis.eye_diagram_state);
     app_state
+        .analysis
         .eye_diagram_state
         .measurements_pane_auto_width_hint = auto_width;
     let measurements_width = resolve_measurements_pane_width(
         available_rect,
-        app_state.eye_diagram_state.measurements_pane_width,
+        app_state.analysis.eye_diagram_state.measurements_pane_width,
         auto_width,
     );
     if app_state
+        .analysis
         .eye_diagram_state
         .measurements_pane_width
         .is_some()
     {
-        app_state.eye_diagram_state.measurements_pane_width = Some(measurements_width);
+        app_state.analysis.eye_diagram_state.measurements_pane_width = Some(measurements_width);
     }
 
     // Calculate layout
     let layout = calculate_layout_with_measurements_width(
         available_rect,
-        app_state.eye_diagram_state.show_measurements,
+        app_state.analysis.eye_diagram_state.show_measurements,
         measurements_width,
     );
 
     let close_requested = {
-        let state = &mut app_state.eye_diagram_state;
+        let state = &mut app_state.analysis.eye_diagram_state;
         let close_requested = render_header(ui, &layout, state);
         handle_measurements_splitter(ui, &layout, state);
         render_chart_area(ui, &layout, state);
@@ -1550,18 +1552,18 @@ fn render_cursor_marker_manager(ui: &mut Ui, state: &mut EyeDiagramState) {
         .cursors
         .cursor1_time_s
         .map(crate::waveform::axis::format_time)
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| "â€”".to_string());
     let c2 = state
         .cursors
         .cursor2_time_s
         .map(crate::waveform::axis::format_time)
-        .unwrap_or_else(|| "—".to_string());
+        .unwrap_or_else(|| "â€”".to_string());
     measurement_row(ui, "C1", &c1);
     measurement_row(ui, "C2", &c2);
     if let Some(dt) = state.cursors.delta_time() {
-        measurement_row(ui, "ΔT", &crate::waveform::axis::format_time(dt));
+        measurement_row(ui, "Î”T", &crate::waveform::axis::format_time(dt));
     } else {
-        measurement_row(ui, "ΔT", "—");
+        measurement_row(ui, "Î”T", "â€”");
     }
 
     ui.add_space(4.0);
@@ -1634,11 +1636,7 @@ fn load_demo_data(state: &mut EyeDiagramState) {
 
             // Smooth transition
             let v = if bit == next_bit {
-                if bit == 1 {
-                    0.35
-                } else {
-                    -0.35
-                }
+                if bit == 1 { 0.35 } else { -0.35 }
             } else {
                 let transition = if phase < 0.3 {
                     0.0

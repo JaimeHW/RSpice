@@ -24,7 +24,7 @@ pub mod toolbar;
 pub mod view;
 
 // Re-export main types
-pub use export::{export_to_svg, SvgExportConfig};
-pub use symbols::{draw_symbol, Symbol, SymbolLibrary};
+pub use export::{SvgExportConfig, export_to_svg};
+pub use symbols::{Symbol, SymbolLibrary, draw_symbol};
 pub use toolbar::render_toolbar;
 pub use view::render_schematic_view;

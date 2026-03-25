@@ -212,10 +212,12 @@ fn test_build_trace_polyline_ignores_non_finite_samples() {
 
     let polyline = build_trace_polyline(&layout, &view, &trace);
     assert!(polyline.points.len() >= 2);
-    assert!(polyline
-        .points
-        .iter()
-        .all(|p| p.x.is_finite() && p.y.is_finite()));
+    assert!(
+        polyline
+            .points
+            .iter()
+            .all(|p| p.x.is_finite() && p.y.is_finite())
+    );
 }
 
 #[test]

@@ -32,7 +32,7 @@ pub use controller::SimulationController;
 pub use dialog::SimulationDialog;
 pub use engine_bridge::EngineBridge;
 pub use netlist_gen::{
-    generate_netlist, generate_netlist_with_analysis, Net, NetlistGenerator, NetlistResult,
+    Net, NetlistGenerator, NetlistResult, generate_netlist, generate_netlist_with_analysis,
 };
 pub use options_translator::{EngineOptions, OptionsTranslator, PvtCorner};
 pub use results::{SimulationResult, WaveformData};

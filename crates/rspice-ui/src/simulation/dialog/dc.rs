@@ -2,7 +2,7 @@
 //!
 //! Configuration for DC sweep analysis (.dc).
 
-use super::framework::{labeled_input, numeric_input, DialogTab};
+use super::framework::{DialogTab, labeled_input, numeric_input};
 use egui::Ui;
 
 // =============================================================================

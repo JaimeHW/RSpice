@@ -160,7 +160,7 @@ fn apply_binary_op(
                     (lx, ly, ry)
                 } else {
                     // Resample second waveform to match first (Spectre default behavior)
-                    use super::interpolation::{align_waveforms, InterpolationMethod};
+                    use super::interpolation::{InterpolationMethod, align_waveforms};
                     let (new_x, new_ly, new_ry) =
                         align_waveforms(&lx, &ly, &rx, &ry, InterpolationMethod::Linear)
                             .map_err(|_| EvaluationError::WaveformMismatch)?;

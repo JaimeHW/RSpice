@@ -457,7 +457,7 @@ mod tests {
         sweep.add_point(-30.0, -20.0); // 10 dB
         sweep.add_point(-20.0, -10.0); // 10 dB
         sweep.add_point(-10.0, 0.0); // 10 dB
-                                     // Compression
+        // Compression
         sweep.add_point(0.0, 9.0); // 9 dB (1 dB compression)
         sweep.add_point(10.0, 15.0); // 5 dB
 

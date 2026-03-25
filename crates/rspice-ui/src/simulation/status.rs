@@ -333,49 +333,63 @@ mod tests {
         assert!(SimulationStatus::Parsing.is_running());
         assert!(SimulationStatus::Building.is_running());
         assert!(SimulationStatus::DcOperatingPoint.is_running());
-        assert!(SimulationStatus::Transient {
-            time: 0.0,
-            stop_time: 1.0
-        }
-        .is_running());
-        assert!(SimulationStatus::AcAnalysis {
-            freq: 1e3,
-            stop_freq: 1e9
-        }
-        .is_running());
+        assert!(
+            SimulationStatus::Transient {
+                time: 0.0,
+                stop_time: 1.0
+            }
+            .is_running()
+        );
+        assert!(
+            SimulationStatus::AcAnalysis {
+                freq: 1e3,
+                stop_freq: 1e9
+            }
+            .is_running()
+        );
     }
 
     #[test]
     fn test_status_terminal_detection() {
         assert!(SimulationStatus::Idle.is_terminal());
-        assert!(SimulationStatus::Completed {
-            elapsed: Duration::from_secs(1)
-        }
-        .is_terminal());
-        assert!(SimulationStatus::Failed {
-            message: "test".to_string(),
-            elapsed: Duration::from_secs(1)
-        }
-        .is_terminal());
-        assert!(SimulationStatus::Aborted {
-            elapsed: Duration::from_secs(1)
-        }
-        .is_terminal());
+        assert!(
+            SimulationStatus::Completed {
+                elapsed: Duration::from_secs(1)
+            }
+            .is_terminal()
+        );
+        assert!(
+            SimulationStatus::Failed {
+                message: "test".to_string(),
+                elapsed: Duration::from_secs(1)
+            }
+            .is_terminal()
+        );
+        assert!(
+            SimulationStatus::Aborted {
+                elapsed: Duration::from_secs(1)
+            }
+            .is_terminal()
+        );
     }
 
     #[test]
     fn test_status_success_detection() {
         assert!(!SimulationStatus::Idle.is_success());
         assert!(!SimulationStatus::Parsing.is_success());
-        assert!(SimulationStatus::Completed {
-            elapsed: Duration::from_secs(1)
-        }
-        .is_success());
-        assert!(!SimulationStatus::Failed {
-            message: "test".to_string(),
-            elapsed: Duration::from_secs(1)
-        }
-        .is_success());
+        assert!(
+            SimulationStatus::Completed {
+                elapsed: Duration::from_secs(1)
+            }
+            .is_success()
+        );
+        assert!(
+            !SimulationStatus::Failed {
+                message: "test".to_string(),
+                elapsed: Duration::from_secs(1)
+            }
+            .is_success()
+        );
     }
 
     #[test]

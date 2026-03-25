@@ -3,8 +3,8 @@ use super::{
     run_transient_analysis_with_source_path,
 };
 use crate::services::safety::{SoADefinition, SoALimit, SoAManager, SoAParameter, SoAViolation};
-use rspice_core::netlist::{Element, ElementKind};
 use rspice_core::Value;
+use rspice_core::netlist::{Element, ElementKind};
 use std::collections::HashMap;
 use std::path::Path;
 

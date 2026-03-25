@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use rspice_core::netlist::ElementKind;
 use rspice_core::Value;
+use rspice_core::netlist::ElementKind;
 
 pub(super) fn parse_runner_netlist(
     netlist_text: &str,

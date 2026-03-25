@@ -7,7 +7,7 @@ impl SimulationController {
         time: &[f64],
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
-        let preferred_fft_source = state.fft_state.selected_source.as_deref();
+        let preferred_fft_source = state.analysis.fft_state.selected_source.as_deref();
         let Some((waveform_key, waveform)) =
             Self::fft_source_waveform(waveforms, time.len(), preferred_fft_source)
         else {
@@ -15,9 +15,10 @@ impl SimulationController {
         };
 
         state
+            .analysis
             .fft_state
             .set_selected_source(Some(waveform_key.clone()));
-        let input_options = state.fft_state.input_options_for_waveform(time);
+        let input_options = state.analysis.fft_state.input_options_for_waveform(time);
 
         if let Some(bit_period) = Self::estimate_ui_period(time, &waveform.y_values) {
             let eye_data = crate::analysis::eye_diagram::data::EyeDataBuilder::new()
@@ -26,7 +27,7 @@ impl SimulationController {
                 .skip_initial(2)
                 .build(time, &waveform.y_values);
             if eye_data.trace_count() > 0 {
-                state.eye_diagram_state.load_data(eye_data);
+                state.analysis.eye_diagram_state.load_data(eye_data);
             }
         }
 
@@ -36,7 +37,7 @@ impl SimulationController {
             &waveform.y_values,
             input_options,
         ) {
-            state.fft_state.load_prepared_input(prepared);
+            state.analysis.fft_state.load_prepared_input(prepared);
         }
     }
 
@@ -47,8 +48,8 @@ impl SimulationController {
         waveforms: &std::collections::HashMap<String, crate::simulation::WaveformData>,
     ) {
         let mut bode_data = crate::analysis::bode::BodeData::new();
-        state.nyquist_state.clear();
-        state.smith_chart_state.clear_traces();
+        state.analysis.nyquist_state.clear();
+        state.analysis.smith_chart_state.clear_traces();
 
         let mut names: Vec<_> = waveforms.keys().cloned().collect();
         names.sort();
@@ -79,14 +80,14 @@ impl SimulationController {
                 imag,
             );
             if loaded_nyquist {
-                state.nyquist_state.add_curve(nyquist_curve);
+                state.analysis.nyquist_state.add_curve(nyquist_curve);
             } else {
-                state.nyquist_state.load_data(nyquist_curve);
+                state.analysis.nyquist_state.load_data(nyquist_curve);
                 loaded_nyquist = true;
             }
 
             if Self::is_sparameter_trace_name(&name) {
-                state.smith_chart_state.load_sparam_data(
+                state.analysis.smith_chart_state.load_sparam_data(
                     &name,
                     frequencies,
                     &waveform.y_values,
@@ -97,9 +98,10 @@ impl SimulationController {
 
         if bode_data.response_count() > 0 {
             bode_data.calculate_margins();
-            state.bode_plot_state.load_data(bode_data);
+            state.analysis.bode_plot_state.load_data(bode_data);
         } else {
             state
+                .analysis
                 .bode_plot_state
                 .load_data(crate::analysis::bode::BodeData::new());
         }

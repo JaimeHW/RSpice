@@ -3,7 +3,7 @@
 //! Commercial-grade signal integrity measurements from eye diagrams.
 //! Includes eye opening, jitter, rise/fall times, and bit error rate estimation.
 
-use super::data::{calculate_edge_rate, EyeData};
+use super::data::{EyeData, calculate_edge_rate};
 use std::f64::consts::PI;
 
 // =============================================================================
@@ -595,11 +595,7 @@ fn erfc_approx(x: f64) -> f64 {
             + 0.17087277 * t.powi(9))
         .exp();
 
-    if x >= 0.0 {
-        tau
-    } else {
-        2.0 - tau
-    }
+    if x >= 0.0 { tau } else { 2.0 - tau }
 }
 
 /// Format voltage with SI prefix

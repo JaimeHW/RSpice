@@ -255,9 +255,11 @@ mod tests {
     #[test]
     fn test_phase_wrap_names() {
         assert!(PhaseWrapMode::Wrap180.display_name().contains("180"));
-        assert!(PhaseWrapMode::Continuous
-            .display_name()
-            .contains("Continuous"));
+        assert!(
+            PhaseWrapMode::Continuous
+                .display_name()
+                .contains("Continuous")
+        );
     }
 
     // =========================================================================

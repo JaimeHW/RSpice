@@ -60,7 +60,7 @@ fn axis_color() -> Color32 {
 /// Render the Nyquist plot viewer panel
 pub fn render_nyquist_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let available_rect = ui.available_rect_before_wrap();
-    let state = &mut app_state.nyquist_state;
+    let state = &mut app_state.analysis.nyquist_state;
     let layout = calculate_layout(available_rect);
 
     render_header(ui, &layout, state);
@@ -144,7 +144,11 @@ fn render_header(ui: &mut Ui, layout: &NyquistLayout, state: &mut NyquistState) 
 
             // Toggle buttons
             if ui
-                .small_button(if state.show_grid { "Grid ✓" } else { "Grid" })
+                .small_button(if state.show_grid {
+                    "Grid âœ“"
+                } else {
+                    "Grid"
+                })
                 .clicked()
             {
                 state.toggle_grid();
@@ -152,7 +156,7 @@ fn render_header(ui: &mut Ui, layout: &NyquistLayout, state: &mut NyquistState) 
 
             if ui
                 .small_button(if state.show_critical_point {
-                    "Critical ✓"
+                    "Critical âœ“"
                 } else {
                     "Critical"
                 })
@@ -162,7 +166,11 @@ fn render_header(ui: &mut Ui, layout: &NyquistLayout, state: &mut NyquistState) 
             }
 
             if ui
-                .small_button(if state.equal_axes { "1:1 ✓" } else { "1:1" })
+                .small_button(if state.equal_axes {
+                    "1:1 âœ“"
+                } else {
+                    "1:1"
+                })
                 .clicked()
             {
                 state.toggle_equal_axes();
@@ -427,7 +435,7 @@ fn render_info_panel(ui: &mut Ui, layout: &NyquistLayout, state: &NyquistState) 
                 }
 
                 if let Some(pm) = curve.phase_margin() {
-                    info_row(ui, "PM", &format!("{:.1}°", pm));
+                    info_row(ui, "PM", &format!("{:.1}Â°", pm));
                 }
             } else {
                 ui.label(

@@ -460,7 +460,15 @@ impl SchematicState {
 
         log::debug!(
             "zoom_to_fit: content=[{:.0},{:.0}]-[{:.0},{:.0}], viewport={:.0}x{:.0}, zoom={:.2}, pan=({:.0},{:.0})",
-            min_px, min_py, max_px, max_py, viewport_width, viewport_height, self.zoom, self.pan.0, self.pan.1
+            min_px,
+            min_py,
+            max_px,
+            max_py,
+            viewport_width,
+            viewport_height,
+            self.zoom,
+            self.pan.0,
+            self.pan.1
         );
     }
 

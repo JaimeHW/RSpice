@@ -565,15 +565,18 @@ fn test_load_multiple_libraries() {
 
     let mut mgr = ModelLibraryManager::new();
 
-    assert!(mgr
-        .load_library_file(temp_dir.path().join("nmos.lib"), None)
-        .is_ok());
-    assert!(mgr
-        .load_library_file(temp_dir.path().join("pmos.lib"), None)
-        .is_ok());
-    assert!(mgr
-        .load_library_file(temp_dir.path().join("diode.lib"), None)
-        .is_ok());
+    assert!(
+        mgr.load_library_file(temp_dir.path().join("nmos.lib"), None)
+            .is_ok()
+    );
+    assert!(
+        mgr.load_library_file(temp_dir.path().join("pmos.lib"), None)
+            .is_ok()
+    );
+    assert!(
+        mgr.load_library_file(temp_dir.path().join("diode.lib"), None)
+            .is_ok()
+    );
 
     assert_eq!(mgr.library_count(), 3);
     assert!(mgr.get_library("nmos").is_some());

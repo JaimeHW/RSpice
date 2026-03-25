@@ -100,7 +100,7 @@ impl SimulationController {
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                    "Noise: {} points, integrated output: {:.3e} V/√Hz",
+                    "Noise: {} points, integrated output: {:.3e} V/âˆšHz",
                     frequencies.len(),
                     integrated
                 )));
@@ -129,7 +129,7 @@ impl SimulationController {
                     } else {
                         // Complex pole
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                            "  Pole {}: {:.3e} ± j{:.3e} rad/s",
+                            "  Pole {}: {:.3e} Â± j{:.3e} rad/s",
                             i + 1,
                             re,
                             im.abs()
@@ -146,7 +146,7 @@ impl SimulationController {
                         )));
                     } else {
                         state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                            "  Zero {}: {:.3e} ± j{:.3e} rad/s",
+                            "  Zero {}: {:.3e} Â± j{:.3e} rad/s",
                             i + 1,
                             re,
                             im.abs()
@@ -329,7 +329,7 @@ impl SimulationController {
             data.roots
                 .push(crate::analysis::pole_zero::data::ComplexRoot::zero(re, im));
         }
-        state.pole_zero_state.load_data(data);
+        state.analysis.pole_zero_state.load_data(data);
     }
 
     fn populate_monte_carlo_histograms(
@@ -337,7 +337,7 @@ impl SimulationController {
         state: &mut AppState,
         variables: &[crate::simulation::results::MonteCarloVariableResult],
     ) {
-        state.histogram_state.clear();
+        state.analysis.histogram_state.clear();
 
         for variable in variables {
             if variable.histogram.is_empty()
@@ -367,10 +367,10 @@ impl SimulationController {
                 data_max: *variable.bin_edges.last().unwrap_or(&0.0),
             };
 
-            if state.histogram_state.is_empty() {
-                state.histogram_state.load_histogram(histogram);
+            if state.analysis.histogram_state.is_empty() {
+                state.analysis.histogram_state.load_histogram(histogram);
             } else {
-                state.histogram_state.add_histogram(histogram);
+                state.analysis.histogram_state.add_histogram(histogram);
             }
         }
     }

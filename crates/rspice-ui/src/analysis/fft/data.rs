@@ -11,9 +11,9 @@ use std::{
 };
 
 use once_cell::sync::Lazy;
-use rustfft::{num_complex::Complex, Fft, FftPlanner};
+use rustfft::{Fft, FftPlanner, num_complex::Complex};
 
-use super::window::{generate_window, WindowFunction};
+use super::window::{WindowFunction, generate_window};
 
 /// Amplitude normalization used for FFT magnitudes.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1203,10 +1203,12 @@ mod tests {
 
         let analysis = SpectrumAnalysis::analyze(&fft, 5);
         assert_eq!(analysis.fundamental_frequency, Some(100.0));
-        assert!(analysis
-            .noise_floor_db
-            .map(|db| db.is_finite())
-            .unwrap_or(false));
+        assert!(
+            analysis
+                .noise_floor_db
+                .map(|db| db.is_finite())
+                .unwrap_or(false)
+        );
         assert!(analysis.snr_db.map(|db| db.is_finite()).unwrap_or(false));
     }
 

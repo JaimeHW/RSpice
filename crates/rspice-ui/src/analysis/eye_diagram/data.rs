@@ -47,11 +47,7 @@ impl EyeTrace {
                 max = max.max(v);
             }
         }
-        if min <= max {
-            Some((min, max))
-        } else {
-            None
-        }
+        if min <= max { Some((min, max)) } else { None }
     }
 }
 

@@ -440,9 +440,11 @@ mod tests {
     #[test]
     fn test_algorithm_description() {
         assert!(!ConvergenceAlgorithm::Newton.description().is_empty());
-        assert!(!ConvergenceAlgorithm::PseudoTransient
-            .description()
-            .is_empty());
+        assert!(
+            !ConvergenceAlgorithm::PseudoTransient
+                .description()
+                .is_empty()
+        );
     }
 
     // =========================================================================

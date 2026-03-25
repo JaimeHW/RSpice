@@ -146,7 +146,7 @@ mod tests {
             vec![0.0, 1.0],
             vec![0.0, 1.0],
         ));
-        state.eye_diagram_state.load_data(eye);
+        state.analysis.eye_diagram_state.load_data(eye);
     }
 
     #[test]
@@ -199,10 +199,12 @@ mod tests {
         activate_specialized_viewer(&mut state, ActiveViewer::EyeDiagram);
 
         assert_eq!(state.active_viewer(), ActiveViewer::EyeDiagram);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Switched to Eye Diagram viewer")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Switched to Eye Diagram viewer"))
+        );
     }
 
     #[test]

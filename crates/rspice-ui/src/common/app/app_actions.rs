@@ -1,8 +1,8 @@
 use egui::Context;
 
 use super::{
-    app_shortcuts::{collect_shortcut_commands, ShortcutCommand, ShortcutInputSnapshot},
     BottomPanelTab, ConsoleMessage, RSpiceApp,
+    app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
 };
 
 impl RSpiceApp {

@@ -369,11 +369,7 @@ impl PwlData {
         // Handle repeat
         let t = if self.repeat {
             if let Some((_, max)) = self.time_range() {
-                if max > 0.0 {
-                    t % max
-                } else {
-                    t
-                }
+                if max > 0.0 { t % max } else { t }
             } else {
                 t
             }

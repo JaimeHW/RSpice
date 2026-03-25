@@ -59,7 +59,7 @@ pub use app_interaction_state::{DragType, InteractionState};
 
 mod app_veriloga_library;
 use app_veriloga_library::{
-    restore_global_veriloga_library, save_global_veriloga_library, VERILOGA_LIBRARY_NAME,
+    VERILOGA_LIBRARY_NAME, restore_global_veriloga_library, save_global_veriloga_library,
 };
 
 mod app_property_edit;
@@ -95,6 +95,25 @@ mod app_veriloga_workflow;
 mod app_pdk_workflow;
 
 mod app_state_init;
+
+/// Analysis viewer state grouped behind a dedicated workspace surface.
+#[derive(Clone, Default)]
+pub struct AnalysisWorkspaceState {
+    /// Pole-Zero viewer state
+    pub(crate) pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
+    /// Bode viewer state
+    pub(crate) bode_plot_state: crate::analysis::bode::BodePlotState,
+    /// Nyquist viewer state
+    pub(crate) nyquist_state: crate::analysis::nyquist::NyquistState,
+    /// Eye diagram viewer state
+    pub(crate) eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
+    /// FFT viewer state
+    pub(crate) fft_state: crate::analysis::fft::FftState,
+    /// Smith chart viewer state
+    pub(crate) smith_chart_state: crate::analysis::smith_chart::SmithChartState,
+    /// Histogram viewer state
+    pub(crate) histogram_state: crate::analysis::histogram::HistogramState,
+}
 
 /// Main application state container
 #[derive(Clone)]
@@ -147,20 +166,8 @@ pub struct AppState {
     pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
     /// Flag to signal that application exit has been requested (after confirmation)
     pub(crate) exit_requested: bool,
-    /// Pole-Zero viewer state
-    pub(crate) pole_zero_state: crate::analysis::pole_zero::PoleZeroState,
-    /// Bode viewer state
-    pub(crate) bode_plot_state: crate::analysis::bode::BodePlotState,
-    /// Nyquist viewer state
-    pub(crate) nyquist_state: crate::analysis::nyquist::NyquistState,
-    /// Eye diagram viewer state
-    pub(crate) eye_diagram_state: crate::analysis::eye_diagram::EyeDiagramState,
-    /// FFT viewer state
-    pub(crate) fft_state: crate::analysis::fft::FftState,
-    /// Smith chart viewer state
-    pub(crate) smith_chart_state: crate::analysis::smith_chart::SmithChartState,
-    /// Histogram viewer state
-    pub(crate) histogram_state: crate::analysis::histogram::HistogramState,
+    /// Specialized analysis viewer state grouped by analysis workspace.
+    pub(crate) analysis: AnalysisWorkspaceState,
 }
 
 impl Default for AppState {

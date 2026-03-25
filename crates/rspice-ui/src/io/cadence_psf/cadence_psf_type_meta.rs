@@ -160,15 +160,21 @@ mod tests {
         );
 
         let mut cache = TypeMetaCache::default();
-        assert!(cache
-            .contains_array(1, &types)
-            .expect("contains-array lookup should succeed"));
-        assert!(!cache
-            .contains_array(2, &types)
-            .expect("contains-array lookup should succeed"));
-        assert!(cache
-            .contains_array(3, &types)
-            .expect("contains-array lookup should succeed"));
+        assert!(
+            cache
+                .contains_array(1, &types)
+                .expect("contains-array lookup should succeed")
+        );
+        assert!(
+            !cache
+                .contains_array(2, &types)
+                .expect("contains-array lookup should succeed")
+        );
+        assert!(
+            cache
+                .contains_array(3, &types)
+                .expect("contains-array lookup should succeed")
+        );
     }
 
     #[test]

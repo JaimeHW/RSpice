@@ -13,7 +13,7 @@
 //! - Registration in hierarchy
 
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 
 /// State for the Verilog-A model loading dialog
 pub struct VerilogALoadDialogState {

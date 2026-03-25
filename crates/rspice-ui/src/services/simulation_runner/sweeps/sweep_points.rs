@@ -1,5 +1,5 @@
-use rspice_core::netlist::{AnalysisCommand, StepSweep};
 use rspice_core::Value;
+use rspice_core::netlist::{AnalysisCommand, StepSweep};
 use std::fmt;
 
 const MAX_SWEEP_POINTS: usize = 1_000_000;

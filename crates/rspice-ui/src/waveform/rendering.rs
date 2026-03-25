@@ -28,8 +28,8 @@ use std::cell::RefCell;
 
 use super::axis::{self, GridLineType};
 use super::export::{
-    build_export_payload, calculate_export_stats, export_format_display_name,
-    save_export_payload_with_native_dialog, ExportFormat,
+    ExportFormat, build_export_payload, calculate_export_stats, export_format_display_name,
+    save_export_payload_with_native_dialog,
 };
 use super::legend::{self, LegendSortOrder};
 use super::measurements::TraceMeasurements;
@@ -37,8 +37,8 @@ use super::state::{MeasurementScope, TraceData, ViewTransform, WaveformViewerSta
 use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::utils::vertical_label_layout::{
-    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
-    VerticalLabelRequest,
+    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
+    place_vertical_line_labels,
 };
 
 // =============================================================================

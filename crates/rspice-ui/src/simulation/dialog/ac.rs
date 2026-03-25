@@ -2,7 +2,7 @@
 //!
 //! Configuration for small-signal AC analysis (.ac).
 
-use super::framework::{labeled_checkbox, numeric_input, DialogTab};
+use super::framework::{DialogTab, labeled_checkbox, numeric_input};
 use egui::Ui;
 
 // =============================================================================

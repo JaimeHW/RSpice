@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use egui::Context;
 
-use super::{save_global_veriloga_library, ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use super::{ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_veriloga_library};
 
 struct CompiledVerilogaPayload {
     module: crate::panels::CompiledModuleInfo,

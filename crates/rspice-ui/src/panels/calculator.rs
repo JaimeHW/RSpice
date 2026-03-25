@@ -7,7 +7,7 @@
 //! - Function browser
 //! - Signal list (drag & drop target)
 
-use crate::analysis::calculator::{evaluator, parser, CalcValue, SimulationContext};
+use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
 use crate::state::SimulationState;
 use egui::{Button, Color32, ScrollArea, TextEdit, Ui, Vec2};
 

@@ -3,7 +3,7 @@
 //! Configuration for noise analysis (.noise).
 
 use super::ac::FrequencySweep;
-use super::framework::{labeled_checkbox, labeled_input, numeric_input, DialogTab};
+use super::framework::{DialogTab, labeled_checkbox, labeled_input, numeric_input};
 use egui::Ui;
 
 // =============================================================================

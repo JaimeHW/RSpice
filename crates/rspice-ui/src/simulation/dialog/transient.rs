@@ -2,7 +2,7 @@
 //!
 //! Configuration for time-domain transient analysis (.tran).
 
-use super::framework::{labeled_checkbox, numeric_input, DialogTab};
+use super::framework::{DialogTab, labeled_checkbox, numeric_input};
 use egui::Ui;
 
 // =============================================================================

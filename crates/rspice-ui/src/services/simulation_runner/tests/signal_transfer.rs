@@ -120,22 +120,30 @@ fn test_run_tf_analysis_with_config_executes_for_driven_rc() {
     assert_eq!(result.transfer.len(), result.frequencies.len());
     assert_eq!(result.magnitude_db.len(), result.frequencies.len());
     assert_eq!(result.phase_deg.len(), result.frequencies.len());
-    assert!(result
-        .transfer
-        .iter()
-        .all(|value| value.re.is_finite() && value.im.is_finite()));
-    assert!(result
-        .group_delay
-        .as_ref()
-        .is_some_and(|curve| !curve.is_empty()));
-    assert!(result
-        .input_impedance
-        .as_ref()
-        .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
-    assert!(result
-        .output_impedance
-        .as_ref()
-        .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite())));
+    assert!(
+        result
+            .transfer
+            .iter()
+            .all(|value| value.re.is_finite() && value.im.is_finite())
+    );
+    assert!(
+        result
+            .group_delay
+            .as_ref()
+            .is_some_and(|curve| !curve.is_empty())
+    );
+    assert!(
+        result
+            .input_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+    );
+    assert!(
+        result
+            .output_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.iter().all(|value| value.re.is_finite()))
+    );
 }
 
 #[test]
@@ -204,18 +212,24 @@ fn test_run_tf_analysis_with_config_and_source_path_resolves_relative_include() 
             .expect("source-aware configured TF analysis should resolve include");
     assert!(!with_source.frequencies.is_empty());
     assert_eq!(with_source.transfer.len(), with_source.frequencies.len());
-    assert!(with_source
-        .group_delay
-        .as_ref()
-        .is_some_and(|curve| !curve.is_empty()));
-    assert!(with_source
-        .input_impedance
-        .as_ref()
-        .is_some_and(|curve| curve.len() == with_source.frequencies.len()));
-    assert!(with_source
-        .output_impedance
-        .as_ref()
-        .is_some_and(|curve| curve.len() == with_source.frequencies.len()));
+    assert!(
+        with_source
+            .group_delay
+            .as_ref()
+            .is_some_and(|curve| !curve.is_empty())
+    );
+    assert!(
+        with_source
+            .input_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.len() == with_source.frequencies.len())
+    );
+    assert!(
+        with_source
+            .output_impedance
+            .as_ref()
+            .is_some_and(|curve| curve.len() == with_source.frequencies.len())
+    );
 }
 
 #[test]

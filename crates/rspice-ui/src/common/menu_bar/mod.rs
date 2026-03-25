@@ -3,7 +3,7 @@
 //! Provides a professional menu bar matching the Dioxus version
 //! with File, Edit, View, Simulate, Tools, and Help menus.
 
-use egui::{menu, Ui};
+use egui::{Ui, menu};
 
 use crate::common::app::AppState;
 use crate::common::export_workflow::ExportWorkflowIo;

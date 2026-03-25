@@ -143,7 +143,7 @@ fn seed_eye_data(state: &mut AppState) {
         vec![0.0, 1.0],
         vec![0.0, 1.0],
     ));
-    state.eye_diagram_state.load_data(eye);
+    state.analysis.eye_diagram_state.load_data(eye);
 }
 
 fn seed_bode_data(state: &mut AppState) {
@@ -153,7 +153,7 @@ fn seed_bode_data(state: &mut AppState) {
     ));
     let mut data = crate::analysis::bode::BodeData::new();
     data.add_response(response);
-    state.bode_plot_state.load_data(data);
+    state.analysis.bode_plot_state.load_data(data);
 }
 
 fn seed_nyquist_data(state: &mut AppState) {
@@ -163,7 +163,7 @@ fn seed_nyquist_data(state: &mut AppState) {
         &[0.5, 0.25],
         &[0.0, -0.2],
     );
-    state.nyquist_state.load_data(curve);
+    state.analysis.nyquist_state.load_data(curve);
 }
 
 #[test]
@@ -346,9 +346,11 @@ fn test_app_state_open_viewer_routes_to_waveform_tab() {
         state.active_viewer(),
         crate::viewers::ActiveViewer::EyeDiagram
     );
-    assert!(state
-        .viewer_workspace
-        .contains(crate::viewers::ActiveViewer::EyeDiagram));
+    assert!(
+        state
+            .viewer_workspace
+            .contains(crate::viewers::ActiveViewer::EyeDiagram)
+    );
 }
 
 #[test]
@@ -380,9 +382,11 @@ fn test_app_state_close_active_viewer_keeps_workspace_non_empty() {
         state.active_viewer(),
         crate::viewers::ActiveViewer::Waveform
     );
-    assert!(state
-        .viewer_workspace
-        .contains(crate::viewers::ActiveViewer::Waveform));
+    assert!(
+        state
+            .viewer_workspace
+            .contains(crate::viewers::ActiveViewer::Waveform)
+    );
 
     state.close_active_viewer();
     assert_eq!(
@@ -718,12 +722,13 @@ fn test_confirmation_yes_executes_pending_exit_after_successful_save() {
         "successful save should clear dirty flag"
     );
     assert!(!app.state.dialogs.confirmation_dialog.visible);
-    assert!(app
-        .state
-        .dialogs
-        .confirmation_dialog
-        .pending_action
-        .is_none());
+    assert!(
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .pending_action
+            .is_none()
+    );
 }
 
 #[test]
@@ -756,12 +761,13 @@ fn test_confirmation_yes_does_not_execute_pending_exit_when_save_fails() {
         "failed save should emit an error message"
     );
     assert!(!app.state.dialogs.confirmation_dialog.visible);
-    assert!(app
-        .state
-        .dialogs
-        .confirmation_dialog
-        .pending_action
-        .is_none());
+    assert!(
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .pending_action
+            .is_none()
+    );
 }
 
 #[test]
@@ -823,12 +829,13 @@ fn test_confirmation_yes_file_open_with_save_as_cancelled_does_not_open() {
     assert_eq!(app.state.schematic.components.len(), 1);
     assert!(app.state.schematic.is_dirty);
     assert!(!app.state.dialogs.confirmation_dialog.visible);
-    assert!(app
-        .state
-        .dialogs
-        .confirmation_dialog
-        .pending_action
-        .is_none());
+    assert!(
+        app.state
+            .dialogs
+            .confirmation_dialog
+            .pending_action
+            .is_none()
+    );
 }
 
 #[test]

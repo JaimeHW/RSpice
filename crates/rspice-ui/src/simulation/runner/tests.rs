@@ -797,9 +797,11 @@ R2 out 0 1k
             assert_eq!(x_label, "Corner Index");
             assert_eq!(x_unit, "");
             assert_eq!(corner_labels.len(), 4);
-            assert!(corner_labels
-                .iter()
-                .any(|label| label.contains("FF_1.100000V")));
+            assert!(
+                corner_labels
+                    .iter()
+                    .any(|label| label.contains("FF_1.100000V"))
+            );
         }
         other => panic!("Expected Corner result, got {:?}", other),
     }
@@ -1010,9 +1012,11 @@ R2 out 0 50
             assert!(waveforms.contains_key("S21"));
             assert!(waveforms.contains_key("S12"));
             assert!(waveforms.contains_key("S22"));
-            assert!(waveforms
-                .values()
-                .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .all(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for S-parameter, got {:?}", other),
     }
@@ -1138,9 +1142,11 @@ M1 d g 0 0 NM W=10u L=1u
             assert_eq!(years, vec![1.0, 5.0, 10.0]);
             assert!(!device_results.is_empty());
             assert!(!waveforms.is_empty());
-            assert!(waveforms
-                .keys()
-                .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS(")));
+            assert!(
+                waveforms
+                    .keys()
+                    .any(|name| name.starts_with("DVTH(") || name.starts_with("DRDS("))
+            );
         }
         other => panic!("Expected Reliability result, got {:?}", other),
     }
@@ -1377,9 +1383,11 @@ C1 out 0 1n
                 "expected PXF transfer waveform name, got {:?}",
                 waveforms.keys().collect::<Vec<_>>()
             );
-            assert!(waveforms
-                .values()
-                .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for PXF, got {:?}", other),
     }
@@ -1407,9 +1415,11 @@ C1 out 0 1n
         .expect("Expected PXF completion result")
         .expect_err("PXF without options should fail");
     assert!(matches!(result, SimulationError::InvalidConfig(_)));
-    assert!(result
-        .to_string()
-        .contains("requires explicit PXF execution options"));
+    assert!(
+        result
+            .to_string()
+            .contains("requires explicit PXF execution options")
+    );
 }
 
 #[test]
@@ -1474,9 +1484,11 @@ C1 out 0 1n
                 "expected Zout waveform, got {:?}",
                 waveforms.keys().collect::<Vec<_>>()
             );
-            assert!(waveforms
-                .values()
-                .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some()));
+            assert!(
+                waveforms
+                    .values()
+                    .any(|wf| wf.is_complex && wf.y_imag.as_ref().is_some())
+            );
         }
         other => panic!("Expected AC result for TF, got {:?}", other),
     }
@@ -1686,7 +1698,9 @@ C1 out 0 1n
         .expect("Expected PSTB completion result")
         .expect_err("PSTB without options should fail");
     assert!(matches!(result, SimulationError::InvalidConfig(_)));
-    assert!(result
-        .to_string()
-        .contains("requires explicit PSTB execution options"));
+    assert!(
+        result
+            .to_string()
+            .contains("requires explicit PSTB execution options")
+    );
 }

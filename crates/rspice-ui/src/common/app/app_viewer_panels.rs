@@ -400,7 +400,7 @@ impl RSpiceApp {
 
     /// Render the Pole-Zero map panel.
     pub(super) fn render_polezero_panel(&mut self, ui: &mut Ui) {
-        crate::analysis::pole_zero::render_pz_plot(ui, &self.state.pole_zero_state);
+        crate::analysis::pole_zero::render_pz_plot(ui, &self.state.analysis.pole_zero_state);
     }
 
     /// Render the Nyquist panel.
@@ -438,7 +438,10 @@ impl RSpiceApp {
 
     /// Render the Smith chart panel.
     pub(super) fn render_smith_panel(&mut self, ui: &mut Ui) {
-        crate::analysis::smith_chart::render_smith_chart(ui, &mut self.state.smith_chart_state);
+        crate::analysis::smith_chart::render_smith_chart(
+            ui,
+            &mut self.state.analysis.smith_chart_state,
+        );
     }
 
     /// Render the Histogram panel (Monte Carlo/corners).

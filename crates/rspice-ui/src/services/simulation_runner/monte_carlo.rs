@@ -1,10 +1,10 @@
 //! Monte Carlo analysis runner.
 
-use super::{build_engine_config, parse_runner_netlist, DEFAULT_MONTE_CARLO_SEED};
+use super::{DEFAULT_MONTE_CARLO_SEED, build_engine_config, parse_runner_netlist};
+use rspice_core::Value;
 use rspice_core::analysis::monte_carlo::Distribution;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{AnalysisCommand, MonteCarloDistribution};
-use rspice_core::Value;
 use std::path::Path;
 
 /// Monte Carlo variable summary statistics.

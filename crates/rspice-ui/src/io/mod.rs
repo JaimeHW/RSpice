@@ -20,17 +20,17 @@ pub mod waveform_io;
 
 // Re-exports
 pub use binary_io::{PsfHeader, PsfReader, PsfWriter};
-pub use cadence_psf::{parse_cadence_psf_binary, CadencePsfError, ParsedCadencePsfBinary};
+pub use cadence_psf::{CadencePsfError, ParsedCadencePsfBinary, parse_cadence_psf_binary};
 pub use lib_parser::{
     IncludeDirective, IncludeType, LibrarySection, ModelDef, ParamValue, ParsedLibrary,
     SubcircuitDef,
 };
 pub use netlist_export::{ExportOptions, NetlistExporter, NetlistFormat};
 pub use schematic_io::{
-    load_schematic, save_schematic, show_open_dialog, show_save_dialog, SchematicFile,
-    SchematicIoError, SchematicVersion,
+    SchematicFile, SchematicIoError, SchematicVersion, load_schematic, save_schematic,
+    show_open_dialog, show_save_dialog,
 };
-pub use session_io::{load_session, save_session, SessionFile, SessionVersion};
+pub use session_io::{SessionFile, SessionVersion, load_session, save_session};
 pub use waveform_io::{
     SignalType, WaveformDataset, WaveformFormat, WaveformReader, WaveformSignal, WaveformWriter,
 };

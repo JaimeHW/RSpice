@@ -1,9 +1,9 @@
 //! Noise analysis runner.
 
 use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
+use rspice_core::Value;
 use rspice_core::analysis::noise::NoiseResult;
 use rspice_core::engine::Engine;
-use rspice_core::Value;
 use std::path::Path;
 
 /// Noise analysis data for spectral density plots

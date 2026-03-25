@@ -285,10 +285,12 @@ mod tests {
         assert!(state.schematic.components.is_empty());
         assert!(!state.schematic.is_dirty);
         assert!(state.schematic.current_file.is_none());
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Created new schematic")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Created new schematic"))
+        );
     }
 
     #[test]
@@ -312,10 +314,12 @@ mod tests {
         assert_eq!(state.schematic.components[0].kind, ComponentType::Capacitor);
         assert_eq!(io.load_calls(), 1);
         assert_eq!(io.last_load_path(), Some(source_path));
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Opened:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Opened:"))
+        );
     }
 
     #[test]
@@ -337,10 +341,12 @@ mod tests {
         assert!(!loaded);
         assert_eq!(io.load_calls(), 1);
         assert_eq!(state.schematic.components.len(), prior_component_count);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Failed to open:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Failed to open:"))
+        );
     }
 
     #[test]
@@ -364,10 +370,12 @@ mod tests {
         assert_eq!(io.last_save_path(), Some(save_path));
         assert!(!state.schematic.is_dirty);
         assert!(state.schematic.current_file.is_none());
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Saved:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Saved:"))
+        );
     }
 
     #[test]
@@ -409,10 +417,12 @@ mod tests {
         assert!(!saved);
         assert_eq!(io.save_calls(), 1);
         assert!(state.schematic.is_dirty);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Save failed:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Save failed:"))
+        );
     }
 
     #[test]
@@ -464,10 +474,12 @@ mod tests {
 
         assert_eq!(io.open_dialog_calls(), 1);
         assert_eq!(io.load_calls(), 0);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Open failed:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Open failed:"))
+        );
     }
 
     #[test]
@@ -487,10 +499,12 @@ mod tests {
         assert_eq!(io.open_dialog_calls(), 1);
         assert_eq!(io.load_calls(), 1);
         assert_eq!(state.schematic.components.len(), prior_component_count);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Failed to open:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Failed to open:"))
+        );
     }
 
     #[test]
@@ -544,10 +558,12 @@ mod tests {
         assert_eq!(io.save_dialog_calls(), 1);
         assert_eq!(io.save_calls(), 0);
         assert!(state.schematic.is_dirty);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("Save As failed:")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("Save As failed:"))
+        );
     }
 
     #[test]

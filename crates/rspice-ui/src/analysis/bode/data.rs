@@ -271,11 +271,7 @@ impl BodeData {
             }
         }
 
-        if min <= max {
-            Some((min, max))
-        } else {
-            None
-        }
+        if min <= max { Some((min, max)) } else { None }
     }
 
     /// Combined magnitude range in dB
@@ -290,11 +286,7 @@ impl BodeData {
             }
         }
 
-        if min <= max {
-            Some((min, max))
-        } else {
-            None
-        }
+        if min <= max { Some((min, max)) } else { None }
     }
 
     /// Calculate stability margins for primary response

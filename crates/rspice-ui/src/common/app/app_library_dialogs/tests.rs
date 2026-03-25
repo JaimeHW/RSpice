@@ -1,4 +1,4 @@
-use super::shared::{validate_lcv_name, DialogActionOutcome};
+use super::shared::{DialogActionOutcome, validate_lcv_name};
 use super::*;
 use crate::state::{Cell, Library, View, ViewType};
 

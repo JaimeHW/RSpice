@@ -331,9 +331,11 @@ mod tests {
     fn test_action_veriloga_recompile_library_without_library_warns() {
         let mut state = AppState::default();
         action_veriloga_recompile_library(&mut state);
-        assert!(state
-            .console_messages
-            .iter()
-            .any(|msg| msg.message.contains("No global 'veriloga' library found")));
+        assert!(
+            state
+                .console_messages
+                .iter()
+                .any(|msg| msg.message.contains("No global 'veriloga' library found"))
+        );
     }
 }

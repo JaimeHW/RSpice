@@ -19,11 +19,11 @@
 
 use crate::properties::model_browser::ModelBrowserState;
 use crate::properties::pwl_editor::PwlEditorState;
-use crate::state::property_types::{
-    format_engineering, DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet,
-    PropertyType, PropertyValue, VisibilityCondition,
-};
 use crate::state::ComponentType;
+use crate::state::property_types::{
+    DisplayMode, PropertyDefinition, PropertyRegistry, PropertySheet, PropertyType, PropertyValue,
+    VisibilityCondition, format_engineering,
+};
 use egui::{Color32, RichText, Ui, Window};
 use std::collections::{HashMap, HashSet};
 
@@ -597,7 +597,7 @@ pub fn render_tabbed_property_dialog(
 
     // Render Model Browser modal if open
     if state.model_browser.open {
-        use crate::properties::model_browser::{render_model_browser, ModelBrowserResult};
+        use crate::properties::model_browser::{ModelBrowserResult, render_model_browser};
 
         // render_model_browser creates its own egui::Window internally
         match render_model_browser(ctx, &mut state.model_browser, model_library_manager) {

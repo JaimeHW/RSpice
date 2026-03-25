@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use super::defaults::{set_default_if_blank, toggle_enabled_analysis};
 use super::options_dialog::{
-    apply_options_preset, commit_validated_options, parse_and_validate_options,
-    revert_options_dialog_state, SimulationOptionsPreset,
+    SimulationOptionsPreset, apply_options_preset, commit_validated_options,
+    parse_and_validate_options, revert_options_dialog_state,
 };
 use super::*;
 
@@ -117,10 +117,12 @@ fn test_parse_and_validate_options_reports_parse_errors() {
     let parsed = parse_and_validate_options(&mut dialogs);
 
     assert!(parsed.is_none());
-    assert!(dialogs
-        .simulation_options_errors
-        .iter()
-        .any(|error| error.contains("reltol")));
+    assert!(
+        dialogs
+            .simulation_options_errors
+            .iter()
+            .any(|error| error.contains("reltol"))
+    );
 }
 
 #[test]
@@ -131,10 +133,12 @@ fn test_parse_and_validate_options_reports_validation_errors() {
     let parsed = parse_and_validate_options(&mut dialogs);
 
     assert!(parsed.is_none());
-    assert!(dialogs
-        .simulation_options_errors
-        .iter()
-        .any(|error| error.contains("reltol must be positive")));
+    assert!(
+        dialogs
+            .simulation_options_errors
+            .iter()
+            .any(|error| error.contains("reltol must be positive"))
+    );
 }
 
 #[test]

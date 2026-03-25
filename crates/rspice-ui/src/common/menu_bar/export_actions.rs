@@ -5,7 +5,7 @@ pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    use crate::schematic::export::{export_to_svg, SvgExportConfig};
+    use crate::schematic::export::{SvgExportConfig, export_to_svg};
 
     let config = SvgExportConfig::default();
     let svg_content = export_to_svg(&state.schematic, &config);

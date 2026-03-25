@@ -15,7 +15,7 @@
 //! - Touchstone S-parameter format (`.sNp`) for import/export
 
 use super::binary_io::PsfReader;
-use super::cadence_psf::{parse_cadence_psf_binary, ParsedCadencePsfBinary};
+use super::cadence_psf::{ParsedCadencePsfBinary, parse_cadence_psf_binary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -366,15 +366,13 @@ impl WaveformReader {
                         // Finally fall back to PSF ASCII text parsing.
                         match self.read_psf_ascii_file(path) {
                             Ok(dataset) => Ok(dataset),
-                            Err(psf_ascii_err) => {
-                                Err(format!(
-                                    "Failed to read PSF '{}': {}; Cadence PSF binary parse failed: {}; PSF ASCII parse failed: {}",
-                                    path.display(),
-                                    psf_lite_err,
-                                    cadence_bin_err,
-                                    psf_ascii_err
-                                ))
-                            }
+                            Err(psf_ascii_err) => Err(format!(
+                                "Failed to read PSF '{}': {}; Cadence PSF binary parse failed: {}; PSF ASCII parse failed: {}",
+                                path.display(),
+                                psf_lite_err,
+                                cadence_bin_err,
+                                psf_ascii_err
+                            )),
                         }
                     }
                 }

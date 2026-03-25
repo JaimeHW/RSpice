@@ -1,7 +1,7 @@
 use super::test_helpers::{
     build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_bare_descriptor_psf,
     build_non_windowed_array_of_struct_psf, build_non_windowed_array_real_psf,
-    build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+    build_non_windowed_complex_psf, build_non_windowed_int8_psf, build_non_windowed_int32_psf,
     build_non_windowed_mixed_real_and_string_psf,
     build_non_windowed_nested_array_real_bare_descriptor_psf,
     build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,

@@ -6,8 +6,8 @@ use super::*;
 
 #[test]
 fn test_convert_dc_op_result() {
-    use crate::simulation::results::DcOpResult as EngineDcOpResult;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::DcOpResult as EngineDcOpResult;
 
     let controller = SimulationController::new();
     let config = AnalysisConfig::DcOp;
@@ -39,8 +39,8 @@ fn test_convert_dc_op_result() {
 
 #[test]
 fn test_convert_transient_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let controller = SimulationController::new();
@@ -77,8 +77,8 @@ fn test_convert_transient_result() {
 
 #[test]
 fn test_convert_transient_result_reuses_shared_time_axis_across_waveforms() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -109,8 +109,8 @@ fn test_convert_transient_result_reuses_shared_time_axis_across_waveforms() {
 
 #[test]
 fn test_convert_ac_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let controller = SimulationController::new();
@@ -145,8 +145,8 @@ fn test_convert_ac_result() {
 
 #[test]
 fn test_convert_dc_sweep_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let controller = SimulationController::new();
@@ -186,8 +186,8 @@ fn test_convert_dc_sweep_result() {
 
 #[test]
 fn test_convert_pole_zero_result() {
-    use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
     use crate::simulation::SimulationResult;
+    use crate::simulation::config::{PoleZeroConfig, PzAnalysisType};
 
     let controller = SimulationController::new();
     let config = AnalysisConfig::PoleZero(PoleZeroConfig {
@@ -212,8 +212,8 @@ fn test_convert_pole_zero_result() {
 
 #[test]
 fn test_convert_monte_carlo_result() {
-    use crate::simulation::results::MonteCarloVariableResult;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::MonteCarloVariableResult;
 
     let controller = SimulationController::new();
     let sim_result = SimulationResult::MonteCarlo {
@@ -247,8 +247,8 @@ fn test_convert_monte_carlo_result() {
 
 #[test]
 fn test_convert_parametric_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let controller = SimulationController::new();
@@ -280,8 +280,8 @@ fn test_convert_parametric_result() {
 
 #[test]
 fn test_convert_corner_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let controller = SimulationController::new();
@@ -418,8 +418,8 @@ fn wait_for_derived_view(
 
 #[test]
 fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
@@ -457,8 +457,8 @@ fn test_update_waveforms_transient_populates_waveforms_eye_and_fft() {
     assert_eq!(state.simulation.waveforms.len(), 1);
     assert_eq!(state.simulation.waveforms[0].name, "V(out)");
     assert!(state.simulation.node_to_waveform.contains_key("V(out)"));
-    assert!(state.eye_diagram_state.trace_count() > 0);
-    assert!(state.fft_state.has_data());
+    assert!(state.analysis.eye_diagram_state.trace_count() > 0);
+    assert!(state.analysis.fft_state.has_data());
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Waveform
@@ -499,8 +499,11 @@ fn test_ensure_transient_fft_viewer_data_loads_in_background() {
         final_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
-    assert!(state.fft_state.has_data());
-    assert_eq!(state.fft_state.selected_source.as_deref(), Some("V(out)"));
+    assert!(state.analysis.fft_state.has_data());
+    assert_eq!(
+        state.analysis.fft_state.selected_source.as_deref(),
+        Some("V(out)")
+    );
 }
 
 #[test]
@@ -530,7 +533,7 @@ fn test_ensure_transient_eye_viewer_data_loads_in_background() {
         final_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
-    assert!(state.eye_diagram_state.trace_count() > 0);
+    assert!(state.analysis.eye_diagram_state.trace_count() > 0);
 }
 
 #[test]
@@ -572,12 +575,12 @@ fn test_sync_transient_post_views_clears_fft_when_active_analysis_changes() {
         final_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
-    assert!(state.fft_state.has_data());
+    assert!(state.analysis.fft_state.has_data());
 
     assert!(state.simulation.select_analysis(1));
     controller.sync_transient_post_views(&mut state);
 
-    assert!(!state.fft_state.has_data());
+    assert!(!state.analysis.fft_state.has_data());
     let reload_state = wait_for_derived_view(
         &mut controller,
         &mut state,
@@ -587,18 +590,22 @@ fn test_sync_transient_post_views_clears_fft_when_active_analysis_changes() {
         reload_state,
         crate::simulation::controller::DerivedViewerLoadState::Ready
     );
-    assert_eq!(state.fft_state.selected_source.as_deref(), Some("V(b)"));
+    assert_eq!(
+        state.analysis.fft_state.selected_source.as_deref(),
+        Some("V(b)")
+    );
 }
 
 #[test]
 fn test_update_waveforms_transient_prefers_selected_fft_source_trace() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("V(sel)".to_string()));
 
@@ -632,16 +639,25 @@ fn test_update_waveforms_transient_prefers_selected_fft_source_trace() {
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "V(sel)");
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 9_000.0).abs() < 600.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_fft_source_fallback_is_deterministic_by_name() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
@@ -683,21 +699,31 @@ fn test_update_waveforms_transient_fft_source_fallback_is_deterministic_by_name(
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "A_weak");
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 2_000.0).abs() < 400.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_missing_preferred_fft_source_uses_deterministic_fallback() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("nonexistent_trace".to_string()));
 
@@ -731,20 +757,31 @@ fn test_update_waveforms_transient_missing_preferred_fft_source_uses_determinist
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "B_low");
-    assert_eq!(state.fft_state.selected_source.as_deref(), Some("B_low"));
+    assert_eq!(
+        state.analysis.fft_state.selected_source.as_deref(),
+        Some("B_low")
+    );
 }
 
 #[test]
 fn test_update_waveforms_transient_preferred_fft_source_matches_normalized_name() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
-    state.fft_state.set_selected_source(Some("out".to_string()));
+    state
+        .analysis
+        .fft_state
+        .set_selected_source(Some("out".to_string()));
 
     let sample_count = 4096usize;
     let fs = 100_000.0;
@@ -776,21 +813,33 @@ fn test_update_waveforms_transient_preferred_fft_source_matches_normalized_name(
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "V(out)");
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 9_000.0).abs() < 600.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_ambiguous_normalized_source_prefers_voltage_trace() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
-    state.fft_state.set_selected_source(Some("out".to_string()));
+    state
+        .analysis
+        .fft_state
+        .set_selected_source(Some("out".to_string()));
 
     let sample_count = 4096usize;
     let fs = 100_000.0;
@@ -822,21 +871,31 @@ fn test_update_waveforms_transient_ambiguous_normalized_source_prefers_voltage_t
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "V(out)");
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 9_000.0).abs() < 600.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_typed_current_source_selects_current_trace() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("I(out)".to_string()));
 
@@ -870,21 +929,31 @@ fn test_update_waveforms_transient_typed_current_source_selects_current_trace() 
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "I(out)");
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 2_000.0).abs() < 400.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_duplicate_labels_use_deterministic_key() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("NET6".to_string()));
 
@@ -918,28 +987,39 @@ fn test_update_waveforms_transient_duplicate_labels_use_deterministic_key() {
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.name, "A_path.NET6");
     assert_eq!(
-        state.fft_state.selected_source.as_deref(),
+        state.analysis.fft_state.selected_source.as_deref(),
         Some("A_path.NET6")
     );
-    let fundamental = state.fft_state.fundamental_freq().expect("fundamental");
+    let fundamental = state
+        .analysis
+        .fft_state
+        .fundamental_freq()
+        .expect("fundamental");
     assert!((fundamental - 1_500.0).abs() < 250.0);
 }
 
 #[test]
 fn test_update_waveforms_transient_fft_reference_mode_preserves_large_uniform_input() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Reference);
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("V(out)".to_string()));
 
@@ -964,23 +1044,30 @@ fn test_update_waveforms_transient_fft_reference_mode_preserves_large_uniform_in
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.decimation_factor, 1);
     assert_eq!(source.samples.len(), n);
 }
 
 #[test]
 fn test_update_waveforms_transient_fft_interactive_mode_caps_large_uniform_input() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Interactive);
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("V(out)".to_string()));
 
@@ -1005,27 +1092,34 @@ fn test_update_waveforms_transient_fft_interactive_mode_caps_large_uniform_input
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert!(source.samples.len() <= crate::analysis::fft::DEFAULT_MAX_FFT_POINTS);
     assert!(source.decimation_factor > 1);
 }
 
 #[test]
 fn test_update_waveforms_transient_fft_auto_n_tracks_effective_sample_count() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Interactive);
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("V(out)".to_string()));
-    state.fft_state.sample_count_auto = true;
-    state.fft_state.sample_count = 2048;
+    state.analysis.fft_state.sample_count_auto = true;
+    state.analysis.fft_state.sample_count = 2048;
 
     let n = crate::analysis::fft::DEFAULT_MAX_FFT_POINTS * 3;
     let fs = 2_000_000.0;
@@ -1048,29 +1142,36 @@ fn test_update_waveforms_transient_fft_auto_n_tracks_effective_sample_count() {
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
-    assert_eq!(state.fft_state.sample_count, source.samples.len());
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
+    assert_eq!(state.analysis.fft_state.sample_count, source.samples.len());
 }
 
 #[test]
 fn test_update_waveforms_transient_fft_manual_window_and_sample_count_are_applied() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
     state
+        .analysis
         .fft_state
         .set_input_fidelity(crate::analysis::fft::state::InputFidelity::Reference);
     state
+        .analysis
         .fft_state
         .set_selected_source(Some("V(out)".to_string()));
-    state.fft_state.time_window_auto = false;
-    state.fft_state.time_window_start = 0.2;
-    state.fft_state.time_window_end = 0.4;
-    state.fft_state.sample_count_auto = false;
-    state.fft_state.sample_count = 2048;
+    state.analysis.fft_state.time_window_auto = false;
+    state.analysis.fft_state.time_window_start = 0.2;
+    state.analysis.fft_state.time_window_end = 0.4;
+    state.analysis.fft_state.sample_count_auto = false;
+    state.analysis.fft_state.sample_count = 2048;
 
     let n = 100_000usize;
     let fs = 100_000.0;
@@ -1093,7 +1194,12 @@ fn test_update_waveforms_transient_fft_manual_window_and_sample_count_are_applie
         },
     );
 
-    let source = state.fft_state.source_cache.as_ref().expect("source cache");
+    let source = state
+        .analysis
+        .fft_state
+        .source_cache
+        .as_ref()
+        .expect("source cache");
     assert_eq!(source.decimation_factor, 1);
     assert_eq!(source.samples.len(), 2048);
     assert!(source.original_count > 15_000);
@@ -1102,8 +1208,8 @@ fn test_update_waveforms_transient_fft_manual_window_and_sample_count_are_applie
 
 #[test]
 fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let mut controller = SimulationController::new();
@@ -1139,20 +1245,24 @@ fn test_update_waveforms_ac_populates_bode_nyquist_and_smith_data() {
     );
 
     assert_eq!(state.simulation.waveforms.len(), 2);
-    assert!(state
-        .simulation
-        .waveforms
-        .iter()
-        .any(|wf| wf.name.as_str() == "|S11|"));
-    assert!(state
-        .simulation
-        .waveforms
-        .iter()
-        .any(|wf| wf.name.as_str() == "|V(out)|"));
-    assert_eq!(state.bode_plot_state.trace_count(), 2);
-    assert_eq!(state.nyquist_state.curve_count(), 2);
-    assert_eq!(state.smith_chart_state.traces.len(), 1);
-    assert_eq!(state.smith_chart_state.traces[0].name, "S11");
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "|S11|")
+    );
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "|V(out)|")
+    );
+    assert_eq!(state.analysis.bode_plot_state.trace_count(), 2);
+    assert_eq!(state.analysis.nyquist_state.curve_count(), 2);
+    assert_eq!(state.analysis.smith_chart_state.traces.len(), 1);
+    assert_eq!(state.analysis.smith_chart_state.traces[0].name, "S11");
     assert_eq!(
         state.active_viewer(),
         crate::viewers::ActiveViewer::BodePlot
@@ -1187,11 +1297,13 @@ fn test_update_waveforms_noise_populates_output_input_and_contributors() {
     assert_eq!(state.simulation.waveforms.len(), 4);
     assert!(state.simulation.node_to_waveform.contains_key("onoise"));
     assert!(state.simulation.node_to_waveform.contains_key("inoise"));
-    assert!(state
-        .simulation
-        .waveforms
-        .iter()
-        .any(|wf| wf.name.starts_with("noise(")));
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.starts_with("noise("))
+    );
     assert!(
         state
             .console_messages
@@ -1203,8 +1315,8 @@ fn test_update_waveforms_noise_populates_output_input_and_contributors() {
 
 #[test]
 fn test_update_waveforms_monte_carlo_loads_histograms_and_skips_invalid_bins() {
-    use crate::simulation::results::MonteCarloVariableResult;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::MonteCarloVariableResult;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
@@ -1241,13 +1353,15 @@ fn test_update_waveforms_monte_carlo_loads_histograms_and_skips_invalid_bins() {
         },
     );
 
-    assert_eq!(state.histogram_state.histogram_count(), 1);
+    assert_eq!(state.analysis.histogram_state.histogram_count(), 1);
     assert_eq!(state.simulation.waveforms.len(), 2);
-    assert!(state
-        .simulation
-        .waveforms
-        .iter()
-        .any(|wf| wf.name.as_str() == "hist(V(out))"));
+    assert!(
+        state
+            .simulation
+            .waveforms
+            .iter()
+            .any(|wf| wf.name.as_str() == "hist(V(out))")
+    );
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Waveform
@@ -1260,8 +1374,8 @@ fn test_update_waveforms_monte_carlo_loads_histograms_and_skips_invalid_bins() {
 
 #[test]
 fn test_update_waveforms_monte_carlo_without_valid_histograms_selects_log_tab() {
-    use crate::simulation::results::MonteCarloVariableResult;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::MonteCarloVariableResult;
 
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
@@ -1287,7 +1401,7 @@ fn test_update_waveforms_monte_carlo_without_valid_histograms_selects_log_tab() 
     );
 
     assert!(state.simulation.waveforms.is_empty());
-    assert_eq!(state.histogram_state.histogram_count(), 0);
+    assert_eq!(state.analysis.histogram_state.histogram_count(), 0);
     assert_eq!(
         state.panels.active_bottom_tab,
         crate::common::app::BottomPanelTab::Log
@@ -1307,8 +1421,8 @@ fn test_current_config_none_initially() {
 
 #[test]
 fn test_build_touchstone_dataset_from_sparameter_ac_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let freqs = vec![1e6, 2e6];
@@ -1359,8 +1473,8 @@ fn test_build_touchstone_dataset_from_sparameter_ac_result() {
 
 #[test]
 fn test_build_touchstone_dataset_records_per_port_reference_metadata() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let freqs = vec![1e6];
@@ -1396,8 +1510,8 @@ fn test_build_touchstone_dataset_records_per_port_reference_metadata() {
 
 #[test]
 fn test_build_touchstone_dataset_rejects_non_uniform_reference_for_v1() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let freqs = vec![1e6];
@@ -1430,8 +1544,8 @@ fn test_build_touchstone_dataset_rejects_non_uniform_reference_for_v1() {
 
 #[test]
 fn test_build_touchstone_dataset_requires_complex_components() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let freqs = vec![1e6, 2e6];
@@ -1465,8 +1579,8 @@ fn test_build_touchstone_dataset_requires_complex_components() {
 
 #[test]
 fn test_build_touchstone_dataset_from_three_port_result() {
-    use crate::simulation::results::WaveformData as EngineWaveformData;
     use crate::simulation::SimulationResult;
+    use crate::simulation::results::WaveformData as EngineWaveformData;
     use std::collections::HashMap;
 
     let freqs = vec![1e6, 2e6];

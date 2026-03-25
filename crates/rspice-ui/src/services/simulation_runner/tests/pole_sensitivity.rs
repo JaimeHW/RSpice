@@ -141,10 +141,12 @@ fn test_run_sensitivity_analysis_with_parameter() {
         .expect("sensitivity run should succeed");
     assert_eq!(result.output_var, "V(out)");
     assert!(!result.sensitivities.is_empty());
-    assert!(result
-        .sensitivities
-        .iter()
-        .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+    assert!(
+        result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+    );
 }
 
 #[test]
@@ -154,14 +156,18 @@ fn test_run_sensitivity_analysis_filters_internal_side_channel_parameters() {
     let result = run_sensitivity_analysis(netlist, "V(out)", false, None)
         .expect("sensitivity run should succeed");
 
-    assert!(result
-        .sensitivities
-        .iter()
-        .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
-    assert!(result
-        .sensitivities
-        .iter()
-        .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_")));
+    assert!(
+        result
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+    );
+    assert!(
+        result
+            .sensitivities
+            .iter()
+            .all(|(name, _, _)| !name.starts_with("IC_") && !name.starts_with("NODESET_"))
+    );
 }
 
 #[test]
@@ -187,10 +193,12 @@ fn test_run_sensitivity_analysis_supports_differential_output() {
     let result = run_sensitivity_analysis(netlist, "V(out,in)", false, None)
         .expect("differential sensitivity run should succeed");
     assert!(!result.sensitivities.is_empty());
-    assert!(result
-        .sensitivities
-        .iter()
-        .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+    assert!(
+        result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+    );
 }
 
 #[test]
@@ -218,10 +226,12 @@ fn test_run_sensitivity_analysis_supports_current_output_ac() {
         .expect("current-output ac sensitivity should succeed");
     assert_eq!(result.output_var, "I(V1)");
     assert!(!result.sensitivities.is_empty());
-    assert!(result
-        .sensitivities
-        .iter()
-        .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite()));
+    assert!(
+        result
+            .sensitivities
+            .iter()
+            .all(|(_, raw, norm)| raw.is_finite() && norm.is_finite())
+    );
 }
 
 #[test]
@@ -305,8 +315,10 @@ fn test_run_sensitivity_analysis_with_source_path_resolves_relative_include() {
     )
     .expect("source-aware sensitivity analysis should resolve include");
     assert!(!with_source.sensitivities.is_empty());
-    assert!(with_source
-        .sensitivities
-        .iter()
-        .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL")));
+    assert!(
+        with_source
+            .sensitivities
+            .iter()
+            .any(|(name, _, _)| name.eq_ignore_ascii_case("RVAL"))
+    );
 }

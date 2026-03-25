@@ -16,8 +16,8 @@ use crate::common::app::AppState;
 use crate::common::viewer_style::{viewer_chart_bg_color, viewer_header_bg_color};
 use crate::state::AnalysisType;
 use crate::utils::vertical_label_layout::{
-    place_vertical_line_labels, LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement,
-    VerticalLabelRequest,
+    LabelSide, VerticalLabelLayoutConfig, VerticalLabelPlacement, VerticalLabelRequest,
+    place_vertical_line_labels,
 };
 
 // =============================================================================
@@ -107,29 +107,29 @@ fn text_color() -> Color32 {
 /// Render the FFT viewer panel
 pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
     if !fft_supported_for_active_analysis(app_state) {
-        app_state.fft_state.clear();
+        app_state.analysis.fft_state.clear();
     }
 
     let available_rect = ui.available_rect_before_wrap();
     // Claim full available space so the parent resizable panel keeps user height
     // instead of collapsing to a content-driven "natural" size.
     let (_id, _rect) = ui.allocate_space(available_rect.size());
-    let auto_info_width = preferred_fft_info_pane_width(ui, &app_state.fft_state);
-    app_state.fft_state.info_pane_auto_width_hint = auto_info_width;
+    let auto_info_width = preferred_fft_info_pane_width(ui, &app_state.analysis.fft_state);
+    app_state.analysis.fft_state.info_pane_auto_width_hint = auto_info_width;
     let info_width = resolve_fft_info_pane_width(
         available_rect,
-        app_state.fft_state.info_pane_width,
+        app_state.analysis.fft_state.info_pane_width,
         auto_info_width,
     );
-    if app_state.fft_state.info_pane_width.is_some() {
-        app_state.fft_state.info_pane_width = Some(info_width);
+    if app_state.analysis.fft_state.info_pane_width.is_some() {
+        app_state.analysis.fft_state.info_pane_width = Some(info_width);
     }
     let layout = calculate_layout_with_info_width(available_rect, info_width);
     let source_names = collect_fft_source_names(app_state);
     let source_time_bounds = current_fft_source_time_bounds(app_state);
 
     let header_actions = {
-        let state = &mut app_state.fft_state;
+        let state = &mut app_state.analysis.fft_state;
         let mut actions = HeaderActions::default();
         actions.merge(render_time_controls_header(
             ui,
@@ -145,7 +145,7 @@ pub fn render_fft_viewer(ui: &mut Ui, app_state: &mut AppState) {
         refresh_fft_from_source_waveform(app_state, &source_name);
     }
 
-    let state = &mut app_state.fft_state;
+    let state = &mut app_state.analysis.fft_state;
     handle_fft_info_splitter(ui, &layout, state);
     render_spectrum(ui, &layout, state);
     render_info_panel(ui, &layout, state);
@@ -547,13 +547,19 @@ fn collect_fft_source_names(app_state: &AppState) -> Vec<String> {
 }
 
 fn current_fft_source_time_bounds(app_state: &AppState) -> Option<(f64, f64)> {
-    let selected = app_state.fft_state.selected_source.as_ref().or_else(|| {
-        app_state
-            .fft_state
-            .source_cache
-            .as_ref()
-            .map(|src| &src.name)
-    })?;
+    let selected = app_state
+        .analysis
+        .fft_state
+        .selected_source
+        .as_ref()
+        .or_else(|| {
+            app_state
+                .analysis
+                .fft_state
+                .source_cache
+                .as_ref()
+                .map(|src| &src.name)
+        })?;
     let waveform = app_state
         .simulation
         .waveforms
@@ -589,6 +595,7 @@ fn fft_supported_for_active_analysis(app_state: &AppState) -> bool {
 
 fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str) {
     app_state
+        .analysis
         .fft_state
         .set_selected_source(Some(source_name.to_string()));
     let Some(waveform) = app_state
@@ -597,20 +604,23 @@ fn refresh_fft_from_source_waveform(app_state: &mut AppState, source_name: &str)
         .iter()
         .find(|wf| wf.name == source_name)
     else {
-        app_state.fft_state.clear();
+        app_state.analysis.fft_state.clear();
         return;
     };
 
-    let input_options = app_state.fft_state.input_options_for_waveform(&waveform.x);
+    let input_options = app_state
+        .analysis
+        .fft_state
+        .input_options_for_waveform(&waveform.x);
     if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
         source_name,
         &waveform.x,
         &waveform.y,
         input_options,
     ) {
-        app_state.fft_state.load_prepared_input(prepared);
+        app_state.analysis.fft_state.load_prepared_input(prepared);
     } else {
-        app_state.fft_state.clear();
+        app_state.analysis.fft_state.clear();
     }
 }
 

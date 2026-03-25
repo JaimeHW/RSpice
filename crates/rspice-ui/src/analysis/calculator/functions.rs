@@ -216,7 +216,7 @@ fn clip(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
         _ => {
             return Err(EvaluationError::TypeMismatch(
                 "clip min must be scalar".into(),
-            ))
+            ));
         }
     };
 
@@ -225,7 +225,7 @@ fn clip(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
         _ => {
             return Err(EvaluationError::TypeMismatch(
                 "clip max must be scalar".into(),
-            ))
+            ));
         }
     };
 

@@ -4,7 +4,7 @@
 //! Integrates with the PropertyRegistry for schema-driven property editing.
 
 use crate::common::app::AppState;
-use crate::properties::{render_tabbed_property_dialog, TabbedDialogResult};
+use crate::properties::{TabbedDialogResult, render_tabbed_property_dialog};
 use egui::Ui;
 
 /// Render the properties panel in the right sidebar

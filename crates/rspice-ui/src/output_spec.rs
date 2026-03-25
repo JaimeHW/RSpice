@@ -4,9 +4,9 @@
 //! the engine bridge path to keep sensitivity/output behavior identical.
 
 use num_complex::Complex64;
+use rspice_core::Value;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
-use rspice_core::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct OutputVoltageSpec {
@@ -550,12 +550,16 @@ mod tests {
                 .expect("DC mode should have no AC frequency"),
             None
         );
-        assert!(resolve_sensitivity_ac_frequency(true, Some(0.0))
-            .expect_err("non-positive AC frequency should fail")
-            .contains("must be > 0"));
-        assert!(resolve_sensitivity_ac_frequency(false, Some(1e3))
-            .expect_err("frequency without AC mode should fail")
-            .contains("only valid when AC mode is enabled"));
+        assert!(
+            resolve_sensitivity_ac_frequency(true, Some(0.0))
+                .expect_err("non-positive AC frequency should fail")
+                .contains("must be > 0")
+        );
+        assert!(
+            resolve_sensitivity_ac_frequency(false, Some(1e3))
+                .expect_err("frequency without AC mode should fail")
+                .contains("only valid when AC mode is enabled")
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use super::super::cadence_psf::test_helpers::{
     build_non_windowed_array_complex_psf, build_non_windowed_array_of_struct_bare_descriptor_psf,
     build_non_windowed_array_of_struct_psf, build_non_windowed_array_real_psf,
-    build_non_windowed_complex_psf, build_non_windowed_int32_psf, build_non_windowed_int8_psf,
+    build_non_windowed_complex_psf, build_non_windowed_int8_psf, build_non_windowed_int32_psf,
     build_non_windowed_mixed_real_and_string_psf,
     build_non_windowed_nested_array_real_bare_descriptor_psf,
     build_non_windowed_nested_array_real_psf, build_non_windowed_real_psf,
@@ -252,12 +252,16 @@ fn test_write_touchstone_v1_two_port() {
 
     let content = std::fs::read_to_string(temp.path()).expect("read touchstone");
     assert!(content.contains("# Hz S RI R 75"));
-    assert!(content
-        .lines()
-        .any(|line| line.contains("1.000000000000e6")));
-    assert!(content
-        .lines()
-        .any(|line| line.contains("2.000000000000e6")));
+    assert!(
+        content
+            .lines()
+            .any(|line| line.contains("1.000000000000e6"))
+    );
+    assert!(
+        content
+            .lines()
+            .any(|line| line.contains("2.000000000000e6"))
+    );
     assert!(!content.contains("[Version] 2.0"));
 }
 
@@ -329,9 +333,11 @@ fn test_write_touchstone_v2_three_port() {
 
     let content = std::fs::read_to_string(temp.path()).expect("read touchstone");
     assert!(content.contains("[Number of Ports] 3"));
-    assert!(content
-        .lines()
-        .any(|line| line.starts_with("1.000000000000e6 ")));
+    assert!(
+        content
+            .lines()
+            .any(|line| line.starts_with("1.000000000000e6 "))
+    );
 }
 
 #[test]

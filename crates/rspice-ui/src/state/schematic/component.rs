@@ -637,7 +637,7 @@ mod tests {
             let (name_n, pos_n) = &terminals_normal[i];
             let (name_m, pos_m) = &terminals_mirrored[i];
             assert_eq!(name_n, name_m); // Same terminal names
-                                        // If terminal has X offset from center, mirrored should have opposite offset
+            // If terminal has X offset from center, mirrored should have opposite offset
             if pos_n.x != 10 {
                 assert_ne!(
                     pos_n.x, pos_m.x,

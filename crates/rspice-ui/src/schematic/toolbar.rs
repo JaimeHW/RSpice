@@ -2,7 +2,7 @@
 //!
 //! Main toolbar with simulation controls, zoom, and tool selection.
 
-use egui::{pos2, Color32, Rect, RichText, Stroke, Ui, Vec2};
+use egui::{Color32, Rect, RichText, Stroke, Ui, Vec2, pos2};
 
 use super::component_palette::component_palette;
 use crate::common::app::AppState;

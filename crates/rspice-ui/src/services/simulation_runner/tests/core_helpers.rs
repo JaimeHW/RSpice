@@ -153,10 +153,11 @@ fn test_run_transient_analysis_with_source_path_resolves_relative_include() {
     let data = run_transient_analysis_with_source_path(&netlist, 2e-3, 10e-6, Some(&source_path))
         .expect("source-aware transient analysis should resolve include");
     assert!(!data.time.is_empty());
-    assert!(data
-        .voltages
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)")));
+    assert!(
+        data.voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)"))
+    );
 }
 
 #[test]
@@ -167,10 +168,11 @@ fn test_run_ac_analysis_with_source_path_resolves_relative_include() {
         run_ac_analysis_with_source_path(&netlist, 10.0, 1.0e6, 5, "dec", Some(&source_path))
             .expect("source-aware AC analysis should resolve include");
     assert!(data.num_points >= 2);
-    assert!(data
-        .responses
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)")));
+    assert!(
+        data.responses
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)"))
+    );
 }
 
 #[test]
@@ -181,10 +183,11 @@ fn test_run_dc_sweep_with_source_path_resolves_relative_include() {
         .expect("source-aware DC sweep should resolve include");
     assert_eq!(data.source_name, "V1");
     assert_eq!(data.num_points, data.sweep_values.len());
-    assert!(data
-        .voltages
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)")));
+    assert!(
+        data.voltages
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("V(OUT)"))
+    );
 }
 
 #[test]

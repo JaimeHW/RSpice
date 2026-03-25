@@ -97,11 +97,7 @@ impl SoaConfig {
 }
 
 fn yes_no(v: bool) -> &'static str {
-    if v {
-        "on"
-    } else {
-        "off"
-    }
+    if v { "on" } else { "off" }
 }
 
 /// UI state for SOA tab.

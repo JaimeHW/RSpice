@@ -350,11 +350,7 @@ pub fn format_frequency(hertz: f64) -> String {
 
 /// Calculate frequency from period
 pub fn period_to_frequency(period: f64) -> f64 {
-    if period > 0.0 {
-        1.0 / period
-    } else {
-        0.0
-    }
+    if period > 0.0 { 1.0 / period } else { 0.0 }
 }
 
 // =============================================================================

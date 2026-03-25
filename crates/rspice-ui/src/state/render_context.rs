@@ -27,8 +27,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::state::schematic::{Component, Point, Wire};
 use crate::state::Viewport;
+use crate::state::schematic::{Component, Point, Wire};
 
 use super::spatial_index::SpatialIndex;
 

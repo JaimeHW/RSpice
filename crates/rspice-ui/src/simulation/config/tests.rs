@@ -732,10 +732,12 @@ fn test_noise_validate_missing_output_node() {
     };
     let result = cfg.validate();
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .iter()
-        .any(|e| e.contains("Output node")));
+    assert!(
+        result
+            .unwrap_err()
+            .iter()
+            .any(|e| e.contains("Output node"))
+    );
 }
 
 #[test]
@@ -746,10 +748,12 @@ fn test_noise_validate_missing_input_source() {
     };
     let result = cfg.validate();
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .iter()
-        .any(|e| e.contains("Input source")));
+    assert!(
+        result
+            .unwrap_err()
+            .iter()
+            .any(|e| e.contains("Input source"))
+    );
 }
 
 #[test]

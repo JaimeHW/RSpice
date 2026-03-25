@@ -33,31 +33,31 @@ pub mod smith_chart;
 
 // Re-export main types for convenience (optional - users can also access via submodule)
 // Bode
-pub use bode::{render_bode_panel, BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse};
+pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse, render_bode_panel};
 
 // FFT
 pub use fft::{
-    render_fft_plot, FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction,
+    FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction, render_fft_plot,
 };
 
 // Histogram
 pub use histogram::{
-    render_histogram, Histogram, HistogramBuilder, HistogramDisplayMode, HistogramState,
-    HistogramStats,
+    Histogram, HistogramBuilder, HistogramDisplayMode, HistogramState, HistogramStats,
+    render_histogram,
 };
 
 // Nyquist
-pub use nyquist::{render_nyquist_plot, NyquistData, NyquistState};
+pub use nyquist::{NyquistData, NyquistState, render_nyquist_plot};
 
 // Pole-Zero
-pub use pole_zero::{render_pz_plot, ComplexRoot, PoleZeroData, PoleZeroState, RootType};
+pub use pole_zero::{ComplexRoot, PoleZeroData, PoleZeroState, RootType, render_pz_plot};
 
 // Smith Chart
 pub use smith_chart::{
-    render_smith_chart, Admittance, Complex, Impedance, SmithChartMode, SmithChartState,
+    Admittance, Complex, Impedance, SmithChartMode, SmithChartState, render_smith_chart,
 };
 
 // Eye Diagram
 pub use eye_diagram::{
-    render_eye_diagram, EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace,
+    EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace, render_eye_diagram,
 };

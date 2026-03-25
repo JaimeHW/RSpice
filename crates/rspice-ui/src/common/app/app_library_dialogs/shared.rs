@@ -1,4 +1,4 @@
-use super::{save_global_veriloga_library, ConsoleMessage, RSpiceApp};
+use super::{ConsoleMessage, RSpiceApp, save_global_veriloga_library};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DialogActionOutcome {

@@ -1,7 +1,7 @@
 use super::{build_engine_config, now_ms, parse_runner_netlist};
+use rspice_core::Value;
 use rspice_core::engine::{Engine, TransientResult};
 use rspice_core::netlist::AnalysisCommand;
-use rspice_core::Value;
 use std::path::Path;
 
 /// Result of a simulation run

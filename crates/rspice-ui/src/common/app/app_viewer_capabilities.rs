@@ -31,8 +31,9 @@ impl ViewerCapability {
 impl AppState {
     /// Clear transient-derived viewer caches without disturbing AC/RF state.
     pub fn clear_transient_specialized_viewer_data(&mut self) {
-        self.fft_state.clear();
-        self.eye_diagram_state
+        self.analysis.fft_state.clear();
+        self.analysis
+            .eye_diagram_state
             .load_data(crate::analysis::eye_diagram::data::EyeData::default());
     }
 
@@ -42,12 +43,13 @@ impl AppState {
     /// cached analysis-specific visualizations.
     pub fn clear_specialized_viewer_data(&mut self) {
         self.clear_transient_specialized_viewer_data();
-        self.histogram_state.clear();
-        self.bode_plot_state
+        self.analysis.histogram_state.clear();
+        self.analysis
+            .bode_plot_state
             .load_data(crate::analysis::bode::BodeData::new());
-        self.nyquist_state.clear();
-        self.smith_chart_state.clear_traces();
-        self.pole_zero_state.clear();
+        self.analysis.nyquist_state.clear();
+        self.analysis.smith_chart_state.clear_traces();
+        self.analysis.pole_zero_state.clear();
     }
 
     /// Resolve whether a viewer can currently be opened with meaningful data.
@@ -55,14 +57,14 @@ impl AppState {
         match viewer {
             ActiveViewer::Waveform => ViewerCapability::available("Always available"),
             ActiveViewer::SmithChart => {
-                if self.smith_chart_state.traces.is_empty() {
+                if self.analysis.smith_chart_state.traces.is_empty() {
                     ViewerCapability::unavailable("Requires S-parameter complex traces")
                 } else {
                     ViewerCapability::available("S-parameter traces loaded")
                 }
             }
             ActiveViewer::EyeDiagram => {
-                if self.eye_diagram_state.trace_count() > 0 {
+                if self.analysis.eye_diagram_state.trace_count() > 0 {
                     ViewerCapability::available("Eye traces loaded")
                 } else if self.active_analysis_supports_eye_diagram() {
                     ViewerCapability::available(
@@ -73,21 +75,21 @@ impl AppState {
                 }
             }
             ActiveViewer::Histogram => {
-                if self.histogram_state.is_empty() {
+                if self.analysis.histogram_state.is_empty() {
                     ViewerCapability::unavailable("Requires histogram bins from sweep/MC data")
                 } else {
                     ViewerCapability::available("Histogram data loaded")
                 }
             }
             ActiveViewer::BodePlot => {
-                if self.bode_plot_state.is_empty() {
+                if self.analysis.bode_plot_state.is_empty() {
                     ViewerCapability::unavailable("Requires AC/transfer-function response data")
                 } else {
                     ViewerCapability::available("Frequency-response data loaded")
                 }
             }
             ActiveViewer::Nyquist => {
-                if self.nyquist_state.is_empty() {
+                if self.analysis.nyquist_state.is_empty() {
                     ViewerCapability::unavailable("Requires complex loop-gain/AC response data")
                 } else {
                     ViewerCapability::available("Nyquist curves loaded")
@@ -95,6 +97,7 @@ impl AppState {
             }
             ActiveViewer::Fft => {
                 let has_spectrum = self
+                    .analysis
                     .fft_state
                     .data
                     .as_ref()
@@ -109,7 +112,7 @@ impl AppState {
                 }
             }
             ActiveViewer::PoleZero => {
-                if self.pole_zero_state.is_empty() {
+                if self.analysis.pole_zero_state.is_empty() {
                     ViewerCapability::unavailable("Requires pole-zero root data")
                 } else {
                     ViewerCapability::available("Pole-zero root data loaded")
@@ -215,7 +218,7 @@ mod tests {
         ));
         let mut data = crate::analysis::bode::BodeData::new();
         data.add_response(response);
-        state.bode_plot_state.load_data(data);
+        state.analysis.bode_plot_state.load_data(data);
     }
 
     fn seed_nyquist(state: &mut AppState) {
@@ -225,14 +228,14 @@ mod tests {
             &[0.5, 0.25],
             &[0.0, -0.2],
         );
-        state.nyquist_state.load_data(curve);
+        state.analysis.nyquist_state.load_data(curve);
     }
 
     fn seed_fft(state: &mut AppState) {
         let mut fft = crate::analysis::fft::FftData::new("spec");
         fft.points
             .push(crate::analysis::fft::FftPoint::new(1.0, 1.0, 0.0));
-        state.fft_state.load_data(fft);
+        state.analysis.fft_state.load_data(fft);
     }
 
     fn seed_eye(state: &mut AppState) {
@@ -241,26 +244,29 @@ mod tests {
             vec![0.0, 1.0],
             vec![0.0, 1.0],
         ));
-        state.eye_diagram_state.load_data(eye);
+        state.analysis.eye_diagram_state.load_data(eye);
     }
 
     fn seed_histogram(state: &mut AppState) {
         let histogram = crate::analysis::histogram::data::HistogramBuilder::new()
             .name("mc")
             .build(&[0.9, 1.0, 1.1]);
-        state.histogram_state.load_histogram(histogram);
+        state.analysis.histogram_state.load_histogram(histogram);
     }
 
     fn seed_smith(state: &mut AppState) {
-        state
-            .smith_chart_state
-            .load_sparam_data("S11", &[1.0, 2.0], &[0.2, 0.1], &[0.0, -0.1]);
+        state.analysis.smith_chart_state.load_sparam_data(
+            "S11",
+            &[1.0, 2.0],
+            &[0.2, 0.1],
+            &[0.0, -0.1],
+        );
     }
 
     fn seed_pole_zero(state: &mut AppState) {
         let mut data = crate::analysis::pole_zero::PoleZeroData::new("pz");
         data.add_real_pole(-1.0);
-        state.pole_zero_state.load_data(data);
+        state.analysis.pole_zero_state.load_data(data);
     }
 
     fn seed_active_transient_analysis(state: &mut AppState) {
@@ -346,7 +352,7 @@ mod tests {
         let opened = state.open_preferred_viewer_for_analysis(AnalysisType::SParameter);
         assert_eq!(opened, ActiveViewer::SmithChart);
 
-        state.smith_chart_state.clear_traces();
+        state.analysis.smith_chart_state.clear_traces();
         let opened = state.open_preferred_viewer_for_analysis(AnalysisType::SParameter);
         assert_eq!(opened, ActiveViewer::BodePlot);
     }

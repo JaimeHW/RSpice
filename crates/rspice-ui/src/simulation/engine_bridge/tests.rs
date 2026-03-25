@@ -278,9 +278,11 @@ R3 out 0 1k
             assert!(!waveforms.is_empty());
             assert!(waveforms.keys().any(|name| name.contains("[V2=0")));
             assert!(waveforms.keys().any(|name| name.contains("[V2=1")));
-            assert!(waveforms
-                .values()
-                .all(|wf| wf.y_values.len() == sweep_values.len()));
+            assert!(
+                waveforms
+                    .values()
+                    .all(|wf| wf.y_values.len() == sweep_values.len())
+            );
         }
         other => panic!("expected DC sweep result, got {:?}", other),
     }
@@ -833,9 +835,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected validation error");
-    assert!(err
-        .to_string()
-        .contains("only valid when AC mode is enabled"));
+    assert!(
+        err.to_string()
+            .contains("only valid when AC mode is enabled")
+    );
 }
 
 #[test]
@@ -883,9 +886,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]
@@ -909,9 +913,10 @@ R2 out 0 1k
     let err = bridge
         .run(&cfg, netlist)
         .expect_err("expected unresolved output error");
-    assert!(err
-        .to_string()
-        .contains("could not be resolved to a node or branch"));
+    assert!(
+        err.to_string()
+            .contains("could not be resolved to a node or branch")
+    );
 }
 
 #[test]

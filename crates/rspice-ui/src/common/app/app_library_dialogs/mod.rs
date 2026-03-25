@@ -1,6 +1,6 @@
 use egui::Context;
 
-use super::{save_global_veriloga_library, ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use super::{ConsoleMessage, RSpiceApp, VERILOGA_LIBRARY_NAME, save_global_veriloga_library};
 
 mod new_cell_dialog;
 mod new_view_dialog;

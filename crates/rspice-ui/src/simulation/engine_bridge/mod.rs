@@ -24,10 +24,9 @@ use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    OutputSpec, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
     run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
-    OutputSpec,
 };
 
 //=============================================================================

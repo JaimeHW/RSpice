@@ -6,9 +6,9 @@ use super::{
 };
 use crate::output_spec::{ac_output_value, parse_output_spec};
 use num_complex::Complex64;
+use rspice_core::Value;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{ElementKind, SourceSpec};
-use rspice_core::Value;
 use std::path::Path;
 
 /// Frequency sweep type for transfer function analysis.

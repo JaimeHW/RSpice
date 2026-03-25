@@ -1,8 +1,8 @@
 use egui::Context;
 
 use super::{
-    app_shortcuts::{ShortcutCategory, ShortcutCommand},
     RSpiceApp,
+    app_shortcuts::{ShortcutCategory, ShortcutCommand},
 };
 
 fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {

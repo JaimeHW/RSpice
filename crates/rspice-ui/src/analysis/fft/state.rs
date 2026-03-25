@@ -4,8 +4,8 @@
 
 use super::data::{FftData, SpectrumAnalysis, SpectrumNormalization};
 use super::pipeline::{
-    FftInputOptions, FftInputPolicy, FftTimeWindow, PreparedFftInput,
-    MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
+    FftInputOptions, FftInputPolicy, FftTimeWindow, MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES,
+    PreparedFftInput,
 };
 use super::window::WindowFunction;
 use std::sync::Arc;

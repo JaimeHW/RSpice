@@ -17,8 +17,8 @@ pub mod parser;
 pub use ast::CalculatorExpr;
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};
 pub use interpolation::{
-    align_waveforms, align_waveforms_union, ExtrapolationMode, InterpolationError,
-    InterpolationMethod, WaveformInterpolator,
+    ExtrapolationMode, InterpolationError, InterpolationMethod, WaveformInterpolator,
+    align_waveforms, align_waveforms_union,
 };
 
 // =============================================================================

@@ -325,7 +325,7 @@ fn render_analysis(
 
     // Build analysis label with type icon
     let type_icon = analysis_navigation::analysis_icon(analysis.analysis_type);
-    let status_icon = if analysis.success { "" } else { " ⚠" };
+    let status_icon = if analysis.success { "" } else { " âš " };
     let data_icon = if analysis.has_data { "" } else { " (no data)" };
 
     let label = format!(
@@ -499,14 +499,14 @@ mod tests {
         ));
         let mut bode = crate::analysis::bode::BodeData::new();
         bode.add_response(response);
-        state.bode_plot_state.load_data(bode);
+        state.analysis.bode_plot_state.load_data(bode);
     }
 
     fn seed_fft_data(state: &mut AppState) {
         let mut fft = crate::analysis::fft::FftData::new("spec");
         fft.points
             .push(crate::analysis::fft::FftPoint::new(1.0, 1.0, 0.0));
-        state.fft_state.load_data(fft);
+        state.analysis.fft_state.load_data(fft);
     }
 
     #[test]

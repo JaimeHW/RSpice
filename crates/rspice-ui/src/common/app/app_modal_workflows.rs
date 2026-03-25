@@ -1,6 +1,6 @@
 use egui::Context;
 
-use super::{apply_component_property_edits, AppState, RSpiceApp};
+use super::{AppState, RSpiceApp, apply_component_property_edits};
 
 fn apply_properties_dialog_result(
     state: &mut AppState,

@@ -36,8 +36,8 @@ pub use connection::{ConnectionSet, WireConnection};
 pub use drag::WireDragContext;
 pub use drawing::WireDrawing;
 pub use routing::{
-    convert_to_orthogonal, count_bends, is_valid_route, optimize_route, route_length,
-    WireRoutingMode,
+    WireRoutingMode, convert_to_orthogonal, count_bends, is_valid_route, optimize_route,
+    route_length,
 };
 pub use segment::{WireHitResult, WireSegment};
 pub use types::{DragConstraint, JunctionType, WireDragMode};

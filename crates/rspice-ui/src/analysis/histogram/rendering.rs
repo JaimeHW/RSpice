@@ -52,7 +52,7 @@ fn axis_color() -> Color32 {
 pub fn render_histogram_viewer(ui: &mut Ui, app_state: &mut AppState) {
     let available_rect = ui.available_rect_before_wrap();
     let close_requested = {
-        let state = &mut app_state.histogram_state;
+        let state = &mut app_state.analysis.histogram_state;
         let layout = calculate_layout(available_rect, state.show_stats);
         let close_requested = render_header(ui, &layout, state);
         render_chart_area(ui, &layout, state);
@@ -173,7 +173,7 @@ fn render_header(ui: &mut Ui, layout: &HistogramLayout, state: &mut HistogramSta
             // Toggle buttons
             if ui
                 .small_button(if state.show_stats {
-                    "Stats ✓"
+                    "Stats âœ“"
                 } else {
                     "Stats"
                 })
@@ -183,7 +183,11 @@ fn render_header(ui: &mut Ui, layout: &HistogramLayout, state: &mut HistogramSta
             }
 
             if ui
-                .small_button(if state.show_grid { "Grid ✓" } else { "Grid" })
+                .small_button(if state.show_grid {
+                    "Grid âœ“"
+                } else {
+                    "Grid"
+                })
                 .clicked()
             {
                 state.toggle_grid();
@@ -192,7 +196,7 @@ fn render_header(ui: &mut Ui, layout: &HistogramLayout, state: &mut HistogramSta
             // Right-aligned close button
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
-                if ui.small_button("✕").clicked() {
+                if ui.small_button("âœ•").clicked() {
                     close_requested = true;
                 }
             });

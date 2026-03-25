@@ -41,18 +41,8 @@ pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVert
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::SchematicState;
 pub use tool::Tool;
-pub use undo_history::{SchematicSnapshot, UndoHistory, MAX_UNDO_STEPS};
+pub use undo_history::{MAX_UNDO_STEPS, SchematicSnapshot, UndoHistory};
 pub use wire::{
-    convert_to_orthogonal,
-    count_bends,
-    // Convenience functions
-    create_wire,
-    find_wire_intersections,
-    is_valid_route,
-    // Routing utilities
-    optimize_route,
-    route_length,
-    wires_connected,
     // Connection types
     ConnectionSet,
     DragConstraint,
@@ -68,6 +58,16 @@ pub use wire::{
     WireRoutingMode,
     // Segment types
     WireSegment,
+    convert_to_orthogonal,
+    count_bends,
+    // Convenience functions
+    create_wire,
+    find_wire_intersections,
+    is_valid_route,
+    // Routing utilities
+    optimize_route,
+    route_length,
+    wires_connected,
 };
 
 #[cfg(test)]

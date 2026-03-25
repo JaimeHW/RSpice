@@ -778,22 +778,30 @@ fn test_symbol_content_generated_pin_placement() {
     let symbol = SymbolContent::generated("amp", &pins);
 
     assert_eq!(symbol.pins.len(), 4);
-    assert!(symbol
-        .pins
-        .iter()
-        .any(|pin| pin.orientation == PinOrientation::Left));
-    assert!(symbol
-        .pins
-        .iter()
-        .any(|pin| pin.orientation == PinOrientation::Right));
-    assert!(symbol
-        .pins
-        .iter()
-        .any(|pin| pin.orientation == PinOrientation::Top));
-    assert!(symbol
-        .pins
-        .iter()
-        .any(|pin| pin.orientation == PinOrientation::Bottom));
+    assert!(
+        symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Left)
+    );
+    assert!(
+        symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Right)
+    );
+    assert!(
+        symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Top)
+    );
+    assert!(
+        symbol
+            .pins
+            .iter()
+            .any(|pin| pin.orientation == PinOrientation::Bottom)
+    );
 }
 
 // =========================================================================

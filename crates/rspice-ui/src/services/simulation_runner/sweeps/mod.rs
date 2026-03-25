@@ -3,12 +3,12 @@
 #![allow(clippy::needless_range_loop, clippy::type_complexity)]
 
 use super::{build_engine_config, generate_freq_points, parse_runner_netlist};
+use rspice_core::Value;
 use rspice_core::engine::{Engine, TransientResult};
 #[cfg(test)]
 use rspice_core::netlist::StepSweep;
 use rspice_core::netlist::{AnalysisCommand, ElementKind, SourceSpec, StepCommand, StepTarget};
 use rspice_core::solver::SimulationResult as CoreSimulationResult;
-use rspice_core::Value;
 use std::path::Path;
 
 mod sweep_points;

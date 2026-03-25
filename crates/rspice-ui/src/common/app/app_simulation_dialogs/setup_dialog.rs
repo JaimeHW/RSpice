@@ -1,6 +1,6 @@
 use super::super::DialogState;
 use super::defaults::toggle_enabled_analysis;
-use super::{app_simulation_analysis_options, Context, RSpiceApp, SIMULATION_ANALYSIS_CATEGORIES};
+use super::{Context, RSpiceApp, SIMULATION_ANALYSIS_CATEGORIES, app_simulation_analysis_options};
 
 fn render_analysis_list(ui: &mut egui::Ui, dialogs: &mut DialogState, content_height: f32) {
     ui.allocate_ui_with_layout(

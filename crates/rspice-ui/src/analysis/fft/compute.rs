@@ -3,7 +3,7 @@
 //! Provides FFT computation for frequency-domain analysis of waveforms.
 
 use super::data::FftData;
-use super::pipeline::{prepare_fft_input, MIN_FFT_SAMPLES};
+use super::pipeline::{MIN_FFT_SAMPLES, prepare_fft_input};
 
 /// Window function types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -259,9 +259,11 @@ mod tests {
 
         let result = compute_fft(&time, &values, WindowFunction::Hanning);
         assert!(result.is_some());
-        assert!(result
-            .as_ref()
-            .map(|r| r.sample_rate.is_finite() && r.sample_rate > 0.0)
-            .unwrap_or(false));
+        assert!(
+            result
+                .as_ref()
+                .map(|r| r.sample_rate.is_finite() && r.sample_rate > 0.0)
+                .unwrap_or(false)
+        );
     }
 }
