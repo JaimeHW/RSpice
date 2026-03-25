@@ -2301,6 +2301,38 @@ RRET out 0 1k
     }
 
     #[test]
+    fn test_dc_results_preserve_branch_names() {
+        let netlist_str = r#"
+* DC branch-name mapping
+VDRV in 0 1
+LRET in out 1m
+RLOAD out 0 1k
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        assert_eq!(
+            dc.branch_names,
+            vec!["VDRV".to_string(), "LRET".to_string()]
+        );
+        assert_eq!(dc.branch_currents.len(), dc.branch_names.len());
+
+        let sweep = engine
+            .run_dc_sweep(&netlist, "VDRV", 0.0, 1.0, 1.0)
+            .unwrap();
+        assert!(!sweep.is_empty());
+        for (_, point) in sweep {
+            assert_eq!(
+                point.branch_names,
+                vec!["VDRV".to_string(), "LRET".to_string()]
+            );
+            assert_eq!(point.branch_currents.len(), point.branch_names.len());
+        }
+    }
+
+    #[test]
     fn test_dc_sweep_with_abort_returns_aborted_error() {
         let netlist = Netlist::parse(
             r#"

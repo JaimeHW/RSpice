@@ -49,6 +49,8 @@ pub struct SimulationResult {
     pub node_names: Vec<String>,
     /// Branch currents for voltage sources/inductors
     pub branch_currents: Vec<Value>,
+    /// Canonical branch names aligned with `branch_currents`
+    pub branch_names: Vec<String>,
     /// Time points (for transient analysis)
     pub time_points: Vec<Value>,
     /// Voltage waveforms: waveforms[node_id][time_index]
@@ -63,6 +65,7 @@ impl SimulationResult {
             node_voltages: vec![0.0; num_nodes + 1], // +1 for ground
             node_names,
             branch_currents: vec![0.0; num_branches],
+            branch_names: vec![String::new(); num_branches],
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
         }
@@ -102,6 +105,15 @@ impl SimulationResult {
         self.branch_currents.get(branch_idx).copied()
     }
 
+    /// Get branch current by canonical element name stored in the result.
+    pub fn branch_current_named(&self, name: &str) -> Option<Value> {
+        let branch_idx = self
+            .branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        self.branch_current(branch_idx)
+    }
+
     /// Get branch current by element name using a lookup map
     ///
     /// # Arguments
@@ -120,9 +132,11 @@ impl SimulationResult {
         name: &str,
         branch_map: &std::collections::HashMap<String, usize>,
     ) -> Option<Value> {
-        branch_map
-            .get(name)
-            .and_then(|&idx| self.branch_currents.get(idx).copied())
+        self.branch_current_named(name).or_else(|| {
+            branch_map
+                .get(name)
+                .and_then(|&idx| self.branch_currents.get(idx).copied())
+        })
     }
 }
 
@@ -182,6 +196,7 @@ impl From<crate::engine::SimulationConfig> for Simulator {
 #[cfg(test)]
 mod tests {
     use super::Simulator;
+    use std::collections::HashMap;
 
     #[test]
     fn test_simulator_default_matches_engine_defaults() {
@@ -219,5 +234,26 @@ mod tests {
         assert_eq!(simulator.max_iterations, 87);
         assert_eq!(simulator.min_timestep, 4e-12);
         assert_eq!(simulator.max_timestep, 9e-6);
+    }
+
+    #[test]
+    fn test_simulation_result_branch_current_named_uses_internal_metadata() {
+        let mut result = super::SimulationResult::new(1, 2);
+        result.branch_names = vec!["V1".to_string(), "L1".to_string()];
+        result.branch_currents = vec![1e-3, -2e-3];
+
+        assert_eq!(result.branch_current_named("v1"), Some(1e-3));
+        assert_eq!(result.branch_current_named("L1"), Some(-2e-3));
+        assert_eq!(result.branch_current_named("missing"), None);
+    }
+
+    #[test]
+    fn test_simulation_result_branch_current_by_name_prefers_internal_metadata() {
+        let mut result = super::SimulationResult::new(1, 1);
+        result.branch_names = vec!["VDRV".to_string()];
+        result.branch_currents = vec![3e-3];
+
+        let lookup = HashMap::new();
+        assert_eq!(result.branch_current_by_name("vdrv", &lookup), Some(3e-3));
     }
 }

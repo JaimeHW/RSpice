@@ -42,9 +42,11 @@ impl Engine {
 
         // Populate node names from circuit (results include actual net names)
         let sorted_names = circuit.node_names_sorted();
+        let branch_names = circuit.branch_names_sorted();
         result.node_names = std::iter::once("0".to_string()) // Ground is node 0
             .chain(sorted_names)
             .collect();
+        result.branch_names = branch_names;
 
         for (i, &v) in solution.iter().enumerate() {
             if i < circuit.num_nodes() {
@@ -139,6 +141,7 @@ impl Engine {
 
         let mut results = Vec::with_capacity(sweep_points.len());
         let sorted_node_names = circuit.node_names_sorted();
+        let branch_names = circuit.branch_names_sorted();
 
         let node_hints = self.collect_node_voltage_hints(netlist, &circuit);
 
@@ -190,6 +193,7 @@ impl Engine {
             result.node_names = std::iter::once("0".to_string())
                 .chain(sorted_node_names.iter().cloned())
                 .collect();
+            result.branch_names = branch_names.clone();
             for (i, &v) in solution.iter().enumerate() {
                 if i < circuit.num_nodes() {
                     result.node_voltages[i + 1] = v;
