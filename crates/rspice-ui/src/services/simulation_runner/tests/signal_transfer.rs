@@ -38,18 +38,21 @@ fn test_ac_data_from_results_node_mapping() {
     let results = vec![
         AcResult {
             frequency: 1e3,
+            node_names: vec!["IN".to_string(), "OUT".to_string()],
+            branch_names: vec![],
             voltages: vec![Complex64::new(1.0, 0.0), Complex64::new(0.5, 0.0)],
             currents: vec![],
         },
         AcResult {
             frequency: 1e6,
+            node_names: vec!["IN".to_string(), "OUT".to_string()],
+            branch_names: vec![],
             voltages: vec![Complex64::new(2.0, 0.0), Complex64::new(1.0, 0.0)],
             currents: vec![],
         },
     ];
-    let node_names = vec!["0".to_string(), "IN".to_string(), "OUT".to_string()];
 
-    let data = AcData::from_results(results, &node_names);
+    let data = AcData::from_results(results);
     assert_eq!(data.responses.len(), 2);
     assert_eq!(data.responses[0].0, "V(IN)");
     assert_eq!(data.responses[0].1[0], Complex64::new(1.0, 0.0));

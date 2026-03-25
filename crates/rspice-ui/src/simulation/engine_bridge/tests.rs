@@ -457,6 +457,38 @@ R1 1 0 1k
 }
 
 #[test]
+fn test_run_ac_uses_stable_node_and_branch_waveform_names() {
+    let bridge = EngineBridge::new();
+    let netlist = r#"
+* AC naming metadata
+V1 in 0 AC 1
+E1 out 0 in 0 2
+R1 out 0 1k
+.end
+"#;
+    let config = AnalysisConfig::Ac(super::super::config::AcAnalysisConfig {
+        start_freq: 1e3,
+        stop_freq: 1e4,
+        num_points: 2,
+        sweep_type: super::super::config::AcSweepType::Linear,
+    });
+
+    let result = bridge.run(&config, netlist).expect("AC run should succeed");
+
+    match result {
+        SimulationResult::Ac { waveforms, .. } => {
+            assert!(waveforms.contains_key("V(IN)"));
+            assert!(waveforms.contains_key("V(OUT)"));
+            assert!(waveforms.contains_key("I(V1)"));
+            assert!(waveforms.contains_key("I(E1)"));
+            assert!(!waveforms.contains_key("V(1)"));
+            assert!(!waveforms.contains_key("I(1)"));
+        }
+        other => panic!("expected AC result, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_run_sensitivity_dc_reports_param_derivatives() {
     let bridge = EngineBridge::new();
     let netlist = r#"

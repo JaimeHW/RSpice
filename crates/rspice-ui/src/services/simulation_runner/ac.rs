@@ -33,17 +33,13 @@ impl AcData {
     }
 
     /// Create from engine AcResult vector
-    pub fn from_results(results: Vec<AcResult>, node_names: &[String]) -> Self {
+    pub fn from_results(results: Vec<AcResult>) -> Self {
         let frequencies: Vec<Value> = results.iter().map(|result| result.frequency).collect();
         let num_points = frequencies.len();
 
         let mut responses = Vec::new();
-        if !results.is_empty() && !results[0].voltages.is_empty() {
-            for (idx, name) in node_names.iter().enumerate() {
-                if name == "0" || name.eq_ignore_ascii_case("gnd") {
-                    continue;
-                }
-                let ac_idx = idx.saturating_sub(1);
+        if let Some(first_result) = results.first() {
+            for (ac_idx, name) in first_result.node_names.iter().enumerate() {
                 let values: Vec<Complex64> = results
                     .iter()
                     .filter_map(|result| result.voltages.get(ac_idx).copied())
@@ -74,13 +70,9 @@ pub fn run_ac_analysis(
         .map_err(|e| format!("Parse error: {}", e))?;
     let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type);
     let engine = Engine::new(build_engine_config(&netlist, None));
-    let dc_result = engine
-        .run_dc_op(&netlist)
-        .map_err(|e| format!("DC OP error (required for AC): {}", e))?;
-    let node_names = dc_result.node_names.clone();
     let results = engine
         .run_ac(&netlist, &frequencies)
         .map_err(|e| format!("AC analysis error: {}", e))?;
 
-    Ok(AcData::from_results(results, &node_names))
+    Ok(AcData::from_results(results))
 }

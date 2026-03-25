@@ -24,9 +24,10 @@ use super::config::AnalysisConfig;
 use super::results::{DcOpResult, SimulationResult, WaveformData};
 use super::runner::SimulationError;
 use crate::output_spec::{
-    OutputSpec, collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
+    collect_sensitivity_parameters, dc_output_value, finite_difference_derivative,
     normalized_sensitivity, parse_output_spec, resolve_sensitivity_ac_frequency,
     run_ac_output_at_frequency, run_dc_output_sensitivity, validate_sensitivity_output_spec,
+    OutputSpec,
 };
 
 //=============================================================================
@@ -39,6 +40,12 @@ use crate::output_spec::{
 pub struct EngineBridge {
     /// Core engine instance
     engine: rspice_core::Engine,
+}
+
+struct SimulationInput<'a> {
+    config: &'a AnalysisConfig,
+    netlist_str: &'a str,
+    source_path: Option<&'a Path>,
 }
 
 impl Default for EngineBridge {
@@ -68,7 +75,14 @@ impl EngineBridge {
         config: &AnalysisConfig,
         netlist_str: &str,
     ) -> Result<SimulationResult, SimulationError> {
-        self.run_with_source_path(config, netlist_str, None)
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path: None,
+            },
+            None,
+        )
     }
 
     /// Run simulation with a source path used to resolve relative includes and
@@ -79,19 +93,14 @@ impl EngineBridge {
         netlist_str: &str,
         source_path: Option<&Path>,
     ) -> Result<SimulationResult, SimulationError> {
-        // Parse netlist
-        let netlist = self.parse_netlist_with_source_path(netlist_str, source_path)?;
-
-        // Dispatch to appropriate analysis
-        match config {
-            AnalysisConfig::DcOp => self.run_dc_op(&netlist),
-            AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(&netlist, dc_config),
-            AnalysisConfig::Transient(tran_config) => self.run_transient(&netlist, tran_config),
-            AnalysisConfig::Ac(ac_config) => self.run_ac(&netlist, ac_config),
-            AnalysisConfig::Noise(noise_config) => self.run_noise(&netlist, noise_config),
-            AnalysisConfig::PoleZero(pz_config) => self.run_pz(&netlist, pz_config),
-            AnalysisConfig::Sensitivity(sens_config) => self.run_sensitivity(&netlist, sens_config),
-        }
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+            },
+            None,
+        )
     }
 
     /// Run simulation with abort signal for cooperative cancellation
@@ -104,7 +113,14 @@ impl EngineBridge {
         netlist_str: &str,
         abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<SimulationResult, SimulationError> {
-        self.run_with_abort_and_source_path(config, netlist_str, None, abort_flag)
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path: None,
+            },
+            Some(abort_flag),
+        )
     }
 
     /// Run simulation with cooperative cancellation and a source path for
@@ -116,21 +132,45 @@ impl EngineBridge {
         source_path: Option<&Path>,
         abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Result<SimulationResult, SimulationError> {
-        // Parse netlist
-        let netlist = self.parse_netlist_with_source_path(netlist_str, source_path)?;
+        self.run_request(
+            SimulationInput {
+                config,
+                netlist_str,
+                source_path,
+            },
+            Some(abort_flag),
+        )
+    }
 
-        // Arc<AtomicBool> implements AbortSignal directly, so we can use it
-        // Dispatch to appropriate analysis (abort-aware where supported)
+    fn run_request(
+        &self,
+        input: SimulationInput<'_>,
+        abort_flag: Option<&dyn rspice_core::abort_signal::AbortSignal>,
+    ) -> Result<SimulationResult, SimulationError> {
+        let netlist = self.parse_netlist_with_source_path(input.netlist_str, input.source_path)?;
+        self.dispatch_analysis(input.config, &netlist, abort_flag)
+    }
+
+    fn dispatch_analysis(
+        &self,
+        config: &AnalysisConfig,
+        netlist: &rspice_core::Netlist,
+        abort_flag: Option<&dyn rspice_core::abort_signal::AbortSignal>,
+    ) -> Result<SimulationResult, SimulationError> {
         match config {
-            AnalysisConfig::DcOp => self.run_dc_op(&netlist),
-            AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(&netlist, dc_config),
+            AnalysisConfig::DcOp => self.run_dc_op(netlist),
+            AnalysisConfig::DcSweep(dc_config) => self.run_dc_sweep(netlist, dc_config),
             AnalysisConfig::Transient(tran_config) => {
-                self.run_transient_with_abort(&netlist, tran_config, abort_flag)
+                if let Some(abort) = abort_flag {
+                    self.run_transient_with_abort(netlist, tran_config, abort)
+                } else {
+                    self.run_transient(netlist, tran_config)
+                }
             }
-            AnalysisConfig::Ac(ac_config) => self.run_ac(&netlist, ac_config),
-            AnalysisConfig::Noise(noise_config) => self.run_noise(&netlist, noise_config),
-            AnalysisConfig::PoleZero(pz_config) => self.run_pz(&netlist, pz_config),
-            AnalysisConfig::Sensitivity(sens_config) => self.run_sensitivity(&netlist, sens_config),
+            AnalysisConfig::Ac(ac_config) => self.run_ac(netlist, ac_config),
+            AnalysisConfig::Noise(noise_config) => self.run_noise(netlist, noise_config),
+            AnalysisConfig::PoleZero(pz_config) => self.run_pz(netlist, pz_config),
+            AnalysisConfig::Sensitivity(sens_config) => self.run_sensitivity(netlist, sens_config),
         }
     }
 
@@ -169,6 +209,29 @@ impl EngineBridge {
             &rspice_core::SimulationConfigOverrides::default(),
         );
         rspice_core::Engine::new(resolved)
+    }
+
+    #[inline]
+    fn ac_node_waveform_name(result: &rspice_core::analysis::AcResult, node_idx: usize) -> String {
+        result
+            .node_names
+            .get(node_idx)
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("V({})", name))
+            .unwrap_or_else(|| format!("V({})", node_idx + 1))
+    }
+
+    #[inline]
+    fn ac_branch_waveform_name(
+        result: &rspice_core::analysis::AcResult,
+        branch_idx: usize,
+    ) -> String {
+        result
+            .branch_names
+            .get(branch_idx)
+            .filter(|name| !name.is_empty())
+            .map(|name| format!("I({})", name))
+            .unwrap_or_else(|| format!("I({})", branch_idx + 1))
     }
 
     //-------------------------------------------------------------------------
@@ -560,7 +623,8 @@ impl EngineBridge {
             return Ok(SimulationResult::default());
         }
 
-        let num_nodes = ac_results[0].voltages.len();
+        let first_result = &ac_results[0];
+        let num_nodes = first_result.voltages.len();
 
         // Build waveform for each node
         for node_idx in 0..num_nodes {
@@ -579,7 +643,7 @@ impl EngineBridge {
                 }
             }
 
-            let name = format!("V({})", node_idx + 1);
+            let name = Self::ac_node_waveform_name(first_result, node_idx);
             waveforms.insert(
                 name.clone(),
                 WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
@@ -587,8 +651,8 @@ impl EngineBridge {
         }
 
         // Also extract branch currents if available
-        if !ac_results[0].currents.is_empty() {
-            let num_branches = ac_results[0].currents.len();
+        if !first_result.currents.is_empty() {
+            let num_branches = first_result.currents.len();
 
             for branch_idx in 0..num_branches {
                 let mut real_values = Vec::with_capacity(frequencies.len());
@@ -605,7 +669,7 @@ impl EngineBridge {
                     }
                 }
 
-                let name = format!("I({})", branch_idx + 1);
+                let name = Self::ac_branch_waveform_name(first_result, branch_idx);
                 waveforms.insert(
                     name.clone(),
                     WaveformData::new_complex(&name, frequencies.clone(), real_values, imag_values),
