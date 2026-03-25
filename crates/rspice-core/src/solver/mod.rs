@@ -222,11 +222,13 @@ mod tests {
 
     #[test]
     fn test_simulator_from_engine_config_preserves_selected_fields() {
-        let mut config = crate::engine::SimulationConfig::default();
-        config.tolerance = 2e-5;
-        config.max_iterations = 87;
-        config.min_timestep = 4e-12;
-        config.max_timestep = 9e-6;
+        let config = crate::engine::SimulationConfig {
+            tolerance: 2e-5,
+            max_iterations: 87,
+            min_timestep: 4e-12,
+            max_timestep: 9e-6,
+            ..crate::engine::SimulationConfig::default()
+        };
 
         let simulator = Simulator::from(&config);
 

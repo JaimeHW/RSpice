@@ -277,16 +277,14 @@ mod tests {
         assert!(clamp_with_margin(2.0, 0.0, 1.0) <= 1.0);
     }
 
-    #[test]
-    fn test_constants_are_reasonable() {
-        // Sanity checks for constant values
+    const _: () = {
         assert!(ABSTOL > 0.0);
         assert!(RELTOL > 0.0 && RELTOL < 1.0);
         assert!(GMIN > 0.0 && GMIN < 1.0);
         assert!(MAX_NR_ITERATIONS > 0);
         assert!(MIN_TIMESTEP < MAX_TIMESTEP);
         assert!(GMIN_INITIAL > GMIN_TARGET);
-    }
+    };
 
     #[test]
     fn test_physical_constants() {
