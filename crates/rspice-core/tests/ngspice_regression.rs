@@ -149,11 +149,9 @@ fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
         stats.pass_rate()
     );
     assert_eq!(
-        stats.skipped,
-        0,
+        stats.skipped, 0,
         "Suite '{}' skipped {} circuit(s); all discovered decks must execute.",
-        subdir,
-        stats.skipped
+        subdir, stats.skipped
     );
 
     stats
@@ -195,6 +193,18 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
     }
 
     cfg
+}
+
+#[test]
+fn test_suite_config_applies_soi_timeout_override() {
+    for suite in ["bsim3soidd", "bsim3soifd", "bsim3soipd"] {
+        let cfg = suite_config(suite);
+        assert_eq!(
+            cfg.max_time_per_test_ms, 1_800_000,
+            "expected {} to inherit the long-suite timeout override",
+            suite
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -519,7 +529,7 @@ fn test_ngspice_regression_temper_suite() {
 
 #[test]
 fn test_ngspice_bsim3soidd_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("bsim3soidd"));
     let stats = run_and_report(&runner, "bsim3soidd");
 
     println!(
@@ -531,7 +541,7 @@ fn test_ngspice_bsim3soidd_suite() {
 
 #[test]
 fn test_ngspice_bsim3soifd_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("bsim3soifd"));
     let stats = run_and_report(&runner, "bsim3soifd");
 
     println!(
@@ -543,7 +553,7 @@ fn test_ngspice_bsim3soifd_suite() {
 
 #[test]
 fn test_ngspice_bsim3soipd_suite() {
-    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    let runner = TestRunner::new(get_tests_dir(), suite_config("bsim3soipd"));
     let stats = run_and_report(&runner, "bsim3soipd");
 
     println!(
@@ -631,8 +641,7 @@ fn test_full_ngspice_suite_summary() {
         total_stats.pass_rate()
     );
     assert_eq!(
-        total_stats.skipped,
-        0,
+        total_stats.skipped, 0,
         "Full ngspice suite skipped {} circuit(s); all discovered decks must execute.",
         total_stats.skipped
     );
