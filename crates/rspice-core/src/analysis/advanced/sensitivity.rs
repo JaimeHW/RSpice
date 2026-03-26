@@ -309,6 +309,7 @@ impl SensitivityAnalyzer {
     /// Solve the adjoint system: Gáµ€Â·Î» = eâ‚–
     ///
     /// For symmetric G (resistive networks), Gáµ€ = G
+    #[allow(dead_code)]
     fn solve_adjoint(&mut self, output_node: usize) -> bool {
         if output_node >= self.system_size {
             return false;
@@ -365,6 +366,62 @@ impl SensitivityAnalyzer {
         }
 
         // Back substitution
+        for i in (0..n).rev() {
+            let mut sum = aug[i][n];
+            for j in (i + 1)..n {
+                sum -= aug[i][j] * self.adjoint[j];
+            }
+            self.adjoint[i] = sum / aug[i][i];
+        }
+
+        true
+    }
+
+    fn solve_adjoint_transposed(&mut self, output_node: usize) -> bool {
+        if output_node >= self.system_size {
+            return false;
+        }
+
+        let mut e = vec![0.0; self.system_size];
+        e[output_node] = 1.0;
+        let n = self.system_size;
+        let mut aug = vec![vec![0.0; n + 1]; n];
+
+        for row in 0..n {
+            for col in 0..n {
+                aug[row][col] = self.g_matrix[col][row];
+            }
+            aug[row][n] = e[row];
+        }
+
+        for k in 0..n {
+            let mut max_row = k;
+            let mut max_val = aug[k][k].abs();
+            for i in (k + 1)..n {
+                if aug[i][k].abs() > max_val {
+                    max_val = aug[i][k].abs();
+                    max_row = i;
+                }
+            }
+
+            if max_val < 1e-15 {
+                return false;
+            }
+
+            if max_row != k {
+                aug.swap(k, max_row);
+            }
+
+            let pivot = aug[k][k];
+            for i in (k + 1)..n {
+                let factor = aug[i][k] / pivot;
+                aug[i][k] = 0.0;
+                for j in (k + 1)..=n {
+                    aug[i][j] -= factor * aug[k][j];
+                }
+            }
+        }
+
         for i in (0..n).rev() {
             let mut sum = aug[i][n];
             for j in (i + 1)..n {
@@ -459,7 +516,7 @@ impl SensitivityAnalyzer {
         };
 
         // Solve adjoint for output node
-        if !self.solve_adjoint(output_node) {
+        if !self.solve_adjoint_transposed(output_node) {
             return None;
         }
 
@@ -471,7 +528,7 @@ impl SensitivityAnalyzer {
             let adj_output = self.adjoint.clone();
 
             // Solve for reference node
-            if !self.solve_adjoint(ref_node) {
+            if !self.solve_adjoint_transposed(ref_node) {
                 return None;
             }
 
@@ -880,6 +937,31 @@ mod tests {
             sens_r.absolute.abs() < 1e-12,
             "load resistor should not perturb a perfectly driven ideal source node, got {}",
             sens_r.absolute
+        );
+    }
+
+    #[test]
+    fn test_voltage_source_sensitivity_nonsymmetric_mna_uses_transposed_adjoint() {
+        // G * x = b with b = [0, p]^T and
+        // G = [[2, 3],
+        //      [5, 7]]
+        // gives dx0/dp = (G^-1)[0,1] = 3.
+        let g_matrix = vec![vec![2.0, 3.0], vec![5.0, 7.0]];
+        let solution = vec![3.0, -2.0];
+        let elements = vec![ElementDesc::voltage_source("V1", None, None, 1, 1.0)];
+
+        let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
+        let result = analyzer
+            .analyze(0, None)
+            .expect("nonsymmetric adjoint solve should succeed");
+        let sens_v = result
+            .get("V1")
+            .expect("voltage source sensitivity should be reported");
+
+        assert!(
+            (sens_v.absolute - 3.0).abs() < 1e-12,
+            "expected dx0/dp = 3, got {}",
+            sens_v.absolute
         );
     }
 

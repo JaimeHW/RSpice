@@ -2555,6 +2555,50 @@ impl TestRunner {
         Err(format!("Unsupported .TF output probe '{}'", output))
     }
 
+    fn transfer_output_value_linearized(
+        &self,
+        netlist: &Netlist,
+        output: &str,
+        input_source: &str,
+    ) -> Result<Option<Value>, String> {
+        let Some((output_pos, output_neg)) = Self::parse_voltage_probe(output) else {
+            // Keep the AC fallback for non-voltage .TF probes until the branch-current
+            // path is upgraded to use the same exact linearized adjoint formulation.
+            return Ok(None);
+        };
+
+        let resolver_engine = self.create_dynamic_engine();
+        let circuit = resolver_engine
+            .build_circuit(netlist)
+            .map_err(|err| format!("Circuit build error: {err}"))?;
+        let output_pos_idx =
+            Self::resolve_circuit_node_index(&circuit, &output_pos, "transfer output+")?;
+        let output_neg_idx = Self::resolve_optional_circuit_node_index(
+            &circuit,
+            output_neg.as_deref(),
+            "transfer output-",
+        )?;
+
+        let engine = self.create_dc_engine();
+        let sensitivity = engine
+            .run_sensitivity_linearized(netlist, output_pos_idx, output_neg_idx)
+            .map_err(|err| format!("Linearized transfer analysis error: {err}"))?;
+
+        let gain = sensitivity
+            .sensitivities
+            .iter()
+            .find(|entry| entry.element.eq_ignore_ascii_case(input_source))
+            .map(|entry| entry.absolute)
+            .ok_or_else(|| {
+                format!(
+                    "Linearized transfer analysis found no independent source sensitivity for '{}'",
+                    input_source
+                )
+            })?;
+
+        Ok(Some(gain))
+    }
+
     fn get_source_dc_value(&self, netlist: &Netlist, source_name: &str) -> Result<Value, String> {
         for element in &netlist.elements {
             if !element.name.eq_ignore_ascii_case(source_name) {
@@ -2621,48 +2665,67 @@ impl TestRunner {
             };
         }
 
-        let mut ac_netlist = base_netlist.clone();
-        self.clear_all_source_ac_values(&mut ac_netlist);
-        if let Err(err) = self.set_source_ac_value(&mut ac_netlist, input_source, 1.0, 0.0) {
-            return TestResult {
-                name: name.to_string(),
-                passed: false,
-                error: Some(err),
-                mismatches: Vec::new(),
-                duration_ms: start.elapsed().as_millis(),
-                analysis_type: Some("TF".to_string()),
-            };
-        }
-
-        let engine = self.create_dc_engine();
-        let ac_result = match engine.run_ac(&ac_netlist, &[0.0]) {
-            Ok(mut results) => match results.pop() {
-                Some(result) => result,
-                None => {
+        let gain = match self.transfer_output_value_linearized(&base_netlist, output, input_source)
+        {
+            Ok(Some(gain)) => gain,
+            Ok(None) => {
+                let mut ac_netlist = base_netlist.clone();
+                self.clear_all_source_ac_values(&mut ac_netlist);
+                if let Err(err) = self.set_source_ac_value(&mut ac_netlist, input_source, 1.0, 0.0)
+                {
                     return TestResult {
                         name: name.to_string(),
                         passed: false,
-                        error: Some("Transfer-function analysis produced no AC sample".to_string()),
+                        error: Some(err),
                         mismatches: Vec::new(),
                         duration_ms: start.elapsed().as_millis(),
                         analysis_type: Some("TF".to_string()),
                     };
                 }
-            },
-            Err(err) => {
-                return TestResult {
-                    name: name.to_string(),
-                    passed: false,
-                    error: Some(format!("Simulation error: {}", err)),
-                    mismatches: Vec::new(),
-                    duration_ms: start.elapsed().as_millis(),
-                    analysis_type: Some("TF".to_string()),
-                };
-            }
-        };
 
-        let gain = match self.transfer_output_value_ac(&ac_result, output) {
-            Ok(value) => value,
+                let engine = self.create_dc_engine();
+                let ac_result = match engine.run_ac(&ac_netlist, &[0.0]) {
+                    Ok(mut results) => match results.pop() {
+                        Some(result) => result,
+                        None => {
+                            return TestResult {
+                                name: name.to_string(),
+                                passed: false,
+                                error: Some(
+                                    "Transfer-function analysis produced no AC sample".to_string(),
+                                ),
+                                mismatches: Vec::new(),
+                                duration_ms: start.elapsed().as_millis(),
+                                analysis_type: Some("TF".to_string()),
+                            };
+                        }
+                    },
+                    Err(err) => {
+                        return TestResult {
+                            name: name.to_string(),
+                            passed: false,
+                            error: Some(format!("Simulation error: {}", err)),
+                            mismatches: Vec::new(),
+                            duration_ms: start.elapsed().as_millis(),
+                            analysis_type: Some("TF".to_string()),
+                        };
+                    }
+                };
+
+                match self.transfer_output_value_ac(&ac_result, output) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        return TestResult {
+                            name: name.to_string(),
+                            passed: false,
+                            error: Some(err),
+                            mismatches: Vec::new(),
+                            duration_ms: start.elapsed().as_millis(),
+                            analysis_type: Some("TF".to_string()),
+                        };
+                    }
+                }
+            }
             Err(err) => {
                 return TestResult {
                     name: name.to_string(),
@@ -5414,6 +5477,59 @@ vdm#input_impedance = 8.940897e+03\n",
         assert_eq!(reference.transfer_function, Some(-87.8493));
 
         std::fs::remove_dir_all(&temp_dir).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn test_transfer_output_value_linearized_matches_voltage_divider_gain() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let netlist = Netlist::parse(
+            "\
+Voltage divider transfer
+V1 in 0 DC 1
+R1 in out 1k
+R2 out 0 1k
+.tf v(out) v1
+.end
+",
+        )
+        .expect("netlist should parse");
+
+        let gain = runner
+            .transfer_output_value_linearized(&netlist, "v(out)", "V1")
+            .expect("linearized transfer should succeed")
+            .expect("voltage output should use linearized path");
+
+        assert!(
+            (gain - 0.5).abs() < 1e-9,
+            "expected divider gain 0.5, got {}",
+            gain
+        );
+    }
+
+    #[test]
+    fn test_transfer_output_value_linearized_matches_current_source_transimpedance() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let netlist = Netlist::parse(
+            "\
+Current-driven resistor transfer
+I1 out 0 DC 1m
+R1 out 0 2k
+.tf v(out) i1
+.end
+",
+        )
+        .expect("netlist should parse");
+
+        let gain = runner
+            .transfer_output_value_linearized(&netlist, "v(out)", "I1")
+            .expect("linearized transfer should succeed")
+            .expect("voltage output should use linearized path");
+
+        assert!(
+            (gain + 2000.0).abs() < 1e-6,
+            "expected transimpedance -2000 ohms, got {}",
+            gain
+        );
     }
 
     #[test]
