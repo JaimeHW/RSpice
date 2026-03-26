@@ -380,10 +380,11 @@ impl SchematicState {
             if !prefix.is_empty() {
                 // Extract number from name like "R1", "C5", etc.
                 if let Some(num_str) = comp.name.strip_prefix(prefix)
-                    && let Ok(num) = num_str.parse::<u32>() {
-                        let counter = self.component_counters.entry(prefix).or_insert(0);
-                        *counter = (*counter).max(num);
-                    }
+                    && let Ok(num) = num_str.parse::<u32>()
+                {
+                    let counter = self.component_counters.entry(prefix).or_insert(0);
+                    *counter = (*counter).max(num);
+                }
             }
         }
     }

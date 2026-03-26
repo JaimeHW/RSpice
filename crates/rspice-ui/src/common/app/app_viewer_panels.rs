@@ -412,9 +412,10 @@ impl RSpiceApp {
     pub(super) fn render_fft_panel(&mut self, ui: &mut Ui) {
         if let Some(state) =
             self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::Fft)
-            && !matches!(state, DerivedViewerLoadState::Ready) {
-                return;
-            }
+            && !matches!(state, DerivedViewerLoadState::Ready)
+        {
+            return;
+        }
         crate::analysis::fft::render_fft_panel(ui, &mut self.state);
         self.simulation_controller
             .mark_transient_view_ready(&self.state, crate::viewers::ActiveViewer::Fft);
@@ -424,9 +425,10 @@ impl RSpiceApp {
     pub(super) fn render_eye_panel(&mut self, ui: &mut Ui) {
         if let Some(state) =
             self.ensure_transient_viewer_ready(ui, crate::viewers::ActiveViewer::EyeDiagram)
-            && !matches!(state, DerivedViewerLoadState::Ready) {
-                return;
-            }
+            && !matches!(state, DerivedViewerLoadState::Ready)
+        {
+            return;
+        }
         crate::analysis::eye_diagram::render_eye_diagram_panel(ui, &mut self.state);
         self.simulation_controller
             .mark_transient_view_ready(&self.state, crate::viewers::ActiveViewer::EyeDiagram);

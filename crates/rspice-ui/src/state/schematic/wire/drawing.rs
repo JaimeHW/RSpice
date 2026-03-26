@@ -130,12 +130,13 @@ impl WireDrawing {
 
         if let Some(target) = self.preview_pos
             && let Some(&last) = self.points.last()
-                && last != target {
-                    if let Some(corner) = self.get_route_corner(target) {
-                        path.push(corner);
-                    }
-                    path.push(target);
-                }
+            && last != target
+        {
+            if let Some(corner) = self.get_route_corner(target) {
+                path.push(corner);
+            }
+            path.push(target);
+        }
 
         path
     }

@@ -146,11 +146,12 @@ impl BodePlotState {
     /// Update auto-scale ranges
     pub fn update_auto_scale(&mut self) {
         if self.mag_auto
-            && let Some((min, max)) = self.data.magnitude_range_db() {
-                let padding = (max - min) * 0.1;
-                self.mag_min = (min - padding).floor();
-                self.mag_max = (max + padding).ceil();
-            }
+            && let Some((min, max)) = self.data.magnitude_range_db()
+        {
+            let padding = (max - min) * 0.1;
+            self.mag_min = (min - padding).floor();
+            self.mag_max = (max + padding).ceil();
+        }
 
         if self.phase_auto {
             // Default to -180 to 0 for typical stable systems

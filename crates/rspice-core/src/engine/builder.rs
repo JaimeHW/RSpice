@@ -706,17 +706,19 @@ impl Engine {
                     instance_params,
                 } => {
                     if let Some(expression) = value_expr.as_deref()
-                        && model.is_none() && expression_references_circuit_state(expression) {
-                            add_behavioral_resistor(
-                                &mut circuit,
-                                netlist,
-                                element,
-                                expression,
-                                instance_params,
-                                self.config.temperature,
-                            )?;
-                            continue;
-                        }
+                        && model.is_none()
+                        && expression_references_circuit_state(expression)
+                    {
+                        add_behavioral_resistor(
+                            &mut circuit,
+                            netlist,
+                            element,
+                            expression,
+                            instance_params,
+                            self.config.temperature,
+                        )?;
+                        continue;
+                    }
 
                     let resistance = resolve_resistor_instance_value(
                         netlist,
@@ -727,11 +729,20 @@ impl Engine {
                         instance_params,
                         self.config.temperature,
                     )?;
+                    let small_signal_resistance = resolve_resistor_small_signal_value(
+                        &element.name,
+                        resistance,
+                        instance_params,
+                    )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    circuit
-                        .resistors
-                        .add(element.name.clone(), np, nn, resistance);
+                    circuit.resistors.add_with_small_signal(
+                        element.name.clone(),
+                        np,
+                        nn,
+                        resistance,
+                        small_signal_resistance,
+                    );
                 }
                 ElementKind::Capacitor { value, .. } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);

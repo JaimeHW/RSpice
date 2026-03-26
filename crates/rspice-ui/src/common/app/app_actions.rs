@@ -97,15 +97,15 @@ impl RSpiceApp {
                         .components
                         .iter()
                         .find(|c| c.id == comp_id)
-                    {
-                        let props = crate::properties::dialog::EditedProperties {
-                            name: comp.name.clone(),
-                            value: comp.value.clone(),
-                            model: String::new(),
-                            parameters: vec![],
-                        };
-                        self.state.property_editor.open_for(comp_id, props);
-                    }
+                {
+                    let props = crate::properties::dialog::EditedProperties {
+                        name: comp.name.clone(),
+                        value: comp.value.clone(),
+                        model: String::new(),
+                        parameters: vec![],
+                    };
+                    self.state.property_editor.open_for(comp_id, props);
+                }
             }
             ShortcutCommand::EscapeCancel => {
                 if self.state.property_editor.open {

@@ -472,22 +472,24 @@ impl LibraryManager {
     /// Select a cell
     pub fn select_cell(&mut self, library: &str, cell: &str) {
         if let Some(lib) = self.libraries.get(library)
-            && lib.cells.contains_key(cell) {
-                self.selected_library = Some(library.to_string());
-                self.selected_cell = Some(cell.to_string());
-                self.selected_view = None;
-            }
+            && lib.cells.contains_key(cell)
+        {
+            self.selected_library = Some(library.to_string());
+            self.selected_cell = Some(cell.to_string());
+            self.selected_view = None;
+        }
     }
 
     /// Select a view
     pub fn select_view(&mut self, library: &str, cell: &str, view: &str) {
         if let Some(lib) = self.libraries.get(library)
             && let Some(c) = lib.cells.get(cell)
-                && c.views.contains_key(view) {
-                    self.selected_library = Some(library.to_string());
-                    self.selected_cell = Some(cell.to_string());
-                    self.selected_view = Some(view.to_string());
-                }
+            && c.views.contains_key(view)
+        {
+            self.selected_library = Some(library.to_string());
+            self.selected_cell = Some(cell.to_string());
+            self.selected_view = Some(view.to_string());
+        }
     }
 
     /// Get the LCV path string (library/cell/view)
@@ -542,10 +544,11 @@ impl LibraryManager {
                 return false;
             }
             if let Some(c) = lib.cells.get_mut(cell)
-                && !c.views.contains_key(view_name) {
-                    c.add_view(View::new(view_name, view_type));
-                    return true;
-                }
+                && !c.views.contains_key(view_name)
+            {
+                c.add_view(View::new(view_name, view_type));
+                return true;
+            }
         }
         false
     }

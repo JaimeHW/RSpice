@@ -415,11 +415,10 @@ impl PxfRunConfig {
             .as_deref()
             .map(str::trim)
             .filter(|node| !node.is_empty() && !is_ground_like(node))
-            && reference.eq_ignore_ascii_case(self.output_node.trim()) {
-                return Err(
-                    "PXF output node and output reference cannot be the same node".to_string(),
-                );
-            }
+            && reference.eq_ignore_ascii_case(self.output_node.trim())
+        {
+            return Err("PXF output node and output reference cannot be the same node".to_string());
+        }
         if !self.reltol.is_finite() || self.reltol <= 0.0 {
             return Err("PXF relative tolerance must be positive".to_string());
         }

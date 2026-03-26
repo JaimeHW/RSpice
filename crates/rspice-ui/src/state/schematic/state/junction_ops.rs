@@ -22,9 +22,10 @@ impl SchematicState {
                 intersection_map.entry(start).or_default().push(wire.id);
             }
             if let Some(end) = wire.end()
-                && wire.points.len() > 1 {
-                    intersection_map.entry(end).or_default().push(wire.id);
-                }
+                && wire.points.len() > 1
+            {
+                intersection_map.entry(end).or_default().push(wire.id);
+            }
         }
 
         // Phase 2: Find wire-to-wire segment intersections
@@ -251,9 +252,10 @@ impl SchematicState {
         for (wire_id, point) in splits_needed {
             // Insert vertex at the intersection point
             if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                && let Some((segment_idx, _segment)) = wire.segment_containing_point(point) {
-                    wire.insert_vertex(segment_idx + 1, point);
-                }
+                && let Some((segment_idx, _segment)) = wire.segment_containing_point(point)
+            {
+                wire.insert_vertex(segment_idx + 1, point);
+            }
 
             // Ensure junction exists at this point
             let has_junction = self.junctions.iter().any(|j| j.pos == point);

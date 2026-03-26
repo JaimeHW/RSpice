@@ -398,11 +398,12 @@ impl SchematicState {
     /// Returns true if successful
     pub fn move_wire_vertex(&mut self, wire_id: u64, vertex_index: usize, new_pos: Point) -> bool {
         if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-            && wire.move_vertex(vertex_index, new_pos) {
-                self.is_dirty = true;
-                self.bump_topology_version();
-                return true;
-            }
+            && wire.move_vertex(vertex_index, new_pos)
+        {
+            self.is_dirty = true;
+            self.bump_topology_version();
+            return true;
+        }
         false
     }
 

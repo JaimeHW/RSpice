@@ -427,18 +427,19 @@ impl FftState {
     pub fn update_auto_scale(&mut self) {
         if let Some(ref data) = self.data {
             if self.freq_auto
-                && let Some((min, max)) = data.frequency_range() {
-                    match self.freq_scale {
-                        FrequencyScale::Linear => {
-                            self.freq_min = min;
-                            self.freq_max = max;
-                        }
-                        FrequencyScale::Log => {
-                            self.freq_min = first_positive_frequency(data).unwrap_or(1e-12);
-                            self.freq_max = max.max(self.freq_min * 1.01);
-                        }
+                && let Some((min, max)) = data.frequency_range()
+            {
+                match self.freq_scale {
+                    FrequencyScale::Linear => {
+                        self.freq_min = min;
+                        self.freq_max = max;
+                    }
+                    FrequencyScale::Log => {
+                        self.freq_min = first_positive_frequency(data).unwrap_or(1e-12);
+                        self.freq_max = max.max(self.freq_min * 1.01);
                     }
                 }
+            }
 
             if self.mag_auto {
                 let mut min_value = f64::INFINITY;

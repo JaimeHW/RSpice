@@ -57,11 +57,12 @@ impl DistoRunConfig {
             ));
         }
         if let Some(ratio) = self.f2_over_f1
-            && (!ratio.is_finite() || ratio <= 1.0) {
-                return Err(DistoRunError::Validation(
-                    "DISTO f2_over_f1 must be finite and > 1".to_string(),
-                ));
-            }
+            && (!ratio.is_finite() || ratio <= 1.0)
+        {
+            return Err(DistoRunError::Validation(
+                "DISTO f2_over_f1 must be finite and > 1".to_string(),
+            ));
+        }
         Ok(())
     }
 }

@@ -1189,12 +1189,13 @@ impl Jfet {
         if let Some(area) = area_override {
             self.area *= area;
         } else if !matches!(self.params.channel_model, JfetChannelModel::Hfet1)
-            && let (Some(w), Some(l)) = (width, length) {
-                let wl_scale = w / l;
-                if wl_scale.is_finite() && wl_scale > 0.0 {
-                    self.area *= wl_scale * nf;
-                }
+            && let (Some(w), Some(l)) = (width, length)
+        {
+            let wl_scale = w / l;
+            if wl_scale.is_finite() && wl_scale > 0.0 {
+                self.area *= wl_scale * nf;
             }
+        }
 
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && nf.is_finite()

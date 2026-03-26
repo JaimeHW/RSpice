@@ -496,12 +496,12 @@ fn render_library_paths_tab(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
                 && let Some(path) = rfd::FileDialog::new()
                     .set_directory(&entry.path)
                     .pick_folder()
-                {
-                    action = Some(PathListAction::Update(
-                        idx,
-                        path.to_string_lossy().to_string(),
-                    ));
-                }
+            {
+                action = Some(PathListAction::Update(
+                    idx,
+                    path.to_string_lossy().to_string(),
+                ));
+            }
         });
     }
 
@@ -546,9 +546,10 @@ fn render_library_paths_tab(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
         }
 
         if ui.button("Browse...").clicked()
-            && let Some(path) = rfd::FileDialog::new().pick_folder() {
-                state.add_library_path(path.to_string_lossy().to_string());
-            }
+            && let Some(path) = rfd::FileDialog::new().pick_folder()
+        {
+            state.add_library_path(path.to_string_lossy().to_string());
+        }
     });
 
     // Help text

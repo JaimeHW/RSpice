@@ -539,9 +539,10 @@ mod tests {
                 && let (Ok(t), Ok(v)) = (
                     parts[0].trim().parse::<f64>(),
                     parts[1].trim().parse::<f64>(),
-                ) {
-                    points.push((t, v));
-                }
+                )
+            {
+                points.push((t, v));
+            }
         }
 
         assert_eq!(points.len(), 3);

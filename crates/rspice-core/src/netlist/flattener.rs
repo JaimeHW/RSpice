@@ -473,20 +473,23 @@ impl<'a> Flattener<'a> {
                 }
 
                 let is_probe = ident.eq_ignore_ascii_case("V") || ident.eq_ignore_ascii_case("I");
-                if is_probe && ws_idx < chars.len() && chars[ws_idx] == '('
-                    && let Some((inner, end_idx)) = extract_parenthesized(&chars, ws_idx) {
-                        let remapped = if ident.eq_ignore_ascii_case("V") {
-                            remap_voltage_probe_args(self, &inner, prefix, node_map)
-                        } else {
-                            remap_current_probe_arg(prefix, &inner)
-                        };
-                        out.push_str(&ident);
-                        out.push('(');
-                        out.push_str(&remapped);
-                        out.push(')');
-                        i = end_idx + 1;
-                        continue;
-                    }
+                if is_probe
+                    && ws_idx < chars.len()
+                    && chars[ws_idx] == '('
+                    && let Some((inner, end_idx)) = extract_parenthesized(&chars, ws_idx)
+                {
+                    let remapped = if ident.eq_ignore_ascii_case("V") {
+                        remap_voltage_probe_args(self, &inner, prefix, node_map)
+                    } else {
+                        remap_current_probe_arg(prefix, &inner)
+                    };
+                    out.push_str(&ident);
+                    out.push('(');
+                    out.push_str(&remapped);
+                    out.push(')');
+                    i = end_idx + 1;
+                    continue;
+                }
 
                 out.push_str(&ident);
                 continue;

@@ -177,14 +177,15 @@ pub fn render_waveform_viewer(ui: &mut Ui, app_state: &mut AppState) {
         // Set axis labels based on current analysis type
         if let Some(run_idx) = app_state.simulation.active_run_idx
             && let Some(analysis_idx) = app_state.simulation.active_analysis_idx
-                && let Some(run) = app_state.simulation.runs.get(run_idx)
-                    && let Some(analysis) = run.analyses.get(analysis_idx) {
-                        let (x_label, x_unit, y_label, y_unit) = analysis.analysis_type.axis_info();
-                        app_state.waveform_viewer.x_axis_label = x_label.to_string();
-                        app_state.waveform_viewer.x_axis_unit = x_unit.to_string();
-                        app_state.waveform_viewer.y_axis_label = y_label.to_string();
-                        app_state.waveform_viewer.y_axis_unit = y_unit.to_string();
-                    }
+            && let Some(run) = app_state.simulation.runs.get(run_idx)
+            && let Some(analysis) = run.analyses.get(analysis_idx)
+        {
+            let (x_label, x_unit, y_label, y_unit) = analysis.analysis_type.axis_info();
+            app_state.waveform_viewer.x_axis_label = x_label.to_string();
+            app_state.waveform_viewer.x_axis_unit = x_unit.to_string();
+            app_state.waveform_viewer.y_axis_label = y_label.to_string();
+            app_state.waveform_viewer.y_axis_unit = y_unit.to_string();
+        }
     }
 
     // Clamp view to data bounds every frame to enforce limits
@@ -1463,29 +1464,32 @@ fn handle_plot_interactions(
     }
 
     // Click to place cursor or marker
-    if response.clicked() && !viewer_state.view.did_drag
-        && let Some(pos) = response.hover_pos() {
-            let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
-            let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
-            let modifiers = response.ctx.input(|i| i.modifiers);
-            if modifiers.alt {
-                viewer_state.add_marker(data_x);
-            } else {
-                viewer_state.cursors.place(data_x);
-            }
+    if response.clicked()
+        && !viewer_state.view.did_drag
+        && let Some(pos) = response.hover_pos()
+    {
+        let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
+        let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
+        let modifiers = response.ctx.input(|i| i.modifiers);
+        if modifiers.alt {
+            viewer_state.add_marker(data_x);
+        } else {
+            viewer_state.cursors.place(data_x);
         }
+    }
 
     // Alt + right click removes nearest marker.
     if response.secondary_clicked()
-        && let Some(pos) = response.hover_pos() {
-            let modifiers = response.ctx.input(|i| i.modifiers);
-            if modifiers.alt {
-                let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
-                let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
-                let tolerance = viewer_state.view.x_range() * 0.01;
-                viewer_state.remove_nearest_marker(data_x, tolerance);
-            }
+        && let Some(pos) = response.hover_pos()
+    {
+        let modifiers = response.ctx.input(|i| i.modifiers);
+        if modifiers.alt {
+            let x_frac = (pos.x - layout.plot.min.x) / layout.plot.width();
+            let data_x = viewer_state.view.x_min + x_frac as f64 * viewer_state.view.x_range();
+            let tolerance = viewer_state.view.x_range() * 0.01;
+            viewer_state.remove_nearest_marker(data_x, tolerance);
         }
+    }
 
     // Drag handling
     if response.dragged() {
@@ -1539,14 +1543,15 @@ fn handle_plot_interactions(
     // Drag released
     if response.drag_stopped() {
         if viewer_state.box_selection.is_selecting
-            && let Some((x_min, x_max, y_min, y_max)) = viewer_state.box_selection.finish() {
-                viewer_state.view.x_min = x_min;
-                viewer_state.view.x_max = x_max;
-                viewer_state.view.y_min = y_min;
-                viewer_state.view.y_max = y_max;
-                // Enforce minimum zoom to prevent numerical issues
-                viewer_state.view.enforce_minimum_range();
-            }
+            && let Some((x_min, x_max, y_min, y_max)) = viewer_state.box_selection.finish()
+        {
+            viewer_state.view.x_min = x_min;
+            viewer_state.view.x_max = x_max;
+            viewer_state.view.y_min = y_min;
+            viewer_state.view.y_max = y_max;
+            // Enforce minimum zoom to prevent numerical issues
+            viewer_state.view.enforce_minimum_range();
+        }
         viewer_state.view.did_drag = false;
     }
 
@@ -2392,10 +2397,10 @@ fn render_export_panel(ui: &mut Ui, viewer_state: &mut WaveformViewerState) {
     if let (Some(start), Some(end)) = (
         viewer_state.export_options.x_start,
         viewer_state.export_options.x_end,
-    )
-        && end < start {
-            viewer_state.export_options.x_end = Some(start);
-        }
+    ) && end < start
+    {
+        viewer_state.export_options.x_end = Some(start);
+    }
 
     let stats = calculate_export_stats(&viewer_state.traces, &viewer_state.export_options);
     measurement_row(ui, "Traces", &format!("{}", stats.num_traces));

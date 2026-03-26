@@ -273,27 +273,30 @@ impl ParamResolver {
 
         // 1. Check local override (exact path)
         if let Some(params) = self.local_overrides.get(&path_str)
-            && let Some(&value) = params.get(&name_upper) {
-                return Some(value);
-            }
+            && let Some(&value) = params.get(&name_upper)
+        {
+            return Some(value);
+        }
 
         // 2. Check instance overrides (path and ancestors)
         let mut current = Some(path.clone());
         while let Some(p) = current {
             let p_str = p.to_string().to_uppercase();
             if let Some(params) = self.instance_overrides.get(&p_str)
-                && let Some(&value) = params.get(&name_upper) {
-                    return Some(value);
-                }
+                && let Some(&value) = params.get(&name_upper)
+            {
+                return Some(value);
+            }
             current = p.parent();
         }
 
         // 3. Library parameters (if active library set)
         if let Some(lib) = &self.active_library
             && let Some(params) = self.library_params.get(lib)
-                && let Some(&value) = params.get(&name_upper) {
-                    return Some(value);
-                }
+            && let Some(&value) = params.get(&name_upper)
+        {
+            return Some(value);
+        }
 
         // 4. Global parameters
         self.global_params.get(&name_upper).copied()
@@ -349,11 +352,12 @@ impl ParamResolver {
 
         // Add library params
         if let Some(lib) = &self.active_library
-            && let Some(params) = self.library_params.get(lib) {
-                for (name, &value) in params {
-                    result.insert(name.clone(), value);
-                }
+            && let Some(params) = self.library_params.get(lib)
+        {
+            for (name, &value) in params {
+                result.insert(name.clone(), value);
             }
+        }
 
         // Add instance overrides from ancestors (closer ancestors override)
         let mut ancestors: Vec<_> = path.ancestors();
@@ -416,9 +420,9 @@ impl ParamResolver {
                 .library_params
                 .get(lib)
                 .is_some_and(|p| p.contains_key(&name_upper))
-            {
-                return Some(ParamScope::Library);
-            }
+        {
+            return Some(ParamScope::Library);
+        }
 
         if self.global_params.contains_key(&name_upper) {
             return Some(ParamScope::Global);

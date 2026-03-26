@@ -679,13 +679,13 @@ impl Engine {
         if !suspicious
             && let Some(refined) =
                 self.refine_fallback_candidate(circuit, matrix, &candidate, abort)
-            {
-                log::info!(
-                    "{} candidate required Newton polishing and is now accepted.",
-                    method_name
-                );
-                return Some(refined);
-            }
+        {
+            log::info!(
+                "{} candidate required Newton polishing and is now accepted.",
+                method_name
+            );
+            return Some(refined);
+        }
 
         if suspicious {
             if Self::has_clamped_values(&candidate) {

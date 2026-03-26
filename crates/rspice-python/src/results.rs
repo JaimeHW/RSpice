@@ -196,13 +196,14 @@ impl PySimulationResult {
             // that have branch currents but no canonical branch metadata.
             if !self.inner.branch_currents.is_empty()
                 && (name.to_uppercase().starts_with('V') || name.to_uppercase().starts_with('L'))
-                && let Ok(idx) = name[1..].parse::<usize>() {
-                    return self
-                        .inner
-                        .branch_currents
-                        .get(idx.saturating_sub(1))
-                        .copied();
-                }
+                && let Ok(idx) = name[1..].parse::<usize>()
+            {
+                return self
+                    .inner
+                    .branch_currents
+                    .get(idx.saturating_sub(1))
+                    .copied();
+            }
             None
         })
     }

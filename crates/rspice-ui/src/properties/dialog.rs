@@ -95,10 +95,11 @@ impl PropertyEditorState {
 
         // Value validation (if provided)
         if !self.edited.value.is_empty()
-            && let Err(e) = parse_engineering_value(&self.edited.value) {
-                self.error_message = Some(format!("Invalid value: {}", e));
-                return false;
-            }
+            && let Err(e) = parse_engineering_value(&self.edited.value)
+        {
+            self.error_message = Some(format!("Invalid value: {}", e));
+            return false;
+        }
 
         self.error_message = None;
         true
@@ -331,12 +332,14 @@ pub fn render_properties_dialog(
                         });
 
                         // OK button
-                        if ui.button("OK").clicked() && state.validate()
-                            && let Some(id) = state.component_id {
-                                result = PropertiesDialogResult::Apply(id, state.edited.clone());
-                                state.open = false;
-                                state.component_id = None;
-                            }
+                        if ui.button("OK").clicked()
+                            && state.validate()
+                            && let Some(id) = state.component_id
+                        {
+                            result = PropertiesDialogResult::Apply(id, state.edited.clone());
+                            state.open = false;
+                            state.component_id = None;
+                        }
                     });
                 });
             });

@@ -100,13 +100,14 @@ impl SimulationState {
             .trim_end_matches(')');
 
         if let Some(ref ground) = self.ground_node
-            && ground.eq_ignore_ascii_case(net_name_check) {
-                log::info!(
-                    "Probe '{}' is the ground reference (0V) - no waveform displayed",
-                    probe_name
-                );
-                return false;
-            }
+            && ground.eq_ignore_ascii_case(net_name_check)
+        {
+            log::info!(
+                "Probe '{}' is the ground reference (0V) - no waveform displayed",
+                probe_name
+            );
+            return false;
+        }
 
         log::warn!(
             "Probe '{}' not found in {} waveforms",
@@ -177,13 +178,14 @@ impl SimulationState {
     /// so existing waveform viewer code continues to work.
     pub fn complete_run(&mut self) {
         if let Some(run_idx) = self.active_run_idx
-            && let Some(run) = self.runs.get(run_idx) {
-                // Auto-select first analysis if available - this will sync only that analysis's waveforms
-                if !run.analyses.is_empty() {
-                    // Use select_analysis to properly load only the selected analysis's waveforms
-                    self.select_analysis(0);
-                }
+            && let Some(run) = self.runs.get(run_idx)
+        {
+            // Auto-select first analysis if available - this will sync only that analysis's waveforms
+            if !run.analyses.is_empty() {
+                // Use select_analysis to properly load only the selected analysis's waveforms
+                self.select_analysis(0);
             }
+        }
     }
 
     /// Select a run by index
@@ -219,11 +221,12 @@ impl SimulationState {
     pub fn select_analysis(&mut self, analysis_idx: usize) -> bool {
         if let Some(run_idx) = self.active_run_idx
             && let Some(run) = self.runs.get(run_idx)
-                && analysis_idx < run.analyses.len() {
-                    self.active_analysis_idx = Some(analysis_idx);
-                    self.sync_selected_analysis_waveforms();
-                    return true;
-                }
+            && analysis_idx < run.analyses.len()
+        {
+            self.active_analysis_idx = Some(analysis_idx);
+            self.sync_selected_analysis_waveforms();
+            return true;
+        }
         false
     }
 

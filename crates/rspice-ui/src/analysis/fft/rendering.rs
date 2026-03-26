@@ -725,15 +725,16 @@ fn render_spectrum_core(ui: &mut Ui, layout: &FftLayout, state: &mut FftState) {
         // Fundamental marker
         if let Some(ref analysis) = state.analysis {
             if let Some(fund_freq) = analysis.fundamental_frequency
-                && let Some(x) = render_fundamental_marker(&painter, plot_rect, fund_freq, state) {
-                    line_x_positions.push(x);
-                    cursor_labels.push(PlotCursorLabelSpec {
-                        anchor_x: x,
-                        text: "f0".to_string(),
-                        color: fundamental_color(),
-                        font: FontId::proportional(10.0),
-                    });
-                }
+                && let Some(x) = render_fundamental_marker(&painter, plot_rect, fund_freq, state)
+            {
+                line_x_positions.push(x);
+                cursor_labels.push(PlotCursorLabelSpec {
+                    anchor_x: x,
+                    text: "f0".to_string(),
+                    color: fundamental_color(),
+                    font: FontId::proportional(10.0),
+                });
+            }
 
             // Harmonic markers
             if state.show_harmonics {
@@ -1652,24 +1653,26 @@ fn handle_spectrum_interactions(
 
     if response.clicked()
         && let Some(pos) = response.interact_pointer_pos()
-            && plot_rect.contains(pos) {
-                let freq = x_to_freq(pos.x, plot_rect, state);
-                let modifiers = ui.input(|i| i.modifiers);
-                if modifiers.alt && freq.is_finite() {
-                    state.add_marker(freq);
-                }
-            }
+        && plot_rect.contains(pos)
+    {
+        let freq = x_to_freq(pos.x, plot_rect, state);
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.alt && freq.is_finite() {
+            state.add_marker(freq);
+        }
+    }
 
     if response.secondary_clicked()
         && let Some(pos) = response.interact_pointer_pos()
-            && plot_rect.contains(pos) {
-                let modifiers = ui.input(|i| i.modifiers);
-                if modifiers.alt {
-                    let freq = x_to_freq(pos.x, plot_rect, state);
-                    let tolerance = marker_frequency_removal_tolerance(state, plot_rect, pos.x);
-                    state.remove_nearest_marker(freq, tolerance);
-                }
-            }
+        && plot_rect.contains(pos)
+    {
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.alt {
+            let freq = x_to_freq(pos.x, plot_rect, state);
+            let tolerance = marker_frequency_removal_tolerance(state, plot_rect, pos.x);
+            state.remove_nearest_marker(freq, tolerance);
+        }
+    }
 
     if response.hovered() {
         let scroll_y = ui.input(|i| i.raw_scroll_delta.y);

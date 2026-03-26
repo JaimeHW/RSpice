@@ -134,10 +134,11 @@ impl<'a> Lexer<'a> {
 
         // Sign
         if let Some(ch) = self.peek()
-            && (ch == '-' || ch == '+') {
-                s.push(ch);
-                self.advance();
-            }
+            && (ch == '-' || ch == '+')
+        {
+            s.push(ch);
+            self.advance();
+        }
 
         // Integer part
         while let Some(ch) = self.peek() {
@@ -155,10 +156,11 @@ impl<'a> Lexer<'a> {
                 s.push(ch);
                 self.advance();
                 if let Some(sign) = self.peek()
-                    && (sign == '-' || sign == '+') {
-                        s.push(sign);
-                        self.advance();
-                    }
+                    && (sign == '-' || sign == '+')
+                {
+                    s.push(sign);
+                    self.advance();
+                }
                 while let Some(ch) = self.peek() {
                     if ch.is_ascii_digit() {
                         s.push(ch);
@@ -800,10 +802,11 @@ impl<'a> LibraryParser<'a> {
 
         // Get section for .lib
         if directive_type == IncludeType::Lib
-            && let Token::Identifier(s) = &self.current {
-                section = Some(s.clone());
-                self.advance()?;
-            }
+            && let Token::Identifier(s) = &self.current
+        {
+            section = Some(s.clone());
+            self.advance()?;
+        }
 
         Ok(IncludeDirective {
             directive_type,

@@ -273,11 +273,12 @@ fn run_pnoise_analysis_with_config_typed(
         })
         .transpose()?;
     if let Some(ref_idx) = output_ref_idx
-        && ref_idx == output_idx {
-            return Err(PnoiseRunError::Resolution(
-                "PNOISE output node and output reference cannot be the same node".to_string(),
-            ));
-        }
+        && ref_idx == output_idx
+    {
+        return Err(PnoiseRunError::Resolution(
+            "PNOISE output node and output reference cannot be the same node".to_string(),
+        ));
+    }
 
     let frequencies = generate_freq_points(
         config.start_freq,
@@ -515,9 +516,9 @@ fn estimate_carrier_rms_for_node(pss_data: &PssData, output_node: &str) -> Optio
                     && *magnitude > 0.0
             })
             .max_by(|a, b| a.1.total_cmp(&b.1))
-        {
-            return Some(*magnitude / 2.0_f64.sqrt());
-        }
+    {
+        return Some(*magnitude / 2.0_f64.sqrt());
+    }
 
     pss_data
         .waveforms

@@ -303,9 +303,10 @@ impl EyeDataBuilder {
                     window_duration,
                     self.bit_period,
                     resampled_points,
-                ) {
-                    eye_data.add_trace(trace);
-                }
+                )
+            {
+                eye_data.add_trace(trace);
+            }
 
             window_start += self.bit_period;
         }

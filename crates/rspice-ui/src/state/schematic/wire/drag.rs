@@ -265,9 +265,10 @@ impl WireDragContext {
         if self.target_index == 0 {
             points[0] = target_pos;
         } else if self.target_index == points.len() - 1
-            && let Some(last) = points.last_mut() {
-                *last = target_pos;
-            }
+            && let Some(last) = points.last_mut()
+        {
+            *last = target_pos;
+        }
 
         points
     }

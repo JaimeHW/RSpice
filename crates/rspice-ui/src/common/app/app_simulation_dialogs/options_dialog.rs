@@ -398,15 +398,15 @@ impl RSpiceApp {
                         if (apply_clicked || ok_clicked)
                             && let Some(options) =
                                 parse_and_validate_options(&mut self.state.dialogs)
-                            {
-                                commit_validated_options(&mut self.state.dialogs, &options);
-                                self.state.push_user_message(ConsoleMessage::info(
-                                    "Simulation options updated",
-                                ));
-                                if ok_clicked {
-                                    close_requested = true;
-                                }
+                        {
+                            commit_validated_options(&mut self.state.dialogs, &options);
+                            self.state.push_user_message(ConsoleMessage::info(
+                                "Simulation options updated",
+                            ));
+                            if ok_clicked {
+                                close_requested = true;
                             }
+                        }
                     });
                 });
             });

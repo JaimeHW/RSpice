@@ -202,9 +202,10 @@ fn render_header(
             let mut z0_str = format!("{:.0}", state.z0);
             let response = ui.add(egui::TextEdit::singleline(&mut z0_str).desired_width(50.0));
             if response.changed()
-                && let Ok(z0) = z0_str.parse::<f64>() {
-                    state.set_z0(z0);
-                }
+                && let Ok(z0) = z0_str.parse::<f64>()
+            {
+                state.set_z0(z0);
+            }
             ui.label("Ω");
 
             ui.separator();
@@ -570,11 +571,12 @@ fn handle_chart_interactions(
 
     // Click to place marker
     if response.clicked()
-        && let Some(pos) = response.hover_pos() {
-            let x = (pos.x - center.x) / radius;
-            let y = -(pos.y - center.y) / radius; // Y inverted
-            state.place_marker(x as f64, y as f64);
-        }
+        && let Some(pos) = response.hover_pos()
+    {
+        let x = (pos.x - center.x) / radius;
+        let y = -(pos.y - center.y) / radius; // Y inverted
+        state.place_marker(x as f64, y as f64);
+    }
 
     // Right-click to clear marker
     if response.secondary_clicked() {

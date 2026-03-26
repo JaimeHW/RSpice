@@ -466,13 +466,14 @@ impl SymbolLibrary {
 
         // For 90° or 270° rotation, use horizontal variant if available
         if (normalized == 90 || normalized == 270)
-            && let Some(symbol) = self.horizontal_symbols.get(&component_type) {
-                // Horizontal SVG is already rotated 90° from vertical.
-                // For 90° requested: use horizontal SVG with 0° rotation
-                // For 270° requested: use horizontal SVG with 180° rotation
-                let adjusted = if normalized == 90 { 0 } else { 180 };
-                return Some((symbol, adjusted));
-            }
+            && let Some(symbol) = self.horizontal_symbols.get(&component_type)
+        {
+            // Horizontal SVG is already rotated 90° from vertical.
+            // For 90° requested: use horizontal SVG with 0° rotation
+            // For 270° requested: use horizontal SVG with 180° rotation
+            let adjusted = if normalized == 90 { 0 } else { 180 };
+            return Some((symbol, adjusted));
+        }
 
         // Fall back to default symbol with original rotation
         self.symbols
@@ -493,10 +494,11 @@ impl SymbolLibrary {
             let variant_key = (component_type, variant_id.to_string());
 
             if (normalized == 90 || normalized == 270)
-                && let Some(symbol) = self.horizontal_variant_symbols.get(&variant_key) {
-                    let adjusted = if normalized == 90 { 0 } else { 180 };
-                    return Some((symbol, adjusted));
-                }
+                && let Some(symbol) = self.horizontal_variant_symbols.get(&variant_key)
+            {
+                let adjusted = if normalized == 90 { 0 } else { 180 };
+                return Some((symbol, adjusted));
+            }
 
             if let Some(symbol) = self.variant_symbols.get(&variant_key) {
                 return Some((symbol, rotation_degrees));

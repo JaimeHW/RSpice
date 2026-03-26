@@ -185,13 +185,15 @@ impl RenderContext {
         // Count wire endpoints at each point
         for wire in wires {
             if let Some(first) = wire.points.first()
-                && !terminals.contains(first) {
-                    *self.junction_segment_counts.entry(*first).or_insert(0) += 1;
-                }
+                && !terminals.contains(first)
+            {
+                *self.junction_segment_counts.entry(*first).or_insert(0) += 1;
+            }
             if let Some(last) = wire.points.last()
-                && !terminals.contains(last) {
-                    *self.junction_segment_counts.entry(*last).or_insert(0) += 1;
-                }
+                && !terminals.contains(last)
+            {
+                *self.junction_segment_counts.entry(*last).or_insert(0) += 1;
+            }
         }
 
         // Points with 3+ segments are junctions

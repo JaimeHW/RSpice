@@ -104,30 +104,31 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
 
     // Handle dialog result - apply changes back to component
     if matches!(result, TabbedDialogResult::Applied)
-        && let Some(comp_id) = state.tabbed_property_dialog.component_id {
-            // Clone the values to avoid borrow conflict
-            let values = state.tabbed_property_dialog.values.clone();
+        && let Some(comp_id) = state.tabbed_property_dialog.component_id
+    {
+        // Clone the values to avoid borrow conflict
+        let values = state.tabbed_property_dialog.values.clone();
 
-            // Find the component and update its properties
-            if let Some(component) = state
-                .schematic
-                .components
-                .iter_mut()
-                .find(|c| c.id == comp_id)
-            {
-                // Use property bridge for comprehensive property application
-                // This properly serializes all properties including secondary params
-                crate::properties::property_bridge::apply_properties_to_component(
-                    component,
-                    &values,
-                    &state.property_registry,
-                );
-                log::info!("Applied property changes to component {}", comp_id);
-            }
-
-            // Clear dialog state AFTER applying (values were preserved for this)
-            state.tabbed_property_dialog.clear_after_apply();
+        // Find the component and update its properties
+        if let Some(component) = state
+            .schematic
+            .components
+            .iter_mut()
+            .find(|c| c.id == comp_id)
+        {
+            // Use property bridge for comprehensive property application
+            // This properly serializes all properties including secondary params
+            crate::properties::property_bridge::apply_properties_to_component(
+                component,
+                &values,
+                &state.property_registry,
+            );
+            log::info!("Applied property changes to component {}", comp_id);
         }
+
+        // Clear dialog state AFTER applying (values were preserved for this)
+        state.tabbed_property_dialog.clear_after_apply();
+    }
 
     result
 }

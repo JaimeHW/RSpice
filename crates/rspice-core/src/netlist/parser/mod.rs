@@ -226,9 +226,10 @@ fn rewrite_scoped_references(
 ) {
     for element in elements {
         if let ElementKind::Subcircuit { subckt_name, .. } = &mut element.kind
-            && let Some(qualified) = nested_aliases.get(&subckt_name.to_ascii_uppercase()) {
-                *subckt_name = qualified.clone();
-            }
+            && let Some(qualified) = nested_aliases.get(&subckt_name.to_ascii_uppercase())
+        {
+            *subckt_name = qualified.clone();
+        }
 
         let model_ref = match &mut element.kind {
             ElementKind::Resistor { model, .. } => model.as_mut(),
@@ -246,9 +247,10 @@ fn rewrite_scoped_references(
         };
 
         if let Some(model_name) = model_ref
-            && let Some(qualified) = visible_model_aliases.get(&model_name.to_ascii_uppercase()) {
-                *model_name = qualified.clone();
-            }
+            && let Some(qualified) = visible_model_aliases.get(&model_name.to_ascii_uppercase())
+        {
+            *model_name = qualified.clone();
+        }
     }
 }
 
@@ -1433,16 +1435,17 @@ fn parse_resistor(
                     }
 
                     if (name_upper == "R" || name_upper == "VALUE")
-                        && let Some(expr) = take_value_expression_string(stream, params) {
-                            if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
-                                value = Some(resolved);
-                                value_expr = None;
-                            } else {
-                                value_expr = Some(expr);
-                                value = None;
-                            }
-                            continue;
+                        && let Some(expr) = take_value_expression_string(stream, params)
+                    {
+                        if !defer_simple_param_refs && let Some(resolved) = params.get(&expr) {
+                            value = Some(resolved);
+                            value_expr = None;
+                        } else {
+                            value_expr = Some(expr);
+                            value = None;
                         }
+                        continue;
+                    }
 
                     let param_value =
                         try_value(stream, params).ok_or_else(|| ParseError::Syntax {
@@ -1927,19 +1930,17 @@ fn parse_fet_instance_params(
                     continue;
                 }
 
-                if !area_positional_seen
-                    && let Ok(parsed) = raw_name.parse::<f64>() {
-                        instance_params.push(("AREA".to_string(), parsed));
-                        area_positional_seen = true;
-                    }
+                if !area_positional_seen && let Ok(parsed) = raw_name.parse::<f64>() {
+                    instance_params.push(("AREA".to_string(), parsed));
+                    area_positional_seen = true;
+                }
             }
             _ => {
-                if !area_positional_seen
-                    && let Some(value) = try_value(stream, params) {
-                        instance_params.push(("AREA".to_string(), value));
-                        area_positional_seen = true;
-                        continue;
-                    }
+                if !area_positional_seen && let Some(value) = try_value(stream, params) {
+                    instance_params.push(("AREA".to_string(), value));
+                    area_positional_seen = true;
+                    continue;
+                }
                 stream.advance();
             }
         }
@@ -2194,9 +2195,10 @@ fn parse_numeric_field_value(
 ) -> Result<Value, ParseError> {
     let expr = strip_wrapping_expression_delimiters(raw_value);
     if !looks_like_expression(expr)
-        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr) {
-            return Ok(value);
-        }
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr)
+    {
+        return Ok(value);
+    }
     if let Some(value) = params.get(expr) {
         return Ok(value);
     }
@@ -2207,9 +2209,10 @@ fn parse_numeric_field_value(
 fn parse_parametric_field_value(raw_value: &str, params: &ParamContext) -> ParametricValue {
     let expr = strip_wrapping_expression_delimiters(raw_value);
     if !looks_like_expression(expr)
-        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr) {
-            return ParametricValue::Resolved(value);
-        }
+        && let Ok(value) = crate::netlist::lexer::parse_spice_value(expr)
+    {
+        return ParametricValue::Resolved(value);
+    }
     if params.get(expr).is_some() || expr.chars().any(|ch| "+-*/()".contains(ch)) {
         return ParametricValue::Expression(expr.to_string());
     }
@@ -2492,13 +2495,14 @@ fn parse_source_spec(
                 // Optional AC specification after DC
                 skip_commas(stream);
                 if let TokenKind::Ident(next) = &stream.peek().kind
-                    && next.to_uppercase() == "AC" {
-                        stream.advance();
-                        let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
-                        // SPICE AC phase is specified in degrees; store radians internally.
-                        let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
-                        ac_terms = Some((ac_magnitude, ac_phase));
-                    }
+                    && next.to_uppercase() == "AC"
+                {
+                    stream.advance();
+                    let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
+                    // SPICE AC phase is specified in degrees; store radians internally.
+                    let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
+                    ac_terms = Some((ac_magnitude, ac_phase));
+                }
 
                 let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
                 return Ok(match (ac_terms, transient) {
@@ -2536,13 +2540,14 @@ fn parse_source_spec(
                 let mut dc_value = 0.0;
                 let mut has_dc_term = false;
                 if let TokenKind::Ident(next) = &stream.peek().kind
-                    && next.to_uppercase() == "DC" {
-                        stream.advance();
-                        skip_commas(stream);
-                        stream.consume(&TokenKind::Equals);
-                        dc_value = expect_value(stream, line_num, params)?;
-                        has_dc_term = true;
-                    }
+                    && next.to_uppercase() == "DC"
+                {
+                    stream.advance();
+                    skip_commas(stream);
+                    stream.consume(&TokenKind::Equals);
+                    dc_value = expect_value(stream, line_num, params)?;
+                    has_dc_term = true;
+                }
 
                 let transient = parse_transient_source_spec_keyword(stream, line_num, params)?;
                 return Ok(match transient {
@@ -2701,61 +2706,62 @@ fn parse_pwl_spec(
 
     // PWL FILE="path" [TSCALE=..] [VSCALE=..] [TOFFSET=..] [VOFFSET=..]
     if let TokenKind::Ident(s) = &stream.peek().kind
-        && s.eq_ignore_ascii_case("FILE") {
+        && s.eq_ignore_ascii_case("FILE")
+    {
+        stream.advance();
+        stream.consume(&TokenKind::Equals);
+
+        let path = match &stream.peek().kind {
+            TokenKind::StringLit(s) => {
+                let p = s.clone();
+                stream.advance();
+                p
+            }
+            TokenKind::Ident(s) => {
+                let p = s.clone();
+                stream.advance();
+                p
+            }
+            _ => {
+                return Err(ParseError::MissingParameter(format!(
+                    "PWL filename at line {}",
+                    line_num
+                )));
+            }
+        };
+
+        let mut time_scale = 1.0;
+        let mut value_scale = 1.0;
+        let mut time_offset = 0.0;
+        let mut value_offset = 0.0;
+
+        while let TokenKind::Ident(key) = &stream.peek().kind {
+            let key_upper = key.to_uppercase();
             stream.advance();
             stream.consume(&TokenKind::Equals);
 
-            let path = match &stream.peek().kind {
-                TokenKind::StringLit(s) => {
-                    let p = s.clone();
-                    stream.advance();
-                    p
-                }
-                TokenKind::Ident(s) => {
-                    let p = s.clone();
-                    stream.advance();
-                    p
-                }
-                _ => {
-                    return Err(ParseError::MissingParameter(format!(
-                        "PWL filename at line {}",
-                        line_num
-                    )));
-                }
-            };
-
-            let mut time_scale = 1.0;
-            let mut value_scale = 1.0;
-            let mut time_offset = 0.0;
-            let mut value_offset = 0.0;
-
-            while let TokenKind::Ident(key) = &stream.peek().kind {
-                let key_upper = key.to_uppercase();
-                stream.advance();
-                stream.consume(&TokenKind::Equals);
-
-                let value = try_value(stream, params).unwrap_or(1.0);
-                match key_upper.as_str() {
-                    "TSCALE" | "TIMESCALE" => time_scale = value,
-                    "VSCALE" | "VALUESCALE" | "SCALE" => value_scale = value,
-                    "TOFFSET" | "TIMEOFFSET" | "TD" => time_offset = value,
-                    "VOFFSET" | "VALUEOFFSET" | "DC" => value_offset = value,
-                    _ => break,
-                }
+            let value = try_value(stream, params).unwrap_or(1.0);
+            match key_upper.as_str() {
+                "TSCALE" | "TIMESCALE" => time_scale = value,
+                "VSCALE" | "VALUESCALE" | "SCALE" => value_scale = value,
+                "TOFFSET" | "TIMEOFFSET" | "TD" => time_offset = value,
+                "VOFFSET" | "VALUEOFFSET" | "DC" => value_offset = value,
+                _ => break,
             }
-
-            if has_paren {
-                stream.consume(&TokenKind::RParen);
-            }
-
-            return Ok(SourceSpec::PwlFile {
-                path,
-                time_scale,
-                value_scale,
-                time_offset,
-                value_offset,
-            });
         }
+
+        if has_paren {
+            stream.consume(&TokenKind::RParen);
+        }
+
+        return Ok(SourceSpec::PwlFile {
+            path,
+            time_scale,
+            value_scale,
+            time_offset,
+            value_offset,
+        });
+    }
 
     let mut points = Vec::new();
     while !stream.is_eof() {
@@ -3130,12 +3136,13 @@ fn try_value_with_param(
 
     // Check if next token is the param name followed by =
     if let TokenKind::Ident(s) = &stream.peek().kind
-        && s.eq_ignore_ascii_case(param_name) {
-            stream.advance();
-            if stream.consume(&TokenKind::Equals) {
-                return try_value(stream, params);
-            }
+        && s.eq_ignore_ascii_case(param_name)
+    {
+        stream.advance();
+        if stream.consume(&TokenKind::Equals) {
+            return try_value(stream, params);
         }
+    }
 
     try_value(stream, params)
 }
@@ -3146,27 +3153,29 @@ fn try_string_with_param(stream: &mut TokenStream, param_name: &str) -> Option<S
 
     // Check if next token is the param name followed by =
     if let TokenKind::Ident(s) = &stream.peek().kind
-        && s.eq_ignore_ascii_case(param_name) {
-            stream.advance();
-            if stream.consume(&TokenKind::Equals) {
-                // Get the string value (identifier)
-                if let TokenKind::Ident(value) = &stream.peek().kind {
-                    let value = value.clone();
-                    stream.advance();
-                    return Some(value);
-                }
+        && s.eq_ignore_ascii_case(param_name)
+    {
+        stream.advance();
+        if stream.consume(&TokenKind::Equals) {
+            // Get the string value (identifier)
+            if let TokenKind::Ident(value) = &stream.peek().kind {
+                let value = value.clone();
+                stream.advance();
+                return Some(value);
             }
         }
+    }
 
     None
 }
 
 fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {
     if let TokenKind::Ident(s) = &stream.peek().kind
-        && s == param_name {
-            stream.advance();
-            stream.consume(&TokenKind::Equals);
-        }
+        && s == param_name
+    {
+        stream.advance();
+        stream.consume(&TokenKind::Equals);
+    }
 }
 
 fn skip_commas(stream: &mut TokenStream) {

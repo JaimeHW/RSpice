@@ -248,25 +248,27 @@ impl IncludeProcessor {
             let upper = trimmed.to_ascii_uppercase();
 
             if (upper.starts_with(".INCLUDE") || upper.starts_with(".INC "))
-                && let Some(filename) = parse_include_directive(trimmed) {
-                    let included = self.process_include_from(base_dir, &filename)?;
-                    result.push_str(&included);
-                    if !included.ends_with('\n') {
-                        result.push('\n');
-                    }
-                    continue;
+                && let Some(filename) = parse_include_directive(trimmed)
+            {
+                let included = self.process_include_from(base_dir, &filename)?;
+                result.push_str(&included);
+                if !included.ends_with('\n') {
+                    result.push('\n');
                 }
+                continue;
+            }
 
-            if upper.starts_with(".LIB") && !upper.starts_with(".LIBS")
-                && let Some((filename, section)) = parse_lib_directive(trimmed) {
-                    let included =
-                        self.process_lib_from(base_dir, &filename, section.as_deref())?;
-                    result.push_str(&included);
-                    if !included.ends_with('\n') {
-                        result.push('\n');
-                    }
-                    continue;
+            if upper.starts_with(".LIB")
+                && !upper.starts_with(".LIBS")
+                && let Some((filename, section)) = parse_lib_directive(trimmed)
+            {
+                let included = self.process_lib_from(base_dir, &filename, section.as_deref())?;
+                result.push_str(&included);
+                if !included.ends_with('\n') {
+                    result.push('\n');
                 }
+                continue;
+            }
 
             result.push_str(line);
             result.push('\n');
@@ -417,9 +419,10 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
             return Some(quoted[..end].to_string());
         }
     } else if let Some(quoted) = rest.strip_prefix('\'')
-        && let Some(end) = quoted.find('\'') {
-            return Some(quoted[..end].to_string());
-        }
+        && let Some(end) = quoted.find('\'')
+    {
+        return Some(quoted[..end].to_string());
+    }
 
     // Unquoted - take first word
     Some(rest.split_whitespace().next()?.to_string())

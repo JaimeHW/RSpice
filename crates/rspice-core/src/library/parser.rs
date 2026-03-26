@@ -38,9 +38,10 @@ pub fn parse_library_content(
         if upper.starts_with(".SUBCKT") {
             // Parse subcircuit at top level only
             if subckt_depth == 0
-                && let Some(subckt) = parse_subckt_line(line, library_name, &last_comment) {
-                    subcircuits.push(subckt);
-                }
+                && let Some(subckt) = parse_subckt_line(line, library_name, &last_comment)
+            {
+                subcircuits.push(subckt);
+            }
             subckt_depth += 1;
             last_comment.clear();
         } else if upper.starts_with(".ENDS") {

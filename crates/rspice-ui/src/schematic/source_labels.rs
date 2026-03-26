@@ -47,13 +47,15 @@ fn format_dc_source_label(params: &HashMap<String, String>, primary: &str, unit:
     let mut lines = vec![format!("DC: {} {}", primary_or_default(primary, "0"), unit)];
 
     if let Some(ac) = get_param_optional(params, &["ac", "acmag", "ac_mag"])
-        && !is_default_value(ac, "0") {
-            lines.push(format!("AC: {} {}", ac, unit));
-        }
+        && !is_default_value(ac, "0")
+    {
+        lines.push(format!("AC: {} {}", ac, unit));
+    }
     if let Some(phase) = get_param_optional(params, &["acphase", "phase"])
-        && !is_default_value(phase, "0") {
-            lines.push(format!("Phase: {} deg", phase));
-        }
+        && !is_default_value(phase, "0")
+    {
+        lines.push(format!("Phase: {} deg", phase));
+    }
 
     push_parasitic_lines(&mut lines, params);
     lines.join("\n")
@@ -64,13 +66,15 @@ fn format_ac_source_label(params: &HashMap<String, String>, primary: &str, unit:
     let mut lines = vec![format!("AC: {} {}", mag, unit)];
 
     if let Some(phase) = get_param_optional(params, &["acphase", "phase"])
-        && !is_default_value(phase, "0") {
-            lines.push(format!("Phase: {} deg", phase));
-        }
+        && !is_default_value(phase, "0")
+    {
+        lines.push(format!("Phase: {} deg", phase));
+    }
     if let Some(dc) = get_param_optional(params, &["dc"])
-        && !is_default_value(dc, "0") {
-            lines.push(format!("DC: {} {}", dc, unit));
-        }
+        && !is_default_value(dc, "0")
+    {
+        lines.push(format!("DC: {} {}", dc, unit));
+    }
 
     push_parasitic_lines(&mut lines, params);
     lines.join("\n")
@@ -105,17 +109,20 @@ fn format_pulse_label(params: &HashMap<String, String>, primary: &str, is_voltag
     ];
 
     if let Some(td) = get_param_optional(params, &["td"])
-        && !is_default_value(td, "0") {
-            lines.push(format!("TD: {}", td));
-        }
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
     if let Some(tr) = get_param_optional(params, &["tr"])
-        && !is_default_value(tr, "1n") {
-            lines.push(format!("TR: {}", tr));
-        }
+        && !is_default_value(tr, "1n")
+    {
+        lines.push(format!("TR: {}", tr));
+    }
     if let Some(tf) = get_param_optional(params, &["tf"])
-        && !is_default_value(tf, "1n") {
-            lines.push(format!("TF: {}", tf));
-        }
+        && !is_default_value(tf, "1n")
+    {
+        lines.push(format!("TF: {}", tf));
+    }
 
     lines.join("\n")
 }
@@ -141,17 +148,20 @@ fn format_sin_label(params: &HashMap<String, String>, primary: &str, is_voltage:
         lines.push(format!("Offset: {} {}", offset, unit));
     }
     if let Some(phase) = get_param_optional(params, &["phase"])
-        && !is_default_value(phase, "0") {
-            lines.push(format!("Phase: {} deg", phase));
-        }
+        && !is_default_value(phase, "0")
+    {
+        lines.push(format!("Phase: {} deg", phase));
+    }
     if let Some(td) = get_param_optional(params, &["td"])
-        && !is_default_value(td, "0") {
-            lines.push(format!("TD: {}", td));
-        }
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
     if let Some(theta) = get_param_optional(params, &["theta"])
-        && !is_default_value(theta, "0") {
-            lines.push(format!("Theta: {}", theta));
-        }
+        && !is_default_value(theta, "0")
+    {
+        lines.push(format!("Theta: {}", theta));
+    }
 
     lines.join("\n")
 }
@@ -168,13 +178,15 @@ fn format_pwl_label(params: &HashMap<String, String>, primary: &str) -> String {
     ];
 
     if let Some(td) = get_param_optional(params, &["td"])
-        && !is_default_value(td, "0") {
-            lines.push(format!("TD: {}", td));
-        }
+        && !is_default_value(td, "0")
+    {
+        lines.push(format!("TD: {}", td));
+    }
     if let Some(repeat) = get_param_optional(params, &["repeat"])
-        && is_truthy(repeat) {
-            lines.push("Repeat: on".to_string());
-        }
+        && is_truthy(repeat)
+    {
+        lines.push("Repeat: on".to_string());
+    }
 
     lines.join("\n")
 }
@@ -250,33 +262,37 @@ fn format_noise_label(params: &HashMap<String, String>, primary: &str) -> String
         lines.push(format!("DC: {} A", dc));
     }
     if let Some(kf) = get_param_optional(params, &["kf"])
-        && !is_default_value(kf, "0") {
-            lines.push(format!("KF: {}", kf));
-        }
+        && !is_default_value(kf, "0")
+    {
+        lines.push(format!("KF: {}", kf));
+    }
     if let Some(af) = get_param_optional(params, &["af"])
-        && !is_default_value(af, "1") {
-            lines.push(format!("AF: {}", af));
-        }
+        && !is_default_value(af, "1")
+    {
+        lines.push(format!("AF: {}", af));
+    }
 
     lines.join("\n")
 }
 
 fn push_parasitic_lines(lines: &mut Vec<String>, params: &HashMap<String, String>) {
     if let Some(rs) = get_param_optional(params, &["rs"])
-        && !is_default_value(rs, "0") {
-            lines.push(format!("Rs: {} ohm", rs));
-        }
+        && !is_default_value(rs, "0")
+    {
+        lines.push(format!("Rs: {} ohm", rs));
+    }
     if let Some(rp) = get_param_optional(params, &["rp"])
         && !is_default_value(rp, "inf")
-            && !is_default_value(rp, "infinity")
-            && !is_default_value(rp, "1e309")
-        {
-            lines.push(format!("Rp: {} ohm", rp));
-        }
+        && !is_default_value(rp, "infinity")
+        && !is_default_value(rp, "1e309")
+    {
+        lines.push(format!("Rp: {} ohm", rp));
+    }
     if let Some(cpar) = get_param_optional(params, &["cpar"])
-        && !is_default_value(cpar, "0") {
-            lines.push(format!("Cpar: {} F", cpar));
-        }
+        && !is_default_value(cpar, "0")
+    {
+        lines.push(format!("Cpar: {} F", cpar));
+    }
 }
 
 fn summarize_pwl(data: &str) -> (usize, String, String) {

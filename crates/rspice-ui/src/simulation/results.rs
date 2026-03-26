@@ -573,9 +573,9 @@ fn waveform_last_value_by_name(
         && let Some(v) = waveforms
             .get(inner)
             .and_then(|wf| wf.y_values.last().copied())
-        {
-            return Some(v);
-        }
+    {
+        return Some(v);
+    }
 
     let voltage_key = format!("V({})", key);
     if let Some(v) = waveforms

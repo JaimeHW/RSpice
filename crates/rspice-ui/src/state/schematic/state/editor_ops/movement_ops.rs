@@ -39,9 +39,10 @@ impl SchematicState {
         // Apply wire updates
         for (wire_id, point_idx, new_pos) in wire_updates {
             if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                && point_idx < wire.points.len() {
-                    wire.points[point_idx] = new_pos;
-                }
+                && point_idx < wire.points.len()
+            {
+                wire.points[point_idx] = new_pos;
+            }
         }
 
         self.is_dirty = true;
@@ -141,9 +142,10 @@ impl SchematicState {
                 continue;
             }
             if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                && point_idx < wire.points.len() {
-                    wire.points[point_idx] = new_pos;
-                }
+                && point_idx < wire.points.len()
+            {
+                wire.points[point_idx] = new_pos;
+            }
         }
 
         self.is_dirty = true;
@@ -229,9 +231,10 @@ impl SchematicState {
 
             for (wire_id, point_idx, new_pos) in wire_updates {
                 if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                    && point_idx < wire.points.len() {
-                        wire.points[point_idx] = new_pos;
-                    }
+                    && point_idx < wire.points.len()
+                {
+                    wire.points[point_idx] = new_pos;
+                }
             }
         }
 

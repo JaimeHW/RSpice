@@ -135,13 +135,15 @@ pub fn export_to_csv(traces: &[TraceData], options: &ExportOptions) -> String {
 
         // Apply X range filter
         if let Some(x_start) = options.x_start
-            && t < x_start {
-                continue;
-            }
+            && t < x_start
+        {
+            continue;
+        }
         if let Some(x_end) = options.x_end
-            && t > x_end {
-                continue;
-            }
+            && t > x_end
+        {
+            continue;
+        }
 
         // Time column
         output.push_str(&format_value(t, options));

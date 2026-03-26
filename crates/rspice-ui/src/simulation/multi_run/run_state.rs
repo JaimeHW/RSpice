@@ -370,11 +370,12 @@ impl RunQueue {
     /// Start the next runnable analysis
     pub fn start_next(&mut self, timestamp: u64) -> Option<u64> {
         if let Some(id) = self.next_runnable()
-            && let Some(run) = self.get_mut(id) {
-                run.start(timestamp);
-                self.current_run = Some(id);
-                return Some(id);
-            }
+            && let Some(run) = self.get_mut(id)
+        {
+            run.start(timestamp);
+            self.current_run = Some(id);
+            return Some(id);
+        }
         None
     }
 
@@ -429,9 +430,10 @@ impl RunQueue {
     /// Cancel all pending runs
     pub fn cancel_all(&mut self, timestamp: u64) {
         if let Some(id) = self.current_run
-            && let Some(run) = self.get_mut(id) {
-                run.cancel(timestamp);
-            }
+            && let Some(run) = self.get_mut(id)
+        {
+            run.cancel(timestamp);
+        }
         self.current_run = None;
 
         for run in &mut self.runs {

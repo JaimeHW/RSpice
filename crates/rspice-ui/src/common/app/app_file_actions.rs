@@ -62,9 +62,10 @@ impl RSpiceApp {
             ConfirmationResponse::Yes => {
                 // Save first, then proceed
                 if self.action_file_save()
-                    && let Some(action) = pending {
-                        self.execute_pending_action(action);
-                    }
+                    && let Some(action) = pending
+                {
+                    self.execute_pending_action(action);
+                }
             }
         }
     }

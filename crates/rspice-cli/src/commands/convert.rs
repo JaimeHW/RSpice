@@ -100,14 +100,16 @@ fn read_input(args: &ConvertArgs, from_format: OutputFormat) -> Result<WaveformD
     for line in lines.iter().skip(1) {
         let values: Vec<&str> = line.split(separator).collect();
         if let Some(first) = values.first()
-            && let Ok(v) = first.trim().parse::<f64>() {
-                independent_values.push(v);
-            }
+            && let Ok(v) = first.trim().parse::<f64>()
+        {
+            independent_values.push(v);
+        }
         for (i, val) in values.iter().skip(1).enumerate() {
             if i < variable_values.len()
-                && let Ok(v) = val.trim().parse::<f64>() {
-                    variable_values[i].push(v);
-                }
+                && let Ok(v) = val.trim().parse::<f64>()
+            {
+                variable_values[i].push(v);
+            }
         }
     }
 

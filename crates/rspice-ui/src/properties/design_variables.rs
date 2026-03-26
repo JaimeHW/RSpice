@@ -293,21 +293,23 @@ fn try_simple_arithmetic(expr: &str, context: &HashMap<String, f64>) -> Option<f
     // Format: term OP term
     for op in ['*', '/', '+', '-'] {
         if let Some(pos) = expr.rfind(op)
-            && pos > 0 && pos < expr.len() - 1 {
-                let left = expr[..pos].trim();
-                let right = expr[pos + 1..].trim();
+            && pos > 0
+            && pos < expr.len() - 1
+        {
+            let left = expr[..pos].trim();
+            let right = expr[pos + 1..].trim();
 
-                let left_val = parse_term(left, context)?;
-                let right_val = parse_term(right, context)?;
+            let left_val = parse_term(left, context)?;
+            let right_val = parse_term(right, context)?;
 
-                return Some(match op {
-                    '+' => left_val + right_val,
-                    '-' => left_val - right_val,
-                    '*' => left_val * right_val,
-                    '/' => left_val / right_val,
-                    _ => return None,
-                });
-            }
+            return Some(match op {
+                '+' => left_val + right_val,
+                '-' => left_val - right_val,
+                '*' => left_val * right_val,
+                '/' => left_val / right_val,
+                _ => return None,
+            });
+        }
     }
     None
 }

@@ -147,6 +147,33 @@ R1 in out RMOD R=2k L=10u W=2u
 }
 
 #[test]
+fn test_parse_resistor_preserves_ac_scale_and_multiplicity_instance_params() {
+    let netlist = r#"Scaled Resistor
+R1 in out 10 AC=5 SCALE=1k M=2
+.END
+"#;
+    let result = parse_netlist(netlist).expect("netlist should parse");
+    match &result.elements[0].kind {
+        ElementKind::Resistor {
+            value,
+            model,
+            instance_params,
+            ..
+        } => {
+            assert!(model.is_none());
+            assert!((*value - 10.0).abs() < 1e-12);
+
+            let params: std::collections::HashMap<String, Value> =
+                instance_params.iter().cloned().collect();
+            assert!((params["AC"] - 5.0).abs() < 1e-12);
+            assert!((params["SCALE"] - 1e3).abs() < 1e-9);
+            assert!((params["M"] - 2.0).abs() < 1e-12);
+        }
+        other => panic!("Expected resistor, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_parse_resistor_preserves_parameter_expression_for_late_resolution() {
     let netlist = r#"Parametric Resistor
 .PARAM FOO=2k

@@ -161,6 +161,8 @@ pub struct Resistors {
     pub stamps: Vec<TwoTerminalStamp>,
     /// Conductance values (1/R)
     pub conductances: Vec<Value>,
+    /// Small-signal conductances used by AC/PZ/noise analyses.
+    pub small_signal_conductances: Vec<Value>,
 }
 
 impl Resistors {
@@ -169,9 +171,30 @@ impl Resistors {
     }
 
     pub fn add(&mut self, name: String, node_pos: NodeId, node_neg: NodeId, resistance: Value) {
+        self.add_with_small_signal(name, node_pos, node_neg, resistance, resistance);
+    }
+
+    pub fn add_with_small_signal(
+        &mut self,
+        name: String,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        resistance: Value,
+        small_signal_resistance: Value,
+    ) {
         self.names.push(name);
         self.stamps.push(TwoTerminalStamp::new(node_pos, node_neg));
         self.conductances.push(1.0 / resistance);
+        self.small_signal_conductances
+            .push(1.0 / small_signal_resistance);
+    }
+
+    #[inline]
+    pub fn small_signal_conductance(&self, index: usize) -> Value {
+        self.small_signal_conductances
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| self.conductances.get(index).copied().unwrap_or(0.0))
     }
 
     pub fn len(&self) -> usize {
@@ -697,9 +720,10 @@ impl VoltageSources {
         let key = PwlCacheKey::new(path, time_scale, value_scale, time_offset, value_offset);
 
         if let Ok(cache) = pwl_waveform_cache().read()
-            && let Some(wf) = cache.get(&key) {
-                return Ok(Arc::clone(wf));
-            }
+            && let Some(wf) = cache.get(&key)
+        {
+            return Ok(Arc::clone(wf));
+        }
 
         let waveform = crate::device::pwl_file::load_pwl_file(path)
             .map_err(|e| format!("failed to load PWL file '{}': {}", path, e))?
@@ -1389,9 +1413,10 @@ impl Inductors {
 
             // Also get branch current from solution for accuracy
             if br > 0
-                && let Some(&i_br) = currents.get(br - 1) {
-                    self.i_prev[i] = i_br;
-                }
+                && let Some(&i_br) = currents.get(br - 1)
+            {
+                self.i_prev[i] = i_br;
+            }
         }
     }
 }
@@ -2250,9 +2275,11 @@ impl CircuitData {
             };
 
             if let Some(slot) = self.inductors.inductances.get_mut(inductor_index)
-                && l_eff.is_finite() && l_eff > 0.0 {
-                    *slot = l_eff.max(1e-18);
-                }
+                && l_eff.is_finite()
+                && l_eff > 0.0
+            {
+                *slot = l_eff.max(1e-18);
+            }
         }
     }
 
@@ -3125,6 +3152,18 @@ mod tests {
         circuit.resistors.stamp_all(&mut matrix);
 
         assert_eq!(matrix.nnz(), 4); // 4 stamp entries
+    }
+
+    #[test]
+    fn test_resistor_small_signal_override_is_tracked_separately() {
+        let mut resistors = Resistors::new();
+        resistors.add_with_small_signal("R1".to_string(), 1, 0, 10_000.0, 15_000.0);
+
+        assert!((resistors.conductances[0] - 1.0 / 10_000.0).abs() < 1e-18);
+        assert!(
+            (resistors.small_signal_conductance(0) - 1.0 / 15_000.0).abs() < 1e-18,
+            "AC/PZ/noise conductance should use the dedicated small-signal override"
+        );
     }
 
     #[test]

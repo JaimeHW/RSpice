@@ -66,14 +66,13 @@ pub fn render_schematic_view(
         let mut is_selected = state.schematic.selection.wires.contains(&wire.id);
 
         // Live preview: if dragging selection rect, highlight wires inside the rect
-        if !is_selected
-            && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-                // Check if any point of the wire is inside the selection rect
-                is_selected = wire
-                    .points
-                    .iter()
-                    .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
-            }
+        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            // Check if any point of the wire is inside the selection rect
+            is_selected = wire
+                .points
+                .iter()
+                .any(|p| p.x >= min_x && p.x <= max_x && p.y >= min_y && p.y <= max_y);
+        }
 
         let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
         draw_wire(
@@ -91,14 +90,13 @@ pub fn render_schematic_view(
         let mut is_selected = state.schematic.selection.components.contains(&component.id);
 
         // Live preview: if dragging selection rect, highlight components inside the rect
-        if !is_selected
-            && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
-                // Check if component center is inside the selection rect
-                is_selected = component.pos.x >= min_x
-                    && component.pos.x <= max_x
-                    && component.pos.y >= min_y
-                    && component.pos.y <= max_y;
-            }
+        if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
+            // Check if component center is inside the selection rect
+            is_selected = component.pos.x >= min_x
+                && component.pos.x <= max_x
+                && component.pos.y >= min_y
+                && component.pos.y <= max_y;
+        }
 
         draw_component(
             &painter,
@@ -246,76 +244,78 @@ pub fn render_schematic_view(
         // On drag start, check if we're dragging a selected component (move) or empty space (box select)
         if response.drag_started_by(egui::PointerButton::Primary)
             && !ui.input(|i| i.modifiers.shift)
-            && let Some(pos) = response.interact_pointer_pos() {
-                let grid_pos = screen_to_grid(pos);
-                // Also check wire grid for more precise vertex detection
-                let wire_grid_pos = screen_to_wire_grid(pos);
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            let grid_pos = screen_to_grid(pos);
+            // Also check wire grid for more precise vertex detection
+            let wire_grid_pos = screen_to_wire_grid(pos);
 
-                // Priority 1: Check for wire vertex at position (for wire corner/junction dragging)
-                // Use wire grid for more precise positioning
-                // Use is_draggable_wire_point to detect vertices AND junctions (including T-junctions)
-                if state.schematic.is_draggable_wire_point(wire_grid_pos) {
-                    // Start vertex/junction drag - track the POSITION, not specific wire
-                    // This allows dragging all wires meeting at a junction together
-                    state.dialogs.interaction.vertex_drag_pos =
-                        Some((wire_grid_pos.x, wire_grid_pos.y));
-                    state.dialogs.interaction.drag.start(
-                        (wire_grid_pos.x, wire_grid_pos.y),
-                        crate::common::app::DragType::WireVertex,
-                    );
-                }
-                // Priority 2: Check if there's a component at the drag start position
-                else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-                    // Drag started on a component
-                    if !state.schematic.selection.has_component(comp_id) {
-                        // Component not selected - select it first (professional behavior)
-                        // This enables click-and-drag in one motion like Cadence Virtuoso
-                        state.schematic.selection.clear();
-                        state.schematic.selection.select_component(comp_id);
-                    }
-                    // Now start dragging the selection
-                    state.dialogs.drag_start = Some((grid_pos.x, grid_pos.y));
-                    state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
-                } else {
-                    // Drag started on empty space - start box selection
-                    state.schematic.selection_rect.start_at(grid_pos);
-                }
+            // Priority 1: Check for wire vertex at position (for wire corner/junction dragging)
+            // Use wire grid for more precise positioning
+            // Use is_draggable_wire_point to detect vertices AND junctions (including T-junctions)
+            if state.schematic.is_draggable_wire_point(wire_grid_pos) {
+                // Start vertex/junction drag - track the POSITION, not specific wire
+                // This allows dragging all wires meeting at a junction together
+                state.dialogs.interaction.vertex_drag_pos =
+                    Some((wire_grid_pos.x, wire_grid_pos.y));
+                state.dialogs.interaction.drag.start(
+                    (wire_grid_pos.x, wire_grid_pos.y),
+                    crate::common::app::DragType::WireVertex,
+                );
             }
+            // Priority 2: Check if there's a component at the drag start position
+            else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
+                // Drag started on a component
+                if !state.schematic.selection.has_component(comp_id) {
+                    // Component not selected - select it first (professional behavior)
+                    // This enables click-and-drag in one motion like Cadence Virtuoso
+                    state.schematic.selection.clear();
+                    state.schematic.selection.select_component(comp_id);
+                }
+                // Now start dragging the selection
+                state.dialogs.drag_start = Some((grid_pos.x, grid_pos.y));
+                state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
+            } else {
+                // Drag started on empty space - start box selection
+                state.schematic.selection_rect.start_at(grid_pos);
+            }
+        }
 
         // Handle ongoing drag - either move selection, update box selection, or move wire vertex
         if response.dragged_by(egui::PointerButton::Primary)
-            && let Some(pos) = response.hover_pos() {
-                let grid_pos = screen_to_grid(pos);
-                let wire_grid_pos = screen_to_wire_grid(pos);
+            && let Some(pos) = response.hover_pos()
+        {
+            let grid_pos = screen_to_grid(pos);
+            let wire_grid_pos = screen_to_wire_grid(pos);
 
-                // Check if we're dragging a wire vertex/junction
-                if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
-                    let old_pos = Point::new(old_x, old_y);
-                    // Move ALL wire vertices at the old position to the new position
-                    // This is professional EDA behavior - junctions move as a unit
-                    if state.schematic.move_all_vertices_at(old_pos, wire_grid_pos) {
-                        // Update the tracked position to the new location
-                        state.dialogs.interaction.vertex_drag_pos =
-                            Some((wire_grid_pos.x, wire_grid_pos.y));
-                        state
-                            .dialogs
-                            .interaction
-                            .drag
-                            .update((wire_grid_pos.x, wire_grid_pos.y));
-                    }
-                } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
-                    // Moving selection with rubber-banding
-                    let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
-
-                    if delta.x != 0 || delta.y != 0 {
-                        state.schematic.move_selection_with_rubber_band(delta);
-                        state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
-                    }
-                } else if state.schematic.selection_rect.is_active() {
-                    // Update box selection rectangle position
-                    state.schematic.selection_rect.update(grid_pos);
+            // Check if we're dragging a wire vertex/junction
+            if let Some((old_x, old_y)) = state.dialogs.interaction.vertex_drag_pos {
+                let old_pos = Point::new(old_x, old_y);
+                // Move ALL wire vertices at the old position to the new position
+                // This is professional EDA behavior - junctions move as a unit
+                if state.schematic.move_all_vertices_at(old_pos, wire_grid_pos) {
+                    // Update the tracked position to the new location
+                    state.dialogs.interaction.vertex_drag_pos =
+                        Some((wire_grid_pos.x, wire_grid_pos.y));
+                    state
+                        .dialogs
+                        .interaction
+                        .drag
+                        .update((wire_grid_pos.x, wire_grid_pos.y));
                 }
+            } else if let Some((last_x, last_y)) = state.dialogs.last_drag_pos {
+                // Moving selection with rubber-banding
+                let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
+
+                if delta.x != 0 || delta.y != 0 {
+                    state.schematic.move_selection_with_rubber_band(delta);
+                    state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
+                }
+            } else if state.schematic.selection_rect.is_active() {
+                // Update box selection rectangle position
+                state.schematic.selection_rect.update(grid_pos);
             }
+        }
 
         // Finish drag - complete box selection, finalize move, or finish wire vertex drag
         if response.drag_stopped_by(egui::PointerButton::Primary) {
@@ -345,254 +345,246 @@ pub fn render_schematic_view(
 
     // Single click handling (for single item selection and placement)
     if response.clicked_by(egui::PointerButton::Primary)
-        && let Some(pos) = response.interact_pointer_pos() {
-            match current_tool {
-                Tool::Place(component_type) => {
-                    // Components snap to full grid
-                    let grid_pos = screen_to_grid(pos);
-                    if component_type == ComponentType::CellInstance {
-                        if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
-                            state
-                                .schematic
-                                .add_library_cell_component(grid_pos, library_cell);
-                            log::info!("Placed library cell instance at {:?}", grid_pos);
-                        } else {
-                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                                "No library cell selected for placement".to_string(),
-                            ));
-                            state.schematic.tool = Tool::Select;
-                        }
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        match current_tool {
+            Tool::Place(component_type) => {
+                // Components snap to full grid
+                let grid_pos = screen_to_grid(pos);
+                if component_type == ComponentType::CellInstance {
+                    if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
+                        state
+                            .schematic
+                            .add_library_cell_component(grid_pos, library_cell);
+                        log::info!("Placed library cell instance at {:?}", grid_pos);
                     } else {
-                        state.schematic.add_component(component_type, grid_pos);
-                        log::info!("Placed {:?} at {:?}", component_type, grid_pos);
+                        state.push_user_message(crate::common::app::ConsoleMessage::warning(
+                            "No library cell selected for placement".to_string(),
+                        ));
+                        state.schematic.tool = Tool::Select;
                     }
+                } else {
+                    state.schematic.add_component(component_type, grid_pos);
+                    log::info!("Placed {:?} at {:?}", component_type, grid_pos);
                 }
-                Tool::Wire => {
-                    // Wires snap to half grid for connecting to component terminals
-                    let wire_pos = screen_to_wire_grid(pos);
-                    if state.schematic.wire_drawing.active {
-                        state.schematic.extend_wire(wire_pos);
+            }
+            Tool::Wire => {
+                // Wires snap to half grid for connecting to component terminals
+                let wire_pos = screen_to_wire_grid(pos);
+                if state.schematic.wire_drawing.active {
+                    state.schematic.extend_wire(wire_pos);
+                } else {
+                    state.schematic.start_wire(wire_pos);
+                }
+            }
+            Tool::Select => {
+                // Single click: select component or wire at position
+                // Only trigger if not dragging (prevent double action)
+                let grid_pos = screen_to_grid(pos);
+                let ctrl_held = ui.input(|i| i.modifiers.ctrl);
+                let alt_held = ui.input(|i| i.modifiers.alt);
+
+                let comp_id = state.schematic.component_at(grid_pos);
+                let wire_id = state.schematic.wire_at(grid_pos);
+
+                if let Some(id) = comp_id {
+                    // Clear any net highlighting when selecting components
+                    state.schematic.net_highlight.clear();
+                    if ctrl_held {
+                        state.schematic.selection.toggle_component(id);
                     } else {
-                        state.schematic.start_wire(wire_pos);
-                    }
-                }
-                Tool::Select => {
-                    // Single click: select component or wire at position
-                    // Only trigger if not dragging (prevent double action)
-                    let grid_pos = screen_to_grid(pos);
-                    let ctrl_held = ui.input(|i| i.modifiers.ctrl);
-                    let alt_held = ui.input(|i| i.modifiers.alt);
-
-                    let comp_id = state.schematic.component_at(grid_pos);
-                    let wire_id = state.schematic.wire_at(grid_pos);
-
-                    if let Some(id) = comp_id {
-                        // Clear any net highlighting when selecting components
-                        state.schematic.net_highlight.clear();
-                        if ctrl_held {
-                            state.schematic.selection.toggle_component(id);
-                        } else {
-                            state.schematic.selection.clear();
-                            state.schematic.selection.select_component(id);
-                        }
-                    } else if let Some(id) = wire_id {
-                        if alt_held {
-                            // Alt+Click: Highlight entire connected net
-                            // Build net graph and find all connected wires
-                            use crate::state::NetGraph;
-                            let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
-                            let connected_wires = net_graph.get_connected_wires(id);
-
-                            // Clear selection and highlight the net
-                            state.schematic.selection.clear();
-                            state
-                                .schematic
-                                .net_highlight
-                                .highlight_wires(connected_wires);
-                            log::info!(
-                                "Highlighted net with {} wires",
-                                state.schematic.net_highlight.highlighted_wires.len()
-                            );
-                        } else if ctrl_held {
-                            state.schematic.net_highlight.clear();
-                            state.schematic.selection.toggle_wire(id);
-                        } else {
-                            state.schematic.net_highlight.clear();
-                            state.schematic.selection.clear();
-                            state.schematic.selection.select_wire(id);
-                        }
-                    } else if !ctrl_held {
-                        // Click on empty space clears selection and highlighting
                         state.schematic.selection.clear();
-                        state.schematic.net_highlight.clear();
+                        state.schematic.selection.select_component(id);
                     }
+                } else if let Some(id) = wire_id {
+                    if alt_held {
+                        // Alt+Click: Highlight entire connected net
+                        // Build net graph and find all connected wires
+                        use crate::state::NetGraph;
+                        let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
+                        let connected_wires = net_graph.get_connected_wires(id);
+
+                        // Clear selection and highlight the net
+                        state.schematic.selection.clear();
+                        state
+                            .schematic
+                            .net_highlight
+                            .highlight_wires(connected_wires);
+                        log::info!(
+                            "Highlighted net with {} wires",
+                            state.schematic.net_highlight.highlighted_wires.len()
+                        );
+                    } else if ctrl_held {
+                        state.schematic.net_highlight.clear();
+                        state.schematic.selection.toggle_wire(id);
+                    } else {
+                        state.schematic.net_highlight.clear();
+                        state.schematic.selection.clear();
+                        state.schematic.selection.select_wire(id);
+                    }
+                } else if !ctrl_held {
+                    // Click on empty space clears selection and highlighting
+                    state.schematic.selection.clear();
+                    state.schematic.net_highlight.clear();
                 }
-                Tool::Probe => {
-                    // Probe mode: click on wire/node to add/toggle signal in waveform viewer
-                    let grid_pos = screen_to_grid(pos);
+            }
+            Tool::Probe => {
+                // Probe mode: click on wire/node to add/toggle signal in waveform viewer
+                let grid_pos = screen_to_grid(pos);
 
-                    // Check if we clicked on a wire
-                    if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
-                        // Look up net name from cross-probe mapping
-                        if let Some(net_name) = state.simulation.cross_probe.net_at(grid_pos) {
-                            let net_name = net_name.clone();
-                            log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
+                // Check if we clicked on a wire
+                if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
+                    // Look up net name from cross-probe mapping
+                    if let Some(net_name) = state.simulation.cross_probe.net_at(grid_pos) {
+                        let net_name = net_name.clone();
+                        log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
-                            // Check if this is ground
-                            if net_name == "0" {
-                                log::info!("Probe: ground net (0V reference)");
-                                state.push_user_message(crate::common::app::ConsoleMessage::info(
-                                    "Ground node: 0V reference".to_string(),
-                                ));
-                            } else {
-                                // Try to toggle waveform visibility for this net
-                                let toggled =
-                                    state.simulation.toggle_waveform_visibility(&net_name);
-
-                                if toggled {
-                                    log::info!("Probe: toggled waveform for net '{}'", net_name);
-                                    state.push_user_message(
-                                        crate::common::app::ConsoleMessage::info(format!(
-                                            "Toggled waveform: V({})",
-                                            net_name
-                                        )),
-                                    );
-                                } else {
-                                    // Waveform not found - simulation may not have run yet
-                                    log::info!(
-                                        "Probe: no waveform found for net '{}' (run simulation first?)",
-                                        net_name
-                                    );
-                                    state.push_user_message(
-                                        crate::common::app::ConsoleMessage::warning(format!(
-                                            "No waveform for {}: run simulation first",
-                                            net_name
-                                        )),
-                                    );
-                                }
-
-                                // Highlight the probed net on schematic
-                                // Build net graph and use it to highlight connected wires
-                                let net_graph = crate::state::NetGraph::build_from_wires(
-                                    &state.schematic.wires,
-                                );
-                                state
-                                    .schematic
-                                    .net_highlight
-                                    .highlight_net(&net_graph, grid_pos);
-                            }
-                        } else {
-                            // Wire exists but not in netlist (disconnected or schematic changed)
-                            log::info!(
-                                "Probe: wire at {:?} not in netlist (regenerate netlist?)",
-                                grid_pos
-                            );
-                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
-                                "Wire not in netlist. Run simulation to update.".to_string(),
+                        // Check if this is ground
+                        if net_name == "0" {
+                            log::info!("Probe: ground net (0V reference)");
+                            state.push_user_message(crate::common::app::ConsoleMessage::info(
+                                "Ground node: 0V reference".to_string(),
                             ));
-                        }
-                    } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-                        // Component probing - look up component and probe its nodes
-                        if let Some(component) =
-                            state.schematic.components.iter().find(|c| c.id == comp_id)
-                        {
-                            let comp_name = component.name.clone();
-                            log::info!(
-                                "Probe: clicked component '{}' ({})",
-                                comp_name,
-                                component.kind.display_name()
-                            );
+                        } else {
+                            // Try to toggle waveform visibility for this net
+                            let toggled = state.simulation.toggle_waveform_visibility(&net_name);
 
-                            // For voltage sources, probe the current I(Vname)
-                            // For other components, probe voltage at the nearest terminal.
-                            let probe_name = if component.kind.spice_prefix() == "V" {
-                                format!("I(V{})", comp_name)
-                            } else {
-                                // Choose terminal nearest the click to avoid ambiguous picks.
-                                let terminals = component.terminal_positions();
-                                if let Some((_, term_pos)) = nearest_terminal(&terminals, grid_pos)
-                                {
-                                    if let Some(net_name) =
-                                        state.simulation.cross_probe.net_at(term_pos)
-                                    {
-                                        format!("V({})", net_name)
-                                    } else {
-                                        format!("V({})", comp_name)
-                                    }
-                                } else {
-                                    format!("V({})", comp_name)
-                                }
-                            };
-
-                            let toggled = state.simulation.toggle_waveform_visibility(&probe_name);
                             if toggled {
+                                log::info!("Probe: toggled waveform for net '{}'", net_name);
                                 state.push_user_message(crate::common::app::ConsoleMessage::info(
-                                    format!("Toggled waveform: {}", probe_name),
+                                    format!("Toggled waveform: V({})", net_name),
                                 ));
                             } else {
+                                // Waveform not found - simulation may not have run yet
+                                log::info!(
+                                    "Probe: no waveform found for net '{}' (run simulation first?)",
+                                    net_name
+                                );
                                 state.push_user_message(
                                     crate::common::app::ConsoleMessage::warning(format!(
-                                        "No waveform for {}",
-                                        probe_name
+                                        "No waveform for {}: run simulation first",
+                                        net_name
                                     )),
                                 );
                             }
+
+                            // Highlight the probed net on schematic
+                            // Build net graph and use it to highlight connected wires
+                            let net_graph =
+                                crate::state::NetGraph::build_from_wires(&state.schematic.wires);
+                            state
+                                .schematic
+                                .net_highlight
+                                .highlight_net(&net_graph, grid_pos);
                         }
                     } else {
-                        // Clear highlight when clicking empty space
-                        state.schematic.net_highlight.clear();
-                        log::debug!("Probe: clicked empty space at {:?}", grid_pos);
+                        // Wire exists but not in netlist (disconnected or schematic changed)
+                        log::info!(
+                            "Probe: wire at {:?} not in netlist (regenerate netlist?)",
+                            grid_pos
+                        );
+                        state.push_user_message(crate::common::app::ConsoleMessage::warning(
+                            "Wire not in netlist. Run simulation to update.".to_string(),
+                        ));
                     }
+                } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
+                    // Component probing - look up component and probe its nodes
+                    if let Some(component) =
+                        state.schematic.components.iter().find(|c| c.id == comp_id)
+                    {
+                        let comp_name = component.name.clone();
+                        log::info!(
+                            "Probe: clicked component '{}' ({})",
+                            comp_name,
+                            component.kind.display_name()
+                        );
+
+                        // For voltage sources, probe the current I(Vname)
+                        // For other components, probe voltage at the nearest terminal.
+                        let probe_name = if component.kind.spice_prefix() == "V" {
+                            format!("I(V{})", comp_name)
+                        } else {
+                            // Choose terminal nearest the click to avoid ambiguous picks.
+                            let terminals = component.terminal_positions();
+                            if let Some((_, term_pos)) = nearest_terminal(&terminals, grid_pos) {
+                                if let Some(net_name) =
+                                    state.simulation.cross_probe.net_at(term_pos)
+                                {
+                                    format!("V({})", net_name)
+                                } else {
+                                    format!("V({})", comp_name)
+                                }
+                            } else {
+                                format!("V({})", comp_name)
+                            }
+                        };
+
+                        let toggled = state.simulation.toggle_waveform_visibility(&probe_name);
+                        if toggled {
+                            state.push_user_message(crate::common::app::ConsoleMessage::info(
+                                format!("Toggled waveform: {}", probe_name),
+                            ));
+                        } else {
+                            state.push_user_message(crate::common::app::ConsoleMessage::warning(
+                                format!("No waveform for {}", probe_name),
+                            ));
+                        }
+                    }
+                } else {
+                    // Clear highlight when clicking empty space
+                    state.schematic.net_highlight.clear();
+                    log::debug!("Probe: clicked empty space at {:?}", grid_pos);
                 }
-                _ => {}
             }
+            _ => {}
         }
+    }
 
     // Double-click handling - open properties panel for selected component
     if response.double_clicked_by(egui::PointerButton::Primary)
-        && let Some(pos) = response.interact_pointer_pos() {
-            let grid_pos = screen_to_grid(pos);
-            if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-                // Select the component and open properties panel
-                state.schematic.selection.clear();
-                state.schematic.selection.select_component(comp_id);
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let grid_pos = screen_to_grid(pos);
+        if let Some(comp_id) = state.schematic.component_at(grid_pos) {
+            // Select the component and open properties panel
+            state.schematic.selection.clear();
+            state.schematic.selection.select_component(comp_id);
 
-                // Find the component to get its type and current values
-                if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id)
-                {
-                    let component_type = component.kind;
+            // Find the component to get its type and current values
+            if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id) {
+                let component_type = component.kind;
 
-                    // Use property bridge for comprehensive property collection
-                    // This properly parses all component properties including secondary params
-                    let properties =
-                        crate::properties::property_bridge::collect_properties_from_component(
-                            component,
-                            &state.property_registry,
-                        );
+                // Use property bridge for comprehensive property collection
+                // This properly parses all component properties including secondary params
+                let properties =
+                    crate::properties::property_bridge::collect_properties_from_component(
+                        component,
+                        &state.property_registry,
+                    );
 
-                    // Get property sheet from registry
-                    if let Some(sheet) = state.property_registry.get(component_type) {
-                        // Open the tabbed property dialog
-                        state.tabbed_property_dialog.open_for_component(
-                            comp_id,
-                            &component.name,
-                            component_type,
-                            sheet,
-                            properties,
-                        );
-                        log::info!(
-                            "Double-clicked component {} ({:?}), opening properties dialog",
-                            comp_id,
-                            component_type
-                        );
-                    } else {
-                        log::warn!("No property sheet found for {:?}", component_type);
-                    }
+                // Get property sheet from registry
+                if let Some(sheet) = state.property_registry.get(component_type) {
+                    // Open the tabbed property dialog
+                    state.tabbed_property_dialog.open_for_component(
+                        comp_id,
+                        &component.name,
+                        component_type,
+                        sheet,
+                        properties,
+                    );
+                    log::info!(
+                        "Double-clicked component {} ({:?}), opening properties dialog",
+                        comp_id,
+                        component_type
+                    );
+                } else {
+                    log::warn!("No property sheet found for {:?}", component_type);
                 }
-
-                state.panels.properties = true;
             }
+
+            state.panels.properties = true;
         }
+    }
 
     // Right click to finish wire or cancel
     if response.clicked_by(egui::PointerButton::Secondary) && state.schematic.wire_drawing.active {
@@ -603,11 +595,10 @@ pub fn render_schematic_view(
     let wire_active = state.schematic.wire_drawing.active;
 
     // Update wire preview position first (mutable borrow)
-    if wire_active
-        && let Some(hover_pos) = response.hover_pos() {
-            let grid_pos = screen_to_wire_grid(hover_pos);
-            state.schematic.update_wire_preview(grid_pos);
-        }
+    if wire_active && let Some(hover_pos) = response.hover_pos() {
+        let grid_pos = screen_to_wire_grid(hover_pos);
+        state.schematic.update_wire_preview(grid_pos);
+    }
 
     // Now draw the wire (gather data, then draw)
     if wire_active {
@@ -627,14 +618,15 @@ pub fn render_schematic_view(
 
             // Draw preview to current mouse position
             if let Some(preview) = preview_pos_opt
-                && let Some(last) = wire_points.last() {
-                    let p1 = tool_viewport.schematic_to_screen(*last);
-                    let p2 = tool_viewport.schematic_to_screen(preview);
-                    painter.line_segment(
-                        [p1, p2],
-                        Stroke::new(1.0 * tool_viewport.zoom, wire_color.gamma_multiply(0.6)),
-                    );
-                }
+                && let Some(last) = wire_points.last()
+            {
+                let p1 = tool_viewport.schematic_to_screen(*last);
+                let p2 = tool_viewport.schematic_to_screen(preview);
+                painter.line_segment(
+                    [p1, p2],
+                    Stroke::new(1.0 * tool_viewport.zoom, wire_color.gamma_multiply(0.6)),
+                );
+            }
 
             // Draw start point marker
             if let Some(start) = wire_points.first() {
@@ -651,125 +643,124 @@ pub fn render_schematic_view(
     let preview_rotation_degrees = state.schematic.preview_rotation.degrees();
     let preview_rotation_index = rotation_to_index(state.schematic.preview_rotation);
     if let Tool::Place(component_type) = preview_tool
-        && let Some(hover_pos) = response.hover_pos() {
-            let grid_pos = screen_to_grid(hover_pos);
-            let preview_pos = tool_viewport.schematic_to_screen(grid_pos);
+        && let Some(hover_pos) = response.hover_pos()
+    {
+        let grid_pos = screen_to_grid(hover_pos);
+        let preview_pos = tool_viewport.schematic_to_screen(grid_pos);
 
-            let preview_stroke = Stroke::new(
-                1.0 * tool_viewport.zoom,
-                Color32::from_rgba_unmultiplied(100, 200, 100, 180),
-            );
+        let preview_stroke = Stroke::new(
+            1.0 * tool_viewport.zoom,
+            Color32::from_rgba_unmultiplied(100, 200, 100, 180),
+        );
 
-            // Try to use SVG symbol for preview (matches placed component appearance)
-            let svg_rendered = if let Some(library) = symbol_library {
-                if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
-                    component_type,
-                    preview_rotation_degrees,
-                    None,
-                ) {
-                    super::symbols::draw_symbol(
-                        &painter,
-                        symbol,
-                        preview_pos,
-                        viewport.zoom,
-                        adjusted_rotation,
-                        false, // Preview doesn't use mirror_h
-                        false, // Preview doesn't use mirror_v
-                        preview_stroke,
-                    );
-                    true
-                } else {
-                    false
-                }
+        // Try to use SVG symbol for preview (matches placed component appearance)
+        let svg_rendered = if let Some(library) = symbol_library {
+            if let Some((symbol, adjusted_rotation)) =
+                library.get_with_rotation_variant(component_type, preview_rotation_degrees, None)
+            {
+                super::symbols::draw_symbol(
+                    &painter,
+                    symbol,
+                    preview_pos,
+                    viewport.zoom,
+                    adjusted_rotation,
+                    false, // Preview doesn't use mirror_h
+                    false, // Preview doesn't use mirror_v
+                    preview_stroke,
+                );
+                true
             } else {
                 false
-            };
+            }
+        } else {
+            false
+        };
 
-            // Fall back to procedural drawing for preview if SVG not available
-            if !svg_rendered {
-                match component_type {
-                    ComponentType::Resistor => draw_resistor_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::Capacitor => draw_capacitor_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::Inductor => draw_inductor_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::VoltageSource => draw_vsource_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::CurrentSource => draw_isource_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::Ground => {
-                        draw_ground_symbol(&painter, preview_pos, viewport.zoom, preview_stroke)
-                    }
-                    ComponentType::Diode => draw_diode_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::Nmos => draw_nmos_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::Pmos => draw_pmos_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::NpnBjt => draw_npn_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    ComponentType::PnpBjt => draw_pnp_symbol(
-                        &painter,
-                        preview_pos,
-                        viewport.zoom,
-                        preview_rotation_index,
-                        preview_stroke,
-                    ),
-                    _ => {
-                        // Generic preview
-                        let rect =
-                            Rect::from_center_size(preview_pos, Vec2::splat(30.0 * viewport.zoom));
-                        painter.rect_stroke(rect, 2.0, preview_stroke);
-                    }
+        // Fall back to procedural drawing for preview if SVG not available
+        if !svg_rendered {
+            match component_type {
+                ComponentType::Resistor => draw_resistor_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::Capacitor => draw_capacitor_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::Inductor => draw_inductor_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::VoltageSource => draw_vsource_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::CurrentSource => draw_isource_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::Ground => {
+                    draw_ground_symbol(&painter, preview_pos, viewport.zoom, preview_stroke)
+                }
+                ComponentType::Diode => draw_diode_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::Nmos => draw_nmos_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::Pmos => draw_pmos_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::NpnBjt => draw_npn_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                ComponentType::PnpBjt => draw_pnp_symbol(
+                    &painter,
+                    preview_pos,
+                    viewport.zoom,
+                    preview_rotation_index,
+                    preview_stroke,
+                ),
+                _ => {
+                    // Generic preview
+                    let rect =
+                        Rect::from_center_size(preview_pos, Vec2::splat(30.0 * viewport.zoom));
+                    painter.rect_stroke(rect, 2.0, preview_stroke);
                 }
             }
         }
+    }
 
     // Draw box selection rectangle if active (commercial-grade dashed rectangle)
     if state.schematic.selection_rect.is_active() {

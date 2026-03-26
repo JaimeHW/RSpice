@@ -333,16 +333,20 @@ fn render_roots(painter: &egui::Painter, rect: Rect, data: &PoleZeroData, state:
         }
 
         // Annotation
-        if state.show_annotations && root.is_pole() && !root.is_real() && root.imag > 0.0
-            && let Some(q) = root.q_factor() {
-                painter.text(
-                    Pos2::new(pos.x + 10.0, pos.y - 5.0),
-                    egui::Align2::LEFT_CENTER,
-                    format!("Q={:.1}", q),
-                    FontId::proportional(9.0),
-                    text_color(),
-                );
-            }
+        if state.show_annotations
+            && root.is_pole()
+            && !root.is_real()
+            && root.imag > 0.0
+            && let Some(q) = root.q_factor()
+        {
+            painter.text(
+                Pos2::new(pos.x + 10.0, pos.y - 5.0),
+                egui::Align2::LEFT_CENTER,
+                format!("Q={:.1}", q),
+                FontId::proportional(9.0),
+                text_color(),
+            );
+        }
     }
 }
 
@@ -421,15 +425,16 @@ fn render_info_panel(ui: &mut Ui, layout: &PzLayout, state: &PoleZeroState) {
                 ui.add_space(4.0);
                 let dominant = data.dominant_poles();
                 if !dominant.is_empty()
-                    && let Some(dom) = dominant.first() {
-                        if let Some(q) = dom.q_factor() {
-                            info_row(ui, "Dom Q", &format!("{:.2}", q));
-                        }
-                        let zeta = dom.damping_ratio();
-                        if zeta > 0.0 && zeta < 1.0 {
-                            info_row(ui, "ζ", &format!("{:.3}", zeta));
-                        }
+                    && let Some(dom) = dominant.first()
+                {
+                    if let Some(q) = dom.q_factor() {
+                        info_row(ui, "Dom Q", &format!("{:.2}", q));
                     }
+                    let zeta = dom.damping_ratio();
+                    if zeta > 0.0 && zeta < 1.0 {
+                        info_row(ui, "ζ", &format!("{:.3}", zeta));
+                    }
+                }
             } else {
                 ui.label(
                     egui::RichText::new("No data")

@@ -3204,9 +3204,11 @@ impl HbSolver {
                             continue;
                         };
                         if let (Some(i), Some(j)) = (row, col)
-                            && i < n && j < n {
-                                g_time[i][j][t] += entry.value;
-                            }
+                            && i < n
+                            && j < n
+                        {
+                            g_time[i][j][t] += entry.value;
+                        }
                     }
                 }
             }

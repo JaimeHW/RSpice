@@ -243,9 +243,10 @@ fn clean_time_series(time: &[f64], values: &[f64]) -> Vec<(f64, f64)> {
             continue;
         }
         if let Some(prev) = last_t
-            && t <= prev {
-                continue;
-            }
+            && t <= prev
+        {
+            continue;
+        }
         cleaned.push((t, v));
         last_t = Some(t);
     }

@@ -24,9 +24,10 @@ impl EnvelopeRunConfig {
             return Err("Envelope num_harmonics must be > 0".to_string());
         }
         if let Some(step) = self.max_step
-            && (!step.is_finite() || step <= 0.0) {
-                return Err("Envelope max_step must be positive when provided".to_string());
-            }
+            && (!step.is_finite() || step <= 0.0)
+        {
+            return Err("Envelope max_step must be positive when provided".to_string());
+        }
         Ok(())
     }
 }

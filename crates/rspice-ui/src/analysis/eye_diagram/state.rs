@@ -376,9 +376,10 @@ impl EyeDiagramState {
         self.ui_count = data.ui_count.max(1);
         self.data = data;
         if let Some(idx) = self.selected_trace
-            && idx >= self.data.traces.len() {
-                self.selected_trace = None;
-            }
+            && idx >= self.data.traces.len()
+        {
+            self.selected_trace = None;
+        }
         self.cursors.clear();
         self.clear_markers();
         self.reset_view_to_data();

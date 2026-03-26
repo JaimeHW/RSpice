@@ -608,26 +608,28 @@ fn handle_eye_chart_interactions(
 
     if response.clicked()
         && let Some(pos) = response.interact_pointer_pos()
-            && plot_rect.contains(pos) {
-                let modifiers = ui.input(|i| i.modifiers);
-                let time_s = x_to_eye_time(pos.x, plot_rect, state);
-                if modifiers.alt {
-                    state.add_marker(time_s);
-                } else {
-                    state.cursors.place(time_s);
-                }
-            }
+        && plot_rect.contains(pos)
+    {
+        let modifiers = ui.input(|i| i.modifiers);
+        let time_s = x_to_eye_time(pos.x, plot_rect, state);
+        if modifiers.alt {
+            state.add_marker(time_s);
+        } else {
+            state.cursors.place(time_s);
+        }
+    }
 
     if response.secondary_clicked()
         && let Some(pos) = response.interact_pointer_pos()
-            && plot_rect.contains(pos) {
-                let modifiers = ui.input(|i| i.modifiers);
-                if modifiers.alt {
-                    let time_s = x_to_eye_time(pos.x, plot_rect, state);
-                    let tolerance = eye_marker_removal_tolerance_s(state, plot_rect, pos.x);
-                    state.remove_nearest_marker(time_s, tolerance);
-                }
-            }
+        && plot_rect.contains(pos)
+    {
+        let modifiers = ui.input(|i| i.modifiers);
+        if modifiers.alt {
+            let time_s = x_to_eye_time(pos.x, plot_rect, state);
+            let tolerance = eye_marker_removal_tolerance_s(state, plot_rect, pos.x);
+            state.remove_nearest_marker(time_s, tolerance);
+        }
+    }
 
     if response.hovered() {
         let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
@@ -1264,9 +1266,9 @@ fn render_single_eye_trace(
         if let Some(start) = prev
             && let Some([clipped_start, clipped_end]) =
                 clip_line_segment_to_rect(start, point, rect)
-            {
-                painter.line_segment([clipped_start, clipped_end], stroke);
-            }
+        {
+            painter.line_segment([clipped_start, clipped_end], stroke);
+        }
         prev = Some(point);
     }
 }

@@ -631,24 +631,26 @@ fn parse_voltage_hint_target(
     }
 
     if let TokenKind::Ident(ident) = &stream.peek().kind
-        && ident.eq_ignore_ascii_case("V") && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
-            stream.advance(); // V
-            stream.advance(); // (
+        && ident.eq_ignore_ascii_case("V")
+        && matches!(stream.peek_n(1).kind, TokenKind::LParen)
+    {
+        stream.advance(); // V
+        stream.advance(); // (
 
-            let node = expect_node(stream, line_num)?;
-            if stream.consume(&TokenKind::Comma) {
-                // Optional reference node (e.g. V(out,0)); currently ignored.
-                let _ = expect_node(stream, line_num)?;
-            }
-
-            if !stream.consume(&TokenKind::RParen) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: "Expected ')' in voltage target specification".to_string(),
-                });
-            }
-            return Ok(Some(node));
+        let node = expect_node(stream, line_num)?;
+        if stream.consume(&TokenKind::Comma) {
+            // Optional reference node (e.g. V(out,0)); currently ignored.
+            let _ = expect_node(stream, line_num)?;
         }
+
+        if !stream.consume(&TokenKind::RParen) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "Expected ')' in voltage target specification".to_string(),
+            });
+        }
+        return Ok(Some(node));
+    }
 
     Ok(Some(expect_node(stream, line_num)?))
 }

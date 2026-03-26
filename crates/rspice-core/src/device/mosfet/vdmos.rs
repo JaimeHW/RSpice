@@ -921,13 +921,15 @@ impl Vdmos {
 
         // RHS contributions
         if let Some(di_idx) = self.indices.rhs_di
-            && di_idx > 0 {
-                rhs[di_idx - 1] -= ieq;
-            }
+            && di_idx > 0
+        {
+            rhs[di_idx - 1] -= ieq;
+        }
         if let Some(si_idx) = self.indices.rhs_si
-            && si_idx > 0 {
-                rhs[si_idx - 1] += ieq;
-            }
+            && si_idx > 0
+        {
+            rhs[si_idx - 1] += ieq;
+        }
     }
 }
 

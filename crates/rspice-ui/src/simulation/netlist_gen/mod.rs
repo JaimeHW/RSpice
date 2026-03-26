@@ -437,14 +437,15 @@ impl<'a> NetlistGenerator<'a> {
                 // Find the net connected to this ground symbol
                 let terminals = component.terminal_positions();
                 if let Some((_, terminal_pos)) = terminals.first()
-                    && let Some(&net_id) = self.point_to_net.get(terminal_pos) {
-                        self.ground_net = Some(net_id);
-                        // Update the net's label
-                        if let Some(net) = self.nets.iter_mut().find(|n| n.id == net_id) {
-                            net.label = Some("0".to_string());
-                        }
-                        return;
+                    && let Some(&net_id) = self.point_to_net.get(terminal_pos)
+                {
+                    self.ground_net = Some(net_id);
+                    // Update the net's label
+                    if let Some(net) = self.nets.iter_mut().find(|n| n.id == net_id) {
+                        net.label = Some("0".to_string());
                     }
+                    return;
+                }
             }
         }
 
@@ -789,9 +790,10 @@ impl<'a> NetlistGenerator<'a> {
     /// Get node name for a grid point
     fn get_node_name(&self, point: Point) -> String {
         if let Some(&net_id) = self.point_to_net.get(&point)
-            && let Some(net) = self.nets.iter().find(|n| n.id == net_id) {
-                return net.spice_name();
-            }
+            && let Some(net) = self.nets.iter().find(|n| n.id == net_id)
+        {
+            return net.spice_name();
+        }
         // Floating terminal - assign a unique net
         format!(
             "float_{}",
@@ -868,14 +870,15 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
         if let Ok(value) = primary_inductance.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0) {
-                self.errors.push(format!(
-                    "Transformer '{}' has invalid primary inductance {}",
-                    component.spice_instance_name(),
-                    primary_inductance
-                ));
-                return None;
-            }
+            && (!value.is_finite() || value <= 0.0)
+        {
+            self.errors.push(format!(
+                "Transformer '{}' has invalid primary inductance {}",
+                component.spice_instance_name(),
+                primary_inductance
+            ));
+            return None;
+        }
 
         let params = crate::properties::parse_params_string(&component.params);
         let ratio = params
@@ -884,14 +887,15 @@ impl<'a> NetlistGenerator<'a> {
             .filter(|value| !value.is_empty())
             .unwrap_or("1");
         if let Ok(value) = ratio.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0) {
-                self.errors.push(format!(
-                    "Transformer '{}' has invalid turns ratio {}",
-                    component.spice_instance_name(),
-                    ratio
-                ));
-                return None;
-            }
+            && (!value.is_finite() || value <= 0.0)
+        {
+            self.errors.push(format!(
+                "Transformer '{}' has invalid turns ratio {}",
+                component.spice_instance_name(),
+                ratio
+            ));
+            return None;
+        }
 
         let explicit_secondary = params
             .get("ls")
@@ -899,14 +903,15 @@ impl<'a> NetlistGenerator<'a> {
             .filter(|value| !value.is_empty());
         if let Some(value) = explicit_secondary {
             if let Ok(parsed) = value.parse::<f64>()
-                && (!parsed.is_finite() || parsed <= 0.0) {
-                    self.errors.push(format!(
-                        "Transformer '{}' has invalid secondary inductance {}",
-                        component.spice_instance_name(),
-                        value
-                    ));
-                    return None;
-                }
+                && (!parsed.is_finite() || parsed <= 0.0)
+            {
+                self.errors.push(format!(
+                    "Transformer '{}' has invalid secondary inductance {}",
+                    component.spice_instance_name(),
+                    value
+                ));
+                return None;
+            }
             if ratio != "1" {
                 self.warnings.push(format!(
                     "Transformer '{}' specifies both turns_ratio and secondary inductance; using explicit secondary inductance",
@@ -921,14 +926,15 @@ impl<'a> NetlistGenerator<'a> {
             .filter(|value| !value.is_empty())
             .unwrap_or("0.999");
         if let Ok(value) = coupling.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0 || value > 1.0) {
-                self.errors.push(format!(
-                    "Transformer '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
-                    component.spice_instance_name(),
-                    coupling
-                ));
-                return None;
-            }
+            && (!value.is_finite() || value <= 0.0 || value > 1.0)
+        {
+            self.errors.push(format!(
+                "Transformer '{}' has invalid coupling factor {} (expected 0 < k <= 1)",
+                component.spice_instance_name(),
+                coupling
+            ));
+            return None;
+        }
 
         let secondary_inductance = explicit_secondary
             .map(ToOwned::to_owned)
@@ -1034,18 +1040,18 @@ impl<'a> NetlistGenerator<'a> {
             if component.kind == ComponentType::CoupledInductor
                 && let Some((key, coefficient, line, source)) =
                     self.explicit_coupling_line(component, &inductor_lookup)
-                {
-                    self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
-                }
+            {
+                self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
+            }
         }
 
         for component in &self.schematic.components {
             if Self::is_couplable_inductor(component.kind)
                 && let Some((key, coefficient, line, source)) =
                     self.metadata_coupling_line(component, &inductor_lookup)
-                {
-                    self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
-                }
+            {
+                self.insert_coupling_line(&mut emitted, key, coefficient, line, source);
+            }
         }
 
         emitted
@@ -1128,14 +1134,15 @@ impl<'a> NetlistGenerator<'a> {
             return None;
         }
         if let Ok(value) = coefficient.parse::<f64>()
-            && (!value.is_finite() || value <= 0.0 || value > 1.0) {
-                self.errors.push(format!(
-                    "Coupled inductor '{}' has invalid coupling coefficient {} (expected 0 < k <= 1)",
-                    component.spice_instance_name(),
-                    coefficient
-                ));
-                return None;
-            }
+            && (!value.is_finite() || value <= 0.0 || value > 1.0)
+        {
+            self.errors.push(format!(
+                "Coupled inductor '{}' has invalid coupling coefficient {} (expected 0 < k <= 1)",
+                component.spice_instance_name(),
+                coefficient
+            ));
+            return None;
+        }
 
         let emitted_windings = self.resolve_inductor_refs(
             &winding_refs,
@@ -1460,9 +1467,10 @@ impl<'a> NetlistGenerator<'a> {
         default: &str,
     ) -> String {
         if let Some(v) = params.get(key)
-            && !v.is_empty() {
-                return v.clone();
-            }
+            && !v.is_empty()
+        {
+            return v.clone();
+        }
         if !value_fallback.is_empty() {
             value_fallback.to_string()
         } else {

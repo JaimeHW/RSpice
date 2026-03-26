@@ -177,16 +177,17 @@ fn write_junit_report<W: Write>(
         )?;
 
         if !report.passed
-            && let Some(ref err) = report.error {
-                write_line(
-                    writer,
-                    path,
-                    format_args!(
-                        "      <failure message=\"Simulation failed\">{}</failure>",
-                        xml_escape(err)
-                    ),
-                )?;
-            }
+            && let Some(ref err) = report.error
+        {
+            write_line(
+                writer,
+                path,
+                format_args!(
+                    "      <failure message=\"Simulation failed\">{}</failure>",
+                    xml_escape(err)
+                ),
+            )?;
+        }
         write_line(writer, path, format_args!("    </testcase>"))?;
 
         // Measurement test cases
@@ -202,16 +203,17 @@ fn write_junit_report<W: Write>(
             )?;
 
             if !meas.passed
-                && let Some(ref err) = meas.error {
-                    write_line(
-                        writer,
-                        path,
-                        format_args!(
-                            "      <failure message=\"Measurement failed\">{}</failure>",
-                            xml_escape(err)
-                        ),
-                    )?;
-                }
+                && let Some(ref err) = meas.error
+            {
+                write_line(
+                    writer,
+                    path,
+                    format_args!(
+                        "      <failure message=\"Measurement failed\">{}</failure>",
+                        xml_escape(err)
+                    ),
+                )?;
+            }
             write_line(writer, path, format_args!("    </testcase>"))?;
         }
 

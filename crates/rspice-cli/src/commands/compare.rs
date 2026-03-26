@@ -158,9 +158,10 @@ fn load_waveform_data(path: &std::path::Path) -> Result<WaveformData, CliError> 
         let vals: Vec<&str> = line.split(',').collect();
         for (i, val) in vals.iter().enumerate() {
             if i < values.len()
-                && let Ok(v) = val.trim().parse::<f64>() {
-                    values[i].push(v);
-                }
+                && let Ok(v) = val.trim().parse::<f64>()
+            {
+                values[i].push(v);
+            }
         }
     }
 

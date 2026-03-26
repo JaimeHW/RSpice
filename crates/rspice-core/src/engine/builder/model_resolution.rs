@@ -192,6 +192,42 @@ fn model_bin_range_size(model_def: &crate::netlist::ModelDef) -> f64 {
     l_range + w_range
 }
 
+fn apply_resistor_instance_scaling(
+    element_name: &str,
+    quantity_label: &str,
+    mut resistance: f64,
+    instance_params: &[(String, f64)],
+) -> Result<f64, SimulationError> {
+    if let Some(scale) = instance_param(instance_params, &["SCALE"]) {
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' has invalid SCALE={} (must be finite and > 0)",
+                element_name, scale
+            )));
+        }
+        resistance *= scale;
+    }
+
+    if let Some(mult) = instance_param(instance_params, &["M", "MULT"]) {
+        if !mult.is_finite() || mult <= 0.0 {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{}' has invalid multiplicity M={} (must be finite and > 0)",
+                element_name, mult
+            )));
+        }
+        resistance /= mult;
+    }
+
+    if !resistance.is_finite() || resistance <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Resistor '{}' resolved to invalid {} {}",
+            element_name, quantity_label, resistance
+        )));
+    }
+
+    Ok(resistance)
+}
+
 pub(super) fn resolve_resistor_instance_value(
     netlist: &Netlist,
     element_name: &str,
@@ -227,16 +263,17 @@ pub(super) fn resolve_resistor_instance_value(
         resistance = Some(value);
     }
     if resistance.is_none()
-        && let Some(expr) = value_expr {
-            resistance = Some(
-                crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
-                    SimulationError::Circuit(format!(
-                        "Resistor '{}' value expression could not be resolved: {}",
-                        element_name, e
-                    ))
-                })?,
-            );
-        }
+        && let Some(expr) = value_expr
+    {
+        resistance = Some(
+            crate::netlist::expr::eval_expression(expr, &eval_ctx).map_err(|e| {
+                SimulationError::Circuit(format!(
+                    "Resistor '{}' value expression could not be resolved: {}",
+                    element_name, e
+                ))
+            })?,
+        );
+    }
 
     if let Some(model_def) = model_def {
         if resistance.is_none() {
@@ -302,12 +339,13 @@ pub(super) fn resolve_resistor_instance_value(
                         ))
                     })?;
                 let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
-                let l_eff = l - narrow;
+                let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
+                let l_eff = l - short;
                 let w_eff = w - narrow;
                 if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff <= 0.0 {
                     return Err(SimulationError::Circuit(format!(
-                        "Resistor '{}' has invalid effective geometry (L={}, W={}, NARROW={})",
-                        element_name, l, w, narrow
+                        "Resistor '{}' has invalid effective geometry (L={}, W={}, SHORT={}, NARROW={})",
+                        element_name, l, w, short, narrow
                     )));
                 }
                 l_eff / w_eff
@@ -361,24 +399,31 @@ pub(super) fn resolve_resistor_instance_value(
             .scale_resistance(resolved, &temp_ctx);
     }
 
-    if let Some(mult) = instance_param(instance_params, &["M", "MULT"]) {
-        if !mult.is_finite() || mult <= 0.0 {
-            return Err(SimulationError::Circuit(format!(
-                "Resistor '{}' has invalid multiplicity M={} (must be finite and > 0)",
-                element_name, mult
-            )));
+    apply_resistor_instance_scaling(element_name, "resistance", resolved, instance_params)
+}
+
+pub(super) fn resolve_resistor_small_signal_value(
+    element_name: &str,
+    dc_resistance: f64,
+    instance_params: &[(String, f64)],
+) -> Result<f64, SimulationError> {
+    match instance_param(instance_params, &["AC"]) {
+        Some(ac_resistance) => apply_resistor_instance_scaling(
+            element_name,
+            "small-signal resistance",
+            ac_resistance,
+            instance_params,
+        ),
+        None => {
+            if !dc_resistance.is_finite() || dc_resistance <= 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Resistor '{}' resolved to invalid small-signal resistance {}",
+                    element_name, dc_resistance
+                )));
+            }
+            Ok(dc_resistance)
         }
-        resolved /= mult;
     }
-
-    if !resolved.is_finite() || resolved <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "Resistor '{}' resolved to invalid resistance {}",
-            element_name, resolved
-        )));
-    }
-
-    Ok(resolved)
 }
 
 pub(super) fn resolve_tline_model_params(
@@ -408,21 +453,27 @@ pub(super) fn resolve_tline_model_params(
 
     if params.z0.is_none()
         && let (Some(l), Some(c)) = (l, c)
-            && l > 0.0 && c > 0.0 {
-                params.z0 = Some((l / c).sqrt());
-            }
+        && l > 0.0
+        && c > 0.0
+    {
+        params.z0 = Some((l / c).sqrt());
+    }
 
     if params.td.is_none()
         && let (Some(f), Some(nl)) = (params.freq, params.nl)
-            && f > 0.0 {
-                params.td = Some(nl / f);
-            }
+        && f > 0.0
+    {
+        params.td = Some(nl / f);
+    }
 
     if params.td.is_none()
         && let (Some(l), Some(c), Some(len)) = (l, c, len)
-            && l > 0.0 && c > 0.0 && len > 0.0 {
-                params.td = Some(len * (l * c).sqrt());
-            }
+        && l > 0.0
+        && c > 0.0
+        && len > 0.0
+    {
+        params.td = Some(len * (l * c).sqrt());
+    }
 
     Some(params)
 }
@@ -630,23 +681,27 @@ pub(super) fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f
 
     // Explicit alpha (Np/unit length) takes precedence.
     if let Some(alpha) = params.alpha
-        && alpha.is_finite() && alpha >= 0.0 {
-            return Some((-alpha * len).exp());
-        }
+        && alpha.is_finite()
+        && alpha >= 0.0
+    {
+        return Some((-alpha * len).exp());
+    }
 
     // ATTEN/ATTENDB: interpret <=1 as linear ratio, otherwise as dB.
     if let Some(atten) = params.atten
-        && atten.is_finite() && atten >= 0.0 {
-            if atten <= 1.0 {
-                return Some(atten);
-            }
-            let db_total = if params.len.is_some() {
-                atten * len
-            } else {
-                atten
-            };
-            return Some(10_f64.powf(-db_total / 20.0));
+        && atten.is_finite()
+        && atten >= 0.0
+    {
+        if atten <= 1.0 {
+            return Some(atten);
         }
+        let db_total = if params.len.is_some() {
+            atten * len
+        } else {
+            atten
+        };
+        return Some(10_f64.powf(-db_total / 20.0));
+    }
 
     // Derive from primary RLGC line loss when available.
     let r = params.r.unwrap_or(0.0).max(0.0);

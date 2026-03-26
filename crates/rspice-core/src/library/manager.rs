@@ -189,23 +189,27 @@ impl ModelDefinition {
     pub fn matches_geometry(&self, width: f64, length: f64) -> bool {
         // Check length bounds
         if let Some(lmin) = self.lmin
-            && length < lmin {
-                return false;
-            }
+            && length < lmin
+        {
+            return false;
+        }
         if let Some(lmax) = self.lmax
-            && length > lmax {
-                return false;
-            }
+            && length > lmax
+        {
+            return false;
+        }
 
         // Check width bounds
         if let Some(wmin) = self.wmin
-            && width < wmin {
-                return false;
-            }
+            && width < wmin
+        {
+            return false;
+        }
         if let Some(wmax) = self.wmax
-            && width > wmax {
-                return false;
-            }
+            && width > wmax
+        {
+            return false;
+        }
 
         true
     }

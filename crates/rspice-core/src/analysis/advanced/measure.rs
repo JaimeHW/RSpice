@@ -319,9 +319,10 @@ impl MeasureEngine {
 
         for i in 1..signal.len() {
             if let Some(start_time) = start_at
-                && time[i] < start_time {
-                    continue;
-                }
+                && time[i] < start_time
+            {
+                continue;
+            }
 
             let prev = signal[i - 1];
             let curr = signal[i];
@@ -340,9 +341,10 @@ impl MeasureEngine {
                 let crossing_time = time[i - 1] + frac * (time[i] - time[i - 1]);
 
                 if let Some(start_time) = start_at
-                    && crossing_time < start_time {
-                        continue;
-                    }
+                    && crossing_time < start_time
+                {
+                    continue;
+                }
 
                 count += 1;
                 if count == occurrence {

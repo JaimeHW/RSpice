@@ -298,11 +298,12 @@ impl CornerRunConfig {
             return Err("Corner analysis temperature corners must be finite values".to_string());
         }
         if let Some(vnom) = self.nominal_voltage
-            && (!vnom.is_finite() || vnom <= 0.0) {
-                return Err(
-                    "Corner analysis nominal voltage must be a positive finite value".to_string(),
-                );
-            }
+            && (!vnom.is_finite() || vnom <= 0.0)
+        {
+            return Err(
+                "Corner analysis nominal voltage must be a positive finite value".to_string(),
+            );
+        }
         validate_base_mode("Corner", &self.base_mode)?;
         Ok(())
     }
@@ -966,17 +967,19 @@ fn apply_voltage_corner(
             continue;
         }
         if let ElementKind::VoltageSource(spec) = &element.kind
-            && dc_value_from_source(spec).is_some() {
-                candidate_indices.push(idx);
-            }
+            && dc_value_from_source(spec).is_some()
+        {
+            candidate_indices.push(idx);
+        }
     }
 
     if candidate_indices.is_empty() {
         for (idx, element) in netlist.elements.iter().enumerate() {
             if let ElementKind::VoltageSource(spec) = &element.kind
-                && dc_value_from_source(spec).is_some() {
-                    candidate_indices.push(idx);
-                }
+                && dc_value_from_source(spec).is_some()
+            {
+                candidate_indices.push(idx);
+            }
         }
     }
 
@@ -985,9 +988,10 @@ fn apply_voltage_corner(
             continue;
         };
         if let ElementKind::VoltageSource(spec) = &mut element.kind
-            && let Some(dc) = dc_value_from_source(spec) {
-                let _ = set_dc_value_for_source(spec, dc * scale);
-            }
+            && let Some(dc) = dc_value_from_source(spec)
+        {
+            let _ = set_dc_value_for_source(spec, dc * scale);
+        }
     }
 
     Ok(())
@@ -999,21 +1003,22 @@ fn infer_nominal_supply_voltage(netlist: &rspice_core::Netlist) -> Option<Value>
 
     for element in &netlist.elements {
         if let ElementKind::VoltageSource(spec) = &element.kind
-            && let Some(dc) = dc_value_from_source(spec) {
-                let abs_dc = dc.abs();
-                if abs_dc <= 1e-15 {
-                    continue;
-                }
-                all_sources.push(abs_dc);
-                if element
-                    .nodes
-                    .get(1)
-                    .map(|name| is_ground_node(name))
-                    .unwrap_or(false)
-                {
-                    ground_referenced.push(abs_dc);
-                }
+            && let Some(dc) = dc_value_from_source(spec)
+        {
+            let abs_dc = dc.abs();
+            if abs_dc <= 1e-15 {
+                continue;
             }
+            all_sources.push(abs_dc);
+            if element
+                .nodes
+                .get(1)
+                .map(|name| is_ground_node(name))
+                .unwrap_or(false)
+            {
+                ground_referenced.push(abs_dc);
+            }
+        }
     }
 
     if !ground_referenced.is_empty() {

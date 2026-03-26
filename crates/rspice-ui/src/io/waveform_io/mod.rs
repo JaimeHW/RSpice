@@ -504,9 +504,10 @@ impl WaveformReader {
                         .map(|(name, _)| name.clone())
                 });
             if let Some(name) = x_from_real
-                && let Some(values) = real_traces.remove(&name) {
-                    x_candidate = Some((name, values));
-                }
+                && let Some(values) = real_traces.remove(&name)
+            {
+                x_candidate = Some((name, values));
+            }
         }
 
         let (x_name, x_values) = if let Some((name, values)) = x_candidate {
@@ -767,9 +768,10 @@ impl WaveformReader {
         }
 
         if let Some(active_name) = vector_name
-            && !vector_values.is_empty() {
-                Self::commit_psf_ascii_sample(&mut traces, &active_name, &vector_values);
-            }
+            && !vector_values.is_empty()
+        {
+            Self::commit_psf_ascii_sample(&mut traces, &active_name, &vector_values);
+        }
 
         if traces.is_empty() {
             return Err(format!(
@@ -1006,9 +1008,10 @@ impl WaveformReader {
 
             for (i, val) in values.iter().enumerate() {
                 if i < signals.len()
-                    && let Ok(v) = val.trim().parse::<f64>() {
-                        signals[i].push(v);
-                    }
+                    && let Ok(v) = val.trim().parse::<f64>()
+                {
+                    signals[i].push(v);
+                }
             }
         }
 
@@ -1065,9 +1068,10 @@ impl WaveformReader {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 for (i, val) in parts.iter().enumerate() {
                     if i < values_buffer.len()
-                        && let Ok(v) = val.parse::<f64>() {
-                            values_buffer[i].push(v);
-                        }
+                        && let Ok(v) = val.parse::<f64>()
+                    {
+                        values_buffer[i].push(v);
+                    }
                 }
             }
         }
@@ -1215,12 +1219,13 @@ impl WaveformReader {
             return Err("Touchstone file contains no network data points".to_string());
         }
         if let Some(expected_freqs) = declared_freqs
-            && expected_freqs != num_freqs {
-                return Err(format!(
-                    "Touchstone [Number of Frequencies]={} but parsed {} records",
-                    expected_freqs, num_freqs
-                ));
-            }
+            && expected_freqs != num_freqs
+        {
+            return Err(format!(
+                "Touchstone [Number of Frequencies]={} but parsed {} records",
+                expected_freqs, num_freqs
+            ));
+        }
 
         let z0_by_port = Self::resolve_touchstone_reference_values(
             num_ports,
@@ -1880,9 +1885,10 @@ impl WaveformWriter {
         ];
         for (suffix, is_imag) in suffixes {
             if let Some(base) = normalized.strip_suffix(suffix)
-                && let Some((row, col)) = Self::parse_touchstone_base_name(base) {
-                    return Some((row, col, is_imag));
-                }
+                && let Some((row, col)) = Self::parse_touchstone_base_name(base)
+            {
+                return Some((row, col, is_imag));
+            }
         }
         None
     }

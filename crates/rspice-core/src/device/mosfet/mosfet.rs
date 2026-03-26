@@ -393,22 +393,23 @@ impl Mosfet {
             }
         }
         if (gamma_explicit.is_none() || phi_explicit.is_none())
-            && let Some(nsub_cm3) = nsub {
-                // NSUB is cm^-3 in SPICE model cards.
-                let nsub_m3 = nsub_cm3 * 1e6;
-                if phi_explicit.is_none() && nsub_cm3 > N_I_CM3 {
-                    let phi_derived = 2.0 * V_T_REF * (nsub_cm3 / N_I_CM3).ln();
-                    if phi_derived.is_finite() && phi_derived > 0.0 {
-                        self.phi = phi_derived;
-                    }
-                }
-                if gamma_explicit.is_none() && self.cox > 0.0 && self.cox.is_finite() {
-                    let gamma_derived = (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
-                    if gamma_derived.is_finite() && gamma_derived >= 0.0 {
-                        self.gamma = gamma_derived;
-                    }
+            && let Some(nsub_cm3) = nsub
+        {
+            // NSUB is cm^-3 in SPICE model cards.
+            let nsub_m3 = nsub_cm3 * 1e6;
+            if phi_explicit.is_none() && nsub_cm3 > N_I_CM3 {
+                let phi_derived = 2.0 * V_T_REF * (nsub_cm3 / N_I_CM3).ln();
+                if phi_derived.is_finite() && phi_derived > 0.0 {
+                    self.phi = phi_derived;
                 }
             }
+            if gamma_explicit.is_none() && self.cox > 0.0 && self.cox.is_finite() {
+                let gamma_derived = (2.0 * Q_E * EPS_SI_REL * EPS0 * nsub_m3).sqrt() / self.cox;
+                if gamma_derived.is_finite() && gamma_derived >= 0.0 {
+                    self.gamma = gamma_derived;
+                }
+            }
+        }
         // BSIM3 parameters
         if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;

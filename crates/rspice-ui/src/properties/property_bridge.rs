@@ -263,19 +263,20 @@ pub fn collect_properties_from_component(
 
     if let Some(sheet) = registry.get(component.kind)
         && let Some(def) = sheet.iter().find(|def| def.name == "symbol")
-            && let PropertyValue::Enum { options, .. } = &def.default_value {
-                let selected = component
-                    .symbol_variant
-                    .clone()
-                    .unwrap_or_else(|| options.first().cloned().unwrap_or_default());
-                properties.insert(
-                    "symbol".to_string(),
-                    PropertyValue::Enum {
-                        selected,
-                        options: options.clone(),
-                    },
-                );
-            }
+        && let PropertyValue::Enum { options, .. } = &def.default_value
+    {
+        let selected = component
+            .symbol_variant
+            .clone()
+            .unwrap_or_else(|| options.first().cloned().unwrap_or_default());
+        properties.insert(
+            "symbol".to_string(),
+            PropertyValue::Enum {
+                selected,
+                options: options.clone(),
+            },
+        );
+    }
 
     // Get the primary property name for this component type
     let primary_prop = get_primary_property_name(component.kind);

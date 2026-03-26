@@ -355,17 +355,19 @@ impl XspiceInstance {
                 PortType::Voltage => {
                     // Voltage source output - stamps like a dependent voltage source
                     if let PortConnection::Analog(node) = &self.connections[i]
-                        && *node > 0 {
-                            // Would need branch equation - for now, treat as current source
-                            rhs_add(*node - 1, output_value);
-                        }
+                        && *node > 0
+                    {
+                        // Would need branch equation - for now, treat as current source
+                        rhs_add(*node - 1, output_value);
+                    }
                 }
                 PortType::Current => {
                     // Current source output
                     if let PortConnection::Analog(node) = &self.connections[i]
-                        && *node > 0 {
-                            rhs_add(*node - 1, output_value);
-                        }
+                        && *node > 0
+                    {
+                        rhs_add(*node - 1, output_value);
+                    }
                 }
                 _ => {}
             }
@@ -393,16 +395,17 @@ impl XspiceInstance {
         for (port_name, value, delay) in events {
             // Find the node for this port
             if let Some(&port_idx) = self.port_indices.get(&port_name)
-                && let Some(PortConnection::Digital(node)) = self.connections.get(port_idx) {
-                    event_queue.schedule_delayed(
-                        current_time,
-                        delay,
-                        *node,
-                        &port_name,
-                        &self.name,
-                        value,
-                    );
-                }
+                && let Some(PortConnection::Digital(node)) = self.connections.get(port_idx)
+            {
+                event_queue.schedule_delayed(
+                    current_time,
+                    delay,
+                    *node,
+                    &port_name,
+                    &self.name,
+                    value,
+                );
+            }
         }
     }
 

@@ -114,9 +114,10 @@ impl ModelBrowserState {
     pub fn matches_filter(&self, model: &DeviceModel) -> bool {
         // Type filter
         if let Some(target) = self.type_filter
-            && model.model_type != target {
-                return false;
-            }
+            && model.model_type != target
+        {
+            return false;
+        }
 
         // Search text filter
         if !self.search_text.is_empty() {
@@ -346,14 +347,14 @@ pub fn render_model_browser(
                             .clicked()
                             && let (Some(library), Some(model)) =
                                 (&state.selected_library, &state.selected_model)
-                            {
-                                result = ModelBrowserResult::Selected {
-                                    library: library.clone(),
-                                    model: model.clone(),
-                                    corner: state.selected_corner.clone(),
-                                };
-                                state.close();
-                            }
+                        {
+                            result = ModelBrowserResult::Selected {
+                                library: library.clone(),
+                                model: model.clone(),
+                                corner: state.selected_corner.clone(),
+                            };
+                            state.close();
+                        }
                     }
                 });
             });
@@ -472,100 +473,99 @@ fn render_model_list(ui: &mut Ui, state: &mut ModelBrowserState, manager: &Model
 fn render_model_details(ui: &mut Ui, state: &ModelBrowserState, manager: &ModelLibraryManager) {
     if let (Some(lib_name), Some(model_name)) = (&state.selected_library, &state.selected_model)
         && let Some(lib) = manager.get_library(lib_name)
-            && let Some(model) = lib.get_model(model_name) {
-                // Model name header
-                ui.label(RichText::new(&model.name).heading());
-                ui.add_space(4.0);
+        && let Some(model) = lib.get_model(model_name)
+    {
+        // Model name header
+        ui.label(RichText::new(&model.name).heading());
+        ui.add_space(4.0);
 
-                // Type and level
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "{} {}",
-                            model.model_type.icon(),
-                            model.model_type.display_name()
-                        ))
-                        .strong(),
-                    );
-                    ui.separator();
-                    ui.label(format!("Level: {}", model.level.display_name()));
+        // Type and level
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{} {}",
+                    model.model_type.icon(),
+                    model.model_type.display_name()
+                ))
+                .strong(),
+            );
+            ui.separator();
+            ui.label(format!("Level: {}", model.level.display_name()));
+        });
+
+        ui.add_space(8.0);
+
+        // Description
+        if !model.description.is_empty() {
+            ui.label(&model.description);
+            ui.add_space(8.0);
+        }
+
+        // Geometry limits (for transistors)
+        if model.l_min.is_some() || model.w_min.is_some() {
+            ui.separator();
+            ui.label(RichText::new("Geometry Limits").strong());
+
+            egui::Grid::new("geometry_grid")
+                .num_columns(2)
+                .spacing([20.0, 4.0])
+                .show(ui, |ui| {
+                    if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
+                        ui.label("Length:");
+                        ui.label(format!(
+                            "{} - {}",
+                            format_si_value(l_min),
+                            format_si_value(l_max)
+                        ));
+                        ui.end_row();
+                    }
+
+                    if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
+                        ui.label("Width:");
+                        ui.label(format!(
+                            "{} - {}",
+                            format_si_value(w_min),
+                            format_si_value(w_max)
+                        ));
+                        ui.end_row();
+                    }
                 });
+        }
 
-                ui.add_space(8.0);
+        // Operating voltage
+        if let Some(vdd) = model.vdd {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("Vdd:");
+                ui.label(format!("{:.2} V", vdd));
+            });
+        }
 
-                // Description
-                if !model.description.is_empty() {
-                    ui.label(&model.description);
-                    ui.add_space(8.0);
-                }
+        // Threshold voltage
+        if let Some(vth0) = model.vth0 {
+            ui.horizontal(|ui| {
+                ui.label("Vth0:");
+                ui.label(format!("{:.3} V", vth0));
+            });
+        }
 
-                // Geometry limits (for transistors)
-                if model.l_min.is_some() || model.w_min.is_some() {
-                    ui.separator();
-                    ui.label(RichText::new("Geometry Limits").strong());
+        // File path
+        if let Some(ref path) = model.file_path {
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new("File").strong());
+            ui.label(RichText::new(path.display().to_string()).small().weak());
+        }
 
-                    egui::Grid::new("geometry_grid")
-                        .num_columns(2)
-                        .spacing([20.0, 4.0])
-                        .show(ui, |ui| {
-                            if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
-                                ui.label("Length:");
-                                ui.label(format!(
-                                    "{} - {}",
-                                    format_si_value(l_min),
-                                    format_si_value(l_max)
-                                ));
-                                ui.end_row();
-                            }
+        // Parameters summary
+        if !model.parameters.is_empty() {
+            ui.add_space(8.0);
+            ui.separator();
+            ui.label(RichText::new(format!("Parameters ({})", model.parameters.len())).strong());
+        }
 
-                            if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
-                                ui.label("Width:");
-                                ui.label(format!(
-                                    "{} - {}",
-                                    format_si_value(w_min),
-                                    format_si_value(w_max)
-                                ));
-                                ui.end_row();
-                            }
-                        });
-                }
-
-                // Operating voltage
-                if let Some(vdd) = model.vdd {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("Vdd:");
-                        ui.label(format!("{:.2} V", vdd));
-                    });
-                }
-
-                // Threshold voltage
-                if let Some(vth0) = model.vth0 {
-                    ui.horizontal(|ui| {
-                        ui.label("Vth0:");
-                        ui.label(format!("{:.3} V", vth0));
-                    });
-                }
-
-                // File path
-                if let Some(ref path) = model.file_path {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.label(RichText::new("File").strong());
-                    ui.label(RichText::new(path.display().to_string()).small().weak());
-                }
-
-                // Parameters summary
-                if !model.parameters.is_empty() {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.label(
-                        RichText::new(format!("Parameters ({})", model.parameters.len())).strong(),
-                    );
-                }
-
-                return;
-            }
+        return;
+    }
 
     ui.label(
         RichText::new("Select a model to view details")

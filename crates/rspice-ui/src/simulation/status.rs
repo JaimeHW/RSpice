@@ -239,14 +239,15 @@ impl SimulationProgress {
 
         // Calculate ETA based on progress
         if let Some(progress) = status.progress()
-            && progress > 0.01 {
-                let elapsed_secs = self.elapsed.as_secs_f64();
-                let total_estimated = elapsed_secs / progress as f64;
-                let remaining = total_estimated - elapsed_secs;
-                if remaining > 0.0 {
-                    self.estimated_remaining = Some(Duration::from_secs_f64(remaining));
-                }
+            && progress > 0.01
+        {
+            let elapsed_secs = self.elapsed.as_secs_f64();
+            let total_estimated = elapsed_secs / progress as f64;
+            let remaining = total_estimated - elapsed_secs;
+            if remaining > 0.0 {
+                self.estimated_remaining = Some(Duration::from_secs_f64(remaining));
             }
+        }
 
         self.status = status;
     }
