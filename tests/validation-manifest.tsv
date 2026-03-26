@@ -41,6 +41,7 @@ regression/sens/sens-ac-1.cir	scripted_control
 regression/sens/sens-ac-2.cir	scripted_control
 regression/sens/sens-dc-1.cir	scripted_control
 regression/sens/sens-dc-2.cir	scripted_control
+sensitivity/diffpair.cir	smoke
 regression/temper/temper-1.cir	scripted_control
 regression/temper/temper-2.cir	scripted_control
 regression/temper/temper-3.cir	scripted_control
