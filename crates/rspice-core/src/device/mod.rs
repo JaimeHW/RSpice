@@ -15,6 +15,7 @@ pub mod semiconductor;
 // Other devices (kept at root level)
 pub mod behavioral;
 pub mod controlled;
+mod coupled_transmission_line;
 pub mod ffi;
 pub mod gan_hemt;
 pub mod model_bypass;
@@ -49,6 +50,7 @@ pub use semiconductor::{Bjt, BjtType, Diode};
 // Re-export from root-level modules
 pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
 pub use controlled::{Cccs, Ccvs, Vccs, Vcvs};
+pub use coupled_transmission_line::CoupledTransmissionLine;
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;

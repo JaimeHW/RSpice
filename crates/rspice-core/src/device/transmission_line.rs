@@ -196,6 +196,9 @@ pub struct TransmissionLine {
     /// DC equivalent series resistance used to couple near/far conductors
     /// during operating-point solves. `0` means "ideal short fallback".
     dc_series_resistance: Value,
+    /// Characteristic loss-dispersion time constant used to smooth the
+    /// delayed-wave history for RLGC model-card lines.
+    loss_time_constant: Value,
 
     // Internal state
     /// Branch indices for current variables
@@ -207,6 +210,12 @@ pub struct TransmissionLine {
     history_forward: DelayBuffer,
     /// V2 + Z0*I2 history  
     history_backward: DelayBuffer,
+    /// Smoothed forward wave stored into the delay history
+    filtered_forward_wave: Value,
+    /// Smoothed backward wave stored into the delay history
+    filtered_backward_wave: Value,
+    /// Whether the filtered wave state has been seeded yet
+    history_initialized: bool,
 
     /// Current simulation time
     current_time: Value,
@@ -235,10 +244,14 @@ impl TransmissionLine {
             nl: None,
             attenuation: 1.0,
             dc_series_resistance: 0.0,
+            loss_time_constant: 0.0,
             branch1: None,
             branch2: None,
             history_forward: DelayBuffer::new(td),
             history_backward: DelayBuffer::new(td),
+            filtered_forward_wave: 0.0,
+            filtered_backward_wave: 0.0,
+            history_initialized: false,
             current_time: 0.0,
         }
     }
@@ -309,6 +322,21 @@ impl TransmissionLine {
         self.dc_series_resistance
     }
 
+    /// Configure the lossy-line history smoothing time constant.
+    pub fn set_loss_time_constant(&mut self, tau: Value) {
+        self.loss_time_constant = if tau.is_finite() && tau > 0.0 {
+            tau
+        } else {
+            0.0
+        };
+    }
+
+    /// Get the configured lossy-line history smoothing time constant.
+    #[inline]
+    pub fn loss_time_constant(&self) -> Value {
+        self.loss_time_constant
+    }
+
     /// Get DC equivalent conductance used by OP/DC fallback stamping.
     #[inline]
     pub fn dc_series_conductance(&self) -> Value {
@@ -334,13 +362,33 @@ impl TransmissionLine {
 
     /// Update history buffers with current state
     pub fn update_history(&mut self, time: Value, v1: Value, i1: Value, v2: Value, i2: Value) {
-        self.current_time = time;
+        let raw_forward = v1 + self.z0 * i1;
+        let raw_backward = v2 + self.z0 * i2;
+
+        if !self.history_initialized {
+            self.filtered_forward_wave = raw_forward;
+            self.filtered_backward_wave = raw_backward;
+            self.history_initialized = true;
+        } else if self.loss_time_constant > 0.0 {
+            let dt = (time - self.current_time).max(0.0);
+            let alpha = if !dt.is_finite() || dt <= 0.0 {
+                1.0
+            } else {
+                (dt / (self.loss_time_constant + dt)).clamp(0.0, 1.0)
+            };
+            self.filtered_forward_wave += alpha * (raw_forward - self.filtered_forward_wave);
+            self.filtered_backward_wave += alpha * (raw_backward - self.filtered_backward_wave);
+        } else {
+            self.filtered_forward_wave = raw_forward;
+            self.filtered_backward_wave = raw_backward;
+        }
 
         // Forward wave: V1 + Z0*I1 propagates to port 2
-        self.history_forward.push(time, v1 + self.z0 * i1);
+        self.history_forward.push(time, self.filtered_forward_wave);
 
         // Backward wave: V2 + Z0*I2 propagates to port 1
-        self.history_backward.push(time, v2 + self.z0 * i2);
+        self.history_backward.push(time, self.filtered_backward_wave);
+        self.current_time = time;
     }
 
     /// Get delayed forward wave (arrives at port 2)
@@ -355,18 +403,31 @@ impl TransmissionLine {
 
     /// Get delayed forward wave at an explicit simulation time.
     pub fn delayed_forward_at(&self, time: Value) -> Value {
-        self.history_forward.get_delayed(time, self.td) * self.attenuation
+        self.delayed_forward_raw_at(time) * self.attenuation
     }
 
     /// Get delayed backward wave at an explicit simulation time.
     pub fn delayed_backward_at(&self, time: Value) -> Value {
-        self.history_backward.get_delayed(time, self.td) * self.attenuation
+        self.delayed_backward_raw_at(time) * self.attenuation
+    }
+
+    /// Get the delayed forward history wave without applying one-way attenuation.
+    pub fn delayed_forward_raw_at(&self, time: Value) -> Value {
+        self.history_forward.get_delayed(time, self.td)
+    }
+
+    /// Get the delayed backward history wave without applying one-way attenuation.
+    pub fn delayed_backward_raw_at(&self, time: Value) -> Value {
+        self.history_backward.get_delayed(time, self.td)
     }
 
     /// Reset for new simulation
     pub fn reset(&mut self) {
         self.history_forward.clear();
         self.history_backward.clear();
+        self.filtered_forward_wave = 0.0;
+        self.filtered_backward_wave = 0.0;
+        self.history_initialized = false;
         self.current_time = 0.0;
     }
 
@@ -551,6 +612,23 @@ mod tests {
     }
 
     #[test]
+    fn test_tline_loss_time_constant_smooths_delayed_wave_history() {
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        tl.set_loss_time_constant(1e-9);
+
+        tl.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.0e-9, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(2.0e-9, 1.0, 0.0, 0.0, 0.0);
+
+        let delayed = tl.delayed_forward();
+        assert!(
+            (0.4..0.6).contains(&delayed),
+            "expected smoothed delayed wave near 0.5, got {}",
+            delayed
+        );
+    }
+
+    #[test]
     fn test_from_frequency() {
         let tl = TransmissionLine::from_frequency(
             "T1".to_string(),
@@ -583,6 +661,19 @@ mod tests {
             "expected attenuated delayed wave near 0.5, got {}",
             delayed
         );
+    }
+
+    #[test]
+    fn test_tline_raw_delayed_wave_ignores_attenuation() {
+        let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1e-9);
+        tl.set_attenuation(0.25);
+
+        tl.update_history(0.0, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.0e-9, 1.0, 0.0, 0.0, 0.0);
+        tl.update_history(1.5e-9, 1.0, 0.0, 0.0, 0.0);
+
+        assert!((tl.delayed_forward_raw_at(1.5e-9) - 1.0).abs() < 0.1);
+        assert!((tl.delayed_forward_at(1.5e-9) - 0.25).abs() < 0.1);
     }
 
     #[test]

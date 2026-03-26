@@ -45,6 +45,17 @@ pub struct StaticMatrix {
 }
 
 impl StaticMatrix {
+    fn to_dense_real(&self) -> Vec<Vec<Value>> {
+        let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
+        for col in 0..self.ncols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                dense[row][col] = self.values[idx];
+            }
+        }
+        dense
+    }
+
     /// Build static structure from triplets (called once during setup)
     pub fn from_triplets(
         nrows: usize,
@@ -320,6 +331,23 @@ impl StaticMatrix {
 
         // Extract solution
         Ok((0..n).map(|i| b[(i, 0)]).collect())
+    }
+
+    /// Solve Ax = b via dense Gaussian elimination.
+    ///
+    /// This is used as a high-stability fallback for small linear systems with
+    /// strong transformer/coupling fill-in where sparse LU can become noisy.
+    pub fn solve_dense(&self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        if self.nrows != rhs.len() || self.ncols != rhs.len() {
+            return Err(SolverError::InvalidCircuit(format!(
+                "Dense solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
+                self.nrows,
+                self.ncols,
+                rhs.len()
+            )));
+        }
+
+        solve_gauss(self.to_dense_real(), rhs.to_vec())
     }
 }
 
@@ -734,6 +762,24 @@ mod tests {
         // Solve again - should use cached structure
         let x2 = matrix.solve(&[5.0, 7.0]).unwrap();
         assert!((x2[0] - 1.6).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_static_matrix_dense_solve_matches_sparse_solve() {
+        let triplets = vec![
+            (0, 0, 4.0),
+            (0, 1, -1.0),
+            (1, 0, 2.0),
+            (1, 1, 3.0),
+        ];
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
+        let rhs = [7.0, 8.0];
+
+        let sparse = matrix.solve(&rhs).unwrap();
+        let dense = matrix.solve_dense(&rhs).unwrap();
+
+        assert!((sparse[0] - dense[0]).abs() < 1e-12);
+        assert!((sparse[1] - dense[1]).abs() < 1e-12);
     }
 
     #[test]

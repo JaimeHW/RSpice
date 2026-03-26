@@ -25,6 +25,10 @@ mod startup;
 /// Newton-Raphson divergence on stiff nonlinear circuits (e.g., BJT exponential I-V).
 /// This value matches the DC solver's MAX_VOLTAGE in convergence.rs for consistency.
 const MAX_VOLTAGE: Value = 1000.0;
+/// Conservative magnitude limit for branch-state unknowns (currents and auxiliary
+/// MNA variables). These states can legitimately exceed node-voltage scales in
+/// tightly coupled passive networks, so they need a separate guardrail.
+const MAX_BRANCH_STATE_MAGNITUDE: Value = 1e12;
 /// Maximum allowed per-iteration node update during Newton damping.
 ///
 /// This bound controls nonlinear solve trust-region size.
@@ -77,6 +81,12 @@ struct MosfetTransientHistory {
     vgb_prev: Vec<Value>,
     vgb_prev_prev: Vec<Value>,
     igb_prev: Vec<Value>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CoupledTlineReferenceState {
+    near_modal: Vec<Value>,
+    far_modal: Vec<Value>,
 }
 
 impl Engine {
@@ -330,18 +340,34 @@ impl Engine {
     }
 
     #[inline]
+    fn differential_port_voltages(
+        solution: &[Value],
+        nodes: &[usize],
+        reference: usize,
+    ) -> Vec<Value> {
+        let reference_voltage = Self::node_voltage(solution, reference);
+        nodes.iter()
+            .map(|&node| Self::node_voltage(solution, node) - reference_voltage)
+            .collect()
+    }
+
+    #[inline]
     fn tline_transient_port_impedance(tl: &crate::device::TransmissionLine) -> Value {
-        // For RLGC-based lossy lines, include a calibrated fraction of the
-        // total distributed series resistance in each port's local driving-point
-        // impedance. This better tracks ngspice LTRA/TXL near-end behavior than
-        // a pure 1/Z0 companion while keeping lossless lines unchanged.
-        const RLGC_PORT_R_WEIGHT: Value = 0.82;
-        (tl.impedance() + RLGC_PORT_R_WEIGHT * tl.dc_series_resistance()).max(1e-12)
+        // Keep the local port relation anchored to the characteristic
+        // impedance; lossy model-card behavior is captured through delayed-wave
+        // attenuation and history smoothing rather than by distorting the
+        // immediate Z0 boundary condition.
+        tl.impedance().max(1e-12)
     }
 
     #[inline]
     fn tline_transient_port_conductance(tl: &crate::device::TransmissionLine) -> Value {
         1.0 / Self::tline_transient_port_impedance(tl)
+    }
+
+    #[inline]
+    fn tline_transient_wave_attenuation(tl: &crate::device::TransmissionLine) -> Value {
+        tl.attenuation()
     }
 
     #[inline]
@@ -366,6 +392,49 @@ impl Engine {
             }
             matrix.add(node_neg - 1, node_neg - 1, g);
             rhs[node_neg - 1] -= i_eq;
+        }
+    }
+
+    #[inline]
+    fn stamp_shared_reference_port(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        nodes: &[usize],
+        reference: usize,
+        admittance: &[Vec<Value>],
+        eq_currents: &[Value],
+    ) {
+        let row_sums: Vec<Value> = admittance
+            .iter()
+            .map(|row| row.iter().copied().sum())
+            .collect();
+
+        for (row_idx, &node_row) in nodes.iter().enumerate() {
+            if node_row == 0 {
+                continue;
+            }
+            for (col_idx, &node_col) in nodes.iter().enumerate() {
+                if node_col > 0 {
+                    matrix.add(node_row - 1, node_col - 1, admittance[row_idx][col_idx]);
+                }
+            }
+            if reference > 0 {
+                matrix.add(node_row - 1, reference - 1, -row_sums[row_idx]);
+            }
+            rhs[node_row - 1] += eq_currents.get(row_idx).copied().unwrap_or(0.0);
+        }
+
+        if reference > 0 {
+            let mut ref_injection = 0.0;
+            for (col_idx, &node_col) in nodes.iter().enumerate() {
+                if node_col > 0 {
+                    matrix.add(reference - 1, node_col - 1, -row_sums[col_idx]);
+                }
+                ref_injection -= eq_currents.get(col_idx).copied().unwrap_or(0.0);
+            }
+            let ref_sum: Value = row_sums.iter().copied().sum();
+            matrix.add(reference - 1, reference - 1, ref_sum);
+            rhs[reference - 1] += ref_injection;
         }
     }
 
@@ -874,17 +943,51 @@ impl Engine {
         for (idx, tl) in circuit.tlines.iter().enumerate() {
             let g = Self::tline_transient_port_conductance(tl);
             let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
-            let atten = tl.attenuation();
+            let atten = Self::tline_transient_wave_attenuation(tl);
 
             // Propagate deviations from the initial DC operating point so
             // constant biases remain invariant even on attenuated lines.
-            let incoming1 = tl.delayed_backward_at(time) + (1.0 - atten) * v2_ref;
-            let incoming2 = tl.delayed_forward_at(time) + (1.0 - atten) * v1_ref;
+            let incoming1 = tl.delayed_backward_raw_at(time) * atten + (1.0 - atten) * v2_ref;
+            let incoming2 = tl.delayed_forward_raw_at(time) * atten + (1.0 - atten) * v1_ref;
             let i_eq_p1 = g * incoming1;
             let i_eq_p2 = g * incoming2;
 
             Self::stamp_tline_port(matrix, rhs, tl.node1_pos, tl.node1_neg, g, i_eq_p1);
             Self::stamp_tline_port(matrix, rhs, tl.node2_pos, tl.node2_neg, g, i_eq_p2);
+        }
+    }
+
+    #[inline]
+    fn stamp_coupled_tline_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        coupled_tline_refs: &[CoupledTlineReferenceState],
+    ) {
+        for (idx, tl) in circuit.coupled_tlines.iter().enumerate() {
+            let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
+            let incoming_near = tl.incoming_near_modal(time, &refs.far_modal);
+            let incoming_far = tl.incoming_far_modal(time, &refs.near_modal);
+            let eq_near = tl.port_equivalent_current(&incoming_near);
+            let eq_far = tl.port_equivalent_current(&incoming_far);
+
+            Self::stamp_shared_reference_port(
+                matrix,
+                rhs,
+                &tl.near_nodes,
+                tl.near_ref,
+                tl.port_admittance(),
+                &eq_near,
+            );
+            Self::stamp_shared_reference_port(
+                matrix,
+                rhs,
+                &tl.far_nodes,
+                tl.far_ref,
+                tl.port_admittance(),
+                &eq_far,
+            );
         }
     }
 
@@ -917,6 +1020,40 @@ impl Engine {
                 v2,
                 i2_actual * wave_scale,
             );
+        }
+        refs
+    }
+
+    #[inline]
+    fn initialize_coupled_tline_history(
+        circuit: &mut crate::circuit::Circuit,
+        initial_solution: &[Value],
+        initial_time: Value,
+    ) -> Vec<CoupledTlineReferenceState> {
+        let mut refs = Vec::with_capacity(circuit.coupled_tlines.len());
+        for tl in &mut circuit.coupled_tlines {
+            tl.reset();
+            let near_physical =
+                Self::differential_port_voltages(initial_solution, &tl.near_nodes, tl.near_ref);
+            let far_physical =
+                Self::differential_port_voltages(initial_solution, &tl.far_nodes, tl.far_ref);
+            let near_modal = tl.modalize_port_voltage(&near_physical);
+            let far_modal = tl.modalize_port_voltage(&far_physical);
+            let near_currents = tl.port_currents(&near_physical, &far_modal);
+            let far_currents = tl.port_currents(&far_physical, &near_modal);
+            let near_modal_currents = tl.modalize_port_current(&near_currents);
+            let far_modal_currents = tl.modalize_port_current(&far_currents);
+            tl.update_modal_history(
+                initial_time,
+                &near_modal,
+                &near_modal_currents,
+                &far_modal,
+                &far_modal_currents,
+            );
+            refs.push(CoupledTlineReferenceState {
+                near_modal,
+                far_modal,
+            });
         }
         refs
     }
@@ -962,6 +1099,7 @@ impl Engine {
         jfet_history: &mut JfetTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
         tline_dc_refs: &[(Value, Value)],
+        coupled_tline_refs: &[CoupledTlineReferenceState],
     ) {
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -1011,9 +1149,11 @@ impl Engine {
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
             let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
-            let atten = tl.attenuation();
-            let incoming_port1 = tl.delayed_backward_at(accepted_time) + (1.0 - atten) * v2_ref;
-            let incoming_port2 = tl.delayed_forward_at(accepted_time) + (1.0 - atten) * v1_ref;
+            let atten = Self::tline_transient_wave_attenuation(tl);
+            let incoming_port1 =
+                tl.delayed_backward_raw_at(accepted_time) * atten + (1.0 - atten) * v2_ref;
+            let incoming_port2 =
+                tl.delayed_forward_raw_at(accepted_time) * atten + (1.0 - atten) * v1_ref;
             let i1_actual = g * v1 - g * incoming_port1;
             let i2_actual = g * v2 - g * incoming_port2;
             let wave_scale = z_port / tl.impedance();
@@ -1023,6 +1163,29 @@ impl Engine {
                 i1_actual * wave_scale,
                 v2,
                 i2_actual * wave_scale,
+            );
+        }
+
+        for (idx, tl) in circuit.coupled_tlines.iter_mut().enumerate() {
+            let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
+            let near_physical =
+                Self::differential_port_voltages(accepted_solution, &tl.near_nodes, tl.near_ref);
+            let far_physical =
+                Self::differential_port_voltages(accepted_solution, &tl.far_nodes, tl.far_ref);
+            let near_modal = tl.modalize_port_voltage(&near_physical);
+            let far_modal = tl.modalize_port_voltage(&far_physical);
+            let incoming_near = tl.incoming_near_modal(accepted_time, &refs.far_modal);
+            let incoming_far = tl.incoming_far_modal(accepted_time, &refs.near_modal);
+            let near_currents = tl.port_currents(&near_physical, &incoming_near);
+            let far_currents = tl.port_currents(&far_physical, &incoming_far);
+            let near_modal_currents = tl.modalize_port_current(&near_currents);
+            let far_modal_currents = tl.modalize_port_current(&far_currents);
+            tl.update_modal_history(
+                accepted_time,
+                &near_modal,
+                &near_modal_currents,
+                &far_modal,
+                &far_modal_currents,
             );
         }
 
@@ -1291,10 +1454,13 @@ impl Engine {
                 branch_names: Vec::new(),
             });
         }
+        let hinted_max_step = circuit
+            .transient_max_step_hint
+            .map_or(max_step, |hint| max_step.min(hint));
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
-        let source_step_hint = Self::transient_source_step_hint(netlist, max_step);
+        let source_step_hint = Self::transient_source_step_hint(netlist, hinted_max_step);
         circuit
             .voltage_sources
             .set_transient_context(source_step_hint, tstop);
@@ -1315,6 +1481,10 @@ impl Engine {
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient =
             !circuit.has_nonlinear_devices() && !circuit.has_xspice_devices();
+        let prefer_dense_linear_solver = is_strictly_linear_transient
+            && size <= 160
+            && (!circuit.multi_winding_transformers.is_empty()
+                || !circuit.coupled_inductor_pairs.is_empty());
 
         // Initialize timestep controller.
         // BJT-heavy decks (notably VBIC regression circuits) need a smaller startup
@@ -1322,9 +1492,9 @@ impl Engine {
         // transitioning to larger steps.
         let has_bjts = !circuit.bjts.devices.is_empty();
         let (startup_div, min_div) = Self::startup_timestep_divisors(has_bjts);
-        let initial_step = (max_step / startup_div).min(tstop / 100.0);
-        let practical_min = (max_step / min_div).max(1e-15);
-        let mut timestep = TimestepController::new(initial_step, practical_min, max_step);
+        let initial_step = (hinted_max_step / startup_div).min(tstop / 100.0);
+        let practical_min = (hinted_max_step / min_div).max(1e-15);
+        let mut timestep = TimestepController::new(initial_step, practical_min, hinted_max_step);
         let mut breakpoints = BreakpointManager::new();
         Self::collect_transient_source_breakpoints(
             &circuit,
@@ -1428,6 +1598,8 @@ impl Engine {
         circuit.update_coupled_inductor_pair_state(&solution);
         circuit.update_multi_winding_transformer_state(&solution);
         let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, 0.0);
+        let coupled_tline_refs =
+            Self::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
@@ -1515,13 +1687,13 @@ impl Engine {
             let newton_step_delta_limit = Self::startup_step_delta_limit(
                 initial_solution_mode,
                 step_time,
-                max_step,
+                hinted_max_step,
                 MAX_NEWTON_ITER_DELTA_V,
             );
             let force_accept_delta_limit = Self::startup_step_delta_limit(
                 initial_solution_mode,
                 step_time,
-                max_step,
+                hinted_max_step,
                 MAX_FORCE_ACCEPT_DELTA_V,
             );
             let current_method = current_integration_method(&trapgear);
@@ -1626,6 +1798,13 @@ impl Engine {
                     t + dt,
                     &tline_dc_refs,
                 );
+                Self::stamp_coupled_tline_companions(
+                    &circuit,
+                    &mut matrix,
+                    &mut rhs,
+                    t + dt,
+                    &coupled_tline_refs,
+                );
 
                 // Stamp nonlinear devices if present
                 if circuit.has_nonlinear_devices() {
@@ -1640,7 +1819,13 @@ impl Engine {
                 }
 
                 // Solve and check convergence
-                match matrix.solve(&rhs) {
+                let solve_result = if prefer_dense_linear_solver {
+                    matrix.solve_dense(&rhs)
+                } else {
+                    matrix.solve(&rhs)
+                };
+
+                match solve_result {
                     Ok(mut sol) => {
                         had_solver_candidate = true;
                         // Sanity check: detect and handle NaN/Inf/excessive values.
@@ -1651,10 +1836,15 @@ impl Engine {
                         let mut logged_divergence = false;
 
                         for (i, v) in sol.iter_mut().enumerate() {
+                            let magnitude_limit = if i < num_nodes {
+                                MAX_VOLTAGE
+                            } else {
+                                MAX_BRANCH_STATE_MAGNITUDE
+                            };
                             if !v.is_finite() {
                                 if !logged_divergence {
                                     log::debug!(
-                                        "Transient: Newton divergence at t={:.3e}s, node {}: {:.3e} - reducing timestep",
+                                        "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
                                         t + dt,
                                         i,
                                         *v
@@ -1664,24 +1854,29 @@ impl Engine {
                                 // Non-finite values cannot be used; fall back to prior guess.
                                 *v = new_solution[i];
                                 has_bad_values = true;
-                            } else if v.abs() > MAX_VOLTAGE {
+                            } else if v.abs() > magnitude_limit {
                                 if !logged_divergence {
                                     log::debug!(
-                                        "Transient: Newton divergence at t={:.3e}s, node {}: {:.3e} - reducing timestep",
+                                        "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
                                         t + dt,
                                         i,
                                         *v
                                     );
                                     logged_divergence = true;
                                 }
-                                // Soft-limit finite overflow around previous Newton guess
-                                // instead of hard-clamping to +/-MAX_VOLTAGE. Hard rail
-                                // clamps can be force-accepted and then contaminate dynamic
-                                // history with nonphysical state.
+                                // Soft-limit finite overflow around the previous Newton
+                                // guess instead of hard-clamping to a global rail. Hard
+                                // clamps can be force-accepted and then contaminate
+                                // dynamic history with nonphysical state.
                                 let old = new_solution[i];
                                 let delta = *v - old;
                                 if delta.is_finite() {
-                                    *v = old + delta.signum() * newton_step_delta_limit;
+                                    let limit = if i < num_nodes {
+                                        newton_step_delta_limit
+                                    } else {
+                                        magnitude_limit * 0.1
+                                    };
+                                    *v = old + delta.signum() * limit;
                                 } else {
                                     *v = old;
                                 }
@@ -1909,6 +2104,7 @@ impl Engine {
                         &mut jfet_history,
                         &mut mosfet_history,
                         &tline_dc_refs,
+                        &coupled_tline_refs,
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
@@ -1947,7 +2143,7 @@ impl Engine {
                         &lte_estimator,
                         &solution,
                         dt,
-                        max_step,
+            max_step,
                         is_strictly_linear_transient,
                         expected_source_delta,
                     );
@@ -2078,6 +2274,7 @@ impl Engine {
                         &mut jfet_history,
                         &mut mosfet_history,
                         &tline_dc_refs,
+                        &coupled_tline_refs,
                     );
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
@@ -2098,7 +2295,7 @@ impl Engine {
                         &lte_estimator,
                         &solution,
                         dt,
-                        max_step,
+            max_step,
                         is_strictly_linear_transient,
                         expected_source_delta,
                     );
@@ -2181,6 +2378,7 @@ impl Engine {
                 &mut jfet_history,
                 &mut mosfet_history,
                 &tline_dc_refs,
+                &coupled_tline_refs,
             );
 
             // Accept XSPICE timestep (commit state changes)

@@ -435,6 +435,44 @@ impl Engine {
             }
         }
 
+        for tl in &circuit.coupled_tlines {
+            // DC fallback topology: each conductor can short near-to-far in operating point.
+            for conductor in 0..tl.conductors() {
+                let near = tl.near_nodes[conductor];
+                let far = tl.far_nodes[conductor];
+                if near > 0 {
+                    triplets.push((near - 1, near - 1, 0.0));
+                }
+                if far > 0 {
+                    triplets.push((far - 1, far - 1, 0.0));
+                }
+                if near > 0 && far > 0 {
+                    triplets.push((near - 1, far - 1, 0.0));
+                    triplets.push((far - 1, near - 1, 0.0));
+                }
+            }
+
+            for (nodes, reference) in [(&tl.near_nodes, tl.near_ref), (&tl.far_nodes, tl.far_ref)] {
+                for &row in nodes {
+                    if row == 0 {
+                        continue;
+                    }
+                    for &col in nodes {
+                        if col > 0 {
+                            triplets.push((row - 1, col - 1, 0.0));
+                        }
+                    }
+                    if reference > 0 {
+                        triplets.push((row - 1, reference - 1, 0.0));
+                        triplets.push((reference - 1, row - 1, 0.0));
+                    }
+                }
+                if reference > 0 {
+                    triplets.push((reference - 1, reference - 1, 0.0));
+                }
+            }
+        }
+
         // XSPICE analog output ports:
         // - Voltage outputs reserve branch-equation topology (MNA branch variable)
         // - Current outputs reserve nodal conductance/current topology.

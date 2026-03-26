@@ -1718,10 +1718,15 @@ pub struct CircuitData {
     pub(crate) vswitches: Vec<crate::device::VoltageSwitch>,
     pub(crate) iswitches: Vec<crate::device::CurrentSwitch>,
     pub(crate) tlines: Vec<crate::device::TransmissionLine>,
+    pub(crate) coupled_tlines: Vec<crate::device::CoupledTransmissionLine>,
     pub(crate) couplings: Vec<crate::device::InductorCoupling>,
     pub(crate) coupled_inductor_pairs: Vec<CoupledInductorPairBinding>,
     pub(crate) multi_winding_transformers: Vec<MultiWindingTransformerBinding>,
     pub(crate) jiles_atherton_inductors: Vec<JilesAthertonBinding>,
+    /// Circuit-level transient step-size hint for synthesized distributed
+    /// structures that need finer temporal resolution than the user-level
+    /// `.tran` print/max-step request to preserve propagation fidelity.
+    pub(crate) transient_max_step_hint: Option<Value>,
 
     // Behavioral sources (expression-based B-elements)
     pub(crate) behavioral_sources: BehavioralSources,
@@ -1780,10 +1785,12 @@ impl CircuitData {
             vswitches: Vec::new(),
             iswitches: Vec::new(),
             tlines: Vec::new(),
+            coupled_tlines: Vec::new(),
             couplings: Vec::new(),
             coupled_inductor_pairs: Vec::new(),
             multi_winding_transformers: Vec::new(),
             jiles_atherton_inductors: Vec::new(),
+            transient_max_step_hint: None,
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),
@@ -1809,6 +1816,18 @@ impl CircuitData {
         self.num_nodes += 1;
         self.node_map.insert(name.to_string(), self.num_nodes);
         self.num_nodes
+    }
+
+    /// Tighten the circuit-level transient max-step hint.
+    pub fn tighten_transient_max_step_hint(&mut self, hint: Value) {
+        if !hint.is_finite() || hint <= 0.0 {
+            return;
+        }
+
+        self.transient_max_step_hint = Some(
+            self.transient_max_step_hint
+                .map_or(hint, |existing| existing.min(hint)),
+        );
     }
 
     #[inline]
@@ -1975,6 +1994,12 @@ impl CircuitData {
             tline.node1_neg = Self::remap_node_id(tline.node1_neg, old_node_id);
             tline.node2_pos = Self::remap_node_id(tline.node2_pos, old_node_id);
             tline.node2_neg = Self::remap_node_id(tline.node2_neg, old_node_id);
+        }
+        for tline in &mut self.coupled_tlines {
+            Self::remap_node_slice(&mut tline.near_nodes, old_node_id);
+            Self::remap_node_slice(&mut tline.far_nodes, old_node_id);
+            tline.near_ref = Self::remap_node_id(tline.near_ref, old_node_id);
+            tline.far_ref = Self::remap_node_id(tline.far_ref, old_node_id);
         }
         for binding in &mut self.coupled_inductor_pairs {
             binding.device.node1_pos = Self::remap_node_id(binding.device.node1_pos, old_node_id);
@@ -2496,11 +2521,41 @@ impl CircuitData {
     }
 
     #[inline]
+    fn stamp_coupled_tlines_dc_direct(&self, matrix: &mut StaticMatrix) {
+        for tline in &self.coupled_tlines {
+            for conductor in 0..tline.conductors() {
+                let g_series = 1.0 / tline.dc_series_resistance(conductor);
+                Self::stamp_tline_port_direct(
+                    matrix,
+                    tline.near_nodes[conductor],
+                    tline.far_nodes[conductor],
+                    g_series,
+                );
+            }
+        }
+    }
+
+    #[inline]
     fn stamp_tlines_dc(&self, matrix: &mut TripletMatrix) {
         for tl in &self.tlines {
             let g_series = tl.dc_series_conductance();
             Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node2_pos, g_series);
             Self::stamp_tline_port_triplet(matrix, tl.node1_neg, tl.node2_neg, g_series);
+        }
+    }
+
+    #[inline]
+    fn stamp_coupled_tlines_dc(&self, matrix: &mut TripletMatrix) {
+        for tline in &self.coupled_tlines {
+            for conductor in 0..tline.conductors() {
+                let g_series = 1.0 / tline.dc_series_resistance(conductor);
+                Self::stamp_tline_port_triplet(
+                    matrix,
+                    tline.near_nodes[conductor],
+                    tline.far_nodes[conductor],
+                    g_series,
+                );
+            }
         }
     }
 
@@ -2593,6 +2648,7 @@ impl CircuitData {
 
         // Transmission-line DC fallback: couple near/far conductors via series path.
         self.stamp_tlines_dc_direct(matrix);
+        self.stamp_coupled_tlines_dc_direct(matrix);
     }
 
     /// Stamp linear devices for transient Newton iterations.
@@ -2641,6 +2697,7 @@ impl CircuitData {
         self.ccvs
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
         self.stamp_tlines_dc_direct(matrix);
+        self.stamp_coupled_tlines_dc_direct(matrix);
     }
 
     /// Stamp all linear devices for DC analysis
@@ -2657,6 +2714,7 @@ impl CircuitData {
         self.cccs.stamp_all(matrix, num_nodes);
         self.ccvs.stamp_all(matrix, num_nodes);
         self.stamp_tlines_dc(matrix);
+        self.stamp_coupled_tlines_dc(matrix);
     }
 
     /// Check if circuit has any nonlinear devices requiring Newton-Raphson

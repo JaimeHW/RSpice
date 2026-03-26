@@ -8,7 +8,9 @@ pub(super) struct TransmissionLineModelParams {
     pub(super) freq: Option<f64>,
     pub(super) nl: Option<f64>,
     pub(super) r: Option<f64>,
+    pub(super) l: Option<f64>,
     pub(super) g: Option<f64>,
+    pub(super) c: Option<f64>,
     pub(super) len: Option<f64>,
     pub(super) alpha: Option<f64>,
     pub(super) atten: Option<f64>,
@@ -441,14 +443,16 @@ pub(super) fn resolve_tline_model_params(
         freq: model_param(&model.params, &["F", "FREQ"]),
         nl: model_param(&model.params, &["NL"]),
         r: model_param(&model.params, &["R", "R0"]),
+        l: model_param(&model.params, &["L", "L0"]),
         g: model_param(&model.params, &["G", "G0"]),
+        c: model_param(&model.params, &["C", "C0"]),
         len: model_param(&model.params, &["LEN", "LENGTH"]),
         alpha: model_param(&model.params, &["ALPHA"]),
         atten: model_param(&model.params, &["ATTEN", "ATTENDB", "LOSSDB"]),
     };
 
-    let l = model_param(&model.params, &["L", "L0"]);
-    let c = model_param(&model.params, &["C", "C0"]);
+    let l = params.l;
+    let c = params.c;
     let len = params.len;
 
     if params.z0.is_none()
@@ -714,6 +718,23 @@ pub(super) fn tline_model_attenuation(params: TransmissionLineModelParams, z0: f
     }
 
     None
+}
+
+#[allow(dead_code)]
+pub(super) fn tline_model_loss_time_constant(params: TransmissionLineModelParams) -> Option<f64> {
+    let len = params.len?;
+    if !len.is_finite() || len <= 0.0 {
+        return None;
+    }
+
+    let rc_term = params.r.unwrap_or(0.0).max(0.0) * params.c.unwrap_or(0.0).max(0.0);
+    let lg_term = params.l.unwrap_or(0.0).max(0.0) * params.g.unwrap_or(0.0).max(0.0);
+    let tau = 0.5 * (rc_term + lg_term) * len * len;
+    if tau.is_finite() && tau > 0.0 {
+        Some(tau)
+    } else {
+        None
+    }
 }
 
 pub(super) fn positive_model_param(

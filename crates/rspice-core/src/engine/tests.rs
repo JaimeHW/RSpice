@@ -3673,6 +3673,7 @@ O1 1 0 2 0 LLINE
         );
     }
 
+
     #[test]
     fn test_build_yline_inline_values_override_model_card() {
         let netlist_str = r#"
@@ -3771,25 +3772,40 @@ P1 V1 V2 0 V3 V4 0 CPL1
         let engine = Engine::default();
         let circuit = engine
             .build_circuit(&netlist)
-            .expect("CPL P-line should synthesize a distributed RLGC ladder");
+            .expect("CPL P-line should build into a modal coupled line device");
 
         assert!(
             circuit.tlines.is_empty(),
             "CPL lines should expand into explicit distributed primitives, not scalar tlines"
         );
         assert_eq!(
+            circuit.coupled_tlines.len(),
+            1,
+            "2-conductor CPL line should build as one coupled transmission line"
+        );
+        assert_eq!(
             circuit.multi_winding_transformers.len(),
-            8,
-            "2-conductor CPL line should create one coupled section per distributed segment"
+            0,
+            "modal CPL implementation should not synthesize transformer ladders"
         );
         assert_eq!(
             circuit.coupled_inductor_pairs.len(),
             0,
-            "CPL implementation should use the dense multi-winding realization path"
+            "modal CPL implementation should not synthesize coupled-inductor ladders"
         );
+        assert_eq!(circuit.capacitors.len(), 0);
+        assert_eq!(circuit.resistors.len(), 0);
+
+        let tline = &circuit.coupled_tlines[0];
+        assert_eq!(tline.name, "P1");
+        assert_eq!(tline.conductors(), 2);
+        assert_eq!(tline.near_ref, 0);
+        assert_eq!(tline.far_ref, 0);
         assert!(
-            circuit.capacitors.len() >= 24,
-            "Expected distributed shunt capacitance network for CPL line"
+            circuit
+                .transient_max_step_hint
+                .is_some_and(|hint| hint > 0.0 && hint <= 0.25 * tline.min_mode_delay()),
+            "modal CPL line should tighten transient max-step from its fastest mode"
         );
     }
 
@@ -3824,14 +3840,11 @@ P1 V1 V2 RNEAR V3 V4 RFAR CPL1
             near_ref, far_ref,
             "references should remain distinct external nodes"
         );
-        assert!(
-            circuit
-                .resistors
-                .names
-                .iter()
-                .any(|name| name.contains("__cpl.refwire")),
-            "distinct references should create an internal reference chain"
-        );
+        assert_eq!(circuit.coupled_tlines.len(), 1);
+        let tline = &circuit.coupled_tlines[0];
+        assert_eq!(tline.near_ref, near_ref);
+        assert_eq!(tline.far_ref, far_ref);
+        assert_eq!(circuit.resistors.len(), 0);
     }
 
     #[test]

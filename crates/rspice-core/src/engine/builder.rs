@@ -101,8 +101,9 @@ fn is_bsimsoi_level(level: i32) -> bool {
     matches!(level, 55..=57)
 }
 
-const CPL_SECTION_MIN: usize = 8;
-const CPL_SECTION_MAX: usize = 16;
+const DISTRIBUTED_LINE_SECTION_MIN: usize = 16;
+const DISTRIBUTED_LINE_SECTION_MAX: usize = 64;
+const DISTRIBUTED_LINE_TARGET_SECTION_DELAY: f64 = 25e-12;
 const CPL_REALIZATION_TOL: f64 = 1e-18;
 const CPL_REFERENCE_SHORT_RESISTANCE: f64 = 1e-6;
 
@@ -233,8 +234,183 @@ fn add_behavioral_resistor(
     Ok(())
 }
 
-fn cpl_section_count(conductors: usize) -> usize {
-    (conductors.saturating_mul(4)).clamp(CPL_SECTION_MIN, CPL_SECTION_MAX)
+fn distributed_line_section_count(conductors: usize, estimated_delay: f64) -> usize {
+    let conductor_floor = conductors.saturating_mul(8).max(DISTRIBUTED_LINE_SECTION_MIN);
+    let delay_driven = if estimated_delay.is_finite() && estimated_delay > 0.0 {
+        (estimated_delay / DISTRIBUTED_LINE_TARGET_SECTION_DELAY)
+            .ceil()
+            .max(1.0) as usize
+    } else {
+        conductor_floor
+    };
+
+    delay_driven
+        .max(conductor_floor)
+        .clamp(
+            conductor_floor,
+            DISTRIBUTED_LINE_SECTION_MAX.max(conductor_floor),
+        )
+}
+
+#[allow(dead_code)]
+fn build_scalar_rlgc_line(
+    circuit: &mut CircuitData,
+    instance_name: &str,
+    node_near: usize,
+    node_near_ref: usize,
+    node_far: usize,
+    node_far_ref: usize,
+    params: TransmissionLineModelParams,
+) -> Result<(), SimulationError> {
+    let r = params.r.unwrap_or(0.0).max(0.0);
+    let l = params.l.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Transmission line '{}' requires finite positive L/L0 for distributed RLGC synthesis",
+            instance_name
+        ))
+    })?;
+    let g = params.g.unwrap_or(0.0).max(0.0);
+    let c = params.c.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Transmission line '{}' requires finite positive C/C0 for distributed RLGC synthesis",
+            instance_name
+        ))
+    })?;
+    let len = params.len.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Transmission line '{}' requires finite positive LEN/LENGTH for distributed RLGC synthesis",
+            instance_name
+        ))
+    })?;
+
+    if !l.is_finite() || l <= 0.0 || !c.is_finite() || c <= 0.0 || !len.is_finite() || len <= 0.0
+    {
+        return Err(SimulationError::Circuit(format!(
+            "Transmission line '{}' resolved invalid RLGC parameters (L={}, C={}, LEN={})",
+            instance_name, l, c, len
+        )));
+    }
+
+    let estimated_delay = len * (l * c).sqrt();
+    let sections = distributed_line_section_count(1, estimated_delay);
+    let section_length = len / sections as f64;
+    let section_delay = estimated_delay / sections as f64;
+    if section_delay.is_finite() && section_delay > 0.0 {
+        // The synthesized ladder is only faithful when the transient solver
+        // resolves each section's propagation interval with multiple steps.
+        circuit.tighten_transient_max_step_hint(0.5 * section_delay);
+    }
+    let mut boundary_nodes = vec![node_near; sections + 1];
+    boundary_nodes[sections] = node_far;
+    for section in 1..sections {
+        let node_name = format!("{}.__rlgc.b{}", instance_name, section);
+        boundary_nodes[section] = circuit.get_or_create_node(&node_name);
+    }
+
+    let mut boundary_refs = vec![node_near_ref; sections + 1];
+    boundary_refs[0] = node_near_ref;
+    boundary_refs[sections] = node_far_ref;
+    if node_near_ref != node_far_ref {
+        for section in 1..sections {
+            let node_name = format!("{}.__rlgc.ref{}", instance_name, section);
+            boundary_refs[section] = circuit.get_or_create_node(&node_name);
+        }
+        for section in 0..sections {
+            circuit.resistors.add(
+                format!("{}.__rlgc.refwire{}", instance_name, section + 1),
+                boundary_refs[section],
+                boundary_refs[section + 1],
+                CPL_REFERENCE_SHORT_RESISTANCE,
+            );
+        }
+    }
+
+    for boundary in 0..=sections {
+        let weight = if boundary == 0 || boundary == sections {
+            0.5
+        } else {
+            1.0
+        };
+        let lump_length = section_length * weight;
+        let node = boundary_nodes[boundary];
+        let reference = boundary_refs[boundary];
+
+        let c_lump = c * lump_length;
+        if c_lump > CPL_REALIZATION_TOL && node != reference {
+            circuit.capacitors.add(
+                format!("{}.__rlgc.cb{}", instance_name, boundary),
+                node,
+                reference,
+                c_lump,
+            );
+        }
+
+        let g_lump = g * lump_length;
+        if g_lump > CPL_REALIZATION_TOL && node != reference {
+            circuit.resistors.add(
+                format!("{}.__rlgc.gb{}", instance_name, boundary),
+                node,
+                reference,
+                1.0 / g_lump.max(CPL_REALIZATION_TOL),
+            );
+        }
+    }
+
+    for section in 0..sections {
+        let start = boundary_nodes[section];
+        let end = boundary_nodes[section + 1];
+        let series_r = r * section_length;
+        let series_l = l * section_length;
+        let half_series_r = 0.5 * series_r;
+        let winding_start = if half_series_r > CPL_REALIZATION_TOL {
+            let next_node = circuit.get_or_create_node(&format!(
+                "{}.__rlgc.s{}.r.pre",
+                instance_name,
+                section + 1
+            ));
+            circuit.resistors.add(
+                format!("{}.__rlgc.s{}.r.pre", instance_name, section + 1),
+                start,
+                next_node,
+                half_series_r,
+            );
+            next_node
+        } else {
+            start
+        };
+
+        let winding_end = if half_series_r > CPL_REALIZATION_TOL {
+            let next_node = circuit.get_or_create_node(&format!(
+                "{}.__rlgc.s{}.r.post",
+                instance_name,
+                section + 1
+            ));
+            circuit.resistors.add(
+                format!("{}.__rlgc.s{}.r.post", instance_name, section + 1),
+                next_node,
+                end,
+                half_series_r,
+            );
+            next_node
+        } else {
+            end
+        };
+
+        let branch = circuit.allocate_branch_named(&format!(
+            "{}.__rlgc.s{}.l",
+            instance_name,
+            section + 1
+        ));
+        circuit.inductors.add(
+            format!("{}.__rlgc.s{}.l", instance_name, section + 1),
+            winding_start,
+            winding_end,
+            branch,
+            series_l,
+        );
+    }
+
+    Ok(())
 }
 
 fn validate_cpl_model_params(
@@ -405,162 +581,33 @@ fn build_cpl_multiconductor_line(
     })?;
     validate_cpl_model_params(model_name, &params)?;
 
-    let sections = cpl_section_count(conductors);
-    let section_length = params.length / sections as f64;
-    if !section_length.is_finite() || section_length <= 0.0 {
-        return Err(SimulationError::Circuit(format!(
-            "CPL model '{}' resolved invalid section length {}",
-            model_name, section_length
-        )));
-    }
-
     let near_ref = circuit.get_or_create_node(&element.nodes[conductors]);
     let far_ref = circuit.get_or_create_node(&element.nodes[element.nodes.len() - 1]);
+    let near_nodes: Vec<usize> = (0..conductors)
+        .map(|idx| circuit.get_or_create_node(&element.nodes[idx]))
+        .collect();
+    let far_nodes: Vec<usize> = (0..conductors)
+        .map(|idx| circuit.get_or_create_node(&element.nodes[conductors + 1 + idx]))
+        .collect();
 
-    let mut boundary_nodes = vec![vec![0usize; conductors]; sections + 1];
-    for conductor in 0..conductors {
-        boundary_nodes[0][conductor] = circuit.get_or_create_node(&element.nodes[conductor]);
-        boundary_nodes[sections][conductor] =
-            circuit.get_or_create_node(&element.nodes[conductors + 1 + conductor]);
+    let coupled_tline = crate::device::CoupledTransmissionLine::new(
+        element.name.clone(),
+        near_nodes,
+        near_ref,
+        far_nodes,
+        far_ref,
+        &params.r,
+        &params.l,
+        &params.c,
+        &params.g,
+        params.length,
+    )
+    .map_err(SimulationError::Circuit)?;
+    let min_mode_delay = coupled_tline.min_mode_delay();
+    if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
+        circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
     }
-    for section in 1..sections {
-        for conductor in 0..conductors {
-            let node_name = format!("{}.__cpl.b{}.c{}", element.name, section, conductor + 1);
-            boundary_nodes[section][conductor] = circuit.get_or_create_node(&node_name);
-        }
-    }
-
-    let mut boundary_refs = vec![near_ref; sections + 1];
-    boundary_refs[0] = near_ref;
-    boundary_refs[sections] = far_ref;
-    if near_ref != far_ref {
-        for section in 1..sections {
-            let node_name = format!("{}.__cpl.ref{}", element.name, section);
-            boundary_refs[section] = circuit.get_or_create_node(&node_name);
-        }
-        for section in 0..sections {
-            let name = format!("{}.__cpl.refwire{}", element.name, section + 1);
-            circuit.resistors.add(
-                name,
-                boundary_refs[section],
-                boundary_refs[section + 1],
-                CPL_REFERENCE_SHORT_RESISTANCE,
-            );
-        }
-    }
-
-    for boundary in 0..=sections {
-        let weight = if boundary == 0 || boundary == sections {
-            0.5
-        } else {
-            1.0
-        };
-        let lump_length = section_length * weight;
-        let reference = boundary_refs[boundary];
-
-        for i in 0..conductors {
-            let node_i = boundary_nodes[boundary][i];
-
-            let c_to_ref = params.c[i].iter().sum::<f64>() * lump_length;
-            if c_to_ref > CPL_REALIZATION_TOL && node_i != reference {
-                let name = format!("{}.__cpl.cb{}.c{}", element.name, boundary, i + 1);
-                circuit.capacitors.add(name, node_i, reference, c_to_ref);
-            }
-
-            let g_to_ref = params.g[i].iter().sum::<f64>() * lump_length;
-            if g_to_ref > CPL_REALIZATION_TOL && node_i != reference {
-                let name = format!("{}.__cpl.gb{}.c{}", element.name, boundary, i + 1);
-                circuit.resistors.add(
-                    name,
-                    node_i,
-                    reference,
-                    1.0 / g_to_ref.max(CPL_REALIZATION_TOL),
-                );
-            }
-
-            for j in (i + 1)..conductors {
-                let node_j = boundary_nodes[boundary][j];
-
-                let c_mutual = (-params.c[i][j]).max(0.0) * lump_length;
-                if c_mutual > CPL_REALIZATION_TOL && node_i != node_j {
-                    let name = format!("{}.__cpl.cb{}.m{}{}", element.name, boundary, i + 1, j + 1);
-                    circuit.capacitors.add(name, node_i, node_j, c_mutual);
-                }
-
-                let g_mutual = (-params.g[i][j]).max(0.0) * lump_length;
-                if g_mutual > CPL_REALIZATION_TOL && node_i != node_j {
-                    let name = format!("{}.__cpl.gb{}.m{}{}", element.name, boundary, i + 1, j + 1);
-                    circuit.resistors.add(
-                        name,
-                        node_i,
-                        node_j,
-                        1.0 / g_mutual.max(CPL_REALIZATION_TOL),
-                    );
-                }
-            }
-        }
-    }
-
-    for section in 0..sections {
-        let start_nodes = boundary_nodes[section].clone();
-        let end_nodes = boundary_nodes[section + 1].clone();
-        let mut winding_nodes = Vec::with_capacity(conductors);
-        let mut inductances = Vec::with_capacity(conductors);
-        let mut coupling_matrix = vec![vec![0.0; conductors]; conductors];
-        for i in 0..conductors {
-            coupling_matrix[i][i] = 1.0;
-        }
-
-        for i in 0..conductors {
-            let series_r = params.r[i][i] * section_length;
-            let winding_start = if series_r > CPL_REALIZATION_TOL {
-                let next_node = circuit.get_or_create_node(&format!(
-                    "{}.__cpl.s{}.r{}.1",
-                    element.name,
-                    section + 1,
-                    i + 1
-                ));
-                circuit.resistors.add(
-                    format!("{}.__cpl.s{}.r{}", element.name, section + 1, i + 1),
-                    start_nodes[i],
-                    next_node,
-                    series_r,
-                );
-                next_node
-            } else {
-                start_nodes[i]
-            };
-
-            winding_nodes.push((winding_start, end_nodes[i]));
-            inductances.push(params.l[i][i] * section_length);
-        }
-
-        for i in 0..conductors {
-            for j in (i + 1)..conductors {
-                let k = if params.l[i][j].abs() <= CPL_REALIZATION_TOL {
-                    0.0
-                } else {
-                    params.l[i][j] / (params.l[i][i] * params.l[j][j]).sqrt()
-                };
-                coupling_matrix[i][j] = k;
-                coupling_matrix[j][i] = k;
-            }
-        }
-
-        let transformer_name = format!("{}.__cpl.s{}.xfmr", element.name, section + 1);
-        let branch_ordinals: Vec<usize> = (0..conductors)
-            .map(|winding| {
-                circuit.allocate_branch_named(&format!("{}#{}", transformer_name, winding + 1))
-            })
-            .collect();
-        let transformer = crate::device::MultiWindingTransformer::new(
-            transformer_name,
-            winding_nodes,
-            inductances,
-            coupling_matrix,
-        );
-        circuit.add_multi_winding_transformer(branch_ordinals, transformer);
-    }
+    circuit.coupled_tlines.push(coupled_tline);
 
     Ok(())
 }
