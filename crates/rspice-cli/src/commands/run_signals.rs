@@ -363,8 +363,10 @@ mod tests {
         let result = TransientResult {
             time: vec![0.0, 1.0],
             voltages: vec![vec![5.0, 5.0], vec![0.0, 2.5]],
+            branch_currents: vec![],
             num_nodes: 2,
             node_names: vec!["IN".to_string(), "OUT".to_string()],
+            branch_names: vec![],
         };
 
         let mut signals = HashMap::new();

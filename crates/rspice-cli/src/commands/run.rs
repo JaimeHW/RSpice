@@ -1200,8 +1200,10 @@ mod tests {
         let result = rspice_core::engine::TransientResult {
             time: vec![0.0, 1e-3, 2e-3],
             voltages: vec![vec![5.0, 5.0, 5.0], vec![0.0, 2.5, 4.0]],
+            branch_currents: vec![],
             num_nodes: 2,
             node_names: vec!["IN".to_string(), "OUT".to_string()],
+            branch_names: vec![],
         };
 
         let reports = run_measurements(&netlist, &result, true);
@@ -1232,8 +1234,10 @@ mod tests {
         let result = rspice_core::engine::TransientResult {
             time: vec![0.0, 1e-3, 2e-3],
             voltages: vec![vec![5.0, 5.0, 5.0], vec![0.0, 2.5, 4.0]],
+            branch_currents: vec![],
             num_nodes: 2,
             node_names: vec!["IN".to_string(), "OUT".to_string()],
+            branch_names: vec![],
         };
 
         let reports = run_measurements(&netlist, &result, true);

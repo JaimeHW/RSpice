@@ -1251,8 +1251,10 @@ mod tests {
         TransientResult {
             time,
             voltages,
+            branch_currents: vec![],
             num_nodes: 1,
             node_names: vec!["1".to_string()],
+            branch_names: vec![],
         }
     }
 
