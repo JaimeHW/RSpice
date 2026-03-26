@@ -1,0 +1,50 @@
+# relative_path<TAB>mode
+# mode:
+#   smoke             Explicit execution-only coverage. The deck must still
+#                     parse, build, and complete the requested analyses.
+#   scripted_control  Upstream ngspice deck carries validation logic in a
+#                     .control script that RSpice does not yet interpret.
+bsim3soidd/ring51.cir	smoke
+bsim3soifd/ring51.cir	smoke
+bsim3soipd/ring51.cir	smoke
+general/diffpair.cir	smoke
+general/fourbitadder.cir	smoke
+general/rca3040.cir	smoke
+mesa/mesa-12.cir	scripted_control
+mesa/mesa12.cir	smoke
+mesa/mesa13.cir	smoke
+mesa/mesa21.cir	smoke
+regression/lib-processing/ex1a.cir	smoke
+regression/lib-processing/ex1b.cir	smoke
+regression/lib-processing/ex2a.cir	smoke
+regression/lib-processing/ex3a.cir	smoke
+regression/misc/ac-zero.cir	scripted_control
+regression/misc/alter-vec.cir	scripted_control
+regression/misc/asrc-tc-1.cir	scripted_control
+regression/misc/asrc-tc-2.cir	scripted_control
+regression/misc/bugs-2.cir	scripted_control
+regression/misc/dollar-1.cir	smoke
+regression/misc/empty-1.cir	smoke
+regression/misc/if-elseif.cir	scripted_control
+regression/misc/log-functions-1.cir	scripted_control
+regression/misc/resume-1.cir	scripted_control
+regression/misc/test-noise-2.cir	scripted_control
+regression/misc/test-noise-3.cir	scripted_control
+regression/model/binning-1.cir	scripted_control
+regression/model/instance-defaults.cir	scripted_control
+regression/model/special-names-1.cir	scripted_control
+regression/parser/minus-minus.cir	smoke
+regression/parser/xpressn-2.cir	smoke
+regression/pipe/alter-1.cir	smoke
+regression/pz/ac-resistance.cir	scripted_control
+regression/sens/sens-ac-1.cir	scripted_control
+regression/sens/sens-ac-2.cir	scripted_control
+regression/sens/sens-dc-1.cir	scripted_control
+regression/sens/sens-dc-2.cir	scripted_control
+regression/temper/temper-1.cir	scripted_control
+regression/temper/temper-2.cir	scripted_control
+regression/temper/temper-3.cir	scripted_control
+regression/temper/temper-res-1.cir	scripted_control
+xspice/digital/d_ram.cir	smoke
+xspice/digital/d_source.cir	smoke
+xspice/digital/d_state.cir	smoke

@@ -5,6 +5,7 @@
 
 use rspice_core::testing::{TestRunner, TestRunnerConfig, TestStatistics};
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -193,6 +194,192 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
     }
 
     cfg
+}
+
+fn load_validation_manifest() -> HashMap<String, String> {
+    let manifest_path = get_tests_dir().join("validation-manifest.tsv");
+    let content = fs::read_to_string(&manifest_path).expect("validation manifest should exist");
+    let mut manifest = HashMap::new();
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let mut parts = line.splitn(3, '\t');
+        let rel = parts
+            .next()
+            .expect("manifest row should contain a relative path")
+            .replace('\\', "/");
+        let mode = parts
+            .next()
+            .expect("manifest row should contain a validation mode")
+            .to_string();
+        manifest.insert(rel, mode);
+    }
+
+    manifest
+}
+
+fn deck_has_gold_assertions(path: &Path) -> bool {
+    let source = fs::read_to_string(path).expect("read circuit");
+    let lower = source.to_ascii_lowercase();
+    lower.contains("_t") && lower.contains("_g")
+}
+
+fn output_has_tabular_reference(content: &str) -> bool {
+    content.lines().any(|line| {
+        let trimmed = line.trim();
+        trimmed.len() >= 6 && trimmed[..5].eq_ignore_ascii_case("index") && trimmed.contains(' ')
+    })
+}
+
+fn output_has_operating_point_reference(content: &str) -> bool {
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Section {
+        None,
+        Node,
+        Source,
+    }
+
+    let mut section = Section::None;
+    let mut rows = 0usize;
+
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let normalized = trimmed.to_ascii_lowercase();
+        if normalized == "node voltage" || normalized.starts_with("node ") {
+            section = Section::Node;
+            continue;
+        }
+        if normalized == "source current" || normalized.starts_with("source ") {
+            section = Section::Source;
+            continue;
+        }
+        if trimmed.starts_with('-')
+            || normalized.starts_with("index ")
+            || normalized.starts_with("initial transient solution")
+        {
+            continue;
+        }
+        if normalized.starts_with("resistor")
+            || normalized.starts_with("capacitor")
+            || normalized.starts_with("inductor")
+            || normalized.starts_with("vsource")
+            || normalized.starts_with("isource")
+            || normalized.starts_with("diode")
+            || normalized.starts_with("bjt")
+            || normalized.starts_with("mosfet")
+            || normalized.starts_with("jfet")
+            || normalized.starts_with("mesfet")
+            || normalized.starts_with("mesa")
+            || normalized.starts_with("vbic")
+            || normalized.starts_with("hfet")
+            || normalized.starts_with("model ")
+            || normalized.starts_with("device ")
+            || normalized.starts_with("warning")
+            || normalized.starts_with("circuit:")
+            || normalized.starts_with("doing analysis")
+            || normalized.starts_with("no. of data rows")
+        {
+            section = Section::None;
+            continue;
+        }
+
+        if section == Section::None {
+            continue;
+        }
+
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        if parts.len() != 2 {
+            continue;
+        }
+        if parts[1].parse::<f64>().is_ok()
+            && (!parts[0].contains('#') || parts[0].ends_with("#branch"))
+        {
+            rows += 1;
+        }
+    }
+
+    rows > 0
+}
+
+fn deck_has_reference_output(path: &Path) -> bool {
+    let out_path = path.with_extension("out");
+    let Ok(content) = fs::read_to_string(out_path) else {
+        return false;
+    };
+    let trimmed = content.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("to be done") {
+        return false;
+    }
+
+    output_has_tabular_reference(trimmed) || output_has_operating_point_reference(trimmed)
+}
+
+#[test]
+fn test_output_has_operating_point_reference_accepts_initial_solution_tables() {
+    let content = "\
+Circuit: demo
+
+Initial Transient Solution
+--------------------------
+
+Node                                   Voltage
+----                                   -------
+out                                          1
+vin#branch                                  -2e-3
+";
+
+    assert!(output_has_operating_point_reference(content));
+}
+
+#[test]
+fn test_output_has_operating_point_reference_rejects_placeholder_text() {
+    let content = "\
+Circuit: placeholder
+Initial Transient Solution
+--------------------------
+Node Voltage
+---- -------
+placeholder data
+";
+
+    assert!(!output_has_operating_point_reference(content));
+}
+
+fn deck_has_control_block(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .expect("read circuit")
+        .lines()
+        .any(|line| line.trim().eq_ignore_ascii_case(".control"))
+}
+
+fn all_circuit_paths(root: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "cir") {
+                paths.push(path);
+            }
+        }
+    }
+
+    paths.sort();
+    paths
 }
 
 #[test]
@@ -724,6 +911,75 @@ fn test_unsupported_detection() {
     // Full-suite validation must fail unsupported decks rather than silently skip them.
     let config = runner.config();
     assert!(!config.skip_unsupported);
+}
+
+#[test]
+fn test_validation_manifest_covers_all_non_oracled_decks() {
+    let tests_dir = get_tests_dir();
+    let manifest = load_validation_manifest();
+
+    for cir in all_circuit_paths(&tests_dir) {
+        let rel = cir
+            .strip_prefix(&tests_dir)
+            .expect("relative path")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if deck_has_gold_assertions(&cir) {
+            continue;
+        }
+        if deck_has_reference_output(&cir) {
+            continue;
+        }
+
+        assert!(
+            manifest.contains_key(&rel),
+            "Deck '{}' has no built-in gold assertions and no validation-manifest entry. Add an explicit contract so it cannot pass silently.",
+            rel
+        );
+    }
+}
+
+#[test]
+fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
+    let tests_dir = get_tests_dir();
+    let manifest = load_validation_manifest();
+
+    for rel in manifest.keys() {
+        let deck_path = tests_dir.join(rel);
+        // `_t`/`_g` node pairs are only automatic oracles for analyses that the
+        // regression harness validates directly from operating-point results.
+        // Scripted-control decks may still mention those symbols while requiring
+        // an explicit manifest contract, so only checked-in reference outputs are
+        // unambiguously redundant here.
+        assert!(
+            !deck_has_reference_output(&deck_path),
+            "validation-manifest entry '{}' is unnecessary because the deck already has a checked-in .out reference",
+            rel
+        );
+    }
+}
+
+#[test]
+fn test_scripted_control_manifest_entries_match_control_decks() {
+    let tests_dir = get_tests_dir();
+    let manifest = load_validation_manifest();
+
+    for (rel, mode) in manifest {
+        let deck_path = tests_dir.join(&rel);
+        assert!(
+            deck_path.exists(),
+            "validation-manifest entry '{}' does not point to an existing deck",
+            rel
+        );
+
+        if mode == "scripted_control" {
+            assert!(
+                deck_has_control_block(&deck_path),
+                "validation-manifest marks '{}' as scripted_control, but the deck has no .control block",
+                rel
+            );
+        }
+    }
 }
 
 #[test]
