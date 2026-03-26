@@ -5533,6 +5533,36 @@ R1 out 0 2k
     }
 
     #[test]
+    fn test_transfer_output_value_linearized_matches_diffpair_ngspice_references() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let netlist = Netlist::parse(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/sensitivity/diffpair.cir"
+        )))
+        .expect("diffpair netlist should parse");
+
+        let cm_gain = runner
+            .transfer_output_value_linearized(&netlist, "v(5)", "vcm")
+            .expect("common-mode transfer should solve")
+            .expect("voltage output should use linearized path");
+        let dm_gain = runner
+            .transfer_output_value_linearized(&netlist, "v(5)", "vdm")
+            .expect("differential-mode transfer should solve")
+            .expect("voltage output should use linearized path");
+
+        assert!(
+            (cm_gain - (-1.10341e-1)).abs() < 1e-3,
+            "expected common-mode gain near -0.110341, got {}",
+            cm_gain
+        );
+        assert!(
+            (dm_gain - (-8.78493e1)).abs() < 0.2,
+            "expected differential gain near -87.8493, got {}",
+            dm_gain
+        );
+    }
+
+    #[test]
     fn test_load_reference_table_for_axis_selects_requested_section() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let temp_dir = unique_temp_dir("ngspice_axis_select");
