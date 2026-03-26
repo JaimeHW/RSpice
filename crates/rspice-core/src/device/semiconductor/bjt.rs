@@ -32,6 +32,18 @@ pub struct BjtIndices {
     pub ee: Option<CscIndex>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BjtLinearization {
+    ic: Value,
+    ib: Value,
+    dic_dvbe: Value,
+    dic_dvbc: Value,
+    dib_dvbe: Value,
+    dib_dvbc: Value,
+}
+
+type BjtRowCoefficients = (Value, Value, Value);
+
 /// BJT device using the Ebers-Moll model
 ///
 /// Terminal connections:
@@ -160,6 +172,7 @@ pub struct Bjt {
     // Operating point values (for linearization)
     vbe: Value,
     vbc: Value,
+    vbi: Value,
     ic: Value,
     ib: Value,
     ie: Value,
@@ -167,6 +180,7 @@ pub struct Bjt {
     // Previous iteration values (for convergence)
     vbe_prev: Value,
     vbc_prev: Value,
+    vbi_prev: Value,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: BjtIndices,
@@ -255,11 +269,13 @@ impl Bjt {
 
             vbe: 0.0,
             vbc: 0.0,
+            vbi: 0.0,
             ic: 0.0,
             ib: 0.0,
             ie: 0.0,
             vbe_prev: 0.0,
             vbc_prev: 0.0,
+            vbi_prev: 0.0,
             indices: BjtIndices::default(),
         }
     }
@@ -359,7 +375,19 @@ impl Bjt {
             self.vaf = v;
             has_vaf = true;
         }
+        if !has_vaf
+            && let Some(&v) = params.get("VA")
+        {
+            self.vaf = v;
+            has_vaf = true;
+        }
         if let Some(&v) = params.get("VAR") {
+            self.var = v;
+            has_var = true;
+        }
+        if !has_var
+            && let Some(&v) = params.get("VB")
+        {
             self.var = v;
             has_var = true;
         }
@@ -677,7 +705,7 @@ impl Bjt {
         } else {
             voltages[self.node_collector - 1]
         };
-        let _vb = if self.node_base == 0 {
+        let vb = if self.node_base == 0 {
             0.0
         } else {
             voltages[self.node_base - 1]
@@ -688,25 +716,11 @@ impl Bjt {
             voltages[self.node_emitter - 1]
         };
 
-        // CRITICAL: Use LIMITED junction voltages from update(), not raw!
-        // This is essential for Newton convergence - raw voltages can cause
-        // exponential current blowup if Vbe changes too much between iterations.
-        // Nagel's algorithm limits the change to prevent divergence.
-        let vbe = self.vbe; // Limited in update() via limit_junction_voltage
-        let vbc = self.vbc; // Limited in update() via limit_junction_voltage
+        let (collector, base, emitter) = self.small_signal_row_coefficients(vc, vb, ve);
 
-        // Linearized conductances
-        // Calculate currents FIRST so we can use fresh ic for go (fixes lag issue)
-        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
-
-        let gm = self.gm(vbe);
-        let go = self.go(ic); // Use fresh ic, not lagged self.ic
-        let gbe = self.gbe(vbe);
-        let gbc = self.gbc(vbc);
-
-        // Equivalent currents (companion model for Newton-Raphson)
-        let ic_eq = ic - gm * vbe - go * (vc - ve);
-        let ib_eq = ib - gbe * vbe - gbc * vbc;
+        // Equivalent current sources for the linearized node-current equations.
+        let ic_eq = self.ic - (collector.0 * vc + collector.1 * vb + collector.2 * ve);
+        let ib_eq = self.ib - (base.0 * vc + base.1 * vb + base.2 * ve);
 
         // Debug logging for Newton convergence analysis (commented for performance)
         // log::trace!(
@@ -717,33 +731,33 @@ impl Bjt {
         // Stamp matrix using direct indexing
         // Collector row
         if let Some(idx) = self.indices.cc {
-            matrix.stamp_direct(idx, go + gbc);
+            matrix.stamp_direct(idx, collector.0);
         }
         if let Some(idx) = self.indices.cb {
-            matrix.stamp_direct(idx, gm - gbc);
+            matrix.stamp_direct(idx, collector.1);
         }
         if let Some(idx) = self.indices.ce {
-            matrix.stamp_direct(idx, -gm - go);
+            matrix.stamp_direct(idx, collector.2);
         }
         // Base row
         if let Some(idx) = self.indices.bc {
-            matrix.stamp_direct(idx, -gbc);
+            matrix.stamp_direct(idx, base.0);
         }
         if let Some(idx) = self.indices.bb {
-            matrix.stamp_direct(idx, gbe + gbc);
+            matrix.stamp_direct(idx, base.1);
         }
         if let Some(idx) = self.indices.be {
-            matrix.stamp_direct(idx, -gbe);
+            matrix.stamp_direct(idx, base.2);
         }
         // Emitter row
         if let Some(idx) = self.indices.ec {
-            matrix.stamp_direct(idx, -go);
+            matrix.stamp_direct(idx, emitter.0);
         }
         if let Some(idx) = self.indices.eb {
-            matrix.stamp_direct(idx, -gm - gbe);
+            matrix.stamp_direct(idx, emitter.1);
         }
         if let Some(idx) = self.indices.ee {
-            matrix.stamp_direct(idx, gm + go + gbe);
+            matrix.stamp_direct(idx, emitter.2);
         }
 
         // Stamp RHS - current flowing OUT of node is positive in the equation
@@ -824,50 +838,240 @@ impl Bjt {
         self.diode_conductance_with_is(self.is, v, n)
     }
 
+    #[inline]
+    fn high_injection_factor(&self, diode_current: Value, knee_current: Value) -> (Value, Value) {
+        if diode_current <= 0.0 {
+            return (1.0, 0.0);
+        }
+
+        let knee = knee_current.max(1e-6);
+        let denom = 1.0 + diode_current / knee;
+        let factor = 1.0 / denom;
+        let derivative_wrt_current = -1.0 / (knee * denom * denom);
+        (factor, derivative_wrt_current)
+    }
+
+    fn linearize_currents(&self, vbe: Value, vbc: Value) -> BjtLinearization {
+        let p = self.polarity();
+        let vbe_eff = p * vbe;
+        let vbc_eff = p * vbc;
+
+        let if_diode = self.diode_current(vbe_eff, self.nf);
+        let ir_diode = self.diode_current(vbc_eff, self.nr);
+        let gif = self.diode_conductance(vbe_eff, self.nf);
+        let gir = self.diode_conductance(vbc_eff, self.nr);
+
+        let (hf_factor, dhf_dif) = self.high_injection_factor(if_diode, self.ikf);
+        let (hr_factor, dhr_dir) = self.high_injection_factor(ir_diode, self.ikr);
+        let dhf_dvbe_eff = dhf_dif * gif;
+        let dhr_dvbc_eff = dhr_dir * gir;
+
+        let vce_eff = vbe_eff - vbc_eff;
+        let (forward_early, dfe_dvbe_eff, dfe_dvbc_eff) =
+            if self.vaf.is_finite() && self.vaf > 0.0 {
+                let raw = 1.0 + vce_eff / self.vaf;
+                if raw > 1e-6 {
+                    (raw, 1.0 / self.vaf, -1.0 / self.vaf)
+                } else {
+                    (1e-6, 0.0, 0.0)
+                }
+            } else {
+                (1.0, 0.0, 0.0)
+            };
+        let (reverse_early, dre_dvbe_eff, dre_dvbc_eff) =
+            if self.var.is_finite() && self.var > 0.0 {
+                let raw = 1.0 - vce_eff / self.var;
+                if raw > 1e-6 {
+                    (raw, -1.0 / self.var, 1.0 / self.var)
+                } else {
+                    (1e-6, 0.0, 0.0)
+                }
+            } else {
+                (1.0, 0.0, 0.0)
+            };
+
+        let forward_transport = if_diode * hf_factor * forward_early;
+        let reverse_transport = ir_diode * hr_factor * reverse_early;
+
+        let dforward_dvbe_eff =
+            (gif * hf_factor + if_diode * dhf_dvbe_eff) * forward_early
+                + if_diode * hf_factor * dfe_dvbe_eff;
+        let dforward_dvbc_eff = if_diode * hf_factor * dfe_dvbc_eff;
+        let dreverse_dvbe_eff = ir_diode * hr_factor * dre_dvbe_eff;
+        let dreverse_dvbc_eff =
+            (gir * hr_factor + ir_diode * dhr_dvbc_eff) * reverse_early
+                + ir_diode * hr_factor * dre_dvbc_eff;
+
+        let ib_be = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
+            + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
+        let ib_bc = self.diode_current_with_is(self.ibci, vbc_eff, self.nci)
+            + self.diode_current_with_is(self.ibcn, vbc_eff, self.ncn);
+        let dib_dvbe = self.gbe(vbe);
+        let dib_dvbc = self.gbc(vbc);
+
+        BjtLinearization {
+            ic: p * (forward_transport - reverse_transport),
+            ib: p * (ib_be + ib_bc),
+            dic_dvbe: dforward_dvbe_eff - dreverse_dvbe_eff,
+            dic_dvbc: dforward_dvbc_eff - dreverse_dvbc_eff,
+            dib_dvbe,
+            dib_dvbc,
+        }
+    }
+
+    #[inline]
+    fn collector_row_coefficients(&self, linearized: BjtLinearization) -> BjtRowCoefficients {
+        (
+            -linearized.dic_dvbc,
+            linearized.dic_dvbe + linearized.dic_dvbc,
+            -linearized.dic_dvbe,
+        )
+    }
+
+    #[inline]
+    fn base_row_coefficients(&self, linearized: BjtLinearization) -> BjtRowCoefficients {
+        (
+            -linearized.dib_dvbc,
+            linearized.dib_dvbe + linearized.dib_dvbc,
+            -linearized.dib_dvbe,
+        )
+    }
+
+    #[inline]
+    fn emitter_row_coefficients(&self, linearized: BjtLinearization) -> BjtRowCoefficients {
+        let (cc, cb, ce) = self.collector_row_coefficients(linearized);
+        let (bc, bb, be) = self.base_row_coefficients(linearized);
+        (-(cc + bc), -(cb + bb), -(ce + be))
+    }
+
+    fn solve_intrinsic_base_voltage(&self, vc: Value, vb: Value, ve: Value) -> Value {
+        let rb = self.rb;
+        if !rb.is_finite() || rb <= 0.0 {
+            return vb;
+        }
+
+        let g_rb = 1.0 / rb.max(1e-12);
+        let mut vbi = if self.vbi.is_finite() {
+            self.vbi
+        } else {
+            vb - self.ib * rb
+        };
+        if !vbi.is_finite() {
+            vbi = vb;
+        }
+
+        for _ in 0..12 {
+            let linearized = self.linearize_currents(vbi - ve, vbi - vc);
+            let f = linearized.ib - g_rb * (vb - vbi);
+            let df = linearized.dib_dvbe + linearized.dib_dvbc + g_rb;
+            if !df.is_finite() || df.abs() < 1e-18 {
+                break;
+            }
+
+            let delta = (-f / df).clamp(-0.1, 0.1);
+            vbi += delta;
+            if delta.abs() < 1e-12 {
+                break;
+            }
+        }
+
+        vbi
+    }
+
+    fn small_signal_row_coefficients(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+    ) -> (BjtRowCoefficients, BjtRowCoefficients, BjtRowCoefficients) {
+        if !self.rb.is_finite() || self.rb <= 0.0 {
+            let linearized = self.linearize_currents(vb - ve, vb - vc);
+            return (
+                self.collector_row_coefficients(linearized),
+                self.base_row_coefficients(linearized),
+                self.emitter_row_coefficients(linearized),
+            );
+        }
+
+        let vbi = self.solve_intrinsic_base_voltage(vc, vb, ve);
+        let linearized = self.linearize_currents(vbi - ve, vbi - vc);
+        let (cc_i, cbi_i, ce_i) = self.collector_row_coefficients(linearized);
+        let (bc_i, bbi_i, be_i) = self.base_row_coefficients(linearized);
+        let g_rb = 1.0 / self.rb.max(1e-12);
+        let denom = bbi_i + g_rb;
+        if !denom.is_finite() || denom.abs() < 1e-18 {
+            return (
+                self.collector_row_coefficients(linearized),
+                self.base_row_coefficients(linearized),
+                self.emitter_row_coefficients(linearized),
+            );
+        }
+
+        let dvbi_dvc = -bc_i / denom;
+        let dvbi_dvb = g_rb / denom;
+        let dvbi_dve = -be_i / denom;
+
+        let collector = (
+            cc_i + cbi_i * dvbi_dvc,
+            cbi_i * dvbi_dvb,
+            ce_i + cbi_i * dvbi_dve,
+        );
+        let base = (
+            -g_rb * dvbi_dvc,
+            g_rb * (1.0 - dvbi_dvb),
+            -g_rb * dvbi_dve,
+        );
+        let emitter = (
+            -(collector.0 + base.0),
+            -(collector.1 + base.1),
+            -(collector.2 + base.2),
+        );
+        (collector, base, emitter)
+    }
+
+    pub(crate) fn stamp_small_signal_ac(
+        &self,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        let vc = if self.node_collector == 0 {
+            0.0
+        } else {
+            voltages[self.node_collector - 1]
+        };
+        let vb = if self.node_base == 0 {
+            0.0
+        } else {
+            voltages[self.node_base - 1]
+        };
+        let ve = if self.node_emitter == 0 {
+            0.0
+        } else {
+            voltages[self.node_emitter - 1]
+        };
+
+        let (collector, base, emitter) = self.small_signal_row_coefficients(vc, vb, ve);
+        matrix.stamp(self.node_collector, self.node_collector, collector.0);
+        matrix.stamp(self.node_collector, self.node_base, collector.1);
+        matrix.stamp(self.node_collector, self.node_emitter, collector.2);
+
+        matrix.stamp(self.node_base, self.node_collector, base.0);
+        matrix.stamp(self.node_base, self.node_base, base.1);
+        matrix.stamp(self.node_base, self.node_emitter, base.2);
+
+        matrix.stamp(self.node_emitter, self.node_collector, emitter.0);
+        matrix.stamp(self.node_emitter, self.node_base, emitter.1);
+        matrix.stamp(self.node_emitter, self.node_emitter, emitter.2);
+    }
+
     /// Calculate BJT currents using Ebers-Moll with Gummel-Poon enhancements
     ///
     /// Base model is Ebers-Moll for stability. Early voltage and high-injection
     /// effects are applied via go() output conductance and base charge modulation.
     fn calculate_currents(&self, vbe: Value, vbc: Value) -> (Value, Value, Value) {
-        let p = self.polarity();
-        let vbe_eff = p * vbe;
-        let vbc_eff = p * vbc;
-
-        // Forward and reverse diode currents
-        let if_diode = self.diode_current(vbe_eff, self.nf);
-        let ir_diode = self.diode_current(vbc_eff, self.nr);
-
-        // High-injection correction (Gummel-Poon)
-        let ikf_ratio = if_diode.max(0.0) / self.ikf.max(1e-6);
-        let ikr_ratio = ir_diode.max(0.0) / self.ikr.max(1e-6);
-
-        // Gummel-Poon style high-injection attenuation through base-charge
-        // inflation. For IF << IKF this is near-unity; for IF >> IKF it
-        // compresses collector current approximately with 1/(1 + IF/IKF).
-        let hf_factor = 1.0 / (1.0 + ikf_ratio);
-        let hr_factor = 1.0 / (1.0 + ikr_ratio);
-
-        // Ebers-Moll with high-injection and finite Early-voltage scaling.
-        let vce_eff = vbe_eff - vbc_eff;
-        let forward_early = if self.vaf.is_finite() && self.vaf > 0.0 {
-            (1.0 + vce_eff / self.vaf).max(1e-6)
-        } else {
-            1.0
-        };
-        let reverse_early = if self.var.is_finite() && self.var > 0.0 {
-            (1.0 - vce_eff / self.var).max(1e-6)
-        } else {
-            1.0
-        };
-        let ic = p * (if_diode * hf_factor * forward_early - ir_diode * hr_factor * reverse_early);
-        let ib = p
-            * (self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
-                + self.diode_current_with_is(self.iben, vbe_eff, self.nen)
-                + self.diode_current_with_is(self.ibci, vbc_eff, self.nci)
-                + self.diode_current_with_is(self.ibcn, vbc_eff, self.ncn));
-        let ie = -(ic + ib); // KCL: Ic + Ib + Ie = 0
-
-        (ic, ib, ie)
+        let linearized = self.linearize_currents(vbe, vbc);
+        let ie = -(linearized.ic + linearized.ib);
+        (linearized.ic, linearized.ib, ie)
     }
 
     /// Get transconductance gm = dIc/dVbe with Gummel-Poon high-injection
@@ -892,6 +1096,7 @@ impl Bjt {
     }
 
     /// Get output conductance go = dIc/dVce (Early effect)
+    #[allow(dead_code)]
     fn go(&self, ic: Value) -> Value {
         if self.vaf.is_finite() {
             ic.abs() / self.vaf
@@ -986,21 +1191,32 @@ impl NonlinearDevice for Bjt {
 
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
+        self.vbi_prev = self.vbi;
 
-        // Calculate raw junction voltages
-        let vbe_raw = vb - ve;
-        let vbc_raw = vb - vc;
+        if self.rb.is_finite() && self.rb > 0.0 {
+            self.vbi = self.solve_intrinsic_base_voltage(vc, vb, ve);
+            self.vbe = self.vbi - ve;
+            self.vbc = self.vbi - vc;
+        } else {
+            let vbe_raw = vb - ve;
+            let vbc_raw = vb - vc;
 
-        // Apply junction voltage limiting (standard SPICE technique)
-        // This is critical for BJT convergence - limits how much Vbe/Vbc can
-        // change per Newton iteration to prevent exponential current blowup
-        self.vbe = Self::limit_junction_voltage(vbe_raw, self.vbe_prev, self.vt);
-        self.vbc = Self::limit_junction_voltage(vbc_raw, self.vbc_prev, self.vt);
+            // Apply junction voltage limiting (standard SPICE technique)
+            // This is critical for BJT convergence - limits how much Vbe/Vbc can
+            // change per Newton iteration to prevent exponential current blowup
+            self.vbe = Self::limit_junction_voltage(vbe_raw, self.vbe_prev, self.vt);
+            self.vbc = Self::limit_junction_voltage(vbc_raw, self.vbc_prev, self.vt);
+            self.vbi = vb;
+        }
 
-        let (ic, ib, ie) = self.calculate_currents(self.vbe, self.vbc);
+        let (ic, ib_intrinsic, _ie_intrinsic) = self.calculate_currents(self.vbe, self.vbc);
         self.ic = ic;
-        self.ib = ib;
-        self.ie = ie;
+        self.ib = if self.rb.is_finite() && self.rb > 0.0 {
+            (vb - self.vbi) / self.rb.max(1e-12)
+        } else {
+            ib_intrinsic
+        };
+        self.ie = -(self.ic + self.ib);
     }
 
     fn stamp_nonlinear(
@@ -1014,7 +1230,7 @@ impl NonlinearDevice for Bjt {
         } else {
             voltages[self.node_collector - 1]
         };
-        let _vb = if self.node_base == 0 {
+        let vb = if self.node_base == 0 {
             0.0
         } else {
             voltages[self.node_base - 1]
@@ -1025,42 +1241,27 @@ impl NonlinearDevice for Bjt {
             voltages[self.node_emitter - 1]
         };
 
-        // CRITICAL: Use LIMITED junction voltages from update(), not raw!
-        // This is essential for Newton convergence - raw voltages can cause
-        // exponential current blowup if Vbe changes too much between iterations.
-        // Nagel's algorithm limits the change to prevent divergence.
-        let vbe = self.vbe; // Limited in update() via limit_junction_voltage
-        let vbc = self.vbc; // Limited in update() via limit_junction_voltage
+        let (collector, base, emitter) = self.small_signal_row_coefficients(vc, vb, ve);
 
-        // Calculate currents FIRST so we can use fresh ic for go (matches stamp_direct)
-        // Using lagged self.ic would cause inconsistent linearization during Newton-Raphson
-        let (ic, ib, _ie) = self.calculate_currents(vbe, vbc);
-
-        // Linearized conductances using fresh values
-        let gm = self.gm(vbe);
-        let go = self.go(ic); // Use fresh ic, not lagged self.ic
-        let gbe = self.gbe(vbe);
-        let gbc = self.gbc(vbc);
-
-        // Equivalent currents for linearization (companion model)
-        let ic_eq = ic - gm * vbe - go * (vc - ve);
-        let ib_eq = ib - gbe * vbe - gbc * vbc;
+        // Equivalent currents for the linearized node-current equations.
+        let ic_eq = self.ic - (collector.0 * vc + collector.1 * vb + collector.2 * ve);
+        let ib_eq = self.ib - (base.0 * vc + base.1 * vb + base.2 * ve);
 
         // Stamp the linearized model
         // Collector node equation
-        matrix.stamp(self.node_collector, self.node_collector, go + gbc);
-        matrix.stamp(self.node_collector, self.node_base, gm - gbc);
-        matrix.stamp(self.node_collector, self.node_emitter, -gm - go);
+        matrix.stamp(self.node_collector, self.node_collector, collector.0);
+        matrix.stamp(self.node_collector, self.node_base, collector.1);
+        matrix.stamp(self.node_collector, self.node_emitter, collector.2);
 
         // Base node equation
-        matrix.stamp(self.node_base, self.node_collector, -gbc);
-        matrix.stamp(self.node_base, self.node_base, gbe + gbc);
-        matrix.stamp(self.node_base, self.node_emitter, -gbe);
+        matrix.stamp(self.node_base, self.node_collector, base.0);
+        matrix.stamp(self.node_base, self.node_base, base.1);
+        matrix.stamp(self.node_base, self.node_emitter, base.2);
 
         // Emitter node equation
-        matrix.stamp(self.node_emitter, self.node_collector, -go);
-        matrix.stamp(self.node_emitter, self.node_base, -gm - gbe);
-        matrix.stamp(self.node_emitter, self.node_emitter, gm + go + gbe);
+        matrix.stamp(self.node_emitter, self.node_collector, emitter.0);
+        matrix.stamp(self.node_emitter, self.node_base, emitter.1);
+        matrix.stamp(self.node_emitter, self.node_emitter, emitter.2);
 
         // Stamp equivalent current sources
         matrix.stamp_rhs(self.node_collector, -ic_eq);
@@ -1172,6 +1373,17 @@ mod tests {
         assert_eq!(q.tf, 1e-9);
         assert_eq!(q.tr, 10e-9);
         assert_eq!(q.ikf, 0.05);
+    }
+
+    #[test]
+    fn test_bjt_early_voltage_aliases_follow_spice_model_cards() {
+        let mut params = HashMap::new();
+        params.insert("VA".to_string(), 50.0);
+        params.insert("VB".to_string(), 30.0);
+
+        let q = Bjt::new_npn("Q1".to_string(), 2, 1, 0).with_params(&params);
+        assert!((q.vaf - 50.0).abs() < 1e-12);
+        assert!((q.var - 30.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1572,5 +1784,58 @@ mod tests {
         // Current-source linearization must also satisfy KCL
         let i_sum = matrix.i(3) + matrix.i(2) + matrix.i(1);
         assert!(i_sum.abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_bjt_linearization_matches_finite_difference_current_derivatives() {
+        let mut params = HashMap::new();
+        params.insert("IS".to_string(), 1e-15);
+        params.insert("BF".to_string(), 120.0);
+        params.insert("BR".to_string(), 3.0);
+        params.insert("VAF".to_string(), 55.0);
+        params.insert("VAR".to_string(), 35.0);
+        params.insert("IKF".to_string(), 0.02);
+        params.insert("IKR".to_string(), 0.01);
+
+        let q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let vbe = 0.67;
+        let vbc = -0.18;
+        let linearized = q.linearize_currents(vbe, vbc);
+        let h = 1e-7;
+
+        let (ic_p_vbe, ib_p_vbe, _) = q.calculate_currents(vbe + h, vbc);
+        let (ic_m_vbe, ib_m_vbe, _) = q.calculate_currents(vbe - h, vbc);
+        let (ic_p_vbc, ib_p_vbc, _) = q.calculate_currents(vbe, vbc + h);
+        let (ic_m_vbc, ib_m_vbc, _) = q.calculate_currents(vbe, vbc - h);
+
+        let dic_dvbe_fd = (ic_p_vbe - ic_m_vbe) / (2.0 * h);
+        let dic_dvbc_fd = (ic_p_vbc - ic_m_vbc) / (2.0 * h);
+        let dib_dvbe_fd = (ib_p_vbe - ib_m_vbe) / (2.0 * h);
+        let dib_dvbc_fd = (ib_p_vbc - ib_m_vbc) / (2.0 * h);
+
+        assert!(
+            (linearized.dic_dvbe - dic_dvbe_fd).abs() <= dic_dvbe_fd.abs().max(1.0) * 2e-5,
+            "collector dIc/dVbe mismatch: analytical={} fd={}",
+            linearized.dic_dvbe,
+            dic_dvbe_fd
+        );
+        assert!(
+            (linearized.dic_dvbc - dic_dvbc_fd).abs() <= dic_dvbc_fd.abs().max(1.0) * 2e-5,
+            "collector dIc/dVbc mismatch: analytical={} fd={}",
+            linearized.dic_dvbc,
+            dic_dvbc_fd
+        );
+        assert!(
+            (linearized.dib_dvbe - dib_dvbe_fd).abs() <= dib_dvbe_fd.abs().max(1.0) * 2e-5,
+            "base dIb/dVbe mismatch: analytical={} fd={}",
+            linearized.dib_dvbe,
+            dib_dvbe_fd
+        );
+        assert!(
+            (linearized.dib_dvbc - dib_dvbc_fd).abs() <= dib_dvbc_fd.abs().max(1.0) * 2e-5,
+            "base dIb/dVbc mismatch: analytical={} fd={}",
+            linearized.dib_dvbc,
+            dib_dvbc_fd
+        );
     }
 }

@@ -170,9 +170,9 @@ impl Engine {
         circuit
             .diodes
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
-        circuit
-            .bjts
-            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        for bjt in &circuit.bjts.devices {
+            bjt.stamp_small_signal_ac(op_voltages, &mut stamper);
+        }
         circuit
             .mosfets
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
