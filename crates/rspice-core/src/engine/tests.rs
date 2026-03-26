@@ -46,7 +46,9 @@ R2 2 0 1k
         let result = crate::engine::TransientResult {
             time: vec![0.0, 1.0],
             voltages: vec![vec![1.0, 1.5], vec![2.0, 2.5]],
+            branch_currents: Vec::new(),
             num_nodes: 2,
+            branch_names: Vec::new(),
             node_names: vec!["n1".to_string(), "n2".to_string()],
         };
 
@@ -62,7 +64,9 @@ R2 2 0 1k
         let result = crate::engine::TransientResult {
             time: vec![0.0, 1.0],
             voltages: vec![vec![1.0, 1.5], vec![2.0, 2.5]],
+            branch_currents: Vec::new(),
             num_nodes: 2,
+            branch_names: Vec::new(),
             node_names: vec!["n1".to_string(), "OUT".to_string()],
         };
 
@@ -84,7 +88,9 @@ R2 2 0 1k
         let result = crate::engine::TransientResult {
             time: vec![0.0, 1.0],
             voltages: vec![vec![1.0, 1.5]],
+            branch_currents: Vec::new(),
             num_nodes: 1,
+            branch_names: Vec::new(),
             node_names: vec!["n1".to_string()],
         };
 
@@ -180,6 +186,272 @@ R2 out 0 1k
             "unexpected error: {}",
             msg
         );
+    }
+
+    #[test]
+    fn test_model_based_resistor_uses_short_and_narrow_on_correct_geometry_axes() {
+        let netlist_str = r#"
+* Model-based resistor geometry should use SHORT for length and NARROW for width
+V1 in 0 1
+R1 in out RMOD L=12u W=2u
+R2 out 0 1k
+.MODEL RMOD R (RSH=1000 SHORT=1u NARROW=1u)
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let vout = result.voltage(2);
+
+        // Effective resistor: RSH * ((L-SHORT)/(W-NARROW)) = 1000 * (11u/1u) = 11k
+        let expected = 1_000.0 / (11_000.0 + 1_000.0);
+        assert!(
+            (vout - expected).abs() < 1e-4,
+            "Expected ~{}V, got {}V",
+            expected,
+            vout
+        );
+    }
+
+    #[test]
+    fn test_resistor_scale_applies_to_dc_and_ac_resistance() {
+        let netlist_str = r#"
+* Resistor SCALE should affect both DC and AC paths, while AC overrides only small-signal resistance
+V1 in 0 DC 1 AC 1
+R1 in 0 10 AC=5 SCALE=1K
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+
+        let dc = engine.run_dc_op(&netlist).unwrap();
+        let idc = dc
+            .branch_current_named("V1")
+            .expect("expected V1 branch current");
+        assert!(
+            (idc + 1e-4).abs() < 1e-9,
+            "Expected DC source current -100uA, got {}A",
+            idc
+        );
+
+        let ac = engine.run_ac(&netlist, &[1.0]).unwrap();
+        let branch_idx = ac[0]
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("V1"))
+            .expect("expected V1 AC branch");
+        let iac = ac[0].currents[branch_idx].norm();
+        assert!(
+            (iac - 2e-4).abs() < 1e-9,
+            "Expected AC source current magnitude 200uA, got {}A",
+            iac
+        );
+    }
+
+    #[test]
+    fn test_current_mode_pz_filters_descriptor_infinite_poles() {
+        let netlist = Netlist::parse(
+            r#"
+* High-pass current transfer
+R1 1 0 1k
+R2 2 0 1k
+C1 1 2 1p
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_pz_ports(&netlist, 1, Some(0), 2, Some(0), true, true, true)
+            .unwrap();
+
+        assert_eq!(
+            result.poles.len(),
+            1,
+            "unexpected poles: {:?}",
+            result.poles
+        );
+        assert!(
+            (result.poles[0].re + 5.0e8).abs() < 1e5,
+            "expected pole near -5e8, got {:?}",
+            result.poles
+        );
+        assert!(
+            result.zeros.len() == 1
+                && result.zeros[0].magnitude() < 1e-9
+                && result.zeros[0].im.abs() < 1e-12,
+            "expected one zero at the origin, got {:?}",
+            result.zeros
+        );
+    }
+
+    #[test]
+    fn test_voltage_mode_pz_lowpass_has_no_finite_zeros() {
+        let netlist = Netlist::parse(
+            r#"
+* RC low-pass
+V1 1 0 0 AC 1
+R1 1 2 1k
+C1 2 0 10p
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_pz_ports(&netlist, 1, Some(0), 2, Some(0), false, true, true)
+            .unwrap();
+
+        assert_eq!(
+            result.poles.len(),
+            1,
+            "unexpected poles: {:?}",
+            result.poles
+        );
+        assert!(
+            (result.poles[0].re + 1.0e8).abs() < 1e5,
+            "expected pole near -1e8, got {:?}",
+            result.poles
+        );
+        assert!(
+            result.zeros.is_empty(),
+            "expected no finite zeros for RC low-pass, got {:?}",
+            result.zeros
+        );
+    }
+
+    #[test]
+    fn test_voltage_mode_pz_bridge_t_preserves_double_zero() {
+        let netlist = Netlist::parse(
+            r#"
+* Bridge-T filter
+V1 1 0 12 AC 1
+C1 1 2 1u
+C2 2 3 1u
+R3 2 0 1k
+R4 1 3 1k
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_pz_ports(&netlist, 1, Some(0), 3, Some(0), false, true, true)
+            .unwrap();
+
+        let expected_poles = [-3.819660112501051e2, -2.618033988749895e3];
+        assert_eq!(
+            result.poles.len(),
+            expected_poles.len(),
+            "unexpected poles: {:?}",
+            result.poles
+        );
+        for (pole, expected_re) in result.poles.iter().zip(expected_poles.iter()) {
+            assert!(
+                (pole.re - expected_re).abs() < expected_re.abs() * 1e-6,
+                "expected pole near {}, got {:?}",
+                expected_re,
+                result.poles
+            );
+            assert!(pole.im.abs() < 1e-9, "expected real pole, got {:?}", pole);
+        }
+        assert!(
+            result.zeros.len() >= 2,
+            "expected repeated zero pair near -1e3, got {:?}",
+            result.zeros
+        );
+        assert!(
+            result
+                .zeros
+                .iter()
+                .take(2)
+                .all(|z| (z.re + 1.0e3).abs() < 1e-3 && z.im.abs() < 5e-5),
+            "expected repeated zeros near -1e3, got {:?}",
+            result.zeros
+        );
+    }
+
+    #[test]
+    fn test_current_mode_pz_preserves_repeated_poles() {
+        let netlist = Netlist::parse(
+            r#"
+* Cascaded transconductance RL ladder
+IIN 1 0 AC
+R1 1 0 1
+L1 1 0 0.05
+GM2 2 0 1 0 1
+R2 2 0 1
+L2 2 0 0.05
+GM3 3 0 2 0 1
+R3 3 0 1
+L3 3 0 0.05
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_pz_ports(&netlist, 1, Some(0), 3, Some(0), true, true, false)
+            .unwrap();
+
+        assert_eq!(
+            result.poles.len(),
+            3,
+            "unexpected poles: {:?}",
+            result.poles
+        );
+        assert!(
+            result
+                .poles
+                .iter()
+                .all(|p| (p.re + 20.0).abs() < 1e-6 && p.im.abs() < 1e-9),
+            "expected three repeated poles at -20, got {:?}",
+            result.poles
+        );
+    }
+
+    #[test]
+    fn test_current_mode_pz_preserves_full_pole_order_for_cascaded_rl_sections() {
+        let netlist = Netlist::parse(
+            r#"
+* Four-section ladder
+IIN 1 0 AC
+R1 1 0 1.019524e+9
+L1 1 0 1
+GM2 2 0 1 0 1
+R2 2 0 8.296965e+8
+L2 2 0 1
+GM3 3 0 2 0 1
+R3 3 0 8.652054e+7
+L3 3 0 1
+GM4 4 0 3 0 1
+R4 4 0 1.060594e+7
+L4 4 0 1
+.end
+"#,
+        )
+        .unwrap();
+        let engine = Engine::default();
+        let result = engine
+            .run_pz_ports(&netlist, 1, Some(0), 4, Some(0), true, true, false)
+            .unwrap();
+
+        let expected = [-1.060594e7, -8.652054e7, -8.296965e8, -1.019524e9];
+        assert_eq!(
+            result.poles.len(),
+            expected.len(),
+            "unexpected poles: {:?}",
+            result.poles
+        );
+        for (pole, expected_re) in result.poles.iter().zip(expected.iter()) {
+            assert!(
+                (pole.re - expected_re).abs() < expected_re.abs() * 1e-6,
+                "expected pole near {}, got {:?}",
+                expected_re,
+                result.poles
+            );
+            assert!(pole.im.abs() < 1e-6, "expected real pole, got {:?}", pole);
+        }
     }
 
     #[test]
@@ -3646,6 +3918,34 @@ O1 1 0 2 0 LLOSS
             expected_rdc,
             tl.dc_series_resistance()
         );
+    }
+
+    #[test]
+    fn test_run_ac_empty_circuit_returns_empty_results() {
+        let netlist = Netlist::parse("* empty\n.end\n").expect("netlist should parse");
+        let engine = Engine::default();
+
+        let results = engine
+            .run_ac(&netlist, &[1.0, 10.0, 100.0])
+            .expect("empty AC analysis should not error");
+
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.voltages.is_empty()));
+        assert!(results.iter().all(|r| r.currents.is_empty()));
+    }
+
+    #[test]
+    fn test_run_tran_empty_circuit_returns_placeholder_waveform() {
+        let netlist = Netlist::parse("* empty\n.end\n").expect("netlist should parse");
+        let engine = Engine::default();
+
+        let result = engine
+            .run_tran(&netlist, 1e-6, 1e-9)
+            .expect("empty transient analysis should not error");
+
+        assert_eq!(result.num_nodes, 0);
+        assert!(result.voltages.is_empty());
+        assert_eq!(result.time, vec![0.0]);
     }
 
     #[test]

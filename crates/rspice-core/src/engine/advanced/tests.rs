@@ -156,6 +156,28 @@ fn test_run_pz_ports_voltage_mode_unity_transfer_has_no_zeros() {
 }
 
 #[test]
+fn test_run_pz_includes_nonlinear_small_signal_jacobian() {
+    let netlist = crate::netlist::parse_netlist(
+        "* Diode-loaded pole\nVDD vdd 0 1\nR1 vdd out 1k\nD1 out 0 dmod\nC1 out 0 1n\n.model dmod d(is=1e-14)\n.end\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+
+    let result = engine
+        .run_pz_ports(&netlist, 2, None, 2, None, true, true, false)
+        .expect("PZ analysis should succeed");
+    let dominant = result
+        .dominant_pole()
+        .expect("expected a dominant pole for the diode-loaded node");
+
+    assert!(
+        dominant.re < -1.2e6,
+        "nonlinear diode conductance should shift the pole beyond the passive -1e6 RC estimate, got {}",
+        dominant.re
+    );
+}
+
+#[test]
 fn test_run_sensitivity_ac_returns_sweep_sized_results() {
     let netlist = crate::netlist::parse_netlist(
         "* RC low-pass\n.PARAM RVAL=1k\nV1 in 0 AC 1\nR1 in out {RVAL}\nC1 out 0 1n\n.end\n",
@@ -304,6 +326,50 @@ fn test_run_sensitivity_supports_subcircuit_param_references() {
 
     // Vout = R2/(R1+R2), dVout/dR1 at R1=R2=1k is -1/(4*R) = -2.5e-4.
     assert!((sensitivity + 2.5e-4).abs() < 5e-6);
+}
+
+#[test]
+fn test_run_sensitivity_linearized_reports_element_and_source_derivatives() {
+    let netlist = crate::netlist::parse_netlist(
+        "* Linearized sensitivity\n\
+             V1 in 0 1\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .END\n",
+    )
+    .expect("netlist should parse");
+    let engine = Engine::default();
+    let circuit = engine
+        .build_circuit(&netlist)
+        .expect("circuit should build");
+    let out = circuit
+        .get_node_by_name("out")
+        .expect("output node should resolve");
+
+    let result = engine
+        .run_sensitivity_linearized(&netlist, out, None)
+        .expect("linearized sensitivity should succeed");
+
+    let sens_v1 = result.get("V1").expect("V1 sensitivity should be present");
+    let sens_r1 = result.get("R1").expect("R1 sensitivity should be present");
+    let sens_r2 = result.get("R2").expect("R2 sensitivity should be present");
+
+    assert!((result.output_value - 0.5).abs() < 1e-9);
+    assert!(
+        (sens_v1.absolute - 0.5).abs() < 1e-9,
+        "expected dVout/dV1 = 0.5, got {}",
+        sens_v1.absolute
+    );
+    assert!(
+        (sens_r1.absolute + 2.5e-4).abs() < 5e-8,
+        "expected dVout/dR1 = -2.5e-4, got {}",
+        sens_r1.absolute
+    );
+    assert!(
+        (sens_r2.absolute - 2.5e-4).abs() < 5e-8,
+        "expected dVout/dR2 = 2.5e-4, got {}",
+        sens_r2.absolute
+    );
 }
 
 #[test]

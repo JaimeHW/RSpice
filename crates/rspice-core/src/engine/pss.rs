@@ -348,7 +348,9 @@ impl Engine {
                 voltages: (0..circuit.num_nodes())
                     .map(|i| vec![dc_solution.get(i).copied().unwrap_or(0.0)])
                     .collect(),
+                branch_currents: Vec::new(),
                 num_nodes: circuit.num_nodes(),
+                branch_names: Vec::new(),
                 node_names: circuit.node_names_sorted(),
             };
 
@@ -590,7 +592,9 @@ impl Engine {
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
+            branch_currents: Vec::new(),
             num_nodes,
+            branch_names: Vec::new(),
             node_names,
         };
 

@@ -286,11 +286,15 @@ pub struct TransientResult {
     pub time: Vec<Value>,
     /// Voltage waveforms: [node_index][time_index]
     pub voltages: Vec<Vec<Value>>,
+    /// Branch current waveforms: [branch_index][time_index]
+    pub branch_currents: Vec<Vec<Value>>,
     /// Number of nodes
     pub num_nodes: usize,
     /// Node names from the netlist (maps index to original name like "N001", "out", etc.)
     /// Index 0 corresponds to voltages[0], which is node 1 (not ground)
     pub node_names: Vec<String>,
+    /// Branch names aligned with `branch_currents`
+    pub branch_names: Vec<String>,
 }
 
 impl TransientResult {
@@ -373,6 +377,16 @@ impl TransientResult {
         self.try_voltage_waveform(node)
     }
 
+    /// Get the complete current waveform for a named branch, returning `None`
+    /// when the branch name does not resolve.
+    pub fn try_branch_current_waveform_named(&self, name: &str) -> Option<&[Value]> {
+        let branch_idx = self
+            .branch_names
+            .iter()
+            .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
+        self.branch_currents.get(branch_idx).map(|waveform| waveform.as_slice())
+    }
+
     /// Get voltage at a named node and time index, returning `None` when the
     /// name or time index is invalid.
     pub fn try_voltage_at_named(&self, name: &str, time_index: usize) -> Option<Value> {
@@ -403,8 +417,10 @@ impl From<TransientResultCompressed> for TransientResult {
         Self {
             time: compressed.time,
             voltages: compressed.voltages,
+            branch_currents: Vec::new(),
             num_nodes: compressed.num_nodes,
             node_names,
+            branch_names: Vec::new(),
         }
     }
 }
@@ -460,9 +476,11 @@ impl Engine {
                 continue;
             }
             if let Some(node_id) = circuit.get_node_by_name(&nodeset.node)
-                && node_id > 0 && node_id <= circuit.num_nodes() {
-                    by_node[node_id] = Some(nodeset.voltage);
-                }
+                && node_id > 0
+                && node_id <= circuit.num_nodes()
+            {
+                by_node[node_id] = Some(nodeset.voltage);
+            }
         }
 
         for ic in &netlist.initial_conditions {
@@ -470,9 +488,11 @@ impl Engine {
                 continue;
             }
             if let Some(node_id) = circuit.get_node_by_name(&ic.node)
-                && node_id > 0 && node_id <= circuit.num_nodes() {
-                    by_node[node_id] = Some(ic.voltage);
-                }
+                && node_id > 0
+                && node_id <= circuit.num_nodes()
+            {
+                by_node[node_id] = Some(ic.voltage);
+            }
         }
 
         by_node

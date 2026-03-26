@@ -14,6 +14,7 @@ use crate::analysis::monte_carlo::{
 };
 use crate::analysis::noise::{NoiseContribution, NoiseResult, NoiseSource};
 use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
+use crate::analysis::sensitivity::{ElementDesc, SensitivityAnalyzer, SensitivityResult};
 use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
@@ -49,18 +50,139 @@ impl Engine {
         (v_pos - v_neg).norm()
     }
 
+    #[inline]
+    fn optional_system_index(node_id: usize) -> Option<usize> {
+        if node_id == 0 {
+            None
+        } else {
+            Some(node_id - 1)
+        }
+    }
+
+    fn collect_sensitivity_elements(circuit: &CircuitData) -> Vec<ElementDesc> {
+        let mut elements = Vec::new();
+
+        for (idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            let name = circuit
+                .resistors
+                .names
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| format!("R{}", idx + 1));
+            let g = circuit
+                .resistors
+                .small_signal_conductances
+                .get(idx)
+                .copied()
+                .unwrap_or_else(|| {
+                    circuit
+                        .resistors
+                        .conductances
+                        .get(idx)
+                        .copied()
+                        .unwrap_or(0.0)
+                });
+            if !g.is_finite() || g.abs() <= 1e-30 {
+                continue;
+            }
+
+            elements.push(ElementDesc::resistor(
+                &name,
+                Self::optional_system_index(stamp.pp.row),
+                Self::optional_system_index(stamp.nn.row),
+                1.0 / g,
+            ));
+        }
+
+        for idx in 0..circuit.current_sources.names.len() {
+            let name = circuit.current_sources.names[idx].clone();
+            let value = circuit.current_sources.dc_values[idx];
+            if !value.is_finite() {
+                continue;
+            }
+
+            elements.push(ElementDesc::current_source(
+                &name,
+                Self::optional_system_index(circuit.current_sources.node_pos[idx]),
+                Self::optional_system_index(circuit.current_sources.node_neg[idx]),
+                value,
+            ));
+        }
+
+        for idx in 0..circuit.voltage_sources.names.len() {
+            let name = circuit.voltage_sources.names[idx].clone();
+            let value = circuit.voltage_sources.dc_values[idx];
+            let branch_ordinal = circuit.voltage_sources.branch_indices[idx];
+            if !value.is_finite() || branch_ordinal == 0 {
+                continue;
+            }
+
+            elements.push(ElementDesc::voltage_source(
+                &name,
+                Self::optional_system_index(circuit.voltage_sources.node_pos[idx]),
+                Self::optional_system_index(circuit.voltage_sources.node_neg[idx]),
+                circuit.get_branch_matrix_index(branch_ordinal) - 1,
+                value,
+            ));
+        }
+
+        elements
+    }
+
+    /// Run DC operating-point sensitivity using the linearized MNA system.
+    pub fn run_sensitivity_linearized(
+        &self,
+        netlist: &Netlist,
+        output_pos: usize,
+        output_neg: Option<usize>,
+    ) -> Result<SensitivityResult, SimulationError> {
+        if output_pos == 0 {
+            return Err(SimulationError::Circuit(
+                "Sensitivity output node must not be ground".to_string(),
+            ));
+        }
+
+        let engine = self.resolved_for_netlist(netlist);
+        let mut circuit = engine.build_circuit(netlist)?;
+        let mut matrix = engine.build_matrix(&circuit)?;
+        circuit.link_indices(&matrix);
+
+        let dc_solution = engine.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        circuit.refresh_jiles_atherton_inductances(&dc_solution);
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&dc_solution);
+        }
+
+        let dense_g = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)
+            .to_dense_real();
+        let elements = Self::collect_sensitivity_elements(&circuit);
+        if elements.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Sensitivity analysis found no eligible linear elements or independent sources"
+                    .to_string(),
+            ));
+        }
+
+        let mut analyzer = SensitivityAnalyzer::new(dense_g, dc_solution, elements);
+        analyzer
+            .analyze(
+                output_pos - 1,
+                output_neg.and_then(Self::optional_system_index),
+            )
+            .ok_or(SimulationError::Solver(crate::solver::SolverError::SingularMatrix))
+    }
+
     fn collect_noise_sources(circuit: &CircuitData, dc_solution: &[Value]) -> Vec<NoiseSource> {
         let mut noise_sources = Vec::new();
 
         // Thermal noise from resistors (4kT/R).
         for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
-            let resistance = 1.0
-                / circuit
-                    .resistors
-                    .conductances
-                    .get(i)
-                    .copied()
-                    .unwrap_or(1.0);
+            let conductance = circuit.resistors.small_signal_conductance(i);
+            let resistance = if conductance.abs() > 0.0 {
+                1.0 / conductance
+            } else {
+                f64::INFINITY
+            };
             if resistance <= 0.0 || !resistance.is_finite() || resistance >= 1e12 {
                 continue;
             }
@@ -207,17 +329,18 @@ impl Engine {
             }
 
             if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients()
-                && ids.abs() > 1e-18 {
-                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", jfet.name),
-                        jfet.drain,
-                        jfet.source,
-                        kf,
-                        af,
-                        ef,
-                        ids,
-                    ));
-                }
+                && ids.abs() > 1e-18
+            {
+                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                    format!("{}:flicker", jfet.name),
+                    jfet.drain,
+                    jfet.source,
+                    kf,
+                    af,
+                    ef,
+                    ids,
+                ));
+            }
         }
 
         noise_sources
@@ -645,14 +768,14 @@ impl Engine {
                 variables.insert(numeric_name, stats);
 
                 if let Some(node_names) = &first_node_names
-                    && let Some(node_name) = node_names.get(node_id) {
-                        let named_key = format!("V({})", node_name);
-                        if named_key != numeric_label {
-                            let alias_stats =
-                                VariableStatistics::from_samples(&named_key, samples, 20);
-                            variables.insert(named_key, alias_stats);
-                        }
+                    && let Some(node_name) = node_names.get(node_id)
+                {
+                    let named_key = format!("V({})", node_name);
+                    if named_key != numeric_label {
+                        let alias_stats = VariableStatistics::from_samples(&named_key, samples, 20);
+                        variables.insert(named_key, alias_stats);
                     }
+                }
             }
         }
 
@@ -723,9 +846,8 @@ impl Engine {
         compute_poles: bool,
         compute_zeros: bool,
     ) -> Result<PoleZeroResult, SimulationError> {
-        let circuit = self.build_circuit(netlist)?;
+        let mut circuit = self.build_circuit(netlist)?;
         let num_nodes = circuit.num_nodes();
-        let size = circuit.matrix_size();
 
         let validate_node = |node: usize, label: &str| -> Result<(), SimulationError> {
             if node > num_nodes {
@@ -769,182 +891,59 @@ impl Engine {
             ));
         }
 
-        // Build descriptor MNA matrices:
-        // (G + s*C) x = b, where x includes node voltages and branch currents.
-        let mut g_matrix = Matrix::zeros(size, size);
-        let mut c_matrix = Matrix::zeros(size, size);
-
-        // Stamp resistors into G
-        for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
-            let g = circuit
-                .resistors
-                .conductances
-                .get(i)
-                .copied()
-                .unwrap_or(0.0);
-
-            if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                g_matrix.add(stamp.pp.row - 1, stamp.pp.col - 1, g);
-            }
-            if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                g_matrix.add(stamp.pn.row - 1, stamp.pn.col - 1, -g);
-            }
-            if stamp.np.row > 0 && stamp.np.col > 0 {
-                g_matrix.add(stamp.np.row - 1, stamp.np.col - 1, -g);
-            }
-            if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                g_matrix.add(stamp.nn.row - 1, stamp.nn.col - 1, g);
-            }
+        if !circuit.tlines.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Pole-zero analysis does not yet support transmission lines".to_string(),
+            ));
         }
 
-        // Stamp capacitors into C
-        for (i, stamp) in circuit.capacitors.stamps.iter().enumerate() {
-            let c = circuit
-                .capacitors
-                .capacitances
-                .get(i)
-                .copied()
-                .unwrap_or(0.0);
-
-            if stamp.pp.row > 0 && stamp.pp.col > 0 {
-                c_matrix.add(stamp.pp.row - 1, stamp.pp.col - 1, c);
-            }
-            if stamp.pn.row > 0 && stamp.pn.col > 0 {
-                c_matrix.add(stamp.pn.row - 1, stamp.pn.col - 1, -c);
-            }
-            if stamp.np.row > 0 && stamp.np.col > 0 {
-                c_matrix.add(stamp.np.row - 1, stamp.np.col - 1, -c);
-            }
-            if stamp.nn.row > 0 && stamp.nn.col > 0 {
-                c_matrix.add(stamp.nn.row - 1, stamp.nn.col - 1, c);
-            }
+        let mut matrix = self.build_matrix(&circuit)?;
+        circuit.link_indices(&matrix);
+        let dc_solution = self.solve_dc_operating_point(netlist, &mut circuit, &mut matrix)?;
+        circuit.refresh_jiles_atherton_inductances(&dc_solution);
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&dc_solution);
         }
 
-        // Stamp independent voltage sources into G (MNA branch equations)
+        // Reuse the AC linearization path so pole-zero analysis sees the same
+        // nonlinear small-signal conductances and capacitances as AC analysis.
+        let g_descriptor = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0);
+        let c_descriptor = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 1.0);
+        let g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
+        let c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
+
+        let input_neg_node = input_neg.unwrap_or(0);
+        let matches_input_voltage_port = |np: usize, nn: usize| {
+            !input_is_current
+                && ((np == input_pos && nn == input_neg_node)
+                    || (nn == input_pos && np == input_neg_node))
+        };
+        let mut input_voltage_branch = None;
+        let mut input_voltage_gain = 1.0;
+
+        // Stamp independent voltage sources into G (MNA branch equations).
+        // If a deck already contains an ideal source on the requested voltage
+        // input port, use that branch directly as the excitation variable
+        // instead of synthesizing a parallel source later.
         for i in 0..circuit.voltage_sources.len() {
             let np = circuit.voltage_sources.node_pos[i];
             let nn = circuit.voltage_sources.node_neg[i];
             let br_ordinal = circuit.voltage_sources.branch_indices[i];
             let br = circuit.get_branch_matrix_index(br_ordinal) - 1;
 
-            if np > 0 {
-                g_matrix.add(br, np - 1, 1.0);
-                g_matrix.add(np - 1, br, 1.0);
+            if matches_input_voltage_port(np, nn) {
+                if input_voltage_branch.replace(br).is_some() {
+                    return Err(SimulationError::Circuit(
+                        "Multiple independent voltage sources drive the requested PZ input port"
+                            .to_string(),
+                    ));
+                }
+                input_voltage_gain = if np == input_pos && nn == input_neg_node {
+                    1.0
+                } else {
+                    -1.0
+                };
             }
-            if nn > 0 {
-                g_matrix.add(br, nn - 1, -1.0);
-                g_matrix.add(nn - 1, br, -1.0);
-            }
-        }
-
-        // Stamp inductors:
-        // V(np)-V(nn)-s*L*I = 0  => C(br,br) = -L
-        for i in 0..circuit.inductors.len() {
-            let np = circuit.inductors.node_pos[i];
-            let nn = circuit.inductors.node_neg[i];
-            let br_ordinal = circuit.inductors.branch_indices[i];
-            let br = circuit.get_branch_matrix_index(br_ordinal) - 1;
-            let l = circuit.inductors.inductances[i];
-
-            if np > 0 {
-                g_matrix.add(br, np - 1, 1.0);
-                g_matrix.add(np - 1, br, 1.0);
-            }
-            if nn > 0 {
-                g_matrix.add(br, nn - 1, -1.0);
-                g_matrix.add(nn - 1, br, -1.0);
-            }
-            c_matrix.add(br, br, -l);
-        }
-
-        // Controlled sources: VCVS
-        for i in 0..circuit.vcvs.len() {
-            let np = circuit.vcvs.node_pos[i];
-            let nn = circuit.vcvs.node_neg[i];
-            let cp = circuit.vcvs.ctrl_pos[i];
-            let cn = circuit.vcvs.ctrl_neg[i];
-            let br_ordinal = circuit.vcvs.branch_indices[i];
-            let br = circuit.get_branch_matrix_index(br_ordinal) - 1;
-            let gain = circuit.vcvs.gains[i];
-
-            if np > 0 {
-                g_matrix.add(br, np - 1, 1.0);
-                g_matrix.add(np - 1, br, 1.0);
-            }
-            if nn > 0 {
-                g_matrix.add(br, nn - 1, -1.0);
-                g_matrix.add(nn - 1, br, -1.0);
-            }
-            if cp > 0 {
-                g_matrix.add(br, cp - 1, -gain);
-            }
-            if cn > 0 {
-                g_matrix.add(br, cn - 1, gain);
-            }
-        }
-
-        // Controlled sources: VCCS
-        for i in 0..circuit.vccs.len() {
-            let np = circuit.vccs.node_pos[i];
-            let nn = circuit.vccs.node_neg[i];
-            let cp = circuit.vccs.ctrl_pos[i];
-            let cn = circuit.vccs.ctrl_neg[i];
-            let gm = circuit.vccs.transconductances[i];
-
-            if np > 0 && cp > 0 {
-                g_matrix.add(np - 1, cp - 1, gm);
-            }
-            if np > 0 && cn > 0 {
-                g_matrix.add(np - 1, cn - 1, -gm);
-            }
-            if nn > 0 && cp > 0 {
-                g_matrix.add(nn - 1, cp - 1, -gm);
-            }
-            if nn > 0 && cn > 0 {
-                g_matrix.add(nn - 1, cn - 1, gm);
-            }
-        }
-
-        // Controlled sources: CCCS
-        for i in 0..circuit.cccs.len() {
-            let np = circuit.cccs.node_pos[i];
-            let nn = circuit.cccs.node_neg[i];
-            let ctrl_branch_ordinal = circuit.cccs.ctrl_branch[i];
-            let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal) - 1;
-            let gain = circuit.cccs.gains[i];
-
-            if np > 0 {
-                g_matrix.add(np - 1, cb, gain);
-            }
-            if nn > 0 {
-                g_matrix.add(nn - 1, cb, -gain);
-            }
-        }
-
-        // Controlled sources: CCVS
-        for i in 0..circuit.ccvs.len() {
-            let np = circuit.ccvs.node_pos[i];
-            let nn = circuit.ccvs.node_neg[i];
-            let br_ordinal = circuit.ccvs.branch_indices[i];
-            let ctrl_branch_ordinal = circuit.ccvs.ctrl_branch[i];
-            let br = circuit.get_branch_matrix_index(br_ordinal) - 1;
-            let cb = circuit.get_branch_matrix_index(ctrl_branch_ordinal) - 1;
-            let rm = circuit.ccvs.transresistances[i];
-
-            if np > 0 {
-                g_matrix.add(br, np - 1, 1.0);
-                g_matrix.add(np - 1, br, 1.0);
-            }
-            if nn > 0 {
-                g_matrix.add(br, nn - 1, -1.0);
-                g_matrix.add(nn - 1, br, -1.0);
-            }
-            g_matrix.add(br, cb, -rm);
-        }
-
-        // Add small diagonal for numerical stability
-        for i in 0..num_nodes {
-            g_matrix.add(i, i, 1e-12);
         }
 
         // Create analyzer and run
@@ -953,6 +952,8 @@ impl Engine {
         config.input_neg = input_neg.and_then(|n| if n == 0 { None } else { Some(n - 1) });
         config.output_neg = output_neg.and_then(|n| if n == 0 { None } else { Some(n - 1) });
         config.input_is_current = input_is_current;
+        config.input_voltage_branch = input_voltage_branch;
+        config.input_voltage_gain = input_voltage_gain;
         config.compute_poles = compute_poles;
         config.compute_zeros = compute_zeros;
 

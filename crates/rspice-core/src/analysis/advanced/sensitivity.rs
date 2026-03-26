@@ -176,6 +176,8 @@ pub struct ElementDesc {
     pub node_pos: Option<usize>,
     /// Negative node index (None = ground)
     pub node_neg: Option<usize>,
+    /// Optional MNA branch-equation index for branch-based elements.
+    pub branch_index: Option<usize>,
     /// Parameter value (conductance for R, capacitance for C, etc.)
     pub value: Value,
 }
@@ -193,6 +195,7 @@ impl ElementDesc {
             element_type: ElementType::Resistor,
             node_pos: n_pos,
             node_neg: n_neg,
+            branch_index: None,
             value: resistance,
         }
     }
@@ -209,6 +212,7 @@ impl ElementDesc {
             element_type: ElementType::Capacitor,
             node_pos: n_pos,
             node_neg: n_neg,
+            branch_index: None,
             value: capacitance,
         }
     }
@@ -227,7 +231,28 @@ impl ElementDesc {
             element_type: ElementType::CurrentSource,
             node_pos: n_pos,
             node_neg: n_neg,
+            branch_index: None,
             value: current,
+        }
+    }
+
+    /// Create independent voltage source element.
+    ///
+    /// `branch_index` is the 0-based MNA branch-equation index.
+    pub fn voltage_source(
+        name: &str,
+        n_pos: Option<usize>,
+        n_neg: Option<usize>,
+        branch_index: usize,
+        voltage: Value,
+    ) -> Self {
+        Self {
+            name: name.to_string(),
+            element_type: ElementType::VoltageSource,
+            node_pos: n_pos,
+            node_neg: n_neg,
+            branch_index: Some(branch_index),
+            value: voltage,
         }
     }
 
@@ -247,11 +272,11 @@ impl ElementDesc {
 
 /// Sensitivity analyzer using the adjoint method
 pub struct SensitivityAnalyzer {
-    /// Number of nodes (excluding ground)
-    num_nodes: usize,
+    /// Dimension of the linearized MNA system (nodes + branch equations).
+    system_size: usize,
     /// Conductance matrix G
     g_matrix: Vec<Vec<Value>>,
-    /// Solution vector (node voltages)
+    /// Linearized MNA operating-point solution (node voltages + branch currents)
     solution: Vec<Value>,
     /// Adjoint vector Î»
     adjoint: Vec<Value>,
@@ -271,12 +296,12 @@ impl SensitivityAnalyzer {
         solution: Vec<Value>,
         elements: Vec<ElementDesc>,
     ) -> Self {
-        let num_nodes = g_matrix.len();
+        let system_size = g_matrix.len();
         Self {
-            num_nodes,
+            system_size,
             g_matrix,
             solution,
-            adjoint: vec![0.0; num_nodes],
+            adjoint: vec![0.0; system_size],
             elements,
         }
     }
@@ -285,17 +310,17 @@ impl SensitivityAnalyzer {
     ///
     /// For symmetric G (resistive networks), Gáµ€ = G
     fn solve_adjoint(&mut self, output_node: usize) -> bool {
-        if output_node >= self.num_nodes {
+        if output_node >= self.system_size {
             return false;
         }
 
         // For resistive networks, G is symmetric so we can solve GÂ·Î» = eâ‚–
         // Build unit vector eâ‚–
-        let mut e = vec![0.0; self.num_nodes];
+        let mut e = vec![0.0; self.system_size];
         e[output_node] = 1.0;
 
         // Solve using Gaussian elimination
-        let n = self.num_nodes;
+        let n = self.system_size;
 
         // Augmented matrix [G | e]
         let mut aug: Vec<Vec<Value>> = self
@@ -388,6 +413,16 @@ impl SensitivityAnalyzer {
         -self.adjoint_difference(elem.node_pos, elem.node_neg)
     }
 
+    /// Compute sensitivity of an independent voltage source DC value.
+    ///
+    /// In MNA, the source value appears directly in the branch equation RHS,
+    /// so d(output)/dVs equals the adjoint value at that branch row.
+    fn voltage_source_sensitivity(&self, elem: &ElementDesc) -> Value {
+        elem.branch_index
+            .and_then(|idx| self.adjoint.get(idx).copied())
+            .unwrap_or(0.0)
+    }
+
     #[inline]
     fn unsupported_linearized_sensitivity(&self, _elem: &ElementDesc) -> Value {
         0.0
@@ -419,7 +454,7 @@ impl SensitivityAnalyzer {
     ) -> Option<SensitivityResult> {
         // Get output value
         let output_value = match output_ref {
-            Some(r) if r < self.num_nodes => self.solution[output_node] - self.solution[r],
+            Some(r) if r < self.system_size => self.solution[output_node] - self.solution[r],
             _ => self.solution[output_node],
         };
 
@@ -430,20 +465,21 @@ impl SensitivityAnalyzer {
 
         // If differential output, also solve for reference and combine
         if let Some(ref_node) = output_ref
-            && ref_node < self.num_nodes {
-                // Save current adjoint
-                let adj_output = self.adjoint.clone();
+            && ref_node < self.system_size
+        {
+            // Save current adjoint
+            let adj_output = self.adjoint.clone();
 
-                // Solve for reference node
-                if !self.solve_adjoint(ref_node) {
-                    return None;
-                }
-
-                // Combine: Î» = Î»_output - Î»_ref
-                for i in 0..self.num_nodes {
-                    self.adjoint[i] = adj_output[i] - self.adjoint[i];
-                }
+            // Solve for reference node
+            if !self.solve_adjoint(ref_node) {
+                return None;
             }
+
+            // Combine: Î» = Î»_output - Î»_ref
+            for i in 0..self.system_size {
+                self.adjoint[i] = adj_output[i] - self.adjoint[i];
+            }
+        }
 
         let mut result = SensitivityResult::new(&format!("V({})", output_node + 1), output_value);
 
@@ -453,8 +489,8 @@ impl SensitivityAnalyzer {
                 ElementType::Resistor => self.resistor_sensitivity(elem),
                 ElementType::Capacitor => self.capacitor_sensitivity(elem),
                 ElementType::CurrentSource => self.current_source_sensitivity(elem),
+                ElementType::VoltageSource => self.voltage_source_sensitivity(elem),
                 ElementType::Inductor
-                | ElementType::VoltageSource
                 | ElementType::Transconductance
                 | ElementType::Transresistance => self.unsupported_linearized_sensitivity(elem),
             };
@@ -807,6 +843,46 @@ mod tests {
         );
     }
 
+    /// Test ideal voltage source sensitivity through an MNA branch equation.
+    #[test]
+    fn test_voltage_source_sensitivity_dc() {
+        let r = 1_000.0;
+        let vs = 3.3;
+        let g = 1.0 / r;
+
+        // Single-node MNA system with an ideal source to ground:
+        // [ g  1 ] [v] = [ 0 ]
+        // [ 1  0 ] [i]   [ Vs]
+        let g_matrix = vec![vec![g, 1.0], vec![1.0, 0.0]];
+        let solution = vec![vs, -vs / r];
+        let elements = vec![
+            ElementDesc::resistor("R1", Some(0), None, r),
+            ElementDesc::voltage_source("V1", Some(0), None, 1, vs),
+        ];
+
+        let mut analyzer = SensitivityAnalyzer::new(g_matrix, solution, elements);
+        let result = analyzer
+            .analyze(0, None)
+            .expect("sensitivity analysis should succeed");
+        let sens_v = result
+            .get("V1")
+            .expect("voltage source sensitivity should be reported");
+        let sens_r = result
+            .get("R1")
+            .expect("resistor sensitivity should be reported");
+
+        assert!(
+            (sens_v.absolute - 1.0).abs() < 1e-12,
+            "ideal source should pin the node voltage, got dV/dVs={}",
+            sens_v.absolute
+        );
+        assert!(
+            sens_r.absolute.abs() < 1e-12,
+            "load resistor should not perturb a perfectly driven ideal source node, got {}",
+            sens_r.absolute
+        );
+    }
+
     /// Unsupported element kinds should be reported with zero sensitivity
     /// instead of being silently dropped.
     #[test]
@@ -818,6 +894,7 @@ mod tests {
             element_type: ElementType::Inductor,
             node_pos: Some(0),
             node_neg: None,
+            branch_index: None,
             value: 1e-6,
         }];
 

@@ -73,10 +73,12 @@ impl StaticMatrix {
 
         for (r, c, v) in entries {
             if let Some(last) = accumulated.last_mut()
-                && last.0 == r && last.1 == c {
-                    last.2 += v;
-                    continue;
-                }
+                && last.0 == r
+                && last.1 == c
+            {
+                last.2 += v;
+                continue;
+            }
             let idx = accumulated.len();
             position_map.insert((r, c), idx);
             accumulated.push((r, c, v));
@@ -387,6 +389,30 @@ impl ComplexMatrix {
         if let Some(&idx) = self.position_map.get(&(row, col)) {
             self.values[idx] += Complex64::new(0.0, value);
         }
+    }
+
+    /// Materialize the real part of the sparse matrix as a dense matrix.
+    pub fn to_dense_real(&self) -> Vec<Vec<Value>> {
+        let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
+        for col in 0..self.ncols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                dense[row][col] = self.values[idx].re;
+            }
+        }
+        dense
+    }
+
+    /// Materialize the imaginary part of the sparse matrix as a dense matrix.
+    pub fn to_dense_imag(&self) -> Vec<Vec<Value>> {
+        let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
+        for col in 0..self.ncols {
+            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
+                let row = self.row_indices[idx];
+                dense[row][col] = self.values[idx].im;
+            }
+        }
+        dense
     }
 
     /// Solve Ax = b for complex values

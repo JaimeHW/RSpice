@@ -399,10 +399,10 @@ impl Engine {
         if matches!(
             jfet.params.channel_model,
             crate::device::JfetChannelModel::Hfet1
-        )
-            && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
-                return (vgs, vgd);
-            }
+        ) && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages()
+        {
+            return (vgs, vgd);
+        }
         let vg = Self::node_voltage(voltages, jfet.gate);
         let vd = Self::node_voltage(voltages, jfet.drain);
         let vs = Self::node_voltage(voltages, jfet.source);
@@ -420,10 +420,10 @@ impl Engine {
         if matches!(
             jfet.params.channel_model,
             crate::device::JfetChannelModel::Hfet1
-        )
-            && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages() {
-                return (vgs, vgd);
-            }
+        ) && let Some((vgs, vgd, _vds)) = jfet.internal_branch_state_voltages()
+        {
+            return (vgs, vgd);
+        }
 
         let vg = Self::node_voltage(voltages, jfet.gate);
         let vd = Self::node_voltage(voltages, jfet.drain);
@@ -1281,6 +1281,16 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
         let mut circuit = self.build_circuit(netlist)?;
+        if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
+            return Ok(TransientResult {
+                time: vec![0.0],
+                voltages: Vec::new(),
+                branch_currents: Vec::new(),
+                num_nodes: 0,
+                node_names: Vec::new(),
+                branch_names: Vec::new(),
+            });
+        }
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -1364,13 +1374,18 @@ impl Engine {
             );
         }
 
+        let branch_names = circuit.branch_names_sorted();
         let mut result = TransientResult {
             time: vec![0.0],
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
+            branch_currents: (0..circuit.num_branches())
+                .map(|i| vec![solution.get(num_nodes + i).copied().unwrap_or(0.0)])
+                .collect(),
             num_nodes,
             node_names,
+            branch_names,
         };
         let mut t = 0.0;
 
@@ -1904,6 +1919,9 @@ impl Engine {
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
                     }
+                    for (i, currents) in result.branch_currents.iter_mut().enumerate() {
+                        currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
+                    }
 
                     // Debug: log force-accept values for node 0
                     let v0_force = solution.first().copied().unwrap_or(0.0);
@@ -2070,6 +2088,9 @@ impl Engine {
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
                     }
+                    for (i, currents) in result.branch_currents.iter_mut().enumerate() {
+                        currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
+                    }
                     retry_count = 0; // Reset for next timepoint
                     force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     Self::recover_timestep_after_accepted_step(
@@ -2173,6 +2194,9 @@ impl Engine {
             result.time.push(t);
             for (i, voltages) in result.voltages.iter_mut().enumerate() {
                 voltages.push(solution.get(i).copied().unwrap_or(0.0));
+            }
+            for (i, currents) in result.branch_currents.iter_mut().enumerate() {
+                currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
             }
             let scale = lte_estimator.recommend_scale(lte);
             timestep.adjust(lte / scale);

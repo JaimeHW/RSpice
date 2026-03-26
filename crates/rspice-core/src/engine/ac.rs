@@ -269,7 +269,7 @@ impl Engine {
 
         // Stamp resistors (real conductance)
         for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
-            let g = circuit.resistors.conductances[r_idx];
+            let g = circuit.resistors.small_signal_conductance(r_idx);
 
             if stamp.pp.row > 0 && stamp.pp.col > 0 {
                 ac_matrix.add_real(stamp.pp.row - 1, stamp.pp.col - 1, g);
@@ -564,6 +564,18 @@ impl Engine {
     ) -> Result<Vec<AcResult>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
+            return Ok(frequencies
+                .iter()
+                .map(|&frequency| AcResult {
+                    frequency,
+                    node_names: Vec::new(),
+                    branch_names: Vec::new(),
+                    voltages: Vec::new(),
+                    currents: Vec::new(),
+                })
+                .collect());
+        }
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
