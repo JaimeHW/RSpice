@@ -304,7 +304,10 @@ fn output_has_operating_point_reference(content: &str) -> bool {
 
 fn deck_has_reference_output(path: &Path) -> bool {
     let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
-    runner.has_valid_reference_output(path)
+    let source = fs::read_to_string(path).expect("read circuit");
+    runner
+        .has_direct_validation_coverage(path, &source)
+        .expect("evaluate direct validation coverage")
 }
 
 #[test]
@@ -343,13 +346,6 @@ fn deck_has_control_block(path: &Path) -> bool {
         .expect("read circuit")
         .lines()
         .any(|line| line.trim().eq_ignore_ascii_case(".control"))
-}
-
-fn deck_has_sensitivity_analysis(path: &Path) -> bool {
-    fs::read_to_string(path)
-        .expect("read circuit")
-        .lines()
-        .any(|line| line.trim_start().to_ascii_lowercase().starts_with(".sens"))
 }
 
 fn all_circuit_paths(root: &Path) -> Vec<PathBuf> {
@@ -461,8 +457,7 @@ fn test_ngspice_transmission_ltra1_focus() {
     assert!(
         result.passed,
         "Focused transmission deck failed: {:?} | mismatches: {:?}",
-        result.error,
-        result.mismatches
+        result.error, result.mismatches
     );
 }
 
@@ -935,7 +930,7 @@ fn test_validation_manifest_covers_all_non_oracled_decks() {
         if deck_has_gold_assertions(&cir) {
             continue;
         }
-        if deck_has_reference_output(&cir) && !deck_has_sensitivity_analysis(&cir) {
+        if deck_has_reference_output(&cir) {
             continue;
         }
 
@@ -952,17 +947,14 @@ fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
     let tests_dir = get_tests_dir();
     let manifest = load_validation_manifest();
 
-    for rel in manifest.keys() {
+    for (rel, mode) in &manifest {
         let deck_path = tests_dir.join(rel);
-        // `_t`/`_g` node pairs are only automatic oracles for analyses that the
-        // regression harness validates directly from operating-point results.
-        // Scripted-control decks may still mention those symbols while requiring
-        // an explicit manifest contract, so only checked-in reference outputs are
-        // unambiguously redundant here. Sensitivity decks are also exempt because
-        // the harness currently smoke-validates .SENS execution without comparing
-        // the checked-in sensitivity tables yet.
+        if mode == "scripted_control" {
+            continue;
+        }
+
         assert!(
-            !deck_has_reference_output(&deck_path) || deck_has_sensitivity_analysis(&deck_path),
+            !deck_has_reference_output(&deck_path),
             "validation-manifest entry '{}' is unnecessary because the deck already has a checked-in direct oracle",
             rel
         );

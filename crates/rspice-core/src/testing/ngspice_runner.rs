@@ -1219,23 +1219,13 @@ impl TestRunner {
         }
     }
 
-    fn enforce_validation_coverage(
+    fn analysis_has_direct_validation(
         &self,
         cir_path: &Path,
         original_source: &str,
         analysis: &AnalysisSpec,
-    ) -> Result<(), String> {
-        let contract = self.validation_contract_for(cir_path);
-        if matches!(contract, Some(ValidationContract::ScriptedControl))
-            && !Self::has_control_block(original_source)
-        {
-            return Err(format!(
-                "Validation manifest marks '{}' as scripted_control, but no .control block was found",
-                cir_path.display()
-            ));
-        }
-
-        let automatically_validated = match analysis {
+    ) -> Result<bool, String> {
+        Ok(match analysis {
             AnalysisSpec::DcOp => {
                 Self::source_has_test_gold_nodes(original_source)
                     || self.load_dc_op_reference(cir_path)?.is_some()
@@ -1258,7 +1248,46 @@ impl TestRunner {
                 .load_transfer_function_reference(cir_path, output, input_source)?
                 .is_some(),
             AnalysisSpec::Unsupported { .. } => true,
-        };
+        })
+    }
+
+    pub fn has_direct_validation_coverage(
+        &self,
+        cir_path: &Path,
+        original_source: &str,
+    ) -> Result<bool, String> {
+        let analyses = self.parse_analyses(original_source);
+        if analyses.is_empty() {
+            return Ok(false);
+        }
+
+        for analysis in &analyses {
+            if !self.analysis_has_direct_validation(cir_path, original_source, analysis)? {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn enforce_validation_coverage(
+        &self,
+        cir_path: &Path,
+        original_source: &str,
+        analysis: &AnalysisSpec,
+    ) -> Result<(), String> {
+        let contract = self.validation_contract_for(cir_path);
+        if matches!(contract, Some(ValidationContract::ScriptedControl))
+            && !Self::has_control_block(original_source)
+        {
+            return Err(format!(
+                "Validation manifest marks '{}' as scripted_control, but no .control block was found",
+                cir_path.display()
+            ));
+        }
+
+        let automatically_validated =
+            self.analysis_has_direct_validation(cir_path, original_source, analysis)?;
 
         if automatically_validated || contract.is_some() {
             return Ok(());
@@ -3795,7 +3824,7 @@ impl TestRunner {
                 return Some(
                     results
                         .iter()
-                        .map(crate::analysis::NoiseResult::output_noise_rms)
+                        .map(|point| point.output_noise_density)
                         .collect(),
                 );
             }
@@ -3807,7 +3836,7 @@ impl TestRunner {
                 return Some(
                     results
                         .iter()
-                        .map(crate::analysis::NoiseResult::input_referred_rms)
+                        .map(|point| point.input_referred_density)
                         .collect(),
                 );
             }
@@ -4236,7 +4265,7 @@ impl TestRunner {
 
             let complex_row = x_col_idx == 1
                 && value_col_start == 2
-                && parts.len() > 2 * (1 + current_vars.len());
+                && parts.len() >= 2 * (1 + current_vars.len());
 
             let Some(x_value) = (if complex_row {
                 parts
@@ -4252,7 +4281,7 @@ impl TestRunner {
 
             if complex_row {
                 for (var_idx, var_name) in current_vars.iter().enumerate() {
-                    let real_idx = 3 + var_idx * 2;
+                    let real_idx = 2 + var_idx * 2;
                     let imag_idx = real_idx + 1;
                     let Some(re_str) = parts.get(real_idx) else {
                         continue;
@@ -5599,7 +5628,7 @@ frequency v(inoise_spectr
         let results = vec![crate::analysis::NoiseResult {
             frequency: 1.0,
             output_noise_density: 0.0,
-            input_referred_density: 1e-12,
+            input_referred_density: 1e-6,
             contributions: Vec::new(),
         }];
 
@@ -5608,6 +5637,50 @@ frequency v(inoise_spectr
             .expect("compare noise reference");
 
         assert!(mismatches.is_empty());
+
+        fs::remove_dir_all(&root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn test_compare_noise_reference_uses_spectral_density_values() {
+        let root = unique_temp_dir("rspice_ngspice_noise_spectrum");
+        fs::create_dir_all(&root).expect("temp dir");
+        let cir_path = root.join("noise_spectrum.cir");
+        fs::write(&cir_path, "Noise spectrum deck\n.end\n").expect("write circuit");
+        fs::write(
+            cir_path.with_extension("out"),
+            "\
+frequency v(inoise_spectrum) v(onoise_spectrum)
+1.0e3 1.0e-12 4.0e-18
+1.0e4 2.5e-12 9.0e-18
+",
+        )
+        .expect("write reference output");
+
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let results = vec![
+            crate::analysis::NoiseResult {
+                frequency: 1.0e3,
+                output_noise_density: 4.0e-18,
+                input_referred_density: 1.0e-12,
+                contributions: Vec::new(),
+            },
+            crate::analysis::NoiseResult {
+                frequency: 1.0e4,
+                output_noise_density: 9.0e-18,
+                input_referred_density: 2.5e-12,
+                contributions: Vec::new(),
+            },
+        ];
+
+        let mismatches = runner
+            .compare_noise_reference(&cir_path, &results)
+            .expect("compare noise reference");
+
+        assert!(
+            mismatches.is_empty(),
+            "expected spectral-density comparison, got mismatches: {mismatches:?}"
+        );
 
         fs::remove_dir_all(&root).expect("cleanup temp dir");
     }
@@ -5660,6 +5733,70 @@ Index   time            v(out)\n\
         assert_eq!(series.y.len(), 4);
         assert!((series.x[0] - 0.0).abs() < 1e-15);
         assert!((series.x[3] - 3e-9).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_parse_ngspice_output_tables_parses_single_variable_complex_rows() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let content = "\
+Index   frequency       v(out)\n\
+0       1.0e3           3.0, 4.0\n\
+1       1.0e4           5.0, 12.0\n";
+
+        let tables = runner
+            .parse_ngspice_output_tables(content)
+            .expect("expected parseable complex section");
+        assert_eq!(tables.len(), 1);
+        assert_eq!(
+            TestRunner::normalize_variable_name(&tables[0].x_name),
+            "frequency"
+        );
+
+        let series = tables[0]
+            .variables
+            .get("v(out)")
+            .expect("v(out) series missing");
+        assert_eq!(series.x, vec![1.0e3, 1.0e4]);
+        assert_eq!(series.y.len(), 2);
+        assert!((series.y[0] - 5.0).abs() < 1e-12);
+        assert!((series.y[1] - 13.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_has_direct_validation_coverage_detects_single_variable_complex_ac_oracle() {
+        let root = unique_temp_dir("rspice_ngspice_direct_ac_complex");
+        fs::create_dir_all(&root).expect("temp dir");
+        let cir_path = root.join("complex_ac.cir");
+        fs::write(
+            &cir_path,
+            "\
+V1 1 0 AC 1
+R1 1 0 1k
+.ac dec 5 1k 10k
+.print ac v(1)
+.end
+",
+        )
+        .expect("write circuit");
+        fs::write(
+            cir_path.with_extension("out"),
+            "\
+Index   frequency       v(1)\n\
+0       1.0e3           3.0, 4.0\n\
+1       1.0e4           5.0, 12.0\n",
+        )
+        .expect("write reference output");
+
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let source = fs::read_to_string(&cir_path).expect("read circuit");
+        assert!(
+            runner
+                .has_direct_validation_coverage(&cir_path, &source)
+                .expect("evaluate direct validation coverage"),
+            "single-variable complex AC tables should count as direct validation coverage"
+        );
+
+        fs::remove_dir_all(&root).expect("cleanup temp dir");
     }
 
     #[test]

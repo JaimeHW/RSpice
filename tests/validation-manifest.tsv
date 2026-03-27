@@ -14,6 +14,7 @@ mesa/mesa-12.cir	scripted_control
 mesa/mesa12.cir	smoke
 mesa/mesa13.cir	smoke
 mesa/mesa21.cir	smoke
+mos6/simpleinv.cir	smoke
 regression/lib-processing/ex1a.cir	smoke
 regression/lib-processing/ex1b.cir	smoke
 regression/lib-processing/ex2a.cir	smoke
@@ -49,4 +50,3 @@ regression/temper/temper-res-1.cir	scripted_control
 xspice/digital/d_ram.cir	smoke
 xspice/digital/d_source.cir	smoke
 xspice/digital/d_state.cir	smoke
-mos6/simpleinv.cir	smoke
