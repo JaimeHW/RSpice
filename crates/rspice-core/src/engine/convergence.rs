@@ -9,6 +9,7 @@
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 use super::{DampingStrategy, Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::device::NonlinearConvergenceCriteria;
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,
 };
@@ -95,8 +96,12 @@ impl Engine {
     }
 
     #[inline]
-    pub(crate) fn device_convergence_tolerance(&self) -> Value {
-        self.voltage_abstol()
+    pub(crate) fn device_convergence_criteria(&self) -> NonlinearConvergenceCriteria {
+        NonlinearConvergenceCriteria::new(
+            self.voltage_abstol(),
+            self.current_abstol(),
+            self.voltage_reltol(),
+        )
     }
 
     #[inline]
@@ -107,30 +112,56 @@ impl Engine {
         rhs: &mut [Value],
         solution: &[Value],
     ) {
+        self.stamp_nonlinear_devices_for_operating_point(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
+    }
+
+    #[inline]
+    fn stamp_nonlinear_devices_for_operating_point(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) {
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, rhs, solution);
-        circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
+        circuit.stamp_behavioral(matrix, rhs, solution, time);
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(
-                0.0,
-                0.0,
-                solution,
-                crate::xspice::AnalysisType::DcOp,
-            );
+            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
             circuit.stamp_xspice(matrix, rhs);
         }
     }
 
     #[inline]
     fn update_device_states_for_dc(&self, circuit: &mut CircuitData, solution: &[Value]) {
+        self.update_device_states_for_operating_point(
+            circuit,
+            solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
+    }
+
+    #[inline]
+    fn update_device_states_for_operating_point(
+        &self,
+        circuit: &mut CircuitData,
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) {
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_analysis(
-                0.0,
-                0.0,
-                solution,
-                crate::xspice::AnalysisType::DcOp,
-            );
+            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
         }
     }
 
@@ -535,6 +566,27 @@ impl Engine {
         })
     }
 
+    #[inline]
+    fn stamp_transient_operating_point_linear(
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        time: Value,
+        gmin: Value,
+    ) {
+        let node_count = circuit.num_nodes().min(rhs.len());
+        for i in 0..node_count {
+            matrix.add(i, i, gmin);
+        }
+
+        circuit.stamp_transient_linear_direct(matrix, rhs);
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .voltage_sources
+            .update_transient_rhs(rhs, time, |br_ordinal| num_nodes + br_ordinal);
+        circuit.current_sources.update_transient_rhs(rhs, time);
+    }
+
     fn nonlinear_merit_scaled(
         &self,
         circuit: &mut CircuitData,
@@ -646,7 +698,7 @@ impl Engine {
 
             if voltage_converged
                 && linearized_residual_converged
-                && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                && circuit.nonlinear_converged(self.device_convergence_criteria())
                 && self.nonlinear_residual_converged_scaled(
                     circuit,
                     matrix,
@@ -764,7 +816,7 @@ impl Engine {
 
         residual_converged && self.voltage_convergence_met(solution, &next_solution) && {
             self.update_device_states_for_dc(circuit, solution);
-            circuit.nonlinear_converged(self.device_convergence_tolerance())
+            circuit.nonlinear_converged(self.device_convergence_criteria())
         }
     }
 
@@ -1041,35 +1093,31 @@ impl Engine {
     /// replaced by very high resistances) to establish DC source voltages
     /// through the resistor network. This provides a much better starting
     /// point for Newton iteration than all zeros.
-    fn linear_presolve_for_guess(
+    fn linear_presolve_for_guess_with_linear_stamp<F>(
         &self,
-        circuit: &CircuitData,
+        circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
-    ) -> Option<Vec<Value>> {
+        mut linear_stamp: F,
+    ) -> Option<Vec<Value>>
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
         let size = circuit.matrix_size();
         let num_nodes = circuit.num_nodes();
 
-        // Clear matrix and build linear-only stamp
         matrix.clear_values();
         let mut rhs = vec![0.0; size];
+        linear_stamp(circuit, matrix, &mut rhs);
 
-        // Stamp only linear devices
-        circuit.stamp_dc_direct(matrix, &mut rhs);
-
-        // Add small conductance to ground for each node to prevent floating nodes
-        // This is especially important for BJT base/emitter nodes that would
-        // otherwise be floating in the linear presolve
         for i in 0..num_nodes {
             if let Some(idx) = matrix.get_index(i, i) {
-                matrix.stamp_direct(idx, 1e-9); // 1nS to ground
+                matrix.stamp_direct(idx, 1e-9);
             }
         }
 
-        // Try to solve
         match matrix.solve(&rhs) {
             Ok(solution) => {
                 log::debug!("Linear presolve succeeded, using as initial guess");
-                // Log initial guess voltages for debugging
                 for (i, &v) in solution.iter().enumerate().take(num_nodes) {
                     log::debug!("  Presolve V({}) = {:.4} V", i + 1, v);
                 }
@@ -1080,6 +1128,16 @@ impl Engine {
                 None
             }
         }
+    }
+
+    fn linear_presolve_for_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+    ) -> Option<Vec<Value>> {
+        self.linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
+            circuit.stamp_dc_direct(matrix, rhs);
+        })
     }
 
     /// Solve a nonlinear circuit using Newton-Raphson iteration with optional initial guess
@@ -1205,7 +1263,7 @@ impl Engine {
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
-            let device_converged = circuit.nonlinear_converged(self.device_convergence_tolerance());
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged =
                 self.nonlinear_residual_converged(circuit, matrix, &new_solution);
             solution = new_solution;
@@ -1219,6 +1277,11 @@ impl Engine {
                         "DC operating point converged after {} iterations (voltage limiting was triggered)",
                         iteration + 1
                     );
+                }
+                if let Some(refined) =
+                    self.refine_fallback_candidate(circuit, matrix, &solution, abort)
+                {
+                    return Ok(refined);
                 }
                 return Ok(solution);
             }
@@ -1374,6 +1437,140 @@ impl Engine {
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
     }
 
+    pub(crate) fn solve_linear_transient_operating_point_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+
+        let size = circuit.matrix_size();
+        matrix.clear_values();
+        let mut rhs = vec![0.0; size];
+        Self::stamp_transient_operating_point_linear(
+            circuit,
+            matrix,
+            &mut rhs,
+            time,
+            self.config.convergence_config.gmin_target.max(0.0),
+        );
+        matrix.solve(&rhs).map_err(SimulationError::Solver)
+    }
+
+    pub(crate) fn solve_nonlinear_transient_op_with_node_hints_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let mut solution = self
+            .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
+                Self::stamp_transient_operating_point_linear(circuit, matrix, rhs, time, 0.0);
+            })
+            .unwrap_or_else(|| vec![0.0; size]);
+
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            solution[node_id - 1] = voltage;
+        }
+
+        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+
+        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let mut rhs = vec![0.0; size];
+        let mut damping_state = NewtonDampingState::default();
+        let tranop_max_iterations = self.nonlinear_iteration_budget(10);
+
+        for iteration in 0..tranop_max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
+
+            matrix.clear_values();
+            rhs.fill(0.0);
+
+            circuit.refresh_jiles_atherton_inductances(&solution);
+            Self::stamp_transient_operating_point_linear(
+                circuit,
+                matrix,
+                &mut rhs,
+                time,
+                gmin_floor,
+            );
+            self.stamp_nonlinear_devices_for_operating_point(
+                circuit,
+                matrix,
+                &mut rhs,
+                &solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+            );
+
+            let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let mut new_solution = if requires_conservative_nonlinear_limiting {
+                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
+                    self.nonlinear_merit_with_linear_stamp(
+                        circuit,
+                        matrix,
+                        trial,
+                        |circuit, matrix, rhs| {
+                            circuit.refresh_jiles_atherton_inductances(trial);
+                            Self::stamp_transient_operating_point_linear(
+                                circuit, matrix, rhs, time, gmin_floor,
+                            );
+                        },
+                    )
+                })
+            } else {
+                raw_solution
+            };
+            Self::clamp_solution_to_physical_bounds(&mut new_solution);
+
+            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let linearized_residual_converged =
+                self.residual_convergence_met(matrix, &new_solution, &rhs);
+            self.update_device_states_for_operating_point(
+                circuit,
+                &new_solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+            );
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = self.nonlinear_residual_converged_with_linear_stamp(
+                circuit,
+                matrix,
+                &new_solution,
+                |circuit, matrix, rhs| {
+                    circuit.refresh_jiles_atherton_inductances(&new_solution);
+                    Self::stamp_transient_operating_point_linear(
+                        circuit, matrix, rhs, time, gmin_floor,
+                    );
+                },
+            );
+
+            solution = new_solution;
+            if voltage_converged
+                && linearized_residual_converged
+                && device_converged
+                && nonlinear_residual_converged
+            {
+                return Ok(solution);
+            }
+        }
+
+        Err(SimulationError::ConvergenceFailed(tranop_max_iterations))
+    }
+
     /// Check if voltage solution has converged using legacy signature.
     ///
     /// Uses `tolerance` as an absolute voltage tolerance with default SPICE-like
@@ -1521,7 +1718,7 @@ impl Engine {
                         solution = new_solution;
                         if converged
                             && linearized_residual_converged
-                            && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                            && circuit.nonlinear_converged(self.device_convergence_criteria())
                             && self.nonlinear_residual_converged_scaled(
                                 circuit, matrix, &solution, scale,
                             )
@@ -1634,7 +1831,7 @@ impl Engine {
 
                 if converged
                     && linearized_residual_converged
-                    && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                    && circuit.nonlinear_converged(self.device_convergence_criteria())
                     && self.nonlinear_residual_converged_with_pseudo_transient(
                         circuit,
                         matrix,
@@ -1855,7 +2052,7 @@ impl Engine {
                         solution = new_solution;
                         if converged
                             && linearized_residual_converged
-                            && circuit.nonlinear_converged(self.device_convergence_tolerance())
+                            && circuit.nonlinear_converged(self.device_convergence_criteria())
                             && self.nonlinear_residual_converged_with_gmin(
                                 circuit, matrix, &solution, gmin,
                             )
@@ -2059,12 +2256,17 @@ mod tests {
     }
 
     #[test]
-    fn test_device_convergence_tolerance_uses_configured_voltage_abstol() {
+    fn test_device_convergence_criteria_uses_configured_tolerances() {
         let mut config = crate::engine::SimulationConfig::default();
         config.tolerance = 1e-3;
         config.convergence_config.voltage_abstol = 7e-7;
+        config.convergence_config.current_abstol = 4e-13;
+        config.convergence_config.voltage_reltol = 2e-3;
         let engine = Engine::new(config);
-        assert!((engine.device_convergence_tolerance() - 7e-7).abs() < 1e-18);
+        let criteria = engine.device_convergence_criteria();
+        assert!((criteria.voltage_abs - 7e-7).abs() < 1e-18);
+        assert!((criteria.current_abs - 4e-13).abs() < 1e-24);
+        assert!((criteria.rel - 2e-3).abs() < 1e-18);
     }
 
     #[test]

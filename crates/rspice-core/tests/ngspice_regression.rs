@@ -228,13 +228,6 @@ fn deck_has_gold_assertions(path: &Path) -> bool {
     lower.contains("_t") && lower.contains("_g")
 }
 
-fn output_has_tabular_reference(content: &str) -> bool {
-    content.lines().any(|line| {
-        let trimmed = line.trim();
-        trimmed.len() >= 6 && trimmed[..5].eq_ignore_ascii_case("index") && trimmed.contains(' ')
-    })
-}
-
 fn output_has_operating_point_reference(content: &str) -> bool {
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Section {
@@ -310,16 +303,8 @@ fn output_has_operating_point_reference(content: &str) -> bool {
 }
 
 fn deck_has_reference_output(path: &Path) -> bool {
-    let out_path = path.with_extension("out");
-    let Ok(content) = fs::read_to_string(out_path) else {
-        return false;
-    };
-    let trimmed = content.trim();
-    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("to be done") {
-        return false;
-    }
-
-    output_has_tabular_reference(trimmed) || output_has_operating_point_reference(trimmed)
+    let runner = TestRunner::new(get_tests_dir(), TestRunnerConfig::default());
+    runner.has_valid_reference_output(path)
 }
 
 #[test]
@@ -358,6 +343,13 @@ fn deck_has_control_block(path: &Path) -> bool {
         .expect("read circuit")
         .lines()
         .any(|line| line.trim().eq_ignore_ascii_case(".control"))
+}
+
+fn deck_has_sensitivity_analysis(path: &Path) -> bool {
+    fs::read_to_string(path)
+        .expect("read circuit")
+        .lines()
+        .any(|line| line.trim_start().to_ascii_lowercase().starts_with(".sens"))
 }
 
 fn all_circuit_paths(root: &Path) -> Vec<PathBuf> {
@@ -455,6 +447,22 @@ fn test_ngspice_transmission_suite() {
         "Transmission: {} tests, {:.1}% pass rate",
         stats.total,
         stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_transmission_ltra1_focus() {
+    let tests_dir = get_tests_dir();
+    let mut cfg = suite_config("transmission");
+    cfg.max_time_per_test_ms = 120_000;
+    let runner = TestRunner::new(tests_dir.clone(), cfg);
+    let result = runner.run_test(&tests_dir.join("transmission").join("ltra1_1_line.cir"));
+
+    assert!(
+        result.passed,
+        "Focused transmission deck failed: {:?} | mismatches: {:?}",
+        result.error,
+        result.mismatches
     );
 }
 
@@ -927,7 +935,7 @@ fn test_validation_manifest_covers_all_non_oracled_decks() {
         if deck_has_gold_assertions(&cir) {
             continue;
         }
-        if deck_has_reference_output(&cir) {
+        if deck_has_reference_output(&cir) && !deck_has_sensitivity_analysis(&cir) {
             continue;
         }
 
@@ -950,10 +958,12 @@ fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
         // regression harness validates directly from operating-point results.
         // Scripted-control decks may still mention those symbols while requiring
         // an explicit manifest contract, so only checked-in reference outputs are
-        // unambiguously redundant here.
+        // unambiguously redundant here. Sensitivity decks are also exempt because
+        // the harness currently smoke-validates .SENS execution without comparing
+        // the checked-in sensitivity tables yet.
         assert!(
-            !deck_has_reference_output(&deck_path),
-            "validation-manifest entry '{}' is unnecessary because the deck already has a checked-in .out reference",
+            !deck_has_reference_output(&deck_path) || deck_has_sensitivity_analysis(&deck_path),
+            "validation-manifest entry '{}' is unnecessary because the deck already has a checked-in direct oracle",
             rel
         );
     }

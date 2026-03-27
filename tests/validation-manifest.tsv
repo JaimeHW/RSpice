@@ -49,3 +49,4 @@ regression/temper/temper-res-1.cir	scripted_control
 xspice/digital/d_ram.cir	smoke
 xspice/digital/d_source.cir	smoke
 xspice/digital/d_state.cir	smoke
+mos6/simpleinv.cir	smoke

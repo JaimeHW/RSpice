@@ -25,7 +25,7 @@
 //! | TT | Body diode transit time | 50ns |
 //! | BV | Breakdown voltage | 100V |
 
-use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
 
@@ -1031,7 +1031,7 @@ impl NonlinearDevice for Vdmos {
         }
     }
 
-    fn is_converged(&self, _tolerance: Value) -> bool {
+    fn is_converged(&self, _criteria: NonlinearConvergenceCriteria) -> bool {
         let _di = self.drain_int.unwrap_or(self.drain);
         let _si = self.source_int.unwrap_or(self.source);
 

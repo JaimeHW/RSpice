@@ -705,7 +705,7 @@ impl Engine {
                         }
 
                         let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
+                    || circuit.nonlinear_converged(self.device_convergence_criteria());
 
                         if voltage_converged && device_converged && linearized_residual_converged {
                             converged = true;

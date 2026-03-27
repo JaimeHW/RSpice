@@ -1,6 +1,6 @@
 //! Diode device model
 
-use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
 
@@ -335,7 +335,8 @@ impl NonlinearDevice for Diode {
         matrix.stamp_rhs(self.node_cathode, ieq);
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        let tolerance = criteria.voltage_tolerance();
         (self.prev_vd - self.prev_vd_old).abs() < tolerance
     }
 }
@@ -600,16 +601,18 @@ mod tests {
 
     #[test]
     fn test_diode_convergence_check() {
+        let loose = NonlinearConvergenceCriteria::voltage_only(0.01);
+        let tight = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut d = Diode::new("D1".to_string(), 1, 0);
 
         d.prev_vd = 0.7;
         d.prev_vd_old = 0.7001;
 
         // Should converge within 1mV tolerance
-        assert!(d.is_converged(0.01));
+        assert!(d.is_converged(loose));
 
         // Should not converge with tight tolerance
-        assert!(!d.is_converged(1e-6));
+        assert!(!d.is_converged(tight));
     }
 
     #[test]

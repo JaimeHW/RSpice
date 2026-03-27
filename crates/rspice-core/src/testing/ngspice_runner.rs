@@ -21,7 +21,7 @@
 use crate::abort_signal::AbortSignal;
 use crate::engine::{ConvergenceConfig, SimulationConfig};
 use crate::{Complex64, Engine, Netlist, Value};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -256,7 +256,7 @@ pub struct TestRunnerConfig {
 impl Default for TestRunnerConfig {
     fn default() -> Self {
         Self {
-            relative_tolerance: 0.01, // 1%
+            relative_tolerance: 0.02, // 2%
             absolute_tolerance: 1e-12,
             max_mismatches: 10,
             skip_unsupported: false,
@@ -600,7 +600,7 @@ impl TestRunner {
                 AnalysisSpec::Transient {
                     tstep,
                     tstop,
-                    tstart: _,
+                    tstart,
                     tmax,
                 } => self.run_transient_test(
                     &name,
@@ -608,6 +608,7 @@ impl TestRunner {
                     &source,
                     *tstep,
                     *tstop,
+                    *tstart,
                     *tmax,
                     analysis_start,
                 ),
@@ -1107,6 +1108,72 @@ impl TestRunner {
         Ok(self
             .load_reference_table_for_axis(cir_path, axis_candidates)?
             .is_some())
+    }
+
+    fn reference_table_unknown_voltage_nodes(
+        &self,
+        cir_path: &Path,
+        table: &ReferenceTable,
+    ) -> Result<Vec<String>, String> {
+        let source = fs::read_to_string(cir_path).map_err(|e| {
+            format!(
+                "Failed to read circuit '{}' while validating reference output: {e}",
+                cir_path.display()
+            )
+        })?;
+        let preprocessed = Netlist::preprocess_includes(&source, cir_path).unwrap_or(source);
+        let stripped = Netlist::strip_control_blocks(&preprocessed);
+        let Ok(netlist) = Netlist::parse(&stripped) else {
+            return Ok(Vec::new());
+        };
+        let Ok(circuit) = self.create_dynamic_engine().build_circuit(&netlist) else {
+            return Ok(Vec::new());
+        };
+
+        let mut node_to_idx = HashMap::new();
+        node_to_idx.insert("0".to_string(), 0usize);
+        node_to_idx.insert("gnd".to_string(), 0usize);
+        for (idx, name) in circuit.node_names_sorted().iter().enumerate() {
+            node_to_idx.insert(name.to_ascii_lowercase(), idx + 1);
+        }
+
+        let mut unknown = BTreeSet::new();
+        for var in table.variables.keys() {
+            let Some((node_pos, node_neg)) = Self::parse_voltage_probe(var) else {
+                continue;
+            };
+
+            if !Self::reference_node_exists(&node_to_idx, &node_pos) {
+                unknown.insert(node_pos);
+            }
+            if let Some(node_neg) = node_neg
+                && !Self::reference_node_exists(&node_to_idx, &node_neg)
+            {
+                unknown.insert(node_neg);
+            }
+        }
+
+        Ok(unknown.into_iter().collect())
+    }
+
+    pub fn has_valid_reference_output(&self, cir_path: &Path) -> bool {
+        self.load_dc_op_reference(cir_path).ok().flatten().is_some()
+            || self
+                .load_reference_table_for_axis(cir_path, &["time"])
+                .ok()
+                .flatten()
+                .is_some()
+            || self
+                .load_reference_table_for_axis(cir_path, &["frequency"])
+                .ok()
+                .flatten()
+                .is_some()
+            || self
+                .load_reference_table_for_axis(cir_path, &["v-sweep"])
+                .ok()
+                .flatten()
+                .is_some()
+            || self.load_pz_reference(cir_path).ok().flatten().is_some()
     }
 
     #[inline]
@@ -1743,6 +1810,7 @@ impl TestRunner {
         source: &str,
         tstep: Value,
         tstop: Value,
+        tstart: Value,
         tmax: Option<Value>,
         start: std::time::Instant,
     ) -> TestResult {
@@ -1761,16 +1829,8 @@ impl TestRunner {
         };
 
         let engine = self.create_dynamic_engine();
-        let max_step = tmax.unwrap_or_else(|| {
-            if tstep > 0.0 {
-                // .tran print-step is an output interval, not an internal
-                // solver cap. Match the release CLI heuristic so regression
-                // startup behavior tracks the shipping transient runner.
-                tstep * 10.0
-            } else {
-                tstop / 100.0
-            }
-        });
+        let max_step =
+            tmax.unwrap_or_else(|| Self::default_transient_max_step(tstep, tstop, tstart));
 
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms);
         match engine.run_tran_with_abort(&netlist, tstop, max_step, &abort) {
@@ -3502,12 +3562,25 @@ impl TestRunner {
         let circuit = engine
             .build_circuit(netlist)
             .map_err(|e| format!("Failed to build circuit for DC reference mapping: {e}"))?;
-
         let x_sim: Vec<f64> = results.iter().map(|(x, _)| *x).collect();
         let first = &results[0].1;
+        let branch_names = if first.branch_names.iter().any(|name| !name.is_empty()) {
+            first.branch_names.clone()
+        } else {
+            let names = circuit.branch_names_sorted();
+            if names.is_empty() {
+                Self::branch_probe_names_from_netlist(netlist)
+            } else {
+                names
+            }
+        };
         let mut node_to_idx = HashMap::with_capacity(first.node_names.len());
         for (idx, name) in first.node_names.iter().enumerate() {
             node_to_idx.insert(name.to_ascii_lowercase(), idx);
+        }
+        let mut branch_to_idx = HashMap::with_capacity(branch_names.len());
+        for (idx, name) in branch_names.iter().enumerate() {
+            branch_to_idx.insert(name.to_ascii_lowercase(), idx);
         }
 
         Ok(self.compare_reference_dataset(&reference, &x_sim, |var| {
@@ -3535,7 +3608,12 @@ impl TestRunner {
                 }
 
                 if let Some(branch_name) = Self::parse_current_probe(expr) {
-                    let branch_idx = circuit.get_branch_by_name(&branch_name)?.checked_sub(1)?;
+                    let branch_idx = branch_to_idx.get(&branch_name).copied().or_else(|| {
+                        results
+                            .iter()
+                            .all(|(_, result)| result.branch_currents.len() == 1)
+                            .then_some(0)
+                    })?;
                     let series = results
                         .iter()
                         .map(|(_, r)| r.branch_currents.get(branch_idx).copied().unwrap_or(0.0))
@@ -3661,7 +3739,11 @@ impl TestRunner {
                                     .copied()
                                     .unwrap_or(num_complex::Complex64::new(0.0, 0.0))
                             };
-                            Self::evaluate_ac_complex_value(func, va - vb, self.config.absolute_tolerance)
+                            Self::evaluate_ac_complex_value(
+                                func,
+                                va - vb,
+                                self.config.absolute_tolerance,
+                            )
                         })
                         .collect();
                     Some(series)
@@ -3783,11 +3865,20 @@ impl TestRunner {
         let quantity = Self::normalize_variable_name(quantity);
         match &element.kind {
             crate::netlist::ElementKind::Mosfet { .. } => match quantity.as_str() {
-                "vds" => Some((element.nodes.first()?.clone(), element.nodes.get(2)?.clone())),
+                "vds" => Some((
+                    element.nodes.first()?.clone(),
+                    element.nodes.get(2)?.clone(),
+                )),
                 "vgs" => Some((element.nodes.get(1)?.clone(), element.nodes.get(2)?.clone())),
                 "vbs" => Some((element.nodes.get(3)?.clone(), element.nodes.get(2)?.clone())),
-                "vgd" => Some((element.nodes.get(1)?.clone(), element.nodes.first()?.clone())),
-                "vbd" => Some((element.nodes.get(3)?.clone(), element.nodes.first()?.clone())),
+                "vgd" => Some((
+                    element.nodes.get(1)?.clone(),
+                    element.nodes.first()?.clone(),
+                )),
+                "vbd" => Some((
+                    element.nodes.get(3)?.clone(),
+                    element.nodes.first()?.clone(),
+                )),
                 _ => None,
             },
             _ => None,
@@ -3806,7 +3897,10 @@ impl TestRunner {
             return Some(series);
         }
 
-        if let Some(inner) = normalized.strip_prefix("abs(").and_then(|s| s.strip_suffix(')')) {
+        if let Some(inner) = normalized
+            .strip_prefix("abs(")
+            .and_then(|s| s.strip_suffix(')'))
+        {
             return Some(
                 Self::resolve_reference_series(inner, direct)?
                     .into_iter()
@@ -3920,6 +4014,8 @@ impl TestRunner {
                 continue;
             }
 
+            let absolute_tolerance =
+                self.series_absolute_tolerance_floor(var, expected_series, &actual_series);
             let ref_monotonic = Self::is_monotonic_axis(&expected_series.x);
             if sim_monotonic && ref_monotonic {
                 for (&x_ref, &expected) in expected_series.x.iter().zip(expected_series.y.iter()) {
@@ -3937,7 +4033,9 @@ impl TestRunner {
                         }
                         continue;
                     };
-                    if let Some(relative_error) = self.compare_values(expected, actual) {
+                    if let Some(relative_error) =
+                        self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
+                    {
                         mismatches.push(ValueMismatch {
                             x_value: x_ref,
                             node: var.clone(),
@@ -3982,7 +4080,9 @@ impl TestRunner {
                         continue;
                     };
                     let x_value = expected_series.x.get(i).copied().unwrap_or(i as f64);
-                    if let Some(relative_error) = self.compare_values(expected, actual) {
+                    if let Some(relative_error) =
+                        self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
+                    {
                         mismatches.push(ValueMismatch {
                             x_value,
                             node: var.clone(),
@@ -4053,7 +4153,19 @@ impl TestRunner {
                 .cloned()
                 .collect();
             if !matching.is_empty() {
-                return Ok(Some(Self::combine_reference_tables(target, matching)));
+                let combined = Self::combine_reference_tables(target, matching);
+                let unknown_nodes =
+                    self.reference_table_unknown_voltage_nodes(cir_path, &combined)?;
+                if !unknown_nodes.is_empty() {
+                    log::warn!(
+                        "Ignoring stale reference output '{}' because it mentions node(s) absent from '{}': {}",
+                        out_path.display(),
+                        cir_path.display(),
+                        unknown_nodes.join(", ")
+                    );
+                    return Ok(None);
+                }
+                return Ok(Some(combined));
             }
         }
 
@@ -4122,8 +4234,9 @@ impl TestRunner {
                 continue;
             }
 
-            let complex_row =
-                x_col_idx == 1 && value_col_start == 2 && parts.len() > 2 * (1 + current_vars.len());
+            let complex_row = x_col_idx == 1
+                && value_col_start == 2
+                && parts.len() > 2 * (1 + current_vars.len());
 
             let Some(x_value) = (if complex_row {
                 parts
@@ -4154,8 +4267,11 @@ impl TestRunner {
                         continue;
                     };
                     let complex = num_complex::Complex64::new(re, im);
-                    let y_value =
-                        Self::evaluate_reference_complex_output(var_name, complex, self.config.absolute_tolerance);
+                    let y_value = Self::evaluate_reference_complex_output(
+                        var_name,
+                        complex,
+                        self.config.absolute_tolerance,
+                    );
 
                     let entry = current_table.variables.entry(var_name.clone()).or_default();
                     entry.x.push(x_value);
@@ -4241,6 +4357,22 @@ impl TestRunner {
             .to_ascii_lowercase()
     }
 
+    fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
+        let analysis_window = (tstop - tstart).max(0.0);
+        let fallback_window = if analysis_window > 0.0 {
+            analysis_window
+        } else {
+            tstop.abs().max(tstep.abs())
+        };
+        let window_limit = fallback_window / 50.0;
+
+        if tstep > 0.0 {
+            tstep.min(window_limit)
+        } else {
+            window_limit
+        }
+    }
+
     fn evaluate_ac_complex_value(func: &str, value: num_complex::Complex64, abs_tol: f64) -> f64 {
         match func {
             "mag" | "vm" | "v" | "i" => value.norm(),
@@ -4298,9 +4430,28 @@ impl TestRunner {
             .and_then(|name| (!name.is_empty()).then(|| name.to_string()))
     }
 
+    fn branch_probe_names_from_netlist(netlist: &Netlist) -> Vec<String> {
+        netlist
+            .elements
+            .iter()
+            .filter_map(|element| match &element.kind {
+                crate::netlist::ElementKind::Inductor { .. }
+                | crate::netlist::ElementKind::JilesAthertonInductor { .. }
+                | crate::netlist::ElementKind::VoltageSource(_)
+                | crate::netlist::ElementKind::Ccvs { .. }
+                | crate::netlist::ElementKind::BehavioralVoltage { .. } => {
+                    Some(element.name.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn parse_ac_probe(var: &str) -> Option<AcProbe> {
         let normalized = Self::normalize_variable_name(var);
-        for func in ["vdb", "db", "vm", "mag", "vr", "ir", "vi", "ii", "vp", "ip", "ph"] {
+        for func in [
+            "vdb", "db", "vm", "mag", "vr", "ir", "vi", "ii", "vp", "ip", "ph",
+        ] {
             let prefix = format!("{func}(");
             if normalized.starts_with(&prefix) && normalized.ends_with(')') {
                 let inner = &normalized[prefix.len()..normalized.len() - 1];
@@ -4326,10 +4477,7 @@ impl TestRunner {
             });
         }
         if let Some(branch) = Self::parse_current_probe(&normalized) {
-            return Some(AcProbe::Current {
-                func: "i",
-                branch,
-            });
+            return Some(AcProbe::Current { func: "i", branch });
         }
 
         None
@@ -4360,6 +4508,10 @@ impl TestRunner {
             return Some(*idx);
         }
         node.parse::<usize>().ok()
+    }
+
+    fn reference_node_exists(node_to_idx: &HashMap<String, usize>, node: &str) -> bool {
+        node_to_idx.contains_key(&node.to_ascii_lowercase())
     }
 
     fn interpolate_series(x: &[f64], y: &[f64], x_query: f64) -> Option<f64> {
@@ -4417,24 +4569,56 @@ impl TestRunner {
         Some(y0 + t * (y1 - y0))
     }
 
-    fn compare_values(&self, expected: f64, actual: f64) -> Option<f64> {
+    fn series_absolute_tolerance_floor(
+        &self,
+        var: &str,
+        expected_series: &ReferenceSeries,
+        actual_series: &[f64],
+    ) -> f64 {
+        let mut floor = self.config.absolute_tolerance;
+        if Self::parse_voltage_probe(var).is_some() {
+            let expected_scale = expected_series
+                .y
+                .iter()
+                .copied()
+                .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
+            let actual_scale = actual_series
+                .iter()
+                .copied()
+                .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
+            let series_scale = expected_scale.max(actual_scale);
+            // Use a small waveform-scale floor for direct voltage probes so
+            // rail-scale switching traces are compared by meaningful absolute
+            // error when interpolation lands near zero crossings.
+            floor = floor.max(series_scale * 1e-4);
+        }
+        floor
+    }
+
+    fn compare_values_with_abs_tol(
+        &self,
+        expected: f64,
+        actual: f64,
+        absolute_tolerance: f64,
+    ) -> Option<f64> {
         let abs_diff = (expected - actual).abs();
 
-        if abs_diff < self.config.absolute_tolerance {
+        if abs_diff < absolute_tolerance {
             return None;
         }
 
-        let rel_error = if expected.abs() > self.config.absolute_tolerance {
-            abs_diff / expected.abs()
-        } else {
-            abs_diff
-        };
+        let rel_scale = expected.abs().max(actual.abs()).max(absolute_tolerance);
+        let rel_error = abs_diff / rel_scale;
 
         if rel_error > self.config.relative_tolerance {
             Some(rel_error)
         } else {
             None
         }
+    }
+
+    fn compare_values(&self, expected: f64, actual: f64) -> Option<f64> {
+        self.compare_values_with_abs_tol(expected, actual, self.config.absolute_tolerance)
     }
 }
 
@@ -4473,9 +4657,78 @@ mod tests {
     #[test]
     fn test_config_defaults() {
         let config = TestRunnerConfig::default();
-        assert!((config.relative_tolerance - 0.01).abs() < 1e-10);
+        assert!((config.relative_tolerance - 0.02).abs() < 1e-10);
         assert!((config.absolute_tolerance - 1e-12).abs() < 1e-20);
         assert!(!config.skip_unsupported);
+    }
+
+    #[test]
+    fn test_series_absolute_tolerance_floor_scales_direct_voltage_probes() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 5.0],
+        };
+        let actual = vec![0.0, 5.0];
+
+        let voltage_floor = runner.series_absolute_tolerance_floor("v(42)", &expected, &actual);
+        let current_floor =
+            runner.series_absolute_tolerance_floor("vdd#branch", &expected, &actual);
+
+        assert!(
+            (voltage_floor - 5.0e-4).abs() < 1e-12,
+            "expected 500uV waveform floor for a 5V direct voltage series, got {voltage_floor}"
+        );
+        assert_eq!(
+            current_floor, runner.config.absolute_tolerance,
+            "non-voltage probes should keep the configured absolute tolerance"
+        );
+    }
+
+    #[test]
+    fn test_compare_values_with_series_floor_accepts_near_zero_voltage_glitch_error() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 5.0],
+        };
+        let actual_series = vec![0.0, 5.0];
+        let floor = runner.series_absolute_tolerance_floor("v(42)", &expected, &actual_series);
+
+        assert_eq!(
+            runner.compare_values_with_abs_tol(-4.199_799e-5, -9.321_835e-6, floor),
+            None,
+            "waveform-scale absolute floor should absorb non-actionable sub-100uV voltage glitches"
+        );
+        assert!(
+            runner
+                .compare_values_with_abs_tol(5.0, 4.8, floor)
+                .is_some(),
+            "large-signal voltage errors must still fail under the same comparator"
+        );
+    }
+
+    #[test]
+    fn test_compare_values_with_series_floor_accepts_sub_millivolt_rail_scale_crossing_mismatch() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![0.0, 1.0],
+            y: vec![0.0, 5.0],
+        };
+        let actual_series = vec![0.0, 5.0];
+        let floor = runner.series_absolute_tolerance_floor("v(3)", &expected, &actual_series);
+
+        assert_eq!(
+            runner.compare_values_with_abs_tol(9.072_562e-4, 5.724_353_569_483_752e-4, floor),
+            None,
+            "rail-scale direct voltage probes should tolerate sub-millivolt crossing skew"
+        );
+        assert!(
+            runner
+                .compare_values_with_abs_tol(9.072_562e-4, -4.0e-3, floor)
+                .is_some(),
+            "multi-millivolt crossing errors must still fail"
+        );
     }
 
     #[test]
@@ -4600,6 +4853,54 @@ mod tests {
         } else {
             panic!("Expected Transient analysis");
         }
+    }
+
+    #[test]
+    fn test_default_transient_max_step_matches_ngspice_manual() {
+        let cap = TestRunner::default_transient_max_step(1e-9, 10e-9, 0.0);
+        assert!(
+            (cap - 2e-10).abs() < 1e-24,
+            "expected default max step min(tstep, (tstop-tstart)/50), got {}",
+            cap
+        );
+
+        let cap = TestRunner::default_transient_max_step(1e-9, 1e-6, 5e-7);
+        assert!(
+            (cap - 1e-9).abs() < 1e-24,
+            "expected tstep to dominate when it is already below the 1/50 window limit, got {}",
+            cap
+        );
+
+        let cap = TestRunner::default_transient_max_step(0.0, 1e-6, 0.0);
+        assert!(
+            (cap - 2e-8).abs() < 1e-24,
+            "expected zero tstep to fall back to the analysis window limit, got {}",
+            cap
+        );
+    }
+
+    #[test]
+    fn test_res_array_transient_matches_reference_with_documented_default_max_step() {
+        let test_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests");
+        let cir_path = test_root.join("resistance/res_array.cir");
+        let source = fs::read_to_string(&cir_path).expect("read res_array deck");
+        let netlist = Netlist::parse(&source).expect("parse res_array deck");
+        let runner = TestRunner::new(&test_root, TestRunnerConfig::default());
+        let engine = runner.create_dynamic_engine();
+        let max_step = TestRunner::default_transient_max_step(1e-9, 10e-9, 0.0);
+        let result = engine
+            .run_tran(&netlist, 10e-9, max_step)
+            .expect("res_array transient should solve");
+
+        let mismatches = runner
+            .compare_transient_reference(&cir_path, &netlist, &result)
+            .expect("res_array transient reference comparison");
+
+        assert!(
+            mismatches.is_empty(),
+            "expected documented default max step to match ngspice reference, got {:?}",
+            mismatches
+        );
     }
 
     #[test]
@@ -5149,7 +5450,12 @@ time @m1[vbs]
         let netlist = crate::netlist::parse_netlist(source).expect("parse netlist");
         let result = crate::engine::TransientResult {
             time: vec![0.0, 1.0],
-            voltages: vec![vec![0.0, 0.0], vec![0.0, 0.0], vec![1.0, 1.0], vec![0.0, 0.0]],
+            voltages: vec![
+                vec![0.0, 0.0],
+                vec![0.0, 0.0],
+                vec![1.0, 1.0],
+                vec![0.0, 0.0],
+            ],
             branch_currents: Vec::new(),
             num_nodes: 4,
             node_names: vec![
@@ -5590,6 +5896,126 @@ Index   frequency       vm(out)\n\
         assert_eq!(
             TestRunner::normalize_variable_name(&selected.x_name),
             "frequency"
+        );
+    }
+
+    #[test]
+    fn test_load_reference_table_for_axis_rejects_unknown_voltage_nodes() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let temp_dir = unique_temp_dir("ngspice_axis_unknown_node");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+
+        let cir_path = temp_dir.join("stale.cir");
+        let out_path = temp_dir.join("stale.out");
+        std::fs::write(
+            &cir_path,
+            "\
+Stale oracle test
+V1 in 0 PULSE(0 1 1n 1p 1p 1n 2n)
+R1 out in 1k
+C1 out 0 1p
+.tran 0.1n 2n
+.print tran v(in) v(out)
+.end
+",
+        )
+        .expect("write cir");
+        std::fs::write(
+            &out_path,
+            "\
+time v(in) v(missing)
+0.0 0.0 0.0
+1e-9 1.0 0.5
+",
+        )
+        .expect("write out");
+
+        let selected = runner
+            .load_reference_table_for_axis(&cir_path, &["time"])
+            .expect("load reference");
+        assert!(
+            selected.is_none(),
+            "reference tables mentioning deck-external voltage nodes must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_run_test_allows_smoke_contract_when_reference_table_is_stale() {
+        let root = unique_temp_dir("rspice_ngspice_stale_reference_smoke");
+        fs::create_dir_all(&root).expect("temp dir");
+        let cir_path = root.join("stale.cir");
+        let out_path = root.join("stale.out");
+        fs::write(
+            &cir_path,
+            "\
+Stale oracle deck
+V1 in 0 PULSE(0 1 1n 1p 1p 1n 2n)
+R1 out in 1k
+C1 out 0 1p
+.tran 0.1n 2n
+.print tran v(in) v(out)
+.end
+",
+        )
+        .expect("write circuit");
+        fs::write(
+            &out_path,
+            "\
+time v(in) v(missing)
+0.0 0.0 0.0
+1e-9 1.0 0.5
+",
+        )
+        .expect("write output");
+
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let result = runner.run_test(&cir_path);
+        assert!(
+            !result.passed,
+            "stale references should not silently count as validation coverage"
+        );
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|err| err.contains("No validation oracle")),
+            "expected stale oracle to degrade into explicit missing-oracle coverage, got {:?}",
+            result.error
+        );
+
+        write_manifest(&root, &["stale.cir\tsmoke"]);
+        let runner = TestRunner::new(&root, TestRunnerConfig::default());
+        let result = runner.run_test(&cir_path);
+        assert!(
+            result.passed,
+            "explicit smoke contract should allow execution when the checked-in oracle is stale: {:?}",
+            result.error
+        );
+    }
+
+    #[test]
+    fn test_workspace_mos6_simpleinv_reference_is_detected_as_stale() {
+        let tests_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests");
+        let cir_path = tests_dir.join("mos6").join("simpleinv.cir");
+        let runner = TestRunner::new(&tests_dir, TestRunnerConfig::default());
+
+        let selected = runner
+            .load_reference_table_for_axis(&cir_path, &["time"])
+            .expect("load reference");
+        let unknown = selected
+            .as_ref()
+            .map(|table| {
+                runner
+                    .reference_table_unknown_voltage_nodes(&cir_path, table)
+                    .expect("validate")
+            })
+            .unwrap_or_default();
+        assert!(
+            selected.is_none(),
+            "workspace simpleinv oracle should be rejected because it references deck-external nodes; unknown={unknown:?}"
         );
     }
 

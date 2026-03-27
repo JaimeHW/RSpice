@@ -203,14 +203,14 @@ impl BreakpointManager {
     }
 
     /// Add a breakpoint time (deduplicates automatically)
-    pub fn add(&mut self, time: Value) {
+    pub fn add(&mut self, time: Value) -> bool {
         // Check for duplicates within tolerance
         if self
             .breakpoints
             .iter()
             .any(|&t| (t - time).abs() < BREAKPOINT_TOLERANCE)
         {
-            return;
+            return false;
         }
 
         // Insert in sorted order
@@ -219,6 +219,7 @@ impl BreakpointManager {
             Some(i) => self.breakpoints.insert(i, time),
             None => self.breakpoints.push(time),
         }
+        true
     }
 
     /// Add breakpoints from a periodic source (pulse edges, clock, etc.)
@@ -310,6 +311,11 @@ impl BreakpointManager {
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.breakpoints.is_empty()
+    }
+
+    /// Borrow the sorted breakpoint schedule.
+    pub fn times(&self) -> &[Value] {
+        &self.breakpoints
     }
 }
 

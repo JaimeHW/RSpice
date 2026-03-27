@@ -4,6 +4,7 @@ use super::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum InitialSolutionMode {
+    TransientOperatingPoint,
     DcOperatingPoint,
     RobustDcFallback,
     LinearizedSeed,
@@ -73,6 +74,32 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<Value>, InitialSolutionMode), SimulationError> {
+        let transient_node_hints = self.collect_node_voltage_hints(netlist, circuit);
+        let transient_op = if circuit.has_nonlinear_devices() {
+            self.solve_nonlinear_transient_op_with_node_hints_and_abort(
+                circuit,
+                matrix,
+                0.0,
+                &transient_node_hints,
+                abort,
+            )
+        } else {
+            self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
+        };
+
+        match transient_op {
+            Ok(solution) => {
+                return Ok((solution, InitialSolutionMode::TransientOperatingPoint));
+            }
+            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Err(transient_err) => {
+                log::warn!(
+                    "Transient initial operating point failed: {}. Falling back to DC operating point startup.",
+                    transient_err
+                );
+            }
+        }
+
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => Ok((solution, InitialSolutionMode::DcOperatingPoint)),
             Err(SimulationError::Aborted) => Err(SimulationError::Aborted),

@@ -3,7 +3,7 @@
 //! Implements the Ebers-Moll model for NPN and PNP transistors.
 //! Supports both large-signal DC and small-signal AC analysis.
 
-use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
 
@@ -375,9 +375,7 @@ impl Bjt {
             self.vaf = v;
             has_vaf = true;
         }
-        if !has_vaf
-            && let Some(&v) = params.get("VA")
-        {
+        if !has_vaf && let Some(&v) = params.get("VA") {
             self.vaf = v;
             has_vaf = true;
         }
@@ -385,9 +383,7 @@ impl Bjt {
             self.var = v;
             has_var = true;
         }
-        if !has_var
-            && let Some(&v) = params.get("VB")
-        {
+        if !has_var && let Some(&v) = params.get("VB") {
             self.var = v;
             has_var = true;
         }
@@ -867,40 +863,38 @@ impl Bjt {
         let dhr_dvbc_eff = dhr_dir * gir;
 
         let vce_eff = vbe_eff - vbc_eff;
-        let (forward_early, dfe_dvbe_eff, dfe_dvbc_eff) =
-            if self.vaf.is_finite() && self.vaf > 0.0 {
-                let raw = 1.0 + vce_eff / self.vaf;
-                if raw > 1e-6 {
-                    (raw, 1.0 / self.vaf, -1.0 / self.vaf)
-                } else {
-                    (1e-6, 0.0, 0.0)
-                }
+        let (forward_early, dfe_dvbe_eff, dfe_dvbc_eff) = if self.vaf.is_finite() && self.vaf > 0.0
+        {
+            let raw = 1.0 + vce_eff / self.vaf;
+            if raw > 1e-6 {
+                (raw, 1.0 / self.vaf, -1.0 / self.vaf)
             } else {
-                (1.0, 0.0, 0.0)
-            };
-        let (reverse_early, dre_dvbe_eff, dre_dvbc_eff) =
-            if self.var.is_finite() && self.var > 0.0 {
-                let raw = 1.0 - vce_eff / self.var;
-                if raw > 1e-6 {
-                    (raw, -1.0 / self.var, 1.0 / self.var)
-                } else {
-                    (1e-6, 0.0, 0.0)
-                }
+                (1e-6, 0.0, 0.0)
+            }
+        } else {
+            (1.0, 0.0, 0.0)
+        };
+        let (reverse_early, dre_dvbe_eff, dre_dvbc_eff) = if self.var.is_finite() && self.var > 0.0
+        {
+            let raw = 1.0 - vce_eff / self.var;
+            if raw > 1e-6 {
+                (raw, -1.0 / self.var, 1.0 / self.var)
             } else {
-                (1.0, 0.0, 0.0)
-            };
+                (1e-6, 0.0, 0.0)
+            }
+        } else {
+            (1.0, 0.0, 0.0)
+        };
 
         let forward_transport = if_diode * hf_factor * forward_early;
         let reverse_transport = ir_diode * hr_factor * reverse_early;
 
-        let dforward_dvbe_eff =
-            (gif * hf_factor + if_diode * dhf_dvbe_eff) * forward_early
-                + if_diode * hf_factor * dfe_dvbe_eff;
+        let dforward_dvbe_eff = (gif * hf_factor + if_diode * dhf_dvbe_eff) * forward_early
+            + if_diode * hf_factor * dfe_dvbe_eff;
         let dforward_dvbc_eff = if_diode * hf_factor * dfe_dvbc_eff;
         let dreverse_dvbe_eff = ir_diode * hr_factor * dre_dvbe_eff;
-        let dreverse_dvbc_eff =
-            (gir * hr_factor + ir_diode * dhr_dvbc_eff) * reverse_early
-                + ir_diode * hr_factor * dre_dvbc_eff;
+        let dreverse_dvbc_eff = (gir * hr_factor + ir_diode * dhr_dvbc_eff) * reverse_early
+            + ir_diode * hr_factor * dre_dvbc_eff;
 
         let ib_be = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
             + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
@@ -1016,11 +1010,7 @@ impl Bjt {
             cbi_i * dvbi_dvb,
             ce_i + cbi_i * dvbi_dve,
         );
-        let base = (
-            -g_rb * dvbi_dvc,
-            g_rb * (1.0 - dvbi_dvb),
-            -g_rb * dvbi_dve,
-        );
+        let base = (-g_rb * dvbi_dvc, g_rb * (1.0 - dvbi_dvb), -g_rb * dvbi_dve);
         let emitter = (
             -(collector.0 + base.0),
             -(collector.1 + base.1),
@@ -1275,9 +1265,10 @@ impl NonlinearDevice for Bjt {
     ///   |delta(V)| < RELTOL * max(|V_new|, |V_old|) + VNTOL
     ///
     /// `tolerance` is VNTOL from solver configuration.
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         // Industry-standard SPICE convergence parameter
         const RELTOL: Value = 1e-3; // 0.1% relative tolerance
+        let tolerance = criteria.voltage_tolerance();
 
         let vbe_diff = (self.vbe - self.vbe_prev).abs();
         let vbc_diff = (self.vbc - self.vbc_prev).abs();
@@ -1733,6 +1724,8 @@ mod tests {
 
     #[test]
     fn test_bjt_convergence_check() {
+        let loose = NonlinearConvergenceCriteria::voltage_only(0.01);
+        let tight = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut q = Bjt::new_npn("Q1".to_string(), 2, 1, 0);
 
         // Simulate convergence
@@ -1743,16 +1736,16 @@ mod tests {
 
         // Should be converged within 1mV tolerance
         // With RELTOL=1e-3: tol_vbe = 0.001*0.7 + 0.01 ≈ 0.0107, Δ=0.0001 < 0.0107 ✓
-        assert!(q.is_converged(0.01));
+        assert!(q.is_converged(loose));
 
         // Even with very tight VNTOL, RELTOL provides adequate tolerance for
         // junction voltages. This is correct SPICE behavior.
         // tol_vbe = 0.001*0.7 + 1e-6 ≈ 0.0007, Δ=0.0001 < 0.0007 ✓
-        assert!(q.is_converged(1e-6));
+        assert!(q.is_converged(tight));
 
         // To fail convergence, delta must exceed RELTOL*|V| + VNTOL
         q.vbe_prev = 0.71; // Δ=0.01, tol=0.001*0.71+1e-6≈0.00071, 0.01 > 0.00071
-        assert!(!q.is_converged(1e-6));
+        assert!(!q.is_converged(tight));
     }
 
     #[test]

@@ -235,7 +235,9 @@ fn add_behavioral_resistor(
 }
 
 fn distributed_line_section_count(conductors: usize, estimated_delay: f64) -> usize {
-    let conductor_floor = conductors.saturating_mul(8).max(DISTRIBUTED_LINE_SECTION_MIN);
+    let conductor_floor = conductors
+        .saturating_mul(8)
+        .max(DISTRIBUTED_LINE_SECTION_MIN);
     let delay_driven = if estimated_delay.is_finite() && estimated_delay > 0.0 {
         (estimated_delay / DISTRIBUTED_LINE_TARGET_SECTION_DELAY)
             .ceil()
@@ -244,15 +246,12 @@ fn distributed_line_section_count(conductors: usize, estimated_delay: f64) -> us
         conductor_floor
     };
 
-    delay_driven
-        .max(conductor_floor)
-        .clamp(
-            conductor_floor,
-            DISTRIBUTED_LINE_SECTION_MAX.max(conductor_floor),
-        )
+    delay_driven.max(conductor_floor).clamp(
+        conductor_floor,
+        DISTRIBUTED_LINE_SECTION_MAX.max(conductor_floor),
+    )
 }
 
-#[allow(dead_code)]
 fn build_scalar_rlgc_line(
     circuit: &mut CircuitData,
     instance_name: &str,
@@ -283,8 +282,7 @@ fn build_scalar_rlgc_line(
         ))
     })?;
 
-    if !l.is_finite() || l <= 0.0 || !c.is_finite() || c <= 0.0 || !len.is_finite() || len <= 0.0
-    {
+    if !l.is_finite() || l <= 0.0 || !c.is_finite() || c <= 0.0 || !len.is_finite() || len <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Transmission line '{}' resolved invalid RLGC parameters (L={}, C={}, LEN={})",
             instance_name, l, c, len
@@ -396,11 +394,8 @@ fn build_scalar_rlgc_line(
             end
         };
 
-        let branch = circuit.allocate_branch_named(&format!(
-            "{}.__rlgc.s{}.l",
-            instance_name,
-            section + 1
-        ));
+        let branch =
+            circuit.allocate_branch_named(&format!("{}.__rlgc.s{}.l", instance_name, section + 1));
         circuit.inductors.add(
             format!("{}.__rlgc.s{}.l", instance_name, section + 1),
             winding_start,
@@ -1618,6 +1613,11 @@ impl Engine {
 
                     let freq_eff = (*freq).or(model_params.and_then(|m| m.freq));
                     let nl_eff = (*nl).or(model_params.and_then(|m| m.nl));
+                    // Keep scalar LTRA/TXL instances on the delayed-wave device path.
+                    // A synthesized RLGC ladder is useful for diagnostics, but it is
+                    // not behaviorally equivalent to ngspice's transmission-line models
+                    // and can be substantially slower on the regression decks.
+                    let synthesize_distributed_rlgc = false;
 
                     let delay = (*td)
                         .or_else(|| {
@@ -1645,6 +1645,13 @@ impl Engine {
                     }
 
                     let attenuation = model_params.and_then(|p| tline_model_attenuation(p, z0_eff));
+                    let loss_time_constant = model_params.and_then(tline_model_loss_time_constant);
+                    let compact_reltol = model_params
+                        .and_then(|p| p.compactrel)
+                        .unwrap_or_else(|| self.voltage_reltol());
+                    let compact_abstol = model_params
+                        .and_then(|p| p.compactabs)
+                        .unwrap_or_else(|| self.voltage_abstol());
                     let dc_series_resistance = model_params
                         .and_then(|p| {
                             let r = p.r?;
@@ -1670,14 +1677,47 @@ impl Engine {
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
                         tline.set_dc_series_resistance(dc_series_resistance);
+                        if let Some(params) = model_params
+                            && let (Some(l), Some(c), Some(len)) = (params.l, params.c, params.len)
+                        {
+                            let r = params.r.unwrap_or(0.0);
+                            let g = params.g.unwrap_or(0.0);
+                            tline.set_distributed_rlgc_with_compaction(
+                                r,
+                                l,
+                                g,
+                                c,
+                                len,
+                                compact_reltol,
+                                compact_abstol,
+                            );
+                            if let Some(step_hint) = tline.distributed_rlgc_max_safe_step() {
+                                circuit.tighten_transient_max_step_hint(step_hint);
+                            }
+                        }
                         if let Some(att) = attenuation {
                             tline.set_attenuation(att);
+                        }
+                        if let Some(tau) = loss_time_constant {
+                            tline.set_loss_time_constant(tau);
                         }
                         circuit.tlines.push(tline);
                     };
 
                     if element.nodes.len() == 4 {
-                        push_tline(&mut circuit, element.name.clone(), p1p, p1n, p2p, p2n);
+                        if synthesize_distributed_rlgc {
+                            build_scalar_rlgc_line(
+                                &mut circuit,
+                                &element.name,
+                                p1p,
+                                p1n,
+                                p2p,
+                                p2n,
+                                model_params.expect("distributed RLGC synthesis requires model"),
+                            )?;
+                        } else {
+                            push_tline(&mut circuit, element.name.clone(), p1p, p1n, p2p, p2n);
+                        }
                     } else {
                         if element.nodes.len() % 2 != 0 {
                             return Err(SimulationError::Circuit(format!(
@@ -1699,14 +1739,22 @@ impl Engine {
                             let near = circuit.get_or_create_node(&element.nodes[conductor_idx]);
                             let far = circuit
                                 .get_or_create_node(&element.nodes[conductor_idx + conductors]);
-                            push_tline(
-                                &mut circuit,
-                                format!("{}#{}", element.name, conductor_idx + 1),
-                                near,
-                                0,
-                                far,
-                                0,
-                            );
+                            let conductor_name = format!("{}#{}", element.name, conductor_idx + 1);
+                            if synthesize_distributed_rlgc {
+                                build_scalar_rlgc_line(
+                                    &mut circuit,
+                                    &conductor_name,
+                                    near,
+                                    0,
+                                    far,
+                                    0,
+                                    model_params.expect(
+                                        "distributed RLGC synthesis requires model",
+                                    ),
+                                )?;
+                            } else {
+                                push_tline(&mut circuit, conductor_name, near, 0, far, 0);
+                            }
                         }
                     }
                 }
@@ -1836,6 +1884,16 @@ impl Engine {
         circuit
             .resolve_control_elements()
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
+
+        let junction_gmin = self
+            .config
+            .convergence_config
+            .gmin_initial
+            .max(self.config.convergence_config.gmin_target)
+            .max(0.0);
+        for mos in &mut circuit.mosfets.devices {
+            mos.set_junction_gmin(junction_gmin);
+        }
 
         Ok(circuit)
     }

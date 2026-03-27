@@ -14,6 +14,8 @@ pub(super) struct TransmissionLineModelParams {
     pub(super) len: Option<f64>,
     pub(super) alpha: Option<f64>,
     pub(super) atten: Option<f64>,
+    pub(super) compactrel: Option<f64>,
+    pub(super) compactabs: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -449,6 +451,8 @@ pub(super) fn resolve_tline_model_params(
         len: model_param(&model.params, &["LEN", "LENGTH"]),
         alpha: model_param(&model.params, &["ALPHA"]),
         atten: model_param(&model.params, &["ATTEN", "ATTENDB", "LOSSDB"]),
+        compactrel: model_param(&model.params, &["COMPACTREL"]),
+        compactabs: model_param(&model.params, &["COMPACTABS"]),
     };
 
     let l = params.l;

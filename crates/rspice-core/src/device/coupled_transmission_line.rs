@@ -72,7 +72,10 @@ impl CoupledTransmissionLine {
         let modal_metric = mat_mul(&mat_mul(&c_sqrt, l), &c_sqrt);
         let (mode_metrics, mode_vecs) = symmetric_eigendecompose(&modal_metric)?;
         let mode_tol = positive_eigen_tolerance(&mode_metrics);
-        if mode_metrics.iter().any(|&x| !x.is_finite() || x <= mode_tol) {
+        if mode_metrics
+            .iter()
+            .any(|&x| !x.is_finite() || x <= mode_tol)
+        {
             return Err(format!(
                 "Coupled transmission line '{}' requires a positive-definite inductance matrix",
                 name
@@ -103,6 +106,8 @@ impl CoupledTransmissionLine {
             let g_shunt_mode = g_modal[mode][mode].max(0.0);
             let alpha = 0.5 * (r_mode / z_mode.max(mode_tol.sqrt()) + g_shunt_mode * z_mode);
             let attenuation = (-alpha * length).exp().clamp(1e-6, 1.0);
+            let loss_time_constant =
+                0.5 * (r_mode + mode_metrics[mode].max(0.0) * g_shunt_mode) * length * length;
 
             let mut mode_line = TransmissionLine::new(
                 format!("{}#mode{}", name, mode + 1),
@@ -113,7 +118,17 @@ impl CoupledTransmissionLine {
                 z_mode,
                 td_mode,
             );
+            mode_line.set_distributed_rlgc(
+                r_mode,
+                mode_metrics[mode].max(mode_tol),
+                g_shunt_mode,
+                1.0,
+                length,
+            );
             mode_line.set_attenuation(attenuation);
+            if loss_time_constant.is_finite() && loss_time_constant > 0.0 {
+                mode_line.set_loss_time_constant(loss_time_constant);
+            }
             modal_conductances.push(g_mode);
             modes.push(mode_line);
         }
@@ -164,6 +179,22 @@ impl CoupledTransmissionLine {
     }
 
     #[inline]
+    pub fn propagation_delays(&self) -> impl Iterator<Item = Value> + '_ {
+        self.modes.iter().map(TransmissionLine::delay)
+    }
+
+    #[inline]
+    pub fn launched_modal_waves(&self) -> impl Iterator<Item = (Value, Value, Value)> + '_ {
+        self.modes.iter().map(|mode| {
+            (
+                mode.delay(),
+                mode.launched_forward_wave(),
+                mode.launched_backward_wave(),
+            )
+        })
+    }
+
+    #[inline]
     pub fn port_admittance(&self) -> &[Vec<Value>] {
         &self.port_admittance
     }
@@ -196,7 +227,11 @@ impl CoupledTransmissionLine {
         mat_vec_mul(&self.modal_to_physical_current, &weighted)
     }
 
-    pub fn port_currents(&self, physical_voltage: &[Value], incoming_modal: &[Value]) -> Vec<Value> {
+    pub fn port_currents(
+        &self,
+        physical_voltage: &[Value],
+        incoming_modal: &[Value],
+    ) -> Vec<Value> {
         let mut currents = mat_vec_mul(&self.port_admittance, physical_voltage);
         let eq = self.port_equivalent_current(incoming_modal);
         for (current, eq_value) in currents.iter_mut().zip(eq.iter()) {
@@ -256,7 +291,11 @@ fn positive_eigen_tolerance(eigenvalues: &[Value]) -> Value {
         * MODAL_RELATIVE_EIGEN_TOL
 }
 
-fn validate_square_matrix(name: &str, matrix: &[Vec<Value>], expected: usize) -> Result<(), String> {
+fn validate_square_matrix(
+    name: &str,
+    matrix: &[Vec<Value>],
+    expected: usize,
+) -> Result<(), String> {
     if matrix.len() != expected || matrix.iter().any(|row| row.len() != expected) {
         return Err(format!(
             "Coupled transmission line matrix '{}' must be {}x{}",
@@ -266,7 +305,9 @@ fn validate_square_matrix(name: &str, matrix: &[Vec<Value>], expected: usize) ->
     Ok(())
 }
 
-fn symmetric_eigendecompose(matrix: &[Vec<Value>]) -> Result<(Vec<Value>, Vec<Vec<Value>>), String> {
+fn symmetric_eigendecompose(
+    matrix: &[Vec<Value>],
+) -> Result<(Vec<Value>, Vec<Vec<Value>>), String> {
     let n = matrix.len();
     let mut faer_mat = Mat::<Value>::zeros(n, n);
     for row in 0..n {
@@ -381,7 +422,11 @@ mod tests {
         )
         .expect("modal decomposition");
 
-        let mut mode_delays = line.modes.iter().map(|mode| mode.delay()).collect::<Vec<_>>();
+        let mut mode_delays = line
+            .modes
+            .iter()
+            .map(|mode| mode.delay())
+            .collect::<Vec<_>>();
         mode_delays.sort_by(|a, b| a.partial_cmp(b).expect("finite delays"));
 
         let expected_fast =
@@ -390,5 +435,42 @@ mod tests {
             0.3048_f64 * ((247.3e-9_f64 + 31.65e-9_f64) * (31.4e-12_f64 - 2.45e-12_f64)).sqrt();
         assert!((mode_delays[0] - expected_fast).abs() / expected_fast < 1e-6);
         assert!((mode_delays[1] - expected_slow).abs() / expected_slow < 1e-6);
+    }
+
+    #[test]
+    fn test_coupled_tline_modal_loss_time_constants_follow_modal_rlgc() {
+        let line = CoupledTransmissionLine::new(
+            "P1".to_string(),
+            vec![1, 2],
+            0,
+            vec![3, 4],
+            0,
+            &[vec![1.0, 0.0], vec![0.0, 2.0]],
+            &[vec![3.0e-9, 0.0], vec![0.0, 5.0e-9]],
+            &[vec![7.0e-12, 0.0], vec![0.0, 11.0e-12]],
+            &[vec![13.0e-6, 0.0], vec![0.0, 17.0e-6]],
+            0.4,
+        )
+        .expect("uncoupled modal line");
+
+        let mut actual = line
+            .modes
+            .iter()
+            .map(TransmissionLine::loss_time_constant)
+            .collect::<Vec<_>>();
+        actual.sort_by(|a, b| a.partial_cmp(b).expect("finite taus"));
+
+        let mut expected = vec![
+            0.5 * (1.0 * 7.0e-12 + 3.0e-9 * 13.0e-6) * 0.4 * 0.4,
+            0.5 * (2.0 * 11.0e-12 + 5.0e-9 * 17.0e-6) * 0.4 * 0.4,
+        ];
+        expected.sort_by(|a, b| a.partial_cmp(b).expect("finite taus"));
+
+        for (actual_tau, expected_tau) in actual.iter().zip(expected.iter()) {
+            assert!(
+                ((actual_tau - expected_tau) / expected_tau).abs() < 1e-12,
+                "expected modal tau {expected_tau}, got {actual_tau}"
+            );
+        }
     }
 }

@@ -8,7 +8,7 @@
 
 use super::stamps::{NodeId, TwoTerminalStamp};
 use crate::Value;
-use crate::device::{Bjt, Diode, MatrixStamper, Mosfet};
+use crate::device::{Bjt, Diode, MatrixStamper, Mosfet, NonlinearConvergenceCriteria};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 
 //=============================================================================
@@ -574,8 +574,8 @@ macro_rules! define_nonlinear_storage {
                 }
             }
 
-            pub fn all_converged(&self, tolerance: Value) -> bool {
-                self.devices.iter().all(|d| d.is_converged(tolerance))
+            pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+                self.devices.iter().all(|d| d.is_converged(criteria))
             }
 
             pub fn link_all(&mut self, matrix: &StaticMatrix) {
@@ -671,13 +671,13 @@ impl Diodes {
     }
 
     /// Check if all devices have converged.
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         #[cfg(feature = "simd")]
         if let Some(ref batch) = self.batch {
-            return batch.all_converged(tolerance);
+            return batch.all_converged(criteria);
         }
 
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all devices to the sparse matrix for O(1) stamping.
@@ -826,22 +826,22 @@ impl Mosfets {
     }
 
     /// Check if all devices have converged.
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         #[cfg(feature = "simd")]
         {
             if let Some(ref batch) = self.batch_level1 {
-                if !batch.all_converged(tolerance) {
+                if !batch.all_converged(criteria) {
                     return false;
                 }
             }
             if let Some(ref batch) = self.batch_level6 {
-                if !batch.all_converged(tolerance) {
+                if !batch.all_converged(criteria) {
                     return false;
                 }
             }
             // Check non-batched devices
             for (i, d) in self.devices.iter().enumerate() {
-                if !self.batched_indices.contains(&i) && !d.is_converged(tolerance) {
+                if !self.batched_indices.contains(&i) && !d.is_converged(criteria) {
                     return false;
                 }
             }
@@ -849,7 +849,7 @@ impl Mosfets {
         }
 
         #[cfg(not(feature = "simd"))]
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all devices to the sparse matrix for O(1) stamping.
@@ -871,7 +871,6 @@ impl Mosfets {
 
         // Count devices by level
         let level1_count = self.devices.iter().filter(|d| d.level == 1).count();
-        let level6_count = self.devices.iter().filter(|d| d.level == 6).count();
 
         // Build Level 1 batch
         if level1_count >= 4 {
@@ -899,37 +898,9 @@ impl Mosfets {
             self.batch_level1 = None;
         }
 
-        // Build Level 6 batch
-        if level6_count >= 4 {
-            let mut batch =
-                crate::device::batch_mosfet_level6::BatchMosfetsLevel6::with_capacity(level6_count);
-            for (i, d) in self.devices.iter().enumerate() {
-                if d.level == 6 {
-                    batch.add(
-                        d.node_drain,
-                        d.node_gate,
-                        d.node_source,
-                        d.node_bulk,
-                        d.mos_type,
-                        d.wl_ratio(),
-                        d.vto,
-                        d.gamma,
-                        d.phi,
-                        d.kc,
-                        d.nc,
-                        d.kv,
-                        d.nv,
-                        d.lambda0,
-                        d.lambda1,
-                    );
-                    self.batched_indices.push(i);
-                }
-            }
-            batch.link(matrix);
-            self.batch_level6 = Some(batch);
-        } else {
-            self.batch_level6 = None;
-        }
+        // Keep Level 6 on the scalar path until the batch evaluator is proven
+        // numerically equivalent to the scalar legacy signed-voltage model.
+        self.batch_level6 = None;
     }
 
     /// Stamp all devices using O(1) direct indexing.
@@ -966,6 +937,51 @@ impl Mosfets {
         for d in &self.devices {
             d.stamp_direct(matrix, rhs, voltages);
         }
+    }
+}
+
+#[cfg(all(test, feature = "simd"))]
+mod tests {
+    use super::*;
+    use crate::device::mosfet::Mosfet;
+
+    fn dense_static_matrix(size: usize) -> StaticMatrix {
+        let mut triplets = Vec::with_capacity(size * size);
+        for row in 0..size {
+            for col in 0..size {
+                triplets.push((row, col, 0.0));
+            }
+        }
+
+        StaticMatrix::from_triplets(size, size, &triplets).expect("dense test matrix")
+    }
+
+    #[test]
+    fn test_level1_mosfets_still_build_batch() {
+        let mut mosfets = Mosfets::new();
+        for idx in 0..4 {
+            mosfets.add(Mosfet::new_nmos(format!("M{idx}"), 1, 2, 3, 0));
+        }
+
+        let matrix = dense_static_matrix(3);
+        mosfets.link_all(&matrix);
+
+        assert!(mosfets.batch_level1.is_some());
+        assert_eq!(mosfets.batched_indices.len(), 4);
+    }
+
+    #[test]
+    fn test_level6_mosfets_remain_unbatched_until_simd_matches_scalar_model() {
+        let mut mosfets = Mosfets::new();
+        for idx in 0..4 {
+            mosfets.add(Mosfet::new_nmos(format!("M{idx}"), 1, 2, 3, 0).with_level(6));
+        }
+
+        let matrix = dense_static_matrix(3);
+        mosfets.link_all(&matrix);
+
+        assert!(mosfets.batch_level6.is_none());
+        assert!(mosfets.batched_indices.is_empty());
     }
 }
 
@@ -1035,13 +1051,13 @@ impl Bjts {
     }
 
     /// Check if all devices have converged.
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         #[cfg(feature = "simd")]
         if let Some(ref batch) = self.batch {
-            return batch.all_converged(tolerance);
+            return batch.all_converged(criteria);
         }
 
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all devices to the sparse matrix.
@@ -1174,13 +1190,13 @@ impl Jfets {
     }
 
     /// Check if all devices have converged.
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         #[cfg(feature = "simd")]
         if let Some(ref batch) = self.batch {
-            return batch.all_converged(tolerance);
+            return batch.all_converged(criteria);
         }
 
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all devices to the sparse matrix.
@@ -1306,8 +1322,8 @@ impl Vdmoss {
     }
 
     /// Check if all devices have converged.
-    pub fn all_converged(&self, tolerance: Value) -> bool {
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all devices to the sparse matrix.

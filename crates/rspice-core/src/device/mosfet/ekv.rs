@@ -9,7 +9,7 @@
 //! Reference: EKV v2.6 documentation (EPFL)
 
 use super::mosfet::{MosRegion, MosType, MosfetIndices};
-use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::StaticMatrix;
 use crate::{Value, circuit::NodeId};
 
@@ -507,7 +507,8 @@ impl NonlinearDevice for EkvMosfet {
         }
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        let tolerance = criteria.voltage_tolerance();
         let dvgs = (self.vgs - self.vgs_prev).abs();
         let dvds = (self.vds - self.vds_prev).abs();
         dvgs < tolerance && dvds < tolerance

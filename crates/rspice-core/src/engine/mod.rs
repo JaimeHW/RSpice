@@ -384,7 +384,9 @@ impl TransientResult {
             .branch_names
             .iter()
             .position(|candidate| candidate.eq_ignore_ascii_case(name))?;
-        self.branch_currents.get(branch_idx).map(|waveform| waveform.as_slice())
+        self.branch_currents
+            .get(branch_idx)
+            .map(|waveform| waveform.as_slice())
     }
 
     /// Get voltage at a named node and time index, returning `None` when the

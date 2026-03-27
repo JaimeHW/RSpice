@@ -9,7 +9,9 @@
 use crate::Value;
 use crate::analysis::{CompanionCoefficients, IntegrationMethod};
 use crate::device::behavioral::BehavioralSources;
-use crate::device::{Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, Vccs, Vcvs};
+use crate::device::{
+    Bjt, Cccs, Ccvs, Diode, MatrixStamper, Mosfet, NonlinearConvergenceCriteria, Vccs, Vcvs,
+};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use crate::xspice::{CodeModelRegistry, XspiceInstance};
 use std::collections::{HashMap, HashSet};
@@ -1470,9 +1472,9 @@ impl Diodes {
     }
 
     /// Check if all diodes have converged
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all diodes to matrix for O(1) stamping
@@ -1540,9 +1542,9 @@ impl Bjts {
     }
 
     /// Check if all BJTs have converged
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all BJTs to matrix for O(1) stamping
@@ -1610,9 +1612,9 @@ impl Mosfets {
     }
 
     /// Check if all MOSFETs have converged
-    pub fn all_converged(&self, tolerance: Value) -> bool {
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
-        self.devices.iter().all(|d| d.is_converged(tolerance))
+        self.devices.iter().all(|d| d.is_converged(criteria))
     }
 
     /// Link all MOSFETs to matrix for O(1) stamping
@@ -2842,15 +2844,15 @@ impl CircuitData {
     }
 
     /// Check if all nonlinear devices have converged
-    pub fn nonlinear_converged(&self, tolerance: Value) -> bool {
+    pub fn nonlinear_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         use crate::device::NonlinearDevice;
-        self.diodes.all_converged(tolerance)
-            && self.bjts.all_converged(tolerance)
-            && self.mosfets.all_converged(tolerance)
-            && self.jfets.iter().all(|jfet| jfet.is_converged(tolerance))
-            && self.vswitches.iter().all(|sw| sw.is_converged(tolerance))
-            && self.iswitches.iter().all(|sw| sw.is_converged(tolerance))
-            && self.xspice_converged(tolerance)
+        self.diodes.all_converged(criteria)
+            && self.bjts.all_converged(criteria)
+            && self.mosfets.all_converged(criteria)
+            && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
+            && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
+            && self.iswitches.iter().all(|sw| sw.is_converged(criteria))
+            && self.xspice_converged(criteria.voltage_tolerance())
     }
 
     //=========================================================================

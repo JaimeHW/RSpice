@@ -766,12 +766,7 @@ mod tests {
 
     #[test]
     fn test_static_matrix_dense_solve_matches_sparse_solve() {
-        let triplets = vec![
-            (0, 0, 4.0),
-            (0, 1, -1.0),
-            (1, 0, 2.0),
-            (1, 1, 3.0),
-        ];
+        let triplets = vec![(0, 0, 4.0), (0, 1, -1.0), (1, 0, 2.0), (1, 1, 3.0)];
         let mut matrix = StaticMatrix::from_triplets(2, 2, &triplets).unwrap();
         let rhs = [7.0, 8.0];
 

@@ -33,7 +33,7 @@
 #![allow(clippy::too_many_arguments)]
 use crate::Value;
 use crate::circuit::NodeId;
-use crate::device::traits::{MatrixStamper, NonlinearDevice};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::solver::{CscIndex, StaticMatrix};
 
 //=============================================================================
@@ -3170,8 +3170,9 @@ impl NonlinearDevice for Jfet {
         matrix.stamp_rhs(self.source, ids_eq + igs_eq);
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         const RELTOL: Value = 1e-3;
+        let tolerance = criteria.voltage_tolerance();
 
         if self.limiter_applied {
             return false;
@@ -4276,6 +4277,7 @@ mod tests {
 
     #[test]
     fn test_is_converged_uses_relative_voltage_criterion() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut jfet = Jfet::njf("J1", 1, 2, 0);
         jfet.vgs_prev = 1.0;
         jfet.vgs = 1.0005;
@@ -4283,13 +4285,14 @@ mod tests {
         jfet.vds = 2.0008;
 
         assert!(
-            jfet.is_converged(1e-6),
+            jfet.is_converged(criteria),
             "relative tolerance should allow sub-millivolt deltas around 1-2V biases"
         );
     }
 
     #[test]
     fn test_is_converged_rejects_large_branch_delta() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut jfet = Jfet::njf("J1", 1, 2, 0);
         jfet.vgs_prev = 1.0;
         jfet.vgs = 1.01;
@@ -4297,13 +4300,14 @@ mod tests {
         jfet.vds = 2.0;
 
         assert!(
-            !jfet.is_converged(1e-6),
+            !jfet.is_converged(criteria),
             "large branch-voltage jump must fail convergence"
         );
     }
 
     #[test]
     fn test_is_converged_rejects_non_finite_history() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut jfet = Jfet::njf("J1", 1, 2, 0);
         jfet.vgs_prev = f64::NAN;
         jfet.vgs = 0.0;
@@ -4311,13 +4315,14 @@ mod tests {
         jfet.vds = 0.0;
 
         assert!(
-            !jfet.is_converged(1e-6),
+            !jfet.is_converged(criteria),
             "non-finite branch history must force another Newton update"
         );
     }
 
     #[test]
     fn test_is_converged_rejects_when_limiter_was_applied() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-6);
         let mut jfet = Jfet::njf("J1", 1, 2, 0);
         jfet.vgs_prev = 1.0;
         jfet.vgs = 1.0001;
@@ -4326,7 +4331,7 @@ mod tests {
         jfet.limiter_applied = true;
 
         assert!(
-            !jfet.is_converged(1e-6),
+            !jfet.is_converged(criteria),
             "limiter-applied flag must force another Newton iteration"
         );
     }

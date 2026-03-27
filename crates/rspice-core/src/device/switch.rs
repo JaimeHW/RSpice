@@ -34,7 +34,7 @@
 //! ```
 //! where f(x) is a smooth step function.
 
-use super::traits::{MatrixStamper, NonlinearDevice};
+use super::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Value, circuit::NodeId};
 
 //=============================================================================
@@ -323,11 +323,12 @@ impl NonlinearDevice for VoltageSwitch {
         matrix.stamp_rhs(self.node_neg, ieq);
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         if self.state != self.prev_state {
             return false;
         }
 
+        let tolerance = criteria.voltage_tolerance();
         let denom = self
             .current_resistance
             .abs()
@@ -599,11 +600,12 @@ impl NonlinearDevice for CurrentSwitch {
         matrix.stamp_rhs(self.node_neg, ieq);
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         if self.state != self.prev_state {
             return false;
         }
 
+        let tolerance = criteria.voltage_tolerance();
         let denom = self
             .current_resistance
             .abs()
@@ -908,23 +910,27 @@ mod tests {
 
     #[test]
     fn test_switch_convergence_requires_state_and_resistance_settling() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-9);
         let mut sw = VoltageSwitch::new("S1".to_string(), 1, 2, 3, 0)
             .with_resistances(1.0, 1e6)
             .with_thresholds(1.0, 0.2);
 
-        assert!(sw.is_converged(1e-9), "fresh switch should start converged");
+        assert!(
+            sw.is_converged(criteria),
+            "fresh switch should start converged"
+        );
 
         // First update crosses ON threshold and should be marked non-converged.
         sw.update(&[0.0, 0.0, 2.0]);
         assert!(
-            !sw.is_converged(1e-9),
+            !sw.is_converged(criteria),
             "state transition must require another Newton iteration"
         );
 
         // Re-applying the same operating point should settle convergence.
         sw.update(&[0.0, 0.0, 2.0]);
         assert!(
-            sw.is_converged(1e-9),
+            sw.is_converged(criteria),
             "stable state/resistance should report converged"
         );
     }

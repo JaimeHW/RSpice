@@ -9,7 +9,7 @@ mod engine_tests {
     use crate::Netlist;
     use crate::Value;
     use crate::abort_signal::ImmediateAbort;
-    use crate::engine::Engine;
+    use crate::engine::{ConvergenceConfig, Engine, SimulationConfig};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
@@ -2910,6 +2910,336 @@ M1 d g 0 0 MCAP
     }
 
     #[test]
+    fn test_dc_level6_pmos_gate_low_pulls_output_high() {
+        let netlist = Netlist::parse(
+            r#"
+VDD vdd 0 5
+VG gate 0 0
+RLOAD out 0 10e6
+MPULL out gate vdd vdd P6 L=1u W=5u
+.MODEL P6 PMOS (LEVEL=6 KC=6.42696E-06 NC=1.6536 KV=0.92145 NV=0.88345 LAMBDA0=0.018966 LAMBDA1=0.0084012 VT0=-0.60865 GAMMA=0.89213 PHI=1 LD=0.28u)
+.OP
+.END
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let out = result.try_voltage_named("out").expect("missing OUT node");
+
+        assert!(
+            out > 4.0,
+            "expected Level-6 PMOS pull-up to hold OUT high, got {out}"
+        );
+    }
+
+    #[test]
+    fn test_dc_level6_pmos_gate_high_turns_output_off() {
+        let netlist = Netlist::parse(
+            r#"
+VDD vdd 0 5
+VG gate 0 5
+RLOAD out 0 10e6
+MPULL out gate vdd vdd P6 L=1u W=5u
+.MODEL P6 PMOS (LEVEL=6 KC=6.42696E-06 NC=1.6536 KV=0.92145 NV=0.88345 LAMBDA0=0.018966 LAMBDA1=0.0084012 VT0=-0.60865 GAMMA=0.89213 PHI=1 LD=0.28u)
+.OP
+.END
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        let out = result.try_voltage_named("out").expect("missing OUT node");
+
+        assert!(
+            out < 0.1,
+            "expected Level-6 PMOS to turn off when gate is tied high, got {out}"
+        );
+    }
+
+    #[test]
+    fn test_dc_mos6inv_stage_outputs_start_near_ground() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/mos6/mos6inv.cir"
+        ));
+        let netlist = Netlist::parse(source).unwrap();
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+
+        for node in ["2", "3", "4", "5"] {
+            let value = result
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("missing node {node}"));
+            assert!(
+                value.abs() < 1e-4,
+                "expected node {node} to settle near ground in MOS6 inverter chain, got {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_dc_mos6_stage2_internal_node_stays_threshold_clamped() {
+        let netlist = Netlist::parse(
+            r#"
+* NDINV stage-2 slice
+VDD vdd 0 5
+V11 n11 0 5
+V0 g0 0 0
+MP21 n23 g0 vdd vdd P6 L=1.2u W=20u
+MP22 n22 n11 n23 vdd P6 L=1.2u W=20u
+MP23 n21 g0 n22 vdd P6 L=1.2u W=20u
+MN21 n21 g0 0 0 N6 L=1.0u W=5u
+MN22 n21 n11 0 0 N6 L=1.0u W=5u
+MN23 n21 g0 0 0 N6 L=1.0u W=5u
+.MODEL N6 NMOS (LEVEL=6 KC=3.8921E-05 NC=1.1739 KV=0.91602 NV=0.87225 LAMBDA0=0.013333 LAMBDA1=0.0046901 VT0=0.69486 GAMMA=0.60309 PHI=1 TOX=1.98E-8 LD=0.1u)
+.MODEL P6 PMOS (LEVEL=6 KC=6.42696E-06 NC=1.6536 KV=0.92145 NV=0.88345 LAMBDA0=0.018966 LAMBDA1=0.0084012 VT0=-0.60865 GAMMA=0.89213 PHI=1 TOX=1.98E-8 LD=0.28u)
+.END
+"#,
+        )
+        .unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
+        let result = Engine::new(config).run_dc_op(&netlist).unwrap();
+
+        let n21 = result.try_voltage_named("N21").expect("missing N21");
+        let n22 = result.try_voltage_named("N22").expect("missing N22");
+        let n23 = result.try_voltage_named("N23").expect("missing N23");
+
+        assert!(
+            n21.abs() < 1e-6,
+            "expected Stage-2 output node n21 to stay low in the DC operating point, got {n21}"
+        );
+        assert!(
+            n23 > 4.9,
+            "expected Stage-2 pull-up node n23 to remain high in the DC operating point, got {n23}"
+        );
+        assert!(
+            n22 > 1.4 && n22 < 1.8,
+            "expected Stage-2 internal node n22 to settle near the PMOS body-effect cutoff in the DC operating point, got {n22}"
+        );
+    }
+
+    #[test]
+    fn test_transient_mos6inv_respects_requested_max_step() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/mos6/mos6inv.cir"
+        ));
+        let netlist = Netlist::parse(source).unwrap();
+        let max_step = 5e-10;
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+        config.temperature = 300.15;
+
+        let result = Engine::new(config)
+            .run_tran(&netlist, 150e-9, max_step)
+            .unwrap();
+        let observed_max_dt = result
+            .time
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .fold(0.0, Value::max);
+
+        assert!(
+            observed_max_dt <= max_step * 1.001,
+            "expected transient max dt <= {max_step}, observed {observed_max_dt}"
+        );
+    }
+
+    #[test]
+    fn test_transient_simpleinv_switches_from_high_to_low() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/mos6/simpleinv.cir"
+        ));
+        let netlist = Netlist::parse(source).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+        config.temperature = 300.15;
+
+        let result = Engine::new(config)
+            .run_tran(&netlist, 150e-9, 0.05e-9)
+            .unwrap();
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|name| name == "11")
+            .expect("missing node 11");
+        let waveform = &result.voltages[out_idx];
+        let initial = waveform
+            .first()
+            .copied()
+            .expect("transient should produce samples");
+        let final_value = waveform
+            .last()
+            .copied()
+            .expect("transient should produce samples");
+
+        assert!(
+            initial > 4.9,
+            "expected simple Level-6 inverter output to start high, got {initial}"
+        );
+        assert!(
+            final_value < 0.2,
+            "expected simple Level-6 inverter output to switch low after the input ramp, got {final_value}"
+        );
+    }
+
+    #[test]
+    fn test_transient_initial_solution_uses_time_zero_waveform_value() {
+        let netlist = Netlist::parse(
+            r#"
+VSTEP in 0 DC 5 PWL(0 0 1n 5)
+R1 in out 1k
+R2 out 0 1k
+.TRAN 0.1n 2n
+.END
+"#,
+        )
+        .unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+
+        let result = Engine::new(config).run_tran(&netlist, 2e-9, 0.1e-9).unwrap();
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("missing node out");
+        let initial = result.voltages[out_idx][0];
+        let final_value = *result.voltages[out_idx]
+            .last()
+            .expect("transient should produce a final sample");
+
+        assert!(
+            initial.abs() < 1e-9,
+            "expected transient startup to honor the waveform's time-zero value instead of the source DC value, got V(out)={initial}"
+        );
+        assert!(
+            (final_value - 2.5).abs() < 0.05,
+            "expected divider output to settle near 2.5V after the waveform rises, got {final_value}"
+        );
+    }
+
+    #[test]
+    fn test_transient_mos6inv_stage_outputs_start_at_ngspice_scale() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/mos6/mos6inv.cir"
+        ));
+        let netlist = Netlist::parse(source).unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+        config.temperature = 300.15;
+
+        let result = Engine::new(config).run_tran(&netlist, 1e-12, 1e-12).unwrap();
+        let sample0 = |node: &str| -> Value {
+            let node_idx = result
+                .node_names
+                .iter()
+                .position(|name| name == node)
+                .unwrap_or_else(|| panic!("missing node {node}"));
+            result.voltages[node_idx][0]
+        };
+
+        let v12 = sample0("12");
+        let v42 = sample0("42");
+
+        assert!(
+            (1e-9..1e-7).contains(&v12),
+            "expected MOS6 stage-1 output node 12 to start at the same small-signal scale as ngspice's transient operating point, got {v12}"
+        );
+        assert!(
+            (1e-9..1e-7).contains(&v42),
+            "expected MOS6 stage-4 output node 42 to start at the same small-signal scale as ngspice's transient operating point, got {v42}"
+        );
+    }
+
+    #[test]
+    fn test_transient_mosfet_bulk_drain_capacitance_loads_output_node() {
+        let with_bulk_cap = Netlist::parse(
+            r#"
+VSTEP in 0 PULSE(0 1 0 1n 1n 30n 60n)
+RDRV in out 1k
+M1 out 0 0 0 MCAP
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CBD=50p CBS=0)
+.TRAN 0.1n 20n
+.END
+"#,
+        )
+        .unwrap();
+        let without_bulk_cap = Netlist::parse(
+            r#"
+VSTEP in 0 PULSE(0 1 0 1n 1n 30n 60n)
+RDRV in out 1k
+M1 out 0 0 0 MCAP
+.MODEL MCAP NMOS (LEVEL=1 KP=0 VTO=100 CBD=0 CBS=0)
+.TRAN 0.1n 20n
+.END
+"#,
+        )
+        .unwrap();
+
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+
+        let with_result = Engine::new(config.clone())
+            .run_tran(&with_bulk_cap, 20e-9, 0.1e-9)
+            .unwrap();
+        let without_result = Engine::new(config)
+            .run_tran(&without_bulk_cap, 20e-9, 0.1e-9)
+            .unwrap();
+
+        let sample_at =
+            |result: &crate::engine::TransientResult, node: &str, time: Value| -> Value {
+                let node_idx = result
+                    .node_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(node))
+                    .unwrap_or_else(|| panic!("missing node {node}"));
+                let sample_idx = result
+                    .time
+                    .iter()
+                    .position(|&t| t >= time)
+                    .unwrap_or_else(|| panic!("missing sample at or after {time}"));
+                result.voltages[node_idx][sample_idx]
+            };
+
+        let with_cap = sample_at(&with_result, "out", 10e-9);
+        let without_cap = sample_at(&without_result, "out", 10e-9);
+
+        assert!(
+            without_cap > 0.95,
+            "expected unloaded drain node to follow the 1V step quickly, got {without_cap}"
+        );
+        assert!(
+            with_cap < 0.4,
+            "expected explicit CBD to create a visible RC delay on the drain node, got {with_cap}"
+        );
+    }
+
+    #[test]
     fn test_transient_mosfet_cgs_companion_creates_gate_rc_delay() {
         let with_cgs = Netlist::parse(
             r#"
@@ -3661,18 +3991,17 @@ O1 1 0 2 0 LLINE
         let expected_td = 16.0 * (8.972e-9_f64 * 0.468e-12_f64).sqrt();
         assert!(
             ((tl.z0 - expected_z0) / expected_z0).abs() < 1e-6,
-            "expected Z0≈{}, got {}",
+            "expected Z0~={}, got {}",
             expected_z0,
             tl.z0
         );
         assert!(
             ((tl.td - expected_td) / expected_td).abs() < 1e-6,
-            "expected TD≈{}, got {}",
+            "expected TD~={}, got {}",
             expected_td,
             tl.td
         );
     }
-
 
     #[test]
     fn test_build_yline_inline_values_override_model_card() {
@@ -3908,7 +4237,7 @@ V1 in 0 DC 0
         let netlist_str = r#"
 * O-line with model-derived attenuation
 O1 1 0 2 0 LLOSS
-.MODEL LLOSS LTRA R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
+.MODEL LLOSS LTRA Z0=50 TD=1N R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
 .end
 "#;
         let netlist = Netlist::parse(netlist_str).unwrap();
@@ -3930,6 +4259,29 @@ O1 1 0 2 0 LLOSS
             "expected DC series resistance={}, got {}",
             expected_rdc,
             tl.dc_series_resistance()
+        );
+    }
+
+    #[test]
+    fn test_build_tline_model_sets_loss_time_constant_from_rlgc() {
+        let netlist_str = r#"
+* O-line with model-derived dispersion time constant
+O1 1 0 2 0 LLOSS
+.MODEL LLOSS LTRA Z0=50 TD=1N R=500 G=0 L=2.5e-7 C=1e-10 LEN=0.2
+.end
+"#;
+        let netlist = Netlist::parse(netlist_str).unwrap();
+        let engine = Engine::default();
+        let circuit = engine.build_circuit(&netlist).unwrap();
+
+        assert_eq!(circuit.tlines.len(), 1);
+        let tl = &circuit.tlines[0];
+        let expected_tau = 0.5 * (500.0 * 1e-10 + 2.5e-7 * 0.0) * 0.2 * 0.2;
+        assert!(
+            (tl.loss_time_constant() - expected_tau).abs() < 1e-18,
+            "expected loss time constant={}, got {}",
+            expected_tau,
+            tl.loss_time_constant()
         );
     }
 
@@ -4010,7 +4362,6 @@ C2 n2 0 7f
         );
     }
 
-    #[test]
     fn test_transient_tline_enforces_delay_before_load_rises() {
         let netlist_str = r#"
 * Matched source/load around a 1ns transmission line
@@ -4215,6 +4566,134 @@ Rload 2 0 50
             (0.2..0.6).contains(&ratio),
             "unexpected attenuation ratio: {}",
             ratio
+        );
+    }
+
+    #[test]
+    fn test_transient_tline_lands_on_delayed_source_arrival() {
+        let netlist = Netlist::parse(
+            r#"
+* Delayed breakpoint coverage for a transmission-line arrival
+V1 in 0 PULSE(0 1 0.25n 1p 1p 1n 4n)
+Rsrc in 1 50
+T1 1 0 2 0 Z0=50 TD=1n
+Rload 2 0 50
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default()
+            .run_tran(&netlist, 2.0e-9, 0.6e-9)
+            .expect("transient should converge");
+
+        let expected_arrival = 1.25e-9;
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|&time| (time - expected_arrival).abs() < 1e-15),
+            "expected an accepted transient timepoint at the delayed line arrival {expected_arrival:e}, got {:?}",
+            result.time
+        );
+
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("2"))
+            .expect("missing load node");
+        let arrival_idx = result
+            .time
+            .iter()
+            .position(|&time| (time - expected_arrival).abs() < 1e-15)
+            .expect("missing delayed-arrival sample");
+        let post_arrival_peak = result.voltages[out_idx]
+            .iter()
+            .skip(arrival_idx)
+            .take(4)
+            .copied()
+            .fold(Value::NEG_INFINITY, Value::max);
+
+        assert!(
+            post_arrival_peak > 0.2,
+            "expected the matched load to respond on the arrival breakpoint or the immediate restart step, got peak {post_arrival_peak}"
+        );
+    }
+
+    #[test]
+    fn test_transient_tline_propagates_dynamic_launch_arrivals() {
+        let netlist = Netlist::parse(
+            r#"
+* Dynamic launch breakpoint coverage for a transmission line
+V1 in 0 PULSE(0 1 0.1n 1p 1p 20n 40n)
+Rsrc in drv 1k
+Cdrv drv 0 1p
+T1 drv 0 out 0 Z0=1k TD=0.7n
+Rload out 0 1k
+.end
+"#,
+        )
+        .unwrap();
+
+        let result = Engine::default()
+            .run_tran(&netlist, 1.8e-9, 0.5e-9)
+            .expect("transient with analog launch should converge");
+
+        let drv_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("drv"))
+            .expect("missing launch node");
+        let out_idx = result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("missing load node");
+
+        let launch_idx = result
+            .time
+            .iter()
+            .enumerate()
+            .find_map(|(idx, &time)| {
+                (time > 0.15e-9 && time < 0.8e-9 && result.voltages[drv_idx][idx] > 0.15)
+                    .then_some(idx)
+            })
+            .expect("expected an accepted analog launch sample before the far-end response");
+        let launch_time = result.time[launch_idx];
+        let expected_arrival = launch_time + 0.7e-9;
+
+        assert!(
+            (expected_arrival - 0.8e-9).abs() > 1e-12 && (expected_arrival - 1.5e-9).abs() > 1e-12,
+            "expected a dynamically launched arrival, not a static source-edge multiple: launch_time={launch_time:e}, arrival={expected_arrival:e}"
+        );
+        assert!(
+            result
+                .time
+                .iter()
+                .any(|&time| (time - expected_arrival).abs() < 1e-15),
+            "expected an accepted far-end timepoint at the analog launch arrival {expected_arrival:e}, got {:?}",
+            result.time
+        );
+
+        let arrival_idx = result
+            .time
+            .iter()
+            .position(|&time| (time - expected_arrival).abs() < 1e-15)
+            .expect("missing dynamic arrival sample");
+        let out_before = arrival_idx
+            .checked_sub(1)
+            .map(|idx| result.voltages[out_idx][idx])
+            .unwrap_or(0.0);
+        let out_after_peak = result.voltages[out_idx]
+            .iter()
+            .skip(arrival_idx)
+            .take(4)
+            .copied()
+            .fold(Value::NEG_INFINITY, Value::max);
+
+        assert!(
+            out_after_peak > out_before + 1e-3,
+            "expected the far-end waveform to respond after the dynamic launch arrival, got before={out_before}, peak={out_after_peak}"
         );
     }
 

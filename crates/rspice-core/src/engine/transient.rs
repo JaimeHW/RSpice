@@ -42,6 +42,10 @@ const MAX_FORCE_ACCEPT_DELTA_V: Value = 5e-2;
 const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 /// Source edge magnitude that triggers transient source-step capping.
 const SOURCE_ACTIVE_DELTA: Value = 1e-2;
+/// Safety cap for synthesized transmission-line arrival breakpoints.
+const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
+/// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
+const MAX_DYNAMIC_TLINE_BREAKPOINTS: usize = 200_000;
 
 #[derive(Debug, Clone, Default)]
 struct JfetTransientHistory {
@@ -74,13 +78,32 @@ struct BjtTransientHistory {
 struct MosfetTransientHistory {
     vgs_prev: Vec<Value>,
     vgs_prev_prev: Vec<Value>,
-    igs_prev: Vec<Value>,
+    capgs_prev_half: Vec<Value>,
+    qgs_prev: Vec<Value>,
+    qgs_prev_prev: Vec<Value>,
+    cqgs_prev: Vec<Value>,
     vgd_prev: Vec<Value>,
     vgd_prev_prev: Vec<Value>,
-    igd_prev: Vec<Value>,
+    capgd_prev_half: Vec<Value>,
+    qgd_prev: Vec<Value>,
+    qgd_prev_prev: Vec<Value>,
+    cqgd_prev: Vec<Value>,
     vgb_prev: Vec<Value>,
     vgb_prev_prev: Vec<Value>,
-    igb_prev: Vec<Value>,
+    capgb_prev_half: Vec<Value>,
+    qgb_prev: Vec<Value>,
+    qgb_prev_prev: Vec<Value>,
+    cqgb_prev: Vec<Value>,
+    vbs_j_prev: Vec<Value>,
+    vbs_j_prev_prev: Vec<Value>,
+    qbs_prev: Vec<Value>,
+    qbs_prev_prev: Vec<Value>,
+    cqbs_prev: Vec<Value>,
+    vbd_j_prev: Vec<Value>,
+    vbd_j_prev_prev: Vec<Value>,
+    qbd_prev: Vec<Value>,
+    qbd_prev_prev: Vec<Value>,
+    cqbd_prev: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -235,6 +258,131 @@ impl Engine {
         }
     }
 
+    fn transmission_line_delays(circuit: &crate::circuit::Circuit) -> Vec<Value> {
+        let mut delays: Vec<Value> = circuit
+            .tlines
+            .iter()
+            .map(crate::device::TransmissionLine::delay)
+            .chain(
+                circuit
+                    .coupled_tlines
+                    .iter()
+                    .flat_map(crate::device::CoupledTransmissionLine::propagation_delays),
+            )
+            .filter(|delay| delay.is_finite() && *delay > 0.0)
+            .collect();
+        delays.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        delays.dedup_by(|a, b| {
+            let scale = a.abs().max(b.abs()).max(1.0);
+            (*a - *b).abs() <= scale * 1e-12
+        });
+        delays
+    }
+
+    fn collect_transient_tline_breakpoints(
+        circuit: &crate::circuit::Circuit,
+        source_breakpoints: &[Value],
+        tstop: Value,
+        breakpoints: &mut BreakpointManager,
+    ) {
+        if source_breakpoints.is_empty() {
+            return;
+        }
+
+        let delays = Self::transmission_line_delays(circuit);
+        if delays.is_empty() {
+            return;
+        }
+
+        let mut generated = 0_usize;
+        'origins: for &origin in source_breakpoints {
+            for &delay in &delays {
+                let mut arrival = origin + delay;
+                while arrival.is_finite() && arrival <= tstop {
+                    if breakpoints.add(arrival) {
+                        generated += 1;
+                        if generated >= MAX_PROPAGATED_TLINE_BREAKPOINTS {
+                            log::warn!(
+                                "Capped propagated transmission-line breakpoints at {} entries (tstop={:.3e}s)",
+                                MAX_PROPAGATED_TLINE_BREAKPOINTS,
+                                tstop
+                            );
+                            break 'origins;
+                        }
+                    }
+                    arrival += delay;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn wave_event_exceeds_tolerance(
+        previous: Value,
+        current: Value,
+        reltol: Value,
+        abstol: Value,
+    ) -> bool {
+        if !previous.is_finite() || !current.is_finite() {
+            return false;
+        }
+        let scale = previous.abs().max(current.abs());
+        let threshold = abstol.max(scale * reltol);
+        (current - previous).abs() > threshold
+    }
+
+    #[inline]
+    fn maybe_schedule_tline_arrival_breakpoint(
+        breakpoints: &mut BreakpointManager,
+        event_time: Value,
+        delay: Value,
+        tstop: Value,
+        previous_wave: Value,
+        current_wave: Value,
+        reltol: Value,
+        abstol: Value,
+        dynamic_breakpoints_added: &mut usize,
+        warned_dynamic_breakpoint_cap: &mut bool,
+    ) {
+        if !Self::wave_event_exceeds_tolerance(previous_wave, current_wave, reltol, abstol) {
+            return;
+        }
+        if !(event_time.is_finite() && delay.is_finite() && delay > 0.0) {
+            return;
+        }
+
+        let arrival = event_time + delay;
+        if !(arrival.is_finite() && arrival > event_time && arrival <= tstop) {
+            return;
+        }
+
+        if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS {
+            if !*warned_dynamic_breakpoint_cap {
+                log::warn!(
+                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
+                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
+                    tstop
+                );
+                *warned_dynamic_breakpoint_cap = true;
+            }
+            return;
+        }
+
+        if breakpoints.add(arrival) {
+            *dynamic_breakpoints_added += 1;
+            if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
+                && !*warned_dynamic_breakpoint_cap
+            {
+                log::warn!(
+                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
+                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
+                    tstop
+                );
+                *warned_dynamic_breakpoint_cap = true;
+            }
+        }
+    }
+
     /// Run transient time-domain analysis
     ///
     /// Uses adaptive integration with automatic method switching (TrapGear).
@@ -346,7 +494,8 @@ impl Engine {
         reference: usize,
     ) -> Vec<Value> {
         let reference_voltage = Self::node_voltage(solution, reference);
-        nodes.iter()
+        nodes
+            .iter()
             .map(|&node| Self::node_voltage(solution, node) - reference_voltage)
             .collect()
     }
@@ -393,6 +542,78 @@ impl Engine {
             matrix.add(node_neg - 1, node_neg - 1, g);
             rhs[node_neg - 1] -= i_eq;
         }
+    }
+
+    #[inline]
+    fn stamp_tline_cross_conductance(
+        matrix: &mut crate::solver::StaticMatrix,
+        node_row_pos: usize,
+        node_row_neg: usize,
+        node_col_pos: usize,
+        node_col_neg: usize,
+        g_cross: Value,
+    ) {
+        if g_cross == 0.0 {
+            return;
+        }
+
+        if node_row_pos > 0 {
+            if node_col_pos > 0 {
+                matrix.add(node_row_pos - 1, node_col_pos - 1, g_cross);
+            }
+            if node_col_neg > 0 {
+                matrix.add(node_row_pos - 1, node_col_neg - 1, -g_cross);
+            }
+        }
+        if node_row_neg > 0 {
+            if node_col_pos > 0 {
+                matrix.add(node_row_neg - 1, node_col_pos - 1, -g_cross);
+            }
+            if node_col_neg > 0 {
+                matrix.add(node_row_neg - 1, node_col_neg - 1, g_cross);
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_tline_two_port(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+        response: crate::device::TlineTransientResponse,
+    ) {
+        Self::stamp_tline_port(
+            matrix,
+            rhs,
+            tl.node1_pos,
+            tl.node1_neg,
+            response.self_conductance(),
+            response.i_eq_port1(),
+        );
+        Self::stamp_tline_port(
+            matrix,
+            rhs,
+            tl.node2_pos,
+            tl.node2_neg,
+            response.self_conductance(),
+            response.i_eq_port2(),
+        );
+        Self::stamp_tline_cross_conductance(
+            matrix,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            response.mutual_conductance(),
+        );
+        Self::stamp_tline_cross_conductance(
+            matrix,
+            tl.node2_pos,
+            tl.node2_neg,
+            tl.node1_pos,
+            tl.node1_neg,
+            response.mutual_conductance(),
+        );
     }
 
     #[inline]
@@ -520,6 +741,16 @@ impl Engine {
     }
 
     #[inline]
+    fn effective_companion_method(method: IntegrationMethod, trap_order: u8) -> IntegrationMethod {
+        match method {
+            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
+                IntegrationMethod::BackwardEuler
+            }
+            _ => method,
+        }
+    }
+
+    #[inline]
     fn jfet_companion_geq(
         method: IntegrationMethod,
         trap_order: u8,
@@ -584,7 +815,7 @@ impl Engine {
         if geq == 0.0 {
             return (0.0, 0.0, q_prev, 0.0);
         }
-        // Match ngspice HFET/JFET transient charge update:
+        // Match ngspice nonlinear charge-branch transient update:
         // q(n+1) = q(n) + C(n+1) * (v(n+1) - v(n))
         let q_curr = q_prev + capacitance * (v_curr - v_prev);
         let cq_curr =
@@ -595,6 +826,28 @@ impl Engine {
         //   i_eq = geq * v_hist - ccap.
         // NOTE: This intentionally uses branch voltage history, not charge, because
         // q is not generally equal to C * v for voltage-dependent capacitances.
+        let ieq = geq * v_curr - cq_curr;
+        (geq, ieq, q_curr, cq_curr)
+    }
+
+    #[inline]
+    fn nonlinear_charge_companion_terms(
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        capacitance: Value,
+        v_curr: Value,
+        q_curr: Value,
+        q_prev: Value,
+        q_prev_prev: Value,
+        cq_prev: Value,
+    ) -> (Value, Value, Value, Value) {
+        let geq = Self::jfet_companion_geq(method, trap_order, capacitance, dt);
+        if geq == 0.0 {
+            return (0.0, 0.0, q_curr, 0.0);
+        }
+        let cq_curr =
+            Self::jfet_companion_ccap(method, trap_order, dt, q_curr, q_prev, q_prev_prev, cq_prev);
         let ieq = geq * v_curr - cq_curr;
         (geq, ieq, q_curr, cq_curr)
     }
@@ -688,35 +941,80 @@ impl Engine {
         let mut history = MosfetTransientHistory {
             vgs_prev: Vec::with_capacity(n),
             vgs_prev_prev: Vec::with_capacity(n),
-            igs_prev: Vec::with_capacity(n),
+            capgs_prev_half: Vec::with_capacity(n),
+            qgs_prev: Vec::with_capacity(n),
+            qgs_prev_prev: Vec::with_capacity(n),
+            cqgs_prev: Vec::with_capacity(n),
             vgd_prev: Vec::with_capacity(n),
             vgd_prev_prev: Vec::with_capacity(n),
-            igd_prev: Vec::with_capacity(n),
+            capgd_prev_half: Vec::with_capacity(n),
+            qgd_prev: Vec::with_capacity(n),
+            qgd_prev_prev: Vec::with_capacity(n),
+            cqgd_prev: Vec::with_capacity(n),
             vgb_prev: Vec::with_capacity(n),
             vgb_prev_prev: Vec::with_capacity(n),
-            igb_prev: Vec::with_capacity(n),
+            capgb_prev_half: Vec::with_capacity(n),
+            qgb_prev: Vec::with_capacity(n),
+            qgb_prev_prev: Vec::with_capacity(n),
+            cqgb_prev: Vec::with_capacity(n),
+            vbs_j_prev: Vec::with_capacity(n),
+            vbs_j_prev_prev: Vec::with_capacity(n),
+            qbs_prev: Vec::with_capacity(n),
+            qbs_prev_prev: Vec::with_capacity(n),
+            cqbs_prev: Vec::with_capacity(n),
+            vbd_j_prev: Vec::with_capacity(n),
+            vbd_j_prev_prev: Vec::with_capacity(n),
+            qbd_prev: Vec::with_capacity(n),
+            qbd_prev_prev: Vec::with_capacity(n),
+            cqbd_prev: Vec::with_capacity(n),
         };
 
         for mos in &circuit.mosfets.devices {
-            let vg = Self::node_voltage(solution, mos.node_gate);
-            let vd = Self::node_voltage(solution, mos.node_drain);
-            let vs = Self::node_voltage(solution, mos.node_source);
-            let vb = Self::node_voltage(solution, mos.node_bulk);
-            let vgs = vg - vs;
-            let vgd = vg - vd;
-            let vgb = vg - vb;
+            let (vgs, vds, vbs) = mos.eval_branch_voltages_at(solution);
+            let vgd = vgs - vds;
+            let vgb = vgs - vbs;
+            let (cgs_half, cgd_half, cgb_half) =
+                mos.transient_capacitance_halves_at(vgs, vds, vbs);
+            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+            let cgs = 2.0 * cgs_half + cgs_ov;
+            let cgd = 2.0 * cgd_half + cgd_ov;
+            let cgb = 2.0 * cgb_half + cgb_ov;
 
             history.vgs_prev.push(vgs);
             history.vgs_prev_prev.push(vgs);
-            history.igs_prev.push(0.0);
+            history.capgs_prev_half.push(cgs_half);
+            history.qgs_prev.push(cgs.max(0.0) * vgs);
+            history.qgs_prev_prev.push(cgs.max(0.0) * vgs);
+            history.cqgs_prev.push(0.0);
 
             history.vgd_prev.push(vgd);
             history.vgd_prev_prev.push(vgd);
-            history.igd_prev.push(0.0);
+            history.capgd_prev_half.push(cgd_half);
+            history.qgd_prev.push(cgd.max(0.0) * vgd);
+            history.qgd_prev_prev.push(cgd.max(0.0) * vgd);
+            history.cqgd_prev.push(0.0);
 
             history.vgb_prev.push(vgb);
             history.vgb_prev_prev.push(vgb);
-            history.igb_prev.push(0.0);
+            history.capgb_prev_half.push(cgb_half);
+            history.qgb_prev.push(cgb.max(0.0) * vgb);
+            history.qgb_prev_prev.push(cgb.max(0.0) * vgb);
+            history.cqgb_prev.push(0.0);
+
+            let vbs_j = mos.body_source_charge_branch_voltage(vbs);
+            let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
+            let (qbs, _) = mos.body_source_junction_charge_and_capacitance_at(vbs);
+            let (qbd, _) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
+            history.vbs_j_prev.push(vbs_j);
+            history.vbs_j_prev_prev.push(vbs_j);
+            history.qbs_prev.push(qbs);
+            history.qbs_prev_prev.push(qbs);
+            history.cqbs_prev.push(0.0);
+            history.vbd_j_prev.push(vbd_j);
+            history.vbd_j_prev_prev.push(vbd_j);
+            history.qbd_prev.push(qbd);
+            history.qbd_prev_prev.push(qbd);
+            history.cqbd_prev.push(0.0);
         }
 
         history
@@ -732,12 +1030,7 @@ impl Engine {
         dt: Value,
         history: &BjtTransientHistory,
     ) {
-        let effective_method = match method {
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
-                IntegrationMethod::BackwardEuler
-            }
-            _ => method,
-        };
+        let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method(effective_method);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vbe = history.vbe_prev[idx];
@@ -814,13 +1107,12 @@ impl Engine {
         trap_order: u8,
         dt: Value,
         history: &JfetTransientHistory,
+        suppress_gate_charge: bool,
     ) {
-        let effective_method = match method {
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
-                IntegrationMethod::BackwardEuler
-            }
-            _ => method,
-        };
+        if suppress_gate_charge {
+            return;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, voltages);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, voltages);
@@ -863,71 +1155,128 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
         dt: Value,
-        coeff: &CompanionCoefficients,
         history: &MosfetTransientHistory,
+        suppress_gate_charge: bool,
     ) {
+        let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            if mos.level == 6 {
-                continue;
-            }
-            let (cgs, cgd, cgb) = mos.overlap_capacitances();
+            let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
+            let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(voltages);
+            let (cgs_half, cgd_half, cgb_half) =
+                mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+            let cgs = cgs_half + history.capgs_prev_half[idx] + cgs_ov;
+            let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
+            let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
-            if cgs.is_finite() && cgs > 0.0 {
-                let geq = coeff.capacitor_geq(cgs, dt);
-                let ieq = coeff.capacitor_ieq(
+            if !suppress_gate_charge {
+                let (geq_gs, ieq_gs, _qgs_curr, _cqgs_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
                     cgs,
-                    dt,
+                    vgs,
                     history.vgs_prev[idx],
-                    history.vgs_prev_prev[idx],
-                    history.igs_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgs_prev_prev[idx],
+                    history.cqgs_prev[idx],
                 );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    mos.node_gate,
-                    mos.node_source,
-                    geq,
-                    ieq,
-                );
-            }
+                if geq_gs > 0.0 {
+                    Self::stamp_two_terminal_companion(
+                        matrix,
+                        rhs,
+                        mos.node_gate,
+                        mos.node_source,
+                        geq_gs,
+                        ieq_gs,
+                    );
+                }
 
-            if cgd.is_finite() && cgd > 0.0 {
-                let geq = coeff.capacitor_geq(cgd, dt);
-                let ieq = coeff.capacitor_ieq(
+                let (geq_gd, ieq_gd, _qgd_curr, _cqgd_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
                     cgd,
-                    dt,
+                    vgd,
                     history.vgd_prev[idx],
-                    history.vgd_prev_prev[idx],
-                    history.igd_prev[idx],
+                    history.qgd_prev[idx],
+                    history.qgd_prev_prev[idx],
+                    history.cqgd_prev[idx],
                 );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    mos.node_gate,
-                    mos.node_drain,
-                    geq,
-                    ieq,
+                if geq_gd > 0.0 {
+                    Self::stamp_two_terminal_companion(
+                        matrix,
+                        rhs,
+                        mos.node_gate,
+                        mos.node_drain,
+                        geq_gd,
+                        ieq_gd,
+                    );
+                }
+
+                let (geq_gb, ieq_gb, _qgb_curr, _cqgb_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    cgb,
+                    vgb,
+                    history.vgb_prev[idx],
+                    history.qgb_prev[idx],
+                    history.qgb_prev_prev[idx],
+                    history.cqgb_prev[idx],
                 );
+                if geq_gb > 0.0 {
+                    Self::stamp_two_terminal_companion(
+                        matrix,
+                        rhs,
+                        mos.node_gate,
+                        mos.node_bulk,
+                        geq_gb,
+                        ieq_gb,
+                    );
+                }
             }
 
-            if cgb.is_finite() && cgb > 0.0 {
-                let geq = coeff.capacitor_geq(cgb, dt);
-                let ieq = coeff.capacitor_ieq(
-                    cgb,
-                    dt,
-                    history.vgb_prev[idx],
-                    history.vgb_prev_prev[idx],
-                    history.igb_prev[idx],
-                );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    mos.node_gate,
-                    mos.node_bulk,
-                    geq,
-                    ieq,
-                );
+            let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
+            let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
+            let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
+            let (qbd_curr, cbd) =
+                mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+            let (bs_pos, bs_neg) = mos.body_source_charge_nodes();
+            let (bd_pos, bd_neg) = mos.body_drain_charge_nodes();
+
+            let (geq_bs, ieq_bs, _qbs_curr, _cqbs_curr) = Self::nonlinear_charge_companion_terms(
+                effective_method,
+                trap_order,
+                dt,
+                cbs,
+                vbs_j,
+                qbs_curr,
+                history.qbs_prev[idx],
+                history.qbs_prev_prev[idx],
+                history.cqbs_prev[idx],
+            );
+            if geq_bs > 0.0 {
+                Self::stamp_two_terminal_companion(matrix, rhs, bs_pos, bs_neg, geq_bs, ieq_bs);
+            }
+
+            let (geq_bd, ieq_bd, _qbd_curr, _cqbd_curr) = Self::nonlinear_charge_companion_terms(
+                effective_method,
+                trap_order,
+                dt,
+                cbd,
+                vbd_j,
+                qbd_curr,
+                history.qbd_prev[idx],
+                history.qbd_prev_prev[idx],
+                history.cqbd_prev[idx],
+            );
+            if geq_bd > 0.0 {
+                Self::stamp_two_terminal_companion(matrix, rhs, bd_pos, bd_neg, geq_bd, ieq_bd);
             }
         }
     }
@@ -938,22 +1287,11 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
-        tline_dc_refs: &[(Value, Value)],
+        _tline_dc_refs: &[(Value, Value)],
     ) {
-        for (idx, tl) in circuit.tlines.iter().enumerate() {
-            let g = Self::tline_transient_port_conductance(tl);
-            let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
-            let atten = Self::tline_transient_wave_attenuation(tl);
-
-            // Propagate deviations from the initial DC operating point so
-            // constant biases remain invariant even on attenuated lines.
-            let incoming1 = tl.delayed_backward_raw_at(time) * atten + (1.0 - atten) * v2_ref;
-            let incoming2 = tl.delayed_forward_raw_at(time) * atten + (1.0 - atten) * v1_ref;
-            let i_eq_p1 = g * incoming1;
-            let i_eq_p2 = g * incoming2;
-
-            Self::stamp_tline_port(matrix, rhs, tl.node1_pos, tl.node1_neg, g, i_eq_p1);
-            Self::stamp_tline_port(matrix, rhs, tl.node2_pos, tl.node2_neg, g, i_eq_p2);
+        for tl in &circuit.tlines {
+            let response = tl.transient_port_response(time);
+            Self::stamp_tline_two_port(matrix, rhs, tl, response);
         }
     }
 
@@ -1098,8 +1436,15 @@ impl Engine {
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
+        suppress_gate_charge_history: bool,
         tline_dc_refs: &[(Value, Value)],
         coupled_tline_refs: &[CoupledTlineReferenceState],
+        breakpoints: &mut BreakpointManager,
+        tstop: Value,
+        voltage_reltol: Value,
+        voltage_abstol: Value,
+        dynamic_breakpoints_added: &mut usize,
+        warned_dynamic_breakpoint_cap: &mut bool,
     ) {
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -1144,29 +1489,50 @@ impl Engine {
 
         // Update transmission-line delayed-wave history from the accepted state.
         for (idx, tl) in circuit.tlines.iter_mut().enumerate() {
-            let z_port = Self::tline_transient_port_impedance(tl);
-            let g = 1.0 / z_port;
+            let previous_forward = tl.launched_forward_wave();
+            let previous_backward = tl.launched_backward_wave();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
-            let (v1_ref, v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
-            let atten = Self::tline_transient_wave_attenuation(tl);
-            let incoming_port1 =
-                tl.delayed_backward_raw_at(accepted_time) * atten + (1.0 - atten) * v2_ref;
-            let incoming_port2 =
-                tl.delayed_forward_raw_at(accepted_time) * atten + (1.0 - atten) * v1_ref;
-            let i1_actual = g * v1 - g * incoming_port1;
-            let i2_actual = g * v2 - g * incoming_port2;
-            let wave_scale = z_port / tl.impedance();
+            let (_v1_ref, _v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
+            let response = tl.transient_port_response(accepted_time);
+            let (i1_actual, i2_actual) = response.port_currents(v1, v2);
             tl.update_history(
                 accepted_time,
                 v1,
-                i1_actual * wave_scale,
+                i1_actual,
                 v2,
-                i2_actual * wave_scale,
+                i2_actual,
             );
+            if !tl.has_distributed_rlgc() {
+                Self::maybe_schedule_tline_arrival_breakpoint(
+                    breakpoints,
+                    accepted_time,
+                    tl.delay(),
+                    tstop,
+                    previous_forward,
+                    tl.launched_forward_wave(),
+                    voltage_reltol,
+                    voltage_abstol,
+                    dynamic_breakpoints_added,
+                    warned_dynamic_breakpoint_cap,
+                );
+                Self::maybe_schedule_tline_arrival_breakpoint(
+                    breakpoints,
+                    accepted_time,
+                    tl.delay(),
+                    tstop,
+                    previous_backward,
+                    tl.launched_backward_wave(),
+                    voltage_reltol,
+                    voltage_abstol,
+                    dynamic_breakpoints_added,
+                    warned_dynamic_breakpoint_cap,
+                );
+            }
         }
 
         for (idx, tl) in circuit.coupled_tlines.iter_mut().enumerate() {
+            let previous_mode_launches = tl.launched_modal_waves().collect::<Vec<_>>();
             let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
             let near_physical =
                 Self::differential_port_voltages(accepted_solution, &tl.near_nodes, tl.near_ref);
@@ -1187,14 +1553,39 @@ impl Engine {
                 &far_modal,
                 &far_modal_currents,
             );
+            for (
+                (delay, previous_forward, previous_backward),
+                (_, current_forward, current_backward),
+            ) in previous_mode_launches.into_iter().zip(tl.launched_modal_waves())
+            {
+                Self::maybe_schedule_tline_arrival_breakpoint(
+                    breakpoints,
+                    accepted_time,
+                    delay,
+                    tstop,
+                    previous_forward,
+                    current_forward,
+                    voltage_reltol,
+                    voltage_abstol,
+                    dynamic_breakpoints_added,
+                    warned_dynamic_breakpoint_cap,
+                );
+                Self::maybe_schedule_tline_arrival_breakpoint(
+                    breakpoints,
+                    accepted_time,
+                    delay,
+                    tstop,
+                    previous_backward,
+                    current_backward,
+                    voltage_reltol,
+                    voltage_abstol,
+                    dynamic_breakpoints_added,
+                    warned_dynamic_breakpoint_cap,
+                );
+            }
         }
 
-        let effective_method = match method {
-            IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear if trap_order <= 1 => {
-                IntegrationMethod::BackwardEuler
-            }
-            _ => method,
-        };
+        let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff_update = CompanionCoefficients::for_method(effective_method);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
@@ -1273,126 +1664,146 @@ impl Engine {
             let (vgs_charge, vgd_charge) =
                 Self::jfet_charge_branch_voltages(jfet, accepted_solution);
             let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
-            let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
-                dt,
-                cgs,
-                vgs_charge,
-                jfet_history.vgs_prev[idx],
-                jfet_history.qgs_prev[idx],
-                jfet_history.qgs_prev_prev[idx],
-                jfet_history.cqgs_prev[idx],
-            );
             jfet_history.vgs_prev_prev[idx] = jfet_history.vgs_prev[idx];
             jfet_history.vgs_prev[idx] = vgs_charge;
-            jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
-            jfet_history.qgs_prev[idx] = qgs_curr;
-            jfet_history.cqgs_prev[idx] = cqgs_curr;
-
-            let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                method,
-                trap_order,
-                dt,
-                cgd,
-                vgd_charge,
-                jfet_history.vgd_prev[idx],
-                jfet_history.qgd_prev[idx],
-                jfet_history.qgd_prev_prev[idx],
-                jfet_history.cqgd_prev[idx],
-            );
             jfet_history.vgd_prev_prev[idx] = jfet_history.vgd_prev[idx];
             jfet_history.vgd_prev[idx] = vgd_charge;
-            jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
-            jfet_history.qgd_prev[idx] = qgd_curr;
-            jfet_history.cqgd_prev[idx] = cqgd_curr;
+            if !suppress_gate_charge_history {
+                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
+                    cgs,
+                    vgs_charge,
+                    jfet_history.vgs_prev_prev[idx],
+                    jfet_history.qgs_prev[idx],
+                    jfet_history.qgs_prev_prev[idx],
+                    jfet_history.cqgs_prev[idx],
+                );
+                jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
+                jfet_history.qgs_prev[idx] = qgs_curr;
+                jfet_history.cqgs_prev[idx] = cqgs_curr;
+
+                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
+                    cgd,
+                    vgd_charge,
+                    jfet_history.vgd_prev_prev[idx],
+                    jfet_history.qgd_prev[idx],
+                    jfet_history.qgd_prev_prev[idx],
+                    jfet_history.cqgd_prev[idx],
+                );
+                jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
+                jfet_history.qgd_prev[idx] = qgd_curr;
+                jfet_history.cqgd_prev[idx] = cqgd_curr;
+            }
         }
 
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            if mos.level == 6 {
-                let vg = Self::node_voltage(accepted_solution, mos.node_gate);
-                let vd = Self::node_voltage(accepted_solution, mos.node_drain);
-                let vs = Self::node_voltage(accepted_solution, mos.node_source);
-                let vb = Self::node_voltage(accepted_solution, mos.node_bulk);
-                mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
-                mosfet_history.vgs_prev[idx] = vg - vs;
-                mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
-                mosfet_history.vgd_prev[idx] = vg - vd;
-                mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
-                mosfet_history.vgb_prev[idx] = vg - vb;
-                mosfet_history.igs_prev[idx] = 0.0;
-                mosfet_history.igd_prev[idx] = 0.0;
-                mosfet_history.igb_prev[idx] = 0.0;
-                continue;
-            }
-            let vg = Self::node_voltage(accepted_solution, mos.node_gate);
-            let vd = Self::node_voltage(accepted_solution, mos.node_drain);
-            let vs = Self::node_voltage(accepted_solution, mos.node_source);
-            let vb = Self::node_voltage(accepted_solution, mos.node_bulk);
-            let vgs = vg - vs;
-            let vgd = vg - vd;
-            let vgb = vg - vb;
-            let (cgs, cgd, cgb) = mos.overlap_capacitances();
-
-            if cgs.is_finite() && cgs > 0.0 {
-                let geq = coeff_update.capacitor_geq(cgs, dt);
-                let ieq = coeff_update.capacitor_ieq(
+            let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
+            let vgd = vgs - vds;
+            let vgb = vgs - vbs;
+            let (cgs_half, cgd_half, cgb_half) =
+                mos.transient_capacitance_halves_at(vgs, vds, vbs);
+            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+            let cgs = cgs_half + mosfet_history.capgs_prev_half[idx] + cgs_ov;
+            let cgd = cgd_half + mosfet_history.capgd_prev_half[idx] + cgd_ov;
+            let cgb = cgb_half + mosfet_history.capgb_prev_half[idx] + cgb_ov;
+            mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
+            mosfet_history.vgs_prev[idx] = vgs;
+            mosfet_history.capgs_prev_half[idx] = cgs_half;
+            mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
+            mosfet_history.vgd_prev[idx] = vgd;
+            mosfet_history.capgd_prev_half[idx] = cgd_half;
+            mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
+            mosfet_history.vgb_prev[idx] = vgb;
+            mosfet_history.capgb_prev_half[idx] = cgb_half;
+            if !suppress_gate_charge_history {
+                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
                     cgs,
-                    dt,
-                    mosfet_history.vgs_prev[idx],
+                    vgs,
                     mosfet_history.vgs_prev_prev[idx],
-                    mosfet_history.igs_prev[idx],
+                    mosfet_history.qgs_prev[idx],
+                    mosfet_history.qgs_prev_prev[idx],
+                    mosfet_history.cqgs_prev[idx],
                 );
-                let i_new = geq * vgs - ieq;
-                let v_old = mosfet_history.vgs_prev[idx];
-                mosfet_history.vgs_prev_prev[idx] = v_old;
-                mosfet_history.vgs_prev[idx] = vgs;
-                mosfet_history.igs_prev[idx] = i_new;
-            } else {
-                mosfet_history.vgs_prev_prev[idx] = mosfet_history.vgs_prev[idx];
-                mosfet_history.vgs_prev[idx] = vgs;
-                mosfet_history.igs_prev[idx] = 0.0;
-            }
+                mosfet_history.qgs_prev_prev[idx] = mosfet_history.qgs_prev[idx];
+                mosfet_history.qgs_prev[idx] = qgs_curr;
+                mosfet_history.cqgs_prev[idx] = cqgs_curr;
 
-            if cgd.is_finite() && cgd > 0.0 {
-                let geq = coeff_update.capacitor_geq(cgd, dt);
-                let ieq = coeff_update.capacitor_ieq(
+                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
                     cgd,
-                    dt,
-                    mosfet_history.vgd_prev[idx],
+                    vgd,
                     mosfet_history.vgd_prev_prev[idx],
-                    mosfet_history.igd_prev[idx],
+                    mosfet_history.qgd_prev[idx],
+                    mosfet_history.qgd_prev_prev[idx],
+                    mosfet_history.cqgd_prev[idx],
                 );
-                let i_new = geq * vgd - ieq;
-                let v_old = mosfet_history.vgd_prev[idx];
-                mosfet_history.vgd_prev_prev[idx] = v_old;
-                mosfet_history.vgd_prev[idx] = vgd;
-                mosfet_history.igd_prev[idx] = i_new;
-            } else {
-                mosfet_history.vgd_prev_prev[idx] = mosfet_history.vgd_prev[idx];
-                mosfet_history.vgd_prev[idx] = vgd;
-                mosfet_history.igd_prev[idx] = 0.0;
+                mosfet_history.qgd_prev_prev[idx] = mosfet_history.qgd_prev[idx];
+                mosfet_history.qgd_prev[idx] = qgd_curr;
+                mosfet_history.cqgd_prev[idx] = cqgd_curr;
+
+                let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
+                    cgb,
+                    vgb,
+                    mosfet_history.vgb_prev_prev[idx],
+                    mosfet_history.qgb_prev[idx],
+                    mosfet_history.qgb_prev_prev[idx],
+                    mosfet_history.cqgb_prev[idx],
+                );
+                mosfet_history.qgb_prev_prev[idx] = mosfet_history.qgb_prev[idx];
+                mosfet_history.qgb_prev[idx] = qgb_curr;
+                mosfet_history.cqgb_prev[idx] = cqgb_curr;
             }
 
-            if cgb.is_finite() && cgb > 0.0 {
-                let geq = coeff_update.capacitor_geq(cgb, dt);
-                let ieq = coeff_update.capacitor_ieq(
-                    cgb,
-                    dt,
-                    mosfet_history.vgb_prev[idx],
-                    mosfet_history.vgb_prev_prev[idx],
-                    mosfet_history.igb_prev[idx],
-                );
-                let i_new = geq * vgb - ieq;
-                let v_old = mosfet_history.vgb_prev[idx];
-                mosfet_history.vgb_prev_prev[idx] = v_old;
-                mosfet_history.vgb_prev[idx] = vgb;
-                mosfet_history.igb_prev[idx] = i_new;
-            } else {
-                mosfet_history.vgb_prev_prev[idx] = mosfet_history.vgb_prev[idx];
-                mosfet_history.vgb_prev[idx] = vgb;
-                mosfet_history.igb_prev[idx] = 0.0;
-            }
+            let vbs_j = mos.body_source_charge_branch_voltage(vbs);
+            let vbd_j = mos.body_drain_charge_branch_voltage(vds, vbs);
+            let (qbs_exact, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs);
+            let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cbs,
+                vbs_j,
+                qbs_exact,
+                mosfet_history.qbs_prev[idx],
+                mosfet_history.qbs_prev_prev[idx],
+                mosfet_history.cqbs_prev[idx],
+            );
+            mosfet_history.vbs_j_prev_prev[idx] = mosfet_history.vbs_j_prev[idx];
+            mosfet_history.vbs_j_prev[idx] = vbs_j;
+            mosfet_history.qbs_prev_prev[idx] = mosfet_history.qbs_prev[idx];
+            mosfet_history.qbs_prev[idx] = qbs_curr;
+            mosfet_history.cqbs_prev[idx] = cqbs_curr;
+
+            let (qbd_exact, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds, vbs);
+            let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cbd,
+                vbd_j,
+                qbd_exact,
+                mosfet_history.qbd_prev[idx],
+                mosfet_history.qbd_prev_prev[idx],
+                mosfet_history.cqbd_prev[idx],
+            );
+            mosfet_history.vbd_j_prev_prev[idx] = mosfet_history.vbd_j_prev[idx];
+            mosfet_history.vbd_j_prev[idx] = vbd_j;
+            mosfet_history.qbd_prev_prev[idx] = mosfet_history.qbd_prev[idx];
+            mosfet_history.qbd_prev[idx] = qbd_curr;
+            mosfet_history.cqbd_prev[idx] = cqbd_curr;
         }
     }
 
@@ -1502,6 +1913,15 @@ impl Engine {
             source_step_hint,
             &mut breakpoints,
         );
+        let source_breakpoint_times = breakpoints.times().to_vec();
+        Self::collect_transient_tline_breakpoints(
+            &circuit,
+            &source_breakpoint_times,
+            tstop,
+            &mut breakpoints,
+        );
+        let mut dynamic_tline_breakpoints_added = 0_usize;
+        let mut warned_dynamic_tline_breakpoint_cap = false;
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
 
@@ -1610,6 +2030,7 @@ impl Engine {
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = 1_u8; // ngspice-style trap order: start at 1, promote to 2 after accepted smooth step
+        let mut inittran_gate_charge_phase = true;
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         // Keep cancellation responsiveness tight for large transient decks where a
@@ -1699,7 +2120,11 @@ impl Engine {
             let current_method = current_integration_method(&trapgear);
             let step_trap_order =
                 Self::effective_trapezoidal_order(current_method, trap_order, at_breakpoint);
-            let coeff = CompanionCoefficients::for_method(current_method);
+            let coeff = CompanionCoefficients::for_method(Self::effective_companion_method(
+                current_method,
+                step_trap_order,
+            ));
+            let suppress_gate_charge = inittran_gate_charge_phase && t == 0.0;
 
             // Prepare for Newton iteration at this timestep
             new_solution.clone_from(&solution);
@@ -1782,14 +2207,18 @@ impl Engine {
                     step_trap_order,
                     dt,
                     &jfet_history,
+                    suppress_gate_charge,
                 );
                 Self::stamp_mosfet_transient_companions(
                     &circuit,
                     &mut matrix,
                     &mut rhs,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
                     dt,
-                    &coeff,
                     &mosfet_history,
+                    suppress_gate_charge,
                 );
                 Self::stamp_tline_companions(
                     &circuit,
@@ -1925,7 +2354,7 @@ impl Engine {
                         }
 
                         let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_tolerance());
+                    || circuit.nonlinear_converged(self.device_convergence_criteria());
 
                         if voltage_converged && device_converged && linearized_residual_converged {
                             converged = true;
@@ -1956,7 +2385,7 @@ impl Engine {
                     // Check what specifically didn't converge
                     let v_conv = self.voltage_convergence_met(&solution, &new_solution);
                     let d_conv = !circuit.has_nonlinear_devices()
-                        || circuit.nonlinear_converged(self.device_convergence_tolerance());
+                || circuit.nonlinear_converged(self.device_convergence_criteria());
                     let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
@@ -2103,9 +2532,17 @@ impl Engine {
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut mosfet_history,
+                        suppress_gate_charge,
                         &tline_dc_refs,
                         &coupled_tline_refs,
+                        &mut breakpoints,
+                        tstop,
+                        self.voltage_reltol(),
+                        self.voltage_abstol(),
+                        &mut dynamic_tline_breakpoints_added,
+                        &mut warned_dynamic_tline_breakpoint_cap,
                     );
+                    inittran_gate_charge_phase = false;
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
                     }
@@ -2143,7 +2580,7 @@ impl Engine {
                         &lte_estimator,
                         &solution,
                         dt,
-            max_step,
+                        max_step,
                         is_strictly_linear_transient,
                         expected_source_delta,
                     );
@@ -2273,9 +2710,17 @@ impl Engine {
                         &mut bjt_history,
                         &mut jfet_history,
                         &mut mosfet_history,
+                        suppress_gate_charge,
                         &tline_dc_refs,
                         &coupled_tline_refs,
+                        &mut breakpoints,
+                        tstop,
+                        self.voltage_reltol(),
+                        self.voltage_abstol(),
+                        &mut dynamic_tline_breakpoints_added,
+                        &mut warned_dynamic_tline_breakpoint_cap,
                     );
+                    inittran_gate_charge_phase = false;
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
                     }
@@ -2295,7 +2740,7 @@ impl Engine {
                         &lte_estimator,
                         &solution,
                         dt,
-            max_step,
+                        max_step,
                         is_strictly_linear_transient,
                         expected_source_delta,
                     );
@@ -2377,9 +2822,17 @@ impl Engine {
                 &mut bjt_history,
                 &mut jfet_history,
                 &mut mosfet_history,
+                suppress_gate_charge,
                 &tline_dc_refs,
                 &coupled_tline_refs,
+                &mut breakpoints,
+                tstop,
+                self.voltage_reltol(),
+                self.voltage_abstol(),
+                &mut dynamic_tline_breakpoints_added,
+                &mut warned_dynamic_tline_breakpoint_cap,
             );
+            inittran_gate_charge_phase = false;
 
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
@@ -2878,6 +3331,45 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_effective_companion_method_restarts_trapezoidal_with_backward_euler() {
+        assert_eq!(
+            Engine::effective_companion_method(IntegrationMethod::Trapezoidal, 1),
+            IntegrationMethod::BackwardEuler
+        );
+        assert_eq!(
+            Engine::effective_companion_method(IntegrationMethod::TrapGear, 1),
+            IntegrationMethod::BackwardEuler
+        );
+        assert_eq!(
+            Engine::effective_companion_method(IntegrationMethod::Trapezoidal, 2),
+            IntegrationMethod::Trapezoidal
+        );
+        assert_eq!(
+            Engine::effective_companion_method(IntegrationMethod::Gear2, 2),
+            IntegrationMethod::Gear2
+        );
+    }
+
+    #[test]
+    fn test_breakpoint_restart_uses_backward_euler_linear_reactive_coefficients() {
+        let c = 1e-12;
+        let dt = 5e-10;
+        let v_prev = 1.25;
+        let i_prev = 7.0;
+
+        let coeff = CompanionCoefficients::for_method(Engine::effective_companion_method(
+            IntegrationMethod::Trapezoidal,
+            1,
+        ));
+
+        let geq = coeff.capacitor_geq(c, dt);
+        let ieq = coeff.capacitor_ieq(c, dt, v_prev, 0.0, i_prev);
+
+        assert!((geq - (c / dt)).abs() < 1e-18);
+        assert!((ieq - (c * v_prev / dt)).abs() < 1e-18);
+    }
+
+    #[test]
     fn test_startup_step_delta_limit_relaxes_only_for_linearized_seed_window() {
         let base = 5e-2;
         let max_step = 5e-9;
@@ -2898,9 +3390,15 @@ mod abort_tests {
     }
 
     #[test]
-    fn test_startup_step_delta_limit_unchanged_for_dc_op_modes() {
+    fn test_startup_step_delta_limit_unchanged_for_non_recovery_startup_modes() {
         let base = 5e-2;
         let max_step = 5e-9;
+        let tranop = Engine::startup_step_delta_limit(
+            startup::InitialSolutionMode::TransientOperatingPoint,
+            20e-9,
+            max_step,
+            base,
+        );
         let dc = Engine::startup_step_delta_limit(
             startup::InitialSolutionMode::DcOperatingPoint,
             20e-9,
@@ -2913,6 +3411,7 @@ mod abort_tests {
             max_step,
             base,
         );
+        assert!((tranop - base).abs() < 1e-18);
         assert!((dc - base).abs() < 1e-18);
         assert!((robust - base).abs() < 1e-18);
     }
@@ -3114,5 +3613,46 @@ mod abort_tests {
             "net1/net7 crossing time out of expected range: {}",
             crossing_t
         );
+    }
+
+    #[test]
+    fn test_dynamic_tline_breakpoints_only_schedule_material_wave_changes() {
+        let mut breakpoints = BreakpointManager::new();
+        let mut dynamic_breakpoints_added = 0;
+        let mut warned_dynamic_breakpoint_cap = false;
+
+        Engine::maybe_schedule_tline_arrival_breakpoint(
+            &mut breakpoints,
+            0.5e-9,
+            1.0e-9,
+            5.0e-9,
+            1.0,
+            1.0 + 5.0e-7,
+            1e-3,
+            1e-6,
+            &mut dynamic_breakpoints_added,
+            &mut warned_dynamic_breakpoint_cap,
+        );
+        assert!(
+            breakpoints.is_empty(),
+            "sub-tolerance wave changes should not create arrival breakpoints"
+        );
+
+        Engine::maybe_schedule_tline_arrival_breakpoint(
+            &mut breakpoints,
+            0.5e-9,
+            1.0e-9,
+            5.0e-9,
+            1.0,
+            1.02,
+            1e-3,
+            1e-6,
+            &mut dynamic_breakpoints_added,
+            &mut warned_dynamic_breakpoint_cap,
+        );
+        assert_eq!(dynamic_breakpoints_added, 1);
+        assert_eq!(breakpoints.times().len(), 1);
+        assert!((breakpoints.times()[0] - 1.5e-9).abs() < 1e-21);
+        assert!(!warned_dynamic_breakpoint_cap);
     }
 }

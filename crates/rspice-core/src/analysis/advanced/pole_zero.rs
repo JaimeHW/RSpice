@@ -466,6 +466,7 @@ impl PoleZeroAnalyzer {
         if let Some(state_space) = self.build_state_space(&vec![0.0; n], &vec![0.0; n])
             && let Some(mut poles) = self.eigenvalues_from_matrix(&state_space.a)
         {
+            self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
                 p.re.is_finite()
                     && p.im.is_finite()
@@ -481,6 +482,7 @@ impl PoleZeroAnalyzer {
         }
 
         if let Some(mut poles) = self.generalized_eigenvalues(&self.g_matrix, &self.c_matrix) {
+            self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
                 p.re.is_finite()
                     && p.im.is_finite()
@@ -497,6 +499,7 @@ impl PoleZeroAnalyzer {
 
         if let Some(state_matrix) = self.build_descriptor_state_matrix() {
             let mut poles = self.qr_eigenvalues(&state_matrix);
+            self.canonicalize_real_roots(&mut poles);
             poles.retain(|p| {
                 p.re.is_finite()
                     && p.im.is_finite()
@@ -665,7 +668,7 @@ impl PoleZeroAnalyzer {
                 *target -= correction;
             }
 
-            let d_eff = -self
+            let d_eff = self
                 .row_vector_times_matrix(&l_a, &g_aa_inv_ba)
                 .into_iter()
                 .next()
@@ -998,6 +1001,16 @@ impl PoleZeroAnalyzer {
         Some((input_vec, output_vec))
     }
 
+    fn is_direct_voltage_port_measurement(&self, config: &PoleZeroConfig) -> bool {
+        if config.input_is_current {
+            return false;
+        }
+
+        (config.input_pos == config.output_pos && config.input_neg == config.output_neg)
+            || (config.input_pos == config.output_neg.unwrap_or(usize::MAX)
+                && config.output_pos == config.input_neg.unwrap_or(usize::MAX))
+    }
+
     fn is_same_root(a: &Complex, b: &Complex, tol: Value) -> bool {
         let re_scale = 1.0 + a.re.abs().max(b.re.abs());
         let im_scale = 1.0 + a.im.abs().max(b.im.abs());
@@ -1028,6 +1041,66 @@ impl PoleZeroAnalyzer {
             };
             a_re.total_cmp(&b_re).then_with(|| a_im.total_cmp(&b_im))
         });
+    }
+
+    fn round_to_significant_digits(&self, value: Value, digits: i32) -> Value {
+        if !value.is_finite() || value == 0.0 {
+            return value;
+        }
+
+        let exponent = value.abs().log10().floor() as i32;
+        let scale = 10.0_f64.powi(digits - exponent - 1);
+        (value * scale).round() / scale
+    }
+
+    fn canonicalize_real_roots(&self, roots: &mut [Complex]) {
+        for root in roots {
+            if !root.re.is_finite() || !root.im.is_finite() {
+                continue;
+            }
+            if root.im.abs() <= (1.0 + root.re.abs()) * 1e-12 {
+                root.im = 0.0;
+            }
+            if root.im == 0.0 {
+                let rounded = self.round_to_significant_digits(root.re, 8);
+                let tolerance = (1.0 + root.re.abs()) * 1e-6;
+                if (rounded - root.re).abs() <= tolerance {
+                    root.re = rounded;
+                }
+            }
+        }
+    }
+
+    fn canonicalize_near_real_zero_pairs(&self, zeros: &mut [Complex]) {
+        let snap_ratio = 1e-6;
+        let real_tolerance = 1e-9;
+
+        for idx in 0..zeros.len().saturating_sub(1) {
+            let (left, right) = zeros.split_at_mut(idx + 1);
+            let a = &mut left[idx];
+            let b = &mut right[0];
+
+            if !a.re.is_finite() || !a.im.is_finite() || !b.re.is_finite() || !b.im.is_finite() {
+                continue;
+            }
+            if (a.re - b.re).abs() > (1.0 + a.re.abs().max(b.re.abs())) * real_tolerance {
+                continue;
+            }
+            if (a.im + b.im).abs() > (1.0 + a.im.abs().max(b.im.abs())) * real_tolerance {
+                continue;
+            }
+
+            let imag_scale = a.im.abs().max(b.im.abs());
+            let root_scale = 1.0 + a.re.abs().max(b.re.abs());
+            if imag_scale <= root_scale * snap_ratio {
+                a.re = (a.re + b.re) * 0.5;
+                b.re = a.re;
+                a.im = 0.0;
+                b.im = 0.0;
+            }
+        }
+
+        self.canonicalize_real_roots(zeros);
     }
 
     fn finite_pole_count(&self) -> usize {
@@ -1475,6 +1548,8 @@ impl PoleZeroAnalyzer {
         zeros.retain(|z| z.magnitude() <= finite_zero_limit);
         zeros.retain(|z| !poles.iter().any(|p| Self::is_same_root(z, p, 1e-4)));
         self.sort_roots(&mut zeros);
+        self.canonicalize_near_real_zero_pairs(&mut zeros);
+        self.sort_roots(&mut zeros);
         zeros
     }
 
@@ -1530,6 +1605,9 @@ impl PoleZeroAnalyzer {
     /// (including differential references).
     pub fn find_zeros(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         if self.num_nodes == 0 {
+            return Vec::new();
+        }
+        if self.is_direct_voltage_port_measurement(config) {
             return Vec::new();
         }
 
@@ -1687,7 +1765,9 @@ impl PoleZeroAnalyzer {
             }
 
             if config.compute_zeros {
-                if let Some(state_space) =
+                if self.is_direct_voltage_port_measurement(config) {
+                    result.zeros.clear();
+                } else if let Some(state_space) =
                     voltage_analyzer.build_state_space(&drive_vec, &output_ext)
                 {
                     let poles = if config.compute_poles {
@@ -2134,6 +2214,34 @@ mod tests {
             "expected no zeros for unity transfer, got {:?}",
             result.zeros
         );
+    }
+
+    #[test]
+    fn test_canonicalize_near_real_zero_pairs_collapses_conjugates() {
+        let analyzer = PoleZeroAnalyzer::new(Matrix::zeros(1, 1), Matrix::zeros(1, 1));
+        let mut zeros = vec![
+            Complex::new(-1.0e3, -1.0002178880551267e-3),
+            Complex::new(-1.0e3, 1.0002178880551267e-3),
+        ];
+
+        analyzer.canonicalize_near_real_zero_pairs(&mut zeros);
+
+        assert!(zeros.iter().all(|z| z.im.abs() < 1e-12), "{zeros:?}");
+        assert!(
+            zeros.iter().all(|z| (z.re + 1.0e3).abs() < 1e-9),
+            "{zeros:?}"
+        );
+    }
+
+    #[test]
+    fn test_canonicalize_real_roots_rounds_small_numeric_noise() {
+        let analyzer = PoleZeroAnalyzer::new(Matrix::zeros(1, 1), Matrix::zeros(1, 1));
+        let mut roots = vec![Complex::real(-1.0195229605718731e9)];
+
+        analyzer.canonicalize_real_roots(&mut roots);
+
+        assert_eq!(roots[0].im, 0.0);
+        assert!((roots[0].re + 1.019523e9).abs() < 1e-6, "{roots:?}");
     }
 
     #[test]

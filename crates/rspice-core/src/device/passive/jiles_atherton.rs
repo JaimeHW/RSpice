@@ -44,7 +44,9 @@
 //! - Hauser, H., "Energetic model of ferromagnetic hysteresis"
 //!   Journal of Applied Physics, 1994
 
-use crate::device::traits::{DynamicDevice, MatrixStamper, NonlinearDevice};
+use crate::device::traits::{
+    DynamicDevice, MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
+};
 use crate::{Value, circuit::NodeId};
 use std::f64::consts::PI;
 
@@ -542,7 +544,8 @@ impl NonlinearDevice for JilesAthertonInductor {
         // Nonlinear behavior is captured in effective inductance update
     }
 
-    fn is_converged(&self, tolerance: Value) -> bool {
+    fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        let tolerance = criteria.voltage_tolerance();
         // Check if magnetization has stabilized
         let dm = (self.state.m - self.state.m_prev).abs();
         dm / (self.state.m.abs().max(1e-12)) < tolerance

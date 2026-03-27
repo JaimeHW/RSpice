@@ -27,7 +27,9 @@
 //! | NSAT | Saturation exponent (knee sharpness) | 2.0 |
 //! | IC | Initial current | 0.0 |
 
-use crate::device::traits::{DynamicDevice, MatrixStamper, NonlinearDevice};
+use crate::device::traits::{
+    DynamicDevice, MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
+};
 use crate::{Value, circuit::NodeId};
 
 //=============================================================================
@@ -304,7 +306,7 @@ impl NonlinearDevice for SaturableInductor {
         // This method can be used for additional nonlinear corrections if needed
     }
 
-    fn is_converged(&self, _tolerance: Value) -> bool {
+    fn is_converged(&self, _criteria: NonlinearConvergenceCriteria) -> bool {
         // Convergence is typically checked globally
         // But we can add inductor-specific checks if needed
         true

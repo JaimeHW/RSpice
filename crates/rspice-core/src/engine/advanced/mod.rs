@@ -169,7 +169,9 @@ impl Engine {
                 output_pos - 1,
                 output_neg.and_then(Self::optional_system_index),
             )
-            .ok_or(SimulationError::Solver(crate::solver::SolverError::SingularMatrix))
+            .ok_or(SimulationError::Solver(
+                crate::solver::SolverError::SingularMatrix,
+            ))
     }
 
     fn collect_noise_sources(circuit: &CircuitData, dc_solution: &[Value]) -> Vec<NoiseSource> {
