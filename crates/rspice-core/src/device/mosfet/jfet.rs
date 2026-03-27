@@ -178,6 +178,16 @@ pub struct JfetParams {
     pub hfet_vt1: Value,
     /// HFET1 capacitance partition parameter `P`.
     pub hfet_p: Value,
+    /// HFET AC output-conductance shaping coefficient `KAPPA`.
+    pub hfet_kappa: Value,
+    /// HFET AC output-conductance transition width `DELF`.
+    pub hfet_delf_freq: Value,
+    /// HFET AC output-conductance corner frequency `FGDS`.
+    pub hfet_fgds: Value,
+    /// HFET AC temperature-shaping denominator `TF` (K).
+    pub hfet_tf: Value,
+    /// HFET drain-source capacitance `CDS`.
+    pub hfet_cds: Value,
     /// MESA/HFET emission constant `ASTAR`.
     pub mesa_astar: Value,
     /// MESA/HFET barrier potential `PHIB` (J).
@@ -202,6 +212,14 @@ pub struct JfetParams {
     pub mesa_tc: Value,
     /// MESA transport factor `ZETA`.
     pub mesa_zeta: Value,
+    /// MESA high-frequency channel-length modulation `LAMBDAHF`.
+    pub mesa_lambdahf: Value,
+    /// MESA AC temperature-shaping denominator `TF` (K).
+    pub mesa_tf: Value,
+    /// MESA AC channel-length corner frequency `FLO`.
+    pub mesa_flo: Value,
+    /// MESA AC channel-length transition width `DELFO`.
+    pub mesa_delfo: Value,
     /// MESA level-4 accumulation capacitance scale `CAS`.
     pub mesa_cas: Value,
     /// MESA level-4 depletion capacitance scale `CBS`.
@@ -261,6 +279,11 @@ impl Default for JfetParams {
             hfet_d1: 0.03e-6,
             hfet_vt1: Value::NAN,
             hfet_p: 1.0,
+            hfet_kappa: 0.0,
+            hfet_delf_freq: 0.0,
+            hfet_fgds: 0.0,
+            hfet_tf: 300.15,
+            hfet_cds: 0.0,
             mesa_astar: 4.0e4,
             mesa_phib: 0.5 * 1.602176634e-19,
             mesa_xchi: 0.033,
@@ -273,6 +296,10 @@ impl Default for JfetParams {
             mesa_alpha: 0.0,
             mesa_tc: 0.0,
             mesa_zeta: 1.0,
+            mesa_lambdahf: Value::NAN,
+            mesa_tf: 300.15,
+            mesa_flo: 0.0,
+            mesa_delfo: 0.0,
             mesa_cas: 1.0,
             mesa_cbs: 1.0,
         }
@@ -558,6 +585,11 @@ impl Jfet {
         self.params.hfet_d1 = 0.03e-6;
         self.params.hfet_vt1 = Value::NAN;
         self.params.hfet_p = 1.0;
+        self.params.hfet_kappa = 0.0;
+        self.params.hfet_delf_freq = 0.0;
+        self.params.hfet_fgds = 0.0;
+        self.params.hfet_tf = 300.15;
+        self.params.hfet_cds = 0.0;
         self.params.mesa_astar = 4.0e4;
         self.params.mesa_phib = 0.5 * 1.602176634e-19;
         self.params.mesa_xchi = 0.033;
@@ -570,6 +602,10 @@ impl Jfet {
         self.params.mesa_alpha = 0.0;
         self.params.mesa_tc = 0.0;
         self.params.mesa_zeta = 1.0;
+        self.params.mesa_lambdahf = Value::NAN;
+        self.params.mesa_tf = 300.15;
+        self.params.mesa_flo = 0.0;
+        self.params.mesa_delfo = 0.0;
         self.params.mesa_cas = 1.0;
         self.params.mesa_cbs = 1.0;
         self.width = 20e-6;
@@ -618,6 +654,11 @@ impl Jfet {
         self.params.hfet_d1 = 0.03e-6;
         self.params.hfet_vt1 = Value::NAN;
         self.params.hfet_p = 1.0;
+        self.params.hfet_kappa = 0.0;
+        self.params.hfet_delf_freq = 0.0;
+        self.params.hfet_fgds = 0.0;
+        self.params.hfet_tf = 300.15;
+        self.params.hfet_cds = 0.0;
         self.params.mesa_astar = 4.0e4;
         self.params.mesa_phib = 0.5 * 1.602176634e-19;
         self.params.mesa_xchi = 0.033;
@@ -630,6 +671,10 @@ impl Jfet {
         self.params.mesa_alpha = 0.0;
         self.params.mesa_tc = 0.0;
         self.params.mesa_zeta = 1.0;
+        self.params.mesa_lambdahf = Value::NAN;
+        self.params.mesa_tf = 300.15;
+        self.params.mesa_flo = 0.0;
+        self.params.mesa_delfo = 0.0;
         self.params.mesa_cas = 1.0;
         self.params.mesa_cbs = 1.0;
         self.width = 20e-6;
@@ -813,6 +858,13 @@ impl Jfet {
             .filter(|v| v.is_finite() && *v > 0.0)
         {
             p.mesa_zeta = v;
+        }
+        if let Some(v) = params
+            .get("LAMBDAHF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.mesa_lambdahf = v;
         }
         if let Some(v) = params
             .get("SIGMA0")
@@ -1070,6 +1122,30 @@ impl Jfet {
         {
             p.hfet_p = v;
         }
+        if let Some(v) = params.get("KAPPA").copied().filter(|v| v.is_finite()) {
+            p.hfet_kappa = v;
+        }
+        if let Some(v) = params
+            .get("DELF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.hfet_delf_freq = v;
+        }
+        if let Some(v) = params
+            .get("FGDS")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.hfet_fgds = v;
+        }
+        if let Some(v) = params
+            .get("CDS")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.hfet_cds = v;
+        }
         if let Some(v) = params
             .get("ASTAR")
             .copied()
@@ -1086,6 +1162,28 @@ impl Jfet {
         }
         if let Some(v) = params.get("XCHI").copied().filter(|v| v.is_finite()) {
             p.mesa_xchi = v;
+        }
+        if let Some(v) = params.get("TF").copied().filter(|v| v.is_finite()) {
+            let tf_k = v + 273.15;
+            if matches!(p.hfet_level, 2..=4) {
+                p.mesa_tf = tf_k;
+            } else {
+                p.hfet_tf = tf_k;
+            }
+        }
+        if let Some(v) = params
+            .get("FLO")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.mesa_flo = v;
+        }
+        if let Some(v) = params
+            .get("DELFO")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.mesa_delfo = v;
         }
         if let Some(v) = params
             .get("TNOM")
@@ -1650,6 +1748,56 @@ impl Jfet {
         }
     }
 
+    #[inline]
+    fn temperature_shape_scale(temp_k: Value, tf_k: Value) -> Value {
+        if !temp_k.is_finite() || temp_k <= 0.0 || !tf_k.is_finite() || tf_k.abs() < 1e-18 {
+            return 1.0;
+        }
+        (temp_k / tf_k.abs()).clamp(-80.0, 80.0).exp()
+    }
+
+    #[inline]
+    fn mesa_ac_lambda(&self, temp_k: Value, frequency_hz: Option<Value>) -> Value {
+        let lambda_lo = self.params.lambda;
+        let lambda_hi = if self.params.mesa_lambdahf.is_finite() {
+            self.params.mesa_lambdahf
+        } else {
+            lambda_lo
+        };
+        let Some(frequency_hz) = frequency_hz.filter(|f| f.is_finite() && *f >= 0.0) else {
+            return lambda_lo;
+        };
+
+        let transition = self.params.mesa_delfo.abs();
+        if transition <= 0.0 {
+            return lambda_lo;
+        }
+
+        let scale = Self::temperature_shape_scale(temp_k, self.params.mesa_tf);
+        let flo = self.params.mesa_flo.max(0.0) * scale;
+        let delf = transition * scale;
+        lambda_lo + 0.5 * (lambda_hi - lambda_lo) * (1.0 + ((frequency_hz - flo) / delf).tanh())
+    }
+
+    #[inline]
+    fn hfet_ac_gds_scale(&self, temp_k: Value, frequency_hz: Value) -> Value {
+        if !frequency_hz.is_finite() || frequency_hz < 0.0 {
+            return 1.0;
+        }
+        if self.params.hfet_kappa == 0.0 {
+            return 1.0;
+        }
+        let transition = self.params.hfet_delf_freq.abs();
+        if transition <= 0.0 {
+            return 1.0;
+        }
+
+        let scale = Self::temperature_shape_scale(temp_k, self.params.hfet_tf);
+        let fgds = self.params.hfet_fgds.max(0.0) * scale;
+        let delf = transition * scale;
+        1.0 + 0.5 * self.params.hfet_kappa * (1.0 + ((frequency_hz - fgds) / delf).tanh())
+    }
+
     /// Resolve branch voltages used for nonlinear stamping.
     ///
     /// Prefer the device state updated in `update()` (which may include
@@ -1819,7 +1967,14 @@ impl Jfet {
         x.clamp(-80.0, 80.0).exp()
     }
 
-    fn mesa_level2_ids(&self, vgs: Value, vds: Value, temp_k: Value, vto: Value) -> Value {
+    fn mesa_level2_ids(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        lambda: Value,
+    ) -> Value {
         const Q_ELECTRON: Value = 1.602176634e-19;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
@@ -1882,11 +2037,161 @@ impl Jfet {
         let m = (p.hfet_m + p.mesa_alpha * vgte).max(1e-9);
         let g = (vds / vsate).max(0.0).powf(m);
         let h = (1.0 + g).powf(1.0 / m);
-        let ids = gch * vds * (1.0 + p.lambda * vds) / h;
+        let ids = gch * vds * (1.0 + lambda * vds) / h;
         if ids.is_finite() { ids } else { 0.0 }
     }
 
-    fn mesa_level3_ids(&self, vgs: Value, vds: Value, temp_k: Value, vto: Value) -> Value {
+    fn mesa_level2_small_signal_forward(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        lambda: Value,
+    ) -> (Value, Value, Value) {
+        const Q_ELECTRON: Value = 1.602176634e-19;
+        const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
+
+        let p = &self.params;
+        let w = self.width.max(1e-12);
+        let l = self.length.max(1e-12);
+        let d = p.hfet_di.max(1e-12);
+        let nd = p.mesa_nd.max(1e-30);
+        let vpo = Q_ELECTRON * nd * d * d / (2.0 * EPSILONGAAS);
+        let vt = self.thermal_voltage(temp_k).max(1e-12);
+        let eta = p.eta.abs().max(1e-12);
+        let etavth = (eta * vt).max(1e-12);
+        let rsi = p.hfet_rsi.max(0.0);
+        let rt = rsi + p.hfet_rdi.max(0.0);
+        let vsigma = p.hfet_vsigma.max(1e-12);
+
+        let vgt0 = vgs - vto;
+        let s = Self::exp_limited((vgt0 - p.hfet_vsigmat) / vsigma);
+        let sigma = p.sigma0.max(0.0) / (1.0 + s);
+        let vgt = vgt0 + sigma * vds;
+        let mu = (p.hfet_mu + p.mesa_theta * vgt).max(1e-12);
+        let vl = (p.hfet_vs.max(1e-12) / mu * l).max(1e-30);
+        let beta_num = 2.0 * EPSILONGAAS * p.hfet_vs.max(1e-12) * p.mesa_zeta.max(1e-12) * w / d;
+        let beta = beta_num / (vpo + 3.0 * vl).max(1e-30);
+
+        let u = vgt / vt - 1.0;
+        let t = (p.hfet_delta.max(1e-9).powi(2) + u * u).sqrt();
+        let vgte = 0.5 * vt * (2.0 + u + t);
+        let b = Self::exp_limited(-vgt / etavth);
+
+        let sqrt1 = if vgte > vpo {
+            0.0
+        } else {
+            (1.0 - vgte / vpo.max(1e-30)).max(0.0).sqrt()
+        };
+        let q = (1.0 - sqrt1).max(1e-30);
+        let n0 = (EPSILONGAAS * eta * vt / (Q_ELECTRON * d)).max(1e-30);
+        let ns = 1.0 / (1.0 / (nd * d * q).max(1e-30) + b / n0);
+        if !ns.is_finite() || ns < 1e-38 {
+            return (0.0, 0.0, 0.0);
+        }
+
+        let gchi0 = Q_ELECTRON * w / l;
+        let gchi = gchi0 * mu * ns;
+        let gch = gchi / (1.0 + gchi * rt);
+        if !gch.is_finite() || gch <= 0.0 {
+            return (0.0, 0.0, 0.0);
+        }
+
+        let a = 2.0 * beta * vgte;
+        let f = (1.0 + 2.0 * a * rsi).sqrt();
+        let d_term = 1.0 + a * rsi + f;
+        let e_term = 1.0 + p.mesa_tc * vgte;
+        let isata = a * vgte / (d_term * e_term).max(1e-30);
+        let isatb0 = Q_ELECTRON * n0 * vt * w / l;
+        let isatb = isatb0 * mu * Self::exp_limited(vgt / etavth);
+        let isat_sum = (isata + isatb).max(1e-30);
+        let isat = isata * isatb / isat_sum;
+        let vsate = (isat / gch).abs().max(1e-30);
+        let m = (p.hfet_m + p.mesa_alpha * vgte).max(1e-9);
+        let g = (vds / vsate).max(0.0).powf(m);
+        let h = (1.0 + g).powf(1.0 / m);
+
+        let delidgch0 = vds / h;
+        let delidgch = delidgch0 * (1.0 + lambda * vds);
+        let ids = gch * delidgch;
+
+        let delgchgchi = 1.0 / (1.0 + gchi * rt).powi(2);
+        let delgchins = gchi0 * mu;
+        let delnsvgt = ns * ns * (1.0 / n0) / etavth * b;
+        let delnsvgte = if sqrt1 == 0.0 {
+            0.0
+        } else {
+            0.5 * ns * ns / (vpo.max(1e-30) * nd * d * sqrt1 * q * q)
+        };
+        let delvgtevgt = 0.5 * (1.0 + u / t.max(1e-30));
+        let delidvds0 = gch / h;
+        let delidvds1 = if vds != 0.0 {
+            ids * (vds / vsate).powf(m - 1.0) / (vsate * (1.0 + g))
+        } else {
+            0.0
+        };
+        let delidvds = delidvds0 * (1.0 + 2.0 * lambda * vds) - delidvds1;
+        let delidvsate = ids * g / (vsate * (1.0 + g));
+        let delvsateisat = 1.0 / gch;
+        let isat_sq = isat_sum * isat_sum;
+        let delisatisata = isatb * isatb / isat_sq;
+        let v_term = 1.0 + 1.0 / f;
+        let ddevgte = 2.0 * beta * rsi * v_term * e_term + d_term * p.mesa_tc;
+        let denom = (d_term * d_term * e_term * e_term).max(1e-30);
+        let delisatavgte = (2.0 * a * d_term * e_term - a * vgte * ddevgte) / denom;
+        let delisatabeta =
+            2.0 * vgte * vgte * (d_term * e_term - a * e_term * rsi * v_term) / denom;
+        let delisatisatb = isata * isata / isat_sq;
+        let delvsategch = -vsate / gch;
+        let dvgtvgs = 1.0 - p.sigma0.max(0.0) * vds * s / (vsigma * (1.0 + s).powi(2));
+        let theta_term = gchi0 * ns * p.mesa_theta;
+        let dgchivgt = delgchins * (delnsvgte * delvgtevgt + delnsvgt) + theta_term;
+        let dvgtevds = delvgtevgt * sigma;
+        let dgchivds = delgchins * (delnsvgte * dvgtevds + delnsvgt * sigma) + theta_term * sigma;
+        let beta_theta_term =
+            delisatabeta * 3.0 * beta * vl * p.mesa_theta / (mu * (vpo + 3.0 * vl).max(1e-30));
+        let disatavgt = delisatavgte * delvgtevgt + beta_theta_term;
+        let disatavds = delisatavgte * dvgtevds + beta_theta_term * sigma;
+        let disatbvgt = isatb / etavth + isatb / mu * p.mesa_theta;
+        let p_term = delgchgchi * dgchivgt;
+        let w_term = delgchgchi * dgchivds;
+        let dvsatevgt = delvsateisat * (delisatisata * disatavgt + delisatisatb * disatbvgt)
+            + delvsategch * p_term;
+        let dvsatevds = delvsateisat
+            * (delisatisata * disatavds + delisatisatb * disatbvgt * sigma)
+            + delvsategch * w_term;
+
+        let (gmmadd, gdsmadd) = if p.mesa_alpha != 0.0 && vds != 0.0 {
+            let gmmadd = ids
+                * ((1.0 + g).ln() / (m * m) - g * (vds / vsate).ln() / (m * (1.0 + g)))
+                * p.mesa_alpha
+                * delvgtevgt;
+            (gmmadd, gmmadd * sigma)
+        } else {
+            (0.0, 0.0)
+        };
+
+        let gm1 = delidvsate * dvsatevgt;
+        let gm = (delidgch * p_term + gm1 + gmmadd) * dvgtvgs;
+        let gds0 = delidvsate * dvsatevds + delidgch * w_term + gdsmadd;
+        let gds = delidvds + gds0;
+
+        (
+            if ids.is_finite() { ids } else { 0.0 },
+            if gm.is_finite() { gm } else { 0.0 },
+            if gds.is_finite() { gds } else { 0.0 },
+        )
+    }
+
+    fn mesa_level3_ids(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        lambda: Value,
+    ) -> Value {
         const Q_ELECTRON: Value = 1.602176634e-19;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
@@ -1964,11 +2269,18 @@ impl Jfet {
         let m = p.hfet_m.max(1e-9);
         let g = (vds / vsate).max(0.0).powf(m);
         let h = (1.0 + g).powf(1.0 / m);
-        let ids = gch * vds * (1.0 + p.lambda * vds) / h;
+        let ids = gch * vds * (1.0 + lambda * vds) / h;
         if ids.is_finite() { ids } else { 0.0 }
     }
 
-    fn mesa_level4_ids(&self, vgs: Value, vds: Value, temp_k: Value, vto: Value) -> Value {
+    fn mesa_level4_ids(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        lambda: Value,
+    ) -> Value {
         const Q_ELECTRON: Value = 1.602176634e-19;
 
         let p = &self.params;
@@ -2015,7 +2327,7 @@ impl Jfet {
         let vsate = (isat / gch).abs().max(1e-30);
         let d = (vds / vsate).max(0.0).powf(p.hfet_m.max(1e-9));
         let e = (1.0 + d).powf(1.0 / p.hfet_m.max(1e-9));
-        let ids = gch * vds * (1.0 + p.lambda * vds) / e;
+        let ids = gch * vds * (1.0 + lambda * vds) / e;
         if ids.is_finite() { ids } else { 0.0 }
     }
 
@@ -2026,6 +2338,7 @@ impl Jfet {
         temp: Value,
         level: i32,
         force_inverse: bool,
+        frequency_hz: Option<Value>,
     ) -> Value {
         let pol = self.jfet_type.polarity();
         let temp_k = if temp.is_finite() && temp > 0.0 {
@@ -2051,10 +2364,11 @@ impl Jfet {
         }
 
         let vto = pol * self.params.vto;
+        let lambda = self.mesa_ac_lambda(temp_k, frequency_hz);
         let mut ids_int = match level {
-            2 => self.mesa_level2_ids(vgs_int, vds_int, temp_k, vto),
-            3 => self.mesa_level3_ids(vgs_int, vds_int, temp_k, vto),
-            _ => self.mesa_level4_ids(vgs_int, vds_int, temp_k, vto),
+            2 => self.mesa_level2_ids(vgs_int, vds_int, temp_k, vto, lambda),
+            3 => self.mesa_level3_ids(vgs_int, vds_int, temp_k, vto, lambda),
+            _ => self.mesa_level4_ids(vgs_int, vds_int, temp_k, vto, lambda),
         };
         if inverse {
             ids_int = -ids_int;
@@ -2070,16 +2384,67 @@ impl Jfet {
         level: i32,
         force_inverse: bool,
     ) -> (Value, Value, Value) {
-        let ids = self.mesa_ids_external(vgs, vds, temp, level, force_inverse);
+        let ids = self.mesa_ids_external(vgs, vds, temp, level, force_inverse, None);
 
         let dvgs = (1e-8_f64).max(1e-6 * (1.0 + vgs.abs()));
         let dvds = (1e-8_f64).max(1e-6 * (1.0 + vds.abs()));
-        let gm = (self.mesa_ids_external(vgs + dvgs, vds, temp, level, force_inverse)
-            - self.mesa_ids_external(vgs - dvgs, vds, temp, level, force_inverse))
+        let gm = (self.mesa_ids_external(vgs + dvgs, vds, temp, level, force_inverse, None)
+            - self.mesa_ids_external(vgs - dvgs, vds, temp, level, force_inverse, None))
             / (2.0 * dvgs);
-        let gds = (self.mesa_ids_external(vgs, vds + dvds, temp, level, force_inverse)
-            - self.mesa_ids_external(vgs, vds - dvds, temp, level, force_inverse))
+        let gds = (self.mesa_ids_external(vgs, vds + dvds, temp, level, force_inverse, None)
+            - self.mesa_ids_external(vgs, vds - dvds, temp, level, force_inverse, None))
             / (2.0 * dvds);
+
+        (
+            if ids.is_finite() { ids } else { 0.0 },
+            if gm.is_finite() { gm } else { 0.0 },
+            if gds.is_finite() { gds } else { 0.0 },
+        )
+    }
+
+    fn calculate_mesa_level_ac(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp: Value,
+        level: i32,
+        force_inverse: bool,
+        frequency_hz: Value,
+    ) -> (Value, Value, Value) {
+        let ids = self.mesa_ids_external(vgs, vds, temp, level, force_inverse, Some(frequency_hz));
+
+        let dvgs = (1e-8_f64).max(1e-6 * (1.0 + vgs.abs()));
+        let dvds = (1e-8_f64).max(1e-6 * (1.0 + vds.abs()));
+        let gm = (self.mesa_ids_external(
+            vgs + dvgs,
+            vds,
+            temp,
+            level,
+            force_inverse,
+            Some(frequency_hz),
+        ) - self.mesa_ids_external(
+            vgs - dvgs,
+            vds,
+            temp,
+            level,
+            force_inverse,
+            Some(frequency_hz),
+        )) / (2.0 * dvgs);
+        let gds = (self.mesa_ids_external(
+            vgs,
+            vds + dvds,
+            temp,
+            level,
+            force_inverse,
+            Some(frequency_hz),
+        ) - self.mesa_ids_external(
+            vgs,
+            vds - dvds,
+            temp,
+            level,
+            force_inverse,
+            Some(frequency_hz),
+        )) / (2.0 * dvds);
 
         (
             if ids.is_finite() { ids } else { 0.0 },
@@ -2884,6 +3249,119 @@ impl Jfet {
         (cgs, cgd)
     }
 
+    pub(crate) fn ac_capacitances(
+        &self,
+        vgs: Value,
+        vgd: Value,
+        temp: Value,
+    ) -> (Value, Value, Value) {
+        let cds = if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_level >= 5
+        {
+            self.params.hfet_cds.max(0.0)
+        } else {
+            0.0
+        };
+
+        match self.params.channel_model {
+            JfetChannelModel::ShichmanHodges => {
+                let pol = self.jfet_type.polarity();
+                let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
+                (cgs, cgd, cds)
+            }
+            JfetChannelModel::Hfet1 => {
+                let (cgs, cgd) = self.transient_capacitances(vgs, vgd, temp);
+                (cgs, cgd, cds)
+            }
+        }
+    }
+
+    fn ac_real_terms_at_frequency(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vgd: Value,
+        frequency_hz: Value,
+    ) -> (Value, Value, Value, Value) {
+        let (temp_common, temp_source, _) = self.resolved_temperatures(self.params.tnom);
+        let (_, gm_base, gds_base, _, _, ggs, ggd, _) = self.compute_operating_terms(vgs, vds, vgd);
+
+        let (gm, gds) = match self.params.channel_model {
+            JfetChannelModel::ShichmanHodges => (gm_base, gds_base),
+            JfetChannelModel::Hfet1 => match self.params.hfet_level {
+                2..=4 => {
+                    let force_inverse = self.hfet_legacy_inverse_active && vds >= 0.0;
+                    if self.params.hfet_level == 2 && !force_inverse {
+                        let pol = self.jfet_type.polarity();
+                        let vto = pol * self.params.vto;
+                        let vgs_int = pol * vgs;
+                        let vds_int = pol * vds;
+                        if vds_int >= 0.0 {
+                            let lambda = self.mesa_ac_lambda(temp_source, Some(frequency_hz));
+                            let (_, gm, gds) = self.mesa_level2_small_signal_forward(
+                                vgs_int,
+                                vds_int,
+                                temp_source,
+                                vto,
+                                lambda,
+                            );
+                            (gm, gds)
+                        } else {
+                            let (_, gm, gds) = self.calculate_mesa_level_ac(
+                                vgs,
+                                vds,
+                                temp_source,
+                                self.params.hfet_level,
+                                force_inverse,
+                                frequency_hz,
+                            );
+                            (gm, gds)
+                        }
+                    } else {
+                        let (_, gm, gds) = self.calculate_mesa_level_ac(
+                            vgs,
+                            vds,
+                            temp_source,
+                            self.params.hfet_level,
+                            force_inverse,
+                            frequency_hz,
+                        );
+                        (gm, gds)
+                    }
+                }
+                5.. => (
+                    gm_base,
+                    gds_base * self.hfet_ac_gds_scale(temp_common, frequency_hz),
+                ),
+                _ => (gm_base, gds_base),
+            },
+        };
+
+        (gm, gds, ggs, ggd)
+    }
+
+    pub(crate) fn stamp_small_signal_ac(
+        &self,
+        voltages: &[Value],
+        frequency_hz: Value,
+        matrix: &mut impl MatrixStamper,
+    ) {
+        let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
+        let (gm, gds, ggs, ggd) = self.ac_real_terms_at_frequency(vgs, vds, vgd, frequency_hz);
+
+        matrix.stamp(self.drain, self.drain, gds + ggd);
+        matrix.stamp(self.drain, self.gate, gm - ggd);
+        matrix.stamp(self.drain, self.source, -gm - gds);
+
+        matrix.stamp(self.gate, self.drain, -ggd);
+        matrix.stamp(self.gate, self.gate, ggs + ggd);
+        matrix.stamp(self.gate, self.source, -ggs);
+
+        matrix.stamp(self.source, self.drain, -gds);
+        matrix.stamp(self.source, self.gate, -gm - ggs);
+        matrix.stamp(self.source, self.source, gm + gds + ggs);
+    }
+
     /// Calculate junction capacitances
     ///
     /// Returns (Cgs, Cgd) - gate-source and gate-drain capacitances
@@ -3672,6 +4150,50 @@ mod tests {
     }
 
     #[test]
+    fn test_with_model_params_loads_mesa_frequency_shaping_terms() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("LEVEL".to_string(), 2.0);
+        model.insert("LAMBDA".to_string(), 0.1);
+        model.insert("LAMBDAHF".to_string(), 12.0);
+        model.insert("TF".to_string(), 100_000.0);
+        model.insert("FLO".to_string(), 0.5);
+        model.insert("DELFO".to_string(), 5.0);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_mesa_model()
+            .with_model_params(&model);
+        assert!((jfet.params.lambda - 0.1).abs() < 1e-15);
+        assert!((jfet.params.mesa_lambdahf - 12.0).abs() < 1e-15);
+        assert!((jfet.params.mesa_tf - 100_273.15).abs() < 1e-9);
+        assert!((jfet.params.mesa_flo - 0.5).abs() < 1e-15);
+        assert!((jfet.params.mesa_delfo - 5.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_with_model_params_loads_hfet_ac_terms() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("LEVEL".to_string(), 5.0);
+        model.insert("KAPPA".to_string(), 1.25);
+        model.insert("DELF".to_string(), 7.0);
+        model.insert("FGDS".to_string(), 2.0);
+        model.insert("TF".to_string(), 90_000.0);
+        model.insert("CDS".to_string(), 0.75e-12);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_hfet_model()
+            .with_model_params(&model);
+        assert!((jfet.params.hfet_kappa - 1.25).abs() < 1e-15);
+        assert!((jfet.params.hfet_delf_freq - 7.0).abs() < 1e-15);
+        assert!((jfet.params.hfet_fgds - 2.0).abs() < 1e-15);
+        assert!((jfet.params.hfet_tf - 90_273.15).abs() < 1e-9);
+        assert!((jfet.params.hfet_cds - 0.75e-12).abs() < 1e-24);
+    }
+
+    #[test]
     fn test_with_model_params_preserves_m_as_grading_parameter() {
         use std::collections::HashMap;
 
@@ -3783,6 +4305,124 @@ mod tests {
             .with_model_params(&model);
         assert!((jfet.params.mesa_cas - 2.5).abs() < 1e-15);
         assert!((jfet.params.mesa_cbs - 0.75).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_mesa_ac_lambda_transitions_between_low_and_high_frequency_limits() {
+        let mut jfet = Jfet::njf("Z1", 1, 2, 0).enable_mesa_model();
+        jfet.params.lambda = 0.0;
+        jfet.params.mesa_lambdahf = 120.0;
+        jfet.params.mesa_flo = 0.5;
+        jfet.params.mesa_delfo = 5.0;
+        jfet.params.mesa_tf = 100_273.15;
+
+        let low = jfet.mesa_ac_lambda(300.15, Some(1e-3));
+        let high = jfet.mesa_ac_lambda(300.15, Some(1e6));
+
+        assert!(
+            low > 0.0,
+            "broad DELFO should already lift low-frequency lambda"
+        );
+        assert!(high > low, "lambda should increase with frequency");
+        assert!(
+            (high - 120.0).abs() < 1e-3,
+            "high-frequency lambda should approach LAMBDAHF, got {high}"
+        );
+    }
+
+    #[test]
+    fn test_mesa_ac_real_terms_apply_frequency_shaped_lambda() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("LEVEL".to_string(), 2.0);
+        model.insert("N".to_string(), 1.44);
+        model.insert("RD".to_string(), 0.0);
+        model.insert("RS".to_string(), 0.0);
+        model.insert("VS".to_string(), 1.5e5);
+        model.insert("MU".to_string(), 0.25);
+        model.insert("D".to_string(), 2e-7);
+        model.insert("VTO".to_string(), 0.1);
+        model.insert("M".to_string(), 2.0);
+        model.insert("LAMBDA".to_string(), 0.0);
+        model.insert("SIGMA0".to_string(), 0.0);
+        model.insert("DELFO".to_string(), 5.0);
+        model.insert("FLO".to_string(), 0.5);
+        model.insert("TF".to_string(), 100_000.0);
+        model.insert("LAMBDAHF".to_string(), 120.0);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_mesa_model()
+            .with_model_params(&model)
+            .with_instance_params(&[("L".to_string(), 1e-6), ("W".to_string(), 10e-6)]);
+
+        let (_gm_low, gds_low, _ggs_low, _ggd_low) =
+            jfet.ac_real_terms_at_frequency(0.5, 1.0, -0.5, 1e-3);
+        let (_gm_high, gds_high, _ggs_high, _ggd_high) =
+            jfet.ac_real_terms_at_frequency(0.5, 1.0, -0.5, 1e6);
+
+        assert!(gds_low.is_finite() && gds_high.is_finite());
+        assert!(
+            gds_high > gds_low,
+            "expected high-frequency lambda to boost gds: low={gds_low} high={gds_high}"
+        );
+    }
+
+    #[test]
+    fn test_hfet_ac_real_terms_apply_kappa_scaling() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("LEVEL".to_string(), 5.0);
+        model.insert("VT0".to_string(), 0.3);
+        model.insert("ETA".to_string(), 1.32);
+        model.insert("SIGMA0".to_string(), 0.04);
+        model.insert("VSIGMA".to_string(), 0.1);
+        model.insert("VSIGMAT".to_string(), 0.3);
+        model.insert("MU".to_string(), 0.385);
+        model.insert("VS".to_string(), 1.5e5);
+        model.insert("NMAX".to_string(), 6e15);
+        model.insert("M".to_string(), 2.57);
+        model.insert("KAPPA".to_string(), 2.0);
+        model.insert("DELF".to_string(), 4.0);
+        model.insert("FGDS".to_string(), 0.5);
+        model.insert("TF".to_string(), 100_000.0);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_hfet_model()
+            .with_model_params(&model)
+            .with_instance_params(&[("W".to_string(), 10e-6), ("L".to_string(), 1e-6)]);
+
+        let (_gm_low, gds_low, _ggs_low, _ggd_low) =
+            jfet.ac_real_terms_at_frequency(0.0, 0.3, -0.3, 1e-3);
+        let (_gm_high, gds_high, _ggs_high, _ggd_high) =
+            jfet.ac_real_terms_at_frequency(0.0, 0.3, -0.3, 1e6);
+
+        assert!(gds_low.is_finite() && gds_high.is_finite());
+        assert!(
+            gds_high > gds_low,
+            "expected kappa-shaped HFET AC path to increase gds: low={gds_low} high={gds_high}"
+        );
+    }
+
+    #[test]
+    fn test_ac_capacitances_follow_transient_model_family() {
+        let mesa = Jfet::njf("Z1", 1, 2, 0)
+            .enable_mesa_model()
+            .with_instance_params(&[("W".to_string(), 20e-6), ("L".to_string(), 0.7e-6)]);
+        let (mesa_cgs_tran, mesa_cgd_tran) = mesa.transient_capacitances(0.1, -0.2, 300.15);
+        let (mesa_cgs_ac, mesa_cgd_ac, mesa_cds_ac) = mesa.ac_capacitances(0.1, -0.2, 300.15);
+        assert!((mesa_cgs_ac - mesa_cgs_tran).abs() < 1e-24);
+        assert!((mesa_cgd_ac - mesa_cgd_tran).abs() < 1e-24);
+        assert_eq!(mesa_cds_ac, 0.0);
+
+        let mut hfet = Jfet::njf("Z2", 1, 2, 0).enable_hfet_model();
+        hfet.params.hfet_cds = 0.75e-12;
+        let (hfet_cgs_tran, hfet_cgd_tran) = hfet.transient_capacitances(0.0, -0.25, 300.15);
+        let (hfet_cgs_ac, hfet_cgd_ac, hfet_cds_ac) = hfet.ac_capacitances(0.0, -0.25, 300.15);
+        assert!((hfet_cgs_ac - hfet_cgs_tran).abs() < 1e-24);
+        assert!((hfet_cgd_ac - hfet_cgd_tran).abs() < 1e-24);
+        assert!((hfet_cds_ac - 0.75e-12).abs() < 1e-24);
     }
 
     #[test]

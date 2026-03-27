@@ -54,8 +54,8 @@ pub use coupled_transmission_line::CoupledTransmissionLine;
 pub use sources::{CurrentSource, VoltageSource};
 pub use switch::{CurrentSwitch, SwitchState, VoltageSwitch};
 pub use traits::*;
-pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
 pub(crate) use transmission_line::TlineTransientResponse;
+pub use transmission_line::{LossyTransmissionLine, TransmissionLine};
 
 use crate::Value;
 

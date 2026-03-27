@@ -1581,7 +1581,11 @@ impl Mosfet {
     }
 
     #[inline]
-    fn body_drain_junction_current_and_conductance(&self, vds: Value, vbs: Value) -> (Value, Value) {
+    fn body_drain_junction_current_and_conductance(
+        &self,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value) {
         let vd = self.body_drain_diode_voltage(vds, vbs);
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
         (
@@ -2184,8 +2188,8 @@ impl NonlinearDevice for Mosfet {
         self.gmb_prev = self.gmb;
         (self.ibs_prev, self.gbs_prev) =
             self.body_source_junction_current_and_conductance(self.eval_vbs_prev);
-        (self.ibd_prev, self.gbd_prev) =
-            self.body_drain_junction_current_and_conductance(self.eval_vds_prev, self.eval_vbs_prev);
+        (self.ibd_prev, self.gbd_prev) = self
+            .body_drain_junction_current_and_conductance(self.eval_vds_prev, self.eval_vbs_prev);
 
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
@@ -2311,7 +2315,8 @@ impl NonlinearDevice for Mosfet {
             + self.ibd_prev
             + self.gbs_prev * body_source_delta
             + self.gbd_prev * body_drain_delta;
-        let bulk_current_tol = reltol * bulk_current.abs().max(bulk_current_hat.abs()) + current_tol;
+        let bulk_current_tol =
+            reltol * bulk_current.abs().max(bulk_current_hat.abs()) + current_tol;
 
         (bulk_current_hat - bulk_current).abs() < bulk_current_tol
     }
@@ -3573,10 +3578,7 @@ mod tests {
         m.gm_prev = 5e-4;
         m.gds_prev = 2e-4;
         m.gmb_prev = 1e-4;
-        m.id = m.id_prev
-            + m.gm_prev * delta_vgs
-            + m.gds_prev * delta_vds
-            + m.gmb_prev * delta_vbs;
+        m.id = m.id_prev + m.gm_prev * delta_vgs + m.gds_prev * delta_vds + m.gmb_prev * delta_vbs;
 
         let (ibs_prev, gbs_prev) = m.body_source_junction_current_and_conductance(m.eval_vbs_prev);
         let (ibd_prev, gbd_prev) =

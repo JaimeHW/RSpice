@@ -6230,6 +6230,99 @@ R1 1 0 1k
     }
 
     #[test]
+    fn test_parse_ngspice_output_tables_preserves_signed_current_headers() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let content = "\
+Index   v-sweep         -i(vc)          abs(i(vb))
+0       0.0             -1.0e-6         2.0e-9
+1       0.1             -2.0e-6         3.0e-9
+";
+
+        let tables = runner
+            .parse_ngspice_output_tables(content)
+            .expect("parse output");
+
+        assert_eq!(tables.len(), 1);
+        assert!(tables[0].variables.contains_key("-i(vc)"));
+        assert!(tables[0].variables.contains_key("abs(i(vb))"));
+        assert_eq!(tables[0].variables["-i(vc)"].y, vec![-1.0e-6, -2.0e-6]);
+        assert_eq!(tables[0].variables["abs(i(vb))"].y, vec![2.0e-9, 3.0e-9]);
+    }
+
+    #[test]
+    fn test_compare_dc_sweep_reference_maps_signed_current_expressions_by_branch_name() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let temp_dir = unique_temp_dir("ngspice_dc_signed_branch_compare");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+
+        let cir_path = temp_dir.join("branch_expr.cir");
+        let out_path = temp_dir.join("branch_expr.out");
+        std::fs::write(
+            &cir_path,
+            "\
+VB b 0 0.7
+VC c 0 0
+RB b 0 1g
+RC c 0 1g
+.dc vc 0 0.1 0.1 vb 0.7 0.8 0.1
+.print dc -i(vc) abs(i(vb))
+.end
+",
+        )
+        .expect("write cir");
+        std::fs::write(
+            &out_path,
+            "\
+Index   v-sweep         -i(vc)          abs(i(vb))
+0       0.0             -9.0e-6         1.0e-9
+1       0.1             -8.0e-6         2.0e-9
+2       0.0             -7.0e-6         3.0e-9
+3       0.1             -6.0e-6         4.0e-9
+",
+        )
+        .expect("write out");
+
+        let netlist = Netlist::parse(
+            "\
+VB b 0 0.7
+VC c 0 0
+RB b 0 1g
+RC c 0 1g
+.dc vc 0 0.1 0.1 vb 0.7 0.8 0.1
+.print dc -i(vc) abs(i(vb))
+.end
+",
+        )
+        .expect("parse netlist");
+
+        let make_result = |vb_current: f64, vc_current: f64, vc_voltage: f64| {
+            let mut result = crate::SimulationResult::new(2, 2);
+            result.node_names = vec!["0".to_string(), "b".to_string(), "c".to_string()];
+            result.node_voltages = vec![0.0, 0.0, vc_voltage];
+            // Keep branch names intentionally reversed to prove lookup is name-driven.
+            result.branch_names = vec!["VB".to_string(), "VC".to_string()];
+            result.branch_currents = vec![vb_current, vc_current];
+            result
+        };
+
+        let results = vec![
+            (0.0, make_result(-1.0e-9, 9.0e-6, 0.0)),
+            (0.1, make_result(-2.0e-9, 8.0e-6, 0.1)),
+            (0.0, make_result(-3.0e-9, 7.0e-6, 0.0)),
+            (0.1, make_result(-4.0e-9, 6.0e-6, 0.1)),
+        ];
+
+        let mismatches = runner
+            .compare_dc_sweep_reference(&cir_path, &netlist, &results)
+            .expect("comparison should succeed");
+        assert!(
+            mismatches.is_empty(),
+            "signed branch-expression comparison should match reference, got {:?}",
+            mismatches
+        );
+    }
+
+    #[test]
     fn test_frequency_generation() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
 

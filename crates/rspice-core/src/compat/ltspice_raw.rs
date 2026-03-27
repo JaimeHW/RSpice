@@ -306,7 +306,11 @@ fn detect_binary_encoding(
         return Ok(matches[0]);
     }
 
-    if let Some(preferred) = matches.iter().copied().find(|(encoding, _)| encoding.is_all_f64()) {
+    if let Some(preferred) = matches
+        .iter()
+        .copied()
+        .find(|(encoding, _)| encoding.is_all_f64())
+    {
         return Ok(preferred);
     }
 

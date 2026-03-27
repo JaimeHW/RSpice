@@ -3114,7 +3114,9 @@ R2 out 0 1k
         config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
         config.min_timestep = 1e-12;
 
-        let result = Engine::new(config).run_tran(&netlist, 2e-9, 0.1e-9).unwrap();
+        let result = Engine::new(config)
+            .run_tran(&netlist, 2e-9, 0.1e-9)
+            .unwrap();
         let out_idx = result
             .node_names
             .iter()
@@ -3150,7 +3152,9 @@ R2 out 0 1k
         config.min_timestep = 1e-12;
         config.temperature = 300.15;
 
-        let result = Engine::new(config).run_tran(&netlist, 1e-12, 1e-12).unwrap();
+        let result = Engine::new(config)
+            .run_tran(&netlist, 1e-12, 1e-12)
+            .unwrap();
         let sample0 = |node: &str| -> Value {
             let node_idx = result
                 .node_names

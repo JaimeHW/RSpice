@@ -323,8 +323,8 @@ fn thriceintlinfunc(
     let temp9 = hilimit - secondlolimit;
     let temp10 = lolimit - secondlolimit;
 
-    let mut value = lovalue
-        * ((temp5 * temp5 * temp5 - temp6 * temp6 * temp6) / 3.0 - temp7 * temp5 * temp8);
+    let mut value =
+        lovalue * ((temp5 * temp5 * temp5 - temp6 * temp6 * temp6) / 3.0 - temp7 * temp5 * temp8);
     value += slope
         * ((((temp1 * temp1 * temp1 * temp1 - temp2 * temp2 * temp2 * temp2) * 0.25
             - temp3 * temp3 * temp3 * temp8)
@@ -342,8 +342,7 @@ fn bessel_i0(x: Value) -> Value {
         1.0 + y2
             * (3.5156229
                 + y2 * (3.0899424
-                    + y2 * (1.2067492
-                        + y2 * (0.2659732 + y2 * (0.0360768 + y2 * 0.0045813)))))
+                    + y2 * (1.2067492 + y2 * (0.2659732 + y2 * (0.0360768 + y2 * 0.0045813)))))
     } else {
         let y = 3.75 / ax;
         (ax.exp() / ax.sqrt())
@@ -353,8 +352,7 @@ fn bessel_i0(x: Value) -> Value {
                         + y * (-0.00157565
                             + y * (0.00916281
                                 + y * (-0.02057706
-                                    + y * (0.02635537
-                                        + y * (-0.01647633 + y * 0.00392377))))))))
+                                    + y * (0.02635537 + y * (-0.01647633 + y * 0.00392377))))))))
     }
 }
 
@@ -365,10 +363,9 @@ fn bessel_i1(x: Value) -> Value {
         let y = x / 3.75;
         let y2 = y * y;
         ax * (0.5
-            + y2
-                * (0.87890594
-                    + y2 * (0.51498869
-                        + y2 * (0.15084934 + y2 * (0.02658733 + y2 * (0.00301532 + y2 * 0.00032411))))))
+            + y2 * (0.87890594
+                + y2 * (0.51498869
+                    + y2 * (0.15084934 + y2 * (0.02658733 + y2 * (0.00301532 + y2 * 0.00032411))))))
     } else {
         let y = 3.75 / ax;
         let tail = 0.02282967 + y * (-0.02895312 + y * (0.01787654 - y * 0.00420059));
@@ -386,11 +383,10 @@ fn bessel_i1_over_x(x: Value) -> Value {
     if ax < 3.75 {
         let y = x / 3.75;
         let y2 = y * y;
-        0.5
-            + y2
-                * (0.87890594
-                    + y2 * (0.51498869
-                        + y2 * (0.15084934 + y2 * (0.02658733 + y2 * (0.00301532 + y2 * 0.00032411)))))
+        0.5 + y2
+            * (0.87890594
+                + y2 * (0.51498869
+                    + y2 * (0.15084934 + y2 * (0.02658733 + y2 * (0.00301532 + y2 * 0.00032411)))))
     } else {
         let y = 3.75 / ax;
         let tail = 0.02282967 + y * (-0.02895312 + y * (0.01787654 - y * 0.00420059));
@@ -846,12 +842,8 @@ impl TransmissionLine {
         F: Fn(&TlineStateSample) -> Value + Copy,
     {
         if let Some(sample0) = prev2
-            && let Some((q0, q1, q2)) = Self::quadratic_interp_coefficients(
-                target,
-                sample0.time,
-                prev.time,
-                next.time,
-            )
+            && let Some((q0, q1, q2)) =
+                Self::quadratic_interp_coefficients(target, sample0.time, prev.time, next.time)
         {
             let v0 = selector(sample0);
             let v1 = selector(prev);
@@ -1041,14 +1033,9 @@ impl TransmissionLine {
         let alpha = 0.5 * (r / l);
         let beta = alpha;
         let attenuation = (-beta * self.td).exp().clamp(1e-6, 1.0);
-        let max_safe_step = distributed_rlc_max_safe_step(
-            self.td,
-            alpha,
-            beta,
-            compact_reltol,
-            compact_abstol,
-        )
-        .unwrap_or(self.td);
+        let max_safe_step =
+            distributed_rlc_max_safe_step(self.td, alpha, beta, compact_reltol, compact_abstol)
+                .unwrap_or(self.td);
         self.distributed_rlc = Some(DistributedRlcKernel {
             alpha,
             beta,
@@ -1064,7 +1051,9 @@ impl TransmissionLine {
 
     #[inline]
     pub fn distributed_rlgc_max_safe_step(&self) -> Option<Value> {
-        self.distributed_rlc.as_ref().map(|kernel| kernel.max_safe_step)
+        self.distributed_rlc
+            .as_ref()
+            .map(|kernel| kernel.max_safe_step)
     }
 
     /// Get DC equivalent conductance used by OP/DC fallback stamping.
@@ -1157,7 +1146,11 @@ impl TransmissionLine {
         let mut input1 = kernel.attenuation * (g * delayed.v2 + delayed.i2);
         let mut input2 = kernel.attenuation * (g * delayed.v1 + delayed.i1);
 
-        let last_time = self.state_history.back().map(|sample| sample.time).unwrap_or(0.0);
+        let last_time = self
+            .state_history
+            .back()
+            .map(|sample| sample.time)
+            .unwrap_or(0.0);
         if time <= last_time {
             return TlineTransientResponse::uncoupled(g, input1, input2);
         }
@@ -1252,10 +1245,7 @@ impl TransmissionLine {
                 return response;
             }
             let response = self.distributed_rlc_response(kernel, time);
-            self.distributed_rlc_cache.set(Some((
-                time,
-                response,
-            )));
+            self.distributed_rlc_cache.set(Some((time, response)));
             return response;
         }
 
@@ -1789,11 +1779,17 @@ mod tests {
             kernel.alpha,
             kernel.beta,
             time,
-            &tl.state_history.iter().map(|sample| sample.time).collect::<Vec<_>>(),
+            &tl.state_history
+                .iter()
+                .map(|sample| sample.time)
+                .collect::<Vec<_>>(),
             DISTRIBUTED_RLC_CHOP_RELTOL,
         );
 
-        assert!(coeffs.h2_first != 0.0, "expected non-zero delayed h2 first coefficient");
+        assert!(
+            coeffs.h2_first != 0.0,
+            "expected non-zero delayed h2 first coefficient"
+        );
         assert!(
             coeffs.h3dash_first != 0.0,
             "expected non-zero delayed h3dash first coefficient"
@@ -1902,7 +1898,9 @@ mod tests {
         tl.update_history(40.0e-9, 0.5, 0.05, -0.5, -0.05);
 
         assert!(
-            tl.state_history.iter().any(|sample| (sample.time - 0.0).abs() < 1e-18),
+            tl.state_history
+                .iter()
+                .any(|sample| (sample.time - 0.0).abs() < 1e-18),
             "distributed RLGC convolution must retain early history samples instead of trimming them by a short delay horizon"
         );
         assert_eq!(tl.state_history.len(), 3);
@@ -1938,7 +1936,9 @@ mod tests {
         let mut tl = TransmissionLine::new("T1".to_string(), 1, 0, 2, 0, 50.0, 1.0e-9);
         tl.set_distributed_rlgc_with_compaction(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0, 1e-3, 1e-14);
 
-        let hint = tl.distributed_rlgc_max_safe_step().expect("distributed safe-step hint");
+        let hint = tl
+            .distributed_rlgc_max_safe_step()
+            .expect("distributed safe-step hint");
         assert!(hint > 0.0);
         assert!(hint < tl.delay());
     }
@@ -1954,8 +1954,14 @@ mod tests {
         let response = tl.transient_port_response(1.2e-9);
         let (i1, i2) = response.port_currents(5.0, 5.0);
 
-        assert!(i1.abs() < 1e-12, "uniform DC bias should not draw current at port 1: {i1}");
-        assert!(i2.abs() < 1e-12, "uniform DC bias should not draw current at port 2: {i2}");
+        assert!(
+            i1.abs() < 1e-12,
+            "uniform DC bias should not draw current at port 1: {i1}"
+        );
+        assert!(
+            i2.abs() < 1e-12,
+            "uniform DC bias should not draw current at port 2: {i2}"
+        );
     }
 
     #[test]

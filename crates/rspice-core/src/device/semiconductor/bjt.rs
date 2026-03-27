@@ -40,9 +40,88 @@ struct BjtLinearization {
     dic_dvbc: Value,
     dib_dvbe: Value,
     dib_dvbc: Value,
+    qb: Value,
+    dqb_dvbe: Value,
+    dqb_dvbc: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TransportChargeState {
+    qb: Value,
+    itzf: Value,
+    itzr: Value,
+    dqb_dvbe_eff: Value,
+    dqb_dvbc_eff: Value,
+    ditzf_dvbe_eff: Value,
+    ditzf_dvbc_eff: Value,
+    ditzr_dvbe_eff: Value,
+    ditzr_dvbc_eff: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IntrinsicTerminalState {
+    vcx: Value,
+    vci: Value,
+    vbx: Value,
+    vbi: Value,
+    vei: Value,
+    vbp: Value,
+    vsi: Value,
+    linearized: BjtLinearization,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct BranchLinearization {
+    current: Value,
+    d_internal: [Value; 5],
+    d_external: [Value; 3],
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EvaluatedBjtState {
+    linearized: BjtLinearization,
+    ircx: BranchLinearization,
+    irci: BranchLinearization,
+    irbx: BranchLinearization,
+    irbi: BranchLinearization,
+    ire: BranchLinearization,
+    ibep: BranchLinearization,
+    irbp: BranchLinearization,
+    ibcp: BranchLinearization,
+    iccp: BranchLinearization,
+    irs: BranchLinearization,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExtendedOperatingPointState {
+    vcx: Value,
+    vci: Value,
+    vbx: Value,
+    vbi: Value,
+    vei: Value,
+    vbp: Value,
+    vsi: Value,
+    ic: Value,
+    ib: Value,
+    ie: Value,
+    isub: Value,
 }
 
 type BjtRowCoefficients = (Value, Value, Value);
+
+const INTERNAL_DIM: usize = 5;
+const EXTERNAL_DIM: usize = 3;
+const IDX_VCX: usize = 0;
+const IDX_VCI: usize = 1;
+const IDX_VBX: usize = 2;
+const IDX_VBI: usize = 3;
+const IDX_VEI: usize = 4;
+const IDX_VBP: usize = 5;
+const IDX_VSI: usize = 6;
+const EXT_C: usize = 0;
+const EXT_B: usize = 1;
+const EXT_E: usize = 2;
+const EXT_S: usize = 3;
 
 /// BJT device using the Ebers-Moll model
 ///
@@ -91,12 +170,50 @@ pub struct Bjt {
     pub vaf: Value,
     /// Reverse Early voltage (VAR)
     pub var: Value,
-    /// Base resistance
+    /// Legacy aggregate base resistance
     pub rb: Value,
-    /// Collector resistance
+    /// Legacy aggregate collector resistance
     pub rc: Value,
     /// Emitter resistance
     pub re: Value,
+    /// Extrinsic base resistance (RBX)
+    pub rbx: Value,
+    /// Intrinsic base resistance (RBI)
+    pub rbi: Value,
+    /// Extrinsic collector resistance (RCX)
+    pub rcx: Value,
+    /// Intrinsic collector resistance (RCI)
+    pub rci: Value,
+    /// Substrate resistance (RS)
+    pub rs: Value,
+    /// Parasitic base resistance (RBP)
+    pub rbp: Value,
+    /// Epi drift saturation voltage (VO)
+    pub vo: Value,
+    /// Epi doping parameter (GAMM)
+    pub gamm: Value,
+    /// High-current collector resistance factor (HRCF)
+    pub hrcf: Value,
+    /// Temperature exponent of IS (XIS)
+    pub xis: Value,
+    /// Temperature exponent of IBEI/IBCI (XII)
+    pub xii: Value,
+    /// Temperature exponent of IBEN/IBCN (XIN)
+    pub xin: Value,
+    /// Temperature exponent of ISRR (XISR)
+    pub xisr: Value,
+    /// Activation energy for IS (EA)
+    pub ea: Value,
+    /// Activation energy for IBEI (EAIE)
+    pub eaie: Value,
+    /// Activation energy for IBCI (EAIC)
+    pub eaic: Value,
+    /// Activation energy for IBEN (EANE)
+    pub eane: Value,
+    /// Activation energy for IBCN (EANC)
+    pub eanc: Value,
+    /// Delta activation energy for ISRR (DEAR)
+    pub dear: Value,
 
     // Gummel-Poon charge model parameters
     /// Zero-bias B-E junction capacitance (CJE)
@@ -117,6 +234,28 @@ pub struct Bjt {
     pub ikf: Value,
     /// Reverse knee current (IKR)
     pub ikr: Value,
+    /// Reverse transport scale factor (ISRR in VBIC)
+    pub isrr: Value,
+    /// Parasitic transport saturation current (ISP)
+    pub isp: Value,
+    /// Portion of parasitic transport current driven by Vbep (WSP)
+    pub wsp: Value,
+    /// Parasitic forward emission coefficient (NFP)
+    pub nfp: Value,
+    /// Parasitic knee current (IKP)
+    pub ikp: Value,
+    /// Ideal parasitic B-E saturation current (IBEIP)
+    pub ibeip: Value,
+    /// Non-ideal parasitic B-E saturation current (IBENP)
+    pub ibenp: Value,
+    /// Ideal parasitic B-C saturation current (IBCIP)
+    pub ibcip: Value,
+    /// Non-ideal parasitic B-C saturation current (IBCNP)
+    pub ibcnp: Value,
+    /// Ideal parasitic B-C emission coefficient (NCIP)
+    pub ncip: Value,
+    /// Non-ideal parasitic B-C emission coefficient (NCNP)
+    pub ncnp: Value,
     /// Instance area factor
     pub area: Value,
     /// Instance multiplicity factor
@@ -156,6 +295,8 @@ pub struct Bjt {
     ikf_nominal: Value,
     /// Nominal reverse high-injection knee current before scaling
     ikr_nominal: Value,
+    /// Nominal reverse transport scale factor before temperature scaling.
+    isrr_nominal: Value,
     /// Nominal ideal base-emitter saturation current before scaling.
     ibei_nominal: Value,
     /// Nominal non-ideal base-emitter saturation current before scaling.
@@ -172,15 +313,32 @@ pub struct Bjt {
     // Operating point values (for linearization)
     vbe: Value,
     vbc: Value,
+    vcx: Value,
     vbi: Value,
+    vci: Value,
+    vbx: Value,
+    vei: Value,
+    vbp: Value,
+    vsi: Value,
+    vc_ext: Value,
+    vb_ext: Value,
+    ve_ext: Value,
+    vs_ext: Value,
     ic: Value,
     ib: Value,
     ie: Value,
+    isub: Value,
 
     // Previous iteration values (for convergence)
     vbe_prev: Value,
     vbc_prev: Value,
+    vcx_prev: Value,
     vbi_prev: Value,
+    vci_prev: Value,
+    vbx_prev: Value,
+    vei_prev: Value,
+    vbp_prev: Value,
+    vsi_prev: Value,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: BjtIndices,
@@ -230,6 +388,25 @@ impl Bjt {
             rb: 10.0,           // Base resistance
             rc: 1.0,            // Collector resistance
             re: 0.1,            // Emitter resistance
+            rbx: 10.0,          // Preserve legacy constant RB via RBX
+            rbi: 0.0,
+            rcx: 1.0, // Preserve legacy constant RC via RCX
+            rci: 0.0,
+            rs: 0.0,
+            rbp: 0.1,
+            vo: 0.0,
+            gamm: 0.0,
+            hrcf: 1.0,
+            xis: 3.0,
+            xii: 3.0,
+            xin: 3.0,
+            xisr: 0.0,
+            ea: 1.12,
+            eaie: 1.12,
+            eaic: 1.12,
+            eane: 1.12,
+            eanc: 1.12,
+            dear: 0.0,
 
             // Gummel-Poon parameters
             cje: 1e-12,   // B-E junction capacitance
@@ -241,6 +418,17 @@ impl Bjt {
             tr: 5e-9,     // Reverse transit time (5ns)
             ikf: 0.1,     // Knee current (100mA)
             ikr: 0.01,    // Reverse knee
+            isrr: 1.0,
+            isp: 0.0,
+            wsp: 1.0,
+            nfp: 1.0,
+            ikp: 0.0,
+            ibeip: 0.0,
+            ibenp: 0.0,
+            ibcip: 0.0,
+            ibcnp: 0.0,
+            ncip: 1.0,
+            ncnp: 2.0,
             area: 1.0,
             m: 1.0,
             kf: 0.0,
@@ -260,6 +448,7 @@ impl Bjt {
             cjcp_nominal: 0.0,
             ikf_nominal: 0.1,
             ikr_nominal: 0.01,
+            isrr_nominal: 1.0,
             ibei_nominal: 5e-17,
             iben_nominal: 0.0,
             ibci_nominal: 1e-14,
@@ -269,13 +458,30 @@ impl Bjt {
 
             vbe: 0.0,
             vbc: 0.0,
+            vcx: 0.0,
             vbi: 0.0,
+            vci: 0.0,
+            vbx: 0.0,
+            vei: 0.0,
+            vbp: 0.0,
+            vsi: 0.0,
+            vc_ext: 0.0,
+            vb_ext: 0.0,
+            ve_ext: 0.0,
+            vs_ext: 0.0,
             ic: 0.0,
             ib: 0.0,
             ie: 0.0,
+            isub: 0.0,
             vbe_prev: 0.0,
             vbc_prev: 0.0,
+            vcx_prev: 0.0,
             vbi_prev: 0.0,
+            vci_prev: 0.0,
+            vbx_prev: 0.0,
+            vei_prev: 0.0,
+            vbp_prev: 0.0,
+            vsi_prev: 0.0,
             indices: BjtIndices::default(),
         }
     }
@@ -298,26 +504,74 @@ impl Bjt {
         (base + self.instance_dtemp).max(1.0)
     }
 
+    #[inline]
+    fn vbic_temp_scaled_current(
+        nominal: Value,
+        r_t: Value,
+        vtv: Value,
+        temp_exponent: Value,
+        activation_energy: Value,
+        emission_coeff: Value,
+    ) -> Value {
+        if nominal <= 0.0 {
+            return 0.0;
+        }
+
+        let emission = emission_coeff.max(1e-12);
+        let ratio_term = r_t.max(1e-18).powf(temp_exponent);
+        let energy_term = (-activation_energy * (1.0 - r_t) / vtv.max(1e-18)).clamp(-80.0, 80.0);
+        let scaled = (ratio_term * energy_term.exp()).max(0.0);
+        nominal * scaled.powf(1.0 / emission)
+    }
+
     fn refresh_operating_scaling(&mut self) {
         let temp = self.effective_temperature();
         let tnom = self.tnom.max(1.0);
         let vt = Self::thermal_voltage_at(temp);
-        let vt_nom = Self::thermal_voltage_at(tnom).max(1e-12);
-        let n_eff = self.nf.max(1e-6);
         let ratio = (temp / tnom).max(1e-12);
-        let exp_term = (self.eg / (n_eff * vt_nom) - self.eg / (n_eff * vt))
-            .clamp(-80.0, 80.0)
-            .exp();
-        let is_temp = self.is_nominal * ratio.powf(self.xti / n_eff) * exp_term;
+        let is_temp =
+            Self::vbic_temp_scaled_current(self.is_nominal, ratio, vt, self.xis, self.ea, self.nf);
         let scale = self.instance_scale();
-        let is_temp_scale = if self.is_nominal > 0.0 {
-            (is_temp / self.is_nominal).max(0.0)
-        } else {
-            0.0
-        };
-        // VBIC non-ideal recombination terms exhibit a softer thermal growth
-        // than transport current in this reduced 3-terminal surrogate.
-        let nonideal_temp_scale = is_temp_scale.powf(0.69);
+        let isrr_temp = Self::vbic_temp_scaled_current(
+            self.isrr_nominal,
+            ratio,
+            vt,
+            self.xisr,
+            self.ea + self.dear,
+            self.nr,
+        );
+        let ibei_temp = Self::vbic_temp_scaled_current(
+            self.ibei_nominal,
+            ratio,
+            vt,
+            self.xii,
+            self.eaie,
+            self.nei,
+        );
+        let iben_temp = Self::vbic_temp_scaled_current(
+            self.iben_nominal,
+            ratio,
+            vt,
+            self.xin,
+            self.eane,
+            self.nen,
+        );
+        let ibci_temp = Self::vbic_temp_scaled_current(
+            self.ibci_nominal,
+            ratio,
+            vt,
+            self.xii,
+            self.eaic,
+            self.nci,
+        );
+        let ibcn_temp = Self::vbic_temp_scaled_current(
+            self.ibcn_nominal,
+            ratio,
+            vt,
+            self.xin,
+            self.eanc,
+            self.ncn,
+        );
 
         self.vt = vt;
         self.temperature = temp;
@@ -327,10 +581,11 @@ impl Bjt {
         self.cjcp = (self.cjcp_nominal * scale).max(0.0);
         self.ikf = (self.ikf_nominal * scale).max(1e-18);
         self.ikr = (self.ikr_nominal * scale).max(1e-18);
-        self.ibei = (self.ibei_nominal * is_temp_scale * scale).max(0.0);
-        self.iben = (self.iben_nominal * nonideal_temp_scale * scale).max(0.0);
-        self.ibci = (self.ibci_nominal * is_temp_scale * scale).max(0.0);
-        self.ibcn = (self.ibcn_nominal * nonideal_temp_scale * scale).max(0.0);
+        self.isrr = isrr_temp.max(0.0);
+        self.ibei = (ibei_temp * scale).max(0.0);
+        self.iben = (iben_temp * scale).max(0.0);
+        self.ibci = (ibci_temp * scale).max(0.0);
+        self.ibcn = (ibcn_temp * scale).max(0.0);
     }
 
     /// Set active device temperature (Kelvin).
@@ -388,27 +643,100 @@ impl Bjt {
             has_var = true;
         }
         if let Some(&v) = params.get("RB") {
-            self.rb = v;
+            self.rbx = v.max(0.0);
+            self.rbi = 0.0;
+            self.rb = self.rbx;
             has_rb = true;
         }
         if let Some(&v) = params.get("RC") {
-            self.rc = v;
+            self.rcx = v.max(0.0);
+            self.rci = 0.0;
+            self.rc = self.rcx;
             has_rc = true;
         }
         if let Some(&v) = params.get("RE") {
             self.re = v;
+        }
+        if let Some(&v) = params.get("RS") {
+            self.rs = v.max(0.0);
+        }
+        if let Some(&v) = params.get("RBP") {
+            self.rbp = v.max(0.0);
         }
         if let Some(&v) = params.get("XTI")
             && v.is_finite()
             && v > 0.0
         {
             self.xti = v;
+            self.xis = v;
+            self.xii = v;
+            self.xin = v;
+        }
+        if let Some(&v) = params.get("XIS")
+            && v.is_finite()
+        {
+            self.xis = v;
+        }
+        if let Some(&v) = params.get("XII")
+            && v.is_finite()
+        {
+            self.xii = v;
+        }
+        if let Some(&v) = params.get("XIN")
+            && v.is_finite()
+        {
+            self.xin = v;
+        }
+        if let Some(&v) = params.get("XISR")
+            && v.is_finite()
+        {
+            self.xisr = v;
         }
         if let Some(&v) = params.get("EG")
             && v.is_finite()
             && v > 0.0
         {
             self.eg = v;
+            self.ea = v;
+            self.eaie = v;
+            self.eaic = v;
+            self.eane = v;
+            self.eanc = v;
+        }
+        if let Some(&v) = params.get("EA")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ea = v;
+        }
+        if let Some(&v) = params.get("EAIE")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.eaie = v;
+        }
+        if let Some(&v) = params.get("EAIC")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.eaic = v;
+        }
+        if let Some(&v) = params.get("EANE")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.eane = v;
+        }
+        if let Some(&v) = params.get("EANC")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.eanc = v;
+        }
+        if let Some(&v) = params.get("DEAR")
+            && v.is_finite()
+        {
+            self.dear = v;
         }
         if let Some(&v) = params.get("TNOM")
             && v.is_finite()
@@ -464,6 +792,8 @@ impl Bjt {
                 .filter(|v| v.is_finite() && *v > 0.0)
                 .unwrap_or(0.0);
             if rbx > 0.0 || rbi > 0.0 {
+                self.rbx = rbx;
+                self.rbi = rbi;
                 self.rb = (rbx + rbi).max(1e-12);
             }
         }
@@ -479,8 +809,28 @@ impl Bjt {
                 .filter(|v| v.is_finite() && *v > 0.0)
                 .unwrap_or(0.0);
             if rcx > 0.0 || rci > 0.0 {
+                self.rcx = rcx;
+                self.rci = rci;
                 self.rc = (rcx + rci).max(1e-12);
             }
+        }
+        if let Some(&v) = params.get("VO")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.vo = v;
+        }
+        if let Some(&v) = params.get("GAMM")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.gamm = v;
+        }
+        if let Some(&v) = params.get("HRCF")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.hrcf = v;
         }
         // Gummel-Poon charge parameters
         if let Some(&v) = params.get("CJE") {
@@ -517,6 +867,31 @@ impl Bjt {
         if let Some(&v) = params.get("IKR") {
             self.ikr_nominal = v.max(0.0);
         }
+        if let Some(v) = params
+            .get("ISRR")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.isrr_nominal = v;
+            self.isrr = v;
+        }
+        if let Some(&v) = params.get("ISP") {
+            self.isp = v.max(0.0);
+        }
+        if let Some(&v) = params.get("WSP")
+            && v.is_finite()
+        {
+            self.wsp = v;
+        }
+        if let Some(&v) = params.get("NFP")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.nfp = v;
+        }
+        if let Some(&v) = params.get("IKP") {
+            self.ikp = v.max(0.0);
+        }
         if let Some(&v) = params.get("IBEI") {
             self.ibei_nominal = v.max(0.0);
             has_ibei = true;
@@ -530,6 +905,18 @@ impl Bjt {
         }
         if let Some(&v) = params.get("IBCN") {
             self.ibcn_nominal = v.max(0.0);
+        }
+        if let Some(&v) = params.get("IBEIP") {
+            self.ibeip = v.max(0.0);
+        }
+        if let Some(&v) = params.get("IBENP") {
+            self.ibenp = v.max(0.0);
+        }
+        if let Some(&v) = params.get("IBCIP") {
+            self.ibcip = v.max(0.0);
+        }
+        if let Some(&v) = params.get("IBCNP") {
+            self.ibcnp = v.max(0.0);
         }
         if let Some(&v) = params.get("NEI")
             && v.is_finite()
@@ -554,6 +941,18 @@ impl Bjt {
             && v > 0.0
         {
             self.ncn = v;
+        }
+        if let Some(&v) = params.get("NCIP")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ncip = v;
+        }
+        if let Some(&v) = params.get("NCNP")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ncnp = v;
         }
         if !has_ibei {
             self.ibei_nominal = self.is_nominal / self.bf.max(1e-18);
@@ -627,7 +1026,7 @@ impl Bjt {
     /// Calculate total capacitances for transient analysis
     /// Returns (Cbe, Cbc)
     pub fn junction_capacitances(&self, vbe: Value, vbc: Value) -> (Value, Value) {
-        let gm = self.gm(vbe);
+        let gm = self.linearize_currents(vbe, vbc).dic_dvbe.max(1e-15);
         (self.cbe(vbe, gm), self.cbc(vbc))
     }
 
@@ -835,81 +1234,129 @@ impl Bjt {
     }
 
     #[inline]
-    fn high_injection_factor(&self, diode_current: Value, knee_current: Value) -> (Value, Value) {
-        if diode_current <= 0.0 {
-            return (1.0, 0.0);
-        }
+    fn depletion_charge_and_derivative(
+        &self,
+        junction_voltage_eff: Value,
+        potential: Value,
+        grading: Value,
+    ) -> (Value, Value) {
+        let phi = potential.max(1e-12);
+        let v = junction_voltage_eff.min(0.9 * phi);
+        let one_minus = (1.0 - v / phi).max(1e-12);
 
-        let knee = knee_current.max(1e-6);
-        let denom = 1.0 + diode_current / knee;
-        let factor = 1.0 / denom;
-        let derivative_wrt_current = -1.0 / (knee * denom * denom);
-        (factor, derivative_wrt_current)
+        if (1.0 - grading).abs() < 1e-12 {
+            (-phi * one_minus.ln(), 1.0 / one_minus)
+        } else {
+            let exponent = 1.0 - grading;
+            let pow = one_minus.powf(exponent);
+            (
+                phi * (1.0 - pow) / exponent,
+                one_minus.powf(-grading),
+            )
+        }
+    }
+
+    fn transport_charge_state(&self, vbe_eff: Value, vbc_eff: Value) -> TransportChargeState {
+        let ifi = self.diode_current(vbe_eff, self.nf).max(0.0);
+        let iri = self
+            .diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
+            .max(0.0);
+        let gfi = self.diode_conductance(vbe_eff, self.nf);
+        let gri = self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
+
+        let (qdbe, dqdbe_dvbe_eff) =
+            self.depletion_charge_and_derivative(vbe_eff, self.vje, self.mje);
+        let (qdbc, dqdbc_dvbc_eff) =
+            self.depletion_charge_and_derivative(vbc_eff, self.vjc, self.mjc);
+
+        let q1z = 1.0
+            + if self.var.is_finite() && self.var > 0.0 {
+                qdbe / self.var
+            } else {
+                0.0
+            }
+            + if self.vaf.is_finite() && self.vaf > 0.0 {
+                qdbc / self.vaf
+            } else {
+                0.0
+            };
+        let q1_shift = q1z - 1e-4;
+        let q1_sqrt = (q1_shift * q1_shift + 1e-8).sqrt();
+        let q1 = 0.5 * (q1_sqrt + q1_shift) + 1e-4;
+        let dq1_dq1z = 0.5 * (q1_shift / q1_sqrt + 1.0);
+        let dq1_dvbe_eff = dq1_dq1z
+            * if self.var.is_finite() && self.var > 0.0 {
+                dqdbe_dvbe_eff / self.var
+            } else {
+                0.0
+            };
+        let dq1_dvbc_eff = dq1_dq1z
+            * if self.vaf.is_finite() && self.vaf > 0.0 {
+                dqdbc_dvbc_eff / self.vaf
+            } else {
+                0.0
+            };
+
+        let q2 = ifi / self.ikf.max(1e-18) + iri / self.ikr.max(1e-18);
+        let dq2_dvbe_eff = gfi / self.ikf.max(1e-18);
+        let dq2_dvbc_eff = gri / self.ikr.max(1e-18);
+
+        let qb_sqrt = (q1 * q1 + 4.0 * q2).sqrt().max(1e-18);
+        let qb = (0.5 * (q1 + qb_sqrt)).max(1e-12);
+        let dqb_dvbe_eff =
+            0.5 * dq1_dvbe_eff + 0.5 * (q1 * dq1_dvbe_eff + 2.0 * dq2_dvbe_eff) / qb_sqrt;
+        let dqb_dvbc_eff =
+            0.5 * dq1_dvbc_eff + 0.5 * (q1 * dq1_dvbc_eff + 2.0 * dq2_dvbc_eff) / qb_sqrt;
+
+        let itzf = ifi / qb;
+        let ditzf_dvbe_eff = gfi / qb - ifi * dqb_dvbe_eff / (qb * qb);
+        let ditzf_dvbc_eff = -ifi * dqb_dvbc_eff / (qb * qb);
+
+        let itzr = iri / qb;
+        let ditzr_dvbe_eff = -iri * dqb_dvbe_eff / (qb * qb);
+        let ditzr_dvbc_eff = gri / qb - iri * dqb_dvbc_eff / (qb * qb);
+
+        TransportChargeState {
+            qb,
+            itzf,
+            itzr,
+            dqb_dvbe_eff,
+            dqb_dvbc_eff,
+            ditzf_dvbe_eff,
+            ditzf_dvbc_eff,
+            ditzr_dvbe_eff,
+            ditzr_dvbc_eff,
+        }
     }
 
     fn linearize_currents(&self, vbe: Value, vbc: Value) -> BjtLinearization {
         let p = self.polarity();
         let vbe_eff = p * vbe;
         let vbc_eff = p * vbc;
-
-        let if_diode = self.diode_current(vbe_eff, self.nf);
-        let ir_diode = self.diode_current(vbc_eff, self.nr);
-        let gif = self.diode_conductance(vbe_eff, self.nf);
-        let gir = self.diode_conductance(vbc_eff, self.nr);
-
-        let (hf_factor, dhf_dif) = self.high_injection_factor(if_diode, self.ikf);
-        let (hr_factor, dhr_dir) = self.high_injection_factor(ir_diode, self.ikr);
-        let dhf_dvbe_eff = dhf_dif * gif;
-        let dhr_dvbc_eff = dhr_dir * gir;
-
-        let vce_eff = vbe_eff - vbc_eff;
-        let (forward_early, dfe_dvbe_eff, dfe_dvbc_eff) = if self.vaf.is_finite() && self.vaf > 0.0
-        {
-            let raw = 1.0 + vce_eff / self.vaf;
-            if raw > 1e-6 {
-                (raw, 1.0 / self.vaf, -1.0 / self.vaf)
-            } else {
-                (1e-6, 0.0, 0.0)
-            }
-        } else {
-            (1.0, 0.0, 0.0)
-        };
-        let (reverse_early, dre_dvbe_eff, dre_dvbc_eff) = if self.var.is_finite() && self.var > 0.0
-        {
-            let raw = 1.0 - vce_eff / self.var;
-            if raw > 1e-6 {
-                (raw, -1.0 / self.var, 1.0 / self.var)
-            } else {
-                (1e-6, 0.0, 0.0)
-            }
-        } else {
-            (1.0, 0.0, 0.0)
-        };
-
-        let forward_transport = if_diode * hf_factor * forward_early;
-        let reverse_transport = ir_diode * hr_factor * reverse_early;
-
-        let dforward_dvbe_eff = (gif * hf_factor + if_diode * dhf_dvbe_eff) * forward_early
-            + if_diode * hf_factor * dfe_dvbe_eff;
-        let dforward_dvbc_eff = if_diode * hf_factor * dfe_dvbc_eff;
-        let dreverse_dvbe_eff = ir_diode * hr_factor * dre_dvbe_eff;
-        let dreverse_dvbc_eff = (gir * hr_factor + ir_diode * dhr_dvbc_eff) * reverse_early
-            + ir_diode * hr_factor * dre_dvbc_eff;
+        let transport = self.transport_charge_state(vbe_eff, vbc_eff);
 
         let ib_be = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
             + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
         let ib_bc = self.diode_current_with_is(self.ibci, vbc_eff, self.nci)
             + self.diode_current_with_is(self.ibcn, vbc_eff, self.ncn);
-        let dib_dvbe = self.gbe(vbe);
-        let dib_dvbc = self.gbc(vbc);
+        let dibe_dvbe = self.gbe(vbe);
+        let dibc_dvbc = self.gbc(vbc);
+        let iciei = transport.itzf - transport.itzr;
+        let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
+        let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
 
         BjtLinearization {
-            ic: p * (forward_transport - reverse_transport),
+            // The intrinsic collector terminal sees both the transport branch
+            // (collector to emitter) and the opposing B-C junction branch.
+            ic: p * (iciei - ib_bc),
             ib: p * (ib_be + ib_bc),
-            dic_dvbe: dforward_dvbe_eff - dreverse_dvbe_eff,
-            dic_dvbc: dforward_dvbc_eff - dreverse_dvbc_eff,
-            dib_dvbe,
-            dib_dvbc,
+            dic_dvbe: diciei_dvbe,
+            dic_dvbc: diciei_dvbc - dibc_dvbc,
+            dib_dvbe: dibe_dvbe,
+            dib_dvbc: dibc_dvbc,
+            qb: transport.qb,
+            dqb_dvbe: p * transport.dqb_dvbe_eff,
+            dqb_dvbc: p * transport.dqb_dvbc_eff,
         }
     }
 
@@ -936,6 +1383,601 @@ impl Bjt {
         let (cc, cb, ce) = self.collector_row_coefficients(linearized);
         let (bc, bb, be) = self.base_row_coefficients(linearized);
         (-(cc + bc), -(cb + bb), -(ce + be))
+    }
+
+    #[inline]
+    fn series_active(resistance: Value) -> bool {
+        resistance.is_finite() && resistance > 0.0
+    }
+
+    #[inline]
+    fn limited_exp(arg: Value) -> (Value, Value) {
+        let clamped = arg.clamp(-80.0, 80.0);
+        let value = clamped.exp();
+        let slope = if (arg - clamped).abs() < f64::EPSILON {
+            value
+        } else {
+            0.0
+        };
+        (value, slope)
+    }
+
+    fn intrinsic_terminal_derivatives(
+        &self,
+        linearized: BjtLinearization,
+    ) -> ([Value; 5], [Value; 5], [Value; 5]) {
+        let mut collector = [0.0; 5];
+        collector[IDX_VCI] = -linearized.dic_dvbc;
+        collector[IDX_VBI] = linearized.dic_dvbe + linearized.dic_dvbc;
+        collector[IDX_VEI] = -linearized.dic_dvbe;
+
+        let mut base = [0.0; 5];
+        base[IDX_VCI] = -linearized.dib_dvbc;
+        base[IDX_VBI] = linearized.dib_dvbe + linearized.dib_dvbc;
+        base[IDX_VEI] = -linearized.dib_dvbe;
+
+        let mut emitter = [0.0; 5];
+        for idx in 0..5 {
+            emitter[idx] = -(collector[idx] + base[idx]);
+        }
+
+        (collector, base, emitter)
+    }
+
+    fn ircx_branch(&self, vc: Value, vcx: Value) -> BranchLinearization {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.rcx) {
+            return branch;
+        }
+
+        let g = 1.0 / self.rcx.max(1e-12);
+        branch.current = g * (vc - vcx);
+        branch.d_internal[IDX_VCX] = -g;
+        branch.d_external[0] = g;
+        branch
+    }
+
+    fn irbx_branch(&self, vb: Value, vbx: Value) -> BranchLinearization {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.rbx) {
+            return branch;
+        }
+
+        let g = 1.0 / self.rbx.max(1e-12);
+        branch.current = g * (vb - vbx);
+        branch.d_internal[IDX_VBX] = -g;
+        branch.d_external[1] = g;
+        branch
+    }
+
+    fn ire_branch(&self, ve: Value, vei: Value) -> BranchLinearization {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.re) {
+            return branch;
+        }
+
+        let g = 1.0 / self.re.max(1e-12);
+        branch.current = g * (ve - vei);
+        branch.d_internal[IDX_VEI] = -g;
+        branch.d_external[2] = g;
+        branch
+    }
+
+    fn irbi_branch(
+        &self,
+        linearized: BjtLinearization,
+        vbx: Value,
+        vbi: Value,
+    ) -> BranchLinearization {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.rbi) {
+            return branch;
+        }
+
+        let rb = self.rbi.max(1e-12);
+        let vrbi = vbx - vbi;
+        let qb = linearized.qb.max(1e-12);
+        let scale = vrbi / rb;
+        let dqb_dvbi = linearized.dqb_dvbe + linearized.dqb_dvbc;
+        let dqb_dvci = -linearized.dqb_dvbc;
+        let dqb_dvei = -linearized.dqb_dvbe;
+
+        branch.current = scale * qb;
+        branch.d_internal[IDX_VBX] = qb / rb;
+        branch.d_internal[IDX_VBI] = -qb / rb + scale * dqb_dvbi;
+        branch.d_internal[IDX_VCI] = scale * dqb_dvci;
+        branch.d_internal[IDX_VEI] = scale * dqb_dvei;
+        branch
+    }
+
+    fn irci_branch(&self, vcx: Value, vci: Value, vbi: Value) -> BranchLinearization {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.rci) {
+            return branch;
+        }
+
+        let p = self.polarity();
+        let vt = self.vt.max(1e-12);
+        let rci = self.rci.max(1e-12);
+        let gamm = self.gamm.max(0.0);
+        let ivo = if self.vo.is_finite() && self.vo > 0.0 {
+            1.0 / self.vo
+        } else {
+            0.0
+        };
+        let ihrcf = if self.hrcf.is_finite() && self.hrcf > 0.0 {
+            1.0 / self.hrcf
+        } else {
+            0.0
+        };
+
+        let vrci_eff = p * (vcx - vci);
+        let vbci_eff = p * (vbi - vci);
+        let vbcx_eff = p * (vbi - vcx);
+
+        let (exp_bci, dexp_bci_darg) = Self::limited_exp(vbci_eff / vt);
+        let (exp_bcx, dexp_bcx_darg) = Self::limited_exp(vbcx_eff / vt);
+        let d_exp_bci_dvbci_eff = dexp_bci_darg / vt;
+        let d_exp_bcx_dvbcx_eff = dexp_bcx_darg / vt;
+
+        let kbci = (1.0 + gamm * exp_bci).sqrt().max(1e-12);
+        let kbcx = (1.0 + gamm * exp_bcx).sqrt().max(1e-12);
+        let d_kbci_dvbci_eff = if gamm > 0.0 {
+            gamm * d_exp_bci_dvbci_eff / (2.0 * kbci)
+        } else {
+            0.0
+        };
+        let d_kbcx_dvbcx_eff = if gamm > 0.0 {
+            gamm * d_exp_bcx_dvbcx_eff / (2.0 * kbcx)
+        } else {
+            0.0
+        };
+
+        let ratio = ((kbci + 1.0) / (kbcx + 1.0)).max(1e-18);
+        let log_ratio = ratio.ln();
+        let d_ratio_dkbci = 1.0 / (kbcx + 1.0);
+        let d_ratio_dkbcx = -(kbci + 1.0) / (kbcx + 1.0).powi(2);
+        let d_log_ratio_dkbci = d_ratio_dkbci / ratio;
+        let d_log_ratio_dkbcx = d_ratio_dkbcx / ratio;
+
+        let iohm = (vrci_eff + vt * (kbci - kbcx - log_ratio)) / rci;
+        let d_iohm_dvrci_eff = 1.0 / rci;
+        let d_iohm_dvbci_eff =
+            vt * d_kbci_dvbci_eff * (1.0 - d_log_ratio_dkbci) / rci;
+        let d_iohm_dvbcx_eff =
+            vt * d_kbcx_dvbcx_eff * (-1.0 - d_log_ratio_dkbcx) / rci;
+
+        let sqrt_vrci = (vrci_eff * vrci_eff + 0.01).sqrt();
+        let denom = 1.0 + 0.5 * ivo * ihrcf * sqrt_vrci;
+        let d_denom_dvrci_eff = if ivo > 0.0 && ihrcf > 0.0 {
+            0.5 * ivo * ihrcf * vrci_eff / sqrt_vrci
+        } else {
+            0.0
+        };
+
+        let derf_scale = ivo * rci;
+        let derf = if derf_scale > 0.0 {
+            derf_scale * iohm / denom
+        } else {
+            0.0
+        };
+        let d_derf_dvrci_eff = if derf_scale > 0.0 {
+            derf_scale * (d_iohm_dvrci_eff / denom - iohm * d_denom_dvrci_eff / denom.powi(2))
+        } else {
+            0.0
+        };
+        let d_derf_dvbci_eff = if derf_scale > 0.0 {
+            derf_scale * d_iohm_dvbci_eff / denom
+        } else {
+            0.0
+        };
+        let d_derf_dvbcx_eff = if derf_scale > 0.0 {
+            derf_scale * d_iohm_dvbcx_eff / denom
+        } else {
+            0.0
+        };
+
+        let irci_scale = (1.0 + derf * derf).sqrt();
+        let inv_irci_scale = 1.0 / irci_scale;
+        let common = -iohm * derf / (irci_scale * irci_scale * irci_scale);
+        let d_irci_eff_dvrci_eff = d_iohm_dvrci_eff * inv_irci_scale + common * d_derf_dvrci_eff;
+        let d_irci_eff_dvbci_eff = d_iohm_dvbci_eff * inv_irci_scale + common * d_derf_dvbci_eff;
+        let d_irci_eff_dvbcx_eff = d_iohm_dvbcx_eff * inv_irci_scale + common * d_derf_dvbcx_eff;
+        let irci_eff = iohm * inv_irci_scale;
+
+        branch.current = p * irci_eff;
+        branch.d_internal[IDX_VCX] = d_irci_eff_dvrci_eff - d_irci_eff_dvbcx_eff;
+        branch.d_internal[IDX_VCI] = -(d_irci_eff_dvrci_eff + d_irci_eff_dvbci_eff);
+        branch.d_internal[IDX_VBI] = d_irci_eff_dvbci_eff + d_irci_eff_dvbcx_eff;
+        branch
+    }
+
+    fn evaluate_state(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vcx: Value,
+        vci: Value,
+        vbx: Value,
+        vbi: Value,
+        vei: Value,
+    ) -> EvaluatedBjtState {
+        let linearized = self.linearize_currents(vbi - vei, vbi - vci);
+        EvaluatedBjtState {
+            linearized,
+            ircx: self.ircx_branch(vc, vcx),
+            irci: self.irci_branch(vcx, vci, vbi),
+            irbx: self.irbx_branch(vb, vbx),
+            irbi: self.irbi_branch(linearized, vbx, vbi),
+            ire: self.ire_branch(ve, vei),
+            ibep: BranchLinearization::default(),
+            irbp: BranchLinearization::default(),
+            ibcp: BranchLinearization::default(),
+            iccp: BranchLinearization::default(),
+            irs: BranchLinearization::default(),
+        }
+    }
+
+    fn solve_small_dense_system(
+        matrix: &[[Value; 5]; 5],
+        rhs: &[Value; 5],
+        dim: usize,
+    ) -> Option<[Value; 5]> {
+        if dim == 0 {
+            return Some([0.0; 5]);
+        }
+
+        let mut a = *matrix;
+        let mut b = *rhs;
+
+        for pivot in 0..dim {
+            let mut best = pivot;
+            let mut best_abs = a[pivot][pivot].abs();
+            for row in (pivot + 1)..dim {
+                let value = a[row][pivot].abs();
+                if value > best_abs {
+                    best = row;
+                    best_abs = value;
+                }
+            }
+            if best_abs < 1e-18 {
+                return None;
+            }
+            if best != pivot {
+                a.swap(pivot, best);
+                b.swap(pivot, best);
+            }
+
+            let pivot_value = a[pivot][pivot];
+            for row in (pivot + 1)..dim {
+                let factor = a[row][pivot] / pivot_value;
+                a[row][pivot] = 0.0;
+                for col in (pivot + 1)..dim {
+                    a[row][col] -= factor * a[pivot][col];
+                }
+                b[row] -= factor * b[pivot];
+            }
+        }
+
+        let mut x = [0.0; 5];
+        for row in (0..dim).rev() {
+            let mut sum = b[row];
+            for col in (row + 1)..dim {
+                sum -= a[row][col] * x[col];
+            }
+            let diag = a[row][row];
+            if diag.abs() < 1e-18 {
+                return None;
+            }
+            x[row] = sum / diag;
+        }
+
+        Some(x)
+    }
+
+    fn solve_intrinsic_terminal_state(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+    ) -> IntrinsicTerminalState {
+        let has_rcx = Self::series_active(self.rcx);
+        let has_rci = Self::series_active(self.rci);
+        let has_rbx = Self::series_active(self.rbx);
+        let has_rbi = Self::series_active(self.rbi);
+        let has_re = Self::series_active(self.re);
+
+        let mut vcx = if self.vcx.is_finite() {
+            self.vcx
+        } else if has_rcx {
+            vc - self.ic * self.rcx.max(0.0)
+        } else {
+            vc
+        };
+        let mut vci = if self.vci.is_finite() {
+            self.vci
+        } else if has_rci {
+            vcx - self.ic * self.rci.max(0.0)
+        } else {
+            vcx
+        };
+        let mut vbx = if self.vbx.is_finite() {
+            self.vbx
+        } else if has_rbx {
+            vb - self.ib * self.rbx.max(0.0)
+        } else {
+            vb
+        };
+        let mut vbi = if self.vbi.is_finite() {
+            self.vbi
+        } else if has_rbi {
+            vbx - self.ib * self.rbi.max(0.0)
+        } else {
+            vbx
+        };
+        let mut vei = if self.vei.is_finite() {
+            self.vei
+        } else if has_re {
+            ve - self.ie * self.re.max(0.0)
+        } else {
+            ve
+        };
+
+        for _ in 0..16 {
+            if !has_rcx {
+                vcx = vc;
+            }
+            if !has_rci {
+                vci = vcx;
+            }
+            if !has_rbx {
+                vbx = vb;
+            }
+            if !has_rbi {
+                vbi = vbx;
+            }
+            if !has_re {
+                vei = ve;
+            }
+
+            let eval = self.evaluate_state(vc, vb, ve, vcx, vci, vbx, vbi, vei);
+            let (collector_d, base_d, emitter_d) =
+                self.intrinsic_terminal_derivatives(eval.linearized);
+            let ie_intrinsic = -(eval.linearized.ic + eval.linearized.ib);
+
+            let mut jacobian = [[0.0; 5]; 5];
+            let mut residual = [0.0; 5];
+
+            if has_rcx {
+                residual[IDX_VCX] = eval.ircx.current
+                    - if has_rci {
+                        eval.irci.current
+                    } else {
+                        eval.linearized.ic
+                    };
+                for idx in 0..5 {
+                    jacobian[IDX_VCX][idx] = eval.ircx.d_internal[idx]
+                        - if has_rci {
+                            eval.irci.d_internal[idx]
+                        } else {
+                            collector_d[idx]
+                        };
+                }
+            } else {
+                residual[IDX_VCX] = vcx - vc;
+                jacobian[IDX_VCX][IDX_VCX] = 1.0;
+            }
+
+            if has_rci {
+                residual[IDX_VCI] = eval.irci.current - eval.linearized.ic;
+                for idx in 0..5 {
+                    jacobian[IDX_VCI][idx] = eval.irci.d_internal[idx] - collector_d[idx];
+                }
+            } else {
+                residual[IDX_VCI] = vci - vcx;
+                jacobian[IDX_VCI][IDX_VCI] = 1.0;
+                jacobian[IDX_VCI][IDX_VCX] = -1.0;
+            }
+
+            if has_rbx {
+                residual[IDX_VBX] = eval.irbx.current
+                    - if has_rbi {
+                        eval.irbi.current
+                    } else {
+                        eval.linearized.ib
+                    };
+                for idx in 0..5 {
+                    jacobian[IDX_VBX][idx] = eval.irbx.d_internal[idx]
+                        - if has_rbi {
+                            eval.irbi.d_internal[idx]
+                        } else {
+                            base_d[idx]
+                        };
+                }
+            } else {
+                residual[IDX_VBX] = vbx - vb;
+                jacobian[IDX_VBX][IDX_VBX] = 1.0;
+            }
+
+            if has_rbi {
+                residual[IDX_VBI] = eval.irbi.current - eval.linearized.ib;
+                for idx in 0..5 {
+                    jacobian[IDX_VBI][idx] = eval.irbi.d_internal[idx] - base_d[idx];
+                }
+            } else {
+                residual[IDX_VBI] = vbi - vbx;
+                jacobian[IDX_VBI][IDX_VBI] = 1.0;
+                jacobian[IDX_VBI][IDX_VBX] = -1.0;
+            }
+
+            if has_re {
+                residual[IDX_VEI] = eval.ire.current - ie_intrinsic;
+                for idx in 0..5 {
+                    jacobian[IDX_VEI][idx] = eval.ire.d_internal[idx] - emitter_d[idx];
+                }
+            } else {
+                residual[IDX_VEI] = vei - ve;
+                jacobian[IDX_VEI][IDX_VEI] = 1.0;
+            }
+
+            let rhs = [
+                -residual[IDX_VCX],
+                -residual[IDX_VCI],
+                -residual[IDX_VBX],
+                -residual[IDX_VBI],
+                -residual[IDX_VEI],
+            ];
+            let Some(delta) = Self::solve_small_dense_system(&jacobian, &rhs, 5) else {
+                break;
+            };
+
+            let mut max_delta: Value = 0.0;
+            for (value, idx) in [
+                (&mut vcx, IDX_VCX),
+                (&mut vci, IDX_VCI),
+                (&mut vbx, IDX_VBX),
+                (&mut vbi, IDX_VBI),
+                (&mut vei, IDX_VEI),
+            ] {
+                let step = delta[idx].clamp(-0.1, 0.1);
+                *value += step;
+                max_delta = max_delta.max(step.abs());
+            }
+
+            if max_delta < 1e-12 {
+                break;
+            }
+        }
+
+        if !has_rcx {
+            vcx = vc;
+        }
+        if !has_rci {
+            vci = vcx;
+        }
+        if !has_rbx {
+            vbx = vb;
+        }
+        if !has_rbi {
+            vbi = vbx;
+        }
+        if !has_re {
+            vei = ve;
+        }
+        let linearized = self.linearize_currents(vbi - vei, vbi - vci);
+
+        IntrinsicTerminalState {
+            vcx,
+            vci,
+            vbx,
+            vbi,
+            vei,
+            vbp: self.vbp,
+            vsi: self.vsi,
+            linearized,
+        }
+    }
+
+    fn internal_voltage_sensitivities(
+        &self,
+        state: IntrinsicTerminalState,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+    ) -> [[Value; 3]; 5] {
+        let has_rcx = Self::series_active(self.rcx);
+        let has_rci = Self::series_active(self.rci);
+        let has_rbx = Self::series_active(self.rbx);
+        let has_rbi = Self::series_active(self.rbi);
+        let has_re = Self::series_active(self.re);
+
+        let eval = self.evaluate_state(
+            vc, vb, ve, state.vcx, state.vci, state.vbx, state.vbi, state.vei,
+        );
+        let (collector_d, base_d, emitter_d) =
+            self.intrinsic_terminal_derivatives(eval.linearized);
+        let ie_intrinsic = -(eval.linearized.ic + eval.linearized.ib);
+
+        let mut jacobian = [[0.0; 5]; 5];
+        let mut external_partials = [[0.0; 3]; 5];
+
+        if has_rcx {
+            for idx in 0..5 {
+                jacobian[IDX_VCX][idx] = eval.ircx.d_internal[idx]
+                    - if has_rci {
+                        eval.irci.d_internal[idx]
+                    } else {
+                        collector_d[idx]
+                    };
+            }
+            external_partials[IDX_VCX] = eval.ircx.d_external;
+        } else {
+            jacobian[IDX_VCX][IDX_VCX] = 1.0;
+            external_partials[IDX_VCX][0] = -1.0;
+        }
+
+        if has_rci {
+            for idx in 0..5 {
+                jacobian[IDX_VCI][idx] = eval.irci.d_internal[idx] - collector_d[idx];
+            }
+        } else {
+            jacobian[IDX_VCI][IDX_VCI] = 1.0;
+            jacobian[IDX_VCI][IDX_VCX] = -1.0;
+        }
+
+        if has_rbx {
+            for idx in 0..5 {
+                jacobian[IDX_VBX][idx] = eval.irbx.d_internal[idx]
+                    - if has_rbi {
+                        eval.irbi.d_internal[idx]
+                    } else {
+                        base_d[idx]
+                    };
+            }
+            external_partials[IDX_VBX] = eval.irbx.d_external;
+        } else {
+            jacobian[IDX_VBX][IDX_VBX] = 1.0;
+            external_partials[IDX_VBX][1] = -1.0;
+        }
+
+        if has_rbi {
+            for idx in 0..5 {
+                jacobian[IDX_VBI][idx] = eval.irbi.d_internal[idx] - base_d[idx];
+            }
+        } else {
+            jacobian[IDX_VBI][IDX_VBI] = 1.0;
+            jacobian[IDX_VBI][IDX_VBX] = -1.0;
+        }
+
+        if has_re {
+            for idx in 0..5 {
+                jacobian[IDX_VEI][idx] = eval.ire.d_internal[idx] - emitter_d[idx];
+            }
+            external_partials[IDX_VEI] = eval.ire.d_external;
+        } else {
+            let _ = ie_intrinsic;
+            jacobian[IDX_VEI][IDX_VEI] = 1.0;
+            external_partials[IDX_VEI][2] = -1.0;
+        }
+
+        let mut sensitivities = [[0.0; 3]; 5];
+        for external in 0..3 {
+            let rhs = [
+                -external_partials[IDX_VCX][external],
+                -external_partials[IDX_VCI][external],
+                -external_partials[IDX_VBX][external],
+                -external_partials[IDX_VBI][external],
+                -external_partials[IDX_VEI][external],
+            ];
+            if let Some(solution) = Self::solve_small_dense_system(&jacobian, &rhs, 5) {
+                for idx in 0..5 {
+                    sensitivities[idx][external] = solution[idx];
+                }
+            }
+        }
+
+        sensitivities
     }
 
     fn solve_intrinsic_base_voltage(&self, vc: Value, vb: Value, ve: Value) -> Value {
@@ -978,44 +2020,81 @@ impl Bjt {
         vb: Value,
         ve: Value,
     ) -> (BjtRowCoefficients, BjtRowCoefficients, BjtRowCoefficients) {
-        if !self.rb.is_finite() || self.rb <= 0.0 {
-            let linearized = self.linearize_currents(vb - ve, vb - vc);
-            return (
-                self.collector_row_coefficients(linearized),
-                self.base_row_coefficients(linearized),
-                self.emitter_row_coefficients(linearized),
-            );
-        }
-
-        let vbi = self.solve_intrinsic_base_voltage(vc, vb, ve);
-        let linearized = self.linearize_currents(vbi - ve, vbi - vc);
-        let (cc_i, cbi_i, ce_i) = self.collector_row_coefficients(linearized);
-        let (bc_i, bbi_i, be_i) = self.base_row_coefficients(linearized);
-        let g_rb = 1.0 / self.rb.max(1e-12);
-        let denom = bbi_i + g_rb;
-        if !denom.is_finite() || denom.abs() < 1e-18 {
-            return (
-                self.collector_row_coefficients(linearized),
-                self.base_row_coefficients(linearized),
-                self.emitter_row_coefficients(linearized),
-            );
-        }
-
-        let dvbi_dvc = -bc_i / denom;
-        let dvbi_dvb = g_rb / denom;
-        let dvbi_dve = -be_i / denom;
-
-        let collector = (
-            cc_i + cbi_i * dvbi_dvc,
-            cbi_i * dvbi_dvb,
-            ce_i + cbi_i * dvbi_dve,
+        let same_cached_bias = |now: Value, cached: Value| {
+            (now - cached).abs() <= f64::EPSILON * now.abs().max(cached.abs()).max(1.0)
+        };
+        let state = if same_cached_bias(vc, self.vc_ext)
+            && same_cached_bias(vb, self.vb_ext)
+            && same_cached_bias(ve, self.ve_ext)
+        {
+            IntrinsicTerminalState {
+                vcx: self.vcx,
+                vci: self.vci,
+                vbx: self.vbx,
+                vbi: self.vbi,
+                vei: self.vei,
+                vbp: self.vbp,
+                vsi: self.vsi,
+                linearized: self.linearize_currents(self.vbe, self.vbc),
+            }
+        } else {
+            self.solve_intrinsic_terminal_state(vc, vb, ve)
+        };
+        let sensitivities = self.internal_voltage_sensitivities(state, vc, vb, ve);
+        let eval = self.evaluate_state(
+            vc, vb, ve, state.vcx, state.vci, state.vbx, state.vbi, state.vei,
         );
-        let base = (-g_rb * dvbi_dvc, g_rb * (1.0 - dvbi_dvb), -g_rb * dvbi_dve);
-        let emitter = (
-            -(collector.0 + base.0),
-            -(collector.1 + base.1),
-            -(collector.2 + base.2),
-        );
+        let (collector_internal, base_internal, emitter_internal) =
+            self.intrinsic_terminal_derivatives(eval.linearized);
+
+        let collector_current = if Self::series_active(self.rcx) {
+            eval.ircx
+        } else if Self::series_active(self.rci) {
+            eval.irci
+        } else {
+            BranchLinearization {
+                current: eval.linearized.ic,
+                d_internal: collector_internal,
+                d_external: [0.0; 3],
+            }
+        };
+        let base_current = if Self::series_active(self.rbx) {
+            eval.irbx
+        } else if Self::series_active(self.rbi) {
+            eval.irbi
+        } else {
+            BranchLinearization {
+                current: eval.linearized.ib,
+                d_internal: base_internal,
+                d_external: [0.0; 3],
+            }
+        };
+        let emitter_current = if Self::series_active(self.re) {
+            eval.ire
+        } else {
+            BranchLinearization {
+                current: -(eval.linearized.ic + eval.linearized.ib),
+                d_internal: emitter_internal,
+                d_external: [0.0; 3],
+            }
+        };
+
+        let current_row = |branch: BranchLinearization| {
+            let mut row = [0.0; 3];
+            for external in 0..3 {
+                row[external] = branch.d_external[external];
+                for internal in 0..5 {
+                    row[external] +=
+                        branch.d_internal[internal] * sensitivities[internal][external];
+                }
+            }
+            (row[0], row[1], row[2])
+        };
+
+        let collector = current_row(collector_current);
+        let base = current_row(base_current);
+        let emitter = current_row(emitter_current);
+
         (collector, base, emitter)
     }
 
@@ -1058,6 +2137,7 @@ impl Bjt {
     ///
     /// Base model is Ebers-Moll for stability. Early voltage and high-injection
     /// effects are applied via go() output conductance and base charge modulation.
+    #[allow(dead_code)]
     fn calculate_currents(&self, vbe: Value, vbc: Value) -> (Value, Value, Value) {
         let linearized = self.linearize_currents(vbe, vbc);
         let ie = -(linearized.ic + linearized.ib);
@@ -1124,6 +2204,7 @@ impl Bjt {
     /// Semiconductor Circuits", UCB/ERL M520, 1975
     ///
     /// Used by commercial simulators: Spectre, HSPICE, PSpice, etc.
+    #[allow(dead_code)]
     fn limit_junction_voltage(vnew: Value, vold: Value, vt: Value) -> Value {
         // Critical voltage: above this, exponential becomes problematic
         let vcrit = vt * (vt / (core::f64::consts::SQRT_2 * 1e-14)).ln();
@@ -1181,32 +2262,46 @@ impl NonlinearDevice for Bjt {
 
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
+        self.vcx_prev = self.vcx;
         self.vbi_prev = self.vbi;
+        self.vci_prev = self.vci;
+        self.vbx_prev = self.vbx;
+        self.vei_prev = self.vei;
 
-        if self.rb.is_finite() && self.rb > 0.0 {
-            self.vbi = self.solve_intrinsic_base_voltage(vc, vb, ve);
-            self.vbe = self.vbi - ve;
-            self.vbc = self.vbi - vc;
+        let state = self.solve_intrinsic_terminal_state(vc, vb, ve);
+        let eval = self.evaluate_state(
+            vc, vb, ve, state.vcx, state.vci, state.vbx, state.vbi, state.vei,
+        );
+        self.vc_ext = vc;
+        self.vb_ext = vb;
+        self.ve_ext = ve;
+        self.vcx = state.vcx;
+        self.vci = state.vci;
+        self.vbx = state.vbx;
+        self.vbi = state.vbi;
+        self.vei = state.vei;
+        self.vbe = self.vbi - self.vei;
+        self.vbc = self.vbi - self.vci;
+
+        self.ic = if Self::series_active(self.rcx) {
+            eval.ircx.current
+        } else if Self::series_active(self.rci) {
+            eval.irci.current
         } else {
-            let vbe_raw = vb - ve;
-            let vbc_raw = vb - vc;
-
-            // Apply junction voltage limiting (standard SPICE technique)
-            // This is critical for BJT convergence - limits how much Vbe/Vbc can
-            // change per Newton iteration to prevent exponential current blowup
-            self.vbe = Self::limit_junction_voltage(vbe_raw, self.vbe_prev, self.vt);
-            self.vbc = Self::limit_junction_voltage(vbc_raw, self.vbc_prev, self.vt);
-            self.vbi = vb;
-        }
-
-        let (ic, ib_intrinsic, _ie_intrinsic) = self.calculate_currents(self.vbe, self.vbc);
-        self.ic = ic;
-        self.ib = if self.rb.is_finite() && self.rb > 0.0 {
-            (vb - self.vbi) / self.rb.max(1e-12)
-        } else {
-            ib_intrinsic
+            eval.linearized.ic
         };
-        self.ie = -(self.ic + self.ib);
+        self.ib = if Self::series_active(self.rbx) {
+            eval.irbx.current
+        } else if Self::series_active(self.rbi) {
+            eval.irbi.current
+        } else {
+            eval.linearized.ib
+        };
+        self.ie = if Self::series_active(self.re) {
+            eval.ire.current
+        } else {
+            -(eval.linearized.ic + eval.linearized.ib)
+        };
     }
 
     fn stamp_nonlinear(
@@ -1438,6 +2533,140 @@ mod tests {
         let (_, ib_vbic, _) = q_vbic.calculate_currents(0.35, -0.5);
 
         assert!(ib_vbic > ib_base * 4.0);
+    }
+
+    fn vbic_reference_params() -> HashMap<String, Value> {
+        let mut params = HashMap::new();
+        params.insert("TNOM".to_string(), 300.15);
+        params.insert("IS".to_string(), 1e-16);
+        params.insert("IBEI".to_string(), 1e-18);
+        params.insert("IBEN".to_string(), 5e-15);
+        params.insert("IBCI".to_string(), 2e-17);
+        params.insert("IBCN".to_string(), 5e-15);
+        params.insert("ISP".to_string(), 1e-15);
+        params.insert("RCX".to_string(), 10.0);
+        params.insert("RCI".to_string(), 60.0);
+        params.insert("RBX".to_string(), 10.0);
+        params.insert("RBI".to_string(), 40.0);
+        params.insert("RE".to_string(), 2.0);
+        params.insert("RS".to_string(), 20.0);
+        params.insert("RBP".to_string(), 40.0);
+        params.insert("VEF".to_string(), 10.0);
+        params.insert("VER".to_string(), 4.0);
+        params.insert("IKF".to_string(), 2e-3);
+        params.insert("IKR".to_string(), 2e-4);
+        params.insert("IKP".to_string(), 2e-4);
+        params.insert("CJE".to_string(), 1e-13);
+        params.insert("CJC".to_string(), 2e-14);
+        params.insert("CJEP".to_string(), 1e-13);
+        params.insert("CJCP".to_string(), 4e-13);
+        params.insert("VO".to_string(), 2.0);
+        params.insert("GAMM".to_string(), 2e-11);
+        params.insert("HRCF".to_string(), 2.0);
+        params.insert("AVC1".to_string(), 2.0);
+        params.insert("AVC2".to_string(), 15.0);
+        params.insert("ITF".to_string(), 8e-2);
+        params.insert("XTF".to_string(), 20.0);
+        params.insert("QCO".to_string(), 1e-12);
+        params.insert("TF".to_string(), 10e-12);
+        params.insert("TR".to_string(), 100e-12);
+        params.insert("TD".to_string(), 2e-11);
+        params
+    }
+
+    fn assert_relative_within(actual: Value, expected: Value, rel_tol: Value, label: &str) {
+        let scale = expected.abs().max(1e-18);
+        let rel_err = (actual - expected).abs() / scale;
+        assert!(
+            rel_err <= rel_tol,
+            "{label}: expected {expected:.12e}, got {actual:.12e}, rel_err={rel_err:.3e}"
+        );
+    }
+
+    #[test]
+    fn test_bjt_vbic_gummel_reference_points_track_ngspice() {
+        let params = vbic_reference_params();
+        let mut q = Bjt::new_pnp("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.set_temperature(300.15);
+
+        q.update(&[0.3, 0.0, 0.0]);
+        let (ic_03, ib_03, _) = q.operating_point_currents();
+        assert_relative_within(ic_03.abs(), 1.007807e-11, 0.08, "FG ic @ 0.3V");
+        assert_relative_within(ib_03.abs(), 1.814379e-12, 0.08, "FG ib @ 0.3V");
+
+        q.update(&[0.7, 0.0, 0.0]);
+        let (ic_07, ib_07, _) = q.operating_point_currents();
+        assert_relative_within(ic_07.abs(), 4.491451e-05, 0.05, "FG ic @ 0.7V");
+        assert_relative_within(ib_07.abs(), 5.682497e-07, 0.05, "FG ib @ 0.7V");
+    }
+
+    #[test]
+    fn test_bjt_vbic_output_reference_point_tracks_ngspice() {
+        let params = vbic_reference_params();
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.set_temperature(300.15);
+
+        q.update(&[0.0, 0.7, 0.0]);
+        let (ic, ib, _) = q.operating_point_currents();
+        assert_relative_within(ic.abs(), 9.59413e-06, 0.08, "FO ic @ vb=0.7 vc=0.0");
+        assert_relative_within(ib.abs(), 5.682510e-07, 0.08, "FO ib @ vb=0.7 vc=0.0");
+    }
+
+    #[test]
+    fn test_bjt_vbic_temperature_reference_points_track_ngspice() {
+        let params = vbic_reference_params();
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.set_temperature(423.15);
+
+        q.update(&[0.0, 0.3, 0.3]);
+        let (ic_03, ib_03, _) = q.operating_point_currents();
+        assert_relative_within(ic_03.abs(), 2.829459e-07, 0.03, "temp ic @ 0.3V");
+        assert_relative_within(ib_03.abs(), 4.160429e-09, 0.05, "temp ib @ 0.3V");
+
+        q.update(&[0.0, 0.7, 0.7]);
+        let (ic_07, ib_07, _) = q.operating_point_currents();
+        assert_relative_within(ic_07.abs(), 3.955907e-03, 0.03, "temp ic @ 0.7V");
+        assert_relative_within(ib_07.abs(), 1.316270e-04, 0.05, "temp ib @ 0.7V");
+    }
+
+    #[test]
+    fn test_bjt_series_resistances_reduce_external_current_and_shift_internal_bias() {
+        let mut ideal_params = HashMap::new();
+        ideal_params.insert("RB".to_string(), 0.0);
+        ideal_params.insert("RC".to_string(), 0.0);
+        ideal_params.insert("RE".to_string(), 0.0);
+
+        let mut series_params = HashMap::new();
+        series_params.insert("RB".to_string(), 50.0);
+        series_params.insert("RC".to_string(), 200.0);
+        series_params.insert("RE".to_string(), 20.0);
+
+        let mut ideal = Bjt::new_npn("Q0".to_string(), 3, 2, 1).with_params(&ideal_params);
+        let mut with_series = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&series_params);
+        let voltages = vec![0.0, 0.78, 3.3];
+
+        ideal.update(&voltages);
+        with_series.update(&voltages);
+
+        assert!(with_series.vci < 3.3 - 1e-9);
+        assert!(with_series.vei > 0.0 + 1e-9);
+        assert!(with_series.vbe < ideal.vbe);
+        assert!(with_series.ic.abs() < ideal.ic.abs());
+    }
+
+    #[test]
+    fn test_bjt_series_resistance_small_signal_rows_preserve_kcl() {
+        let mut params = HashMap::new();
+        params.insert("RB".to_string(), 50.0);
+        params.insert("RC".to_string(), 200.0);
+        params.insert("RE".to_string(), 20.0);
+
+        let q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let (collector, base, emitter) = q.small_signal_row_coefficients(3.3, 0.78, 0.0);
+
+        assert!((collector.0 + base.0 + emitter.0).abs() < 1e-9);
+        assert!((collector.1 + base.1 + emitter.1).abs() < 1e-9);
+        assert!((collector.2 + base.2 + emitter.2).abs() < 1e-9);
     }
 
     #[test]

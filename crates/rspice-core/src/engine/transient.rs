@@ -973,8 +973,7 @@ impl Engine {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(solution);
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
-            let (cgs_half, cgd_half, cgb_half) =
-                mos.transient_capacitance_halves_at(vgs, vds, vbs);
+            let (cgs_half, cgd_half, cgb_half) = mos.transient_capacitance_halves_at(vgs, vds, vbs);
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
             let cgs = 2.0 * cgs_half + cgs_ov;
             let cgd = 2.0 * cgd_half + cgd_ov;
@@ -1496,13 +1495,7 @@ impl Engine {
             let (_v1_ref, _v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
             let response = tl.transient_port_response(accepted_time);
             let (i1_actual, i2_actual) = response.port_currents(v1, v2);
-            tl.update_history(
-                accepted_time,
-                v1,
-                i1_actual,
-                v2,
-                i2_actual,
-            );
+            tl.update_history(accepted_time, v1, i1_actual, v2, i2_actual);
             if !tl.has_distributed_rlgc() {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
@@ -1556,7 +1549,9 @@ impl Engine {
             for (
                 (delay, previous_forward, previous_backward),
                 (_, current_forward, current_backward),
-            ) in previous_mode_launches.into_iter().zip(tl.launched_modal_waves())
+            ) in previous_mode_launches
+                .into_iter()
+                .zip(tl.launched_modal_waves())
             {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
@@ -1705,8 +1700,7 @@ impl Engine {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
-            let (cgs_half, cgd_half, cgb_half) =
-                mos.transient_capacitance_halves_at(vgs, vds, vbs);
+            let (cgs_half, cgd_half, cgb_half) = mos.transient_capacitance_halves_at(vgs, vds, vbs);
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
             let cgs = cgs_half + mosfet_history.capgs_prev_half[idx] + cgs_ov;
             let cgd = cgd_half + mosfet_history.capgd_prev_half[idx] + cgd_ov;
@@ -2354,7 +2348,7 @@ impl Engine {
                         }
 
                         let device_converged = !circuit.has_nonlinear_devices()
-                    || circuit.nonlinear_converged(self.device_convergence_criteria());
+                            || circuit.nonlinear_converged(self.device_convergence_criteria());
 
                         if voltage_converged && device_converged && linearized_residual_converged {
                             converged = true;
@@ -2385,7 +2379,7 @@ impl Engine {
                     // Check what specifically didn't converge
                     let v_conv = self.voltage_convergence_met(&solution, &new_solution);
                     let d_conv = !circuit.has_nonlinear_devices()
-                || circuit.nonlinear_converged(self.device_convergence_criteria());
+                        || circuit.nonlinear_converged(self.device_convergence_criteria());
                     let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(

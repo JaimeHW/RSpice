@@ -1,7 +1,7 @@
+use rspice_core::Netlist;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::device::{MosType, Mosfet, NonlinearDevice};
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};
-use rspice_core::Netlist;
 
 fn interpolate(time: &[f64], values: &[f64], x: f64) -> f64 {
     if x <= time[0] {
@@ -89,8 +89,8 @@ fn ngspice_level6_id(
 #[test]
 #[ignore]
 fn debug_mos6inv_step_sensitivity() {
-    let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/mos6/mos6inv.cir");
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/mos6/mos6inv.cir");
     let source = std::fs::read_to_string(&deck_path).expect("read mos6inv deck");
     let netlist = Netlist::parse(&source).expect("parse mos6inv deck");
 
@@ -112,10 +112,7 @@ fn debug_mos6inv_step_sensitivity() {
         let result = engine
             .run_tran(&netlist, 150e-9, max_step)
             .unwrap_or_else(|err| panic!("run_tran failed for max_step={max_step:e}: {err:?}"));
-        eprintln!(
-            "max_step={max_step:.3e} points={}",
-            result.time.len()
-        );
+        eprintln!("max_step={max_step:.3e} points={}", result.time.len());
         for (node, x) in probes {
             let idx = result
                 .node_names
@@ -131,8 +128,8 @@ fn debug_mos6inv_step_sensitivity() {
 #[test]
 #[ignore]
 fn debug_mos6inv_gmin_sensitivity() {
-    let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/mos6/mos6inv.cir");
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/mos6/mos6inv.cir");
     let source = std::fs::read_to_string(&deck_path).expect("read mos6inv deck");
     let netlist = Netlist::parse(&source).expect("parse mos6inv deck");
 
@@ -154,11 +151,10 @@ fn debug_mos6inv_gmin_sensitivity() {
 
         let result = engine
             .run_tran(&netlist, 150e-9, 0.5e-9)
-            .unwrap_or_else(|err| panic!("run_tran failed for gmin_target={gmin_target:e}: {err:?}"));
-        eprintln!(
-            "gmin_target={gmin_target:.3e} points={}",
-            result.time.len()
-        );
+            .unwrap_or_else(|err| {
+                panic!("run_tran failed for gmin_target={gmin_target:e}: {err:?}")
+            });
+        eprintln!("gmin_target={gmin_target:.3e} points={}", result.time.len());
         for (node, x) in probes {
             let idx = result
                 .node_names
@@ -174,8 +170,8 @@ fn debug_mos6inv_gmin_sensitivity() {
 #[test]
 #[ignore]
 fn debug_mos6inv_initial_nodes() {
-    let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/mos6/mos6inv.cir");
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/mos6/mos6inv.cir");
     let source = std::fs::read_to_string(&deck_path).expect("read mos6inv deck");
     let netlist = Netlist::parse(&source).expect("parse mos6inv deck");
 
@@ -230,8 +226,8 @@ fn debug_mos6inv_initial_nodes() {
 #[test]
 #[ignore]
 fn debug_mos6inv_tight_tolerance_sensitivity() {
-    let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/mos6/mos6inv.cir");
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/mos6/mos6inv.cir");
     let source = std::fs::read_to_string(&deck_path).expect("read mos6inv deck");
     let netlist = Netlist::parse(&source).expect("parse mos6inv deck");
 
@@ -331,8 +327,8 @@ fn debug_level6_current_matches_literal_ngspice_equations() {
                     m.update(&voltages);
                     let actual = m.drain_current();
                     let expected = ngspice_level6_id(
-                        mos_type, m.vto, m.gamma, m.gamma1, m.sigma, m.phi, m.kc, m.nc, m.kv,
-                        m.nv, m.lambda0, m.lambda1, m.l, m.w, m.ld, vgs, vds, vbs,
+                        mos_type, m.vto, m.gamma, m.gamma1, m.sigma, m.phi, m.kc, m.nc, m.kv, m.nv,
+                        m.lambda0, m.lambda1, m.l, m.w, m.ld, vgs, vds, vbs,
                     );
                     let err = (actual - expected).abs();
                     if err > max_abs {

@@ -1748,9 +1748,8 @@ impl Engine {
                                     0,
                                     far,
                                     0,
-                                    model_params.expect(
-                                        "distributed RLGC synthesis requires model",
-                                    ),
+                                    model_params
+                                        .expect("distributed RLGC synthesis requires model"),
                                 )?;
                             } else {
                                 push_tline(&mut circuit, conductor_name, near, 0, far, 0);

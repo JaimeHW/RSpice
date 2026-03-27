@@ -146,6 +146,7 @@ impl Engine {
         matrix: &mut ComplexMatrix,
         circuit: &CircuitData,
         op_voltages: &[Value],
+        frequency_hz: Value,
     ) {
         struct AcRealStamper<'a> {
             matrix: &'a mut ComplexMatrix,
@@ -177,7 +178,7 @@ impl Engine {
             .mosfets
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for jfet in &circuit.jfets {
-            jfet.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
+            jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper);
         }
         for sw in &circuit.vswitches {
             sw.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
@@ -245,14 +246,16 @@ impl Engine {
             let vd = Self::ac_node_voltage(op_voltages, jfet.drain);
             let vg = Self::ac_node_voltage(op_voltages, jfet.gate);
             let vs = Self::ac_node_voltage(op_voltages, jfet.source);
-            let pol = jfet.jfet_type.polarity();
-            let (cgs, cgd) = jfet.capacitances(pol * (vg - vs), pol * (vg - vd));
+            let (cgs, cgd, cds) = jfet.ac_capacitances(vg - vs, vg - vd, jfet.params.tnom);
 
             if cgs.is_finite() && cgs > 0.0 {
                 Self::stamp_imag_two_terminal(matrix, jfet.gate, jfet.source, omega * cgs);
             }
             if cgd.is_finite() && cgd > 0.0 {
                 Self::stamp_imag_two_terminal(matrix, jfet.gate, jfet.drain, omega * cgd);
+            }
+            if cds.is_finite() && cds > 0.0 {
+                Self::stamp_imag_two_terminal(matrix, jfet.drain, jfet.source, omega * cds);
             }
         }
     }
@@ -292,7 +295,12 @@ impl Engine {
 
         // Nonlinear device Jacobian (real part) evaluated at DC operating point.
         if has_nonlinear {
-            Self::stamp_nonlinear_small_signal_real(&mut ac_matrix, circuit, op_voltages);
+            Self::stamp_nonlinear_small_signal_real(
+                &mut ac_matrix,
+                circuit,
+                op_voltages,
+                omega / (2.0 * PI),
+            );
         }
 
         // Stamp capacitors: jωC

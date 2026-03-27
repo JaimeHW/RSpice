@@ -1501,11 +1501,7 @@ impl Engine {
 
             circuit.refresh_jiles_atherton_inductances(&solution);
             Self::stamp_transient_operating_point_linear(
-                circuit,
-                matrix,
-                &mut rhs,
-                time,
-                gmin_floor,
+                circuit, matrix, &mut rhs, time, gmin_floor,
             );
             self.stamp_nonlinear_devices_for_operating_point(
                 circuit,
