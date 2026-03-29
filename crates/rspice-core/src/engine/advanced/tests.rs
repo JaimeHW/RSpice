@@ -13,6 +13,31 @@ fn closest_pole_real(poles: &[crate::analysis::pole_zero::Complex], expected: Va
         .expect("expected at least one pole")
 }
 
+fn vbic_ceamp_netlist(with_td: bool) -> crate::Netlist {
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/CEamp.cir");
+    let source = std::fs::read_to_string(deck_path).expect("read CEamp deck");
+    let deck = if with_td {
+        source
+    } else {
+        source.replace(" TD=2e-11", " TD=0")
+    };
+    crate::Netlist::parse(&deck).expect("parse CEamp deck")
+}
+
+fn vbic_ceamp_ports(engine: &Engine, netlist: &crate::Netlist) -> (usize, usize) {
+    let circuit = engine
+        .build_circuit(netlist)
+        .expect("CEamp circuit should build");
+    let input_pos = circuit
+        .get_node_by_name("1")
+        .expect("CEamp input node 1 should resolve");
+    let output_pos = circuit
+        .get_node_by_name("4")
+        .expect("CEamp output node 4 should resolve");
+    (input_pos, output_pos)
+}
+
 #[test]
 fn test_run_pz_parallel_rl_includes_inductor_dynamics() {
     let netlist = crate::netlist::parse_netlist("* Parallel RL\nR1 out 0 1k\nL1 out 0 1m\n.end\n")
@@ -174,6 +199,81 @@ fn test_run_pz_includes_nonlinear_small_signal_jacobian() {
         dominant.re < -1.2e6,
         "nonlinear diode conductance should shift the pole beyond the passive -1e6 RC estimate, got {}",
         dominant.re
+    );
+}
+
+#[test]
+fn test_run_pz_vbic_ceamp_with_td_matches_reference_root_order() {
+    let netlist = vbic_ceamp_netlist(true);
+    let engine = Engine::default();
+    let (input_pos, output_pos) = vbic_ceamp_ports(&engine, &netlist);
+    let result = engine
+        .run_pz_ports(
+            &netlist, input_pos, None, output_pos, None, true, true, true,
+        )
+        .expect("VBIC CEamp PZ should succeed");
+
+    assert_eq!(result.poles.len(), 5, "expected five finite CEamp poles");
+    assert_eq!(result.zeros.len(), 4, "expected four finite CEamp zeros");
+    assert!(
+        result
+            .poles
+            .iter()
+            .all(|p| p.re.is_finite() && p.im.is_finite())
+    );
+    assert!(
+        result
+            .zeros
+            .iter()
+            .all(|z| z.re.is_finite() && z.im.is_finite())
+    );
+    assert!(
+        result.poles.iter().all(|p| p.re < 0.0),
+        "expected stable CEamp poles, got {:?}",
+        result.poles
+    );
+}
+
+#[test]
+fn test_run_pz_vbic_ceamp_td_expands_dynamic_order_vs_td_zero() {
+    let with_td = vbic_ceamp_netlist(true);
+    let without_td = vbic_ceamp_netlist(false);
+    let engine = Engine::default();
+    let (input_pos_with_td, output_pos_with_td) = vbic_ceamp_ports(&engine, &with_td);
+    let (input_pos_without_td, output_pos_without_td) = vbic_ceamp_ports(&engine, &without_td);
+
+    let with_td_result = engine
+        .run_pz_ports(
+            &with_td,
+            input_pos_with_td,
+            None,
+            output_pos_with_td,
+            None,
+            true,
+            true,
+            true,
+        )
+        .expect("VBIC CEamp PZ with TD should succeed");
+    let without_td_result = engine
+        .run_pz_ports(
+            &without_td,
+            input_pos_without_td,
+            None,
+            output_pos_without_td,
+            None,
+            true,
+            true,
+            true,
+        )
+        .expect("VBIC CEamp PZ without TD should succeed");
+
+    assert!(
+        with_td_result.poles.len() >= without_td_result.poles.len(),
+        "TD-enabled VBIC PZ should not reduce finite pole count"
+    );
+    assert!(
+        with_td_result.zeros.len() >= without_td_result.zeros.len(),
+        "TD-enabled VBIC PZ should not reduce finite zero count"
     );
 }
 

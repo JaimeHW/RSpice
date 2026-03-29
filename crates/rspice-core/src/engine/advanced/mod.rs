@@ -15,6 +15,9 @@ use crate::analysis::monte_carlo::{
 use crate::analysis::noise::{NoiseContribution, NoiseResult, NoiseSource};
 use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 use crate::analysis::sensitivity::{ElementDesc, SensitivityAnalyzer, SensitivityResult};
+use crate::device::semiconductor::{
+    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
+};
 use crate::netlist::{ElementKind, SourceSpec, StepCommand, StepTarget};
 use crate::solver::SimulationResult;
 use crate::{CircuitData, Complex64, Netlist, Value};
@@ -56,6 +59,126 @@ impl Engine {
             None
         } else {
             Some(node_id - 1)
+        }
+    }
+
+    #[inline]
+    fn ac_linearization_node_voltage(voltages: &[Value], node: usize) -> Value {
+        if node == 0 {
+            0.0
+        } else {
+            voltages.get(node - 1).copied().unwrap_or(0.0)
+        }
+    }
+
+    fn descriptor_expand_square(
+        g_matrix: &mut Matrix,
+        c_matrix: &mut Matrix,
+        extra_states: usize,
+    ) -> usize {
+        let (n, _) = g_matrix.dims();
+        let mut g_expanded = Matrix::zeros(n + extra_states, n + extra_states);
+        let mut c_expanded = Matrix::zeros(n + extra_states, n + extra_states);
+        for row in 0..n {
+            for col in 0..n {
+                g_expanded.set(row, col, g_matrix.get(row, col));
+                c_expanded.set(row, col, c_matrix.get(row, col));
+            }
+        }
+        *g_matrix = g_expanded;
+        *c_matrix = c_expanded;
+        n
+    }
+
+    fn stamp_vbic_pz_descriptor_states(
+        circuit: &CircuitData,
+        op_voltages: &[Value],
+        g_matrix: &mut Matrix,
+        c_matrix: &mut Matrix,
+    ) {
+        for bjt in &circuit.bjts.devices {
+            if !bjt.uses_vbic_dynamic_charges() {
+                continue;
+            }
+
+            let vc = Self::ac_linearization_node_voltage(op_voltages, bjt.node_collector);
+            let vb = Self::ac_linearization_node_voltage(op_voltages, bjt.node_base);
+            let ve = Self::ac_linearization_node_voltage(op_voltages, bjt.node_emitter);
+            let vs = Self::ac_linearization_node_voltage(op_voltages, bjt.node_substrate);
+            let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+
+            let mut c_ii = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
+            let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
+            let mut c_ei = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+            let mut c_ee = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+            let mut has_dynamic_charge = false;
+            for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
+                if !branch.is_active() {
+                    continue;
+                }
+                if branch_idx + 2 >= BJT_DYNAMIC_CHARGE_COUNT {
+                    // ngspice small-signal parity excludes VBIC excess-phase TD
+                    // companion charges from linearized frequency-domain matrices.
+                    continue;
+                }
+                branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
+                has_dynamic_charge = true;
+            }
+            if !has_dynamic_charge {
+                continue;
+            }
+
+            let internal_start =
+                Self::descriptor_expand_square(g_matrix, c_matrix, BJT_INTERNAL_STATE_DIM);
+            let external_nodes = [
+                Self::optional_system_index(bjt.node_collector),
+                Self::optional_system_index(bjt.node_base),
+                Self::optional_system_index(bjt.node_emitter),
+                Self::optional_system_index(bjt.node_substrate),
+            ];
+
+            for ext_row in 0..BJT_EXTERNAL_STATE_DIM {
+                let Some(row_idx) = external_nodes[ext_row] else {
+                    continue;
+                };
+
+                for ext_col in 0..BJT_EXTERNAL_STATE_DIM {
+                    let Some(col_idx) = external_nodes[ext_col] else {
+                        continue;
+                    };
+                    g_matrix.add(
+                        row_idx,
+                        col_idx,
+                        snapshot.reduction.g_ee[ext_row][ext_col]
+                            - snapshot.reduction.g_reduced[ext_row][ext_col],
+                    );
+                    c_matrix.add(row_idx, col_idx, -c_ee[ext_row][ext_col]);
+                }
+
+                for int_col in 0..BJT_INTERNAL_STATE_DIM {
+                    let col_idx = internal_start + int_col;
+                    g_matrix.add(row_idx, col_idx, snapshot.reduction.g_ei[ext_row][int_col]);
+                    c_matrix.add(row_idx, col_idx, -c_ei[ext_row][int_col]);
+                }
+            }
+
+            for int_row in 0..BJT_INTERNAL_STATE_DIM {
+                let row_idx = internal_start + int_row;
+
+                for ext_col in 0..BJT_EXTERNAL_STATE_DIM {
+                    let Some(col_idx) = external_nodes[ext_col] else {
+                        continue;
+                    };
+                    g_matrix.add(row_idx, col_idx, snapshot.reduction.g_ie[int_row][ext_col]);
+                    c_matrix.add(row_idx, col_idx, -c_ie[int_row][ext_col]);
+                }
+
+                for int_col in 0..BJT_INTERNAL_STATE_DIM {
+                    let col_idx = internal_start + int_col;
+                    g_matrix.add(row_idx, col_idx, snapshot.reduction.g_ii[int_row][int_col]);
+                    c_matrix.add(row_idx, col_idx, -c_ii[int_row][int_col]);
+                }
+            }
         }
     }
 
@@ -909,10 +1032,11 @@ impl Engine {
 
         // Reuse the AC linearization path so pole-zero analysis sees the same
         // nonlinear small-signal conductances and capacitances as AC analysis.
-        let g_descriptor = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0);
-        let c_descriptor = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 1.0);
-        let g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
-        let c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
+        let g_descriptor = Self::build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 0.0);
+        let c_descriptor = Self::build_small_signal_pz_matrix(&circuit, &matrix, &dc_solution, 1.0);
+        let mut g_matrix = Matrix::from_dense(g_descriptor.to_dense_real());
+        let mut c_matrix = Matrix::from_dense(c_descriptor.to_dense_imag());
+        Self::stamp_vbic_pz_descriptor_states(&circuit, &dc_solution, &mut g_matrix, &mut c_matrix);
 
         let input_neg_node = input_neg.unwrap_or(0);
         let matches_input_voltage_port = |np: usize, nn: usize| {

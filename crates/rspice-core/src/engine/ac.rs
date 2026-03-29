@@ -6,10 +6,16 @@
 
 use super::{Engine, SimulationError};
 use crate::analysis::ac::AcResult;
+use crate::device::semiconductor::{
+    BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeSnapshot,
+};
 use crate::device::{MatrixStamper, NonlinearDevice};
 use crate::solver::{ComplexMatrix, StaticMatrix};
 use crate::{CircuitData, Complex64, Netlist, NodeId, Value};
 use std::f64::consts::PI;
+
+const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
+const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
 
 impl Engine {
     #[inline]
@@ -141,6 +147,160 @@ impl Engine {
         }
     }
 
+    fn solve_small_dense_complex_system<const N: usize>(
+        matrix: &[[Complex64; N]; N],
+        rhs: &[Complex64; N],
+        dim: usize,
+    ) -> Option<[Complex64; N]> {
+        if dim == 0 {
+            return Some([Complex64::new(0.0, 0.0); N]);
+        }
+
+        let mut a = *matrix;
+        let mut b = *rhs;
+
+        for pivot in 0..dim {
+            let mut best = pivot;
+            let mut best_abs = a[pivot][pivot].norm();
+            for row in (pivot + 1)..dim {
+                let value = a[row][pivot].norm();
+                if value > best_abs {
+                    best = row;
+                    best_abs = value;
+                }
+            }
+            if best_abs < 1e-18 {
+                return None;
+            }
+            if best != pivot {
+                a.swap(pivot, best);
+                b.swap(pivot, best);
+            }
+
+            let pivot_value = a[pivot][pivot];
+            for row in (pivot + 1)..dim {
+                let factor = a[row][pivot] / pivot_value;
+                a[row][pivot] = Complex64::new(0.0, 0.0);
+                for col in (pivot + 1)..dim {
+                    a[row][col] -= factor * a[pivot][col];
+                }
+                b[row] -= factor * b[pivot];
+            }
+        }
+
+        let mut x = [Complex64::new(0.0, 0.0); N];
+        for row in (0..dim).rev() {
+            let mut sum = b[row];
+            for col in (row + 1)..dim {
+                sum -= a[row][col] * x[col];
+            }
+            let diag = a[row][row];
+            if diag.norm() < 1e-18 {
+                return None;
+            }
+            x[row] = sum / diag;
+        }
+
+        Some(x)
+    }
+
+    fn stamp_vbic_bjt_dynamic_ac(
+        matrix: &mut ComplexMatrix,
+        bjt: &crate::device::Bjt,
+        op_voltages: &[Value],
+        omega: Value,
+        include_delay_branches: bool,
+    ) {
+        if !bjt.uses_vbic_dynamic_charges() {
+            return;
+        }
+
+        let [vc, vb, ve, vs] = [
+            Self::ac_node_voltage(op_voltages, bjt.node_collector),
+            Self::ac_node_voltage(op_voltages, bjt.node_base),
+            Self::ac_node_voltage(op_voltages, bjt.node_emitter),
+            Self::ac_node_voltage(op_voltages, bjt.node_substrate),
+        ];
+        let snapshot: BjtChargeSnapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let mut c_ii = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
+        let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
+        let mut c_ei = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+        let mut c_ee = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+        let mut has_dynamic_charge = false;
+        for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
+            if !branch.is_active() {
+                continue;
+            }
+            if !include_delay_branches
+                && (branch_idx == BJT_DELAY_XF1_BRANCH_INDEX
+                    || branch_idx == BJT_DELAY_XF2_BRANCH_INDEX)
+            {
+                // ngspice linear AC decks treat VBIC excess-phase TD as a
+                // transient-only dynamic delay state; keep AC parity by excluding
+                // xf1/xf2 companion-charge contributions from small-signal stamping.
+                continue;
+            }
+            branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
+            has_dynamic_charge = true;
+        }
+        if !has_dynamic_charge {
+            return;
+        }
+
+        let s = Complex64::new(0.0, omega);
+        let mut internal =
+            [[Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
+        for row in 0..BJT_INTERNAL_STATE_DIM {
+            for col in 0..BJT_INTERNAL_STATE_DIM {
+                internal[row][col] =
+                    Complex64::new(snapshot.reduction.g_ii[row][col], 0.0) + s * c_ii[row][col];
+            }
+        }
+
+        let mut y_total =
+            [[Complex64::new(0.0, 0.0); BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+        for col in 0..BJT_EXTERNAL_STATE_DIM {
+            let mut rhs = [Complex64::new(0.0, 0.0); BJT_INTERNAL_STATE_DIM];
+            for row in 0..BJT_INTERNAL_STATE_DIM {
+                rhs[row] =
+                    -(Complex64::new(snapshot.reduction.g_ie[row][col], 0.0) + s * c_ie[row][col]);
+            }
+
+            let Some(solution) =
+                Self::solve_small_dense_complex_system(&internal, &rhs, BJT_INTERNAL_STATE_DIM)
+            else {
+                return;
+            };
+
+            for row in 0..BJT_EXTERNAL_STATE_DIM {
+                let mut value =
+                    Complex64::new(snapshot.reduction.g_ee[row][col], 0.0) + s * c_ee[row][col];
+                for idx in 0..BJT_INTERNAL_STATE_DIM {
+                    value += (Complex64::new(snapshot.reduction.g_ei[row][idx], 0.0)
+                        + s * c_ei[row][idx])
+                        * solution[idx];
+                }
+                y_total[row][col] = value;
+            }
+        }
+
+        let nodes = [
+            bjt.node_collector,
+            bjt.node_base,
+            bjt.node_emitter,
+            bjt.node_substrate,
+        ];
+        for row in 0..BJT_EXTERNAL_STATE_DIM {
+            for col in 0..BJT_EXTERNAL_STATE_DIM {
+                let delta =
+                    y_total[row][col] - Complex64::new(snapshot.reduction.g_reduced[row][col], 0.0);
+                if delta.norm() > 0.0 && nodes[row] > 0 && nodes[col] > 0 {
+                    matrix.add(nodes[row] - 1, nodes[col] - 1, delta);
+                }
+            }
+        }
+    }
+
     #[inline]
     fn stamp_nonlinear_small_signal_real(
         matrix: &mut ComplexMatrix,
@@ -223,6 +383,9 @@ impl Engine {
 
         // BJT base-emitter and base-collector depletion/diffusion capacitances.
         for bjt in &circuit.bjts.devices {
+            if bjt.uses_vbic_dynamic_charges() {
+                continue;
+            }
             let vc = Self::ac_node_voltage(op_voltages, bjt.node_collector);
             let vb = Self::ac_node_voltage(op_voltages, bjt.node_base);
             let ve = Self::ac_node_voltage(op_voltages, bjt.node_emitter);
@@ -237,6 +400,14 @@ impl Engine {
                     bjt.node_base,
                     bjt.node_collector,
                     omega * cbc,
+                );
+            }
+            if bjt.cjcp.is_finite() && bjt.cjcp > 0.0 {
+                Self::stamp_imag_two_terminal(
+                    matrix,
+                    bjt.node_collector,
+                    bjt.node_substrate,
+                    omega * bjt.cjcp,
                 );
             }
         }
@@ -260,11 +431,13 @@ impl Engine {
         }
     }
 
-    pub(super) fn build_small_signal_ac_matrix(
+    fn build_small_signal_ac_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
         matrix: &StaticMatrix,
         op_voltages: &[Value],
         omega: Value,
+        include_vbic_dynamic_stamp: bool,
+        include_vbic_delay_branches: bool,
     ) -> ComplexMatrix {
         let has_nonlinear = circuit.has_nonlinear_devices();
         let size = circuit.matrix_size();
@@ -301,6 +474,17 @@ impl Engine {
                 op_voltages,
                 omega / (2.0 * PI),
             );
+            if include_vbic_dynamic_stamp {
+                for bjt in &circuit.bjts.devices {
+                    Self::stamp_vbic_bjt_dynamic_ac(
+                        &mut ac_matrix,
+                        bjt,
+                        op_voltages,
+                        omega,
+                        include_vbic_delay_branches,
+                    );
+                }
+            }
         }
 
         // Stamp capacitors: jωC
@@ -519,6 +703,41 @@ impl Engine {
         ac_matrix
     }
 
+    pub(super) fn build_small_signal_ac_matrix(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        op_voltages: &[Value],
+        omega: Value,
+    ) -> ComplexMatrix {
+        Self::build_small_signal_ac_matrix_with_vbic_delay_mode(
+            circuit,
+            matrix,
+            op_voltages,
+            omega,
+            true,
+            false,
+        )
+    }
+
+    pub(super) fn build_small_signal_pz_matrix(
+        circuit: &CircuitData,
+        matrix: &StaticMatrix,
+        op_voltages: &[Value],
+        omega: Value,
+    ) -> ComplexMatrix {
+        // PZ descriptor construction handles VBIC hidden dynamic states
+        // explicitly in `engine/advanced/mod.rs`, so keep the base AC
+        // linearization free of frequency-dependent VBIC companion reduction.
+        Self::build_small_signal_ac_matrix_with_vbic_delay_mode(
+            circuit,
+            matrix,
+            op_voltages,
+            omega,
+            false,
+            true,
+        )
+    }
+
     fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {
         let size = circuit.matrix_size();
         let mut rhs = vec![Complex64::new(0.0, 0.0); size];
@@ -643,5 +862,54 @@ impl Engine {
             .iter()
             .map(|&freq| solve_at_freq(freq))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Netlist, SimulationConfig};
+    use std::path::PathBuf;
+
+    fn ceamp_netlists() -> (Netlist, Netlist) {
+        let deck_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/CEamp.cir");
+        let source = std::fs::read_to_string(deck_path).expect("read CEamp deck");
+        let with_td = Netlist::parse(&source).expect("parse CEamp deck");
+        let no_td = Netlist::parse(&source.replace(" TD=2e-11", " TD=0"))
+            .expect("parse CEamp deck without TD");
+        (with_td, no_td)
+    }
+
+    fn db_current(result: &AcResult, branch_name: &str) -> f64 {
+        let idx = result
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(branch_name))
+            .expect("branch index");
+        let current = result.currents.get(idx).copied().expect("branch current");
+        20.0 * current.norm().max(1e-12).log10()
+    }
+
+    #[test]
+    fn test_vbic_ceamp_ac_ignores_td_delay_branch_in_small_signal_mode() {
+        let (with_td, no_td) = ceamp_netlists();
+        let engine = Engine::new(SimulationConfig::default());
+        let freqs = [2.451e9, 3.162e9];
+
+        let with_td_ac = engine.run_ac(&with_td, &freqs).expect("ac with TD");
+        let no_td_ac = engine.run_ac(&no_td, &freqs).expect("ac without TD");
+        assert_eq!(with_td_ac.len(), no_td_ac.len());
+
+        for (with_td_point, no_td_point) in with_td_ac.iter().zip(no_td_ac.iter()) {
+            let with_td_db = db_current(with_td_point, "Vmeas");
+            let no_td_db = db_current(no_td_point, "Vmeas");
+            let delta = (with_td_db - no_td_db).abs();
+            assert!(
+                delta < 1e-3,
+                "VBIC TD AC delta should be negligible at f={:.3e}Hz, got |Δdb|={delta:.3e}",
+                with_td_point.frequency
+            );
+        }
     }
 }
