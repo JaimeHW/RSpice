@@ -956,3 +956,34 @@ fn debug_vbic_diffamp_step_stats_200ps() {
         max_dt
     );
 }
+
+#[test]
+#[ignore]
+fn debug_vbic_diffamp_unknown_row_mapping() {
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/diffamp.cir");
+    let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+    let netlist = Netlist::parse(&source).expect("parse diffamp deck");
+
+    let mut config = SimulationConfig::default();
+    config.max_iterations = config.max_iterations.max(1200);
+    config.convergence_config = ConvergenceConfig::robust();
+    config.integration_method = IntegrationMethod::Trapezoidal;
+    config.min_timestep = 1e-12;
+    config.temperature = 300.15;
+    let engine = Engine::new(config);
+
+    let circuit = engine.build_circuit(&netlist).expect("build diffamp circuit");
+    let num_nodes = circuit.num_nodes();
+
+    eprintln!("diffamp matrix row mapping:");
+    eprintln!("  row 0 => GND");
+    for (idx, name) in circuit.node_names_sorted().into_iter().enumerate() {
+        eprintln!("  row {} => V({})", idx + 1, name);
+    }
+    for (branch_ordinal, name) in circuit.branch_names_sorted().into_iter().enumerate() {
+        let matrix_row = circuit.get_branch_matrix_index(branch_ordinal + 1);
+        debug_assert_eq!(matrix_row, num_nodes + branch_ordinal + 1);
+        eprintln!("  row {} => I({})", matrix_row, name);
+    }
+}
