@@ -971,9 +971,24 @@ impl VoltageSources {
                 if let Some(v) = solution.get_mut(nn - 1) {
                     *v = -v_source;
                 }
+            } else if np > 0 && nn > 0 {
+                // For floating sources preserve the pair's common-mode voltage and
+                // correct only the differential component so V(np) - V(nn) = Vs.
+                let vp_idx = np - 1;
+                let vn_idx = nn - 1;
+                if vp_idx >= solution.len() || vn_idx >= solution.len() {
+                    continue;
+                }
+                let vp = solution[vp_idx];
+                let vn = solution[vn_idx];
+                if !(vp.is_finite() && vn.is_finite() && v_source.is_finite()) {
+                    continue;
+                }
+                let midpoint = 0.5 * (vp + vn);
+                let half_diff = 0.5 * v_source;
+                solution[vp_idx] = midpoint + half_diff;
+                solution[vn_idx] = midpoint - half_diff;
             }
-            // For floating voltage sources (neither terminal grounded),
-            // we cannot unambiguously correct the node voltages
         }
     }
 }
@@ -3444,6 +3459,41 @@ mod tests {
 
         let delta = vs.max_expected_delta(0.0, 1e-6);
         assert!(delta > 1e-6, "expected non-zero transient source delta");
+    }
+
+    #[test]
+    fn test_enforce_voltage_constraints_corrects_grounded_source() {
+        let mut vs = VoltageSources::new();
+        vs.add("V1".to_string(), 1, 0, 1, 5.0);
+
+        let mut solution = vec![1.25, -2.0];
+        vs.enforce_voltage_constraints(&mut solution, 0.0);
+
+        assert!((solution[0] - 5.0).abs() < 1e-15);
+        assert!((solution[1] + 2.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_enforce_voltage_constraints_corrects_floating_source_preserving_common_mode() {
+        let mut vs = VoltageSources::new();
+        vs.add("V1".to_string(), 1, 2, 1, 1.5);
+
+        let mut solution = vec![2.0, 0.2, -3.0];
+        let midpoint_before = 0.5 * (solution[0] + solution[1]);
+        vs.enforce_voltage_constraints(&mut solution, 0.0);
+
+        let midpoint_after = 0.5 * (solution[0] + solution[1]);
+        let differential_after = solution[0] - solution[1];
+
+        assert!(
+            (midpoint_after - midpoint_before).abs() < 1e-15,
+            "expected floating source correction to preserve common-mode voltage"
+        );
+        assert!(
+            (differential_after - 1.5).abs() < 1e-15,
+            "expected floating source correction to enforce the source voltage"
+        );
+        assert!((solution[2] + 3.0).abs() < 1e-15);
     }
 
     #[test]
