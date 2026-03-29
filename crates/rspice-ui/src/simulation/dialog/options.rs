@@ -565,6 +565,7 @@ impl SimulationOptions {
             abstol: Some(self.abstol),
             voltage_abstol: Some(self.vntol),
             current_abstol: Some(self.iabstol),
+            charge_abstol: Some(self.chgtol),
             residual_reltol: Some(self.residual_reltol),
             gmin_initial: Some(self.gmin),
         }
@@ -1199,12 +1200,13 @@ mod tests {
     }
 
     #[test]
-    fn test_to_simulation_config_maps_voltage_convergence_tolerances() {
+    fn test_to_simulation_config_maps_convergence_tolerances() {
         let mut opts = SimulationOptions::default();
         opts.reltol = 2e-3;
         opts.residual_reltol = 6e-4;
         opts.vntol = 3e-6;
         opts.iabstol = 4e-12;
+        opts.chgtol = 7e-15;
         opts.gmin = 5e-10;
 
         let sim = opts.to_simulation_config();
@@ -1213,6 +1215,7 @@ mod tests {
         assert!((sim.convergence_config.residual_reltol - 6e-4).abs() < 1e-15);
         assert!((sim.convergence_config.voltage_abstol - 3e-6).abs() < 1e-15);
         assert!((sim.convergence_config.current_abstol - 4e-12).abs() < 1e-24);
+        assert!((sim.convergence_config.charge_abstol - 7e-15).abs() < 1e-27);
         assert!((sim.convergence_config.gmin_initial - 5e-10).abs() < 1e-21);
     }
 
@@ -1224,6 +1227,20 @@ mod tests {
         let sim = opts.to_simulation_config();
         assert!((sim.convergence_config.gmin_initial - 1e-16).abs() < 1e-28);
         assert!((sim.convergence_config.gmin_target - 1e-16).abs() < 1e-28);
+    }
+
+    #[test]
+    fn test_resolve_simulation_config_ui_chgtol_overrides_netlist() {
+        let mut opts = SimulationOptions::default();
+        opts.chgtol = 2e-14;
+
+        let netlist_options = rspice_core::netlist::SimulationOptions {
+            chgtol: Some(9e-15),
+            ..Default::default()
+        };
+
+        let sim = opts.resolve_simulation_config(Some(&netlist_options));
+        assert!((sim.convergence_config.charge_abstol - 2e-14).abs() < 1e-27);
     }
 
     //=========================================================================
@@ -1260,11 +1277,9 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, ValidationError::InvalidTolerance("residual_reltol", _)))
-        );
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::InvalidTolerance("residual_reltol", _))));
     }
 
     #[test]
@@ -1282,11 +1297,9 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, ValidationError::InvalidIteration("itl1", _)))
-        );
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::InvalidIteration("itl1", _))));
     }
 
     #[test]
@@ -1297,11 +1310,9 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(
-            errors
-                .iter()
-                .any(|e| matches!(e, ValidationError::TimestepOrder(_, _)))
-        );
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::TimestepOrder(_, _))));
     }
 
     #[test]
