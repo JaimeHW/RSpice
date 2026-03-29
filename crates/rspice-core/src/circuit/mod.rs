@@ -21,6 +21,65 @@ use thiserror::Error;
 /// Node identifier (0 = ground, always)
 pub type NodeId = usize;
 
+#[inline]
+fn solution_node_voltage(solution: &[Value], node: NodeId) -> Option<Value> {
+    if node == 0 {
+        Some(0.0)
+    } else {
+        solution
+            .get(node - 1)
+            .copied()
+            .filter(|value| value.is_finite())
+    }
+}
+
+#[inline]
+fn project_two_terminal_voltage(
+    solution: &mut [Value],
+    node_pos: NodeId,
+    node_neg: NodeId,
+    target_voltage: Value,
+) {
+    if !target_voltage.is_finite() {
+        return;
+    }
+
+    if node_neg == 0 && node_pos > 0 {
+        if let Some(v) = solution.get_mut(node_pos - 1) {
+            *v = target_voltage;
+        }
+        return;
+    }
+
+    if node_pos == 0 && node_neg > 0 {
+        if let Some(v) = solution.get_mut(node_neg - 1) {
+            *v = -target_voltage;
+        }
+        return;
+    }
+
+    if node_pos == 0 || node_neg == 0 {
+        return;
+    }
+
+    let vp_idx = node_pos - 1;
+    let vn_idx = node_neg - 1;
+    if vp_idx >= solution.len() || vn_idx >= solution.len() {
+        return;
+    }
+
+    let vp = solution[vp_idx];
+    let vn = solution[vn_idx];
+    if !(vp.is_finite() && vn.is_finite()) {
+        return;
+    }
+
+    let midpoint = 0.5 * (vp + vn);
+    let half_diff = 0.5 * target_voltage;
+    solution[vp_idx] = midpoint + half_diff;
+    solution[vn_idx] = midpoint - half_diff;
+}
+
 /// Errors in circuit construction
 #[derive(Debug, Error)]
 pub enum CircuitError {
@@ -958,37 +1017,7 @@ impl VoltageSources {
                 }
                 None => self.dc_values[i],
             };
-
-            // If negative node is ground (nn=0), positive node voltage = source voltage
-            // If negative node is not ground, we can only correct if we know its voltage
-            if nn == 0 && np > 0 {
-                // V(np) - V(ground) = Vs  =>  V(np) = Vs
-                if let Some(v) = solution.get_mut(np - 1) {
-                    *v = v_source;
-                }
-            } else if np == 0 && nn > 0 {
-                // V(ground) - V(nn) = Vs  =>  V(nn) = -Vs
-                if let Some(v) = solution.get_mut(nn - 1) {
-                    *v = -v_source;
-                }
-            } else if np > 0 && nn > 0 {
-                // For floating sources preserve the pair's common-mode voltage and
-                // correct only the differential component so V(np) - V(nn) = Vs.
-                let vp_idx = np - 1;
-                let vn_idx = nn - 1;
-                if vp_idx >= solution.len() || vn_idx >= solution.len() {
-                    continue;
-                }
-                let vp = solution[vp_idx];
-                let vn = solution[vn_idx];
-                if !(vp.is_finite() && vn.is_finite() && v_source.is_finite()) {
-                    continue;
-                }
-                let midpoint = 0.5 * (vp + vn);
-                let half_diff = 0.5 * v_source;
-                solution[vp_idx] = midpoint + half_diff;
-                solution[vn_idx] = midpoint - half_diff;
-            }
+            project_two_terminal_voltage(solution, np, nn, v_source);
         }
     }
 }
@@ -2296,6 +2325,82 @@ impl CircuitData {
         self.num_branches
     }
 
+    #[inline]
+    fn mark_force_accept_protected_node(mask: &mut [bool], node: NodeId) {
+        if node > 0 {
+            if let Some(slot) = mask.get_mut(node - 1) {
+                *slot = true;
+            }
+        }
+    }
+
+    /// Nodes driven by ideal voltage-output elements should not be post-clamped
+    /// after a force-accepted Newton step because that would immediately break
+    /// the ideal constraint equation the solver is trying to preserve.
+    pub fn force_accept_protected_nodes(&self) -> Vec<bool> {
+        let mut mask = vec![false; self.num_nodes()];
+
+        for idx in 0..self.voltage_sources.len() {
+            Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_pos[idx]);
+            Self::mark_force_accept_protected_node(&mut mask, self.voltage_sources.node_neg[idx]);
+        }
+        for idx in 0..self.vcvs.len() {
+            Self::mark_force_accept_protected_node(&mut mask, self.vcvs.node_pos[idx]);
+            Self::mark_force_accept_protected_node(&mut mask, self.vcvs.node_neg[idx]);
+        }
+        for idx in 0..self.ccvs.len() {
+            Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_pos[idx]);
+            Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_neg[idx]);
+        }
+
+        mask
+    }
+
+    /// Re-project all ideal voltage-output equations after a force-accepted
+    /// timestep so the accepted state remains consistent with independent and
+    /// controlled source constraints.
+    pub fn enforce_ideal_voltage_constraints(&self, solution: &mut [Value], time: Value) {
+        self.voltage_sources
+            .enforce_voltage_constraints(solution, time);
+
+        for idx in 0..self.vcvs.len() {
+            let Some(v_ctrl_pos) = solution_node_voltage(solution, self.vcvs.ctrl_pos[idx]) else {
+                continue;
+            };
+            let Some(v_ctrl_neg) = solution_node_voltage(solution, self.vcvs.ctrl_neg[idx]) else {
+                continue;
+            };
+            let target_voltage = self.vcvs.gains[idx] * (v_ctrl_pos - v_ctrl_neg);
+            project_two_terminal_voltage(
+                solution,
+                self.vcvs.node_pos[idx],
+                self.vcvs.node_neg[idx],
+                target_voltage,
+            );
+        }
+
+        for idx in 0..self.ccvs.len() {
+            let ctrl_branch = self.ccvs.ctrl_branch[idx];
+            if ctrl_branch == 0 {
+                continue;
+            }
+            let ctrl_idx = self.get_branch_matrix_index(ctrl_branch).saturating_sub(1);
+            let Some(&ctrl_current) = solution.get(ctrl_idx) else {
+                continue;
+            };
+            if !ctrl_current.is_finite() {
+                continue;
+            }
+            let target_voltage = self.ccvs.transresistances[idx] * ctrl_current;
+            project_two_terminal_voltage(
+                solution,
+                self.ccvs.node_pos[idx],
+                self.ccvs.node_neg[idx],
+                target_voltage,
+            );
+        }
+    }
+
     /// Refresh effective inductance values for all Jiles-Atherton inductors.
     ///
     /// Call this with the latest solution vector before transient companion
@@ -3494,6 +3599,65 @@ mod tests {
             "expected floating source correction to enforce the source voltage"
         );
         assert!((solution[2] + 3.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_force_accept_protected_nodes_include_all_ideal_voltage_outputs() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 6;
+        circuit.num_branches = 3;
+        circuit.voltage_sources.add("V1".to_string(), 1, 2, 1, 5.0);
+        circuit
+            .vcvs
+            .add("E1".to_string(), 3, 4, 1, 2, 1, 2.0);
+        circuit
+            .ccvs
+            .add("H1".to_string(), 5, 6, 2, 1, 10.0);
+
+        let protected = circuit.force_accept_protected_nodes();
+        assert_eq!(
+            protected,
+            vec![true, true, true, true, true, true],
+            "expected every ideal voltage-output node to be protected from post-force-accept clamping"
+        );
+    }
+
+    #[test]
+    fn test_enforce_ideal_voltage_constraints_projects_vcvs_and_ccvs_outputs() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 5;
+        circuit.num_branches = 2;
+        circuit
+            .voltage_sources
+            .add("V1".to_string(), 1, 0, 1, 3.3);
+        circuit
+            .vcvs
+            .add("E1".to_string(), 2, 3, 1, 0, 1, 0.5);
+        circuit
+            .ccvs
+            .add("H1".to_string(), 4, 5, 2, 1, 20.0);
+
+        let mut solution = vec![
+            0.1,  // node 1
+            0.0,  // node 2
+            1.0,  // node 3
+            -0.5, // node 4
+            2.5,  // node 5
+            0.75, // branch current for E1
+            -0.2, // branch current for H1
+        ];
+
+        circuit.enforce_ideal_voltage_constraints(&mut solution, 0.0);
+
+        assert!((solution[0] - 3.3).abs() < 1e-15);
+        assert!(
+            ((solution[1] - solution[2]) - 1.65).abs() < 1e-15,
+            "expected VCVS output to match gain * control voltage"
+        );
+        assert!(
+            ((solution[3] - solution[4]) - 15.0).abs() < 1e-15,
+            "expected CCVS output to match transresistance * control current"
+        );
     }
 
     #[test]

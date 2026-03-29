@@ -1017,6 +1017,12 @@ impl Engine {
         vb: Value,
         ve: Value,
         vs: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         snapshot: &mut crate::device::semiconductor::BjtChargeSnapshot,
     ) {
         let mut internal = snapshot.reduction.internal_voltages;
@@ -1026,8 +1032,20 @@ impl Engine {
         let mut best_residual = Value::INFINITY;
 
         for _ in 0..8 {
-            let (residual, derivative) =
-                bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, internal);
+            let (residual, derivative) = Self::vbic_transient_thermal_residual_and_derivative(
+                bjt,
+                vc,
+                vb,
+                ve,
+                vs,
+                internal,
+                method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            );
             let residual_abs = residual.abs();
             if residual_abs.is_finite() && residual_abs < best_residual {
                 best_residual = residual_abs;
@@ -1059,8 +1077,20 @@ impl Engine {
 
                 let mut candidate = internal;
                 candidate[BJT_THERMAL_STATE_INDEX] = candidate_vrth;
-                let (candidate_residual, _) =
-                    bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, candidate);
+                let (candidate_residual, _) = Self::vbic_transient_thermal_residual_and_derivative(
+                    bjt,
+                    vc,
+                    vb,
+                    ve,
+                    vs,
+                    candidate,
+                    method,
+                    trap_order,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
                 let candidate_abs = candidate_residual.abs();
                 if candidate_abs.is_finite() && candidate_abs < best_candidate_residual {
                     best_candidate = candidate;
@@ -1093,6 +1123,44 @@ impl Engine {
     }
 
     #[inline]
+    fn vbic_transient_thermal_residual_and_derivative(
+        bjt: &crate::device::Bjt,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+    ) -> (Value, Value) {
+        let thermal_charge_idx = BJT_DYNAMIC_CHARGE_COUNT - 3;
+        let (mut residual, mut derivative) =
+            bjt.vbic_dynamic_thermal_residual_and_derivative(vc, vb, ve, vs, internal);
+
+        let cth = bjt.thermal_capacitance();
+        let charge_factor = Self::jfet_companion_geq(method, trap_order, 1.0, dt);
+        if cth > 0.0 && charge_factor > 0.0 {
+            let vrth = internal[BJT_THERMAL_STATE_INDEX];
+            let ieq = Self::linear_charge_history_ieq(
+                method,
+                trap_order,
+                dt,
+                q_prev[thermal_charge_idx],
+                q_prev_prev[thermal_charge_idx],
+                cq_prev[thermal_charge_idx],
+            );
+            residual += charge_factor * cth * vrth - ieq;
+            derivative += charge_factor * cth;
+        }
+
+        (residual, derivative)
+    }
+
+    #[inline]
     fn assemble_vbic_transient_linearization(
         bjt: &crate::device::Bjt,
         snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
@@ -1116,8 +1184,8 @@ impl Engine {
         let mut c_ie = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM];
         let mut c_ei = [[0.0; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
         let mut c_ee = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-        let mut z_i = [0.0; BJT_INTERNAL_STATE_DIM];
-        let mut z_e = [0.0; BJT_EXTERNAL_STATE_DIM];
+        let mut z_i = snapshot.reduction.z_i_static;
+        let mut z_e = snapshot.reduction.z_e_static;
         let mut has_dynamic_charge = false;
 
         for branch in bjt.vbic_delay_static_branches(&snapshot.reduction) {
@@ -1470,7 +1538,20 @@ impl Engine {
         } else {
             bjt.charge_snapshot(vc, vb, ve, vs)
         };
-        Self::rebalance_vbic_dynamic_thermal_state(bjt, vc, vb, ve, vs, &mut seeded_snapshot);
+        Self::rebalance_vbic_dynamic_thermal_state(
+            bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            method,
+            trap_order,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+            &mut seeded_snapshot,
+        );
         let mut base_static_g = seeded_snapshot.reduction.g_reduced;
         let mut transient_linearization = Self::assemble_vbic_transient_linearization(
             bjt,
@@ -1483,7 +1564,8 @@ impl Engine {
             cq_prev,
         )?;
 
-        for _ in 0..32 {
+        let max_refinements = if bjt.has_vbic_self_heating() { 96 } else { 32 };
+        for _ in 0..max_refinements {
             let solved_internal = Self::solve_vbic_internal_state_from_linearization(
                 &transient_linearization,
                 &seeded_snapshot.reduction.external_voltages,
@@ -1524,9 +1606,8 @@ impl Engine {
                 break;
             }
 
-            let mut solved_snapshot =
+            let solved_snapshot =
                 bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, solved_internal);
-            Self::rebalance_vbic_dynamic_thermal_state(bjt, vc, vb, ve, vs, &mut solved_snapshot);
             base_static_g = solved_snapshot.reduction.g_reduced;
             let Some(solved_linearization) = Self::assemble_vbic_transient_linearization(
                 bjt,
@@ -3333,6 +3414,7 @@ impl Engine {
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
+        let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
 
         // Main transient loop
         let mut retry_count = 0;
@@ -3957,15 +4039,16 @@ impl Engine {
                     // While not fully converged, the Newton result is still a valid
                     // approximation that respects circuit equations (just with residual error).
                     // This is the standard SPICE approach for force-accept.
-                    // Voltage sources are enforced to ensure correct input values.
-                    circuit
-                        .voltage_sources
-                        .enforce_voltage_constraints(&mut new_solution, t);
-                    nonlinear_state_matches_new_solution = false;
+                    // Re-project ideal voltage-output equations first so the
+                    // accepted state remains source-consistent.
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t);
 
-                    // Keep forced movement tightly bounded to prevent long-run drift
-                    // when a region requires repeated force-accepts.
+                    // Keep source-free node movement tightly bounded to prevent
+                    // long-run drift without breaking ideal voltage constraints.
                     for i in 0..num_nodes {
+                        if force_accept_protected_nodes.get(i).copied().unwrap_or(false) {
+                            continue;
+                        }
                         let old = solution[i];
                         let delta = new_solution[i] - old;
                         if delta.is_finite() && delta.abs() > force_accept_delta_limit {
@@ -3973,12 +4056,9 @@ impl Engine {
                             nonlinear_state_matches_new_solution = false;
                         }
                     }
-                    circuit
-                        .voltage_sources
-                        .enforce_voltage_constraints(&mut new_solution, t);
-                    nonlinear_state_matches_new_solution = false;
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t);
 
-                    if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
+                    if circuit.has_nonlinear_devices() {
                         circuit.update_nonlinear(&new_solution);
                         nonlinear_state_matches_new_solution = true;
                     }
@@ -4177,12 +4257,12 @@ impl Engine {
                         let restart_dt = breakpoints.mark_breakpoint_solved(t);
                         timestep.force_step(restart_dt.min(max_step));
                     }
-                    circuit
-                        .voltage_sources
-                        .enforce_voltage_constraints(&mut new_solution, t);
-                    nonlinear_state_matches_new_solution = false;
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t);
 
                     for i in 0..num_nodes {
+                        if force_accept_protected_nodes.get(i).copied().unwrap_or(false) {
+                            continue;
+                        }
                         let old = solution[i];
                         let delta = new_solution[i] - old;
                         if delta.is_finite() && delta.abs() > force_accept_delta_limit {
@@ -4190,12 +4270,9 @@ impl Engine {
                             nonlinear_state_matches_new_solution = false;
                         }
                     }
-                    circuit
-                        .voltage_sources
-                        .enforce_voltage_constraints(&mut new_solution, t);
-                    nonlinear_state_matches_new_solution = false;
+                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t);
 
-                    if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
+                    if circuit.has_nonlinear_devices() {
                         circuit.update_nonlinear(&new_solution);
                         nonlinear_state_matches_new_solution = true;
                     }
@@ -5218,6 +5295,169 @@ Q1 C B 0 N1\n\
         (circuit.bjts.devices[0].clone(), 4.1, 0.75, 0.0, 0.0)
     }
 
+    fn vbic_self_heated_pnp_diffamp_test_bjt() -> (crate::device::Bjt, f64, f64, f64, f64) {
+        let netlist = crate::Netlist::parse(
+            "VBIC transient self-heated PNP focus\n\
+VS S 0 1.575451\n\
+VE E 0 1.94\n\
+VB B 0 2.614704\n\
+VC C 0 1.575451\n\
+Q1 C B E S P1\n\
+.MODEL P1 PNP LEVEL=4\n\
++ IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 ISP=1e-15 RCX=10\n\
++ RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2e-3 ITF=8e-2\n\
++ XTF=20 IKR=2e-4 IKP=2e-4 CJE=1e-13 CJC=2e-14 CJEP=1e-13 CJCP=4e-13 VO=2\n\
++ GAMM=2e-11 HRCF=2 QCO=1e-12 AVC1=2 AVC2=15 TF=10e-12 TR=100e-12 TD=2e-11 RTH=300 SELFT=1\n\
+.end",
+        )
+        .expect("parse self-heated PNP VBIC focus deck");
+        let engine = Engine::default();
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("build self-heated PNP VBIC focus circuit");
+        (circuit.bjts.devices[0].clone(), 1.575_451, 2.614_704, 1.94, 1.575_451)
+    }
+
+    fn vbic_reduced_external_current(
+        bjt: &crate::device::Bjt,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        seed_internal: &[Value; BJT_INTERNAL_STATE_DIM],
+    ) -> (
+        [Value; BJT_EXTERNAL_STATE_DIM],
+        [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        let (_snapshot, linearization, _snapshot_static_g) = Engine::solve_vbic_dynamic_snapshot(
+            bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            method,
+            trap_order,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+            Some(seed_internal),
+        )
+        .expect("solve VBIC transient state");
+        let (y_total, reduced_i_eq) = Engine::vbic_reduce_transient_external_system(&linearization)
+            .expect("reduce VBIC transient external system");
+        let external = [vc, vb, ve, vs];
+        let mut currents = [0.0; BJT_EXTERNAL_STATE_DIM];
+        for row in 0..BJT_EXTERNAL_STATE_DIM {
+            currents[row] = -reduced_i_eq[row];
+            for col in 0..BJT_EXTERNAL_STATE_DIM {
+                currents[row] += y_total[row][col] * external[col];
+            }
+        }
+        (currents, y_total)
+    }
+
+    #[test]
+    fn test_vbic_pnp_self_heated_dynamic_snapshot_satisfies_reduced_internal_solve_at_diffamp_bias()
+    {
+        let (mut bjt, vc, vb, ve, vs) = vbic_self_heated_pnp_diffamp_test_bjt();
+        bjt.update(&[vc, vb, ve, vs]);
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 1e-11;
+
+        let base_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let mut q_prev = base_snapshot.branches.map(|branch| branch.charge);
+        let mut q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        q_prev[BJT_DELAY_XF1_BRANCH_INDEX] *= 0.35;
+        q_prev_prev[BJT_DELAY_XF1_BRANCH_INDEX] *= 1.20;
+        q_prev[BJT_DELAY_XF2_BRANCH_INDEX] *= 1.65;
+        q_prev_prev[BJT_DELAY_XF2_BRANCH_INDEX] *= 0.50;
+
+        let mut history_prev = base_snapshot.reduction.internal_voltages;
+        history_prev[BJT_DELAY_XF1_STATE_INDEX] =
+            0.65 * history_prev[BJT_DELAY_XF1_STATE_INDEX] + 1.0e-6;
+        history_prev[BJT_DELAY_XF2_STATE_INDEX] =
+            1.35 * history_prev[BJT_DELAY_XF2_STATE_INDEX] - 2.0e-6;
+        history_prev[BJT_THERMAL_STATE_INDEX] += 4.0;
+        let mut history_prev_prev = history_prev;
+        history_prev_prev[BJT_DELAY_XF2_STATE_INDEX] =
+            0.8 * history_prev_prev[BJT_DELAY_XF2_STATE_INDEX] + 3.0e-6;
+        history_prev_prev[BJT_THERMAL_STATE_INDEX] -= 1.5;
+        let seed_internal = Engine::vbic_dynamic_internal_seed_from_history(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            Some(&history_prev),
+            Some(&history_prev_prev),
+            dt,
+            dt / 2.0,
+        );
+
+        let (solved_snapshot, solved_linearization, _) = Engine::solve_vbic_dynamic_snapshot(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            Some(&seed_internal),
+        )
+        .expect("solve self-heated PNP VBIC transient state");
+        let solved_internal = Engine::solve_vbic_internal_state_from_linearization(
+            &solved_linearization,
+            &solved_snapshot.reduction.external_voltages,
+        )
+        .expect("solve reduced PNP VBIC internal state");
+
+        for idx in 0..BJT_INTERNAL_STATE_DIM {
+            let delta =
+                (solved_snapshot.reduction.internal_voltages[idx] - solved_internal[idx]).abs();
+            assert!(
+                delta < 5e-10,
+                "expected PNP diffamp snapshot to satisfy reduced internal solve at index {idx}; snapshot={:.16e}, solved={:.16e}, delta={delta:.3e}",
+                solved_snapshot.reduction.internal_voltages[idx],
+                solved_internal[idx]
+            );
+        }
+
+        let solved_residual = Engine::vbic_transient_thermal_residual_and_derivative(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            solved_snapshot.reduction.internal_voltages,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+        )
+        .0
+        .abs();
+        assert!(
+            solved_residual < 1e-9,
+            "expected PNP diffamp transient thermal residual to converge, got {solved_residual:.3e}"
+        );
+    }
+
     #[test]
     fn test_solve_vbic_dynamic_snapshot_solves_internal_state_after_history_seed() {
         let (bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
@@ -5522,6 +5762,117 @@ Q1 C B 0 N1\n\
     }
 
     #[test]
+    fn test_vbic_pnp_self_heated_dynamic_reduced_jacobian_matches_finite_difference_at_diffamp_bias()
+    {
+        let (mut bjt, vc, vb, ve, vs) = vbic_self_heated_pnp_diffamp_test_bjt();
+        bjt.update(&[vc, vb, ve, vs]);
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 1e-11;
+
+        let base_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let mut q_prev = base_snapshot.branches.map(|branch| branch.charge);
+        let mut q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        q_prev[BJT_DELAY_XF1_BRANCH_INDEX] *= 0.35;
+        q_prev_prev[BJT_DELAY_XF1_BRANCH_INDEX] *= 1.20;
+        q_prev[BJT_DELAY_XF2_BRANCH_INDEX] *= 1.65;
+        q_prev_prev[BJT_DELAY_XF2_BRANCH_INDEX] *= 0.50;
+
+        let mut history_prev = base_snapshot.reduction.internal_voltages;
+        history_prev[BJT_DELAY_XF1_STATE_INDEX] =
+            0.65 * history_prev[BJT_DELAY_XF1_STATE_INDEX] + 1.0e-6;
+        history_prev[BJT_DELAY_XF2_STATE_INDEX] =
+            1.35 * history_prev[BJT_DELAY_XF2_STATE_INDEX] - 2.0e-6;
+        history_prev[BJT_THERMAL_STATE_INDEX] += 4.0;
+        let mut history_prev_prev = history_prev;
+        history_prev_prev[BJT_DELAY_XF2_STATE_INDEX] =
+            0.8 * history_prev_prev[BJT_DELAY_XF2_STATE_INDEX] + 3.0e-6;
+        history_prev_prev[BJT_THERMAL_STATE_INDEX] -= 1.5;
+
+        let seed_for = |vc: Value, vb: Value, ve: Value, vs: Value| {
+            Engine::vbic_dynamic_internal_seed_from_history(
+                &bjt,
+                vc,
+                vb,
+                ve,
+                vs,
+                Some(&history_prev),
+                Some(&history_prev_prev),
+                dt,
+                dt / 2.0,
+            )
+        };
+
+        let center_seed = seed_for(vc, vb, ve, vs);
+        let (_center_currents, center_jacobian) = vbic_reduced_external_current(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            &center_seed,
+        );
+
+        let mut external = [vc, vb, ve, vs];
+        let eps = 1e-6;
+        for col_idx in 0..BJT_EXTERNAL_STATE_DIM {
+            external[col_idx] += eps;
+            let plus_seed = seed_for(external[0], external[1], external[2], external[3]);
+            let (plus_currents, _) = vbic_reduced_external_current(
+                &bjt,
+                external[0],
+                external[1],
+                external[2],
+                external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                &plus_seed,
+            );
+
+            external[col_idx] -= 2.0 * eps;
+            let minus_seed = seed_for(external[0], external[1], external[2], external[3]);
+            let (minus_currents, _) = vbic_reduced_external_current(
+                &bjt,
+                external[0],
+                external[1],
+                external[2],
+                external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                &minus_seed,
+            );
+            external[col_idx] += eps;
+
+            for row_idx in 0..BJT_EXTERNAL_STATE_DIM {
+                let analytical = center_jacobian[row_idx][col_idx];
+                let numerical = (plus_currents[row_idx] - minus_currents[row_idx]) / (2.0 * eps);
+                let scale = analytical.abs().max(numerical.abs()).max(1e-8);
+                let rel_err = (analytical - numerical).abs() / scale;
+                assert!(
+                    rel_err < 5e-2,
+                    "PNP dynamic reduced Jacobian mismatch row={row_idx} col={col_idx}: analytical={analytical:.12e} numerical={numerical:.12e} rel_err={rel_err:.3e}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_solve_vbic_dynamic_snapshot_converges_self_heated_internal_state_after_history_seed() {
         let (bjt, vc, vb, ve, vs) = vbic_self_heated_focus_test_bjt();
         let method = IntegrationMethod::Trapezoidal;
@@ -5559,16 +5910,22 @@ Q1 C B 0 N1\n\
             dt / 2.0,
         );
         let history_seed = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, seed_internal);
-        let seed_residual = bjt
-            .vbic_dynamic_thermal_residual_and_derivative(
-                vc,
-                vb,
-                ve,
-                vs,
-                history_seed.reduction.internal_voltages,
-            )
-            .0
-            .abs();
+        let seed_residual = Engine::vbic_transient_thermal_residual_and_derivative(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            history_seed.reduction.internal_voltages,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+        )
+        .0
+        .abs();
 
         let (solved_snapshot, solved_linearization, solved_static_g) =
             Engine::solve_vbic_dynamic_snapshot(
@@ -5586,16 +5943,22 @@ Q1 C B 0 N1\n\
                 Some(&seed_internal),
             )
             .expect("solve VBIC transient state");
-        let solved_residual = bjt
-            .vbic_dynamic_thermal_residual_and_derivative(
-                vc,
-                vb,
-                ve,
-                vs,
-                solved_snapshot.reduction.internal_voltages,
-            )
-            .0
-            .abs();
+        let solved_residual = Engine::vbic_transient_thermal_residual_and_derivative(
+            &bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            solved_snapshot.reduction.internal_voltages,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+        )
+        .0
+        .abs();
 
         assert!(
             solved_residual < seed_residual,
@@ -5630,9 +5993,6 @@ Q1 C B 0 N1\n\
         )
         .expect("solve reduced self-heated VBIC internal state");
         for idx in 0..BJT_INTERNAL_STATE_DIM {
-            if idx == BJT_THERMAL_STATE_INDEX {
-                continue;
-            }
             let delta =
                 (solved_snapshot.reduction.internal_voltages[idx] - solved_internal[idx]).abs();
             assert!(
@@ -5997,7 +6357,7 @@ Q1 C B 0 N1\n\
         config.integration_method = IntegrationMethod::Trapezoidal;
         config.min_timestep = 1e-12;
         config.temperature = 300.15;
-        let mut engine = Engine::new(config);
+        let engine = Engine::new(config);
         let mut circuit = engine.build_circuit(&netlist).expect("build diffamp circuit");
         let mut matrix = engine.build_matrix(&circuit).expect("build diffamp matrix");
         let solution = engine
