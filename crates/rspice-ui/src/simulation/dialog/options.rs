@@ -1277,9 +1277,11 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::InvalidTolerance("residual_reltol", _))));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidTolerance("residual_reltol", _)))
+        );
     }
 
     #[test]
@@ -1297,9 +1299,11 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::InvalidIteration("itl1", _))));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::InvalidIteration("itl1", _)))
+        );
     }
 
     #[test]
@@ -1310,9 +1314,11 @@ mod tests {
         let result = opts.validate();
         assert!(result.is_err());
         let errors = result.unwrap_err();
-        assert!(errors
-            .iter()
-            .any(|e| matches!(e, ValidationError::TimestepOrder(_, _))));
+        assert!(
+            errors
+                .iter()
+                .any(|e| matches!(e, ValidationError::TimestepOrder(_, _)))
+        );
     }
 
     #[test]
