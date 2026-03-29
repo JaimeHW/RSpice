@@ -1,5 +1,6 @@
 use super::{
-    AbortSignal, AnalysisCommand, Engine, Netlist, STARTUP_RECOVERY_DELTA_V, SimulationError, Value,
+    AbortSignal, AnalysisCommand, Engine, Netlist, STARTUP_RECOVERY_DELTA_V, SimulationError,
+    VBIC_STARTUP_RECOVERY_DELTA_V, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,11 +223,39 @@ impl Engine {
         max_step: Value,
         base_limit: Value,
     ) -> Value {
+        Self::startup_step_delta_limit_with_vbic_td(mode, false, None, time, max_step, base_limit)
+    }
+
+    #[inline]
+    pub(super) fn startup_step_delta_limit_with_vbic_td(
+        mode: InitialSolutionMode,
+        has_vbic_excess_phase: bool,
+        smallest_vbic_td: Option<Value>,
+        time: Value,
+        max_step: Value,
+        base_limit: Value,
+    ) -> Value {
         if Self::in_startup_recovery_window(mode, time, max_step) {
-            base_limit.max(STARTUP_RECOVERY_DELTA_V)
-        } else {
-            base_limit
+            let startup_limit = if has_vbic_excess_phase {
+                VBIC_STARTUP_RECOVERY_DELTA_V
+            } else {
+                STARTUP_RECOVERY_DELTA_V
+            };
+            return base_limit.max(startup_limit);
         }
+        if has_vbic_excess_phase
+            && let Some(td) = smallest_vbic_td.filter(|td| td.is_finite() && *td > 0.0)
+        {
+            // Even with a valid DC operating point, excess-phase VBIC decks need a
+            // short startup window where the hidden xf states can move into their
+            // charge-history-consistent basin without being throttled by the generic
+            // semiconductor trust region.
+            let relaxed_until = (td * 10.0).clamp(5e-12, 5e-10);
+            if time <= relaxed_until {
+                return base_limit.max(VBIC_STARTUP_RECOVERY_DELTA_V);
+            }
+        }
+        base_limit
     }
 
     #[inline]
@@ -271,6 +300,25 @@ impl Engine {
         min_div: Value,
         tran_step_hint: Option<Value>,
     ) -> Value {
+        Self::startup_practical_min_timestep_with_vbic_td(
+            has_bjts,
+            has_vbic_excess_phase,
+            hinted_max_step,
+            min_div,
+            tran_step_hint,
+            None,
+        )
+    }
+
+    #[inline]
+    pub(super) fn startup_practical_min_timestep_with_vbic_td(
+        has_bjts: bool,
+        has_vbic_excess_phase: bool,
+        hinted_max_step: Value,
+        min_div: Value,
+        tran_step_hint: Option<Value>,
+        smallest_vbic_td: Option<Value>,
+    ) -> Value {
         let mut practical_min = (hinted_max_step / min_div).max(1e-15);
         if has_bjts
             && let Some(step) = tran_step_hint.filter(|step| step.is_finite() && *step > 0.0)
@@ -280,6 +328,14 @@ impl Engine {
             // cadence to resolve startup nonlinearities before force-accept.
             let floor_fraction = if has_vbic_excess_phase { 0.01 } else { 0.05 };
             practical_min = practical_min.max((step * floor_fraction).min(hinted_max_step));
+        }
+        if has_vbic_excess_phase
+            && let Some(td) = smallest_vbic_td.filter(|td| td.is_finite() && *td > 0.0)
+        {
+            // Resolve excess-phase state dynamics on a scale finer than the model's
+            // own transport delay so Newton can recover by shrinking dt instead of
+            // force-accepting at an artificial print-step floor.
+            practical_min = practical_min.min((td / 20.0).clamp(1e-15, hinted_max_step));
         }
         practical_min
     }

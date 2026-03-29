@@ -1043,7 +1043,11 @@ impl Bjt {
     fn self_heating_enabled(&self) -> bool {
         self.charge_model == BjtChargeModel::Vbic
             && self.rth_nominal > 0.0
-            && (!self.selft_given || self.selft >= 0.5)
+            // The shipped ngspice VBIC regression decks include `RTH` on several
+            // level-4 models whose reference outputs match the non-self-heated
+            // solution unless `SELFT` is explicitly enabled.
+            && self.selft_given
+            && self.selft >= 0.5
     }
 
     #[inline]
@@ -6005,6 +6009,26 @@ impl Bjt {
         self.reduced_linearization(vc, vb, ve, vs).g_reduced
     }
 
+    pub(crate) fn stamped_reduced_external_system(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+    ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
+        let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
+        let biases = [vc, vb, ve, vs];
+        let currents = [self.ic, self.ib, self.ie, self.isub];
+        let mut rhs = [0.0; EXTERNAL_DIM];
+        for row in 0..EXTERNAL_DIM {
+            rhs[row] = -currents[row];
+            for col in 0..EXTERNAL_DIM {
+                rhs[row] += rows[row][col] * biases[col];
+            }
+        }
+        (rows, rhs)
+    }
+
     pub(crate) fn stamp_small_signal_ac(
         &self,
         voltages: &[Value],
@@ -6866,7 +6890,7 @@ Q1 Q1_C V1_P 0 N1
     }
 
     #[test]
-    fn test_bjt_vbic_high_voltage_self_heating_reference_tracks_ngspice() {
+    fn test_bjt_vbic_high_voltage_rth_without_selft_tracks_ngspice_reference() {
         let netlist = crate::Netlist::parse(
             r#"VBIC Output High-Voltage Reference
 V1 V1_P V1_N 0.0
@@ -7172,17 +7196,17 @@ Q1 Q1_C V1_P 0 N1
     }
 
     #[test]
-    fn test_bjt_vbic_rth_without_selft_enables_internal_thermal_state_by_default() {
+    fn test_bjt_vbic_rth_without_selft_keeps_internal_thermal_state_disabled() {
         let mut params = vbic_reference_params();
         params.insert("RTH".to_string(), 300.0);
         let q = Bjt::new_npn("Q1".to_string(), 4, 3, 2).with_params(&params);
 
         assert_eq!(q.selft, 0.0);
         assert!((q.cth_nominal - 1e-12).abs() < 1e-24);
-        assert!(q.self_heating_enabled());
-        assert!(q.thermal_conductance() > 0.0);
+        assert!(!q.self_heating_enabled());
+        assert_eq!(q.thermal_conductance(), 0.0);
         let snapshot = q.charge_snapshot(1.2, 0.82, 0.0, 0.4);
-        assert!(snapshot.branches[IDX_QCTH].is_active());
+        assert!(!snapshot.branches[IDX_QCTH].is_active());
     }
 
     #[test]
