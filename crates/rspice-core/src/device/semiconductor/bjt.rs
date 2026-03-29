@@ -296,6 +296,8 @@ pub(crate) struct BjtDynamicReduction {
     pub g_ei: [[Value; BJT_INTERNAL_STATE_DIM]; EXTERNAL_DIM],
     pub g_ee: [[Value; EXTERNAL_DIM]; EXTERNAL_DIM],
     pub g_reduced: [[Value; EXTERNAL_DIM]; EXTERNAL_DIM],
+    pub z_i_static: [Value; BJT_INTERNAL_STATE_DIM],
+    pub z_e_static: [Value; EXTERNAL_DIM],
     vbic_transport: TransportChargeState,
     vbic_d_itzf_d_vrth: Value,
 }
@@ -309,6 +311,8 @@ pub(crate) struct BjtReducedLinearization {
     pub g_ei: [[Value; INTERNAL_DIM]; EXTERNAL_DIM],
     pub g_ee: [[Value; EXTERNAL_DIM]; EXTERNAL_DIM],
     pub g_reduced: [[Value; EXTERNAL_DIM]; EXTERNAL_DIM],
+    pub z_i_static: [Value; INTERNAL_DIM],
+    pub z_e_static: [Value; EXTERNAL_DIM],
     cached_dynamic_inputs: Option<BjtDynamicChargeInputs>,
 }
 
@@ -1059,7 +1063,7 @@ impl Bjt {
     }
 
     #[inline]
-    fn thermal_capacitance(&self) -> Value {
+    pub(crate) fn thermal_capacitance(&self) -> Value {
         if !self.self_heating_enabled() {
             return 0.0;
         }
@@ -4068,7 +4072,7 @@ impl Bjt {
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
             state.vsi, state.vrth,
         );
-        let (jacobian, external_partials) =
+        let (jacobian, external_partials, _) =
             self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
         (eval, jacobian, external_partials)
     }
@@ -4084,6 +4088,7 @@ impl Bjt {
     ) -> (
         [[Value; INTERNAL_DIM]; INTERNAL_DIM],
         [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
+        [Value; INTERNAL_DIM],
     ) {
         let has_rcx = Self::series_active(self.rcx);
         let has_rci = Self::series_active(self.rci);
@@ -4114,6 +4119,33 @@ impl Bjt {
 
         let mut jacobian = [[0.0; INTERNAL_DIM]; INTERNAL_DIM];
         let mut external_partials = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
+        let mut source = [0.0; INTERNAL_DIM];
+        let internal = [
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+            state.vrth,
+        ];
+        let external = [vc, vb, ve, vs];
+        let assign_row = |row_idx: usize,
+                          row: BranchLinearization,
+                          jacobian: &mut [[Value; INTERNAL_DIM]; INTERNAL_DIM],
+                          external_partials: &mut [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
+                          source: &mut [Value; INTERNAL_DIM]| {
+            jacobian[row_idx] = row.d_internal;
+            external_partials[row_idx] = row.d_external;
+            source[row_idx] = row
+                .d_internal
+                .iter()
+                .zip(internal.iter())
+                .map(|(d, v)| d * v)
+                .sum::<Value>()
+                + row
+                    .d_external
+                    .iter()
+                    .zip(external.iter())
+                    .map(|(d, v)| d * v)
+                    .sum::<Value>()
+                - row.current;
+        };
 
         if has_rcx {
             let row = Self::sub_branches(
@@ -4124,8 +4156,13 @@ impl Bjt {
                     collector_internal
                 },
             );
-            jacobian[IDX_VCX] = row.d_internal;
-            external_partials[IDX_VCX] = row.d_external;
+            assign_row(
+                IDX_VCX,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VCX][IDX_VCX] = 1.0;
             external_partials[IDX_VCX][EXT_C] = -1.0;
@@ -4133,7 +4170,13 @@ impl Bjt {
 
         if has_rci {
             let row = Self::sub_branches(eval.irci, collector_internal);
-            jacobian[IDX_VCI] = row.d_internal;
+            assign_row(
+                IDX_VCI,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VCI][IDX_VCI] = 1.0;
             jacobian[IDX_VCI][IDX_VCX] = -1.0;
@@ -4147,8 +4190,13 @@ impl Bjt {
                 ),
                 eval.iccp,
             );
-            jacobian[IDX_VBX] = row.d_internal;
-            external_partials[IDX_VBX] = row.d_external;
+            assign_row(
+                IDX_VBX,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VBX][IDX_VBX] = 1.0;
             external_partials[IDX_VBX][EXT_B] = -1.0;
@@ -4156,7 +4204,13 @@ impl Bjt {
 
         if has_rbi {
             let row = Self::sub_branches(eval.irbi, base_internal);
-            jacobian[IDX_VBI] = row.d_internal;
+            assign_row(
+                IDX_VBI,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VBI][IDX_VBI] = 1.0;
             jacobian[IDX_VBI][IDX_VBX] = -1.0;
@@ -4164,8 +4218,13 @@ impl Bjt {
 
         if has_re {
             let row = Self::sub_branches(eval.ire, emitter_internal);
-            jacobian[IDX_VEI] = row.d_internal;
-            external_partials[IDX_VEI] = row.d_external;
+            assign_row(
+                IDX_VEI,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VEI][IDX_VEI] = 1.0;
             external_partials[IDX_VEI][EXT_E] = -1.0;
@@ -4173,7 +4232,13 @@ impl Bjt {
 
         if solve_vbp {
             let row = Self::sub_branches(Self::add_branches(eval.ibep, eval.ibcp), eval.irbp);
-            jacobian[IDX_VBP] = row.d_internal;
+            assign_row(
+                IDX_VBP,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VBP][IDX_VBP] = 1.0;
             jacobian[IDX_VBP][IDX_VCX] = -1.0;
@@ -4181,8 +4246,13 @@ impl Bjt {
 
         if has_rs {
             let row = Self::sub_branches(Self::add_branches(eval.irs, eval.iccp), eval.ibcp);
-            jacobian[IDX_VSI] = row.d_internal;
-            external_partials[IDX_VSI] = row.d_external;
+            assign_row(
+                IDX_VSI,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VSI][IDX_VSI] = 1.0;
             external_partials[IDX_VSI][EXT_S] = -1.0;
@@ -4190,13 +4260,18 @@ impl Bjt {
 
         if has_self_heat {
             let row = Self::sub_branches(thermal_sink, thermal_power);
-            jacobian[IDX_VRTH] = row.d_internal;
-            external_partials[IDX_VRTH] = row.d_external;
+            assign_row(
+                IDX_VRTH,
+                row,
+                &mut jacobian,
+                &mut external_partials,
+                &mut source,
+            );
         } else {
             jacobian[IDX_VRTH][IDX_VRTH] = 1.0;
         }
 
-        (jacobian, external_partials)
+        (jacobian, external_partials, source)
     }
 
     fn reduced_linearization_from_state_and_eval(
@@ -4208,12 +4283,33 @@ impl Bjt {
         ve: Value,
         vs: Value,
     ) -> BjtReducedLinearization {
-        let (g_ii, g_ie) = self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
+        let (g_ii, g_ie, z_i_static) =
+            self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
         let terminal_currents = self.external_terminal_branches(eval);
         let (g_ei, g_ee, g_reduced) =
             Self::linearized_terminal_conductance_matrices(&g_ii, &g_ie, &terminal_currents);
+        let internal = [
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+            state.vrth,
+        ];
+        let external = [vc, vb, ve, vs];
+        let mut z_e_static = [0.0; EXTERNAL_DIM];
+        for row in 0..EXTERNAL_DIM {
+            z_e_static[row] = terminal_currents[row]
+                .d_internal
+                .iter()
+                .zip(internal.iter())
+                .map(|(d, v)| d * v)
+                .sum::<Value>()
+                + terminal_currents[row]
+                    .d_external
+                    .iter()
+                    .zip(external.iter())
+                    .map(|(d, v)| d * v)
+                    .sum::<Value>()
+                - terminal_currents[row].current;
+        }
         let cached_dynamic_inputs = if self.uses_vbic_dynamic_charges() {
-            let external = [vc, vb, ve, vs];
             let internal = [
                 state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
                 state.vrth, 0.0, 0.0,
@@ -4240,6 +4336,8 @@ impl Bjt {
             g_ei,
             g_ee,
             g_reduced,
+            z_i_static,
+            z_e_static,
             cached_dynamic_inputs,
         }
     }
@@ -4393,11 +4491,13 @@ impl Bjt {
                 reduction.g_ii[row][col] = base.g_ii[row][col];
             }
             reduction.g_ie[row] = base.g_ie[row];
+            reduction.z_i_static[row] = base.z_i_static[row];
         }
         for row in 0..EXTERNAL_DIM {
             for col in 0..INTERNAL_DIM {
                 reduction.g_ei[row][col] = base.g_ei[row][col];
             }
+            reduction.z_e_static[row] = base.z_e_static[row];
         }
 
         // Default the excess-phase states to decoupled algebraic identities when
@@ -7207,6 +7307,60 @@ Q1 Q1_C V1_P 0 N1
         assert_eq!(q.thermal_conductance(), 0.0);
         let snapshot = q.charge_snapshot(1.2, 0.82, 0.0, 0.4);
         assert!(!snapshot.branches[IDX_QCTH].is_active());
+    }
+
+    #[test]
+    fn test_bjt_vbic_pnp_thermal_row_direct_collector_coupling_matches_finite_difference() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let q = Bjt::new_pnp("Q1".to_string(), 4, 3, 2).with_params(&params);
+        let (vc, vb, ve, vs) = (1.575_451, 2.614_704, 1.94, 1.575_451);
+
+        let state = q.intrinsic_state_for_biases(vc, vb, ve, vs);
+        let eval = q.evaluate_state(
+            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
+            state.vsi, state.vrth,
+        );
+        let thermal_power = q.thermal_power_branch(
+            eval,
+            [vc, vb, ve, vs],
+            [
+                state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+                state.vrth,
+            ],
+        );
+        let thermal_row = Bjt::sub_branches(q.thermal_sink_branch(state.vrth), thermal_power);
+        let eps = 1e-6;
+
+        let thermal_row_residual = |vc: Value| {
+            let eval = q.evaluate_state(
+                vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
+                state.vsi, state.vrth,
+            );
+            let row = Bjt::sub_branches(
+                q.thermal_sink_branch(state.vrth),
+                q.thermal_power_branch(
+                    eval,
+                    [vc, vb, ve, vs],
+                    [
+                        state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
+                        state.vsi, state.vrth,
+                    ],
+                ),
+            );
+            row.current
+        };
+        let numerical = (thermal_row_residual(vc + eps) - thermal_row_residual(vc - eps))
+            / (2.0 * eps);
+        let analytical = thermal_row.d_external[EXT_C];
+        let scale = analytical.abs().max(numerical.abs()).max(1e-12);
+        let rel_err = (analytical - numerical).abs() / scale;
+
+        assert!(
+            rel_err < 1e-4,
+            "expected PNP thermal row collector derivative to match finite difference: analytical={analytical:.12e} numerical={numerical:.12e} rel_err={rel_err:.3e}"
+        );
     }
 
     #[test]
