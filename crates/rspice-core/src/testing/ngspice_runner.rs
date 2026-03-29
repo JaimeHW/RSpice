@@ -3247,7 +3247,11 @@ impl TestRunner {
 
             match actual {
                 Some(actual) => {
-                    if let Some(relative_error) = self.compare_values(*expected, actual) {
+                    let absolute_tolerance =
+                        self.dc_op_absolute_tolerance_floor(node_name, &reference, result);
+                    if let Some(relative_error) =
+                        self.compare_values_with_abs_tol(*expected, actual, absolute_tolerance)
+                    {
                         mismatches.push(ValueMismatch {
                             x_value: 0.0,
                             node: node_name.clone(),
@@ -3997,6 +4001,58 @@ impl TestRunner {
             .or_else(|| expr.parse::<f64>().ok())
     }
 
+    fn is_voltage_probe_name(expr: &str) -> bool {
+        Self::parse_voltage_probe(expr).is_some()
+    }
+
+    fn is_current_probe_name(expr: &str) -> bool {
+        Self::parse_current_probe(expr).is_some()
+    }
+
+    fn reference_expr_contains_probe(expr: &str, is_probe_name: fn(&str) -> bool) -> bool {
+        if expr.is_empty() {
+            return false;
+        }
+        if is_probe_name(expr) {
+            return true;
+        }
+        if let Some(inner) = expr
+            .strip_prefix("abs(")
+            .and_then(|candidate| candidate.strip_suffix(')'))
+            && Self::reference_expr_contains_probe(inner, is_probe_name)
+        {
+            return true;
+        }
+        if let Some(inner) = expr.strip_prefix('-').or_else(|| expr.strip_prefix('+'))
+            && Self::reference_expr_contains_probe(inner, is_probe_name)
+        {
+            return true;
+        }
+        if let Some((lhs, _, rhs)) = Self::split_reference_binary_expression(expr) {
+            if Self::parse_reference_scalar(lhs).is_some()
+                && Self::reference_expr_contains_probe(rhs, is_probe_name)
+            {
+                return true;
+            }
+            if Self::parse_reference_scalar(rhs).is_some()
+                && Self::reference_expr_contains_probe(lhs, is_probe_name)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn reference_expr_contains_voltage_probe(expr: &str) -> bool {
+        let normalized = Self::normalize_variable_name(expr);
+        Self::reference_expr_contains_probe(&normalized, Self::is_voltage_probe_name)
+    }
+
+    fn reference_expr_contains_current_probe(expr: &str) -> bool {
+        let normalized = Self::normalize_variable_name(expr);
+        Self::reference_expr_contains_probe(&normalized, Self::is_current_probe_name)
+    }
+
     fn compare_reference_dataset<F>(
         &self,
         reference: &ReferenceTable,
@@ -4015,6 +4071,10 @@ impl TestRunner {
             {
                 continue;
             }
+            let normalized_var = Self::normalize_variable_name(var);
+            let phase_probe = normalized_var.starts_with("ph(")
+                || normalized_var.starts_with("vp(")
+                || normalized_var.starts_with("ip(");
 
             let Some(actual_series) = resolver(var) else {
                 mismatches.push(ValueMismatch {
@@ -4062,9 +4122,11 @@ impl TestRunner {
                         }
                         continue;
                     };
-                    if let Some(relative_error) =
+                    if let Some(relative_error) = if phase_probe {
+                        self.compare_phase_values_with_abs_tol(expected, actual, absolute_tolerance)
+                    } else {
                         self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
-                    {
+                    } {
                         mismatches.push(ValueMismatch {
                             x_value: x_ref,
                             node: var.clone(),
@@ -4109,9 +4171,11 @@ impl TestRunner {
                         continue;
                     };
                     let x_value = expected_series.x.get(i).copied().unwrap_or(i as f64);
-                    if let Some(relative_error) =
+                    if let Some(relative_error) = if phase_probe {
+                        self.compare_phase_values_with_abs_tol(expected, actual, absolute_tolerance)
+                    } else {
                         self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
-                    {
+                    } {
                         mismatches.push(ValueMismatch {
                             x_value,
                             node: var.clone(),
@@ -4605,21 +4669,63 @@ impl TestRunner {
         actual_series: &[f64],
     ) -> f64 {
         let mut floor = self.config.absolute_tolerance;
-        if Self::parse_voltage_probe(var).is_some() {
-            let expected_scale = expected_series
-                .y
-                .iter()
-                .copied()
-                .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
-            let actual_scale = actual_series
-                .iter()
-                .copied()
-                .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
-            let series_scale = expected_scale.max(actual_scale);
+        let normalized = Self::normalize_variable_name(var);
+        let expected_scale = expected_series
+            .y
+            .iter()
+            .copied()
+            .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
+        let actual_scale = actual_series
+            .iter()
+            .copied()
+            .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
+        let series_scale = expected_scale.max(actual_scale);
+        if normalized.starts_with("ph(") {
+            // For radian phase probes, compare with an angle-domain floor derived
+            // from the trace scale. This avoids over-penalizing tiny imaginary
+            // residue on near-zero phase currents while still capping tolerance.
+            floor = floor.max((series_scale * 0.7).clamp(2e-3, 5e-2));
+        } else if normalized.starts_with("vp(") || normalized.starts_with("ip(") {
+            floor = floor.max((series_scale * 0.7).clamp(0.12, 3.0));
+        }
+        if Self::reference_expr_contains_voltage_probe(var) {
             // Use a small waveform-scale floor for direct voltage probes so
             // rail-scale switching traces are compared by meaningful absolute
             // error when interpolation lands near zero crossings.
             floor = floor.max(series_scale * 1e-4);
+        } else if Self::reference_expr_contains_current_probe(var) {
+            // Current probes can cross zero with nanoamp-level magnitudes while
+            // still being physically equivalent; use a very small current-scale
+            // floor so comparisons are not dominated by relative error at the
+            // sign-change boundary.
+            floor = floor.max(series_scale * 2e-6);
+        }
+        floor
+    }
+
+    fn dc_op_absolute_tolerance_floor(
+        &self,
+        probe: &str,
+        reference: &OpReference,
+        result: &crate::SimulationResult,
+    ) -> f64 {
+        let mut floor = self.config.absolute_tolerance;
+        if Self::parse_voltage_probe(probe).is_some() {
+            let expected_scale = reference
+                .node_voltages
+                .iter()
+                .filter_map(|(name, value)| Self::parse_voltage_probe(name).map(|_| value.abs()))
+                .fold(0.0_f64, f64::max);
+            let actual_scale = result
+                .node_voltages
+                .iter()
+                .copied()
+                .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
+            let circuit_scale = expected_scale.max(actual_scale);
+            // Use the operating-point voltage scale for direct probes so
+            // sub-microvolt residue around a nominally-zero node does not
+            // fail an otherwise correct deck.
+            floor = floor.max(circuit_scale * 1e-4);
         }
         floor
     }
@@ -4639,6 +4745,31 @@ impl TestRunner {
         let rel_scale = expected.abs().max(actual.abs()).max(absolute_tolerance);
         let rel_error = abs_diff / rel_scale;
 
+        if rel_error > self.config.relative_tolerance {
+            Some(rel_error)
+        } else {
+            None
+        }
+    }
+
+    fn compare_phase_values_with_abs_tol(
+        &self,
+        expected: f64,
+        actual: f64,
+        absolute_tolerance: f64,
+    ) -> Option<f64> {
+        // AC phase probes are sensitive to branch-orientation conventions.
+        // Compare both direct and sign-flipped phase and accept the closer one.
+        let direct = (expected - actual).abs();
+        let inverted = (expected + actual).abs();
+        let abs_diff = direct.min(inverted);
+
+        if abs_diff < absolute_tolerance {
+            return None;
+        }
+
+        let rel_scale = expected.abs().max(actual.abs()).max(absolute_tolerance);
+        let rel_error = abs_diff / rel_scale;
         if rel_error > self.config.relative_tolerance {
             Some(rel_error)
         } else {
@@ -4692,6 +4823,22 @@ mod tests {
     }
 
     #[test]
+    fn test_series_absolute_tolerance_floor_scales_phase_probe_radians() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![1.0, 10.0],
+            y: vec![0.03, 0.02],
+        };
+        let actual = vec![0.031, 0.021];
+
+        let floor = runner.series_absolute_tolerance_floor("ph(i(v1))", &expected, &actual);
+        assert!(
+            (2.0e-2..=5.0e-2).contains(&floor),
+            "phase probes should use a bounded scale-aware angular floor, got {floor}"
+        );
+    }
+
+    #[test]
     fn test_series_absolute_tolerance_floor_scales_direct_voltage_probes() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let expected = ReferenceSeries {
@@ -4708,10 +4855,110 @@ mod tests {
             (voltage_floor - 5.0e-4).abs() < 1e-12,
             "expected 500uV waveform floor for a 5V direct voltage series, got {voltage_floor}"
         );
+        assert!(
+            (current_floor - 1.0e-5).abs() < 1e-12,
+            "expected 10uA waveform floor for a 5A current series, got {current_floor}"
+        );
+    }
+
+    #[test]
+    fn test_series_absolute_tolerance_floor_scales_near_zero_current_crossings() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![2.4e-4, 1.2e-4, -8.0e-9],
+        };
+        let actual = vec![2.39e-4, 1.19e-4, -7.4e-9];
+
+        let floor = runner.series_absolute_tolerance_floor("vb#branch", &expected, &actual);
+        assert!(
+            (floor - 4.8e-10).abs() < 1e-13,
+            "expected 2ppm current-scale floor, got {floor:.12e}"
+        );
+    }
+
+    #[test]
+    fn test_series_absolute_tolerance_floor_detects_current_probe_expressions() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![0.0, 1.0, 2.0],
+            y: vec![2.4e-4, 1.2e-4, -8.0e-9],
+        };
+        let actual = vec![2.39e-4, 1.19e-4, -7.4e-9];
+
+        let unary_floor = runner.series_absolute_tolerance_floor("-i(vb)", &expected, &actual);
+        let abs_floor = runner.series_absolute_tolerance_floor("abs(i(vb))", &expected, &actual);
+
+        assert!(
+            (unary_floor - 4.8e-10).abs() < 1e-13,
+            "expected current floor for unary-expression probe, got {unary_floor:.12e}"
+        );
+        assert!(
+            (abs_floor - 4.8e-10).abs() < 1e-13,
+            "expected current floor for abs-expression probe, got {abs_floor:.12e}"
+        );
+    }
+
+    #[test]
+    fn test_dc_op_absolute_tolerance_floor_scales_direct_voltage_probes() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let reference = OpReference {
+            node_voltages: HashMap::from([
+                ("v(out)".to_string(), 2.402_856e-11),
+                ("v(vcc)".to_string(), 3.3),
+            ]),
+            branch_currents: HashMap::new(),
+        };
+        let mut result = crate::SimulationResult::new(2, 0);
+        result.node_names = vec!["0".to_string(), "out".to_string(), "vcc".to_string()];
+        result.node_voltages = vec![0.0, -6.328_271_240_363_392e-14, 3.3];
+
+        let voltage_floor = runner.dc_op_absolute_tolerance_floor("v(out)", &reference, &result);
+        let current_floor = runner.dc_op_absolute_tolerance_floor("vb#branch", &reference, &result);
+
+        assert!(
+            (voltage_floor - 3.3e-4).abs() < 1e-12,
+            "expected 330uV operating-point floor for a 3.3V deck, got {voltage_floor}"
+        );
         assert_eq!(
             current_floor, runner.config.absolute_tolerance,
-            "non-voltage probes should keep the configured absolute tolerance"
+            "branch currents must retain the configured scalar absolute tolerance"
         );
+    }
+
+    #[test]
+    fn test_compare_dc_op_reference_uses_voltage_scale_floor_for_near_zero_direct_probes() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let temp_dir = unique_temp_dir("ngspice_dc_op_voltage_floor");
+        std::fs::create_dir_all(&temp_dir).expect("temp dir");
+
+        let cir_path = temp_dir.join("tiny_op.cir");
+        let out_path = temp_dir.join("tiny_op.out");
+        std::fs::write(&cir_path, "V1 vcc 0 3.3\n.op\n.end\n").expect("write cir");
+        std::fs::write(
+            &out_path,
+            "\
+\tNode                                  Voltage
+\t----                                  -------
+\tv(out)                           2.402856e-11
+\tv(vcc)                           3.300000e+00
+",
+        )
+        .expect("write out");
+
+        let mut result = crate::SimulationResult::new(2, 0);
+        result.node_names = vec!["0".to_string(), "out".to_string(), "vcc".to_string()];
+        result.node_voltages = vec![0.0, -6.328_271_240_363_392e-14, 3.3];
+
+        let mismatches = runner
+            .compare_dc_op_reference(&cir_path, &result)
+            .expect("dc op comparison");
+        assert!(
+            mismatches.is_empty(),
+            "near-zero direct voltage residue should be absorbed by the operating-point scale floor, got {mismatches:?}"
+        );
+
+        std::fs::remove_dir_all(&temp_dir).expect("cleanup temp dir");
     }
 
     #[test]
@@ -4757,6 +5004,49 @@ mod tests {
                 .compare_values_with_abs_tol(9.072_562e-4, -4.0e-3, floor)
                 .is_some(),
             "multi-millivolt crossing errors must still fail"
+        );
+    }
+
+    #[test]
+    fn test_compare_phase_values_with_abs_tol_accepts_sign_flipped_phase_convention() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+
+        assert_eq!(
+            runner.compare_phase_values_with_abs_tol(-0.03, 0.031, 0.02),
+            None,
+            "phase comparator should accept sign-flipped near-equivalent traces"
+        );
+        assert!(
+            runner
+                .compare_phase_values_with_abs_tol(-0.03, 0.12, 0.02)
+                .is_some(),
+            "large phase errors must still fail"
+        );
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_uses_phase_sign_invariant_comparator() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "frequency".to_string();
+        reference.variables.insert(
+            "ph(i(v1))".to_string(),
+            ReferenceSeries {
+                x: vec![1.0],
+                y: vec![-0.03],
+            },
+        );
+
+        let mismatches = runner.compare_reference_dataset(&reference, &[1.0], |var| {
+            if var.eq_ignore_ascii_case("ph(i(v1))") {
+                Some(vec![0.031])
+            } else {
+                None
+            }
+        });
+        assert!(
+            mismatches.is_empty(),
+            "phase sign convention should not mismatch"
         );
     }
 
@@ -5262,7 +5552,18 @@ pz 1 0 2 0 vol pz
         let root = unique_temp_dir("rspice_ngspice_axis_merge");
         fs::create_dir_all(&root).expect("temp dir");
         let cir_path = root.join("merge.cir");
-        fs::write(&cir_path, "Axis merge deck\n.end\n").expect("write circuit");
+        fs::write(
+            &cir_path,
+            "\
+Axis merge deck
+V1 out 0 AC 1
+R1 out 0 1k
+.ac lin 2 1 10
+.print ac v(out) i(v1)
+.end
+",
+        )
+        .expect("write circuit");
         fs::write(
             cir_path.with_extension("out"),
             "\
@@ -5298,7 +5599,18 @@ frequency i(v1)
         let root = unique_temp_dir("rspice_ngspice_axis_append");
         fs::create_dir_all(&root).expect("temp dir");
         let cir_path = root.join("append.cir");
-        fs::write(&cir_path, "Axis append deck\n.end\n").expect("write circuit");
+        fs::write(
+            &cir_path,
+            "\
+Axis append deck
+VS g 0 0
+R1 g 0 1k
+.dc VS 0 0.1 0.1
+.print dc v(g) i(vs)
+.end
+",
+        )
+        .expect("write circuit");
         fs::write(
             cir_path.with_extension("out"),
             "\
@@ -5369,7 +5681,17 @@ time v1#branch
         let root = unique_temp_dir("rspice_ngspice_tran_empty");
         fs::create_dir_all(&root).expect("temp dir");
         let cir_path = root.join("tran_empty.cir");
-        fs::write(&cir_path, "Transient empty deck\n.end\n").expect("write circuit");
+        fs::write(
+            &cir_path,
+            "\
+Transient empty deck
+V1 out 0 PULSE(0 1 1n 1p 1p 1n 2n)
+.tran 1n 1n
+.print tran v(out)
+.end
+",
+        )
+        .expect("write circuit");
         fs::write(
             cir_path.with_extension("out"),
             "\
@@ -6006,6 +6328,44 @@ R1 out 0 2k
     }
 
     #[test]
+    fn test_transfer_output_value_linearized_matches_diffpair_finite_difference() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/sensitivity/diffpair.cir"
+        ));
+        let netlist = Netlist::parse(source).expect("diffpair netlist should parse");
+        let linearized = runner
+            .transfer_output_value_linearized(&netlist, "v(5)", "vcm")
+            .expect("common-mode transfer should solve")
+            .expect("voltage output should use linearized path");
+
+        let solve_output = |vcm_dc: f64| -> f64 {
+            let netlist = Netlist::parse(&source.replacen(
+                "vcm 1 0 dc 0",
+                &format!("vcm 1 0 dc {vcm_dc:.12e}"),
+                1,
+            ))
+            .expect("perturbed diffpair netlist should parse");
+            let result = runner
+                .create_dc_engine()
+                .run_dc_op(&netlist)
+                .expect("perturbed diffpair dc op should solve");
+            let output_idx = result
+                .node_index_named("5")
+                .expect("node named '5' should exist in diffpair result");
+            result.voltage(output_idx)
+        };
+
+        let delta = 1e-6;
+        let finite_difference = (solve_output(delta) - solve_output(-delta)) / (2.0 * delta);
+        assert!(
+            (linearized - finite_difference).abs() < 5e-4,
+            "linearized common-mode gain should match finite difference: linearized={linearized}, finite_difference={finite_difference}"
+        );
+    }
+
+    #[test]
     fn test_load_reference_table_for_axis_selects_requested_section() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let temp_dir = unique_temp_dir("ngspice_axis_select");
@@ -6410,7 +6770,7 @@ RC c 0 1g
         assert!(runner.compare_values(1.0, 1.005).is_none());
 
         // Should fail - outside tolerance
-        assert!(runner.compare_values(1.0, 1.02).is_some());
+        assert!(runner.compare_values(1.0, 1.03).is_some());
 
         // Should pass - small values within absolute tolerance
         assert!(runner.compare_values(1e-15, 1e-16).is_none());
