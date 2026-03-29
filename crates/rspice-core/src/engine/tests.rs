@@ -1775,6 +1775,50 @@ Q1 1 2 0 QMOD
     }
 
     #[test]
+    fn test_vbic_diffamp_dc_operating_point_tracks_ngspice_reference_nodes() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/vbic/diffamp.cir"
+        ));
+        let netlist = Netlist::parse(source).unwrap();
+        let mut config = SimulationConfig::default();
+        config.max_iterations = config.max_iterations.max(1200);
+        config.convergence_config = ConvergenceConfig::robust();
+        config.temperature = 300.15;
+        let result = Engine::new(config).run_dc_op(&netlist).unwrap();
+
+        let assert_close = |name: &str, expected: Value, abs_tol: Value, rel_tol: Value| {
+            let actual = result
+                .try_voltage_named(name)
+                .unwrap_or_else(|| panic!("missing {name}"));
+            let scale = expected.abs().max(actual.abs()).max(abs_tol);
+            let err = (actual - expected).abs();
+            assert!(
+                err <= abs_tol || err / scale <= rel_tol,
+                "expected {name} ~= {expected:.9e}, got {actual:.9e} (abs_err={err:.3e})"
+            );
+        };
+
+        assert_close("Q6_C", 2.614_704, 2e-3, 2e-3);
+        assert_close("Q5_C", 2.614_704, 2e-3, 2e-3);
+        assert_close("Q4_C", 1.575_451, 2e-3, 2e-3);
+        assert_close("Q3_C", 1.575_451, 2e-3, 2e-3);
+        assert_close("I1_N", 6.585_156e-1, 2e-3, 3e-3);
+        assert_close("Q5_B", 2.620_602, 2e-3, 2e-3);
+        assert_close("Q9_B", 1.943_247, 2e-3, 2e-3);
+        assert_close("Q1_E", 1.011_054, 2e-3, 2e-3);
+
+        let v1_current = result
+            .branch_current_named("V1")
+            .expect("missing V1 branch current");
+        let current_err = (v1_current - (-1.743_08e-3)).abs();
+        assert!(
+            current_err <= 2e-5,
+            "expected I(V1) ~= -1.74308e-3 A, got {v1_current:.9e}"
+        );
+    }
+
+    #[test]
     fn test_mos_model_card_type_sets_pmos_polarity() {
         let netlist_str = r#"
 * MOS model card type should define NMOS/PMOS polarity

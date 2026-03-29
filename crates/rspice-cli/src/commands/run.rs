@@ -414,6 +414,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         abstol: args.abstol,
         voltage_abstol: None,
         current_abstol: None,
+        charge_abstol: None,
         residual_reltol: args.residual_reltol,
         gmin_initial: None,
     };

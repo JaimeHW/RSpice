@@ -245,11 +245,42 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn startup_timestep_divisors(has_bjts: bool) -> (Value, Value) {
-        if has_bjts {
+    pub(super) fn startup_timestep_divisors(
+        has_bjts: bool,
+        has_vbic_excess_phase: bool,
+    ) -> (Value, Value) {
+        if has_vbic_excess_phase {
+            // Excess-phase VBIC decks have meaningful dynamics well below the
+            // requested .tran print cadence. Resolve that startup region before
+            // larger adaptive steps take over.
             (1000.0, 10_000.0)
+        } else if has_bjts {
+            // Keep BJT startup conservative, but avoid picosecond lock-in that can
+            // stall long-sweep regression decks with gentle source excitation.
+            (50.0, 200.0)
         } else {
             (10.0, 1000.0)
         }
+    }
+
+    #[inline]
+    pub(super) fn startup_practical_min_timestep(
+        has_bjts: bool,
+        has_vbic_excess_phase: bool,
+        hinted_max_step: Value,
+        min_div: Value,
+        tran_step_hint: Option<Value>,
+    ) -> Value {
+        let mut practical_min = (hinted_max_step / min_div).max(1e-15);
+        if has_bjts
+            && let Some(step) = tran_step_hint.filter(|step| step.is_finite() && *step > 0.0)
+        {
+            // Keep stiff BJT decks from collapsing to femtosecond timesteps,
+            // while still allowing enough headroom below the requested .tran
+            // cadence to resolve startup nonlinearities before force-accept.
+            let floor_fraction = if has_vbic_excess_phase { 0.01 } else { 0.05 };
+            practical_min = practical_min.max((step * floor_fraction).min(hinted_max_step));
+        }
+        practical_min
     }
 }

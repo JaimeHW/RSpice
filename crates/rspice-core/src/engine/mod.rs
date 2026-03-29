@@ -122,6 +122,12 @@ pub struct ConvergenceConfig {
     /// This is used when normalizing `A*x-b` residuals in Newton acceptance.
     /// A non-positive value falls back to a conservative 1e-12 default.
     pub current_abstol: Value,
+    /// Absolute charge tolerance for transient truncation on charge-state devices.
+    ///
+    /// This mirrors SPICE `CHGTOL` semantics for compact models whose timestep
+    /// control is driven by integrated charge states instead of node voltages.
+    /// A non-positive value falls back to a conservative 1e-14 default.
+    pub charge_abstol: Value,
     /// Relative tolerance for equation residual convergence checks.
     ///
     /// This controls normalized `A*x-b` acceptance independently from
@@ -160,6 +166,7 @@ impl Default for ConvergenceConfig {
             voltage_reltol: crate::constants::RELTOL,
             voltage_abstol: 0.0,
             current_abstol: crate::constants::ITOL,
+            charge_abstol: crate::constants::CHGTOL,
             residual_reltol: crate::constants::RELTOL,
             verbose: false,
         }

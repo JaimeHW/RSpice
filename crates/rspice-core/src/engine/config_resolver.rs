@@ -60,6 +60,7 @@ pub struct SimulationConfigOverrides {
     pub abstol: Option<Value>,
     pub voltage_abstol: Option<Value>,
     pub current_abstol: Option<Value>,
+    pub charge_abstol: Option<Value>,
     pub residual_reltol: Option<Value>,
     pub gmin_initial: Option<Value>,
 }
@@ -83,6 +84,7 @@ pub fn resolve_simulation_config(
     let mut voltage_reltol = base.convergence_config.voltage_reltol;
     let mut voltage_abstol = base.convergence_config.voltage_abstol;
     let mut current_abstol = base.convergence_config.current_abstol;
+    let mut charge_abstol = base.convergence_config.charge_abstol;
     let mut residual_reltol = base.convergence_config.residual_reltol;
     let mut gmin_initial = base.convergence_config.gmin_initial;
 
@@ -112,6 +114,9 @@ pub fn resolve_simulation_config(
         }
         if let Some(iabstol) = opts.iabstol.or(opts.abstol) {
             current_abstol = iabstol;
+        }
+        if let Some(chgtol) = opts.chgtol {
+            charge_abstol = chgtol;
         }
         if let Some(residual) = opts.residual_reltol {
             residual_reltol = residual;
@@ -150,6 +155,9 @@ pub fn resolve_simulation_config(
     if let Some(iabstol) = overrides.current_abstol {
         current_abstol = iabstol;
     }
+    if let Some(chgtol) = overrides.charge_abstol {
+        charge_abstol = chgtol;
+    }
     if let Some(residual) = overrides.residual_reltol {
         residual_reltol = residual;
     }
@@ -170,6 +178,7 @@ pub fn resolve_simulation_config(
     resolved.convergence_config.voltage_reltol = voltage_reltol;
     resolved.convergence_config.voltage_abstol = voltage_abstol;
     resolved.convergence_config.current_abstol = current_abstol;
+    resolved.convergence_config.charge_abstol = charge_abstol;
     resolved.convergence_config.residual_reltol = residual_reltol;
     resolved.convergence_config.gmin_initial = gmin_initial;
     if resolved.convergence_config.gmin_target > gmin_initial {
@@ -219,6 +228,7 @@ mod tests {
         cfg.convergence_config.voltage_reltol = 8e-4;
         cfg.convergence_config.voltage_abstol = 7e-7;
         cfg.convergence_config.current_abstol = 6e-12;
+        cfg.convergence_config.charge_abstol = 4e-14;
         cfg.convergence_config.residual_reltol = 5e-4;
         cfg.convergence_config.gmin_initial = 1e-11;
         cfg.convergence_config.gmin_target = 1e-13;
@@ -286,6 +296,18 @@ mod tests {
             resolve_simulation_config(&base, Some(&opts), &SimulationConfigOverrides::default());
         assert!((resolved.convergence_config.voltage_abstol - 4e-6).abs() < 1e-18);
         assert!((resolved.convergence_config.current_abstol - 7e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_netlist_chgtol_maps_to_charge_abstol() {
+        let base = base_config();
+        let opts = NetlistOptions {
+            chgtol: Some(9e-15),
+            ..Default::default()
+        };
+        let resolved =
+            resolve_simulation_config(&base, Some(&opts), &SimulationConfigOverrides::default());
+        assert!((resolved.convergence_config.charge_abstol - 9e-15).abs() < 1e-27);
     }
 
     #[test]
@@ -377,6 +399,21 @@ mod tests {
         let resolved = resolve_simulation_config(&base, None, &overrides);
         assert!((resolved.convergence_config.voltage_abstol - 4e-6).abs() < 1e-18);
         assert!((resolved.convergence_config.current_abstol - 5e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_override_charge_abstol_wins_over_netlist() {
+        let base = base_config();
+        let opts = NetlistOptions {
+            chgtol: Some(9e-15),
+            ..Default::default()
+        };
+        let overrides = SimulationConfigOverrides {
+            charge_abstol: Some(2e-14),
+            ..Default::default()
+        };
+        let resolved = resolve_simulation_config(&base, Some(&opts), &overrides);
+        assert!((resolved.convergence_config.charge_abstol - 2e-14).abs() < 1e-27);
     }
 
     #[test]

@@ -86,6 +86,14 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn charge_abstol(&self) -> Value {
+        Self::sanitize_positive_tolerance(
+            self.config.convergence_config.charge_abstol,
+            crate::constants::CHGTOL,
+        )
+    }
+
+    #[inline]
     pub(crate) fn residual_reltol(&self) -> Value {
         let configured = self.config.convergence_config.residual_reltol;
         if configured.is_finite() && configured > 0.0 {
@@ -649,6 +657,51 @@ impl Engine {
         }
     }
 
+    #[inline]
+    fn sanitize_initial_guess(initial_guess: &[Value], size: usize) -> Vec<Value> {
+        let mut guess = Self::normalize_initial_guess(initial_guess, size);
+        if Self::is_suspicious_solution(&guess) {
+            guess.fill(0.0);
+        }
+        Self::clamp_solution_to_physical_bounds(&mut guess);
+        guess
+    }
+
+    fn prefer_lower_merit_scaled_seed(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        incumbent: &[Value],
+        proposal: &[Value],
+        source_scale: Value,
+    ) -> Vec<Value> {
+        let size = circuit.matrix_size();
+        let incumbent = Self::sanitize_initial_guess(incumbent, size);
+        let proposal = Self::sanitize_initial_guess(proposal, size);
+
+        if incumbent == proposal {
+            return incumbent;
+        }
+
+        let incumbent_merit =
+            self.nonlinear_merit_scaled(circuit, matrix, &incumbent, source_scale);
+        let proposal_merit = self.nonlinear_merit_scaled(circuit, matrix, &proposal, source_scale);
+
+        match (incumbent_merit, proposal_merit) {
+            (Some(current), Some(candidate))
+                if current.is_finite() && candidate.is_finite() && candidate < current =>
+            {
+                proposal
+            }
+            (None, Some(candidate)) if candidate.is_finite() => proposal,
+            (Some(current), None) if current.is_finite() => incumbent,
+            (Some(current), Some(candidate)) if !current.is_finite() && candidate.is_finite() => {
+                proposal
+            }
+            _ => incumbent,
+        }
+    }
+
     fn solve_scaled_nonlinear_corrector(
         &self,
         circuit: &mut CircuitData,
@@ -1170,10 +1223,12 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        // Use provided initial guess or start from zero.
+        // Sanitize any warm-start seed before Newton so pathological presolve
+        // artifacts do not launch the iteration from physically impossible rails.
         let mut solution = initial_guess
-            .map(|guess| Self::normalize_initial_guess(guess, size))
+            .map(|guess| Self::sanitize_initial_guess(guess, size))
             .unwrap_or_else(|| vec![0.0; size]);
+        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
@@ -1308,7 +1363,9 @@ impl Engine {
         if !allow_source && !allow_pseudo && !allow_gmin && !allow_arc {
             return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
         }
-        let mut fallback_seed = solution.clone();
+        let zero_seed = vec![0.0; solution.len()];
+        let mut fallback_seed =
+            self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0);
 
         if allow_source {
             if abort.is_aborted() {
@@ -1332,7 +1389,13 @@ impl Engine {
                     ) {
                         return Ok(candidate);
                     }
-                    fallback_seed = source_stepped;
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &source_stepped,
+                        1.0,
+                    );
                 }
                 Err(e) => {
                     if !allow_pseudo && !allow_gmin && !allow_arc {
@@ -1371,7 +1434,13 @@ impl Engine {
                     ) {
                         return Ok(candidate);
                     }
-                    fallback_seed = pseudo_solution;
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &pseudo_solution,
+                        1.0,
+                    );
                 }
                 Err(e) => {
                     if !allow_gmin && !allow_arc {
@@ -1400,7 +1469,13 @@ impl Engine {
                     ) {
                         return Ok(candidate);
                     }
-                    fallback_seed = gmin_solution;
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &gmin_solution,
+                        1.0,
+                    );
                 }
                 Err(e) => {
                     if !allow_arc {
@@ -1484,6 +1559,7 @@ impl Engine {
             solution[node_id - 1] = voltage;
         }
 
+        solution = Self::sanitize_initial_guess(&solution, size);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
 
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
@@ -1660,17 +1736,24 @@ impl Engine {
 
         let size = circuit.matrix_size();
 
-        // Start from provided initial guess (scaled to first source level)
-        let mut solution = if initial_guess.len() == size {
-            initial_guess.to_vec()
-        } else {
-            vec![0.0; size]
-        };
+        let zero_guess = vec![0.0; size];
+        let mut solution =
+            self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0);
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
+        let (bootstrap_solution, _, _) = self.solve_scaled_nonlinear_corrector(
+            circuit,
+            matrix,
+            0.0,
+            &solution,
+            &mut damping_state,
+            source_iterations,
+            abort,
+        );
+        solution = bootstrap_solution;
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
-        for (scale_idx, &scale) in SOURCE_SCALES.iter().enumerate() {
+        for (scale_idx, &scale) in SOURCE_SCALES.iter().enumerate().skip(1) {
             if Self::should_abort_iteration(abort, scale_idx) {
                 return Err(SimulationError::Aborted);
             }
@@ -2516,6 +2599,25 @@ mod tests {
 
         assert_eq!(normalized_short, vec![1.0, 2.0]);
         assert_eq!(normalized_long, vec![1.0, 2.0, 3.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_sanitize_initial_guess_resets_suspicious_vectors_and_clamps_extremes() {
+        let suspicious = vec![0.0, 0.0, 0.0, 0.01, 0.0, 0.0];
+        let sanitized_suspicious = Engine::sanitize_initial_guess(&suspicious, suspicious.len());
+        assert_eq!(
+            sanitized_suspicious,
+            vec![0.0; suspicious.len()],
+            "stuck continuation seeds should be reset to a neutral bootstrap state"
+        );
+
+        let extreme = vec![f64::INFINITY, -5000.0, 12.5];
+        let sanitized_extreme = Engine::sanitize_initial_guess(&extreme, extreme.len());
+        assert_eq!(
+            sanitized_extreme,
+            vec![0.0; extreme.len()],
+            "clamped or non-finite continuation seeds should be discarded wholesale"
+        );
     }
 
     #[test]

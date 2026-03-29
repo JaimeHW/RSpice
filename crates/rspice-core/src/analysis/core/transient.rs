@@ -393,6 +393,39 @@ impl LteEstimator {
         (self.abstol / reltol + magnitude.abs()).max(1e-30)
     }
 
+    #[inline]
+    fn predict_next_value(
+        &self,
+        prev: Value,
+        prev_prev: Value,
+        prev_prev_prev: Value,
+        dt: Value,
+    ) -> Value {
+        if self.method_order >= 2 && self.history_count >= 3 && self.prev_prev_dt > 0.0 {
+            // Evaluate the quadratic interpolant through the previous three
+            // accepted points at the proposed next time. This keeps the LTE
+            // estimate order-consistent with trapezoidal/Gear2 instead of
+            // falling back to a first-order predictor that can over-restrict
+            // smooth waveforms.
+            let h1 = self.prev_dt;
+            let h2 = self.prev_prev_dt;
+            let t0 = 0.0;
+            let t1 = -h1;
+            let t2 = -(h1 + h2);
+            let t = dt;
+
+            let l0 = (t - t1) * (t - t2) / ((t0 - t1) * (t0 - t2));
+            let l1 = (t - t0) * (t - t2) / ((t1 - t0) * (t1 - t2));
+            let l2 = (t - t0) * (t - t1) / ((t2 - t0) * (t2 - t1));
+            prev * l0 + prev_prev * l1 + prev_prev_prev * l2
+        } else if self.history_count >= 2 && self.prev_dt > 0.0 {
+            let slope = (prev - prev_prev) / self.prev_dt;
+            prev + slope * dt
+        } else {
+            prev
+        }
+    }
+
     /// Set the integration method order for accurate timestep scaling
     /// - BackwardEuler: order 1
     /// - Trapezoidal, Gear2: order 2
@@ -428,15 +461,14 @@ impl LteEstimator {
         // We approximate by comparing predicted (linear extrapolation) vs actual
         for (i, &curr_val) in current.iter().enumerate() {
             let prev_val = self.prev_solution[i];
-
-            // Linear prediction: v_pred = v_prev + (v_prev - v_prev_prev) * dt / prev_dt
-            let predicted = if self.history_count >= 2 && self.prev_dt > 0.0 {
-                let prev_prev_val = self.prev_prev_solution[i];
-                let slope = (prev_val - prev_prev_val) / self.prev_dt;
-                prev_val + slope * dt
-            } else {
-                prev_val // No second derivative, predict same value
-            };
+            let prev_prev_val = self.prev_prev_solution.get(i).copied().unwrap_or(prev_val);
+            let prev_prev_prev_val = self
+                .prev_prev_prev_solution
+                .get(i)
+                .copied()
+                .unwrap_or(prev_prev_val);
+            let predicted =
+                self.predict_next_value(prev_val, prev_prev_val, prev_prev_prev_val, dt);
 
             // LTE estimate: |actual - predicted| with weighted SPICE-like scaling.
             let lte = (curr_val - predicted).abs();
@@ -1117,6 +1149,45 @@ mod tests {
 
         let (_lte_est, reject) = lte.estimate(&[2e-6], 1e-9);
         assert!(!reject, "2e-6 error should fail with 1e-6 abstol floor");
+    }
+
+    #[test]
+    fn test_lte_second_order_estimate_matches_quadratic_uniform_history() {
+        let mut lte = LteEstimator::with_tolerances(1e-3, 1e-6);
+        lte.set_method_order(2);
+
+        // x(t) = t^2 sampled at t = 0, 1, 2 and predicted at t = 3.
+        lte.record(&[0.0], 1.0);
+        lte.record(&[1.0], 1.0);
+        lte.record(&[4.0], 1.0);
+
+        let (lte_est, accept) = lte.estimate(&[9.0], 1.0);
+        assert!(accept, "quadratic motion should be accepted exactly");
+        assert!(
+            lte_est < 1e-12,
+            "second-order predictor should be exact for quadratic history, got {lte_est}"
+        );
+    }
+
+    #[test]
+    fn test_lte_second_order_estimate_matches_quadratic_nonuniform_history() {
+        let mut lte = LteEstimator::with_tolerances(1e-3, 1e-6);
+        lte.set_method_order(2);
+
+        // x(t) = t^2 sampled at t = 0, 1, 3 and predicted at t = 6.
+        lte.record(&[0.0], 1.0);
+        lte.record(&[1.0], 1.0);
+        lte.record(&[9.0], 2.0);
+
+        let (lte_est, accept) = lte.estimate(&[36.0], 3.0);
+        assert!(
+            accept,
+            "nonuniform quadratic motion should be accepted exactly"
+        );
+        assert!(
+            lte_est < 1e-12,
+            "second-order predictor should remain exact on nonuniform quadratic history, got {lte_est}"
+        );
     }
 
     #[test]

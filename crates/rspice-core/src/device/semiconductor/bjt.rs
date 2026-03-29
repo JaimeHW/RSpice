@@ -1404,6 +1404,11 @@ impl Bjt {
     }
 
     #[inline]
+    pub(crate) fn has_vbic_self_heating(&self) -> bool {
+        self.self_heating_enabled()
+    }
+
+    #[inline]
     fn vbic_temp_scaled_current(
         nominal: Value,
         r_t: Value,
@@ -1483,11 +1488,7 @@ impl Bjt {
         clone
     }
 
-    fn with_temperature_variant<R>(
-        &self,
-        thermal_rise: Value,
-        f: impl FnOnce(&Self) -> R,
-    ) -> R {
+    fn with_temperature_variant<R>(&self, thermal_rise: Value, f: impl FnOnce(&Self) -> R) -> R {
         if !self.self_heating_enabled() {
             return f(self);
         }
@@ -1501,7 +1502,8 @@ impl Bjt {
         }
 
         let mut variant = self.clone_without_thermal_variant_cache();
-        variant.refresh_operating_scaling_for((self.requested_temperature() + thermal_rise).max(1.0));
+        variant
+            .refresh_operating_scaling_for((self.requested_temperature() + thermal_rise).max(1.0));
         let result = f(&variant);
 
         let mut cache = self.thermal_variant_cache.borrow_mut();
@@ -3540,7 +3542,8 @@ impl Bjt {
         vrth: Value,
     ) -> EvaluatedBjtState {
         let mut evaluated = self.with_temperature_variant(vrth, |model| {
-            model.evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model
+                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
         });
 
         if !self.self_heating_enabled() {
@@ -3549,10 +3552,12 @@ impl Bjt {
 
         let h = self.thermal_derivative_step(vrth);
         let plus = self.with_temperature_variant(vrth + h, |model| {
-            model.evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model
+                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
         });
         let minus = self.with_temperature_variant(vrth - h, |model| {
-            model.evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
+            model
+                .evaluate_state_fixed_temperature(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi)
         });
         let denom = 2.0 * h;
 
@@ -3686,14 +3691,15 @@ impl Bjt {
                         Self::limit_logarithmic_step(candidate[IDX_VRTH], state[IDX_VRTH], 100.0)
                             .max(1.0 - self.requested_temperature());
                 }
-                let (candidate_residual, _) = self.intrinsic_state_residual_jacobian_with_thermal_scale(
-                    vc,
-                    vb,
-                    ve,
-                    vs,
-                    candidate,
-                    thermal_scale,
-                );
+                let (candidate_residual, _) = self
+                    .intrinsic_state_residual_jacobian_with_thermal_scale(
+                        vc,
+                        vb,
+                        ve,
+                        vs,
+                        candidate,
+                        thermal_scale,
+                    );
                 candidate_residual_norm = Self::intrinsic_state_residual_norm(&candidate_residual);
                 if candidate_residual_norm.is_finite()
                     && candidate_residual_norm < best_candidate_residual_norm
@@ -3932,8 +3938,10 @@ impl Bjt {
         let emitter_internal =
             Self::branch_from_internal(-(eval.linearized.ic + eval.linearized.ib), emitter_d);
         let thermal_sink = self.thermal_sink_branch(vrth);
-        let thermal_power =
-            Self::scale_branch(self.thermal_power_branch(eval, [vc, vb, ve, vs], state), thermal_scale);
+        let thermal_power = Self::scale_branch(
+            self.thermal_power_branch(eval, [vc, vb, ve, vs], state),
+            thermal_scale,
+        );
 
         let mut jacobian = [[0.0; INTERNAL_DIM]; INTERNAL_DIM];
         let mut residual = [0.0; INTERNAL_DIM];
@@ -4238,8 +4246,8 @@ impl Bjt {
         internal: [Value; INTERNAL_DIM],
     ) -> IntrinsicTerminalState {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
-        let linearized =
-            self.with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
+        let linearized = self
+            .with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
 
         IntrinsicTerminalState {
             vcx,
@@ -4841,8 +4849,9 @@ impl Bjt {
         reduction: &BjtDynamicReduction,
     ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
         let vrth = reduction.internal_voltages[IDX_VRTH];
-        let mut branches =
-            self.with_temperature_variant(vrth, |model| model.dynamic_charge_branches_fixed_temperature(reduction));
+        let mut branches = self.with_temperature_variant(vrth, |model| {
+            model.dynamic_charge_branches_fixed_temperature(reduction)
+        });
 
         if !self.self_heating_enabled() {
             return branches;
@@ -4946,14 +4955,14 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn charge_snapshot_for_dynamic_state(
+    fn dynamic_reduction_for_internal_state(
         &self,
         vc: Value,
         vb: Value,
         ve: Value,
         vs: Value,
         internal: [Value; BJT_INTERNAL_STATE_DIM],
-    ) -> BjtChargeSnapshot {
+    ) -> BjtDynamicReduction {
         let static_internal = [
             internal[IDX_VCX],
             internal[IDX_VCI],
@@ -4974,10 +4983,7 @@ impl Bjt {
         reduction.internal_voltages = internal;
 
         if !self.uses_vbic_dynamic_charges() {
-            return BjtChargeSnapshot {
-                reduction,
-                branches: [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT],
-            };
+            return reduction;
         }
 
         let vrth = internal[IDX_VRTH];
@@ -4988,10 +4994,7 @@ impl Bjt {
                 self.build_dynamic_reduction_from_transport(reduction, inputs.transport, 0.0);
             reduction.internal_voltages[IDX_VXF1] = internal[IDX_VXF1];
             reduction.internal_voltages[IDX_VXF2] = internal[IDX_VXF2];
-            return BjtChargeSnapshot {
-                reduction,
-                branches: self.dynamic_charge_branches_from_inputs(&reduction, inputs),
-            };
+            return reduction;
         }
 
         let h = self.thermal_derivative_step(vrth);
@@ -5024,7 +5027,41 @@ impl Bjt {
         );
         reduction.internal_voltages[IDX_VXF1] = internal[IDX_VXF1];
         reduction.internal_voltages[IDX_VXF2] = internal[IDX_VXF2];
+        reduction
+    }
+
+    pub(crate) fn charge_snapshot_for_dynamic_state(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> BjtChargeSnapshot {
+        let reduction = self.dynamic_reduction_for_internal_state(vc, vb, ve, vs, internal);
+
+        if !self.uses_vbic_dynamic_charges() {
+            return BjtChargeSnapshot {
+                reduction,
+                branches: [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT],
+            };
+        }
+
+        if !self.self_heating_enabled() {
+            let inputs = self
+                .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
+            return BjtChargeSnapshot {
+                reduction,
+                branches: self.dynamic_charge_branches_from_inputs(&reduction, inputs),
+            };
+        }
+
+        let vrth = internal[IDX_VRTH];
+        let h = self.thermal_derivative_step(vrth);
+        let denom = 2.0 * h;
         let mut branches = self.with_temperature_variant(vrth, |model| {
+            let base_inputs = model
+                .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
             model.dynamic_charge_branches_from_inputs(&reduction, base_inputs)
         });
 
@@ -5033,9 +5070,17 @@ impl Bjt {
         let mut minus_reduction = reduction;
         minus_reduction.internal_voltages[IDX_VRTH] = vrth - h;
         let plus_branches = self.with_temperature_variant(vrth + h, |model| {
+            let plus_inputs = model.dynamic_charge_inputs(
+                plus_reduction.external_voltages,
+                plus_reduction.internal_voltages,
+            );
             model.dynamic_charge_branches_from_inputs(&plus_reduction, plus_inputs)
         });
         let minus_branches = self.with_temperature_variant(vrth - h, |model| {
+            let minus_inputs = model.dynamic_charge_inputs(
+                minus_reduction.external_voltages,
+                minus_reduction.internal_voltages,
+            );
             model.dynamic_charge_branches_from_inputs(&minus_reduction, minus_inputs)
         });
         for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
@@ -5068,6 +5113,40 @@ impl Bjt {
             self.charge_snapshot_cache_valid.set(true);
         }
         snapshot
+    }
+
+    pub(crate) fn dynamic_internal_state_seed(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+    ) -> [Value; BJT_INTERNAL_STATE_DIM] {
+        if self.cache_matches_external_biases(vc, vb, ve, vs)
+            && self.reduced_linearization_cache_valid.get()
+        {
+            let static_internal = self.internal_state_vector();
+            let mut internal = [0.0; BJT_INTERNAL_STATE_DIM];
+            internal[..INTERNAL_DIM].copy_from_slice(&static_internal);
+
+            if self.uses_vbic_dynamic_charges() {
+                let inputs = if self.self_heating_enabled() {
+                    self.with_temperature_variant(static_internal[IDX_VRTH], |model| {
+                        model.dynamic_charge_inputs([vc, vb, ve, vs], internal)
+                    })
+                } else {
+                    self.dynamic_charge_inputs([vc, vb, ve, vs], internal)
+                };
+                internal[IDX_VXF1] = inputs.transport.itzf;
+                internal[IDX_VXF2] = inputs.transport.itzf;
+            }
+
+            return internal;
+        }
+
+        self.charge_snapshot(vc, vb, ve, vs)
+            .reduction
+            .internal_voltages
     }
 
     pub(crate) fn external_terminal_currents_at_bias(
@@ -5319,8 +5398,8 @@ impl Bjt {
         if !has_self_heat {
             vrth = 0.0;
         }
-        let linearized =
-            self.with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
+        let linearized = self
+            .with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
 
         IntrinsicTerminalState {
             vcx,
@@ -5590,12 +5669,12 @@ impl Bjt {
 
         if self.self_heating_enabled() {
             let h = self.thermal_derivative_step(vrth);
-            let (ibe_plus, ibc_plus, iciei_plus) =
-                self.with_temperature_variant(vrth + h, |model| {
+            let (ibe_plus, ibc_plus, iciei_plus) = self
+                .with_temperature_variant(vrth + h, |model| {
                     Self::intrinsic_branch_linearizations_for_model(model, vci, vbi, vei)
                 });
-            let (ibe_minus, ibc_minus, iciei_minus) =
-                self.with_temperature_variant(vrth - h, |model| {
+            let (ibe_minus, ibc_minus, iciei_minus) = self
+                .with_temperature_variant(vrth - h, |model| {
                     Self::intrinsic_branch_linearizations_for_model(model, vci, vbi, vei)
                 });
             let denom = 2.0 * h;
@@ -5799,10 +5878,8 @@ impl Bjt {
         let mut residual = static_row.current;
         let mut derivative = static_row.d_internal[IDX_VRTH];
 
-        let thermal_branch = self.vbic_delay_static_thermal_branch(
-            &self.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal)
-                .reduction,
-        );
+        let reduction = self.dynamic_reduction_for_internal_state(vc, vb, ve, vs, internal);
+        let thermal_branch = self.vbic_delay_static_thermal_branch(&reduction);
         if thermal_branch.is_active() {
             residual += thermal_branch.current;
             derivative += thermal_branch.d_internal[IDX_VRTH];
@@ -7200,6 +7277,43 @@ Q1 Q1_C V1_P 0 N1
         );
     }
 
+    #[test]
+    fn test_bjt_vbic_self_heating_repeated_update_preserves_warm_solution_quality() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let voltages = [0.0, 0.75, 4.1, 0.0];
+
+        q.update(&voltages);
+        let first_state = q.internal_state_vector();
+        let first_residual_norm = Bjt::intrinsic_state_residual_norm(
+            &q.intrinsic_state_residual_jacobian(4.1, 0.75, 0.0, 0.0, first_state)
+                .0,
+        );
+
+        q.update(&voltages);
+        let second_state = q.internal_state_vector();
+        let second_residual_norm = Bjt::intrinsic_state_residual_norm(
+            &q.intrinsic_state_residual_jacobian(4.1, 0.75, 0.0, 0.0, second_state)
+                .0,
+        );
+
+        for idx in 0..INTERNAL_DIM {
+            assert!(
+                (second_state[idx] - first_state[idx]).abs() < 1e-12,
+                "expected repeated warm-start update to preserve state at index {idx}"
+            );
+        }
+        assert!(
+            first_residual_norm < 1e-10,
+            "expected first warm-startable self-heated residual to be small, got {first_residual_norm:.3e}"
+        );
+        assert!(
+            second_residual_norm < 1e-10,
+            "expected repeated self-heated update residual to remain small, got {second_residual_norm:.3e}"
+        );
+    }
 
     #[test]
     fn test_bjt_series_resistances_reduce_external_current_and_shift_internal_bias() {
@@ -7920,6 +8034,26 @@ Q1 Q1_C V1_P 0 N1
         assert!(
             (rebuilt.branches[IDX_QXF2].charge - q.td * internal[IDX_VXF2] / 3.0).abs() < 1e-18
         );
+    }
+
+    #[test]
+    fn test_bjt_dynamic_internal_state_seed_matches_cached_operating_point_snapshot() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let [vc, vb, ve, vs] = [0.0, 0.75, 4.1, 0.0];
+        q.update(&[vc, vb, ve, vs]);
+
+        let cached = q.charge_snapshot(vc, vb, ve, vs);
+        let seed = q.dynamic_internal_state_seed(vc, vb, ve, vs);
+
+        for idx in 0..BJT_INTERNAL_STATE_DIM {
+            assert!(
+                (seed[idx] - cached.reduction.internal_voltages[idx]).abs() < 1e-18,
+                "expected operating-point dynamic seed to match cached snapshot at index {idx}"
+            );
+        }
     }
 
     #[test]
