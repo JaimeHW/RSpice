@@ -174,6 +174,17 @@ impl Engine {
     }
 
     #[inline]
+    fn prime_operating_point_seed(
+        &self,
+        circuit: &mut CircuitData,
+        solution: &[Value],
+        time: Value,
+        analysis: crate::xspice::AnalysisType,
+    ) {
+        self.update_device_states_for_operating_point(circuit, solution, time, analysis);
+    }
+
+    #[inline]
     pub(crate) fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
         Self::check_voltage_convergence_with_tolerances(
             old,
@@ -534,6 +545,93 @@ impl Engine {
         }
     }
 
+    #[inline]
+    pub(crate) fn limit_vbic_external_updates(
+        circuit: &CircuitData,
+        proposal: &mut [Value],
+        previous: &[Value],
+        num_nodes: usize,
+        protected_nodes: Option<&[bool]>,
+        excess_phase_only: bool,
+    ) -> bool {
+        let mut changed = false;
+        for _ in 0..3 {
+            let mut pass_changed = false;
+            for bjt in &circuit.bjts.devices {
+                if !bjt.uses_vbic_dynamic_charges() {
+                    continue;
+                }
+                if excess_phase_only && bjt.td <= 0.0 {
+                    continue;
+                }
+
+                let node_voltage = |values: &[Value], node: usize| {
+                    if node == 0 {
+                        0.0
+                    } else {
+                        values.get(node - 1).copied().unwrap_or(0.0)
+                    }
+                };
+                let previous_external = [
+                    node_voltage(previous, bjt.node_collector),
+                    node_voltage(previous, bjt.node_base),
+                    node_voltage(previous, bjt.node_emitter),
+                    node_voltage(previous, bjt.node_substrate),
+                ];
+                let proposed_external = [
+                    node_voltage(proposal, bjt.node_collector),
+                    node_voltage(proposal, bjt.node_base),
+                    node_voltage(proposal, bjt.node_emitter),
+                    node_voltage(proposal, bjt.node_substrate),
+                ];
+                let Some(scale) = bjt
+                    .vbic_external_step_limit_scale_against_previous(
+                        previous_external,
+                        proposed_external,
+                    )
+                    .filter(|scale| scale.is_finite() && *scale + 1e-6 < 1.0)
+                else {
+                    continue;
+                };
+
+                for node in [
+                    bjt.node_collector,
+                    bjt.node_base,
+                    bjt.node_emitter,
+                    bjt.node_substrate,
+                ] {
+                    if node == 0 {
+                        continue;
+                    }
+                    let proposal_idx = node - 1;
+                    if proposal_idx >= num_nodes
+                        || protected_nodes
+                            .and_then(|protected| protected.get(proposal_idx))
+                            .copied()
+                            .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    let previous_value = previous[proposal_idx];
+                    let proposal_value = proposal[proposal_idx];
+                    let delta = proposal_value - previous_value;
+                    if !delta.is_finite() || delta.abs() <= 0.0 {
+                        continue;
+                    }
+                    proposal[proposal_idx] = previous_value + scale * delta;
+                    pass_changed = true;
+                }
+            }
+
+            if !pass_changed {
+                break;
+            }
+            changed = true;
+        }
+
+        changed
+    }
+
     fn nonlinear_merit_with_linear_stamp<F>(
         &self,
         circuit: &mut CircuitData,
@@ -713,6 +811,12 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
         let mut used_iterations = 0usize;
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
@@ -741,6 +845,14 @@ impl Engine {
                 self.apply_damping_strategy(&solution, &raw_solution, damping_state, |trial| {
                     self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale)
                 });
+            Self::limit_vbic_external_updates(
+                circuit,
+                &mut new_solution,
+                &solution,
+                circuit.num_nodes().min(solution.len()),
+                None,
+                false,
+            );
             Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
             let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
@@ -834,6 +946,31 @@ impl Engine {
         );
         if converged || self.validate_nonlinear_solution(circuit, matrix, &refined) {
             Some(refined)
+        } else {
+            None
+        }
+    }
+
+    fn warm_restart_after_fallback(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        restart_seed: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Option<Vec<Value>> {
+        let mut damping_state = NewtonDampingState::default();
+        let restart_iterations = self.nonlinear_iteration_budget(10);
+        let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector(
+            circuit,
+            matrix,
+            1.0,
+            restart_seed,
+            &mut damping_state,
+            restart_iterations,
+            abort,
+        );
+        if converged || self.validate_nonlinear_solution(circuit, matrix, &restarted) {
+            Some(restarted)
         } else {
             None
         }
@@ -1229,6 +1366,12 @@ impl Engine {
             .map(|guess| Self::sanitize_initial_guess(guess, size))
             .unwrap_or_else(|| vec![0.0; size]);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
@@ -1280,6 +1423,16 @@ impl Engine {
             } else {
                 raw_solution
             };
+            if requires_conservative_nonlinear_limiting {
+                Self::limit_vbic_external_updates(
+                    circuit,
+                    &mut new_solution,
+                    &solution,
+                    circuit.num_nodes().min(size),
+                    None,
+                    false,
+                );
+            }
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -1372,7 +1525,12 @@ impl Engine {
                 return Err(SimulationError::Aborted);
             }
             match self
-                .source_stepping_nonlinear_with_guess_and_abort(circuit, matrix, &solution, abort)
+                .source_stepping_nonlinear_with_guess_and_abort(
+                    circuit,
+                    matrix,
+                    &fallback_seed,
+                    abort,
+                )
             {
                 Ok(source_stepped) => {
                     log::info!(
@@ -1396,6 +1554,17 @@ impl Engine {
                         &source_stepped,
                         1.0,
                     );
+                    if let Some(restarted) = self.warm_restart_after_fallback(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        abort,
+                    ) {
+                        log::info!(
+                            "Source stepping warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
                 }
                 Err(e) => {
                     if !allow_pseudo && !allow_gmin && !allow_arc {
@@ -1441,6 +1610,17 @@ impl Engine {
                         &pseudo_solution,
                         1.0,
                     );
+                    if let Some(restarted) = self.warm_restart_after_fallback(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        abort,
+                    ) {
+                        log::info!(
+                            "Pseudo-transient continuation warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
                 }
                 Err(e) => {
                     if !allow_gmin && !allow_arc {
@@ -1476,6 +1656,17 @@ impl Engine {
                         &gmin_solution,
                         1.0,
                     );
+                    if let Some(restarted) = self.warm_restart_after_fallback(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        abort,
+                    ) {
+                        log::info!(
+                            "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
                 }
                 Err(e) => {
                     if !allow_arc {
@@ -1507,6 +1698,14 @@ impl Engine {
                 abort,
             ) {
                 return Ok(candidate);
+            }
+            if let Some(restarted) =
+                self.warm_restart_after_fallback(circuit, matrix, &arc_solution, abort)
+            {
+                log::info!(
+                    "Arc-length continuation warmed the nonlinear state; direct Newton restart accepted."
+                );
+                return Ok(restarted);
             }
         }
         Err(SimulationError::ConvergenceFailed(dc_max_iterations))
@@ -1561,6 +1760,12 @@ impl Engine {
 
         solution = Self::sanitize_initial_guess(&solution, size);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            time,
+            crate::xspice::AnalysisType::Transient,
+        );
 
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
         let mut rhs = vec![0.0; size];
@@ -1606,6 +1811,16 @@ impl Engine {
             } else {
                 raw_solution
             };
+            if requires_conservative_nonlinear_limiting {
+                Self::limit_vbic_external_updates(
+                    circuit,
+                    &mut new_solution,
+                    &solution,
+                    circuit.num_nodes().min(size),
+                    None,
+                    false,
+                );
+            }
             Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
             let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
@@ -1788,6 +2003,14 @@ impl Engine {
                             &mut damping_state,
                             |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, scale),
                         );
+                        Self::limit_vbic_external_updates(
+                            circuit,
+                            &mut new_solution,
+                            &solution,
+                            circuit.num_nodes().min(size),
+                            None,
+                            false,
+                        );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
@@ -1899,6 +2122,14 @@ impl Engine {
                             pseudo_conductance,
                         )
                     },
+                );
+                Self::limit_vbic_external_updates(
+                    circuit,
+                    &mut new_solution,
+                    &solution,
+                    circuit.num_nodes().min(size),
+                    None,
+                    false,
                 );
                 Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
@@ -2078,6 +2309,12 @@ impl Engine {
                 .map(|&v| if v.abs() >= 999.0 { 0.0 } else { v })
                 .collect()
         };
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            0.0,
+            crate::xspice::AnalysisType::DcOp,
+        );
         let mut damping_state = NewtonDampingState::default();
         let gmin_iterations = self.continuation_iteration_budget(10, 12);
 
@@ -2121,6 +2358,14 @@ impl Engine {
                             &raw_solution,
                             &mut damping_state,
                             |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
+                        );
+                        Self::limit_vbic_external_updates(
+                            circuit,
+                            &mut new_solution,
+                            &solution,
+                            circuit.num_nodes().min(size),
+                            None,
+                            false,
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
@@ -2659,4 +2904,5 @@ D1 1 0 DMOD
             result
         );
     }
+
 }

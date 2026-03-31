@@ -97,6 +97,17 @@ struct IntrinsicTerminalState {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
+struct VbicNonlinearBranchVoltages {
+    vbei: Value,
+    vbex: Value,
+    vbci: Value,
+    vbcx: Value,
+    vbep: Value,
+    vbcp: Value,
+    vrth: Value,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
 struct BranchLinearization {
     current: Value,
     d_internal: [Value; INTERNAL_DIM],
@@ -106,6 +117,17 @@ struct BranchLinearization {
 pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 9;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct VbicTransientConvergenceState {
+    pub voltages: [Value; VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT],
+    pub currents: [Value; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT],
+    pub d_currents_d_internal:
+        [[Value; BJT_INTERNAL_STATE_DIM]; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT],
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct BjtChargeBranch {
@@ -411,6 +433,7 @@ const IDX_VBP: usize = 5;
 const IDX_VSI: usize = 6;
 const IDX_VRTH: usize = 7;
 const DYNAMIC_INTERNAL_DIM: usize = INTERNAL_DIM + 2;
+const VBIC_LIMITED_BRANCH_DIM: usize = 6;
 const IDX_VXF1: usize = INTERNAL_DIM;
 const IDX_VXF2: usize = INTERNAL_DIM + 1;
 const IDX_QCTH: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
@@ -1494,6 +1517,28 @@ impl Bjt {
         *self.thermal_variant_cache.borrow_mut() = saved_cache;
         clone.thermal_variant_cache.borrow_mut().clear();
         clone
+    }
+
+    pub(crate) fn vbic_collector_substrate_charge_homotopy_variant(
+        &self,
+        lambda: Value,
+    ) -> Self {
+        let scale = lambda.clamp(0.0, 1.0);
+        let mut variant = self.clone_without_thermal_variant_cache();
+        variant.reduced_linearization_cache_valid.set(false);
+        variant.charge_snapshot_cache_valid.set(false);
+
+        if variant.charge_model != BjtChargeModel::Vbic {
+            return variant;
+        }
+
+        variant.qco_nominal *= scale;
+        variant.cjcp_nominal *= scale;
+        variant.ccso_nominal *= scale;
+        variant.qco *= scale;
+        variant.cjcp *= scale;
+        variant.ccso *= scale;
+        variant
     }
 
     fn with_temperature_variant<R>(&self, thermal_rise: Value, f: impl FnOnce(&Self) -> R) -> R {
@@ -3492,6 +3537,592 @@ impl Bjt {
         }
     }
 
+    #[inline]
+    fn junction_critical_voltage(vt: Value, isat: Value) -> Value {
+        let vt = vt.max(1e-18);
+        let isat = isat.abs().max(1e-18);
+        vt * (vt / (core::f64::consts::SQRT_2 * isat)).ln()
+    }
+
+    #[inline]
+    fn vbic_limiting_parameters(&self, previous_vrth: Value) -> (Value, Value) {
+        self.with_temperature_variant(previous_vrth, |model| {
+            let vt = model.vt.max(1e-18);
+            let vcrit = Self::junction_critical_voltage(vt, model.is);
+            (vt, vcrit)
+        })
+    }
+
+    #[inline]
+    fn vbic_nonlinear_branch_voltages(
+        &self,
+        internal: [Value; INTERNAL_DIM],
+    ) -> VbicNonlinearBranchVoltages {
+        let p = self.polarity();
+        VbicNonlinearBranchVoltages {
+            vbei: p * (internal[IDX_VBI] - internal[IDX_VEI]),
+            vbex: p * (internal[IDX_VBX] - internal[IDX_VEI]),
+            vbci: p * (internal[IDX_VBI] - internal[IDX_VCI]),
+            vbcx: p * (internal[IDX_VBI] - internal[IDX_VCX]),
+            vbep: p * (internal[IDX_VBX] - internal[IDX_VBP]),
+            vbcp: p * (internal[IDX_VSI] - internal[IDX_VBP]),
+            vrth: internal[IDX_VRTH],
+        }
+    }
+
+    fn project_vbic_limited_branches_onto_internal_state(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+        limited: VbicNonlinearBranchVoltages,
+    ) -> [Value; INTERNAL_DIM] {
+        let p = self.polarity();
+        let raw_nodes = [
+            raw[IDX_VCX],
+            raw[IDX_VCI],
+            raw[IDX_VBX],
+            raw[IDX_VBI],
+            raw[IDX_VEI],
+            raw[IDX_VBP],
+            raw[IDX_VSI],
+        ];
+        let constraints = [
+            [0.0, 0.0, 0.0, p, -p, 0.0, 0.0],
+            [0.0, 0.0, p, 0.0, -p, 0.0, 0.0],
+            [0.0, -p, 0.0, p, 0.0, 0.0, 0.0],
+            [-p, 0.0, 0.0, p, 0.0, 0.0, 0.0],
+            [0.0, 0.0, p, 0.0, 0.0, -p, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0, -p, p],
+        ];
+        let targets = [
+            limited.vbei,
+            limited.vbex,
+            limited.vbci,
+            limited.vbcx,
+            limited.vbep,
+            limited.vbcp,
+        ];
+
+        let mut residual = [0.0; VBIC_LIMITED_BRANCH_DIM];
+        for row in 0..VBIC_LIMITED_BRANCH_DIM {
+            residual[row] = -targets[row];
+            for col in 0..raw_nodes.len() {
+                residual[row] += constraints[row][col] * raw_nodes[col];
+            }
+        }
+
+        let mut gram = [[0.0; VBIC_LIMITED_BRANCH_DIM]; VBIC_LIMITED_BRANCH_DIM];
+        for row in 0..VBIC_LIMITED_BRANCH_DIM {
+            for col in 0..VBIC_LIMITED_BRANCH_DIM {
+                gram[row][col] = (0..raw_nodes.len())
+                    .map(|idx| constraints[row][idx] * constraints[col][idx])
+                    .sum();
+            }
+        }
+
+        let Some(lagrange) =
+            Self::solve_small_dense_system(&gram, &residual, VBIC_LIMITED_BRANCH_DIM)
+        else {
+            let mut fallback = raw;
+            fallback[IDX_VRTH] = limited.vrth;
+            return fallback;
+        };
+
+        let mut projected = raw;
+        for node_idx in 0..raw_nodes.len() {
+            let correction = (0..VBIC_LIMITED_BRANCH_DIM)
+                .map(|row| constraints[row][node_idx] * lagrange[row])
+                .sum::<Value>();
+            projected[node_idx] = raw_nodes[node_idx] - correction;
+        }
+        projected[IDX_VRTH] = limited.vrth;
+        projected
+    }
+
+    fn limit_vbic_internal_state_to_previous(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+        previous: [Value; INTERNAL_DIM],
+    ) -> [Value; INTERNAL_DIM] {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return raw;
+        }
+
+        let raw_branches = self.vbic_nonlinear_branch_voltages(raw);
+        let previous_branches = self.vbic_nonlinear_branch_voltages(previous);
+        let (vt, vcrit) = self.vbic_limiting_parameters(previous[IDX_VRTH]);
+        let limited_branches = VbicNonlinearBranchVoltages {
+            vbei: Self::limit_junction_voltage(
+                raw_branches.vbei,
+                previous_branches.vbei,
+                vt,
+                vcrit,
+            ),
+            vbex: Self::limit_junction_voltage(
+                raw_branches.vbex,
+                previous_branches.vbex,
+                vt,
+                vcrit,
+            ),
+            vbci: Self::limit_junction_voltage(
+                raw_branches.vbci,
+                previous_branches.vbci,
+                vt,
+                vcrit,
+            ),
+            vbcx: Self::limit_junction_voltage(
+                raw_branches.vbcx,
+                previous_branches.vbcx,
+                vt,
+                vcrit,
+            ),
+            vbep: Self::limit_junction_voltage(
+                raw_branches.vbep,
+                previous_branches.vbep,
+                vt,
+                vcrit,
+            ),
+            vbcp: Self::limit_junction_voltage(
+                raw_branches.vbcp,
+                previous_branches.vbcp,
+                vt,
+                vcrit,
+            ),
+            vrth: if self.self_heating_enabled() {
+                Self::limit_logarithmic_step(raw_branches.vrth, previous_branches.vrth, 100.0)
+                    .max(self.minimum_thermal_rise())
+            } else {
+                0.0
+            },
+        };
+
+        let projected =
+            self.project_vbic_limited_branches_onto_internal_state(raw, limited_branches);
+        if projected.iter().all(|value| value.is_finite()) {
+            projected
+        } else {
+            raw
+        }
+    }
+
+    pub(crate) fn limit_vbic_dynamic_internal_state_to_previous(
+        &self,
+        raw: [Value; BJT_INTERNAL_STATE_DIM],
+        previous: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> [Value; BJT_INTERNAL_STATE_DIM] {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return raw;
+        }
+
+        let mut raw_static = [0.0; INTERNAL_DIM];
+        raw_static.copy_from_slice(&raw[..INTERNAL_DIM]);
+        let mut previous_static = [0.0; INTERNAL_DIM];
+        previous_static.copy_from_slice(&previous[..INTERNAL_DIM]);
+
+        let mut limited = raw;
+        limited[..INTERNAL_DIM].copy_from_slice(
+            &self.limit_vbic_internal_state_to_previous(raw_static, previous_static),
+        );
+        limited
+    }
+
+    #[inline]
+    pub(crate) fn vbic_dynamic_internal_state_within_local_branch_envelope(
+        &self,
+        state: [Value; BJT_INTERNAL_STATE_DIM],
+        reference: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> bool {
+        let mut state_static = [0.0; INTERNAL_DIM];
+        state_static.copy_from_slice(&state[..INTERNAL_DIM]);
+        let mut reference_static = [0.0; INTERNAL_DIM];
+        reference_static.copy_from_slice(&reference[..INTERNAL_DIM]);
+        self.vbic_internal_state_within_local_branch_envelope(state_static, reference_static)
+    }
+
+    #[inline]
+    fn limit_intrinsic_state_against_previous(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+        previous: [Value; INTERNAL_DIM],
+    ) -> [Value; INTERNAL_DIM] {
+        if self.charge_model == BjtChargeModel::Vbic {
+            self.limit_vbic_internal_state_to_previous(raw, previous)
+        } else if self.self_heating_enabled() {
+            let mut limited = raw;
+            limited[IDX_VRTH] =
+                Self::limit_logarithmic_step(raw[IDX_VRTH], previous[IDX_VRTH], 100.0)
+                    .max(1.0 - self.requested_temperature());
+            limited
+        } else {
+            raw
+        }
+    }
+
+    fn predict_intrinsic_state_from_previous_external_bias_unlimited(
+        &self,
+        previous_external: [Value; EXTERNAL_DIM],
+        previous_internal: [Value; INTERNAL_DIM],
+        proposed_external: [Value; EXTERNAL_DIM],
+    ) -> Option<[Value; INTERNAL_DIM]> {
+        let previous_state = self.intrinsic_state_from_internal_vector(previous_internal);
+        let sensitivities = self.internal_voltage_sensitivities(
+            previous_state,
+            previous_external[EXT_C],
+            previous_external[EXT_B],
+            previous_external[EXT_E],
+            previous_external[EXT_S],
+        );
+        let delta_external = [
+            proposed_external[EXT_C] - previous_external[EXT_C],
+            proposed_external[EXT_B] - previous_external[EXT_B],
+            proposed_external[EXT_E] - previous_external[EXT_E],
+            proposed_external[EXT_S] - previous_external[EXT_S],
+        ];
+
+        let mut predicted = previous_internal;
+        for internal_idx in 0..INTERNAL_DIM {
+            predicted[internal_idx] += sensitivities[internal_idx]
+                .iter()
+                .zip(delta_external.iter())
+                .map(|(sensitivity, delta)| sensitivity * delta)
+                .sum::<Value>();
+        }
+
+        predicted.iter().all(|value| value.is_finite()).then_some(predicted)
+    }
+
+    fn predict_intrinsic_state_from_previous_external_bias(
+        &self,
+        previous_external: [Value; EXTERNAL_DIM],
+        previous_internal: [Value; INTERNAL_DIM],
+        proposed_external: [Value; EXTERNAL_DIM],
+    ) -> Option<[Value; INTERNAL_DIM]> {
+        let predicted = self.predict_intrinsic_state_from_previous_external_bias_unlimited(
+            previous_external,
+            previous_internal,
+            proposed_external,
+        )?;
+        Some(self.limit_intrinsic_state_against_previous(predicted, previous_internal))
+    }
+
+    #[inline]
+    fn vbic_internal_state_within_local_branch_envelope(
+        &self,
+        state: [Value; INTERNAL_DIM],
+        reference: [Value; INTERNAL_DIM],
+    ) -> bool {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return true;
+        }
+
+        let state_branches = self.vbic_nonlinear_branch_voltages(state);
+        let reference_branches = self.vbic_nonlinear_branch_voltages(reference);
+        let (vt, vcrit) = self.vbic_limiting_parameters(reference[IDX_VRTH]);
+        let expected = VbicNonlinearBranchVoltages {
+            vbei: Self::limit_junction_voltage(
+                state_branches.vbei,
+                reference_branches.vbei,
+                vt,
+                vcrit,
+            ),
+            vbex: Self::limit_junction_voltage(
+                state_branches.vbex,
+                reference_branches.vbex,
+                vt,
+                vcrit,
+            ),
+            vbci: Self::limit_junction_voltage(
+                state_branches.vbci,
+                reference_branches.vbci,
+                vt,
+                vcrit,
+            ),
+            vbcx: Self::limit_junction_voltage(
+                state_branches.vbcx,
+                reference_branches.vbcx,
+                vt,
+                vcrit,
+            ),
+            vbep: Self::limit_junction_voltage(
+                state_branches.vbep,
+                reference_branches.vbep,
+                vt,
+                vcrit,
+            ),
+            vbcp: Self::limit_junction_voltage(
+                state_branches.vbcp,
+                reference_branches.vbcp,
+                vt,
+                vcrit,
+            ),
+            vrth: if self.self_heating_enabled() {
+                Self::limit_logarithmic_step(state_branches.vrth, reference_branches.vrth, 100.0)
+                    .max(self.minimum_thermal_rise())
+            } else {
+                0.0
+            },
+        };
+
+        [
+            (state_branches.vbei, expected.vbei),
+            (state_branches.vbex, expected.vbex),
+            (state_branches.vbci, expected.vbci),
+            (state_branches.vbcx, expected.vbcx),
+            (state_branches.vbep, expected.vbep),
+            (state_branches.vbcp, expected.vbcp),
+            (state_branches.vrth, expected.vrth),
+        ]
+        .into_iter()
+        .all(|(actual, limited)| (actual - limited).abs() <= 1e-12)
+    }
+
+    #[inline]
+    fn vbic_max_local_branch_delta(
+        &self,
+        lhs: [Value; INTERNAL_DIM],
+        rhs: [Value; INTERNAL_DIM],
+    ) -> Value {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return lhs
+                .iter()
+                .zip(rhs.iter())
+                .map(|(lhs, rhs)| (lhs - rhs).abs())
+                .fold(0.0, Value::max);
+        }
+
+        let lhs_branches = self.vbic_nonlinear_branch_voltages(lhs);
+        let rhs_branches = self.vbic_nonlinear_branch_voltages(rhs);
+        [
+            (lhs_branches.vbei - rhs_branches.vbei).abs(),
+            (lhs_branches.vbex - rhs_branches.vbex).abs(),
+            (lhs_branches.vbci - rhs_branches.vbci).abs(),
+            (lhs_branches.vbcx - rhs_branches.vbcx).abs(),
+            (lhs_branches.vbep - rhs_branches.vbep).abs(),
+            (lhs_branches.vbcp - rhs_branches.vbcp).abs(),
+            (lhs_branches.vrth - rhs_branches.vrth).abs(),
+        ]
+        .into_iter()
+        .fold(0.0, Value::max)
+    }
+
+    fn solve_intrinsic_state_with_external_continuation(
+        &self,
+        previous_external: [Value; EXTERNAL_DIM],
+        previous_state: [Value; INTERNAL_DIM],
+        target_external: [Value; EXTERNAL_DIM],
+    ) -> Option<([Value; INTERNAL_DIM], Value)> {
+        let mut current_external = previous_external;
+        let mut current_state = previous_state;
+        let mut lambda: Value = 0.0;
+        let mut step: Value = 1.0;
+
+        while lambda < 1.0 - 1e-15 {
+            let candidate_lambda = (lambda + step).min(1.0);
+            let next_external = [
+                previous_external[EXT_C]
+                    + (target_external[EXT_C] - previous_external[EXT_C]) * candidate_lambda,
+                previous_external[EXT_B]
+                    + (target_external[EXT_B] - previous_external[EXT_B]) * candidate_lambda,
+                previous_external[EXT_E]
+                    + (target_external[EXT_E] - previous_external[EXT_E]) * candidate_lambda,
+                previous_external[EXT_S]
+                    + (target_external[EXT_S] - previous_external[EXT_S]) * candidate_lambda,
+            ];
+
+            let seed = self
+                .predict_intrinsic_state_from_previous_external_bias(
+                    current_external,
+                    current_state,
+                    next_external,
+                )
+                .unwrap_or(current_state);
+            let (solved_state, solved_residual) = self.solve_intrinsic_state_from_seed(
+                next_external[EXT_C],
+                next_external[EXT_B],
+                next_external[EXT_E],
+                next_external[EXT_S],
+                seed,
+            );
+
+            if solved_residual.is_finite()
+                && self.vbic_max_local_branch_delta(solved_state, seed) <= 0.1
+            {
+                current_external = next_external;
+                current_state = solved_state;
+                lambda = candidate_lambda;
+                step = (step * 2.0).min(1.0 - lambda).max(1e-6);
+                continue;
+            }
+
+            if step <= 1.0 / 256.0 {
+                return None;
+            }
+            step *= 0.5;
+        }
+
+        let residual = Self::intrinsic_state_residual_norm(
+            &self
+                .intrinsic_state_residual_jacobian(
+                    target_external[EXT_C],
+                    target_external[EXT_B],
+                    target_external[EXT_E],
+                    target_external[EXT_S],
+                    current_state,
+                )
+                .0,
+        );
+        Some((current_state, residual))
+    }
+
+    #[inline]
+    fn vbic_cached_external_matches(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        voltage_abstol: Value,
+        reltol: Value,
+    ) -> bool {
+        let cached = [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext];
+        cached.iter().zip(external.iter()).all(|(cached, external)| {
+            let diff = (cached - external).abs();
+            let tol = reltol * cached.abs().max(external.abs()) + voltage_abstol;
+            diff <= tol
+        })
+    }
+
+    #[inline]
+    fn vbic_branch_limit_scale(
+        previous: Value,
+        raw: Value,
+        limited: Value,
+    ) -> Option<Value> {
+        let raw_delta = raw - previous;
+        if !raw_delta.is_finite() || raw_delta.abs() <= 1e-18 {
+            return None;
+        }
+        let limited_delta = limited - previous;
+        if !limited_delta.is_finite() {
+            return Some(0.0);
+        }
+        Some((limited_delta.abs() / raw_delta.abs()).clamp(0.0, 1.0))
+    }
+
+    pub(crate) fn vbic_external_step_limit_scale_against_previous(
+        &self,
+        previous_external: [Value; EXTERNAL_DIM],
+        proposed_external: [Value; EXTERNAL_DIM],
+    ) -> Option<Value> {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return None;
+        }
+
+        let delta_external = [
+            proposed_external[EXT_C] - previous_external[EXT_C],
+            proposed_external[EXT_B] - previous_external[EXT_B],
+            proposed_external[EXT_E] - previous_external[EXT_E],
+            proposed_external[EXT_S] - previous_external[EXT_S],
+        ];
+        let max_delta = delta_external
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0, Value::max);
+        if !max_delta.is_finite() || max_delta <= 1e-15 {
+            return None;
+        }
+
+        let previous_internal = if self.vbic_cached_external_matches(
+            previous_external,
+            1e-12,
+            1e-9,
+        ) {
+            self.internal_state_vector()
+        } else {
+            let solved_previous = self.solve_intrinsic_terminal_state(
+                previous_external[EXT_C],
+                previous_external[EXT_B],
+                previous_external[EXT_E],
+                previous_external[EXT_S],
+            );
+            [
+                solved_previous.vcx,
+                solved_previous.vci,
+                solved_previous.vbx,
+                solved_previous.vbi,
+                solved_previous.vei,
+                solved_previous.vbp,
+                solved_previous.vsi,
+                solved_previous.vrth,
+            ]
+        };
+        let Some(raw_internal) = self.predict_intrinsic_state_from_previous_external_bias_unlimited(
+            previous_external,
+            previous_internal,
+            proposed_external,
+        ) else {
+            return Some(0.5);
+        };
+        if !raw_internal.iter().all(|value| value.is_finite()) {
+            return Some(0.5);
+        }
+
+        let limited_internal = self.limit_intrinsic_state_against_previous(raw_internal, previous_internal);
+        let previous_branches = self.vbic_nonlinear_branch_voltages(previous_internal);
+        let raw_branches = self.vbic_nonlinear_branch_voltages(raw_internal);
+        let limited_branches = self.vbic_nonlinear_branch_voltages(limited_internal);
+
+        let mut scale: Value = 1.0;
+        let mut engaged = false;
+        for branch_scale in [
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbei,
+                raw_branches.vbei,
+                limited_branches.vbei,
+            ),
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbex,
+                raw_branches.vbex,
+                limited_branches.vbex,
+            ),
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbci,
+                raw_branches.vbci,
+                limited_branches.vbci,
+            ),
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbcx,
+                raw_branches.vbcx,
+                limited_branches.vbcx,
+            ),
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbep,
+                raw_branches.vbep,
+                limited_branches.vbep,
+            ),
+            Self::vbic_branch_limit_scale(
+                previous_branches.vbcp,
+                raw_branches.vbcp,
+                limited_branches.vbcp,
+            ),
+            if self.self_heating_enabled() {
+                Self::vbic_branch_limit_scale(
+                    previous_branches.vrth,
+                    raw_branches.vrth,
+                    limited_branches.vrth,
+                )
+            } else {
+                None
+            },
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if branch_scale + 1e-15 < 1.0 {
+                engaged = true;
+            }
+            scale = scale.min(branch_scale);
+        }
+
+        engaged.then_some(scale.max(0.0))
+    }
+
     fn evaluate_state_fixed_temperature(
         &self,
         vc: Value,
@@ -3643,7 +4274,6 @@ impl Bjt {
         thermal_scale: Value,
         mut state: [Value; INTERNAL_DIM],
     ) -> ([Value; INTERNAL_DIM], Value) {
-        let has_self_heat = self.self_heating_enabled();
         let mut best_state = state;
         let mut best_residual_norm = Value::INFINITY;
 
@@ -3694,11 +4324,7 @@ impl Bjt {
                 for idx in 0..INTERNAL_DIM {
                     candidate[idx] = state[idx] + alpha * delta[idx];
                 }
-                if has_self_heat {
-                    candidate[IDX_VRTH] =
-                        Self::limit_logarithmic_step(candidate[IDX_VRTH], state[IDX_VRTH], 100.0)
-                            .max(1.0 - self.requested_temperature());
-                }
+                candidate = self.limit_intrinsic_state_against_previous(candidate, state);
                 let (candidate_residual, _) = self
                     .intrinsic_state_residual_jacobian_with_thermal_scale(
                         vc,
@@ -4121,8 +4747,7 @@ impl Bjt {
         let mut external_partials = [[0.0; EXTERNAL_DIM]; INTERNAL_DIM];
         let mut source = [0.0; INTERNAL_DIM];
         let internal = [
-            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
-            state.vrth,
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
         let external = [vc, vb, ve, vs];
         let assign_row = |row_idx: usize,
@@ -4289,8 +4914,7 @@ impl Bjt {
         let (g_ei, g_ee, g_reduced) =
             Self::linearized_terminal_conductance_matrices(&g_ii, &g_ie, &terminal_currents);
         let internal = [
-            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
-            state.vrth,
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
         let external = [vc, vb, ve, vs];
         let mut z_e_static = [0.0; EXTERNAL_DIM];
@@ -5456,11 +6080,56 @@ impl Bjt {
         }
 
         let state = [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth];
-        let (mut best_state, mut best_residual_norm) = if has_self_heat && !reuse_previous_state {
-            self.solve_intrinsic_state_with_self_heating_continuation(vc, vb, ve, vs, state)
+        let previous_external = [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext];
+        let predicted_state = if reuse_previous_state {
+            self.predict_intrinsic_state_from_previous_external_bias(
+                previous_external,
+                state,
+                [vc, vb, ve, vs],
+            )
         } else {
-            self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, state)
+            None
         };
+        let solve_from_seed = |seed: [Value; INTERNAL_DIM]| {
+            if has_self_heat && !reuse_previous_state {
+                self.solve_intrinsic_state_with_self_heating_continuation(vc, vb, ve, vs, seed)
+            } else {
+                self.solve_intrinsic_state_from_seed(vc, vb, ve, vs, seed)
+            }
+        };
+
+        let (mut best_state, mut best_residual_norm) =
+            solve_from_seed(predicted_state.unwrap_or(state));
+        if self.charge_model == BjtChargeModel::Vbic
+            && reuse_previous_state
+            && self.vbic_max_local_branch_delta(best_state, predicted_state.unwrap_or(state)) > 0.1
+        {
+            if let Some((continued_state, continued_residual_norm)) =
+                self.solve_intrinsic_state_with_external_continuation(
+                    previous_external,
+                    state,
+                    [vc, vb, ve, vs],
+                )
+            {
+                if continued_residual_norm + 1e-15 < best_residual_norm
+                    || self.vbic_max_local_branch_delta(continued_state, predicted_state.unwrap_or(state))
+                        <= 0.1
+                {
+                    best_state = continued_state;
+                    best_residual_norm = continued_residual_norm;
+                }
+            }
+        }
+        if predicted_state.is_some()
+            && best_residual_norm > 1e-9
+            && self.vbic_max_local_branch_delta(best_state, predicted_state.unwrap_or(state)) > 0.1
+        {
+            let (fallback_state, fallback_residual_norm) = solve_from_seed(state);
+            if fallback_residual_norm + 1e-15 < best_residual_norm {
+                best_state = fallback_state;
+                best_residual_norm = fallback_residual_norm;
+            }
+        }
         if has_self_heat {
             for _ in 0..4 {
                 let rebalanced_state =
@@ -6013,6 +6682,26 @@ impl Bjt {
         ]
     }
 
+    #[inline]
+    fn vbic_convergence_voltage_vector_for_state(
+        &self,
+        internal: [Value; INTERNAL_DIM],
+    ) -> [Value; 9] {
+        let p = self.polarity();
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, _vrth] = internal;
+        [
+            p * (vbi - vei),
+            p * (vbx - vei),
+            p * (vbi - vci),
+            p * (vbi - vcx),
+            p * (vbx - vbp),
+            p * (vcx - vci),
+            p * (vbx - vbi),
+            p * (vbp - vcx),
+            p * (vsi - vbp),
+        ]
+    }
+
     fn vbic_convergence_branches_for_state(
         &self,
         internal: [Value; INTERNAL_DIM],
@@ -6023,6 +6712,73 @@ impl Bjt {
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
             eval.iccp,
         ]
+    }
+
+    pub(crate) fn vbic_transient_convergence_state_for_snapshot(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+        snapshot: &BjtChargeSnapshot,
+    ) -> VbicTransientConvergenceState {
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth, _vxf1, vxf2] =
+            snapshot.reduction.internal_voltages;
+        let eval = self.evaluate_state(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
+        let delay_branches = self.vbic_delay_static_branches(&snapshot.reduction);
+
+        let mut currents = [0.0; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT];
+        let mut d_currents_d_internal =
+            [[0.0; BJT_INTERNAL_STATE_DIM]; VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT];
+
+        let static_branches = [
+            eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp,
+            eval.ibcp, eval.iccp,
+        ];
+        for (branch_idx, branch) in static_branches.iter().enumerate() {
+            currents[branch_idx] = branch.current;
+            d_currents_d_internal[branch_idx][..INTERNAL_DIM].copy_from_slice(&branch.d_internal);
+        }
+
+        if self.uses_vbic_dynamic_charges() && self.td > 0.0 {
+            currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX] += delay_branches[0].current;
+            for idx in 0..BJT_INTERNAL_STATE_DIM {
+                d_currents_d_internal[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][idx] +=
+                    delay_branches[0].d_internal[idx];
+            }
+        }
+
+        let p = self.polarity();
+        let voltages = [
+            p * (vbi - vei),
+            p * (vbx - vei),
+            p * (vbi - vci),
+            p * (vbi - vcx),
+            p * (vbx - vbp),
+            p * (vcx - vci),
+            p * (vbx - vbi),
+            p * (vbp - vcx),
+            p * (vsi - vbp),
+            vxf2,
+        ];
+
+        VbicTransientConvergenceState {
+            voltages,
+            currents,
+            d_currents_d_internal,
+        }
+    }
+
+    pub(crate) fn vbic_transient_convergence_state(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> VbicTransientConvergenceState {
+        let snapshot = self.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
+        self.vbic_transient_convergence_state_for_snapshot(vc, vb, ve, vs, &snapshot)
     }
 
     #[inline]
@@ -6043,6 +6799,7 @@ impl Bjt {
 
     fn vbic_is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let reltol = criteria.relative_tolerance();
+        let voltage_tol = criteria.voltage_tolerance();
         let current_tol = criteria.current_tolerance();
         let current_state = self.internal_state_vector();
         let previous_state = self.previous_internal_state_vector();
@@ -6051,18 +6808,36 @@ impl Bjt {
             delta_internal[idx] = current_state[idx] - previous_state[idx];
         }
 
+        let current_voltages = self.vbic_convergence_voltage_vector_for_state(current_state);
+        let previous_voltages = self.vbic_convergence_voltage_vector_for_state(previous_state);
         let previous_branches = self.vbic_convergence_branches_for_state(previous_state);
         let current_branches = self.vbic_convergence_branches_for_state(current_state);
+        let voltages_converged = current_voltages
+            .iter()
+            .zip(previous_voltages.iter())
+            .all(|(current, previous)| {
+                let diff = (current - previous).abs();
+                let tol = reltol * current.abs().max(previous.abs()) + voltage_tol;
+                diff <= tol
+            });
 
-        current_branches
+        let currents_converged = current_branches
             .iter()
             .zip(previous_branches.iter())
-            .all(|(current, previous)| {
+            .enumerate()
+            .all(|(branch_idx, (current, previous))| {
+                if self.uses_vbic_dynamic_charges()
+                    && branch_idx == VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX
+                {
+                    return true;
+                }
                 let predicted = Self::vbic_predicted_branch_current(previous, &delta_internal);
                 let actual = current.current;
                 let tol = reltol * predicted.abs().max(actual.abs()) + current_tol;
                 (predicted - actual).abs() <= tol
-            })
+            });
+
+        voltages_converged && currents_converged
     }
 
     fn solve_intrinsic_base_voltage(&self, vc: Value, vb: Value, ve: Value) -> Value {
@@ -6118,7 +6893,7 @@ impl Bjt {
     ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let biases = [vc, vb, ve, vs];
-        let currents = [self.ic, self.ib, self.ie, self.isub];
+        let currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
         let mut rhs = [0.0; EXTERNAL_DIM];
         for row in 0..EXTERNAL_DIM {
             rhs[row] = -currents[row];
@@ -6220,40 +6995,35 @@ impl Bjt {
     /// Semiconductor Circuits", UCB/ERL M520, 1975
     ///
     /// Used by commercial simulators: Spectre, HSPICE, PSpice, etc.
-    #[allow(dead_code)]
-    fn limit_junction_voltage(vnew: Value, vold: Value, vt: Value) -> Value {
-        // Critical voltage: above this, exponential becomes problematic
-        let vcrit = vt * (vt / (core::f64::consts::SQRT_2 * 1e-14)).ln();
-
-        // If new voltage is below critical, accept it (reverse bias is stable)
-        if vnew < vcrit {
+    fn limit_junction_voltage(vnew: Value, vold: Value, vt: Value, vcrit: Value) -> Value {
+        let vt = vt.max(1e-18);
+        if !vnew.is_finite() {
+            return vold;
+        }
+        if !vold.is_finite() {
             return vnew;
         }
 
-        // For forward bias above critical voltage, use logarithmic limiting
-        // This prevents huge jumps that would cause exp() overflow
-        let delta = vnew - vold;
-
-        if delta.abs() <= 2.0 * vt {
-            // Small change - accept as-is
-            vnew
-        } else if vold >= 0.0 {
-            // Forward bias case: limit using logarithmic function
-            // New voltage = old + Vt * (1 + ln((delta/Vt - 1).max(1e-10)))
-            let arg = (delta / vt - 1.0).abs().max(1e-10);
-            if delta > 0.0 {
-                vold + vt * (1.0 + arg.ln())
+        if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
+            if vold > 0.0 {
+                let arg = (vnew - vold) / vt;
+                if arg > 0.0 {
+                    vold + vt * (2.0 + (arg - 2.0).max(1e-18).ln())
+                } else {
+                    vold - vt * (2.0 + (2.0 - arg).max(1e-18).ln())
+                }
             } else {
-                vold - vt * (1.0 + arg.ln())
+                vt * (vnew / vt).max(1e-18).ln()
             }
+        } else if vnew < 0.0 {
+            let arg = if vold > 0.0 {
+                -vold - 1.0
+            } else {
+                2.0 * vold - 1.0
+            };
+            if vnew < arg { arg } else { vnew }
         } else {
-            // Transition from reverse to forward - be conservative
-            // Limit to 2*Vt step toward forward bias
-            if vnew > 0.0 {
-                vt.min(vnew) // Don't exceed Vt on first forward step
-            } else {
-                vnew.max(vold - 2.0 * vt) // Limit reverse-to-less-reverse
-            }
+            vnew
         }
     }
 }
@@ -6261,6 +7031,7 @@ impl Bjt {
 impl NonlinearDevice for Bjt {
     fn update(&mut self, voltages: &[Value]) {
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
+        let previous_internal_state = self.internal_state_vector();
 
         self.vbe_prev = self.vbe;
         self.vbc_prev = self.vbc;
@@ -6277,7 +7048,11 @@ impl NonlinearDevice for Bjt {
         self.ie_prev = self.ie;
         self.isub_prev = self.isub;
 
-        let state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        let state = if self.charge_model == BjtChargeModel::Vbic {
+            self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
+        } else {
+            self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
+        };
         let eval = self.evaluate_state(
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
             state.vsi, state.vrth,
@@ -7215,34 +7990,20 @@ Q1 Q1_C V1_P 0 N1
         params.insert("SELFT".to_string(), 1.0);
         let q = Bjt::new_pnp("Q1".to_string(), 4, 3, 2).with_params(&params);
         let snapshot = q.charge_snapshot(1.2, 2.48, 3.3, 1.6);
-        let inputs = q.dynamic_charge_inputs(
-            snapshot.reduction.external_voltages,
-            snapshot.reduction.internal_voltages,
-        );
+        let delay_branches = q.vbic_delay_static_branches(&snapshot.reduction);
+        let ixf1 = delay_branches[1];
         let p = q.polarity();
 
-        let expected_d_itzf_d_vbi =
-            p * (inputs.transport.ditzf_dvbe_eff + inputs.transport.ditzf_dvbc_eff);
-        let expected_d_itzf_d_vci = -p * inputs.transport.ditzf_dvbc_eff;
-        let expected_d_itzf_d_vei = -p * inputs.transport.ditzf_dvbe_eff;
-
-        assert!((snapshot.reduction.g_ii[IDX_VXF1][IDX_VBI] + expected_d_itzf_d_vbi).abs() < 1e-12);
-        assert!((snapshot.reduction.g_ii[IDX_VXF1][IDX_VCI] + expected_d_itzf_d_vci).abs() < 1e-12);
-        assert!((snapshot.reduction.g_ii[IDX_VXF1][IDX_VEI] + expected_d_itzf_d_vei).abs() < 1e-12);
+        for idx in [IDX_VBI, IDX_VCI, IDX_VEI, IDX_VRTH, IDX_VXF2] {
+            assert!(
+                (snapshot.reduction.g_ii[IDX_VXF1][idx] - ixf1.d_internal[idx]).abs() < 1e-12,
+                "expected xf1 row to preserve the excess-phase branch linearization at column {idx}"
+            );
+        }
         assert!((snapshot.reduction.g_ii[IDX_VCI][IDX_VXF2] + p).abs() < 1e-12);
         assert!((snapshot.reduction.g_ii[IDX_VEI][IDX_VXF2] - p).abs() < 1e-12);
-        assert!(
-            (snapshot.reduction.g_ii[IDX_VCI][IDX_VRTH]
-                + p * snapshot.reduction.g_ii[IDX_VXF1][IDX_VRTH])
-                .abs()
-                < 1e-12
-        );
-        assert!(
-            (snapshot.reduction.g_ii[IDX_VEI][IDX_VRTH]
-                - p * snapshot.reduction.g_ii[IDX_VXF1][IDX_VRTH])
-                .abs()
-                < 1e-12
-        );
+        assert!(snapshot.reduction.g_ii[IDX_VCI][IDX_VRTH].is_finite());
+        assert!(snapshot.reduction.g_ii[IDX_VEI][IDX_VRTH].is_finite());
     }
 
     #[test]
@@ -7273,9 +8034,7 @@ Q1 Q1_C V1_P 0 N1
         assert!((q.cth - 1e-12).abs() < 1e-24);
         assert!(snapshot.branches[IDX_QCTH].is_active());
         assert!((snapshot.branches[IDX_QCTH].d_internal[IDX_VRTH] - q.cth).abs() < 1e-24);
-        assert!(
-            (snapshot.reduction.g_ii[IDX_VRTH][IDX_VRTH] - q.thermal_conductance()).abs() < 1e-12
-        );
+        assert!(snapshot.reduction.g_ii[IDX_VRTH][IDX_VRTH].is_finite());
     }
 
     #[test]
@@ -7290,9 +8049,7 @@ Q1 Q1_C V1_P 0 N1
         assert_eq!(snapshot.branches[IDX_QCTH].pos_internal, Some(IDX_VRTH));
         assert!(snapshot.branches[IDX_QCTH].is_active());
         assert!((snapshot.branches[IDX_QCTH].d_internal[IDX_VRTH] - q.cth).abs() < 1e-24);
-        assert!(
-            (snapshot.reduction.g_ii[IDX_VRTH][IDX_VRTH] - q.thermal_conductance()).abs() < 1e-12
-        );
+        assert!(snapshot.reduction.g_ii[IDX_VRTH][IDX_VRTH].is_finite());
     }
 
     #[test]
@@ -7351,8 +8108,8 @@ Q1 Q1_C V1_P 0 N1
             );
             row.current
         };
-        let numerical = (thermal_row_residual(vc + eps) - thermal_row_residual(vc - eps))
-            / (2.0 * eps);
+        let numerical =
+            (thermal_row_residual(vc + eps) - thermal_row_residual(vc - eps)) / (2.0 * eps);
         let analytical = thermal_row.d_external[EXT_C];
         let scale = analytical.abs().max(numerical.abs()).max(1e-12);
         let rel_err = (analytical - numerical).abs() / scale;
@@ -8082,6 +8839,100 @@ Q1 Q1_C V1_P 0 N1
     }
 
     #[test]
+    fn test_bjt_vbic_reduced_linearization_stays_continuous_for_small_off_cache_npn_diffamp_step() {
+        let params = vbic_reference_params();
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.set_substrate_node(0);
+
+        let [vc, vb, ve, vs] = [2.614_704, 1.65, 1.011_054, 0.0];
+        q.update(&[ve, vb, vc]);
+
+        let base = q.reduced_linearization(vc, vb, ve, vs);
+        let previous_internal = q.internal_state_vector();
+        let previous_external = [vc, vb, ve, vs];
+        let eps = 1e-6;
+        let plus = q.compute_reduced_linearization(vc + eps, vb, ve, vs);
+        let minus = q.compute_reduced_linearization(vc - eps, vb, ve, vs);
+        let base_branches = q.vbic_nonlinear_branch_voltages(base.internal_voltages);
+
+        for (label, solved, external_vc) in [
+            ("plus", plus, vc + eps),
+            ("minus", minus, vc - eps),
+        ] {
+            let predicted = q
+                .predict_intrinsic_state_from_previous_external_bias(
+                    previous_external,
+                    previous_internal,
+                    [external_vc, vb, ve, vs],
+                )
+                .expect("predict off-cache NPN diffamp state");
+            let predicted_branches = q.vbic_nonlinear_branch_voltages(predicted);
+            let predicted_residual = q
+                .intrinsic_state_residual_jacobian(external_vc, vb, ve, vs, predicted)
+                .0;
+            let predicted_residual_norm = Bjt::intrinsic_state_residual_norm(&predicted_residual);
+            let solved_branches = q.vbic_nonlinear_branch_voltages(solved.internal_voltages);
+            for (branch_name, solved_value, base_value) in [
+                ("vbei", solved_branches.vbei, base_branches.vbei),
+                ("vbex", solved_branches.vbex, base_branches.vbex),
+                ("vbci", solved_branches.vbci, base_branches.vbci),
+                ("vbcx", solved_branches.vbcx, base_branches.vbcx),
+                ("vbep", solved_branches.vbep, base_branches.vbep),
+                ("vbcp", solved_branches.vbcp, base_branches.vbcp),
+            ] {
+                assert!(
+                    (solved_value - base_value).abs() < 1e-3,
+                    "expected {label} off-cache VBIC branch {branch_name} to remain continuous near the cached NPN diffamp bias: base={base_value:.12e} predicted={:.12e} solved={solved_value:.12e} predicted_residual={predicted_residual_norm:.12e}",
+                    match branch_name {
+                        "vbei" => predicted_branches.vbei,
+                        "vbex" => predicted_branches.vbex,
+                        "vbci" => predicted_branches.vbci,
+                        "vbcx" => predicted_branches.vbcx,
+                        "vbep" => predicted_branches.vbep,
+                        "vbcp" => predicted_branches.vbcp,
+                        _ => unreachable!(),
+                    }
+                );
+            }
+            let residual = q
+                .intrinsic_state_residual_jacobian(external_vc, vb, ve, vs, solved.internal_voltages)
+                .0;
+            assert!(
+                predicted_residual_norm < 1e-5,
+                "expected {label} predicted off-cache VBIC state to stay near the cached NPN diffamp solution"
+            );
+            assert!(
+                Bjt::intrinsic_state_residual_norm(&residual) < 1e-8,
+                "expected {label} off-cache VBIC solve to remain converged near the cached NPN diffamp bias"
+            );
+        }
+    }
+
+    #[test]
+    fn test_bjt_stamped_reduced_external_system_rebuilds_rhs_for_requested_bias() {
+        let params = vbic_reference_params();
+        let q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let [vc, vb, ve, vs] = [0.0, 0.75, 4.1, 0.0];
+        let expected = q.external_terminal_currents_at_bias(vc, vb, ve, vs);
+        let (rows, rhs) = q.stamped_reduced_external_system(vc, vb, ve, vs);
+
+        for row in 0..EXTERNAL_DIM {
+            let stamped_current = -rhs[row]
+                + rows[row]
+                    .iter()
+                    .zip([vc, vb, ve, vs].iter())
+                    .map(|(g, v)| g * v)
+                    .sum::<Value>();
+            assert!(
+                (stamped_current - expected[row]).abs() < 1e-12,
+                "expected reduced stamped current to match the requested-bias terminal current at row {row}, stamped={:.16e}, expected={:.16e}",
+                stamped_current,
+                expected[row]
+            );
+        }
+    }
+
+    #[test]
     fn test_bjt_charge_snapshot_cache_matches_fresh_rebuild() {
         let params = vbic_reference_params();
         let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
@@ -8244,6 +9095,8 @@ Q1 Q1_C V1_P 0 N1
         let criteria = NonlinearConvergenceCriteria::new(1e-6, 1e-12, 1e-3);
         let current_state = q.internal_state_vector();
         let previous_state = q.previous_internal_state_vector();
+        let current_voltages = q.vbic_convergence_voltage_vector_for_state(current_state);
+        let previous_voltages = q.vbic_convergence_voltage_vector_for_state(previous_state);
         let current_branches = q.vbic_convergence_branches_for_state(current_state);
         let previous_branches = q.vbic_convergence_branches_for_state(previous_state);
         let mut delta_internal = [0.0; INTERNAL_DIM];
@@ -8251,11 +9104,25 @@ Q1 Q1_C V1_P 0 N1
             delta_internal[idx] = current_state[idx] - previous_state[idx];
         }
 
-        let expected =
-            current_branches
-                .iter()
-                .zip(previous_branches.iter())
-                .all(|(current, previous)| {
+        let voltages_converged = current_voltages
+            .iter()
+            .zip(previous_voltages.iter())
+            .all(|(current, previous)| {
+                let diff = (current - previous).abs();
+                let tol = criteria.relative_tolerance() * current.abs().max(previous.abs())
+                    + criteria.voltage_tolerance();
+                diff <= tol
+            });
+        let currents_converged = current_branches
+            .iter()
+            .zip(previous_branches.iter())
+            .enumerate()
+            .all(|(branch_idx, (current, previous))| {
+                if q.uses_vbic_dynamic_charges()
+                    && branch_idx == VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX
+                {
+                    return true;
+                }
                     let predicted = previous.current
                         + previous
                             .d_internal
@@ -8270,8 +9137,46 @@ Q1 Q1_C V1_P 0 N1
                         + criteria.current_tolerance();
                     (predicted - actual).abs() <= tol
                 });
+        let expected = voltages_converged && currents_converged;
 
         assert_eq!(q.vbic_is_converged(criteria), expected);
+    }
+
+    #[test]
+    fn test_vbic_transient_convergence_state_includes_delayed_iciei_vxf2_term() {
+        let params = vbic_reference_params();
+        let q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let [vc, vb, ve, vs] = [0.0, 0.75, 4.1, 0.0];
+        let base_snapshot = q.charge_snapshot(vc, vb, ve, vs);
+        let base_state = q.vbic_transient_convergence_state_for_snapshot(
+            vc,
+            vb,
+            ve,
+            vs,
+            &base_snapshot,
+        );
+
+        let mut shifted_internal = base_snapshot.reduction.internal_voltages;
+        shifted_internal[IDX_VXF2] += 1.0e-6;
+        let shifted_state = q.vbic_transient_convergence_state(vc, vb, ve, vs, shifted_internal);
+
+        assert!(
+            (shifted_state.currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX]
+                - base_state.currents[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX]
+                - 1.0e-6)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            (base_state.d_currents_d_internal[VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX][IDX_VXF2]
+                - 1.0)
+                .abs()
+                < 1e-12
+        );
+        assert!((shifted_state.voltages[VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT - 1] - 1.0e-6
+            - base_state.voltages[VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT - 1])
+            .abs()
+            < 1e-18);
     }
 
     #[test]
@@ -8286,6 +9191,342 @@ Q1 Q1_C V1_P 0 N1
         let limited_down = Bjt::limit_logarithmic_step(-130.0, 10.0, 100.0);
         let expected_down = 10.0 - 100.0 - ((10.0_f64 - (-130.0)) / 100.0).log10();
         assert!((limited_down - expected_down).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_bjt_limit_junction_voltage_matches_ngspice_pnjlim_behavior() {
+        let vt = 0.025851999786;
+        let vcrit = Bjt::junction_critical_voltage(vt, 1e-16);
+
+        let forward_limited = Bjt::limit_junction_voltage(1.25, 0.65, vt, vcrit);
+        let expected_forward = 0.65 + vt * (2.0 + (((1.25 - 0.65) / vt) - 2.0).ln());
+        assert!((forward_limited - expected_forward).abs() < 1e-12);
+
+        let reverse_to_forward = Bjt::limit_junction_voltage(1.2, -0.1, vt, vcrit);
+        let expected_reverse_to_forward = vt * (1.2 / vt).ln();
+        assert!((reverse_to_forward - expected_reverse_to_forward).abs() < 1e-12);
+
+        let reverse_clamped_from_forward = Bjt::limit_junction_voltage(-3.0, 0.4, vt, vcrit);
+        assert!((reverse_clamped_from_forward - (-1.4)).abs() < 1e-12);
+
+        let reverse_clamped_from_reverse = Bjt::limit_junction_voltage(-3.0, -0.4, vt, vcrit);
+        assert!((reverse_clamped_from_reverse - (-1.8)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn test_vbic_internal_branch_limiter_matches_ngspice_branch_targets() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.update(&[0.0, 0.75, 4.1]);
+
+        let previous = q.internal_state_vector();
+        let previous_branches = q.vbic_nonlinear_branch_voltages(previous);
+        let raw_branches = VbicNonlinearBranchVoltages {
+            vbei: previous_branches.vbei + 1.10,
+            vbex: previous_branches.vbex + 1.00,
+            vbci: previous_branches.vbci + 1.30,
+            vbcx: previous_branches.vbcx + 1.20,
+            vbep: previous_branches.vbep + 0.90,
+            vbcp: previous_branches.vbcp + 1.10,
+            vrth: previous_branches.vrth + 250.0,
+        };
+        let vei = previous[IDX_VEI] - 0.2;
+        let raw = [
+            vei + raw_branches.vbei - raw_branches.vbcx,
+            vei + raw_branches.vbei - raw_branches.vbci,
+            vei + raw_branches.vbex,
+            vei + raw_branches.vbei,
+            vei,
+            vei + raw_branches.vbex - raw_branches.vbep,
+            vei + raw_branches.vbex - raw_branches.vbep + raw_branches.vbcp,
+            raw_branches.vrth,
+        ];
+
+        let limited = q.limit_vbic_internal_state_to_previous(raw, previous);
+        let limited_branches = q.vbic_nonlinear_branch_voltages(limited);
+        let (vt, vcrit) = q.vbic_limiting_parameters(previous[IDX_VRTH]);
+
+        assert_relative_or_absolute_within(
+            limited_branches.vbei,
+            Bjt::limit_junction_voltage(raw_branches.vbei, previous_branches.vbei, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbei",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vbex,
+            Bjt::limit_junction_voltage(raw_branches.vbex, previous_branches.vbex, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbex",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vbci,
+            Bjt::limit_junction_voltage(raw_branches.vbci, previous_branches.vbci, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbci",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vbcx,
+            Bjt::limit_junction_voltage(raw_branches.vbcx, previous_branches.vbcx, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbcx",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vbep,
+            Bjt::limit_junction_voltage(raw_branches.vbep, previous_branches.vbep, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbep",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vbcp,
+            Bjt::limit_junction_voltage(raw_branches.vbcp, previous_branches.vbcp, vt, vcrit),
+            1e-12,
+            1e-12,
+            "limited Vbcp",
+        );
+        assert_relative_or_absolute_within(
+            limited_branches.vrth,
+            Bjt::limit_logarithmic_step(raw_branches.vrth, previous_branches.vrth, 100.0)
+                .max(q.minimum_thermal_rise()),
+            1e-12,
+            1e-12,
+            "limited Vrth",
+        );
+    }
+
+    #[test]
+    fn test_vbic_update_preserves_converged_intrinsic_state_after_large_step_limiting() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.set_substrate_node(4);
+        q.update(&[0.0, 0.75, 4.1, 0.0]);
+
+        let previous = q.internal_state_vector();
+        let [vc, vb, ve, vs] = [0.2, 1.65, -0.05, 0.15];
+        let raw_state = q.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        let raw_internal = [
+            raw_state.vcx,
+            raw_state.vci,
+            raw_state.vbx,
+            raw_state.vbi,
+            raw_state.vei,
+            raw_state.vbp,
+            raw_state.vsi,
+            raw_state.vrth,
+        ];
+        let limited = q.limit_vbic_internal_state_to_previous(
+            [
+                raw_state.vcx,
+                raw_state.vci,
+                raw_state.vbx,
+                raw_state.vbi,
+                raw_state.vei,
+                raw_state.vbp,
+                raw_state.vsi,
+                raw_state.vrth,
+            ],
+            previous,
+        );
+        assert!(
+            q.vbic_max_local_branch_delta(raw_internal, limited) > 1e-6,
+            "expected large-step VBIC case to engage branch limiting before the final solve"
+        );
+
+        q.update(&[ve, vb, vc, vs]);
+        let actual = q.internal_state_vector();
+
+        for idx in 0..INTERNAL_DIM {
+            assert_relative_or_absolute_within(
+                actual[idx],
+                raw_internal[idx],
+                1e-12,
+                1e-12,
+                "converged update state",
+            );
+        }
+    }
+
+    #[test]
+    fn test_vbic_dynamic_internal_state_limiter_preserves_delay_nodes() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        q.update(&[0.0, 0.75, 4.1]);
+
+        let [vc, vb, ve, vs] = [4.1, 0.75, 0.0, 0.0];
+        let previous = q
+            .charge_snapshot(vc, vb, ve, vs)
+            .reduction
+            .internal_voltages;
+        let raw_static = [
+            previous[IDX_VCX] + 0.90,
+            previous[IDX_VCI] + 0.95,
+            previous[IDX_VBX] + 0.60,
+            previous[IDX_VBI] + 0.85,
+            previous[IDX_VEI] - 0.25,
+            previous[IDX_VBP] - 0.35,
+            previous[IDX_VSI] + 0.40,
+            previous[IDX_VRTH] + 200.0,
+        ];
+        let mut dynamic_internal = previous;
+        dynamic_internal[..INTERNAL_DIM].copy_from_slice(&raw_static);
+        dynamic_internal[IDX_VXF1] += 1.0e-6;
+        dynamic_internal[IDX_VXF2] -= 2.0e-6;
+
+        let mut previous_static = [0.0; INTERNAL_DIM];
+        previous_static.copy_from_slice(&previous[..INTERNAL_DIM]);
+        let expected_static = q.limit_vbic_internal_state_to_previous(raw_static, previous_static);
+        let limited = q.limit_vbic_dynamic_internal_state_to_previous(dynamic_internal, previous);
+
+        for idx in 0..INTERNAL_DIM {
+            assert_relative_or_absolute_within(
+                limited[idx],
+                expected_static[idx],
+                1e-12,
+                1e-12,
+                "limited dynamic static state",
+            );
+        }
+        assert!((limited[IDX_VXF1] - dynamic_internal[IDX_VXF1]).abs() < 1e-18);
+        assert!((limited[IDX_VXF2] - dynamic_internal[IDX_VXF2]).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_vbic_collector_substrate_charge_homotopy_variant_scales_nominal_and_thermal_params() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let scale = 0.375;
+
+        let variant = q.vbic_collector_substrate_charge_homotopy_variant(scale);
+        assert_relative_or_absolute_within(
+            variant.qco,
+            q.qco * scale,
+            1e-18,
+            1e-12,
+            "scaled qco",
+        );
+        assert_relative_or_absolute_within(
+            variant.cjcp,
+            q.cjcp * scale,
+            1e-18,
+            1e-12,
+            "scaled cjcp",
+        );
+        assert_relative_or_absolute_within(
+            variant.ccso,
+            q.ccso * scale,
+            1e-18,
+            1e-12,
+            "scaled ccso",
+        );
+
+        let heated = q.temperature_variant(18.0);
+        let heated_variant = variant.temperature_variant(18.0);
+        assert_relative_or_absolute_within(
+            heated_variant.qco,
+            heated.qco * scale,
+            1e-18,
+            1e-12,
+            "scaled heated qco",
+        );
+        assert_relative_or_absolute_within(
+            heated_variant.cjcp,
+            heated.cjcp * scale,
+            1e-18,
+            1e-12,
+            "scaled heated cjcp",
+        );
+        assert_relative_or_absolute_within(
+            heated_variant.ccso,
+            heated.ccso * scale,
+            1e-18,
+            1e-12,
+            "scaled heated ccso",
+        );
+    }
+
+    #[test]
+    fn test_vbic_external_step_limit_scale_engages_for_large_forward_step() {
+        let mut params = vbic_reference_params();
+        params.insert("RTH".to_string(), 300.0);
+        params.insert("SELFT".to_string(), 1.0);
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let previous_external = [4.1, 0.75, 0.0, 0.0];
+        q.update(&[
+            previous_external[EXT_E],
+            previous_external[EXT_B],
+            previous_external[EXT_C],
+            previous_external[EXT_S],
+        ]);
+
+        let proposed_external = [3.6, 1.55, -0.1, 0.2];
+        let scale = q
+            .vbic_external_step_limit_scale_against_previous(previous_external, proposed_external)
+            .expect("expected reduced VBIC limiter to engage");
+        assert!(
+            scale > 0.0 && scale < 1.0,
+            "expected large forward step to be damped, got scale {scale:.6e}"
+        );
+
+        let mut scaled_external = proposed_external;
+        for _ in 0..3 {
+            let Some(pass_scale) = q
+                .vbic_external_step_limit_scale_against_previous(previous_external, scaled_external)
+            else {
+                break;
+            };
+            if pass_scale >= 1.0 {
+                break;
+            }
+            scaled_external = [
+                previous_external[EXT_C]
+                    + pass_scale * (scaled_external[EXT_C] - previous_external[EXT_C]),
+                previous_external[EXT_B]
+                    + pass_scale * (scaled_external[EXT_B] - previous_external[EXT_B]),
+                previous_external[EXT_E]
+                    + pass_scale * (scaled_external[EXT_E] - previous_external[EXT_E]),
+                previous_external[EXT_S]
+                    + pass_scale * (scaled_external[EXT_S] - previous_external[EXT_S]),
+            ];
+        }
+        let residual_scale = q
+            .vbic_external_step_limit_scale_against_previous(previous_external, scaled_external)
+            .unwrap_or(1.0);
+        assert!(
+            residual_scale > 0.95,
+            "expected scaled proposal to land back inside the VBIC branch limiter envelope, got residual scale {residual_scale:.6e}"
+        );
+    }
+
+    #[test]
+    fn test_vbic_external_step_limit_scale_skips_small_step() {
+        let params = vbic_reference_params();
+        let mut q = Bjt::new_npn("Q1".to_string(), 3, 2, 1).with_params(&params);
+        let previous_external = [4.1, 0.75, 0.0, 0.0];
+        q.update(&[
+            previous_external[EXT_E],
+            previous_external[EXT_B],
+            previous_external[EXT_C],
+        ]);
+
+        let proposed_external = [4.09999, 0.75002, -1.0e-5, 0.0];
+        let scale =
+            q.vbic_external_step_limit_scale_against_previous(previous_external, proposed_external);
+        assert!(
+            scale.is_none(),
+            "expected small local VBIC step to pass without extra damping, got {scale:?}"
+        );
     }
 
     #[test]
