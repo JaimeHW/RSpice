@@ -118,7 +118,7 @@ pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 9;
-pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 10;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 9;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -6763,7 +6763,7 @@ impl Bjt {
         vs: Value,
         snapshot: &BjtChargeSnapshot,
     ) -> VbicTransientConvergenceState {
-        let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth, _vxf1, vxf2] =
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth, _vxf1, _vxf2] =
             snapshot.reduction.internal_voltages;
         let eval = self.evaluate_state(vc, vb, ve, vs, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
         let delay_branches = self.vbic_delay_static_branches(&snapshot.reduction);
@@ -6800,7 +6800,6 @@ impl Bjt {
             p * (vbx - vbi),
             p * (vbp - vcx),
             p * (vsi - vbp),
-            vxf2,
         ];
 
         VbicTransientConvergenceState {
@@ -9214,13 +9213,7 @@ Q1 Q1_C V1_P 0 N1
                 .abs()
                 < 1e-12
         );
-        assert!(
-            (shifted_state.voltages[VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT - 1]
-                - 1.0e-6
-                - base_state.voltages[VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT - 1])
-                .abs()
-                < 1e-18
-        );
+        assert_eq!(base_state.voltages.len(), VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT);
     }
 
     #[test]
