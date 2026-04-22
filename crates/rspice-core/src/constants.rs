@@ -62,10 +62,11 @@ pub const MAX_TOTAL_ITERATIONS: usize = 100_000;
 // Timestep Control
 //=============================================================================
 
-/// Minimum allowable timestep for transient analysis (seconds)
+/// Preferred minimum timestep for transient analysis (seconds)
 ///
-/// Prevents infinite loops when convergence is difficult while staying aligned
-/// with the engine's practical default floor.
+/// Prevents the adaptive controller from lingering at excessively small steps
+/// in smooth regions while still allowing harder nonlinear recovery paths to
+/// retreat below it when needed.
 pub const MIN_TIMESTEP: Value = 1e-12;
 
 /// Maximum timestep for transient analysis (seconds)

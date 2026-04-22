@@ -116,8 +116,16 @@ impl Default for TransientAnalysis {
 pub struct TimestepController {
     /// Current timestep
     current_dt: Value,
-    /// Minimum allowed timestep
-    min_dt: Value,
+    /// Hard minimum allowed timestep.
+    ///
+    /// This is the true convergence-recovery floor. Retry paths may shrink all
+    /// the way to this bound before the transient solver gives up on a timepoint.
+    hard_min_dt: Value,
+    /// Preferred minimum timestep for normal forward stepping.
+    ///
+    /// This is a soft floor used to help the controller climb back out of
+    /// recovery-sized timesteps once LTE indicates the system is smooth again.
+    preferred_min_dt: Value,
     /// Maximum allowed timestep
     max_dt: Value,
     /// Target local truncation error
@@ -128,18 +136,40 @@ pub struct TimestepController {
 
 impl TimestepController {
     pub fn new(initial_dt: Value, min_dt: Value, max_dt: Value) -> Self {
+        Self::new_with_preferred_min(initial_dt, min_dt, min_dt, max_dt)
+    }
+
+    pub fn new_with_preferred_min(
+        initial_dt: Value,
+        hard_min_dt: Value,
+        preferred_min_dt: Value,
+        max_dt: Value,
+    ) -> Self {
+        let hard_min_dt = hard_min_dt.max(1e-30).min(max_dt);
+        let preferred_min_dt = preferred_min_dt.max(hard_min_dt).min(max_dt);
         Self {
-            current_dt: initial_dt,
-            min_dt,
+            current_dt: initial_dt.clamp(hard_min_dt, max_dt),
+            hard_min_dt,
+            preferred_min_dt,
             max_dt,
             target_lte: 1e-3,
-            prev_dt: initial_dt,
+            prev_dt: initial_dt.clamp(hard_min_dt, max_dt),
         }
     }
 
     /// Get current timestep
     pub fn dt(&self) -> Value {
         self.current_dt
+    }
+
+    /// Get the hard minimum timestep.
+    pub fn hard_min_dt(&self) -> Value {
+        self.hard_min_dt
+    }
+
+    /// Get the preferred minimum timestep.
+    pub fn preferred_min_dt(&self) -> Value {
+        self.preferred_min_dt
     }
 
     /// Adjust timestep based on local truncation error estimate
@@ -150,7 +180,7 @@ impl TimestepController {
         if lte_estimate < 1e-15 {
             // Error too small, increase timestep
             self.prev_dt = self.current_dt;
-            self.current_dt = (self.current_dt * 2.0).min(self.max_dt);
+            self.current_dt = (self.current_dt * 2.0).clamp(self.hard_min_dt, self.max_dt);
         } else {
             let ratio = self.target_lte / lte_estimate;
             let factor = ratio.powf(1.0 / 3.0);
@@ -159,7 +189,14 @@ impl TimestepController {
             let factor = factor.clamp(0.5, 2.0);
 
             self.prev_dt = self.current_dt;
-            self.current_dt = (self.current_dt * factor).clamp(self.min_dt, self.max_dt);
+            self.current_dt = (self.current_dt * factor).clamp(self.hard_min_dt, self.max_dt);
+        }
+
+        if self.current_dt > self.hard_min_dt && self.current_dt < self.preferred_min_dt {
+            let grew = self.current_dt > self.prev_dt;
+            if grew {
+                self.current_dt = self.preferred_min_dt.min(self.max_dt);
+            }
         }
 
         self.current_dt
@@ -168,12 +205,12 @@ impl TimestepController {
     /// Force a specific timestep (for breakpoints)
     pub fn force_step(&mut self, dt: Value) {
         self.prev_dt = self.current_dt;
-        self.current_dt = dt.clamp(self.min_dt, self.max_dt);
+        self.current_dt = dt.clamp(self.hard_min_dt, self.max_dt);
     }
 
     /// Check if timestep was rejected (too small)
     pub fn is_at_minimum(&self) -> bool {
-        self.current_dt <= self.min_dt * 1.001
+        self.current_dt <= self.hard_min_dt * 1.001
     }
 }
 
@@ -424,6 +461,92 @@ impl LteEstimator {
         } else {
             prev
         }
+    }
+
+    #[inline]
+    fn predict_trapezoidal_order1_value(&self, prev: Value, prev_prev: Value, dt: Value) -> Value {
+        if self.history_count >= 2 && self.prev_dt > 0.0 {
+            prev + dt * (prev - prev_prev) / self.prev_dt
+        } else {
+            prev
+        }
+    }
+
+    #[inline]
+    fn predict_trapezoidal_order2_value(
+        &self,
+        prev: Value,
+        prev_prev: Value,
+        prev_prev_prev: Value,
+        dt: Value,
+    ) -> Value {
+        if self.history_count >= 3 && self.prev_dt > 0.0 && self.prev_prev_dt > 0.0 {
+            let dd0 = (prev - prev_prev) / self.prev_dt;
+            let dd1 = (prev_prev - prev_prev_prev) / self.prev_prev_dt;
+            let b = -dt / (2.0 * self.prev_dt);
+            let a = 1.0 - b;
+            prev + (b * dd1 + a * dd0) * dt
+        } else {
+            self.predict_trapezoidal_order1_value(prev, prev_prev, dt)
+        }
+    }
+
+    /// Predict the next solution vector prefix from accepted history.
+    ///
+    /// The predicted vector is initialized from the most recently accepted
+    /// solution, then the first `predicted_len` entries are extrapolated.
+    /// This mirrors ngspice's `NIpred` behavior for trapezoidal integration and
+    /// falls back to order-consistent polynomial extrapolation for Gear methods.
+    pub fn predict_solution_prefix(
+        &self,
+        dt: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+        predicted_len: usize,
+    ) -> Option<Vec<Value>> {
+        if self.history_count == 0 || self.prev_solution.is_empty() || !dt.is_finite() || dt <= 0.0
+        {
+            return None;
+        }
+
+        let mut predicted = self.prev_solution.clone();
+        let predicted_len = predicted_len.min(predicted.len());
+        for (idx, value) in predicted.iter_mut().enumerate().take(predicted_len) {
+            let prev = self.prev_solution[idx];
+            let prev_prev = self.prev_prev_solution.get(idx).copied().unwrap_or(prev);
+            let prev_prev_prev = self
+                .prev_prev_prev_solution
+                .get(idx)
+                .copied()
+                .unwrap_or(prev_prev);
+            *value = match method {
+                IntegrationMethod::BackwardEuler => {
+                    self.predict_trapezoidal_order1_value(prev, prev_prev, dt)
+                }
+                IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear => {
+                    if trap_order >= 2 {
+                        self.predict_trapezoidal_order2_value(prev, prev_prev, prev_prev_prev, dt)
+                    } else {
+                        self.predict_trapezoidal_order1_value(prev, prev_prev, dt)
+                    }
+                }
+                IntegrationMethod::Gear2 => {
+                    self.predict_next_value(prev, prev_prev, prev_prev_prev, dt)
+                }
+            };
+        }
+
+        Some(predicted)
+    }
+
+    /// Predict the next full solution vector from accepted history.
+    pub fn predict_solution(
+        &self,
+        dt: Value,
+        method: IntegrationMethod,
+        trap_order: u8,
+    ) -> Option<Vec<Value>> {
+        self.predict_solution_prefix(dt, method, trap_order, usize::MAX)
     }
 
     /// Set the integration method order for accurate timestep scaling
@@ -957,6 +1080,115 @@ mod tests {
         // Small error - should increase step
         ctrl.adjust(1e-20);
         assert!(ctrl.dt() > 1e-12);
+    }
+
+    #[test]
+    fn test_timestep_controller_can_shrink_below_preferred_minimum() {
+        let mut ctrl = TimestepController::new_with_preferred_min(1e-9, 1e-18, 1e-12, 1e-3);
+
+        ctrl.force_step(1e-15);
+
+        assert!((ctrl.dt() - 1e-15).abs() < 1e-27);
+        assert!(!ctrl.is_at_minimum());
+        assert!((ctrl.hard_min_dt() - 1e-18).abs() < 1e-30);
+        assert!((ctrl.preferred_min_dt() - 1e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_timestep_controller_grows_back_to_preferred_minimum_after_recovery() {
+        let mut ctrl = TimestepController::new_with_preferred_min(1e-9, 1e-18, 1e-12, 1e-3);
+        ctrl.force_step(1e-15);
+
+        ctrl.adjust(1e-20);
+
+        assert!((ctrl.dt() - 1e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_timestep_controller_minimum_detection_uses_hard_floor() {
+        let mut ctrl = TimestepController::new_with_preferred_min(1e-9, 1e-18, 1e-12, 1e-3);
+
+        ctrl.force_step(1e-30);
+        assert!(ctrl.is_at_minimum());
+        assert!((ctrl.dt() - 1e-18).abs() < 1e-30);
+    }
+
+    #[test]
+    fn test_lte_estimator_predict_solution_trapezoidal_order1_matches_ngspice() {
+        let mut estimator = LteEstimator::with_tolerances(1e-3, 1e-12);
+        estimator.record(&[1.0, -2.0], 2.0e-12);
+        estimator.record(&[1.6, -1.4], 3.0e-12);
+
+        let predicted = estimator
+            .predict_solution(1.5e-12, IntegrationMethod::Trapezoidal, 1)
+            .expect("predict trapezoidal order-1 solution");
+
+        let expected0 = 1.6 + 1.5e-12 * (1.6 - 1.0) / 3.0e-12;
+        let expected1 = -1.4 + 1.5e-12 * (-1.4 - -2.0) / 3.0e-12;
+        assert!((predicted[0] - expected0).abs() < 1e-18);
+        assert!((predicted[1] - expected1).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_lte_estimator_predict_solution_trapezoidal_order2_matches_ngspice() {
+        let mut estimator = LteEstimator::with_tolerances(1e-3, 1e-12);
+        estimator.record(&[0.8], 1.0e-12);
+        estimator.record(&[1.0], 2.5e-12);
+        estimator.record(&[1.45], 4.0e-12);
+
+        let dt = 1.6e-12;
+        let predicted = estimator
+            .predict_solution(dt, IntegrationMethod::Trapezoidal, 2)
+            .expect("predict trapezoidal order-2 solution");
+
+        let dd0 = (1.45 - 1.0) / 4.0e-12;
+        let dd1 = (1.0 - 0.8) / 2.5e-12;
+        let b = -dt / (2.0 * 4.0e-12);
+        let a = 1.0 - b;
+        let expected = 1.45 + (b * dd1 + a * dd0) * dt;
+        assert!((predicted[0] - expected).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_lte_estimator_predict_solution_prefix_leaves_suffix_at_last_solution() {
+        let mut estimator = LteEstimator::with_tolerances(1e-3, 1e-12);
+        estimator.record(&[1.0, -2.0, 5.0, -7.0], 2.0e-12);
+        estimator.record(&[1.6, -1.4, 6.5, -6.0], 3.0e-12);
+
+        let predicted = estimator
+            .predict_solution_prefix(1.5e-12, IntegrationMethod::Trapezoidal, 1, 2)
+            .expect("predict nodal solution prefix");
+
+        let expected0 = 1.6 + 1.5e-12 * (1.6 - 1.0) / 3.0e-12;
+        let expected1 = -1.4 + 1.5e-12 * (-1.4 - -2.0) / 3.0e-12;
+        assert!((predicted[0] - expected0).abs() < 1e-18);
+        assert!((predicted[1] - expected1).abs() < 1e-18);
+        assert!((predicted[2] - 6.5).abs() < 1e-18);
+        assert!((predicted[3] - -6.0).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_lte_estimator_predict_solution_updates_suffix_like_ngspice_nipred() {
+        let mut estimator = LteEstimator::with_tolerances(1e-3, 1e-12);
+        estimator.record(&[1.0, -2.0, 5.0, -7.0], 2.0e-12);
+        estimator.record(&[1.6, -1.4, 6.5, -6.0], 3.0e-12);
+
+        let predicted = estimator
+            .predict_solution(1.5e-12, IntegrationMethod::Trapezoidal, 1)
+            .expect("predict full trapezoidal order-1 solution");
+
+        let expected = [
+            1.6 + 1.5e-12 * (1.6 - 1.0) / 3.0e-12,
+            -1.4 + 1.5e-12 * (-1.4 - -2.0) / 3.0e-12,
+            6.5 + 1.5e-12 * (6.5 - 5.0) / 3.0e-12,
+            -6.0 + 1.5e-12 * (-6.0 - -7.0) / 3.0e-12,
+        ];
+        for (idx, expected_value) in expected.into_iter().enumerate() {
+            assert!(
+                (predicted[idx] - expected_value).abs() < 1e-18,
+                "expected full-solution predictor to update entry {idx} like ngspice NIpred"
+            );
+        }
     }
 
     #[test]

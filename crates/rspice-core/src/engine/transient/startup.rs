@@ -259,6 +259,26 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn startup_force_accept_delta_limit_with_vbic_td(
+        mode: InitialSolutionMode,
+        has_vbic_excess_phase: bool,
+        _smallest_vbic_td: Option<Value>,
+        time: Value,
+        max_step: Value,
+        base_limit: Value,
+    ) -> Value {
+        if Self::in_startup_recovery_window(mode, time, max_step) {
+            let startup_limit = if has_vbic_excess_phase {
+                VBIC_STARTUP_RECOVERY_DELTA_V
+            } else {
+                STARTUP_RECOVERY_DELTA_V
+            };
+            return base_limit.max(startup_limit);
+        }
+        base_limit
+    }
+
+    #[inline]
     pub(super) fn in_startup_recovery_window(
         mode: InitialSolutionMode,
         time: Value,
@@ -338,5 +358,26 @@ impl Engine {
             practical_min = practical_min.min((td / 20.0).clamp(1e-15, hinted_max_step));
         }
         practical_min
+    }
+
+    #[inline]
+    pub(super) fn ngspice_hard_min_timestep(
+        hinted_max_step: Value,
+        preferred_min_timestep: Value,
+    ) -> Value {
+        let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
+            hinted_max_step
+        } else {
+            0.0
+        };
+        let preferred_min_timestep =
+            if preferred_min_timestep.is_finite() && preferred_min_timestep > 0.0 {
+                preferred_min_timestep
+            } else {
+                Value::INFINITY
+            };
+        let ngspice_delmin = (hinted_max_step * 1e-11).max(1e-30);
+
+        preferred_min_timestep.min(ngspice_delmin)
     }
 }

@@ -75,7 +75,10 @@ pub struct SimulationConfig {
     pub tolerance: Value,
     /// Maximum Newton-Raphson iterations
     pub max_iterations: usize,
-    /// Minimum timestep for transient analysis
+    /// Preferred minimum timestep for transient analysis.
+    ///
+    /// The transient engine may temporarily shrink below this during nonlinear
+    /// recovery, but will bias accepted smooth regions back above it.
     pub min_timestep: Value,
     /// Maximum timestep for transient analysis
     pub max_timestep: Value,
