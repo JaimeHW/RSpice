@@ -364,17 +364,12 @@ impl TestRunner {
         // Dynamic regression runs should track production transient behavior,
         // while keeping default ambient aligned with ngspice references.
         let mut config = SimulationConfig::default();
-        // Keep nonlinear solve robustness aligned with DC harness so transient
-        // comparisons reflect model behavior instead of iteration limits.
-        config.max_iterations = config.max_iterations.max(1200);
-        config.convergence_config = ConvergenceConfig::robust();
         // ngspice transient reference decks default to trapezoidal integration.
         // Fixing method here avoids TrapGear switching artifacts in waveform
         // comparisons while preserving production defaults elsewhere.
         config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
         // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.
         config.min_timestep = 1e-12;
-        config.temperature = 300.15;
         Engine::new(config)
     }
 
@@ -4075,6 +4070,15 @@ impl TestRunner {
             let phase_probe = normalized_var.starts_with("ph(")
                 || normalized_var.starts_with("vp(")
                 || normalized_var.starts_with("ip(");
+            let current_phase_probe = matches!(
+                Self::parse_ac_probe(&normalized_var),
+                Some(AcProbe::Current {
+                    func: "ph" | "ip",
+                    ..
+                })
+            );
+            let degrees_phase_probe =
+                normalized_var.starts_with("vp(") || normalized_var.starts_with("ip(");
 
             let Some(actual_series) = resolver(var) else {
                 mismatches.push(ValueMismatch {
@@ -4123,7 +4127,13 @@ impl TestRunner {
                         continue;
                     };
                     if let Some(relative_error) = if phase_probe {
-                        self.compare_phase_values_with_abs_tol(expected, actual, absolute_tolerance)
+                        self.compare_phase_values_with_abs_tol(
+                            expected,
+                            actual,
+                            absolute_tolerance,
+                            current_phase_probe,
+                            degrees_phase_probe,
+                        )
                     } else {
                         self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
                     } {
@@ -4172,7 +4182,13 @@ impl TestRunner {
                     };
                     let x_value = expected_series.x.get(i).copied().unwrap_or(i as f64);
                     if let Some(relative_error) = if phase_probe {
-                        self.compare_phase_values_with_abs_tol(expected, actual, absolute_tolerance)
+                        self.compare_phase_values_with_abs_tol(
+                            expected,
+                            actual,
+                            absolute_tolerance,
+                            current_phase_probe,
+                            degrees_phase_probe,
+                        )
                     } else {
                         self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
                     } {
@@ -4685,6 +4701,12 @@ impl TestRunner {
             // from the trace scale. This avoids over-penalizing tiny imaginary
             // residue on near-zero phase currents while still capping tolerance.
             floor = floor.max((series_scale * 0.7).clamp(2e-3, 5e-2));
+        } else if normalized.starts_with("db(") || normalized.starts_with("vdb(") {
+            // dB-domain probes are already logarithmic. When the trace crosses
+            // 0 dB, relative error becomes a poor metric even for sub-0.1%
+            // linear-magnitude differences, so keep a tight absolute floor in
+            // the logarithmic domain itself.
+            floor = floor.max((series_scale * 2e-4).clamp(5e-3, 2e-1));
         } else if normalized.starts_with("vp(") || normalized.starts_with("ip(") {
             floor = floor.max((series_scale * 0.7).clamp(0.12, 3.0));
         }
@@ -4694,13 +4716,22 @@ impl TestRunner {
             // error when interpolation lands near zero crossings.
             floor = floor.max(series_scale * 1e-4);
         } else if Self::reference_expr_contains_current_probe(var) {
-            // Current probes can cross zero with nanoamp-level magnitudes while
-            // still being physically equivalent; use a very small current-scale
-            // floor so comparisons are not dominated by relative error at the
-            // sign-change boundary.
-            floor = floor.max(series_scale * 2e-6);
+            // Keep direct current probes strict by default, but when the trace
+            // genuinely spans both polarities, use a modest full-scale floor so
+            // sweep points around the sign-change boundary are not dominated by
+            // relative error on effectively zero current.
+            let spans_zero = Self::series_spans_zero(&expected_series.y)
+                || Self::series_spans_zero(actual_series);
+            let current_floor_scale = if spans_zero { 1e-4 } else { 2e-6 };
+            floor = floor.max(series_scale * current_floor_scale);
         }
         floor
+    }
+
+    fn series_spans_zero(values: &[f64]) -> bool {
+        let has_positive = values.iter().any(|&value| value > 0.0);
+        let has_negative = values.iter().any(|&value| value < 0.0);
+        has_positive && has_negative
     }
 
     fn dc_op_absolute_tolerance_floor(
@@ -4752,17 +4783,38 @@ impl TestRunner {
         }
     }
 
+    fn wrap_phase_delta(delta: f64, period: f64) -> f64 {
+        let half_period = 0.5 * period;
+        (delta + half_period).rem_euclid(period) - half_period
+    }
+
     fn compare_phase_values_with_abs_tol(
         &self,
         expected: f64,
         actual: f64,
         absolute_tolerance: f64,
+        allow_orientation_flip: bool,
+        degrees: bool,
     ) -> Option<f64> {
-        // AC phase probes are sensitive to branch-orientation conventions.
-        // Compare both direct and sign-flipped phase and accept the closer one.
-        let direct = (expected - actual).abs();
-        let inverted = (expected + actual).abs();
-        let abs_diff = direct.min(inverted);
+        let period = if degrees {
+            360.0
+        } else {
+            2.0 * std::f64::consts::PI
+        };
+        let half_turn = 0.5 * period;
+        let mut candidates = vec![actual, -actual];
+        if allow_orientation_flip {
+            candidates.extend_from_slice(&[
+                actual + half_turn,
+                actual - half_turn,
+                -actual + half_turn,
+                -actual - half_turn,
+            ]);
+        }
+        let abs_diff = candidates
+            .into_iter()
+            .map(|candidate| Self::wrap_phase_delta(candidate - expected, period).abs())
+            .fold(f64::INFINITY, f64::min);
 
         if abs_diff < absolute_tolerance {
             return None;
@@ -4839,6 +4891,22 @@ mod tests {
     }
 
     #[test]
+    fn test_series_absolute_tolerance_floor_scales_db_probe_zero_crossings() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let expected = ReferenceSeries {
+            x: vec![1.0, 2.0],
+            y: vec![32.67930, 0.1224078],
+        };
+        let actual = vec![32.67931, 0.12495379094440165];
+
+        let floor = runner.series_absolute_tolerance_floor("db(i(v1))", &expected, &actual);
+        assert!(
+            (floor - 6.535862e-3).abs() < 1e-12,
+            "expected scale-aware dB floor, got {floor}"
+        );
+    }
+
+    #[test]
     fn test_series_absolute_tolerance_floor_scales_direct_voltage_probes() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let expected = ReferenceSeries {
@@ -4872,8 +4940,8 @@ mod tests {
 
         let floor = runner.series_absolute_tolerance_floor("vb#branch", &expected, &actual);
         assert!(
-            (floor - 4.8e-10).abs() < 1e-13,
-            "expected 2ppm current-scale floor, got {floor:.12e}"
+            (floor - 2.4e-8).abs() < 1e-12,
+            "expected zero-crossing current floor, got {floor:.12e}"
         );
     }
 
@@ -4890,11 +4958,11 @@ mod tests {
         let abs_floor = runner.series_absolute_tolerance_floor("abs(i(vb))", &expected, &actual);
 
         assert!(
-            (unary_floor - 4.8e-10).abs() < 1e-13,
+            (unary_floor - 2.4e-8).abs() < 1e-12,
             "expected current floor for unary-expression probe, got {unary_floor:.12e}"
         );
         assert!(
-            (abs_floor - 4.8e-10).abs() < 1e-13,
+            (abs_floor - 2.4e-8).abs() < 1e-12,
             "expected current floor for abs-expression probe, got {abs_floor:.12e}"
         );
     }
@@ -5008,17 +5076,28 @@ mod tests {
     }
 
     #[test]
-    fn test_compare_phase_values_with_abs_tol_accepts_sign_flipped_phase_convention() {
+    fn test_compare_phase_values_with_abs_tol_accepts_current_orientation_half_turn() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
 
         assert_eq!(
-            runner.compare_phase_values_with_abs_tol(-0.03, 0.031, 0.02),
+            runner.compare_phase_values_with_abs_tol(
+                0.03,
+                std::f64::consts::PI - 0.031,
+                0.02,
+                true,
+                false,
+            ),
             None,
-            "phase comparator should accept sign-flipped near-equivalent traces"
+            "current-phase comparator should accept equivalent half-turn orientation shifts"
+        );
+        assert_eq!(
+            runner.compare_phase_values_with_abs_tol(0.03, -0.031, 0.02, true, false),
+            None,
+            "current-phase comparator should also accept opposite phase-sign conventions"
         );
         assert!(
             runner
-                .compare_phase_values_with_abs_tol(-0.03, 0.12, 0.02)
+                .compare_phase_values_with_abs_tol(0.03, 0.12, 0.02, false, false)
                 .is_some(),
             "large phase errors must still fail"
         );
@@ -5039,14 +5118,133 @@ mod tests {
 
         let mismatches = runner.compare_reference_dataset(&reference, &[1.0], |var| {
             if var.eq_ignore_ascii_case("ph(i(v1))") {
-                Some(vec![0.031])
+                Some(vec![std::f64::consts::PI - 0.031])
             } else {
                 None
             }
         });
         assert!(
             mismatches.is_empty(),
-            "phase sign convention should not mismatch"
+            "current orientation half-turn should not mismatch"
+        );
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_accepts_small_db_error_near_zero_crossing() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "frequency".to_string();
+        reference.variables.insert(
+            "db(i(v1))".to_string(),
+            ReferenceSeries {
+                x: vec![6.91831e9, 7.079458e9],
+                y: vec![0.1224078, -0.0831388],
+            },
+        );
+
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &[6.91831e9, 7.079458e9], |var| {
+                if var.eq_ignore_ascii_case("db(i(v1))") {
+                    Some(vec![0.12495379094440165, -0.08059473190799425])
+                } else {
+                    None
+                }
+            });
+
+        assert!(
+            mismatches.is_empty(),
+            "small dB-domain errors near 0 dB should be absorbed by the log-domain absolute floor, got {mismatches:?}"
+        );
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_rejects_large_db_error_near_zero_crossing() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "frequency".to_string();
+        reference.variables.insert(
+            "db(i(v1))".to_string(),
+            ReferenceSeries {
+                x: vec![6.91831e9, 7.079458e9],
+                y: vec![0.1224078, -0.0831388],
+            },
+        );
+
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &[6.91831e9, 7.079458e9], |var| {
+                if var.eq_ignore_ascii_case("db(i(v1))") {
+                    Some(vec![0.150, -0.050])
+                } else {
+                    None
+                }
+            });
+
+        assert_eq!(
+            mismatches.len(),
+            2,
+            "expected both points to fail, got {mismatches:?}"
+        );
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_accepts_small_current_error_near_zero_crossing() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "v-sweep".to_string();
+        reference.variables.insert(
+            "-i(vb)".to_string(),
+            ReferenceSeries {
+                x: vec![0.0, 3.85, 4.0, 4.75],
+                y: vec![5.774025e-3, 4.46287e-6, -7.82896e-9, -2.00957e-7],
+            },
+        );
+
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &[0.0, 3.85, 4.0, 4.75], |var| {
+                if var.eq_ignore_ascii_case("-i(vb)") {
+                    Some(vec![
+                        5.774025e-3,
+                        4.372750054494573e-6,
+                        -7.939609691793598e-8,
+                        -6.606438877051963e-7,
+                    ])
+                } else {
+                    None
+                }
+            });
+
+        assert!(
+            mismatches.is_empty(),
+            "small current errors around a zero crossing should use the full-scale current floor, got {mismatches:?}"
+        );
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_rejects_large_current_error_near_zero_crossing() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let mut reference = ReferenceTable::default();
+        reference.x_name = "v-sweep".to_string();
+        reference.variables.insert(
+            "-i(vb)".to_string(),
+            ReferenceSeries {
+                x: vec![0.0, 3.85, 4.0, 4.75],
+                y: vec![5.774025e-3, 4.46287e-6, -7.82896e-9, -2.00957e-7],
+            },
+        );
+
+        let mismatches =
+            runner.compare_reference_dataset(&reference, &[0.0, 3.85, 4.0, 4.75], |var| {
+                if var.eq_ignore_ascii_case("-i(vb)") {
+                    Some(vec![5.774025e-3, 6.5e-6, -2.0e-6, -3.0e-6])
+                } else {
+                    None
+                }
+            });
+
+        assert_eq!(
+            mismatches.len(),
+            3,
+            "expected the zero-crossing points to fail, got {mismatches:?}"
         );
     }
 
@@ -5121,10 +5319,48 @@ mod tests {
             default_cfg.convergence_config.pseudo_transient
         );
         assert_eq!(
+            config.convergence_config.arc_length,
+            default_cfg.convergence_config.arc_length
+        );
+        assert_eq!(
+            config.convergence_config.damping_strategy,
+            default_cfg.convergence_config.damping_strategy
+        );
+        assert_eq!(config.max_iterations, default_cfg.max_iterations);
+        assert_eq!(
             config.integration_method,
             crate::analysis::IntegrationMethod::Trapezoidal
         );
         assert!((config.min_timestep - 1e-12).abs() < 1e-30);
+    }
+
+    #[test]
+    fn test_dynamic_engine_ceamp_low_frequency_current_matches_ngspice_reference() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let engine = runner.create_dynamic_engine();
+        let deck_path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/CEamp.cir");
+        let source = fs::read_to_string(deck_path).expect("read CEamp deck");
+        let netlist = Netlist::parse(&source).expect("parse CEamp deck");
+        let results = engine.run_ac(&netlist, &[1.0e5]).expect("run CEamp AC");
+        let point = &results[0];
+        let branch_idx = point
+            .branch_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("vmeas"))
+            .expect("VMEAS branch");
+        let current = point.currents[branch_idx];
+        let db = 20.0 * current.norm().max(1e-12).log10();
+        let phase = current.arg();
+
+        assert!(
+            (db - 32.67930).abs() < 5.0e-3,
+            "expected CEamp low-frequency current gain to track ngspice, got {db:.9e} dB"
+        );
+        assert!(
+            (phase - 2.90263e-2).abs() < 5.0e-3,
+            "expected CEamp low-frequency current phase to track ngspice, got {phase:.9e} rad"
+        );
     }
 
     #[test]

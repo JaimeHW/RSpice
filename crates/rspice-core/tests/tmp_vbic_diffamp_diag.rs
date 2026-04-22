@@ -1,4 +1,5 @@
 use rspice_core::Netlist;
+use rspice_core::abort_signal::ImmediateAbort;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::engine::{ConvergenceConfig, Engine, SimulationConfig};
 use rspice_core::testing::{TestRunner, TestRunnerConfig};
@@ -144,6 +145,83 @@ fn run_temp_diffamp_variant(source: &str) -> rspice_core::testing::TestResult {
 
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
+}
+
+fn replace_nth_occurrence(
+    source: &str,
+    needle: &str,
+    replacement: &str,
+    occurrence: usize,
+) -> String {
+    let matches: Vec<_> = source.match_indices(needle).collect();
+    let &(idx, matched) = matches
+        .get(occurrence)
+        .expect("requested occurrence should exist");
+    let mut rewritten =
+        String::with_capacity(source.len() + replacement.len().saturating_sub(matched.len()));
+    rewritten.push_str(&source[..idx]);
+    rewritten.push_str(replacement);
+    rewritten.push_str(&source[idx + matched.len()..]);
+    rewritten
+}
+
+#[test]
+#[ignore]
+fn debug_vbic_diffamp_dc_op_only() {
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/diffamp.cir");
+    let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+    let netlist = Netlist::parse(&source).expect("parse diffamp deck");
+
+    let mut config = SimulationConfig::default();
+    config.max_iterations = config.max_iterations.max(1200);
+    config.convergence_config = ConvergenceConfig::robust();
+    config.integration_method = IntegrationMethod::Trapezoidal;
+    config.min_timestep = 1e-12;
+    config.temperature = 300.15;
+    let engine = Engine::new(config);
+
+    let t0 = std::time::Instant::now();
+    match engine.run_dc_op(&netlist) {
+        Ok(op) => {
+            eprintln!(
+                "diffamp dc-op ok after {:.3?}: Q5_C={:.12e} Q6_C={:.12e} I1_N={:.12e} Q9_B={:.12e}",
+                t0.elapsed(),
+                op.try_voltage_named("Q5_C").unwrap_or_default(),
+                op.try_voltage_named("Q6_C").unwrap_or_default(),
+                op.try_voltage_named("I1_N").unwrap_or_default(),
+                op.try_voltage_named("Q9_B").unwrap_or_default()
+            );
+        }
+        Err(err) => {
+            eprintln!("diffamp dc-op err after {:.3?}: {err}", t0.elapsed());
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn debug_vbic_diffamp_immediate_abort_timing() {
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/diffamp.cir");
+    let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+    let netlist = Netlist::parse(&source).expect("parse diffamp deck");
+
+    let mut config = SimulationConfig::default();
+    config.max_iterations = config.max_iterations.max(1200);
+    config.convergence_config = ConvergenceConfig::robust();
+    config.integration_method = IntegrationMethod::Trapezoidal;
+    config.min_timestep = 1e-12;
+    config.temperature = 300.15;
+    let engine = Engine::new(config);
+
+    let t0 = std::time::Instant::now();
+    let result = engine.run_tran_with_abort(&netlist, 1e-8, 1e-8, &ImmediateAbort);
+    eprintln!(
+        "diffamp immediate-abort result after {:.3?}: {:?}",
+        t0.elapsed(),
+        result
+    );
 }
 
 #[test]
@@ -652,6 +730,68 @@ fn debug_vbic_diffamp_progress_10ns() {
 
 #[test]
 #[ignore]
+fn debug_vbic_diffamp_progress_10ns_npn_only_td() {
+    init_test_logger();
+    log::set_max_level(log::LevelFilter::Info);
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/diffamp.cir");
+    let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+    let source = replace_nth_occurrence(&source, " TD=2e-11", " TD=0", 1);
+    let netlist = Netlist::parse(&source).expect("parse diffamp deck with only NPN TD");
+
+    let mut config = SimulationConfig::default();
+    config.max_iterations = config.max_iterations.max(1200);
+    config.convergence_config = ConvergenceConfig::robust();
+    config.integration_method = IntegrationMethod::Trapezoidal;
+    config.min_timestep = 1e-12;
+    config.temperature = 300.15;
+    let engine = Engine::new(config);
+
+    let t0 = std::time::Instant::now();
+    let result = engine
+        .run_tran(&netlist, 1e-8, 1e-8)
+        .expect("tran diffamp 10ns with only NPN TD");
+    eprintln!(
+        "10ns NPN-only TD run: points={} final_t={:.3e}s elapsed={:.3?}",
+        result.time.len(),
+        result.time.last().copied().unwrap_or_default(),
+        t0.elapsed()
+    );
+}
+
+#[test]
+#[ignore]
+fn debug_vbic_diffamp_progress_10ns_pnp_only_td() {
+    init_test_logger();
+    log::set_max_level(log::LevelFilter::Info);
+    let deck_path =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/vbic/diffamp.cir");
+    let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+    let source = replace_nth_occurrence(&source, " TD=2e-11", " TD=0", 0);
+    let netlist = Netlist::parse(&source).expect("parse diffamp deck with only PNP TD");
+
+    let mut config = SimulationConfig::default();
+    config.max_iterations = config.max_iterations.max(1200);
+    config.convergence_config = ConvergenceConfig::robust();
+    config.integration_method = IntegrationMethod::Trapezoidal;
+    config.min_timestep = 1e-12;
+    config.temperature = 300.15;
+    let engine = Engine::new(config);
+
+    let t0 = std::time::Instant::now();
+    let result = engine
+        .run_tran(&netlist, 1e-8, 1e-8)
+        .expect("tran diffamp 10ns with only PNP TD");
+    eprintln!(
+        "10ns PNP-only TD run: points={} final_t={:.3e}s elapsed={:.3?}",
+        result.time.len(),
+        result.time.last().copied().unwrap_or_default(),
+        t0.elapsed()
+    );
+}
+
+#[test]
+#[ignore]
 fn debug_vbic_diffamp_progress_100ns() {
     init_test_logger();
     log::set_max_level(log::LevelFilter::Info);
@@ -883,7 +1023,9 @@ fn debug_vbic_diffamp_reference_samples_td_on_10ns() {
         .expect("tran no-td 10ns");
 
     let refs = load_diffamp_reference_tran();
-    let probe_times = [1.6e-10, 3.2e-10, 6.4e-10, 1.28e-9, 2.56e-9, 5.12e-9];
+    let probe_times = [
+        1.0e-11, 2.0e-11, 4.0e-11, 8.0e-11, 1.6e-10, 3.2e-10, 6.4e-10, 1.28e-9, 2.56e-9, 5.12e-9,
+    ];
 
     eprintln!("time_s, ref, td_on, td_on_err, selft0, selft0_err, no_td, no_td_err");
     for &target_time in &probe_times {
@@ -973,7 +1115,9 @@ fn debug_vbic_diffamp_unknown_row_mapping() {
     config.temperature = 300.15;
     let engine = Engine::new(config);
 
-    let circuit = engine.build_circuit(&netlist).expect("build diffamp circuit");
+    let circuit = engine
+        .build_circuit(&netlist)
+        .expect("build diffamp circuit");
     let num_nodes = circuit.num_nodes();
 
     eprintln!("diffamp matrix row mapping:");
