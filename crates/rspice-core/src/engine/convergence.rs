@@ -811,12 +811,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
-        self.prime_operating_point_seed(
-            circuit,
-            &solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-        );
+        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         let mut used_iterations = 0usize;
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
@@ -1366,12 +1361,7 @@ impl Engine {
             .map(|guess| Self::sanitize_initial_guess(guess, size))
             .unwrap_or_else(|| vec![0.0; size]);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
-        self.prime_operating_point_seed(
-            circuit,
-            &solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-        );
+        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
         let mut hit_voltage_limit = false;
@@ -1524,14 +1514,12 @@ impl Engine {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            match self
-                .source_stepping_nonlinear_with_guess_and_abort(
-                    circuit,
-                    matrix,
-                    &fallback_seed,
-                    abort,
-                )
-            {
+            match self.source_stepping_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
                 Ok(source_stepped) => {
                     log::info!(
                         "DC operating point after source stepping ({} nodes): {:?}",
@@ -1554,12 +1542,9 @@ impl Engine {
                         &source_stepped,
                         1.0,
                     );
-                    if let Some(restarted) = self.warm_restart_after_fallback(
-                        circuit,
-                        matrix,
-                        &fallback_seed,
-                        abort,
-                    ) {
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
                         log::info!(
                             "Source stepping warmed the nonlinear state; direct Newton restart accepted."
                         );
@@ -1610,12 +1595,9 @@ impl Engine {
                         &pseudo_solution,
                         1.0,
                     );
-                    if let Some(restarted) = self.warm_restart_after_fallback(
-                        circuit,
-                        matrix,
-                        &fallback_seed,
-                        abort,
-                    ) {
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
                         log::info!(
                             "Pseudo-transient continuation warmed the nonlinear state; direct Newton restart accepted."
                         );
@@ -1656,12 +1638,9 @@ impl Engine {
                         &gmin_solution,
                         1.0,
                     );
-                    if let Some(restarted) = self.warm_restart_after_fallback(
-                        circuit,
-                        matrix,
-                        &fallback_seed,
-                        abort,
-                    ) {
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
                         log::info!(
                             "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
                         );
@@ -2309,12 +2288,7 @@ impl Engine {
                 .map(|&v| if v.abs() >= 999.0 { 0.0 } else { v })
                 .collect()
         };
-        self.prime_operating_point_seed(
-            circuit,
-            &solution,
-            0.0,
-            crate::xspice::AnalysisType::DcOp,
-        );
+        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         let mut damping_state = NewtonDampingState::default();
         let gmin_iterations = self.continuation_iteration_budget(10, 12);
 
@@ -2904,5 +2878,4 @@ D1 1 0 DMOD
             result
         );
     }
-
 }

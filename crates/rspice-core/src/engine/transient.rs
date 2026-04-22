@@ -17,6 +17,7 @@ use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed, Wa
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot, BjtType, VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT,
+    VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX,
 };
 use crate::device::{NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::netlist::AnalysisCommand;
@@ -1828,12 +1829,26 @@ impl Engine {
     }
 
     const VBIC_DYNAMIC_INTERNAL_ACCEPT_RESIDUAL_NORM: Value = 1e-6;
+    const VBIC_DYNAMIC_BOUNDED_BEST_EFFORT_RESIDUAL_NORM: Value = 5e-2;
     const VBIC_HOMOTOPY_MIN_LAMBDA_STEP: Value = 1e-6;
+    const VBIC_CONTINUATION_MIN_TRIAL_STEP: Value = 1.0 / 64.0;
 
     #[inline]
     fn vbic_dynamic_snapshot_residual_is_acceptable(residual_norm: Value) -> bool {
         residual_norm.is_finite()
             && residual_norm <= Self::VBIC_DYNAMIC_INTERNAL_ACCEPT_RESIDUAL_NORM
+    }
+
+    #[inline]
+    fn vbic_dynamic_snapshot_best_effort_is_bounded(result: &VbicBestEffortSolve) -> bool {
+        result.3.is_finite()
+            && result.3 <= Self::VBIC_DYNAMIC_BOUNDED_BEST_EFFORT_RESIDUAL_NORM
+            && result
+                .0
+                .reduction
+                .internal_voltages
+                .iter()
+                .all(|value| value.is_finite())
     }
 
     #[inline]
@@ -3312,6 +3327,14 @@ impl Engine {
         }
 
         (0..VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT).all(|branch_idx| {
+            if bjt.uses_vbic_dynamic_charges()
+                && branch_idx == VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX
+            {
+                // Match ngspice's VBIC convTest path: the excess-phase iciei
+                // contribution is a hidden-state current, not a standalone
+                // predictor gate for local acceptance.
+                return true;
+            }
             let predicted = previous.currents[branch_idx]
                 + previous.d_currents_d_internal[branch_idx]
                     .iter()
@@ -3419,9 +3442,10 @@ impl Engine {
         VbicTransientLinearization,
         [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
     )> {
+        let previous_internal = previous_snapshot.reduction.internal_voltages;
         let limited_live_seed = bjt.limit_vbic_dynamic_internal_state_to_previous(
             bjt.dynamic_internal_state_seed(vc, vb, ve, vs),
-            previous_snapshot.reduction.internal_voltages,
+            previous_internal,
         );
         let seeded_result = Self::solve_vbic_dynamic_snapshot_best_effort(
             bjt,
@@ -3437,6 +3461,29 @@ impl Engine {
             cq_prev,
             seed_internal,
         );
+        let anchored_result = seed_internal
+            .filter(|seed| {
+                seed.iter()
+                    .zip(previous_internal.iter())
+                    .any(|(lhs, rhs)| (*lhs - *rhs).abs() > 1e-18)
+            })
+            .map(|_| {
+                Self::solve_vbic_dynamic_snapshot_best_effort(
+                    bjt,
+                    vc,
+                    vb,
+                    ve,
+                    vs,
+                    method,
+                    trap_order,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                    Some(&previous_internal),
+                )
+            })
+            .unwrap_or(None);
         let live_result = seed_internal
             .filter(|seed| {
                 seed.iter()
@@ -3460,20 +3507,33 @@ impl Engine {
                 )
             })
             .unwrap_or(None);
-        if let Some((snapshot, linearization, base_static_g, _residual_norm)) =
-            Self::choose_preferred_vbic_best_effort_result(
-                seeded_result,
-                live_result,
-                |result| {
-                    Self::vbic_continuation_candidate_is_acceptable(
-                        bjt,
-                        previous_external,
-                        previous_snapshot,
-                        &result.0,
-                        &result.1,
-                    )
-                },
-            )
+        let mut preferred_result = Self::choose_preferred_vbic_best_effort_result(
+            seeded_result,
+            anchored_result,
+            |result| {
+                Self::vbic_continuation_candidate_is_acceptable(
+                    bjt,
+                    previous_external,
+                    previous_snapshot,
+                    &result.0,
+                    &result.1,
+                )
+            },
+        );
+        preferred_result = Self::choose_preferred_vbic_best_effort_result(
+            preferred_result,
+            live_result,
+            |result| {
+                Self::vbic_continuation_candidate_is_acceptable(
+                    bjt,
+                    previous_external,
+                    previous_snapshot,
+                    &result.0,
+                    &result.1,
+                )
+            },
+        );
+        if let Some((snapshot, linearization, base_static_g, _residual_norm)) = preferred_result
             && Self::vbic_continuation_candidate_is_acceptable(
                 bjt,
                 previous_external,
@@ -4054,7 +4114,12 @@ impl Engine {
         if !suggested_scale.is_finite() {
             return min_scale;
         }
-        suggested_scale.clamp(min_scale, 1.0)
+        let min_trial_scale = if bjt.uses_vbic_dynamic_charges() {
+            Self::VBIC_CONTINUATION_MIN_TRIAL_STEP
+        } else {
+            0.0
+        };
+        suggested_scale.max(min_trial_scale).clamp(min_scale, 1.0)
     }
 
     #[inline]
@@ -4195,7 +4260,12 @@ impl Engine {
             return seed;
         }
 
-        let continuation_scale = (proposed_step / previous_step).clamp(0.25, 2.0);
+        // When the continuation loop has already shrunk the external step after
+        // a rejection, the accepted-path predictor must be allowed to collapse
+        // back toward the current accepted state. Keeping a positive floor here
+        // forces an outsized internal extrapolation even for microscopic
+        // follow-up steps and can starve the local reduced solve.
+        let continuation_scale = (proposed_step / previous_step).clamp(0.0, 2.0);
         for idx in 0..BJT_THERMAL_STATE_INDEX {
             let path_predicted =
                 current_internal[idx] + (current_internal[idx] - previous_internal[idx]) * continuation_scale;
@@ -4269,6 +4339,37 @@ impl Engine {
         }) {
             return Some(snapshot);
         }
+        if let Some(cached_snapshot) = cached_snapshot.as_ref() {
+            let candidate_snapshot = bjt.charge_snapshot_for_dynamic_state(
+                external[0],
+                external[1],
+                external[2],
+                external[3],
+                cached_snapshot.reduction.internal_voltages,
+            );
+            if let Some(candidate_linearization) = Self::assemble_vbic_transient_linearization(
+                bjt,
+                &candidate_snapshot,
+                effective_method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            ) && Self::vbic_local_candidate_is_acceptable(
+                bjt,
+                cached_snapshot.reduction.external_voltages,
+                cached_snapshot,
+                &candidate_snapshot,
+                &candidate_linearization,
+            ) {
+                // Match ngspice-style device bypass: when the cached hidden state
+                // remains locally acceptable at the new external bias, reuse it
+                // directly instead of paying for another reduced hidden-state
+                // solve during the same Newton timepoint.
+                return Some(candidate_snapshot);
+            }
+        }
 
         let seed_internal = Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
             bjt,
@@ -4282,6 +4383,10 @@ impl Engine {
             history_linear_prev_prev,
             dt,
             previous_dt,
+        );
+        let live_seed = bjt.limit_vbic_dynamic_internal_state_to_previous(
+            bjt.dynamic_internal_state_seed(external[0], external[1], external[2], external[3]),
+            seed_internal,
         );
         // Match ngspice's predictor/load flow: first solve the current timepoint
         // directly from a predicted/live seed, and only fall back to local
@@ -4302,6 +4407,45 @@ impl Engine {
         ) {
             return Some(snapshot);
         }
+        let mut bounded_best_effort = Self::choose_preferred_vbic_best_effort_result(
+            Self::solve_vbic_dynamic_snapshot_best_effort(
+                bjt,
+                external[0],
+                external[1],
+                external[2],
+                external[3],
+                effective_method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+                Some(&seed_internal),
+            ),
+            Some(&live_seed)
+                .filter(|seed| {
+                    seed.iter()
+                        .zip(seed_internal.iter())
+                        .any(|(lhs, rhs)| (*lhs - *rhs).abs() > 1e-18)
+                })
+                .and_then(|seed| {
+                    Self::solve_vbic_dynamic_snapshot_best_effort(
+                        bjt,
+                        external[0],
+                        external[1],
+                        external[2],
+                        external[3],
+                        effective_method,
+                        trap_order,
+                        dt,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                        Some(seed),
+                    )
+                }),
+            Self::vbic_dynamic_snapshot_best_effort_is_bounded,
+        );
 
         if let Some(cached_snapshot) = cached_snapshot {
             let cached_internal = cached_snapshot.reduction.internal_voltages;
@@ -4326,6 +4470,38 @@ impl Engine {
             {
                 return Some(snapshot);
             }
+            bounded_best_effort = Self::choose_preferred_vbic_best_effort_result(
+                bounded_best_effort,
+                Some(cached_internal)
+                    .filter(|seed| {
+                        seed.iter()
+                            .zip(seed_internal.iter())
+                            .any(|(lhs, rhs)| (*lhs - *rhs).abs() > 1e-18)
+                    })
+                    .and_then(|seed| {
+                        Self::solve_vbic_dynamic_snapshot_best_effort(
+                            bjt,
+                            external[0],
+                            external[1],
+                            external[2],
+                            external[3],
+                            effective_method,
+                            trap_order,
+                            dt,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                            Some(&seed),
+                        )
+                    }),
+                Self::vbic_dynamic_snapshot_best_effort_is_bounded,
+            );
+            if let Some((snapshot, _, _, _)) = bounded_best_effort
+                .as_ref()
+                .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+            {
+                return Some(snapshot.clone());
+            }
             if let Some(snapshot) = Self::continue_vbic_snapshot_to_external_bias_from_snapshot(
                 bjt,
                 cached_snapshot,
@@ -4342,6 +4518,12 @@ impl Engine {
         } else if let (Some(history_internal_prev), Some(history_linear_prev)) =
             (history_internal_prev, history_linear_prev)
         {
+            if let Some((snapshot, _, _, _)) = bounded_best_effort
+                .as_ref()
+                .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+            {
+                return Some(snapshot.clone());
+            }
             let previous_external = Self::vbic_external_from_linear_history(
                 bjt,
                 history_internal_prev,
@@ -4363,7 +4545,21 @@ impl Engine {
             }
         }
 
+        if let Some((snapshot, _, _, _)) = bounded_best_effort
+            .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+        {
+            return Some(snapshot);
+        }
+
         None
+    }
+
+    #[inline]
+    fn vbic_runtime_snapshot_reuse_tolerances(
+        voltage_abstol: Value,
+        reltol: Value,
+    ) -> (Value, Value) {
+        (voltage_abstol, reltol)
     }
 
     #[inline]
@@ -4499,6 +4695,8 @@ impl Engine {
         dt: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: Option<&[Option<BjtChargeSnapshot>]>,
+        snapshot_reuse_abstol: Value,
+        snapshot_reuse_reltol: Value,
     ) -> Option<Vec<Value>> {
         let vbic_device_count = circuit
             .bjts
@@ -4537,8 +4735,8 @@ impl Engine {
                 history.dynamic_linear_prev_prev.get(idx),
                 history.accepted_dt_prev,
                 vbic_snapshot_cache.and_then(|cache| cache.get(idx).copied().flatten()),
-                VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
-                VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
+                snapshot_reuse_abstol,
+                snapshot_reuse_reltol,
             )?;
 
             charges.extend(
@@ -4675,8 +4873,8 @@ impl Engine {
             let snapshot = if let Some(snapshot) = cached_snapshot {
                 snapshot
             } else {
-                let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
-                let snapshot_reuse_reltol = reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
+                let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
+                    Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
                 Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
                     bjt,
                     candidate_external,
@@ -4855,11 +5053,15 @@ impl Engine {
         voltage_lte_estimator: &LteEstimator,
         vbic_charge_lte_estimator: Option<&LteEstimator>,
         vbic_snapshot_cache: Option<&[Option<BjtChargeSnapshot>]>,
+        voltage_abstol: Value,
+        reltol: Value,
     ) -> (Value, bool, bool) {
         if is_strictly_linear_transient {
             return (0.0, true, false);
         }
 
+        let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
+            Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
         if let Some(charge_lte_estimator) = vbic_charge_lte_estimator
             && let Some(vbic_charge_state) = Self::collect_vbic_truncation_charge_state(
                 circuit,
@@ -4869,6 +5071,8 @@ impl Engine {
                 dt,
                 bjt_history,
                 vbic_snapshot_cache,
+                snapshot_reuse_abstol,
+                snapshot_reuse_reltol,
             )
         {
             let (lte, accept) = charge_lte_estimator.estimate(&vbic_charge_state, dt);
@@ -4964,6 +5168,8 @@ impl Engine {
             voltage_lte_estimator,
             vbic_charge_lte_estimator,
             Some(vbic_snapshot_cache),
+            voltage_abstol,
+            reltol,
         );
         if !accept {
             return false;
@@ -5006,6 +5212,8 @@ impl Engine {
             dt,
             history,
             vbic_snapshot_cache,
+            VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
+            VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
         ) {
             estimator.record(&vbic_charge_state, dt);
             estimator.set_method_order(method_order);
@@ -5303,6 +5511,8 @@ impl Engine {
         dt: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        voltage_abstol: Value,
+        reltol: Value,
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
         let coeff = CompanionCoefficients::for_method(effective_method);
@@ -5314,8 +5524,8 @@ impl Engine {
             let vs = Self::node_voltage(voltages, bjt.node_substrate);
 
             if bjt.uses_vbic_dynamic_charges() && charge_factor > 0.0 {
-                let snapshot_reuse_abstol = VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL;
-                let snapshot_reuse_reltol = VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL;
+                let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
+                    Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
                 let cached_snapshot = vbic_snapshot_cache.get(idx).copied().flatten();
                 let snapshot_start = std::time::Instant::now();
                 let Some(snapshot) =
@@ -6608,6 +6818,8 @@ impl Engine {
             dt,
             bjt_history,
             vbic_snapshot_cache,
+            self.voltage_abstol(),
+            self.voltage_reltol(),
         );
         Self::stamp_jfet_transient_companions(
             circuit,
@@ -7199,6 +7411,8 @@ impl Engine {
                     dt,
                     &bjt_history,
                     &mut vbic_snapshot_cache,
+                    self.voltage_abstol(),
+                    self.voltage_reltol(),
                 );
                 Self::stamp_jfet_transient_companions(
                     &circuit,
@@ -7979,6 +8193,8 @@ impl Engine {
                     &lte_estimator,
                     active_vbic_charge_lte_estimator,
                     Some(&vbic_snapshot_cache),
+                    self.voltage_abstol(),
+                    self.voltage_reltol(),
                 )
             };
             let lte_scale = if is_strictly_linear_transient {
@@ -13717,6 +13933,80 @@ Q1 C B E 0 N1\n\
     }
 
     #[test]
+    fn test_vbic_snapshot_resolution_reuses_locally_acceptable_cached_internal_state() {
+        let (mut bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
+        bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 1e-11;
+        let cached_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let q_prev = cached_snapshot.branches.map(|branch| branch.charge);
+        let q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        let target_external = [vc + 5.0e-5, vb - 5.0e-5, ve, vs];
+
+        let candidate_snapshot = bjt.charge_snapshot_for_dynamic_state(
+            target_external[0],
+            target_external[1],
+            target_external[2],
+            target_external[3],
+            cached_snapshot.reduction.internal_voltages,
+        );
+        let candidate_linearization = Engine::assemble_vbic_transient_linearization(
+            &bjt,
+            &candidate_snapshot,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+        )
+        .expect("assemble locally acceptable cached-state candidate");
+        assert!(
+            Engine::vbic_local_candidate_is_acceptable(
+                &bjt,
+                cached_snapshot.reduction.external_voltages,
+                &cached_snapshot,
+                &candidate_snapshot,
+                &candidate_linearization,
+            ),
+            "expected the cached VBIC hidden state to remain locally acceptable across a small external perturbation"
+        );
+
+        let resolved_snapshot = Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            &bjt,
+            target_external,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            Some(&cached_snapshot.reduction.internal_voltages),
+            None,
+            None,
+            None,
+            dt,
+            Some(cached_snapshot),
+            1e-6,
+            1e-3,
+        )
+        .expect("resolve locally acceptable cached-state snapshot");
+
+        for idx in 0..BJT_INTERNAL_STATE_DIM {
+            assert!(
+                (resolved_snapshot.reduction.internal_voltages[idx]
+                    - candidate_snapshot.reduction.internal_voltages[idx])
+                    .abs()
+                    < 1e-18,
+                "expected locally acceptable cached-state resolution to preserve internal index {idx}"
+            );
+        }
+    }
+
+    #[test]
     fn test_vbic_diffamp_q11_continuation_seed_predicts_and_preserves_delay_state() {
         let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tests/vbic/diffamp.cir");
@@ -13857,6 +14147,326 @@ Q1 C B E 0 N1\n\
         assert!(
             bjt.vbic_dynamic_internal_state_within_local_branch_envelope(anchored, current_internal),
             "expected accepted-path VBIC continuation seeding to remain inside the local branch limiter envelope"
+        );
+    }
+
+    #[test]
+    fn test_vbic_continuation_seed_from_accepted_path_shrinks_with_tiny_followup_step() {
+        let (mut bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
+        bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
+
+        let previous_external = [vc + 4.0e-3, vb + 4.0e-3, ve, vs];
+        let current_external = [vc + 2.0e-3, vb + 2.0e-3, ve, vs];
+        let target_external = [vc + 1.999e-3, vb + 1.999e-3, ve, vs];
+        let previous_internal = bjt
+            .charge_snapshot(
+                previous_external[0],
+                previous_external[1],
+                previous_external[2],
+                previous_external[3],
+            )
+            .reduction
+            .internal_voltages;
+        let current_internal = bjt
+            .charge_snapshot(
+                current_external[0],
+                current_external[1],
+                current_external[2],
+                current_external[3],
+            )
+            .reduction
+            .internal_voltages;
+
+        let anchored = Engine::vbic_continuation_seed_from_accepted_path(
+            &bjt,
+            Some(previous_external),
+            Some(previous_internal),
+            current_external,
+            current_internal,
+            target_external,
+        );
+
+        let previous_step = previous_external
+            .iter()
+            .zip(current_external.iter())
+            .map(|(previous, current)| (current - previous).abs())
+            .fold(0.0_f64, Value::max);
+        let proposed_step = target_external
+            .iter()
+            .zip(current_external.iter())
+            .map(|(target, current)| (target - current).abs())
+            .fold(0.0_f64, Value::max);
+        let expected_scale = proposed_step / previous_step;
+
+        for idx in [BJT_VCI_STATE_INDEX, BJT_VBI_STATE_INDEX, BJT_VEI_STATE_INDEX] {
+            let expected = current_internal[idx]
+                + (current_internal[idx] - previous_internal[idx]) * expected_scale;
+            let anchored_delta = (anchored[idx] - current_internal[idx]).abs();
+            let previous_delta = (current_internal[idx] - previous_internal[idx]).abs();
+            assert!(
+                (anchored[idx] - expected).abs() <= previous_delta * 0.05 + 1e-18,
+                "expected tiny-step accepted-path continuation seeding to track the scaled secant at static index {idx}"
+            );
+            assert!(
+                anchored_delta <= previous_delta * 0.05 + 1e-18,
+                "expected tiny-step accepted-path continuation seeding to stay close to the current accepted state at static index {idx}"
+            );
+        }
+        assert!(
+            bjt.vbic_dynamic_internal_state_within_local_branch_envelope(anchored, current_internal),
+            "expected tiny-step accepted-path continuation seeding to remain inside the local branch limiter envelope"
+        );
+    }
+
+    #[test]
+    fn test_vbic_diffamp_q11_large_runtime_jump_best_effort_candidate_keeps_bounded_residual() {
+        let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/vbic/diffamp.cir");
+        let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+        let netlist = crate::Netlist::parse(&source).expect("parse diffamp deck");
+
+        let mut config = crate::SimulationConfig::default();
+        config.integration_method = IntegrationMethod::Trapezoidal;
+        config.temperature = 300.15;
+        let engine = Engine::new(config);
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("build diffamp circuit");
+
+        let q11 = circuit
+            .bjts
+            .devices
+            .iter()
+            .find(|device| device.name == "Q11")
+            .expect("find Q11")
+            .clone();
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 5.893e-21;
+        let history_external = [6.597_288e-1, 6.597_288e-1, 0.0, 0.0];
+        let target_external = [4.584_418e-1, 4.584_418e-1, 0.0, 0.0];
+
+        let previous_snapshot = q11.charge_snapshot(
+            history_external[0],
+            history_external[1],
+            history_external[2],
+            history_external[3],
+        );
+        let q_prev = previous_snapshot.branches.map(|branch| branch.charge);
+        let q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        let history_internal_prev = previous_snapshot.reduction.internal_voltages;
+        let history_linear_prev = Engine::vbic_predictor_linear_branch_state(
+            &q11,
+            previous_snapshot.reduction.external_voltages,
+            previous_snapshot.reduction.internal_voltages,
+        );
+        let live_target_seed = q11.dynamic_internal_state_seed(
+            target_external[0],
+            target_external[1],
+            target_external[2],
+            target_external[3],
+        );
+        let merged_seed = Engine::vbic_dynamic_internal_seed_from_history_with_linear_history(
+            &q11,
+            target_external[0],
+            target_external[1],
+            target_external[2],
+            target_external[3],
+            Some(&history_internal_prev),
+            Some(&history_internal_prev),
+            Some(&history_linear_prev),
+            Some(&history_linear_prev),
+            dt,
+            dt,
+        );
+
+        let mut candidate = Engine::choose_preferred_vbic_best_effort_result(
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&history_internal_prev),
+            ),
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&live_target_seed),
+            ),
+            |result| {
+                Engine::vbic_continuation_candidate_is_acceptable(
+                    &q11,
+                    previous_snapshot.reduction.external_voltages,
+                    &previous_snapshot,
+                    &result.0,
+                    &result.1,
+                )
+            },
+        );
+        candidate = Engine::choose_preferred_vbic_best_effort_result(
+            candidate,
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&merged_seed),
+            ),
+            |result| {
+                Engine::vbic_continuation_candidate_is_acceptable(
+                    &q11,
+                    previous_snapshot.reduction.external_voltages,
+                    &previous_snapshot,
+                    &result.0,
+                    &result.1,
+                )
+            },
+        );
+
+        let (candidate_snapshot, candidate_linearization, _, residual_norm) = candidate
+            .expect("expected a best-effort Q11 runtime-bias candidate across the large history jump");
+
+        assert!(
+            residual_norm.is_finite() && residual_norm < 5.0e-2,
+            "expected the best-effort Q11 runtime-bias candidate to keep a bounded hidden-state residual, got {residual_norm:.12e}"
+        );
+        assert!(
+            candidate_snapshot
+                .reduction
+                .internal_voltages
+                .iter()
+                .all(|value| value.is_finite()),
+            "expected the best-effort Q11 runtime-bias candidate to preserve a finite internal state"
+        );
+        let linearization_residual = Engine::vbic_internal_equation_residual_norm(
+            &candidate_linearization,
+            &candidate_snapshot.reduction.external_voltages,
+            &candidate_snapshot.reduction.internal_voltages,
+        );
+        assert!(
+            linearization_residual.is_finite() && linearization_residual <= residual_norm + 1e-18,
+            "expected the assembled Q11 transient linearization residual to stay consistent with the best-effort solve, got {linearization_residual:.12e} vs {residual_norm:.12e}"
+        );
+    }
+
+    #[test]
+    fn test_vbic_diffamp_q11_tiny_followup_continuation_step_reuses_current_internal_seed() {
+        let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/vbic/diffamp.cir");
+        let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+        let netlist = crate::Netlist::parse(&source).expect("parse diffamp deck");
+
+        let mut config = crate::SimulationConfig::default();
+        config.integration_method = IntegrationMethod::Trapezoidal;
+        config.temperature = 300.15;
+        let engine = Engine::new(config);
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("build diffamp circuit");
+
+        let q11 = circuit
+            .bjts
+            .devices
+            .iter()
+            .find(|device| device.name == "Q11")
+            .expect("find Q11")
+            .clone();
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 5.893e-21;
+        let history_external = [6.597_288e-1, 6.597_288e-1, 0.0, 0.0];
+        let current_external = [6.594_596_634_445_468e-1, 6.594_596_634_445_468e-1, 0.0, 0.0];
+        let target_external = [4.584_418e-1, 4.584_418e-1, 0.0, 0.0];
+        let step = 4.974_682_263_877e-6;
+        let next_external = [
+            current_external[0] + (target_external[0] - current_external[0]) * step,
+            current_external[1] + (target_external[1] - current_external[1]) * step,
+            current_external[2] + (target_external[2] - current_external[2]) * step,
+            current_external[3] + (target_external[3] - current_external[3]) * step,
+        ];
+
+        let history_snapshot = q11.charge_snapshot(
+            history_external[0],
+            history_external[1],
+            history_external[2],
+            history_external[3],
+        );
+        let q_prev = history_snapshot.branches.map(|branch| branch.charge);
+        let q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+
+        let current_snapshot = Engine::solve_vbic_dynamic_snapshot(
+            &q11,
+            current_external[0],
+            current_external[1],
+            current_external[2],
+            current_external[3],
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            Some(&history_snapshot.reduction.internal_voltages),
+        )
+        .map(|(snapshot, _, _)| snapshot)
+        .expect("solve current Q11 continuation snapshot");
+
+        let seed_internal = Engine::vbic_continuation_seed_from_accepted_path(
+            &q11,
+            Some(history_external),
+            Some(history_snapshot.reduction.internal_voltages),
+            current_external,
+            current_snapshot.reduction.internal_voltages,
+            next_external,
+        );
+
+        let continued = Engine::solve_vbic_dynamic_snapshot_for_continuation_step(
+            &q11,
+            current_external,
+            &current_snapshot,
+            next_external[0],
+            next_external[1],
+            next_external[2],
+            next_external[3],
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            Some(&seed_internal),
+        );
+
+        assert!(
+            continued.is_some(),
+            "expected the tiny Q11 follow-up continuation step to remain solvable from the accepted current internal state"
         );
     }
 
@@ -14202,14 +14812,16 @@ Q1 C B E 0 N1\n\
                 target_external,
             )
             .expect("expected large diffamp jump to engage VBIC continuation limiter");
+        let expected_with_floor = expected.max(Engine::VBIC_CONTINUATION_MIN_TRIAL_STEP);
 
         assert!(
             step > 0.0 && step < 1.0,
             "expected VBIC continuation to damp a large diffamp jump, got step {step:.6e}"
         );
         assert!(
-            (step - expected).abs() <= 1e-15 + 1e-12 * expected.abs().max(step.abs()),
-            "expected continuation step {step:.6e} to follow the state-based limiter {expected:.6e}"
+            (step - expected_with_floor).abs()
+                <= 1e-15 + 1e-12 * expected_with_floor.abs().max(step.abs()),
+            "expected continuation step {step:.6e} to follow the state-based limiter with the VBIC trial-step floor {expected_with_floor:.6e}"
         );
     }
 
@@ -14344,6 +14956,8 @@ Q1 C B E 0 N1\n\
         let dt = 1e-11;
         let trap_order = 2;
         let method = IntegrationMethod::Trapezoidal;
+        let voltage_abstol = 1e-6;
+        let reltol = 1e-3;
         let mut base_solution = vec![0.0; size];
         for (node, value) in [
             (bjt.node_collector, vc),
@@ -14380,6 +14994,118 @@ Q1 C B E 0 N1\n\
         history.dynamic_linear_prev_prev[0] = history.dynamic_linear_prev[0];
 
         let target_external = [vc + 1.0e-4, vb - 2.0e-4, ve + 5.0e-5, vs];
+        assert!(
+            Engine::vbic_snapshot_matches_external_bias(
+                &cached_snapshot,
+                &target_external,
+                voltage_abstol,
+                reltol,
+            ),
+            "expected the cached VBIC snapshot to stay reusable while the candidate bias remains within solver tolerance"
+        );
+        let mut candidate_solution = base_solution.clone();
+        for (node, value) in [
+            (bjt.node_collector, target_external[0]),
+            (bjt.node_base, target_external[1]),
+            (bjt.node_emitter, target_external[2]),
+            (bjt.node_substrate, target_external[3]),
+        ] {
+            if node > 0 {
+                candidate_solution[node - 1] = value;
+            }
+        }
+
+        let mut matrix = dense_static_matrix(size);
+        let mut rhs = vec![0.0; size];
+        let mut vbic_snapshot_cache = vec![Some(cached_snapshot); circuit.bjts.devices.len()];
+        Engine::stamp_bjt_transient_companions(
+            &circuit,
+            &mut matrix,
+            &mut rhs,
+            &candidate_solution,
+            method,
+            trap_order,
+            dt,
+            &history,
+            &mut vbic_snapshot_cache,
+            voltage_abstol,
+            reltol,
+        );
+
+        let stamped_snapshot = vbic_snapshot_cache[0]
+            .expect("expected transient BJT stamping to preserve a reusable VBIC snapshot");
+        for (idx, expected) in cached_snapshot.reduction.external_voltages.iter().enumerate() {
+            assert!(
+                (stamped_snapshot.reduction.external_voltages[idx] - *expected).abs() < 1e-18,
+                "expected transient stamping to reuse the cached VBIC snapshot at external index {idx}"
+            );
+        }
+        for idx in 0..BJT_INTERNAL_STATE_DIM {
+            assert!(
+                (stamped_snapshot.reduction.internal_voltages[idx]
+                    - cached_snapshot.reduction.internal_voltages[idx])
+                    .abs()
+                    < 1e-18,
+                "expected transient BJT stamping to keep the cached VBIC internal state when the candidate bias stays within solver tolerance at internal index {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_stamp_bjt_transient_companions_rebuilds_vbic_snapshot_outside_solver_tolerance() {
+        let (circuit, vc, vb, ve, vs) = vbic_npn_diffamp_input_test_circuit();
+        let bjt = circuit.bjts.devices[0].clone();
+        let size = circuit.num_nodes() + circuit.num_branches();
+        let dt = 1e-11;
+        let trap_order = 2;
+        let method = IntegrationMethod::Trapezoidal;
+        let voltage_abstol = 1e-6;
+        let reltol = 1e-3;
+        let mut base_solution = vec![0.0; size];
+        for (node, value) in [
+            (bjt.node_collector, vc),
+            (bjt.node_base, vb),
+            (bjt.node_emitter, ve),
+            (bjt.node_substrate, vs),
+        ] {
+            if node > 0 {
+                base_solution[node - 1] = value;
+            }
+        }
+
+        let mut history = Engine::initialize_bjt_history(&circuit, &base_solution);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+
+        let cached_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let q_prev = cached_snapshot.branches.map(|branch| branch.charge);
+        history.charge_q_prev[0] = q_prev;
+        history.charge_q_prev_prev[0] = q_prev;
+        history.charge_q_prev_prev_prev[0] = q_prev;
+        history.charge_cq_prev[0] = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        history.dynamic_internal_prev[0] = [Value::NAN; BJT_INTERNAL_STATE_DIM];
+        history.dynamic_internal_prev_prev[0] = [Value::NAN; BJT_INTERNAL_STATE_DIM];
+        history.dynamic_linear_prev[0] = VbicPredictorLinearBranchState {
+            vrcx: Value::NAN,
+            vrci: Value::NAN,
+            vrbx: Value::NAN,
+            vrbi: Value::NAN,
+            vre: Value::NAN,
+            vrbp: Value::NAN,
+            vrs: Value::NAN,
+        };
+        history.dynamic_linear_prev_prev[0] = history.dynamic_linear_prev[0];
+
+        let target_external = [vc + 2.0e-3, vb - 2.0e-3, ve + 1.0e-3, vs];
+        assert!(
+            !Engine::vbic_snapshot_matches_external_bias(
+                &cached_snapshot,
+                &target_external,
+                voltage_abstol,
+                reltol,
+            ),
+            "expected transient stamping to rebuild the VBIC snapshot once the candidate bias leaves solver tolerance"
+        );
         let mut candidate_solution = base_solution.clone();
         for (node, value) in [
             (bjt.node_collector, target_external[0]),
@@ -14408,10 +15134,10 @@ Q1 C B E 0 N1\n\
                 Some(&history.dynamic_linear_prev_prev[0]),
                 history.accepted_dt_prev,
                 Some(cached_snapshot),
-                VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
-                VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
+                voltage_abstol,
+                reltol,
             )
-            .expect("resolve expected cached VBIC snapshot for stamping");
+            .expect("resolve expected VBIC snapshot outside runtime cache tolerance");
 
         let mut matrix = dense_static_matrix(size);
         let mut rhs = vec![0.0; size];
@@ -14426,14 +15152,16 @@ Q1 C B E 0 N1\n\
             dt,
             &history,
             &mut vbic_snapshot_cache,
+            voltage_abstol,
+            reltol,
         );
 
         let stamped_snapshot = vbic_snapshot_cache[0]
-            .expect("expected transient BJT stamping to preserve a resolved VBIC snapshot");
+            .expect("expected transient BJT stamping to refresh the VBIC snapshot");
         for (idx, expected) in target_external.iter().enumerate() {
             assert!(
                 (stamped_snapshot.reduction.external_voltages[idx] - *expected).abs() < 1e-18,
-                "expected transient stamping cache to match the target external bias at index {idx}"
+                "expected transient stamping cache to refresh to the candidate external bias at index {idx}"
             );
         }
         for idx in 0..BJT_INTERNAL_STATE_DIM {
@@ -14442,7 +15170,7 @@ Q1 C B E 0 N1\n\
                     - expected_snapshot.reduction.internal_voltages[idx])
                     .abs()
                     < 1e-12,
-                "expected transient BJT stamping to reuse the cached VBIC continuation at internal index {idx}"
+                "expected transient BJT stamping to resolve the same VBIC continuation outside solver tolerance at internal index {idx}"
             );
         }
     }
@@ -15074,6 +15802,8 @@ Q1 C B E 0 N1\n\
             dt,
             &history,
             &mut vbic_snapshot_cache,
+            1e-6,
+            1e-3,
         );
 
         for (idx, value) in rhs.iter().enumerate() {

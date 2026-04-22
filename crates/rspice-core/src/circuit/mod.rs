@@ -2334,6 +2334,210 @@ impl CircuitData {
         }
     }
 
+    #[inline]
+    fn add_force_accept_topology_edge(graph: &mut [Vec<NodeId>], node_a: NodeId, node_b: NodeId) {
+        if node_a == node_b {
+            return;
+        }
+        let Some(neighbors_a) = graph.get_mut(node_a) else {
+            return;
+        };
+        neighbors_a.push(node_b);
+        let Some(neighbors_b) = graph.get_mut(node_b) else {
+            return;
+        };
+        neighbors_b.push(node_a);
+    }
+
+    #[inline]
+    fn add_force_accept_topology_clique(graph: &mut [Vec<NodeId>], nodes: &[NodeId]) {
+        for (idx, &node_a) in nodes.iter().enumerate() {
+            if node_a >= graph.len() {
+                continue;
+            }
+            for &node_b in &nodes[idx + 1..] {
+                if node_b >= graph.len() {
+                    continue;
+                }
+                Self::add_force_accept_topology_edge(graph, node_a, node_b);
+            }
+        }
+    }
+
+    fn force_accept_ground_reachable_nodes(&self) -> Vec<bool> {
+        let mut graph = vec![Vec::new(); self.num_nodes() + 1];
+
+        // Ideal voltage-output elements preserve a fixed differential but only
+        // anchor common mode when the surrounding physical network provides an
+        // absolute reference. Model that supernode connectivity explicitly.
+        for idx in 0..self.voltage_sources.len() {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                self.voltage_sources.node_pos[idx],
+                self.voltage_sources.node_neg[idx],
+            );
+        }
+        for idx in 0..self.vcvs.len() {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                self.vcvs.node_pos[idx],
+                self.vcvs.node_neg[idx],
+            );
+        }
+        for idx in 0..self.ccvs.len() {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                self.ccvs.node_pos[idx],
+                self.ccvs.node_neg[idx],
+            );
+        }
+        for source in &self.behavioral_sources.voltage_sources {
+            Self::add_force_accept_topology_edge(&mut graph, source.node_pos, source.node_neg);
+        }
+
+        // Physical devices and transient companions anchor node common mode when
+        // they provide a path into the grounded circuit.
+        for stamp in &self.resistors.stamps {
+            Self::add_force_accept_topology_edge(&mut graph, stamp.pp.row, stamp.nn.row);
+        }
+        for stamp in &self.capacitors.stamps {
+            Self::add_force_accept_topology_edge(&mut graph, stamp.pp.row, stamp.nn.row);
+        }
+        for idx in 0..self.inductors.len() {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                self.inductors.node_pos[idx],
+                self.inductors.node_neg[idx],
+            );
+        }
+        for binding in &self.coupled_inductor_pairs {
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                binding.device.node1_pos,
+                binding.device.node1_neg,
+            );
+            Self::add_force_accept_topology_edge(
+                &mut graph,
+                binding.device.node2_pos,
+                binding.device.node2_neg,
+            );
+        }
+        for binding in &self.multi_winding_transformers {
+            for &(node_pos, node_neg) in &binding.device.nodes {
+                Self::add_force_accept_topology_edge(&mut graph, node_pos, node_neg);
+            }
+        }
+        for tl in &self.tlines {
+            Self::add_force_accept_topology_edge(&mut graph, tl.node1_pos, tl.node2_pos);
+            Self::add_force_accept_topology_edge(&mut graph, tl.node1_neg, tl.node2_neg);
+        }
+        for tl in &self.coupled_tlines {
+            for conductor in 0..tl.conductors() {
+                Self::add_force_accept_topology_edge(
+                    &mut graph,
+                    tl.near_nodes[conductor],
+                    tl.far_nodes[conductor],
+                );
+            }
+        }
+        for diode in &self.diodes.devices {
+            Self::add_force_accept_topology_edge(&mut graph, diode.node_anode, diode.node_cathode);
+        }
+        for bjt in &self.bjts.devices {
+            Self::add_force_accept_topology_clique(
+                &mut graph,
+                &[
+                    bjt.node_collector,
+                    bjt.node_base,
+                    bjt.node_emitter,
+                    bjt.node_substrate,
+                ],
+            );
+        }
+        for mosfet in &self.mosfets.devices {
+            Self::add_force_accept_topology_clique(
+                &mut graph,
+                &[
+                    mosfet.node_drain,
+                    mosfet.node_gate,
+                    mosfet.node_source,
+                    mosfet.node_bulk,
+                ],
+            );
+        }
+        for jfet in &self.jfets {
+            Self::add_force_accept_topology_clique(
+                &mut graph,
+                &[jfet.drain, jfet.gate, jfet.source],
+            );
+        }
+        for switch in &self.vswitches {
+            Self::add_force_accept_topology_edge(&mut graph, switch.node_pos, switch.node_neg);
+        }
+        for switch in &self.iswitches {
+            Self::add_force_accept_topology_edge(&mut graph, switch.node_pos, switch.node_neg);
+        }
+
+        let mut reachable = vec![false; graph.len()];
+        let mut stack = vec![0];
+        reachable[0] = true;
+
+        while let Some(node) = stack.pop() {
+            for &neighbor in &graph[node] {
+                if let Some(flag) = reachable.get_mut(neighbor)
+                    && !*flag
+                {
+                    *flag = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+
+        reachable
+    }
+
+    /// Return the ideal voltage-output pairs whose common mode is still
+    /// topologically floating with respect to the grounded physical network.
+    ///
+    /// Force-accept should only clip the common mode of these outputs. Anchored
+    /// outputs, like the `V2` source in the VBIC diffamp regression, must be
+    /// left to the surrounding circuit equations.
+    pub fn ideal_voltage_output_pairs(&self) -> Vec<(NodeId, NodeId)> {
+        let mut pairs = Vec::new();
+        let mut push_pair = |node_pos: NodeId, node_neg: NodeId| {
+            if node_pos != 0 && node_neg != 0 {
+                pairs.push((node_pos, node_neg));
+            }
+        };
+
+        for idx in 0..self.voltage_sources.len() {
+            push_pair(
+                self.voltage_sources.node_pos[idx],
+                self.voltage_sources.node_neg[idx],
+            );
+        }
+        for idx in 0..self.vcvs.len() {
+            push_pair(self.vcvs.node_pos[idx], self.vcvs.node_neg[idx]);
+        }
+        for idx in 0..self.ccvs.len() {
+            push_pair(self.ccvs.node_pos[idx], self.ccvs.node_neg[idx]);
+        }
+
+        pairs
+    }
+
+    pub fn force_accept_floating_ideal_output_pairs(&self) -> Vec<(NodeId, NodeId)> {
+        let reachable = self.force_accept_ground_reachable_nodes();
+        self.ideal_voltage_output_pairs()
+            .into_iter()
+            .filter(|&(node_pos, node_neg)| {
+                let pos_reachable = reachable.get(node_pos).copied().unwrap_or(false);
+                let neg_reachable = reachable.get(node_neg).copied().unwrap_or(false);
+                !(pos_reachable || neg_reachable)
+            })
+            .collect()
+    }
+
     /// Nodes driven by ideal voltage-output elements should not be post-clamped
     /// after a force-accepted Newton step because that would immediately break
     /// the ideal constraint equation the solver is trying to preserve.
@@ -3607,12 +3811,8 @@ mod tests {
         circuit.num_nodes = 6;
         circuit.num_branches = 3;
         circuit.voltage_sources.add("V1".to_string(), 1, 2, 1, 5.0);
-        circuit
-            .vcvs
-            .add("E1".to_string(), 3, 4, 1, 2, 1, 2.0);
-        circuit
-            .ccvs
-            .add("H1".to_string(), 5, 6, 2, 1, 10.0);
+        circuit.vcvs.add("E1".to_string(), 3, 4, 1, 2, 1, 2.0);
+        circuit.ccvs.add("H1".to_string(), 5, 6, 2, 1, 10.0);
 
         let protected = circuit.force_accept_protected_nodes();
         assert_eq!(
@@ -3623,19 +3823,73 @@ mod tests {
     }
 
     #[test]
+    fn test_ideal_voltage_output_pairs_include_all_two_terminal_ideal_outputs() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 6;
+        circuit.num_branches = 3;
+        circuit.voltage_sources.add("V1".to_string(), 1, 2, 1, 5.0);
+        circuit.vcvs.add("E1".to_string(), 3, 4, 1, 2, 1, 2.0);
+        circuit.ccvs.add("H1".to_string(), 5, 6, 2, 1, 10.0);
+
+        assert_eq!(
+            circuit.ideal_voltage_output_pairs(),
+            vec![(1, 2), (3, 4), (5, 6)]
+        );
+    }
+
+    #[test]
+    fn test_force_accept_floating_ideal_output_pairs_detect_isolated_source_supernode() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 2;
+        circuit.num_branches = 1;
+        circuit.voltage_sources.add("V1".to_string(), 1, 2, 1, 1.5);
+
+        let floating_pairs = circuit.force_accept_floating_ideal_output_pairs();
+        assert_eq!(floating_pairs, vec![(1, 2)]);
+    }
+
+    #[test]
+    fn test_force_accept_floating_ideal_output_pairs_skip_ground_anchored_source_supernode() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 2;
+        circuit.num_branches = 1;
+        circuit.voltage_sources.add("V1".to_string(), 1, 2, 1, 0.01);
+        circuit.resistors.add("R1".to_string(), 2, 0, 1e3);
+
+        let floating_pairs = circuit.force_accept_floating_ideal_output_pairs();
+        assert!(
+            floating_pairs.is_empty(),
+            "expected source common mode to be treated as anchored by the grounded resistor path"
+        );
+    }
+
+    #[test]
+    fn test_force_accept_floating_ideal_output_pairs_skip_bjt_anchored_source_supernode() {
+        let mut circuit = CircuitData::new();
+        circuit.num_nodes = 4;
+        circuit.num_branches = 2;
+        circuit.voltage_sources.add("VCC".to_string(), 4, 0, 1, 3.3);
+        circuit
+            .voltage_sources
+            .add("VIN".to_string(), 1, 2, 2, 0.01);
+        circuit.resistors.add("R1".to_string(), 2, 0, 1e3);
+        circuit.bjts.add(Bjt::new_npn("Q1".to_string(), 3, 1, 2));
+
+        let floating_pairs = circuit.force_accept_floating_ideal_output_pairs();
+        assert!(
+            floating_pairs.is_empty(),
+            "expected the BJT/resistor network to anchor the driven source supernode"
+        );
+    }
+
+    #[test]
     fn test_enforce_ideal_voltage_constraints_projects_vcvs_and_ccvs_outputs() {
         let mut circuit = CircuitData::new();
         circuit.num_nodes = 5;
         circuit.num_branches = 2;
-        circuit
-            .voltage_sources
-            .add("V1".to_string(), 1, 0, 1, 3.3);
-        circuit
-            .vcvs
-            .add("E1".to_string(), 2, 3, 1, 0, 1, 0.5);
-        circuit
-            .ccvs
-            .add("H1".to_string(), 4, 5, 2, 1, 20.0);
+        circuit.voltage_sources.add("V1".to_string(), 1, 0, 1, 3.3);
+        circuit.vcvs.add("E1".to_string(), 2, 3, 1, 0, 1, 0.5);
+        circuit.ccvs.add("H1".to_string(), 4, 5, 2, 1, 20.0);
 
         let mut solution = vec![
             0.1,  // node 1
