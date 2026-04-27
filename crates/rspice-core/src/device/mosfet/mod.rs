@@ -8,6 +8,7 @@ mod bsim3;
 mod bsim4;
 mod ekv;
 mod jfet;
+mod legacy_bsim;
 mod mos_models;
 mod mosfet;
 mod smooth;

@@ -3,6 +3,7 @@
 //! Implements a Level 1 SPICE MOSFET model (Shichman-Hodges).
 //! Supports NMOS and PMOS devices in cutoff, linear, and saturation regions.
 
+use super::legacy_bsim::{LegacyBsimModel, LegacyBsimRegion, LegacyBsimSizedModel};
 use super::smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 use crate::constants::VT_REFERENCE;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
@@ -119,6 +120,10 @@ pub struct Mosfet {
     // BSIM3-like parameters for short-channel effects
     /// Model level (1 = Level 1, 3 = BSIM3-like)
     pub level: i32,
+    /// Legacy BSIM1/BSIM2 model card for SPICE levels 4 and 5.
+    legacy_bsim_model: Option<LegacyBsimModel>,
+    /// Geometry-sized legacy BSIM instance data derived from W/L.
+    legacy_bsim_sized: Option<LegacyBsimSizedModel>,
     /// Mobility at low field (U0) in cm^2/V*s
     pub u0: Value,
     /// First-order mobility degradation (UA)
@@ -287,7 +292,9 @@ impl Mosfet {
             junction_gmin: 0.0,
 
             // BSIM3-like parameters
-            level: 1,     // Default to Level 1
+            level: 1, // Default to Level 1
+            legacy_bsim_model: None,
+            legacy_bsim_sized: None,
             u0: 400.0,    // Low-field mobility (cm^2/V*s)
             ua: 2.25e-9,  // Mobility degradation coefficient
             ub: 5.87e-19, // Second-order mobility coefficient
@@ -359,7 +366,15 @@ impl Mosfet {
     pub fn with_geometry(mut self, w: Value, l: Value) -> Self {
         self.w = w;
         self.l = l;
+        self.refresh_legacy_bsim_size_params();
         self
+    }
+
+    fn refresh_legacy_bsim_size_params(&mut self) {
+        self.legacy_bsim_sized = self
+            .legacy_bsim_model
+            .as_ref()
+            .and_then(|model| model.sized(self.w, self.l));
     }
 
     #[inline]
@@ -383,7 +398,22 @@ impl Mosfet {
 
     #[inline]
     fn model_space_onset_voltage(&self, vgs: Value, vds: Value, vbs: Value) -> Value {
-        if self.level == 6 {
+        if let Some(legacy) = &self.legacy_bsim_sized {
+            let p = self.polarity();
+            let vds_m = p * vds;
+            let vbs_m = p * vbs;
+            let vbd_m = vbs_m - vds_m;
+            let threshold = if vds_m >= 0.0 {
+                legacy.threshold(vds_m, vbs_m)
+            } else {
+                legacy.threshold(-vds_m, vbd_m)
+            };
+            if threshold.is_finite() {
+                threshold
+            } else {
+                self.polarity() * self.vto
+            }
+        } else if self.level == 6 {
             self.level6_meyer_state(vgs, vds, vbs).1
         } else {
             self.polarity() * self.vth(vbs)
@@ -550,6 +580,13 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value, Value) {
+        if self.legacy_bsim_sized.is_some() {
+            let (id, region, gm, gds, gmb) =
+                self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
+            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+            return (id, region, gm, gds, gmb, id_eq);
+        }
+
         if self.level == 6 {
             let (id, region, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
             let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
@@ -581,6 +618,15 @@ impl Mosfet {
         const Q_E: Value = 1.602_176_634e-19;
         const V_T_REF: Value = 0.025_85;
         const N_I_CM3: Value = 1.45e10;
+
+        if let Some(level) = params
+            .get("LEVEL")
+            .copied()
+            .filter(|v| v.is_finite())
+            .map(|v| v as i32)
+        {
+            self.level = level;
+        }
 
         let kp_explicit = params
             .get("KP")
@@ -866,12 +912,19 @@ impl Mosfet {
         } else if let Some(&v) = params.get("LAMDA1") {
             self.lambda1 = v;
         }
+
+        self.legacy_bsim_model = LegacyBsimModel::from_level_and_params(self.level, params);
+        self.refresh_legacy_bsim_size_params();
         self
     }
 
     /// Set model level (1 = Level 1, 3 = BSIM3-like)
     pub fn with_level(mut self, level: i32) -> Self {
         self.level = level;
+        if level != 4 && level != 5 {
+            self.legacy_bsim_model = None;
+            self.legacy_bsim_sized = None;
+        }
         self
     }
 
@@ -948,6 +1001,7 @@ impl Mosfet {
             self.w *= scale;
         }
 
+        self.refresh_legacy_bsim_size_params();
         self
     }
 
@@ -1055,6 +1109,10 @@ impl Mosfet {
     /// For Level 1: Standard body effect formula
     /// For Level 3+: Includes BSIM4 short-channel Vth roll-off
     fn vth(&self, vbs: Value) -> Value {
+        if let Some(legacy) = &self.legacy_bsim_sized {
+            return legacy.threshold(0.0, self.polarity() * vbs);
+        }
+
         let p = self.polarity();
         let vbs_eff = p * vbs;
         let vto_eff = match self.mos_type {
@@ -1858,8 +1916,76 @@ impl Mosfet {
         (vgs - vds, -vds, vbs - vds)
     }
 
+    fn legacy_bsim_current(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
+        let Some(legacy) = &self.legacy_bsim_sized else {
+            return (0.0, MosRegion::Cutoff);
+        };
+        if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
+            return (0.0, MosRegion::Cutoff);
+        }
+
+        let p = self.polarity();
+        let vgs_m = p * vgs;
+        let vds_m = p * vds;
+        let vbs_m = p * vbs;
+        let (current, region, mode) = if vds_m >= 0.0 {
+            let (current, region) = legacy.evaluate(vgs_m, vds_m, vbs_m);
+            (current, region, 1.0)
+        } else {
+            let (current, region) = legacy.evaluate(vgs_m - vds_m, -vds_m, vbs_m - vds_m);
+            (current, region, -1.0)
+        };
+        let current = if current.is_finite() { current } else { 0.0 };
+
+        (p * mode * current, Self::legacy_region_to_mos(region))
+    }
+
+    fn legacy_bsim_linearized_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, MosRegion, Value, Value, Value) {
+        if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+        }
+
+        let (id, region) = self.legacy_bsim_current(vgs, vds, vbs);
+        let derivative = |dvgs: Value, dvds: Value, dvbs: Value, step: Value| -> Value {
+            if step <= 0.0 || !step.is_finite() {
+                return 0.0;
+            }
+            let (plus, _) =
+                self.legacy_bsim_current(vgs + dvgs * step, vds + dvds * step, vbs + dvbs * step);
+            let (minus, _) =
+                self.legacy_bsim_current(vgs - dvgs * step, vds - dvds * step, vbs - dvbs * step);
+            let slope = (plus - minus) / (2.0 * step);
+            if slope.is_finite() { slope } else { 0.0 }
+        };
+
+        let gm_step = 1.0e-6 * vgs.abs().max(1.0);
+        let gds_step = 1.0e-6 * vds.abs().max(1.0);
+        let gmb_step = 1.0e-6 * vbs.abs().max(1.0);
+        let gm = derivative(1.0, 0.0, 0.0, gm_step);
+        let gds = derivative(0.0, 1.0, 0.0, gds_step);
+        let gmb = derivative(0.0, 0.0, 1.0, gmb_step);
+        (id, region, gm, gds, gmb)
+    }
+
+    fn legacy_region_to_mos(region: LegacyBsimRegion) -> MosRegion {
+        match region {
+            LegacyBsimRegion::Cutoff => MosRegion::Cutoff,
+            LegacyBsimRegion::Linear => MosRegion::Linear,
+            LegacyBsimRegion::Saturation => MosRegion::Saturation,
+        }
+    }
+
     /// Determine operating region and calculate drain current
     fn calculate_id(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, MosRegion) {
+        if self.legacy_bsim_sized.is_some() {
+            return self.legacy_bsim_current(vgs, vds, vbs);
+        }
+
         if self.level == 6 {
             return self.calculate_id_level6(vgs, vds, vbs);
         }
@@ -2103,6 +2229,11 @@ impl Mosfet {
     /// - gds_rev = gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev
     /// - gmb_rev = -gmb_fwd_rev
     fn small_signal(&self, vgs: Value, vds: Value, vbs: Value) -> (Value, Value, Value) {
+        if self.legacy_bsim_sized.is_some() {
+            let (_, _, gm, gds, gmb) = self.legacy_bsim_linearized_operating_point(vgs, vds, vbs);
+            return (gm, gds, gmb);
+        }
+
         if self.level == 6 {
             let (_, _, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
@@ -2380,6 +2511,30 @@ mod tests {
         }
     }
 
+    fn numeric_model_params(card: &str) -> HashMap<String, Value> {
+        let normalized = card.replace('=', " = ");
+        let tokens: Vec<&str> = normalized.split_whitespace().collect();
+        let mut params = HashMap::new();
+
+        for window in tokens.windows(3) {
+            if window[1] != "=" {
+                continue;
+            }
+            let key = window[0]
+                .trim_start_matches('+')
+                .trim_matches(|c: char| c == '(' || c == ')')
+                .to_ascii_uppercase();
+            if key.is_empty() || key.starts_with('.') {
+                continue;
+            }
+            if let Ok(value) = window[2].trim_matches(')').parse::<Value>() {
+                params.insert(key, value);
+            }
+        }
+
+        params
+    }
+
     fn literal_qmeyer_half_caps(
         vgs: Value,
         vgd: Value,
@@ -2495,6 +2650,81 @@ mod tests {
         assert_eq!(m.node_gate, 2);
         assert_eq!(m.node_source, 1);
         assert_eq!(m.node_bulk, 0);
+    }
+
+    #[test]
+    fn test_level4_uses_legacy_bsim1_equations() {
+        let params = numeric_model_params(
+            r#"
+            LEVEL = 4 TOX = 3.00000E-002 VDD = 5.00000E+000
+            DL = 7.97991E-001 DW = 4.77402E-001
+            VFB = -1.0087E+000 PHI = 7.96434E-001 K1 = 1.31191E+000 K2 = 1.46640E-001
+            ETA = -1.0027E-003 MUZ = 5.34334E+002 U0 = 4.38497E-002 U1 = -5.7332E-002
+            X2E = -7.6911E-004 X3E = 7.86777E-004 X2MZ = 8.25434E+000
+            MUS = 5.40612E+002 X2MS = -1.2992E+001 X3MS = -9.4035E+000
+            X2U0 = 1.06821E-003 X2U1 = -1.9209E-002 X3U1 = 7.76925E-003
+            LVFB = -2.1402E-001 WVFB = 3.44354E-001 LK1 = 3.23395E-001 WK1 = -5.7698E-001
+            LK2 = 1.68585E-001 WK2 = -1.8796E-001 LETA = -9.4847E-003 WETA = 1.47316E-002
+            LU0 = 6.38105E-002 WU0 = -6.1053E-002 LU1 = 1.01174E+000 WU1 = 1.62706E-002
+            LX2E = 9.62411E-003 WX2E = -3.7951E-003 LX3E = 7.35448E-004 WX3E = -1.7796E-003
+            LX2MZ = -2.4197E+001 WX2MZ = 1.95696E+001 LMUS = 6.21401E+002 WMUS = -1.9190E+002
+            LX2MS = -6.4900E+001 WX2MS = 4.29043E+001 LX3MS = 1.18239E+002 WX3MS = -2.9747E+001
+            LX2U0 = -8.0958E-003 WX2U0 = 4.03379E-003 LX2U1 = -7.4573E-002 WX2U1 = 1.47520E-002
+            LX3U1 = -1.0940E-001 WX3U1 = -8.3353E-003 N0 = 1.55 NB = 0.09 ND = 0.0
+            "#,
+        );
+
+        let mos = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0)
+            .with_level(4)
+            .with_params(&params)
+            .with_geometry(50.0e-6, 10.0e-6);
+
+        let (id, region) = mos.calculate_id(1.50, 0.05, -2.0);
+        assert_eq!(region, MosRegion::Cutoff);
+        assert!(
+            (id - 2.00148e-7).abs() / 2.00148e-7 < 1.0e-4,
+            "unexpected BSIM1 drain current {id:e}"
+        );
+    }
+
+    #[test]
+    fn test_level5_uses_legacy_bsim2_equations() {
+        let params = numeric_model_params(
+            r#"
+            level=5 vfb=-0.7919 lvfb=-0.0266 wvfb=0.0000 phi=0.8039 lphi=0.0042 wphi=0.0000
+            k1=0.7286 lk1=0.0309 wk1=0.0000 k2=-0.0506 lk2=0.0786 wk2=0.0000
+            mu0=453.2926 dl=0.1553 dw=0.0000 mu0b=-5.4925 lmu0b=-1.9192 wmu0b=0.0000
+            mus0=781.7117 lmus0=25.2769 wmus0=0.0000 musb=25.5724 lmusb=-10.0060 wmusb=0.0000
+            mu20=0.9390 lmu20=-0.0840 wmu20=0.0000 mu2b=0.0753 lmu2b=-0.0148 wmu2b=0.0000
+            mu2g=0.1804 lmu2g=0.0181 wmu2g=0.0000 mu30=44.9689 lmu30=-0.0933 wmu30=0.0000
+            mu3b=0.5871 lmu3b=1.0793 wmu3b=0.0000 mu3g=-11.6723 lmu3g=0.6804 wmu3g=0.0000
+            mu40=0.2682 lmu40=2.3969 wmu40=0.0000 mu4b=-0.3179 lmu4b=0.1264 wmu4b=0.0000
+            mu4g=-0.2654 lmu4g=-0.5702 wmu4g=0.0000 ua0=0.0441 lua0=0.2283 wua0=0.0000
+            uab=-0.0045 luab=-0.0105 wuab=0.0000 ub0=0.0125 lub0=-0.0051 wub0=0.0000
+            ubb=-0.0015 lubb=0.0010 wubb=0.0000 u10=0.1262 lu10=0.5563 wu10=0.0000
+            u1d=-0.2967 lu1d=-0.0062 wu1d=0.0000 u1b=0.0960 lu1b=-0.0345 wu1b=0.0000
+            eta0=-0.0373 leta0=0.0271 weta0=0.0000 etab=0.0004 letab=-0.0041 wetab=0.0000
+            n0=0.8032 ln0=0.1734 wn0=0.0000 nd=0.0105 lnd=-0.0091 wnd=0.0000
+            nb=0.5978 lnb=-0.1638 wnb=0.0000 vof0=1.4977 lvof0=-0.1766 wvof0=0.0000
+            vofd=0.1795 lvofd=-0.1247 wvofd=0.0000 vofb=0.8368 lvofb=-0.3432 wvofb=0.0000
+            ai0=32.0150 lai0=8.2816 wai0=0.0000 aib=-19.5396 laib=4.9347 waib=0.0000
+            bi0=37.6044 lbi0=-1.8713 wbi0=0.0000 bib=-2.5109 lbib=0.7903 wbib=0.0000
+            vghigh=0.2342 lvghigh=-0.0007 wvghigh=0.0000 vglow=-0.1023 lvglow=0.0038 wvglow=0.0000
+            tox=0.0150 temp=27 vdd=5.0 vgg=5.0 vbb=-3.0
+            "#,
+        );
+
+        let mos = Mosfet::new_nmos("M1".to_string(), 3, 2, 1, 0)
+            .with_level(5)
+            .with_params(&params)
+            .with_geometry(50.0e-6, 10.0e-6);
+
+        let (id, region) = mos.calculate_id(1.00, 0.05, 0.0);
+        assert_eq!(region, MosRegion::Linear);
+        assert!(
+            (id - 7.474892e-6).abs() / 7.474892e-6 < 1.0e-5,
+            "unexpected BSIM2 drain current {id:e}"
+        );
     }
 
     #[test]
