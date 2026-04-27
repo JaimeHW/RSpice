@@ -17,7 +17,7 @@ use std::{
 
 const FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS: u128 = 30_000;
 const DEFAULT_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
-const FULL_SUITE_TOTAL_TIMEOUT_MS: u128 = 300_000;
+const FULL_SUITE_TIMEOUT_OVERHEAD_MS: u128 = 60_000;
 const CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-ngspice-case-runner");
 
 struct TestRunner {
@@ -49,24 +49,30 @@ impl TestRunner {
             .collect()
     }
 
-    fn run_suite_until(&self, subdir: &str, deadline: Instant) -> Vec<TestResult> {
+    fn run_suite_until(&self, subdir: &str, deadline: Option<Instant>) -> Vec<TestResult> {
         let mut results = Vec::new();
         for path in self.discover_tests(subdir) {
-            let remaining_ms = remaining_deadline_ms(deadline);
-            if remaining_ms == 0 {
-                results.push(budget_error_result(
-                    subdir,
-                    0,
-                    "Full ngspice suite budget exhausted before launching next deck".to_string(),
-                ));
-                break;
-            }
+            let hard_timeout_ms = if let Some(deadline) = deadline {
+                let remaining_ms = remaining_deadline_ms(deadline);
+                if remaining_ms == 0 {
+                    results.push(budget_error_result(
+                        subdir,
+                        0,
+                        "Full ngspice suite budget exhausted before launching next deck"
+                            .to_string(),
+                    ));
+                    break;
+                }
+                hard_case_timeout_ms(self.config()).min(remaining_ms)
+            } else {
+                hard_case_timeout_ms(self.config())
+            };
 
             results.push(run_case_with_watchdog_with_timeout(
                 &self.test_dir,
                 self.config(),
                 &path,
-                hard_case_timeout_ms(self.config()).min(remaining_ms),
+                hard_timeout_ms,
             ));
         }
         results
@@ -189,12 +195,53 @@ fn run_case_with_watchdog_with_timeout(
 }
 
 fn hard_case_timeout_ms(config: &TestRunnerConfig) -> u128 {
-    let cap = std::env::var("RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS")
+    let hard_cap_ms = std::env::var("RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u128>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_HARD_CASE_TIMEOUT_MS);
-    config.max_time_per_test_ms.min(cap)
+    resolve_hard_case_timeout_ms(config.max_time_per_test_ms, hard_cap_ms)
+}
+
+fn resolve_hard_case_timeout_ms(config_timeout_ms: u128, hard_cap_ms: u128) -> u128 {
+    config_timeout_ms.max(1).min(hard_cap_ms.max(1))
+}
+
+fn full_suite_timeout_ms(suites: &[String]) -> u128 {
+    let override_ms = std::env::var("RSPICE_NGSPICE_FULL_SUITE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value > 0);
+    resolve_full_suite_timeout_ms(suites, override_ms)
+}
+
+fn resolve_full_suite_timeout_ms(suites: &[String], override_ms: Option<u128>) -> u128 {
+    override_ms
+        .filter(|value| *value > 0)
+        .unwrap_or_else(|| default_full_suite_timeout_ms(suites))
+        .max(1)
+}
+
+fn default_full_suite_timeout_ms(suites: &[String]) -> u128 {
+    let tests_dir = get_tests_dir();
+    let mut timeout_ms = FULL_SUITE_TIMEOUT_OVERHEAD_MS;
+
+    for suite in suites {
+        let config = suite_config(suite);
+        let runner = TestRunner::new(tests_dir.clone(), config.clone());
+        let case_count = runner.discover_tests(suite).len() as u128;
+        timeout_ms =
+            timeout_ms.saturating_add(case_count.saturating_mul(hard_case_timeout_ms(&config)));
+    }
+
+    timeout_ms.max(1)
+}
+
+fn full_suite_deadline(start: Instant, timeout_ms: u128) -> Instant {
+    let timeout_ms = timeout_ms.min(u64::MAX as u128) as u64;
+    start
+        .checked_add(Duration::from_millis(timeout_ms))
+        .unwrap_or_else(|| start + Duration::from_secs(365 * 24 * 60 * 60))
 }
 
 fn remaining_deadline_ms(deadline: Instant) -> u128 {
@@ -724,6 +771,29 @@ fn test_suite_config_applies_soi_timeout_override() {
 }
 
 #[test]
+fn test_hard_case_timeout_is_always_finite_and_capped() {
+    assert_eq!(resolve_hard_case_timeout_ms(90_000, 30_000), 30_000);
+    assert_eq!(resolve_hard_case_timeout_ms(10_000, 30_000), 10_000);
+    assert_eq!(resolve_hard_case_timeout_ms(90_000, 120_000), 90_000);
+    assert_eq!(resolve_hard_case_timeout_ms(0, 30_000), 1);
+    assert_eq!(resolve_hard_case_timeout_ms(90_000, 0), 1);
+}
+
+#[test]
+fn test_full_suite_timeout_is_bounded_by_default() {
+    let suites = vec!["filters".to_string(), "general".to_string()];
+    let timeout = resolve_full_suite_timeout_ms(&suites, None);
+
+    assert!(timeout >= FULL_SUITE_TIMEOUT_OVERHEAD_MS);
+    assert!(timeout < u128::MAX);
+    assert_eq!(
+        resolve_full_suite_timeout_ms(&suites, Some(120_000)),
+        120_000
+    );
+    assert_eq!(resolve_full_suite_timeout_ms(&suites, Some(0)), timeout);
+}
+
+#[test]
 fn test_focused_general_config_uses_diagnostic_timeout() {
     let cfg = suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS);
     assert_eq!(cfg.max_time_per_test_ms, 30_000);
@@ -1201,8 +1271,8 @@ fn test_ngspice_mesa_suite() {
 fn test_full_ngspice_suite_summary() {
     let suites = all_discoverable_suite_dirs();
     let full_suite_start = Instant::now();
-    let full_suite_budget = Duration::from_millis(FULL_SUITE_TOTAL_TIMEOUT_MS as u64);
-    let full_suite_deadline = full_suite_start + full_suite_budget;
+    let full_suite_timeout_ms = full_suite_timeout_ms(&suites);
+    let full_suite_deadline = full_suite_deadline(full_suite_start, full_suite_timeout_ms);
 
     let mut total_stats = TestStatistics {
         total: 0,
@@ -1218,14 +1288,14 @@ fn test_full_ngspice_suite_summary() {
             total_stats.failed += 1;
             total_stats.total_time_ms += full_suite_start.elapsed().as_millis();
             println!(
-                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | budget exhausted after {}ms",
-                "HARNESS", 1, 0, 1, 0, FULL_SUITE_TOTAL_TIMEOUT_MS
+                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | full-suite timeout exhausted after {}ms",
+                "HARNESS", 1, 0, 1, 0, full_suite_timeout_ms
             );
             break;
         }
 
         let runner = TestRunner::new(get_tests_dir(), suite_config(suite));
-        let results = runner.run_suite_until(suite, full_suite_deadline);
+        let results = runner.run_suite_until(suite, Some(full_suite_deadline));
         let stats = TestRunner::statistics(&results);
 
         total_stats.total += stats.total;
