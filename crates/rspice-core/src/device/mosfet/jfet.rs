@@ -70,6 +70,54 @@ pub enum JfetChannelModel {
     Hfet1,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct MesaLevel2Linearization {
+    ids: Value,
+    gm: Value,
+    gds: Value,
+    vds: Value,
+    delidgch0: Value,
+    delidvds0: Value,
+    delidvds1: Value,
+    gm0: Value,
+    gm1: Value,
+    gm2: Value,
+    gds0: Value,
+}
+
+impl MesaLevel2Linearization {
+    fn zero() -> Self {
+        Self {
+            ids: 0.0,
+            gm: 0.0,
+            gds: 0.0,
+            vds: 0.0,
+            delidgch0: 0.0,
+            delidvds0: 0.0,
+            delidvds1: 0.0,
+            gm0: 0.0,
+            gm1: 0.0,
+            gm2: 0.0,
+            gds0: 0.0,
+        }
+    }
+
+    fn dc_terms(self) -> (Value, Value, Value) {
+        (self.ids, self.gm, self.gds)
+    }
+
+    fn ac_conductances(self, lambda: Value) -> (Value, Value) {
+        let delidgch = self.delidgch0 * (1.0 + lambda * self.vds);
+        let delidvds = self.delidvds0 * (1.0 + 2.0 * lambda * self.vds) - self.delidvds1;
+        let gm = (delidgch * self.gm0 + self.gm1) * self.gm2;
+        let gds = delidvds + self.gds0;
+        (
+            if gm.is_finite() { gm } else { 0.0 },
+            if gds.is_finite() { gds } else { 0.0 },
+        )
+    }
+}
+
 //=============================================================================
 // JFET Parameters
 //=============================================================================
@@ -2169,14 +2217,14 @@ impl Jfet {
         if ids.is_finite() { ids } else { 0.0 }
     }
 
-    fn mesa_level2_small_signal_forward(
+    fn mesa_level2_linearization_forward(
         &self,
         vgs: Value,
         vds: Value,
         temp_k: Value,
         vto: Value,
         lambda: Value,
-    ) -> (Value, Value, Value) {
+    ) -> MesaLevel2Linearization {
         const Q_ELECTRON: Value = 1.602176634e-19;
         const EPSILONGAAS: Value = 12.244 * 8.85418e-12;
 
@@ -2216,14 +2264,14 @@ impl Jfet {
         let n0 = (EPSILONGAAS * eta * vt / (Q_ELECTRON * d)).max(1e-30);
         let ns = 1.0 / (1.0 / (nd * d * q).max(1e-30) + b / n0);
         if !ns.is_finite() || ns < 1e-38 {
-            return (0.0, 0.0, 0.0);
+            return MesaLevel2Linearization::zero();
         }
 
         let gchi0 = Q_ELECTRON * w / l;
         let gchi = gchi0 * mu * ns;
         let gch = gchi / (1.0 + gchi * rt);
         if !gch.is_finite() || gch <= 0.0 {
-            return (0.0, 0.0, 0.0);
+            return MesaLevel2Linearization::zero();
         }
 
         let a = 2.0 * beta * vgte;
@@ -2305,11 +2353,44 @@ impl Jfet {
         let gds0 = delidvsate * dvsatevds + delidgch * w_term + gdsmadd;
         let gds = delidvds + gds0;
 
-        (
-            if ids.is_finite() { ids } else { 0.0 },
-            if gm.is_finite() { gm } else { 0.0 },
-            if gds.is_finite() { gds } else { 0.0 },
-        )
+        MesaLevel2Linearization {
+            ids: if ids.is_finite() { ids } else { 0.0 },
+            gm: if gm.is_finite() { gm } else { 0.0 },
+            gds: if gds.is_finite() { gds } else { 0.0 },
+            vds,
+            delidgch0,
+            delidvds0,
+            delidvds1,
+            gm0: p_term,
+            gm1,
+            gm2: dvgtvgs,
+            gds0,
+        }
+    }
+
+    fn mesa_level2_small_signal_forward(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        lambda: Value,
+    ) -> (Value, Value, Value) {
+        self.mesa_level2_linearization_forward(vgs, vds, temp_k, vto, lambda)
+            .dc_terms()
+    }
+
+    fn mesa_level2_ac_conductances_forward(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp_k: Value,
+        vto: Value,
+        ac_lambda: Value,
+    ) -> (Value, Value) {
+        let dc_lambda = self.mesa_ac_lambda(temp_k, None);
+        self.mesa_level2_linearization_forward(vgs, vds, temp_k, vto, dc_lambda)
+            .ac_conductances(ac_lambda)
     }
 
     fn mesa_level3_ids(
@@ -2512,6 +2593,24 @@ impl Jfet {
         level: i32,
         force_inverse: bool,
     ) -> (Value, Value, Value) {
+        if level == 2 && !force_inverse {
+            let pol = self.jfet_type.polarity();
+            let vgs_int = pol * vgs;
+            let vds_int = pol * vds;
+            if vds_int >= 0.0 {
+                let temp_k = if temp.is_finite() && temp > 0.0 {
+                    temp
+                } else {
+                    self.params.tnom.max(1.0)
+                };
+                let vto = pol * self.params.vto;
+                let lambda = self.mesa_ac_lambda(temp_k, None);
+                let (ids_int, gm, gds) =
+                    self.mesa_level2_small_signal_forward(vgs_int, vds_int, temp_k, vto, lambda);
+                return (pol * ids_int, gm, gds);
+            }
+        }
+
         let ids = self.mesa_ids_external(vgs, vds, temp, level, force_inverse, None);
 
         let dvgs = (1e-8_f64).max(1e-6 * (1.0 + vgs.abs()));
@@ -3429,7 +3528,7 @@ impl Jfet {
                         let vds_int = pol * vds;
                         if vds_int >= 0.0 {
                             let lambda = self.mesa_ac_lambda(temp_source, Some(frequency_hz));
-                            let (_, gm, gds) = self.mesa_level2_small_signal_forward(
+                            let (gm, gds) = self.mesa_level2_ac_conductances_forward(
                                 vgs_int,
                                 vds_int,
                                 temp_source,
@@ -4575,6 +4674,24 @@ mod tests {
         assert!(
             gds_high > gds_low,
             "expected high-frequency lambda to boost gds: low={gds_low} high={gds_high}"
+        );
+
+        let lambda_low = jfet.mesa_ac_lambda(300.15, Some(1e-3));
+        let dc_linearization =
+            jfet.mesa_level2_linearization_forward(0.5, 1.0, 300.15, jfet.params.vto, 0.0);
+        let (gm_expected, gds_expected) = dc_linearization.ac_conductances(lambda_low);
+        let (gm_low, gds_low, _, _) = jfet.ac_real_terms_at_frequency(0.5, 1.0, -0.5, 1e-3);
+        let rel = |actual: f64, expected: f64| {
+            (actual - expected).abs() / actual.abs().max(expected.abs()).max(1e-30)
+        };
+
+        assert!(
+            rel(gm_low, gm_expected) < 1e-12,
+            "MESA AC gm should reuse DC derivative decomposition"
+        );
+        assert!(
+            rel(gds_low, gds_expected) < 1e-12,
+            "MESA AC gds should reuse DC derivative decomposition"
         );
     }
 
