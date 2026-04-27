@@ -17,6 +17,8 @@ use std::{
 };
 
 const FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS: u128 = 30_000;
+const DEFAULT_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
+const FULL_SUITE_TOTAL_TIMEOUT_MS: u128 = 300_000;
 const CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-ngspice-case-runner");
 
 struct TestRunner {
@@ -48,6 +50,29 @@ impl TestRunner {
             .collect()
     }
 
+    fn run_suite_until(&self, subdir: &str, deadline: Instant) -> Vec<TestResult> {
+        let mut results = Vec::new();
+        for path in self.discover_tests(subdir) {
+            let remaining_ms = remaining_deadline_ms(deadline);
+            if remaining_ms == 0 {
+                results.push(budget_error_result(
+                    subdir,
+                    0,
+                    "Full ngspice suite budget exhausted before launching next deck".to_string(),
+                ));
+                break;
+            }
+
+            results.push(run_case_with_watchdog_with_timeout(
+                &self.test_dir,
+                self.config(),
+                &path,
+                hard_case_timeout_ms(self.config()).min(remaining_ms),
+            ));
+        }
+        results
+    }
+
     fn run_test(&self, cir_path: &Path) -> TestResult {
         run_case_with_watchdog(&self.test_dir, self.config(), cir_path)
     }
@@ -74,7 +99,17 @@ fn run_case_with_watchdog(
     config: &TestRunnerConfig,
     cir_path: &Path,
 ) -> TestResult {
+    run_case_with_watchdog_with_timeout(test_dir, config, cir_path, hard_case_timeout_ms(config))
+}
+
+fn run_case_with_watchdog_with_timeout(
+    test_dir: &Path,
+    config: &TestRunnerConfig,
+    cir_path: &Path,
+    hard_timeout_ms: u128,
+) -> TestResult {
     let start = Instant::now();
+    let hard_timeout_ms = hard_timeout_ms.max(1);
     let result_path = unique_case_result_path(cir_path);
     let mut child = match Command::new(CASE_RUNNER_EXE)
         .arg("--test-dir")
@@ -94,7 +129,7 @@ fn run_case_with_watchdog(
         .arg("--verbose")
         .arg(config.verbose.to_string())
         .arg("--max-time-per-test-ms")
-        .arg(config.max_time_per_test_ms.to_string())
+        .arg(hard_timeout_ms.to_string())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
@@ -109,7 +144,7 @@ fn run_case_with_watchdog(
         }
     };
 
-    let timeout = Duration::from_millis(config.max_time_per_test_ms.min(u64::MAX as u128) as u64);
+    let timeout = Duration::from_millis(hard_timeout_ms.min(u64::MAX as u128) as u64);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -135,7 +170,7 @@ fn run_case_with_watchdog(
                     start.elapsed().as_millis(),
                     format!(
                         "Test exceeded hard process timeout ({}ms)",
-                        config.max_time_per_test_ms
+                        hard_timeout_ms
                     ),
                 );
             }
@@ -157,6 +192,22 @@ fn run_case_with_watchdog(
     }
 }
 
+fn hard_case_timeout_ms(config: &TestRunnerConfig) -> u128 {
+    let cap = std::env::var("RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u128>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_HARD_CASE_TIMEOUT_MS);
+    config.max_time_per_test_ms.min(cap)
+}
+
+fn remaining_deadline_ms(deadline: Instant) -> u128 {
+    deadline
+        .checked_duration_since(Instant::now())
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
 fn watchdog_error_result(cir_path: &Path, duration_ms: u128, error: String) -> TestResult {
     TestResult {
         name: cir_path
@@ -164,6 +215,17 @@ fn watchdog_error_result(cir_path: &Path, duration_ms: u128, error: String) -> T
             .unwrap_or_default()
             .to_string_lossy()
             .to_string(),
+        passed: false,
+        error: Some(error),
+        mismatches: Vec::new(),
+        duration_ms,
+        analysis_type: None,
+    }
+}
+
+fn budget_error_result(name: &str, duration_ms: u128, error: String) -> TestResult {
+    TestResult {
+        name: name.to_string(),
         passed: false,
         error: Some(error),
         mismatches: Vec::new(),
@@ -1142,6 +1204,9 @@ fn test_ngspice_mesa_suite() {
 #[test]
 fn test_full_ngspice_suite_summary() {
     let suites = all_discoverable_suite_dirs();
+    let full_suite_start = Instant::now();
+    let full_suite_budget = Duration::from_millis(FULL_SUITE_TOTAL_TIMEOUT_MS as u64);
+    let full_suite_deadline = full_suite_start + full_suite_budget;
 
     let mut total_stats = TestStatistics {
         total: 0,
@@ -1152,8 +1217,24 @@ fn test_full_ngspice_suite_summary() {
     };
 
     for suite in &suites {
+        if Instant::now() >= full_suite_deadline {
+            total_stats.total += 1;
+            total_stats.failed += 1;
+            total_stats.total_time_ms += full_suite_start.elapsed().as_millis();
+            println!(
+                "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | budget exhausted after {}ms",
+                "HARNESS",
+                1,
+                0,
+                1,
+                0,
+                FULL_SUITE_TOTAL_TIMEOUT_MS
+            );
+            break;
+        }
+
         let runner = TestRunner::new(get_tests_dir(), suite_config(suite));
-        let results = runner.run_suite(suite);
+        let results = runner.run_suite_until(suite, full_suite_deadline);
         let stats = TestRunner::statistics(&results);
 
         total_stats.total += stats.total;
@@ -1172,6 +1253,10 @@ fn test_full_ngspice_suite_summary() {
                 stats.skipped,
                 stats.pass_rate()
             );
+        }
+
+        if Instant::now() >= full_suite_deadline {
+            break;
         }
     }
 
