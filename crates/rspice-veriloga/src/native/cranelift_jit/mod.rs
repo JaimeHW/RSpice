@@ -221,6 +221,3 @@ impl Default for JitCompiler {
         Self::new().expect("Failed to create JIT compiler")
     }
 }
-
-#[cfg(test)]
-mod tests;

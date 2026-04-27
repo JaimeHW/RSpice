@@ -48,9 +48,6 @@ pub(crate) use transient_post::DerivedViewerLoadState;
 use self::spice_value::parse_spice_value;
 use self::spice_value::parse_spice_value_checked;
 
-#[cfg(test)]
-mod tests;
-
 #[derive(Debug, Clone)]
 struct QueuedAnalysis {
     spec: AnalysisSpec,

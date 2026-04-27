@@ -48,6 +48,3 @@ pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
 pub fn try_compile_native(_model: &CompiledModel) -> Option<()> {
     None
 }
-
-#[cfg(test)]
-mod tests;

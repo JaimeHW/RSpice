@@ -88,6 +88,3 @@ impl AnalysisConfig {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

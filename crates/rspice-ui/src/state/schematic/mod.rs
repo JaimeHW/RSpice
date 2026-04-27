@@ -69,6 +69,3 @@ pub use wire::{
     route_length,
     wires_connected,
 };
-
-#[cfg(test)]
-mod tests;

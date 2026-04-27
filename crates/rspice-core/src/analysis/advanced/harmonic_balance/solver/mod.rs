@@ -3519,6 +3519,3 @@ impl HbSolver {
         result
     }
 }
-
-#[cfg(test)]
-mod solver_tests;

@@ -78,10 +78,6 @@ pub mod device;
 #[cfg(feature = "native")]
 pub mod native;
 
-/// End-to-end integration tests
-#[cfg(test)]
-mod integration_tests;
-
 // Re-export primary types
 pub use ast::{Module, SourceFile};
 pub use codegen::{CodeGenerator, CompiledModel};

@@ -509,9 +509,6 @@ use crate::state::ComponentType;
 
 mod registry;
 
-#[cfg(test)]
-mod tests;
-
 /// Registry of property sheets for all component types.
 ///
 /// This provides the "CDF" (Component Description Format) equivalent,

@@ -9,9 +9,17 @@ pub fn encode_test_result(result: &TestResult) -> String {
     push_field(&mut output, "name", &encode_text(&result.name));
     push_field(&mut output, "passed", if result.passed { "1" } else { "0" });
     push_field(&mut output, "duration_ms", &result.duration_ms.to_string());
-    push_optional_field(&mut output, "analysis_type", result.analysis_type.as_deref());
+    push_optional_field(
+        &mut output,
+        "analysis_type",
+        result.analysis_type.as_deref(),
+    );
     push_optional_field(&mut output, "error", result.error.as_deref());
-    push_field(&mut output, "mismatches", &result.mismatches.len().to_string());
+    push_field(
+        &mut output,
+        "mismatches",
+        &result.mismatches.len().to_string(),
+    );
 
     for mismatch in &result.mismatches {
         output.push_str("m\t");

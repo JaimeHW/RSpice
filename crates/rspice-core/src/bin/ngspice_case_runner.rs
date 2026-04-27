@@ -43,12 +43,8 @@ impl Args {
                 "--test-dir" => test_dir = Some(next_path(&mut args, &flag)?),
                 "--circuit" => circuit = Some(next_path(&mut args, &flag)?),
                 "--result" => result = Some(next_path(&mut args, &flag)?),
-                "--relative-tolerance" => {
-                    config.relative_tolerance = next_parse(&mut args, &flag)?
-                }
-                "--absolute-tolerance" => {
-                    config.absolute_tolerance = next_parse(&mut args, &flag)?
-                }
+                "--relative-tolerance" => config.relative_tolerance = next_parse(&mut args, &flag)?,
+                "--absolute-tolerance" => config.absolute_tolerance = next_parse(&mut args, &flag)?,
                 "--max-mismatches" => config.max_mismatches = next_parse(&mut args, &flag)?,
                 "--skip-unsupported" => config.skip_unsupported = next_parse(&mut args, &flag)?,
                 "--verbose" => config.verbose = next_parse(&mut args, &flag)?,

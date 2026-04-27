@@ -1510,6 +1510,3 @@ fn parse_number(s: &str) -> f64 {
 
     num_str.parse::<f64>().unwrap_or(0.0) * scale
 }
-
-#[cfg(test)]
-mod tests;

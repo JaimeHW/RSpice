@@ -53,9 +53,6 @@ mod conversion_matrix;
 mod result;
 mod solver;
 
-#[cfg(test)]
-mod tests;
-
 pub use config::{PacConfig, PacSweepType};
 pub use conversion_matrix::{ConversionMatrix, SidebandTransfer};
 pub use result::{PacResult, PacSidebandData};

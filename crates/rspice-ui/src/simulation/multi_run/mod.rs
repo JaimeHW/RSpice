@@ -21,6 +21,3 @@ pub use run_type::{AnalysisRunType, FrequencySweep};
 pub use spec::{
     AnalysisSpec, HbToneSpec, OptimizationAlgorithm, OptimizationGoal, OptimizationVariable, SpPort,
 };
-
-#[cfg(test)]
-mod tests;

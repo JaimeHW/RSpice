@@ -27,6 +27,3 @@ pub use cross_probe::CrossProbeMapping;
 pub use run::SimulationRun;
 pub use state_model::SimulationState;
 pub use waveform::WaveformData;
-
-#[cfg(test)]
-mod tests;

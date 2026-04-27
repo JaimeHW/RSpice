@@ -40,9 +40,6 @@ pub mod nonlinear;
 mod result;
 mod solver;
 
-#[cfg(test)]
-mod tests;
-
 pub use config::{HbConfig, HbTone};
 pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};

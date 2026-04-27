@@ -4,8 +4,7 @@
 //! Tests are organized by analysis type and device model category.
 
 use rspice_core::testing::{
-    TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
-    decode_test_result,
+    TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics, decode_test_result,
 };
 use std::{
     collections::{BTreeSet, HashMap},
@@ -168,10 +167,7 @@ fn run_case_with_watchdog_with_timeout(
                 return watchdog_error_result(
                     cir_path,
                     start.elapsed().as_millis(),
-                    format!(
-                        "Test exceeded hard process timeout ({}ms)",
-                        hard_timeout_ms
-                    ),
+                    format!("Test exceeded hard process timeout ({}ms)", hard_timeout_ms),
                 );
             }
             Ok(None) => {
@@ -1223,12 +1219,7 @@ fn test_full_ngspice_suite_summary() {
             total_stats.total_time_ms += full_suite_start.elapsed().as_millis();
             println!(
                 "{:15} {:4} tests | {:4} passed | {:4} failed | {:4} skipped | budget exhausted after {}ms",
-                "HARNESS",
-                1,
-                0,
-                1,
-                0,
-                FULL_SUITE_TOTAL_TIMEOUT_MS
+                "HARNESS", 1, 0, 1, 0, FULL_SUITE_TOTAL_TIMEOUT_MS
             );
             break;
         }

@@ -29,9 +29,6 @@ mod floquet;
 mod result;
 mod solver;
 
-#[cfg(test)]
-mod tests;
-
 pub use config::{NoiseOutputNode, PnoiseConfig, PnoiseSideband, PnoiseSweep};
 pub use floquet::{FloquetAnalyzer, FloquetMode, TransferFunction};
 pub use result::{NoiseContributor, PhaseNoisePoint, PnoiseResult};

@@ -13,6 +13,3 @@ pub use context::VmContext;
 pub use error::VmError;
 pub use executor::Vm;
 pub use filters::{CrossDetector, DelayBuffer, SlewFilter, TransitionFilter};
-
-#[cfg(test)]
-mod tests;

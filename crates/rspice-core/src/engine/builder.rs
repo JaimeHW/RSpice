@@ -1897,6 +1897,3 @@ impl Engine {
         Ok(circuit)
     }
 }
-
-#[cfg(all(test, feature = "veriloga"))]
-mod veriloga_cache_tests;

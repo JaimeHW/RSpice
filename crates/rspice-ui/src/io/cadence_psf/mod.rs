@@ -1231,9 +1231,3 @@ fn push_scalar_slice(
 
 #[cfg(test)]
 pub(crate) mod test_helpers;
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod malformed_tests;

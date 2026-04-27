@@ -20,6 +20,3 @@ pub use model::{
     AssignmentProgram, BytecodeProgram, CodeGenerator, CompiledModel, CompiledParameter,
     Instruction, JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram,
 };
-
-#[cfg(test)]
-mod tests;

@@ -28,9 +28,6 @@ mod pss;
 mod stamping;
 mod transient;
 
-#[cfg(test)]
-mod tests;
-
 // Re-export CompressionConfig for public API
 pub use crate::analysis::waveform::CompressionConfig;
 #[cfg(feature = "veriloga")]

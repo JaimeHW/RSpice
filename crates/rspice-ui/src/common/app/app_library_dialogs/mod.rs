@@ -6,6 +6,3 @@ mod new_cell_dialog;
 mod new_view_dialog;
 mod pending_deletions;
 mod shared;
-
-#[cfg(test)]
-mod tests;

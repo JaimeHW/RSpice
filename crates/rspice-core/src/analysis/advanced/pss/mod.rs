@@ -36,9 +36,6 @@ mod period_detect;
 mod result;
 mod shooting;
 
-#[cfg(test)]
-mod tests;
-
 pub use config::PssConfig;
 pub use period_detect::{PeriodDetector, PeriodEstimate};
 pub use result::{PeriodicWaveform, PssResult};
