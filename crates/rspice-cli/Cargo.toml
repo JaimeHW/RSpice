@@ -11,6 +11,7 @@ rust-version.workspace = true
 [[bin]]
 name = "rspice"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 rspice-core.workspace = true

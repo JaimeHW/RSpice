@@ -11,6 +11,8 @@ rust-version.workspace = true
 [lib]
 name = "rspice"
 crate-type = ["cdylib"]
+test = false
+doctest = false
 
 [features]
 default = []

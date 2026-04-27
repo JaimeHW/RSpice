@@ -10,10 +10,11 @@ description = "WebAssembly bindings for the RSpice simulation engine"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+test = false
+doctest = false
 
 [dependencies]
 rspice-core = { path = "../rspice-core", default-features = false, features = ["wasm"] }
 serde.workspace = true
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
-

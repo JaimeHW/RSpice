@@ -8,6 +8,10 @@ repository.workspace = true
 rust-version.workspace = true
 description = "Verilog-A/AMS compiler for RSpice circuit simulator"
 
+[lib]
+test = false
+doctest = false
+
 [dependencies]
 # Core dependencies
 thiserror.workspace = true

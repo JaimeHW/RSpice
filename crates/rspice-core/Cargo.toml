@@ -23,6 +23,10 @@ veriloga = [
 ]
 simd = ["wide"]
 
+[lib]
+test = false
+doctest = false
+
 [dependencies]
 # Faer for sparse linear algebra - workspace configures it with std only, faer-parallel feature adds rayon
 faer.workspace = true

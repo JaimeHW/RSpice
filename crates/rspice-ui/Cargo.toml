@@ -12,11 +12,14 @@ build = "build.rs"
 # Library crate
 [lib]
 crate-type = ["rlib"]
+test = false
+doctest = false
 
 # Desktop binary
 [[bin]]
 name = "rspice-ui"
 path = "src/main.rs"
+test = false
 
 [features]
 default = []
