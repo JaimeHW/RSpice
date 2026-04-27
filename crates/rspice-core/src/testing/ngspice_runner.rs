@@ -4409,9 +4409,9 @@ impl TestRunner {
                 continue;
             }
 
-            let complex_row = x_col_idx == 1
-                && value_col_start == 2
-                && parts.len() >= 2 * (1 + current_vars.len());
+            let indexed_row = x_col_idx == 1 && value_col_start == 2;
+            let complex_axis_row = indexed_row && parts.len() >= 3 + current_vars.len() * 2;
+            let complex_row = indexed_row && parts.len() >= 2 + current_vars.len() * 2;
 
             let Some(x_value) = (if complex_row {
                 parts
@@ -4426,8 +4426,9 @@ impl TestRunner {
             };
 
             if complex_row {
+                let value_pair_start = if complex_axis_row { 3 } else { 2 };
                 for (var_idx, var_name) in current_vars.iter().enumerate() {
-                    let real_idx = 2 + var_idx * 2;
+                    let real_idx = value_pair_start + var_idx * 2;
                     let imag_idx = real_idx + 1;
                     let Some(re_str) = parts.get(real_idx) else {
                         continue;
