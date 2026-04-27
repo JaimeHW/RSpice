@@ -21,7 +21,7 @@
 use crate::abort_signal::AbortSignal;
 use crate::engine::{ConvergenceConfig, SimulationConfig};
 use crate::{Complex64, Engine, Netlist, Value};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -157,7 +157,7 @@ struct ReferenceSeries {
 #[derive(Debug, Clone, Default)]
 struct ReferenceTable {
     x_name: String,
-    variables: HashMap<String, ReferenceSeries>,
+    variables: BTreeMap<String, ReferenceSeries>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -4518,7 +4518,7 @@ impl TestRunner {
             if let Some(last) = merged.last_mut()
                 && Self::can_merge_reference_tables(last, &table)
             {
-                for (name, mut series) in table.variables.drain() {
+                for (name, mut series) in std::mem::take(&mut table.variables) {
                     if let Some(dst) = last.variables.get_mut(&name) {
                         dst.x.append(&mut series.x);
                         dst.y.append(&mut series.y);
@@ -4693,7 +4693,7 @@ impl TestRunner {
     fn combine_reference_tables(axis_name: String, tables: Vec<ReferenceTable>) -> ReferenceTable {
         let mut combined = ReferenceTable {
             x_name: axis_name,
-            variables: HashMap::new(),
+            variables: BTreeMap::new(),
         };
 
         for table in tables {
@@ -6062,6 +6062,33 @@ pz 1 0 2 0 vol pz
         assert!(mismatches[0].expected.is_nan());
         assert!(mismatches[0].actual.is_nan());
         assert!(mismatches[0].relative_error.is_infinite());
+    }
+
+    #[test]
+    fn test_compare_reference_dataset_reports_mismatches_in_stable_variable_order() {
+        let mut config = TestRunnerConfig::default();
+        config.max_mismatches = 1;
+        config.relative_tolerance = 1e-12;
+        let runner = TestRunner::new(".", config);
+
+        let mut reference = ReferenceTable {
+            x_name: "time".to_string(),
+            variables: BTreeMap::new(),
+        };
+        for name in ["v(z)", "v(a)"] {
+            reference.variables.insert(
+                name.to_string(),
+                ReferenceSeries {
+                    x: vec![0.0],
+                    y: vec![1.0],
+                },
+            );
+        }
+
+        let mismatches = runner.compare_reference_dataset(&reference, &[0.0], |_| Some(vec![0.0]));
+
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].node, "v(a)");
     }
 
     #[test]
