@@ -6,6 +6,7 @@
 #![allow(clippy::needless_range_loop)]
 use super::behavioral_expr::prepare_behavioral_expression;
 use super::{Engine, SimulationError, extract_dc_value};
+use crate::device::JfetChannelModel;
 use crate::netlist::{ElementKind, flatten_netlist};
 use crate::{CircuitData, Netlist};
 #[cfg(feature = "veriloga")]
@@ -99,6 +100,36 @@ fn model_params_upper_map(params: &[(String, f64)]) -> HashMap<String, f64> {
 
 fn is_bsimsoi_level(level: i32) -> bool {
     matches!(level, 55..=57)
+}
+
+fn is_physical_mesa_mesfet_level(level: f64) -> bool {
+    level.is_finite() && matches!(level.round() as i32, 2..=4)
+}
+
+fn positive_or_one(value: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        1.0
+    }
+}
+
+fn jfet_extrinsic_resistance_scale(jfet: &crate::device::Jfet) -> f64 {
+    let multiplier = positive_or_one(jfet.m);
+    let area = if matches!(jfet.params.channel_model, JfetChannelModel::Hfet1) {
+        1.0
+    } else {
+        positive_or_one(jfet.area)
+    };
+    area * multiplier
+}
+
+fn scaled_extrinsic_resistance(resistance: f64, scale: f64) -> f64 {
+    if resistance.is_finite() && resistance > 0.0 {
+        resistance / positive_or_one(scale)
+    } else {
+        0.0
+    }
 }
 
 const DISTRIBUTED_LINE_SECTION_MIN: usize = 16;
@@ -1205,16 +1236,12 @@ impl Engine {
                     // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
                     // inserting explicit linear resistors and connecting the intrinsic JFET
                     // to generated internal drain/source nodes.
-                    let rd = if jfet.params.rd.is_finite() && jfet.params.rd > 0.0 {
-                        jfet.params.rd
-                    } else {
-                        0.0
-                    };
-                    let rs = if jfet.params.rs.is_finite() && jfet.params.rs > 0.0 {
-                        jfet.params.rs
-                    } else {
-                        0.0
-                    };
+                    // ngspice stamps model RD/RS as conductance scaled by the
+                    // instance area/multiplicity. Explicit resistors therefore
+                    // use the reciprocal equivalent, R / scale.
+                    let resistance_scale = jfet_extrinsic_resistance_scale(&jfet);
+                    let rd = scaled_extrinsic_resistance(jfet.params.rd, resistance_scale);
+                    let rs = scaled_extrinsic_resistance(jfet.params.rs, resistance_scale);
 
                     if rd > 0.0 {
                         let dint_name = format!("{}.__dint", element.name);
@@ -1235,7 +1262,8 @@ impl Engine {
 
                     circuit.jfets.push(jfet);
                 }
-                // MESFET (GaAs FET) - treat as JFET for now since physics are similar
+                // MESFET (GaAs FET) families share the JFET device container,
+                // with model selection below preserving the ngspice equations.
                 ElementKind::Mesfet {
                     model,
                     mesfet_type: _mesfet_type,
@@ -1244,8 +1272,6 @@ impl Engine {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
                     let source = circuit.get_or_create_node(&element.nodes[2]);
-                    // MESFET uses similar equations to JFET - treat as N-channel JFET
-
                     // Resolve NMF/PMF from model card when available.
                     let model_def = find_model_def(netlist, model);
                     let model_order = netlist
@@ -1253,6 +1279,8 @@ impl Engine {
                         .iter()
                         .position(|m| m.name.eq_ignore_ascii_case(model))
                         .unwrap_or(usize::MAX);
+                    let params_map =
+                        model_def.map(|device_model| model_params_upper_map(&device_model.params));
                     let use_hfet_defaults = model_def
                         .map(|device_model| {
                             device_model.model_type.eq_ignore_ascii_case("NHFET")
@@ -1294,29 +1322,29 @@ impl Engine {
                     };
                     let mut jfet = if use_hfet_defaults {
                         jfet_base.enable_hfet_model()
-                    } else {
+                    } else if params_map
+                        .as_ref()
+                        .and_then(|params| params.get("LEVEL").copied())
+                        .is_some_and(is_physical_mesa_mesfet_level)
+                    {
                         jfet_base.enable_mesa_model()
+                    } else {
+                        jfet_base.enable_legacy_mesfet_model()
                     };
 
                     // Look up model and apply parameters
-                    if let Some(device_model) = model_def {
-                        let params_map = model_params_upper_map(&device_model.params);
+                    if let Some(params_map) = params_map.as_ref() {
                         jfet = jfet.with_model_params(&params_map);
                     }
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_model_order(model_order);
 
-                    // Apply the same RD/RS extrinsic-node expansion for MESFET aliases.
-                    let rd = if jfet.params.rd.is_finite() && jfet.params.rd > 0.0 {
-                        jfet.params.rd
-                    } else {
-                        0.0
-                    };
-                    let rs = if jfet.params.rs.is_finite() && jfet.params.rs > 0.0 {
-                        jfet.params.rs
-                    } else {
-                        0.0
-                    };
+                    // ngspice stamps model RD/RS as conductance scaled by the
+                    // instance area/multiplicity. Explicit resistors therefore
+                    // use the reciprocal equivalent, R / scale.
+                    let resistance_scale = jfet_extrinsic_resistance_scale(&jfet);
+                    let rd = scaled_extrinsic_resistance(jfet.params.rd, resistance_scale);
+                    let rs = scaled_extrinsic_resistance(jfet.params.rs, resistance_scale);
 
                     if rd > 0.0 {
                         let dint_name = format!("{}.__dint", element.name);
@@ -1943,5 +1971,33 @@ impl Engine {
         }
 
         Ok(circuit)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jfet_series_resistance_scales_with_area_and_multiplier() {
+        let jfet = crate::device::Jfet::njf("J1", 1, 2, 0)
+            .with_area(2.0)
+            .with_multiplier(3.0);
+
+        let scale = jfet_extrinsic_resistance_scale(&jfet);
+        assert!((scale - 6.0).abs() < 1e-15);
+        assert!((scaled_extrinsic_resistance(60.0, scale) - 10.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_hfet_series_resistance_scales_with_multiplier_only() {
+        let jfet = crate::device::Jfet::njf("Z1", 1, 2, 0)
+            .enable_mesa_model()
+            .with_area(2.0)
+            .with_multiplier(3.0);
+
+        let scale = jfet_extrinsic_resistance_scale(&jfet);
+        assert!((scale - 3.0).abs() < 1e-15);
+        assert!((scaled_extrinsic_resistance(60.0, scale) - 20.0).abs() < 1e-15);
     }
 }

@@ -64,6 +64,8 @@ impl JfetType {
 pub enum JfetChannelModel {
     /// Classic Shichman-Hodges JFET equations.
     ShichmanHodges,
+    /// Berkeley SPICE level-1 MESFET equations (`mes` device).
+    LegacyMesfet,
     /// HFET1-compatible MESFET channel equations (ngspice-derived).
     Hfet1,
 }
@@ -208,6 +210,8 @@ pub struct JfetParams {
     pub mesa_theta: Value,
     /// MESA velocity-modulation coefficient `ALPHA`.
     pub mesa_alpha: Value,
+    /// Berkeley MESFET denominator coefficient `B`.
+    pub mes_b: Value,
     /// MESA current softening coefficient `TC`.
     pub mesa_tc: Value,
     /// MESA transport factor `ZETA`.
@@ -294,6 +298,7 @@ impl Default for JfetParams {
             mesa_ndelta: 6.0e24,
             mesa_theta: 0.0,
             mesa_alpha: 0.0,
+            mes_b: 0.3,
             mesa_tc: 0.0,
             mesa_zeta: 1.0,
             mesa_lambdahf: Value::NAN,
@@ -669,6 +674,7 @@ impl Jfet {
         self.params.mesa_ndelta = 6.0e24;
         self.params.mesa_theta = 0.0;
         self.params.mesa_alpha = 0.0;
+        self.params.mes_b = 0.3;
         self.params.mesa_tc = 0.0;
         self.params.mesa_zeta = 1.0;
         self.params.mesa_lambdahf = Value::NAN;
@@ -677,6 +683,36 @@ impl Jfet {
         self.params.mesa_delfo = 0.0;
         self.params.mesa_cas = 1.0;
         self.params.mesa_cbs = 1.0;
+        self.width = 20e-6;
+        self.length = 1e-6;
+        self.area = 1.0;
+        self.vgs = Value::NAN;
+        self.vds = Value::NAN;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.eval_valid = false;
+        self.limiter_applied = false;
+        self
+    }
+
+    /// Enable Berkeley SPICE level-1 MESFET defaults (`mes` device).
+    pub fn enable_legacy_mesfet_model(mut self) -> Self {
+        let is_n = matches!(self.jfet_type, JfetType::NJF);
+        self.params.channel_model = JfetChannelModel::LegacyMesfet;
+        self.hfet_legacy_inverse_mode = false;
+        self.params.hfet_level = 1;
+        self.params.vto = if is_n { -2.0 } else { 2.0 };
+        self.params.beta = 2.5e-3;
+        self.params.lambda = 0.0;
+        self.params.mes_b = 0.3;
+        self.params.mesa_alpha = 2.0;
+        self.params.rd = 0.0;
+        self.params.rs = 0.0;
+        self.params.is = 1.0e-14;
+        self.params.cgs = 0.0;
+        self.params.cgd = 0.0;
+        self.params.pb = 1.0;
+        self.params.fc = 0.5;
         self.width = 20e-6;
         self.length = 1e-6;
         self.area = 1.0;
@@ -708,8 +744,12 @@ impl Jfet {
 
         let beta_from_card = params
             .get("BETA")
-            .or_else(|| params.get("B"))
             .copied()
+            .or_else(|| {
+                (!matches!(p.channel_model, JfetChannelModel::LegacyMesfet))
+                    .then(|| params.get("B").copied())
+                    .flatten()
+            })
             .filter(|v| v.is_finite() && *v >= 0.0);
         let idss_from_card = params
             .get("IDSS")
@@ -848,6 +888,13 @@ impl Jfet {
         }
         if let Some(v) = params.get("ALPHA").copied().filter(|v| v.is_finite()) {
             p.mesa_alpha = v;
+        }
+        if let Some(v) = params
+            .get("B")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            p.mes_b = v;
         }
         if let Some(v) = params.get("TC").copied().filter(|v| v.is_finite()) {
             p.mesa_tc = v;
@@ -1962,6 +2009,87 @@ impl Jfet {
         (pol * ids, gm, gds)
     }
 
+    /// Calculate Berkeley SPICE level-1 MESFET drain current and conductances.
+    fn calculate_legacy_mesfet(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
+        let pol = self.jfet_type.polarity();
+        let vgs_int = pol * vgs;
+        let vds_int = pol * vds;
+        let vgd_int = vgs_int - vds_int;
+        let beta = (self.params.beta * self.area * self.m).max(0.0);
+        let lambda = self.params.lambda;
+        let alpha = if self.params.mesa_alpha.is_finite() && self.params.mesa_alpha.abs() > 1.0e-30
+        {
+            self.params.mesa_alpha
+        } else {
+            2.0
+        };
+        let b = self.params.mes_b.max(0.0);
+        let vto = self.params.vto;
+
+        let (ids, gm, gds) = if vds_int >= 0.0 {
+            let vgst = vgs_int - vto;
+            if vgst <= 0.0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let prod = 1.0 + lambda * vds_int;
+                let betap = beta * prod;
+                let denom = (1.0 + b * vgst).max(1.0e-30);
+                let inv_denom = 1.0 / denom;
+                let vgst2_over_denom = vgst * vgst * inv_denom;
+                let gm_sat = betap * vgst * (1.0 + denom) * inv_denom * inv_denom;
+                if vds_int >= 3.0 / alpha {
+                    (
+                        betap * vgst2_over_denom,
+                        gm_sat,
+                        lambda * beta * vgst2_over_denom,
+                    )
+                } else {
+                    let afact = 1.0 - alpha * vds_int / 3.0;
+                    let lfact = 1.0 - afact * afact * afact;
+                    (
+                        betap * vgst2_over_denom * lfact,
+                        gm_sat * lfact,
+                        beta * vgst2_over_denom * (alpha * afact * afact * prod + lfact * lambda),
+                    )
+                }
+            }
+        } else {
+            let vgdt = vgd_int - vto;
+            if vgdt <= 0.0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let prod = 1.0 - lambda * vds_int;
+                let betap = beta * prod;
+                let denom = (1.0 + b * vgdt).max(1.0e-30);
+                let inv_denom = 1.0 / denom;
+                let vgdt2_over_denom = vgdt * vgdt * inv_denom;
+                let gm_sat = -betap * vgdt * (1.0 + denom) * inv_denom * inv_denom;
+                if -vds_int >= 3.0 / alpha {
+                    (
+                        -betap * vgdt2_over_denom,
+                        gm_sat,
+                        lambda * beta * vgdt2_over_denom - gm_sat,
+                    )
+                } else {
+                    let afact = 1.0 + alpha * vds_int / 3.0;
+                    let lfact = 1.0 - afact * afact * afact;
+                    (
+                        -betap * vgdt2_over_denom * lfact,
+                        gm_sat * lfact,
+                        beta * vgdt2_over_denom * (alpha * afact * afact * prod + lfact * lambda)
+                            - gm_sat * lfact,
+                    )
+                }
+            }
+        };
+
+        (
+            if ids.is_finite() { pol * ids } else { 0.0 },
+            if gm.is_finite() { gm } else { 0.0 },
+            if gds.is_finite() { gds } else { 0.0 },
+        )
+    }
+
     #[inline]
     fn exp_limited(x: Value) -> Value {
         x.clamp(-80.0, 80.0).exp()
@@ -2732,6 +2860,7 @@ impl Jfet {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         match self.params.channel_model {
             JfetChannelModel::ShichmanHodges => self.calculate_shichman_hodges(vgs, vds),
+            JfetChannelModel::LegacyMesfet => self.calculate_legacy_mesfet(vgs, vds),
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2 => self.calculate_mesa_level(vgs, vds, temp_source, 2, false),
                 3 => self.calculate_mesa_level(vgs, vds, temp_source, 3, false),
@@ -3206,7 +3335,7 @@ impl Jfet {
     pub fn transient_capacitances(&self, vgs: Value, vgd: Value, temp: Value) -> (Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         let (mut cgs, mut cgd) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges => {
+            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 self.capacitances(pol * vgs, pol * vgd)
             }
@@ -3264,7 +3393,7 @@ impl Jfet {
         };
 
         match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges => {
+            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
                 let pol = self.jfet_type.polarity();
                 let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
                 (cgs, cgd, cds)
@@ -3287,7 +3416,9 @@ impl Jfet {
         let (_, gm_base, gds_base, _, _, ggs, ggd, _) = self.compute_operating_terms(vgs, vds, vgd);
 
         let (gm, gds) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges => (gm_base, gds_base),
+            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
+                (gm_base, gds_base)
+            }
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2..=4 => {
                     let force_inverse = self.hfet_legacy_inverse_active && vds >= 0.0;
@@ -4289,6 +4420,85 @@ mod tests {
             rel < 0.05,
             "mesa LEVEL=2 gate-drain current mismatch: igd={igd} expected={expected} rel={rel}"
         );
+    }
+
+    #[test]
+    fn test_enable_legacy_mesfet_model_applies_ngspice_defaults() {
+        let jfet = Jfet::njf("Z1", 1, 2, 0).enable_legacy_mesfet_model();
+
+        assert_eq!(jfet.params.channel_model, JfetChannelModel::LegacyMesfet);
+        assert_eq!(jfet.params.hfet_level, 1);
+        assert!(!jfet.uses_hfet_legacy_inverse_mode());
+        assert!((jfet.params.vto - (-2.0)).abs() < 1e-15);
+        assert!((jfet.params.beta - 2.5e-3).abs() < 1e-18);
+        assert!((jfet.params.mes_b - 0.3).abs() < 1e-15);
+        assert!((jfet.params.mesa_alpha - 2.0).abs() < 1e-15);
+        assert!((jfet.params.is - 1.0e-14).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_legacy_mesfet_model_params_keep_b_separate_from_beta() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("B".to_string(), 0.75);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_legacy_mesfet_model()
+            .with_model_params(&model);
+
+        assert!((jfet.params.beta - 2.5e-3).abs() < 1e-18);
+        assert!((jfet.params.mes_b - 0.75).abs() < 1e-15);
+    }
+
+    #[test]
+    fn test_legacy_mesfet_level1_cutoff_uses_ngspice_gate_leakage() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("VT0".to_string(), -1.3);
+        model.insert("BETA".to_string(), 1.4e-3);
+        model.insert("ALPHA".to_string(), 3.0);
+        model.insert("LAMBDA".to_string(), 0.03);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_legacy_mesfet_model()
+            .with_model_params(&model)
+            .with_area(1.4);
+
+        let (ids, gm, gds) = jfet.calculate(-3.0, 0.1, 300.15);
+        assert!(ids.abs() < 1e-18, "cutoff channel current={ids}");
+        assert!(gm.abs() < 1e-18, "cutoff gm={gm}");
+        assert!(gds.abs() < 1e-18, "cutoff gds={gds}");
+
+        let (_igs, igd) = jfet.gate_current(-3.0, -3.1, 300.15);
+        let expected = -3.114e-12;
+        assert!(
+            (igd - expected).abs() < 5e-16,
+            "legacy MES gate-drain leakage mismatch: igd={igd} expected={expected}"
+        );
+    }
+
+    #[test]
+    fn test_legacy_mesfet_level1_single_point_matches_ngspice_reference() {
+        use std::collections::HashMap;
+
+        let mut model = HashMap::new();
+        model.insert("VT0".to_string(), -1.3);
+        model.insert("BETA".to_string(), 1.4e-3);
+        model.insert("ALPHA".to_string(), 3.0);
+        model.insert("LAMBDA".to_string(), 0.03);
+
+        let jfet = Jfet::njf("Z1", 1, 2, 0)
+            .enable_legacy_mesfet_model()
+            .with_model_params(&model)
+            .with_area(1.4);
+
+        let (ids, gm, gds) = jfet.calculate(0.0, 0.1, 300.15);
+
+        assert!((ids - 6.477_362_454_676_26e-4).abs() < 1e-15);
+        assert!((gm - 8.567_181_110_501_52e-4).abs() < 1e-15);
+        assert!((gds - 5.827_488_638_848_92e-3).abs() < 1e-15);
     }
 
     #[test]
