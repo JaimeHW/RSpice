@@ -3,12 +3,199 @@
 //! Comprehensive integration tests that run RSpice against the ngspice test suite.
 //! Tests are organized by analysis type and device model category.
 
-use rspice_core::testing::{TestRunner, TestRunnerConfig, TestStatistics};
+use rspice_core::testing::{
+    TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics,
+    decode_test_result,
+};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
 };
+
+const FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS: u128 = 30_000;
+const CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-ngspice-case-runner");
+
+struct TestRunner {
+    inner: CoreTestRunner,
+    test_dir: PathBuf,
+}
+
+impl TestRunner {
+    fn new<P: AsRef<Path>>(test_dir: P, config: TestRunnerConfig) -> Self {
+        let test_dir = test_dir.as_ref().to_path_buf();
+        Self {
+            inner: CoreTestRunner::new(&test_dir, config),
+            test_dir,
+        }
+    }
+
+    fn config(&self) -> &TestRunnerConfig {
+        self.inner.config()
+    }
+
+    fn discover_tests(&self, subdir: &str) -> Vec<PathBuf> {
+        self.inner.discover_tests(subdir)
+    }
+
+    fn run_suite(&self, subdir: &str) -> Vec<TestResult> {
+        self.discover_tests(subdir)
+            .iter()
+            .map(|path| self.run_test(path))
+            .collect()
+    }
+
+    fn run_test(&self, cir_path: &Path) -> TestResult {
+        run_case_with_watchdog(&self.test_dir, self.config(), cir_path)
+    }
+
+    fn has_direct_validation_coverage(
+        &self,
+        cir_path: &Path,
+        source: &str,
+    ) -> Result<bool, String> {
+        self.inner.has_direct_validation_coverage(cir_path, source)
+    }
+
+    fn print_summary(results: &[TestResult]) {
+        CoreTestRunner::print_summary(results);
+    }
+
+    fn statistics(results: &[TestResult]) -> TestStatistics {
+        CoreTestRunner::statistics(results)
+    }
+}
+
+fn run_case_with_watchdog(
+    test_dir: &Path,
+    config: &TestRunnerConfig,
+    cir_path: &Path,
+) -> TestResult {
+    let start = Instant::now();
+    let result_path = unique_case_result_path(cir_path);
+    let mut child = match Command::new(CASE_RUNNER_EXE)
+        .arg("--test-dir")
+        .arg(test_dir)
+        .arg("--circuit")
+        .arg(cir_path)
+        .arg("--result")
+        .arg(&result_path)
+        .arg("--relative-tolerance")
+        .arg(config.relative_tolerance.to_string())
+        .arg("--absolute-tolerance")
+        .arg(config.absolute_tolerance.to_string())
+        .arg("--max-mismatches")
+        .arg(config.max_mismatches.to_string())
+        .arg("--skip-unsupported")
+        .arg(config.skip_unsupported.to_string())
+        .arg("--verbose")
+        .arg(config.verbose.to_string())
+        .arg("--max-time-per-test-ms")
+        .arg(config.max_time_per_test_ms.to_string())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            return watchdog_error_result(
+                cir_path,
+                start.elapsed().as_millis(),
+                format!("Failed to spawn ngspice case runner: {err}"),
+            );
+        }
+    };
+
+    let timeout = Duration::from_millis(config.max_time_per_test_ms.min(u64::MAX as u128) as u64);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let decoded = match fs::read_to_string(&result_path) {
+                    Ok(content) => decode_test_result(&content)
+                        .map_err(|err| format!("Case runner wrote an unreadable result: {err}")),
+                    Err(err) => Err(format!(
+                        "Case runner exited with status {status}, but wrote no result: {err}"
+                    )),
+                };
+                let _ = fs::remove_file(&result_path);
+                return match decoded {
+                    Ok(result) => result,
+                    Err(err) => watchdog_error_result(cir_path, start.elapsed().as_millis(), err),
+                };
+            }
+            Ok(None) if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&result_path);
+                return watchdog_error_result(
+                    cir_path,
+                    start.elapsed().as_millis(),
+                    format!(
+                        "Test exceeded hard process timeout ({}ms)",
+                        config.max_time_per_test_ms
+                    ),
+                );
+            }
+            Ok(None) => {
+                let remaining = timeout.saturating_sub(start.elapsed());
+                thread::sleep(remaining.min(Duration::from_millis(50)));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&result_path);
+                return watchdog_error_result(
+                    cir_path,
+                    start.elapsed().as_millis(),
+                    format!("Failed to poll ngspice case runner: {err}"),
+                );
+            }
+        }
+    }
+}
+
+fn watchdog_error_result(cir_path: &Path, duration_ms: u128, error: String) -> TestResult {
+    TestResult {
+        name: cir_path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        passed: false,
+        error: Some(error),
+        mismatches: Vec::new(),
+        duration_ms,
+        analysis_type: None,
+    }
+}
+
+fn unique_case_result_path(cir_path: &Path) -> PathBuf {
+    let stem = cir_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+
+    std::env::temp_dir().join(format!(
+        "rspice-ngspice-{stem}-{}-{}.result",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos()
+    ))
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test Helpers
@@ -196,6 +383,12 @@ fn suite_config(subdir: &str) -> TestRunnerConfig {
     cfg
 }
 
+fn suite_config_with_timeout(subdir: &str, max_time_per_test_ms: u128) -> TestRunnerConfig {
+    let mut cfg = suite_config(subdir);
+    cfg.max_time_per_test_ms = max_time_per_test_ms;
+    cfg
+}
+
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "rspice-{prefix}-{}-{}",
@@ -261,9 +454,10 @@ fn run_vbic_diffamp_focus_transient(max_time: f64) -> rspice_core::testing::Test
     let source = fs::read_to_string(vbic_dir.join(deck_name)).expect("read diffamp deck");
     let reference =
         fs::read_to_string(vbic_dir.join("diffamp.out")).expect("read diffamp reference");
+    let focused_tran = format!(".TRAN 1n {max_time:.12e} 0 10n");
 
     let focused_source = source
-        .replace(".TRAN 1n 1u 0 10n", ".TRAN 1n 10n 0 10n")
+        .replace(".TRAN 1n 1u 0 10n", &focused_tran)
         .replace(".AC DEC 25 100k 1G\n", "")
         .replace(".print ac v(e1_p)\n", "");
     let focused_reference = truncate_transient_reference_table(&reference, max_time);
@@ -471,6 +665,12 @@ fn test_suite_config_applies_soi_timeout_override() {
     }
 }
 
+#[test]
+fn test_focused_general_config_uses_diagnostic_timeout() {
+    let cfg = suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS);
+    assert_eq!(cfg.max_time_per_test_ms, 30_000);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // General Circuit Tests
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -484,6 +684,38 @@ fn test_ngspice_general_suite() {
         "General: {} tests, {:.1}% pass rate",
         stats.total,
         stats.pass_rate()
+    );
+}
+
+#[test]
+fn test_ngspice_general_rc_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(
+        tests_dir.clone(),
+        suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS),
+    );
+    let result = runner.run_test(&tests_dir.join("general").join("rc.cir"));
+
+    assert!(
+        result.passed,
+        "Focused general RC deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+}
+
+#[test]
+fn test_ngspice_general_rtlinv_focus() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(
+        tests_dir.clone(),
+        suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS),
+    );
+    let result = runner.run_test(&tests_dir.join("general").join("rtlinv.cir"));
+
+    assert!(
+        result.passed,
+        "Focused general rtlinv deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
     );
 }
 
@@ -538,9 +770,10 @@ fn test_ngspice_transmission_suite() {
 #[test]
 fn test_ngspice_transmission_ltra1_focus() {
     let tests_dir = get_tests_dir();
-    let mut cfg = suite_config("transmission");
-    cfg.max_time_per_test_ms = 120_000;
-    let runner = TestRunner::new(tests_dir.clone(), cfg);
+    let runner = TestRunner::new(
+        tests_dir.clone(),
+        suite_config_with_timeout("transmission", 120_000),
+    );
     let result = runner.run_test(&tests_dir.join("transmission").join("ltra1_1_line.cir"));
 
     assert!(
@@ -634,6 +867,17 @@ fn test_ngspice_vbic_diffamp_focus() {
     assert!(
         result.passed,
         "Focused VBIC diffamp deck failed: {:?} | mismatches: {:?}",
+        result.error, result.mismatches
+    );
+}
+
+#[test]
+fn test_ngspice_vbic_diffamp_200ps_focus() {
+    let result = run_vbic_diffamp_focus_transient(2e-10);
+
+    assert!(
+        result.passed,
+        "Focused VBIC diffamp 200ps deck failed: {:?} | mismatches: {:?}",
         result.error, result.mismatches
     );
 }
@@ -1023,6 +1267,36 @@ fn test_all_discoverable_suite_dirs_are_covered() {
     .collect::<Vec<_>>();
 
     assert_eq!(suites, expected);
+}
+
+#[test]
+fn test_discovered_suites_cover_every_local_ngspice_circuit() {
+    let tests_dir = get_tests_dir();
+    let runner = TestRunner::new(tests_dir.clone(), TestRunnerConfig::default());
+    let discovered = all_discoverable_suite_dirs()
+        .into_iter()
+        .flat_map(|suite| runner.discover_tests(&suite))
+        .map(|path| {
+            path.strip_prefix(&tests_dir)
+                .expect("discovered path should live under tests root")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect::<BTreeSet<_>>();
+    let all_circuits = all_circuit_paths(&tests_dir)
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(&tests_dir)
+                .expect("circuit path should live under tests root")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        discovered, all_circuits,
+        "Every checked-in ngspice .cir deck must be discoverable and run by the suite harness"
+    );
 }
 
 #[test]

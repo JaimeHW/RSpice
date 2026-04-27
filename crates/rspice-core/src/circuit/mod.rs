@@ -830,6 +830,7 @@ impl VoltageSources {
     ) -> (Value, Value, Value, Value, Value) {
         let step_default = Self::pulse_step_default(context);
         let stop_default = Self::pulse_stop_default(context);
+        let period_was_omitted = period.is_nan();
 
         let td = if delay.is_finite() {
             delay.max(0.0)
@@ -860,7 +861,12 @@ impl VoltageSources {
         } else {
             stop_default
         };
-        let per = if per.is_finite() && per > 0.0 {
+        let per = if period_was_omitted {
+            // Match ngspice's transient-context defaults for one-shot pulse
+            // decks: omitted PER must not restart the waveform before the
+            // default high interval has completed inside the active analysis.
+            stop_default + tr + pw + tf
+        } else if per.is_finite() && per > 0.0 {
             per
         } else {
             stop_default
@@ -1196,6 +1202,21 @@ impl CurrentSources {
                 rhs[nn - 1] += delta;
             }
         }
+    }
+
+    /// Maximum absolute change expected from time-varying current sources over [t0, t1].
+    #[inline]
+    pub fn max_expected_delta(&self, t0: Value, t1: Value) -> Value {
+        let context = self.transient_context;
+        self.source_specs
+            .iter()
+            .filter_map(|spec| spec.as_ref())
+            .map(|spec| {
+                (VoltageSources::evaluate_source_at_time_with_context(spec, t1, context)
+                    - VoltageSources::evaluate_source_at_time_with_context(spec, t0, context))
+                .abs()
+            })
+            .fold(0.0, Value::max)
     }
 }
 
@@ -3969,6 +3990,13 @@ mod tests {
             "pulse width default should keep source high within tstop window, got {}",
             rhs[1]
         );
+
+        vs.update_transient_rhs(&mut rhs, 10.0e-6, |br_ordinal| 1 + br_ordinal);
+        assert!(
+            (rhs[1] - 1.0).abs() < 1e-9,
+            "pulse default period must not wrap exactly at tstop, got {}",
+            rhs[1]
+        );
     }
 
     #[test]
@@ -3999,6 +4027,35 @@ mod tests {
             (rhs[0] + 1.0).abs() < 1e-9,
             "current pulse should inject 1A from node to ground, rhs={}",
             rhs[0]
+        );
+    }
+
+    #[test]
+    fn test_current_sources_max_expected_delta_tracks_transient_waveform() {
+        let mut cs = CurrentSources::new();
+        cs.add_with_ac_and_spec(
+            "IP".to_string(),
+            1,
+            0,
+            0.0,
+            0.0,
+            0.0,
+            Some(SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 2.0,
+                delay: 1e-9,
+                rise: 2e-9,
+                fall: 1e-9,
+                width: 5e-9,
+                period: 20e-9,
+            }),
+        );
+
+        let delta = cs.max_expected_delta(1.5e-9, 2.5e-9);
+        assert!(
+            (delta - 1.0).abs() < 1e-12,
+            "expected current source activity over pulse ramp, got {}",
+            delta
         );
     }
 

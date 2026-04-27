@@ -373,6 +373,22 @@ impl TestRunner {
         Engine::new(config)
     }
 
+    #[inline]
+    fn simulation_result_contains_non_finite(result: &crate::SimulationResult) -> bool {
+        result.node_voltages.iter().any(|value| !value.is_finite())
+            || result
+                .branch_currents
+                .iter()
+                .any(|value| !value.is_finite())
+    }
+
+    #[inline]
+    fn dc_sweep_results_contain_non_finite(results: &[(Value, crate::SimulationResult)]) -> bool {
+        results.iter().any(|(x, result)| {
+            !x.is_finite() || Self::simulation_result_contains_non_finite(result)
+        })
+    }
+
     /// Discover all .cir test files in a subdirectory
     pub fn discover_tests(&self, subdir: &str) -> Vec<PathBuf> {
         let dir = self.test_dir.join(subdir);
@@ -380,22 +396,50 @@ impl TestRunner {
             return Vec::new();
         }
 
+        let mut tests = Vec::new();
+        let mut seen = BTreeSet::new();
         if let Some(mut suite_tests) = self.discover_tests_from_makefile(&dir) {
-            suite_tests.sort();
-            return suite_tests;
+            for path in suite_tests.drain(..) {
+                Self::push_discovered_test(&mut tests, &mut seen, path);
+            }
         }
 
+        for path in Self::discover_circuit_files_in_dir(&dir) {
+            Self::push_discovered_test(&mut tests, &mut seen, path);
+        }
+
+        tests.sort();
+        tests
+    }
+
+    fn discover_circuit_files_in_dir(dir: &Path) -> Vec<PathBuf> {
         let mut tests = Vec::new();
         if let Ok(entries) = fs::read_dir(&dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().is_some_and(|e| e == "cir") {
+                if path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("cir"))
+                {
                     tests.push(path);
                 }
             }
         }
         tests.sort();
         tests
+    }
+
+    fn push_discovered_test(tests: &mut Vec<PathBuf>, seen: &mut BTreeSet<String>, path: PathBuf) {
+        if seen.insert(Self::discovery_path_key(&path)) {
+            tests.push(path);
+        }
+    }
+
+    fn discovery_path_key(path: &Path) -> String {
+        path.to_string_lossy()
+            .replace('\\', "/")
+            .to_ascii_lowercase()
     }
 
     fn discover_tests_from_makefile(&self, dir: &Path) -> Option<Vec<PathBuf>> {
@@ -1324,7 +1368,8 @@ impl TestRunner {
         let robust_engine = self.create_dc_engine();
         let primary_result = primary_engine.run_dc_op(&netlist);
         let op_result = match primary_result {
-            Ok(result) => Ok(result),
+            Ok(result) if !Self::simulation_result_contains_non_finite(&result) => Ok(result),
+            Ok(_) => robust_engine.run_dc_op(&netlist),
             Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
                 robust_engine.run_dc_op(&netlist)
             }
@@ -1468,7 +1513,18 @@ impl TestRunner {
         );
 
         let sweep_result = match primary_result {
-            Ok(results) => Ok(results),
+            Ok(results) if !Self::dc_sweep_results_contain_non_finite(&results) => Ok(results),
+            Ok(_) => {
+                let robust_engine = self.create_dc_engine();
+                robust_engine.run_dc_sweep_with_abort(
+                    &netlist,
+                    sweep_source,
+                    start_val,
+                    stop_val,
+                    step_val,
+                    &abort,
+                )
+            }
             Err(err) if Self::is_recoverable_dc_convergence_error(&err) => {
                 let robust_engine = self.create_dc_engine();
                 robust_engine.run_dc_sweep_with_abort(
@@ -1770,7 +1826,15 @@ impl TestRunner {
                 &abort,
             );
             let sweep_result = match primary_result {
-                Ok(results) => Ok(results),
+                Ok(results) if !Self::dc_sweep_results_contain_non_finite(&results) => Ok(results),
+                Ok(_) => robust_engine.run_dc_sweep_with_abort(
+                    &netlist,
+                    inner_source,
+                    inner_start,
+                    inner_stop,
+                    inner_step,
+                    &abort,
+                ),
                 Err(err) if Self::is_recoverable_dc_convergence_error(&err) => robust_engine
                     .run_dc_sweep_with_abort(
                         &netlist,
@@ -4324,7 +4388,9 @@ impl TestRunner {
                 || lower.starts_with("v-sweep ")
             {
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() >= 2 {
+                if parts.len() >= 2
+                    && !Self::looks_like_ascii_plot_axis_header(parts[0], &parts[1..])
+                {
                     finalize_current(&mut tables, &mut current_table, &mut current_vars);
                     current_table.x_name = parts[0].to_string();
                     current_vars = parts[1..].iter().map(|s| s.to_string()).collect();
@@ -4411,6 +4477,30 @@ impl TestRunner {
         } else {
             Ok(Self::merge_contiguous_reference_tables(tables))
         }
+    }
+
+    fn looks_like_ascii_plot_axis_header(axis: &str, vars: &[&str]) -> bool {
+        if vars.is_empty() {
+            return false;
+        }
+
+        let normalized_axis = Self::normalize_variable_name(axis);
+        if !matches!(normalized_axis.as_str(), "time" | "frequency" | "v-sweep") {
+            return false;
+        }
+
+        vars.iter()
+            .any(|token| Self::header_token_is_ascii_plot_tick(token))
+    }
+
+    fn header_token_is_ascii_plot_tick(token: &str) -> bool {
+        let normalized = Self::normalize_variable_name(token);
+        if normalized.is_empty() {
+            return true;
+        }
+
+        normalized.parse::<f64>().is_ok()
+            || crate::netlist::lexer::parse_spice_value(&normalized).is_ok()
     }
 
     fn merge_contiguous_reference_tables(tables: Vec<ReferenceTable>) -> Vec<ReferenceTable> {
@@ -4840,7 +4930,9 @@ impl TestRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::abort_signal::{CountingAbort, NoAbort};
     use std::fs;
+    use std::sync::Once;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn unique_temp_dir(prefix: &str) -> PathBuf {
@@ -4864,6 +4956,185 @@ mod tests {
             content.push('\n');
         }
         fs::write(manifest_path, content).expect("write validation manifest");
+    }
+
+    fn workspace_tests_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests")
+            .canonicalize()
+            .expect("workspace tests dir should exist")
+    }
+
+    fn init_test_logger() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            let _ = env_logger::Builder::new()
+                .filter_level(log::LevelFilter::Info)
+                .is_test(true)
+                .try_init();
+        });
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_dc_sweep_runner_returns() {
+        init_test_logger();
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let runner = TestRunner::new(
+            tests_dir,
+            TestRunnerConfig {
+                max_time_per_test_ms: 5_000,
+                ..TestRunnerConfig::default()
+            },
+        );
+
+        let result = runner.run_dc_sweep_test(
+            "rtlinv",
+            &cir_path,
+            &source,
+            "vin",
+            0.0,
+            2.5,
+            0.025,
+            Instant::now(),
+        );
+        eprintln!("rtlinv dc result: {result:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_transient_runner_returns() {
+        init_test_logger();
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let runner = TestRunner::new(
+            tests_dir,
+            TestRunnerConfig {
+                max_time_per_test_ms: 5_000,
+                ..TestRunnerConfig::default()
+            },
+        );
+
+        let result = runner.run_transient_test(
+            "rtlinv",
+            &cir_path,
+            &source,
+            2e-9,
+            200e-9,
+            0.0,
+            None,
+            Instant::now(),
+        );
+        eprintln!("rtlinv tran result: {result:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_transient_short_runner_returns() {
+        init_test_logger();
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let runner = TestRunner::new(
+            tests_dir,
+            TestRunnerConfig {
+                max_time_per_test_ms: 5_000,
+                ..TestRunnerConfig::default()
+            },
+        );
+
+        let result = runner.run_transient_test(
+            "rtlinv-short",
+            &cir_path,
+            &source,
+            2e-9,
+            50e-9,
+            0.0,
+            None,
+            Instant::now(),
+        );
+        eprintln!("rtlinv short tran result: {result:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_transient_tiny_runner_returns() {
+        init_test_logger();
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let runner = TestRunner::new(
+            tests_dir,
+            TestRunnerConfig {
+                max_time_per_test_ms: 5_000,
+                ..TestRunnerConfig::default()
+            },
+        );
+
+        let result = runner.run_transient_test(
+            "rtlinv-tiny",
+            &cir_path,
+            &source,
+            2e-9,
+            5e-9,
+            0.0,
+            None,
+            Instant::now(),
+        );
+        eprintln!("rtlinv tiny tran result: {result:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_transient_preedge_runner_returns() {
+        init_test_logger();
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let runner = TestRunner::new(
+            tests_dir,
+            TestRunnerConfig {
+                max_time_per_test_ms: 5_000,
+                ..TestRunnerConfig::default()
+            },
+        );
+
+        let result = runner.run_transient_test(
+            "rtlinv-preedge",
+            &cir_path,
+            &source,
+            2e-9,
+            1e-9,
+            0.0,
+            None,
+            Instant::now(),
+        );
+        eprintln!("rtlinv preedge tran result: {result:?}");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_rtlinv_engine_early_abort_returns() {
+        init_test_logger();
+        let cir_path = workspace_tests_dir().join("general").join("rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let netlist = Netlist::parse(&source).expect("parse rtlinv deck");
+        let mut config = SimulationConfig::default();
+        config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+        let engine = Engine::new(config);
+        let abort = CountingAbort::new(1);
+        let start = Instant::now();
+        let result = engine.run_tran_with_abort(&netlist, 50e-9, 2e-9, &abort);
+        eprintln!(
+            "rtlinv engine early-abort result after {:?} with {} abort checks: {:?}",
+            start.elapsed(),
+            abort.count(),
+            result
+        );
     }
 
     #[test]
@@ -5374,6 +5645,41 @@ mod tests {
         assert!(!TestRunner::is_recoverable_dc_convergence_error(
             &crate::engine::SimulationError::Aborted
         ));
+    }
+
+    #[test]
+    fn test_simulation_result_contains_non_finite_detection() {
+        let mut result = crate::SimulationResult::new(2, 1);
+        result.node_voltages[1] = 1.0;
+        result.branch_currents[0] = 2.0;
+        assert!(!TestRunner::simulation_result_contains_non_finite(&result));
+
+        result.node_voltages[1] = f64::NAN;
+        assert!(TestRunner::simulation_result_contains_non_finite(&result));
+
+        result.node_voltages[1] = 1.0;
+        result.branch_currents[0] = f64::INFINITY;
+        assert!(TestRunner::simulation_result_contains_non_finite(&result));
+    }
+
+    #[test]
+    fn test_dc_sweep_results_contain_non_finite_detection() {
+        let mut clean = crate::SimulationResult::new(1, 0);
+        clean.node_voltages[1] = 0.5;
+        assert!(!TestRunner::dc_sweep_results_contain_non_finite(&[(
+            0.0, clean
+        )]));
+
+        let mut bad_point = crate::SimulationResult::new(1, 0);
+        bad_point.node_voltages[1] = f64::NAN;
+        assert!(TestRunner::dc_sweep_results_contain_non_finite(&[(
+            0.0,
+            bad_point.clone()
+        )]));
+        assert!(TestRunner::dc_sweep_results_contain_non_finite(&[(
+            f64::NAN,
+            bad_point
+        )]));
     }
 
     #[test]
@@ -6294,6 +6600,38 @@ Index   time            v(out)\n\
     }
 
     #[test]
+    fn test_parse_ngspice_output_tables_ignores_ascii_plot_axis_headers() {
+        let runner = TestRunner::new(".", TestRunnerConfig::default());
+        let content = "\
+Index   v-sweep         v(3)            v(5)\n\
+0       0.0             4.622185e+00    2.665056e-01\n\
+1       2.5e-2          4.622185e+00    2.665056e-01\n\
+\n\
+v-sweep    v(3)     0.00e+00  1.00e+00  2.00e+00  3.00e+00  4.00e+00  5.00e+00\n\
+----------------------|---------|---------|---------|---------|---------|\n\
+0.000e+00  4.622e+00 .         .         .         .         .     +   .\n\
+2.500e-02  4.622e+00 .         .         .         .         .     +   .\n";
+
+        let tables = runner
+            .parse_ngspice_output_tables(content)
+            .expect("expected parseable dc section");
+        assert_eq!(
+            tables.len(),
+            1,
+            "ASCII plot section must not create a second table"
+        );
+
+        let series = tables[0]
+            .variables
+            .get("v(3)")
+            .expect("v(3) series missing");
+        assert_eq!(series.x, vec![0.0, 2.5e-2]);
+        assert_eq!(series.y.len(), 2);
+        assert!((series.y[0] - 4.622_185).abs() < 1e-12);
+        assert!((series.y[1] - 4.622_185).abs() < 1e-12);
+    }
+
+    #[test]
     fn test_parse_ngspice_output_tables_parses_single_variable_complex_rows() {
         let runner = TestRunner::new(".", TestRunnerConfig::default());
         let content = "\
@@ -6598,6 +6936,113 @@ R1 out 0 2k
         assert!(
             (linearized - finite_difference).abs() < 5e-4,
             "linearized common-mode gain should match finite difference: linearized={linearized}, finite_difference={finite_difference}"
+        );
+    }
+
+    #[test]
+    fn test_real_rtlinv_dc_sweep_results_stay_finite_with_abort_aware_runner_path() {
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general/rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let netlist = Netlist::parse(&source).expect("parse rtlinv deck");
+        let runner = TestRunner::new(&tests_dir, TestRunnerConfig::default());
+
+        let results = runner
+            .create_dynamic_engine()
+            .run_dc_sweep_with_abort(&netlist, "vin", 0.0, 2.5, 0.025, &NoAbort)
+            .expect("real rtlinv deck should solve through runner dc sweep path");
+
+        assert_eq!(results.len(), 101, "expected full rtlinv sweep point count");
+        assert!(
+            !TestRunner::dc_sweep_results_contain_non_finite(&results),
+            "runner dc sweep path should not emit non-finite samples for real rtlinv deck"
+        );
+
+        let expected_v3 = 4.622_185;
+        let expected_v5 = 2.665_056e-1;
+        for (sweep_value, result) in results.iter().take(10) {
+            let v3 = result
+                .try_voltage_named("3")
+                .expect("node 3 should exist in rtlinv sweep result");
+            let v5 = result
+                .try_voltage_named("5")
+                .expect("node 5 should exist in rtlinv sweep result");
+            assert!(
+                v3.is_finite(),
+                "expected finite v(3) at vin={sweep_value:.6e}"
+            );
+            assert!(
+                v5.is_finite(),
+                "expected finite v(5) at vin={sweep_value:.6e}"
+            );
+            assert!(
+                (v3 - expected_v3).abs() / expected_v3.abs().max(1e-18) <= 0.02,
+                "expected v(3) near ngspice plateau at vin={sweep_value:.6e}, got {v3:.9e}"
+            );
+            assert!(
+                (v5 - expected_v5).abs() / expected_v5.abs().max(1e-18) <= 0.02,
+                "expected v(5) near ngspice plateau at vin={sweep_value:.6e}, got {v5:.9e}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_real_rtlinv_dc_sweep_reference_comparison_matches_direct_engine_results() {
+        let tests_dir = workspace_tests_dir();
+        let cir_path = tests_dir.join("general/rtlinv.cir");
+        let source = fs::read_to_string(&cir_path).expect("read rtlinv deck");
+        let netlist = Netlist::parse(&source).expect("parse rtlinv deck");
+        let runner = TestRunner::new(&tests_dir, TestRunnerConfig::default());
+
+        let results = runner
+            .create_dynamic_engine()
+            .run_dc_sweep_with_abort(&netlist, "vin", 0.0, 2.5, 0.025, &NoAbort)
+            .expect("real rtlinv deck should solve through runner dc sweep path");
+        let reference = runner
+            .load_reference_table_for_axis(&cir_path, &["v-sweep"])
+            .expect("load rtlinv dc reference")
+            .expect("rtlinv should have a dc reference table");
+        let x_sim: Vec<f64> = results.iter().map(|(x, _)| *x).collect();
+        let actual_v3: Vec<f64> = results
+            .iter()
+            .map(|(_, result)| {
+                result
+                    .try_voltage_named("3")
+                    .expect("node 3 should exist in rtlinv sweep result")
+            })
+            .collect();
+        let expected_v3 = reference
+            .variables
+            .get("v(3)")
+            .expect("reference should contain v(3)");
+
+        assert!(
+            TestRunner::is_monotonic_axis(&x_sim),
+            "simulation axis should be monotonic, got {:?}",
+            &x_sim[..x_sim.len().min(12)]
+        );
+        assert!(
+            TestRunner::is_monotonic_axis(&expected_v3.x),
+            "reference axis should be monotonic, got {:?}",
+            &expected_v3.x[..expected_v3.x.len().min(12)]
+        );
+        for &x_ref in expected_v3.x.iter().take(10) {
+            let actual = TestRunner::interpolate_series(&x_sim, &actual_v3, x_ref);
+            assert!(
+                actual.is_some(),
+                "expected direct interpolation at x={x_ref:.6e}; sim_head={:?}; sim_tail={:?}; ref_head={:?}",
+                &x_sim[..x_sim.len().min(12)],
+                &x_sim[x_sim.len().saturating_sub(12)..],
+                &expected_v3.x[..expected_v3.x.len().min(12)]
+            );
+        }
+        let mismatches = runner
+            .compare_dc_sweep_reference(&cir_path, &netlist, &results)
+            .expect("compare real rtlinv reference");
+
+        assert!(
+            mismatches.is_empty(),
+            "real rtlinv deck should match ngspice DC reference when compared directly, got {mismatches:?}"
         );
     }
 
@@ -7084,7 +7529,7 @@ RC c 0 1g
     }
 
     #[test]
-    fn test_discover_tests_prefers_makefile_tests_manifest() {
+    fn test_discover_tests_merges_makefile_and_supplemental_circuits() {
         let root = unique_temp_dir("rspice_ngspice_manifest");
         let suite = root.join("suite");
         fs::create_dir_all(&suite).expect("failed to create temp suite dir");
@@ -7105,7 +7550,14 @@ RC c 0 1g
             .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
             .collect();
 
-        assert_eq!(names, vec!["t1.cir".to_string(), "t2.cir".to_string()]);
+        assert_eq!(
+            names,
+            vec![
+                "helper.cir".to_string(),
+                "t1.cir".to_string(),
+                "t2.cir".to_string()
+            ]
+        );
 
         fs::remove_dir_all(&root).expect("failed to remove temp suite dir");
     }

@@ -1,6 +1,6 @@
 use super::{
-    AbortSignal, AnalysisCommand, Engine, Netlist, STARTUP_RECOVERY_DELTA_V, SimulationError,
-    VBIC_STARTUP_RECOVERY_DELTA_V, Value,
+    AbortSignal, AnalysisCommand, Engine, Netlist, SOURCE_ACTIVE_DELTA, STARTUP_RECOVERY_DELTA_V,
+    SimulationError, VBIC_STARTUP_RECOVERY_DELTA_V, Value,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,16 +244,13 @@ impl Engine {
             return base_limit.max(startup_limit);
         }
         if has_vbic_excess_phase
-            && let Some(td) = smallest_vbic_td.filter(|td| td.is_finite() && *td > 0.0)
+            && Self::in_vbic_excess_phase_recovery_window(time, smallest_vbic_td)
         {
             // Even with a valid DC operating point, excess-phase VBIC decks need a
             // short startup window where the hidden xf states can move into their
             // charge-history-consistent basin without being throttled by the generic
             // semiconductor trust region.
-            let relaxed_until = (td * 10.0).clamp(5e-12, 5e-10);
-            if time <= relaxed_until {
-                return base_limit.max(VBIC_STARTUP_RECOVERY_DELTA_V);
-            }
+            return base_limit.max(VBIC_STARTUP_RECOVERY_DELTA_V);
         }
         base_limit
     }
@@ -262,7 +259,7 @@ impl Engine {
     pub(super) fn startup_force_accept_delta_limit_with_vbic_td(
         mode: InitialSolutionMode,
         has_vbic_excess_phase: bool,
-        _smallest_vbic_td: Option<Value>,
+        smallest_vbic_td: Option<Value>,
         time: Value,
         max_step: Value,
         base_limit: Value,
@@ -274,6 +271,15 @@ impl Engine {
                 STARTUP_RECOVERY_DELTA_V
             };
             return base_limit.max(startup_limit);
+        }
+        if has_vbic_excess_phase
+            && Self::in_vbic_excess_phase_recovery_window(time, smallest_vbic_td)
+        {
+            // Keep the force-accept commit leash aligned with the relaxed Newton
+            // trust region during the excess-phase warmup window. Otherwise a
+            // clipped 50 mV commit can repeatedly under-step the hidden-state
+            // recovery that Newton is already exploring successfully.
+            return base_limit.max(VBIC_STARTUP_RECOVERY_DELTA_V);
         }
         base_limit
     }
@@ -294,6 +300,22 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn in_vbic_excess_phase_recovery_window(
+        time: Value,
+        smallest_vbic_td: Option<Value>,
+    ) -> bool {
+        smallest_vbic_td
+            .filter(|td| td.is_finite() && *td > 0.0)
+            .map(|td| {
+                // Mirror the short hidden-state recovery window used for Newton
+                // trust-region relaxation after a valid DC operating point.
+                let relaxed_until = (td * 10.0).clamp(5e-12, 5e-10);
+                time <= relaxed_until
+            })
+            .unwrap_or(false)
+    }
+
+    #[inline]
     pub(super) fn startup_timestep_divisors(
         has_bjts: bool,
         has_vbic_excess_phase: bool,
@@ -310,6 +332,30 @@ impl Engine {
         } else {
             (10.0, 1000.0)
         }
+    }
+
+    #[inline]
+    pub(super) fn ngspice_initial_timestep(
+        stop_time: Value,
+        tran_step_hint: Option<Value>,
+        hinted_max_step: Value,
+    ) -> Value {
+        let stop_window = if stop_time.is_finite() && stop_time > 0.0 {
+            stop_time / 100.0
+        } else {
+            Value::INFINITY
+        };
+        let step_seed = tran_step_hint
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .or_else(|| {
+                hinted_max_step
+                    .is_finite()
+                    .then_some(hinted_max_step)
+                    .filter(|step| *step > 0.0)
+            })
+            .unwrap_or(stop_window);
+
+        (stop_window.min(step_seed) / 10.0).max(1e-30)
     }
 
     #[inline]
@@ -358,6 +404,48 @@ impl Engine {
             practical_min = practical_min.min((td / 20.0).clamp(1e-15, hinted_max_step));
         }
         practical_min
+    }
+
+    #[inline]
+    pub(super) fn legacy_bjt_startup_retry_floor(
+        has_bjts: bool,
+        has_vbic_excess_phase: bool,
+        step_time: Value,
+        hinted_max_step: Value,
+        source_activity_delta: Value,
+        initial_timestep: Value,
+        preferred_min_timestep: Value,
+    ) -> Option<Value> {
+        if !has_bjts || has_vbic_excess_phase {
+            return None;
+        }
+        if !source_activity_delta.is_finite() {
+            return None;
+        }
+        let quiet_window_end = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
+            (hinted_max_step * 32.0).clamp(5e-9, 1e-7)
+        } else {
+            5e-9
+        };
+        if !step_time.is_finite() || step_time > quiet_window_end {
+            return None;
+        }
+
+        // Legacy BJT startup decks can otherwise collapse into ngspice's raw
+        // delmin path. Keep quiet retries above the smaller of the requested
+        // initial timestep and practical startup floor; during active source
+        // edges, use a sub-floor so the waveform is still resolved without
+        // falling into attosecond recovery loops.
+        let retry_floor = initial_timestep.min(preferred_min_timestep);
+        if retry_floor.is_finite() && retry_floor > 0.0 {
+            if source_activity_delta >= SOURCE_ACTIVE_DELTA {
+                Some((retry_floor * 0.5).max(1e-15).min(retry_floor))
+            } else {
+                Some(retry_floor)
+            }
+        } else {
+            None
+        }
     }
 
     #[inline]

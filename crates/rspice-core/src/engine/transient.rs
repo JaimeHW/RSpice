@@ -17,7 +17,6 @@ use crate::analysis::waveform::{CompressionConfig, TransientResultCompressed, Wa
 use crate::device::semiconductor::{
     BJT_DYNAMIC_CHARGE_COUNT, BJT_EXTERNAL_STATE_DIM, BJT_INTERNAL_STATE_DIM, BjtChargeBranch,
     BjtChargeSnapshot, BjtType, VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT,
-    VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX,
 };
 use crate::device::{NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::netlist::AnalysisCommand;
@@ -77,6 +76,7 @@ const BJT_VSI_STATE_INDEX: usize = 6;
 const BJT_THERMAL_STATE_INDEX: usize = BJT_INTERNAL_STATE_DIM - 3;
 const BJT_DELAY_XF1_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 2;
 const BJT_DELAY_XF2_BRANCH_INDEX: usize = BJT_DYNAMIC_CHARGE_COUNT - 1;
+const BJT_QBE_BRANCH_INDEX: usize = 0;
 const BJT_QBC_BRANCH_INDEX: usize = 2;
 const BJT_QBCX_BRANCH_INDEX: usize = 3;
 const BJT_QBCP_BRANCH_INDEX: usize = 7;
@@ -161,6 +161,12 @@ struct VbicPredictorLinearBranchState {
     vrs: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VbicCachedSnapshotReuse {
+    SeedOnly,
+    NewtonBypass,
+}
+
 #[derive(Debug, Clone, Default)]
 struct MosfetTransientHistory {
     vgs_prev: Vec<Value>,
@@ -200,6 +206,39 @@ struct CoupledTlineReferenceState {
 }
 
 impl Engine {
+    #[inline]
+    fn max_expected_source_delta(circuit: &crate::circuit::Circuit, t0: Value, t1: Value) -> Value {
+        circuit
+            .voltage_sources
+            .max_expected_delta(t0, t1)
+            .max(circuit.current_sources.max_expected_delta(t0, t1))
+    }
+
+    #[inline]
+    fn startup_source_activity_delta_for_retry_floor(
+        circuit: &crate::circuit::Circuit,
+        time: Value,
+        attempted_dt: Value,
+        tstop: Value,
+        initial_timestep: Value,
+        preferred_min_timestep: Value,
+    ) -> Value {
+        let retry_floor = initial_timestep.min(preferred_min_timestep);
+        let activity_horizon = if retry_floor.is_finite() && retry_floor > 0.0 {
+            attempted_dt.max(retry_floor)
+        } else {
+            attempted_dt
+        };
+        let remaining = (tstop - time).max(0.0);
+        let activity_horizon = activity_horizon.min(remaining);
+
+        if activity_horizon.is_finite() && activity_horizon > 0.0 {
+            Self::max_expected_source_delta(circuit, time, time + activity_horizon)
+        } else {
+            Self::max_expected_source_delta(circuit, time, time + attempted_dt)
+        }
+    }
+
     #[inline]
     fn add_breakpoint_if_in_range(breakpoints: &mut BreakpointManager, time: Value, tstop: Value) {
         if time.is_finite() && time >= 0.0 && time <= tstop {
@@ -583,6 +622,32 @@ impl Engine {
             &circuit.inductors.branch_indices,
         );
         dynamic_current_delta <= current_threshold
+    }
+
+    #[inline]
+    fn force_candidate_vbic_hidden_bypass_metric_met(
+        &self,
+        circuit: &crate::circuit::Circuit,
+        has_vbic_excess_phase: bool,
+        previous_solution: &[Value],
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &BjtTransientHistory,
+        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+    ) -> bool {
+        has_vbic_excess_phase
+            && self.vbic_excess_phase_device_convergence_met(
+                circuit,
+                previous_solution,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                history,
+                vbic_snapshot_cache,
+            )
     }
 
     #[inline]
@@ -1371,34 +1436,48 @@ impl Engine {
         let mut z_e = snapshot.reduction.z_e_static;
         let mut has_dynamic_charge = false;
 
-        for branch in bjt.vbic_delay_static_branches(&snapshot.reduction) {
-            if !branch.is_active() {
-                continue;
+        if bjt.uses_vbic_dynamic_charges() {
+            for branch in bjt.vbic_delay_static_branches(&snapshot.reduction) {
+                if !branch.is_active() {
+                    continue;
+                }
+                let i_eq = branch.linearization_dot(
+                    &snapshot.reduction.internal_voltages,
+                    &snapshot.reduction.external_voltages,
+                ) - branch.current;
+                branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
             }
-            let i_eq = branch.linearization_dot(
-                &snapshot.reduction.internal_voltages,
-                &snapshot.reduction.external_voltages,
-            ) - branch.current;
-            branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
-        }
-        let thermal_branch = bjt.vbic_delay_static_thermal_branch(&snapshot.reduction);
-        if thermal_branch.is_active() {
-            // The dynamic reduction already carries the collector/emitter and xf delay
-            // branch Jacobians. The excess-phase thermal-power correction is a separate
-            // delta branch that must be stamped here to keep the temperature row
-            // consistent with the delayed transport path.
-            thermal_branch.accumulate_derivatives(&mut g_ii, &mut g_ie, &mut g_ei, &mut g_ee);
-            let i_eq = thermal_branch.linearization_dot(
-                &snapshot.reduction.internal_voltages,
-                &snapshot.reduction.external_voltages,
-            ) - thermal_branch.current;
-            thermal_branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
+            let thermal_branch = bjt.vbic_delay_static_thermal_branch(&snapshot.reduction);
+            if thermal_branch.is_active() {
+                // The dynamic reduction already carries the collector/emitter and xf delay
+                // branch Jacobians. The excess-phase thermal-power correction is a separate
+                // delta branch that must be stamped here to keep the temperature row
+                // consistent with the delayed transport path.
+                thermal_branch.accumulate_derivatives(&mut g_ii, &mut g_ie, &mut g_ei, &mut g_ee);
+                let i_eq = thermal_branch.linearization_dot(
+                    &snapshot.reduction.internal_voltages,
+                    &snapshot.reduction.external_voltages,
+                ) - thermal_branch.current;
+                thermal_branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
+            }
         }
 
-        for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
-            let Some(branch) = Self::vbic_transient_owning_charge_branch(bjt, branch_idx, branch)
-            else {
-                continue;
+        for (branch_idx, full_branch) in snapshot.branches.iter().enumerate() {
+            let (branch, ccap_history_sign) = if bjt.uses_vbic_dynamic_charges() {
+                let Some(branch) =
+                    Self::vbic_transient_owning_charge_branch(bjt, branch_idx, full_branch)
+                else {
+                    continue;
+                };
+                (
+                    branch,
+                    Self::vbic_transient_owning_charge_ccap_sign(bjt, branch_idx),
+                )
+            } else {
+                if !full_branch.is_active() {
+                    continue;
+                }
+                (*full_branch, 1.0)
             };
             branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
             let cq_curr = Self::jfet_companion_ccap(
@@ -1410,7 +1489,6 @@ impl Engine {
                 q_prev_prev[branch_idx],
                 cq_prev[branch_idx],
             );
-            let ccap_history_sign = Self::vbic_transient_owning_charge_ccap_sign(bjt, branch_idx);
             let i_eq = charge_factor
                 * branch.linearization_dot(
                     &snapshot.reduction.internal_voltages,
@@ -3327,14 +3405,11 @@ impl Engine {
         }
 
         (0..VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT).all(|branch_idx| {
-            if bjt.uses_vbic_dynamic_charges()
-                && branch_idx == VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX
-            {
-                // Match ngspice's VBIC convTest path: the excess-phase iciei
-                // contribution is a hidden-state current, not a standalone
-                // predictor gate for local acceptance.
-                return true;
-            }
+            // Mirror ngspice's VBIC load-time bypass check: compare the full
+            // predicted branch current against the candidate branch current,
+            // including the hidden excess-phase xf2 contribution in iciei.
+            // Excluding that term can accept a stale delayed-transport state
+            // even when the candidate misses the device-local predictor tolerances.
             let predicted = previous.currents[branch_idx]
                 + previous.d_currents_d_internal[branch_idx]
                     .iter()
@@ -3730,6 +3805,19 @@ impl Engine {
     }
 
     #[inline]
+    fn vbic_snapshot_matches_external_bias_exact(
+        snapshot: &BjtChargeSnapshot,
+        external: &[Value; BJT_EXTERNAL_STATE_DIM],
+    ) -> bool {
+        snapshot
+            .reduction
+            .external_voltages
+            .iter()
+            .zip(external.iter())
+            .all(|(cached, expected)| (*cached - *expected).abs() <= 1e-18)
+    }
+
+    #[inline]
     fn resolve_vbic_snapshot_for_external_bias(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
@@ -3761,6 +3849,7 @@ impl Engine {
             None,
             previous_dt,
             cached_snapshot,
+            VbicCachedSnapshotReuse::SeedOnly,
             voltage_abstol,
             reltol,
         )
@@ -4237,7 +4326,8 @@ impl Engine {
             current_internal,
             target_external,
         );
-        let (Some(previous_external), Some(previous_internal)) = (previous_external, previous_internal)
+        let (Some(previous_external), Some(previous_internal)) =
+            (previous_external, previous_internal)
         else {
             return seed;
         };
@@ -4267,8 +4357,8 @@ impl Engine {
         // follow-up steps and can starve the local reduced solve.
         let continuation_scale = (proposed_step / previous_step).clamp(0.0, 2.0);
         for idx in 0..BJT_THERMAL_STATE_INDEX {
-            let path_predicted =
-                current_internal[idx] + (current_internal[idx] - previous_internal[idx]) * continuation_scale;
+            let path_predicted = current_internal[idx]
+                + (current_internal[idx] - previous_internal[idx]) * continuation_scale;
             let path_delta = path_predicted - current_internal[idx];
             let snapshot_delta = seed[idx] - current_internal[idx];
             if path_delta.is_finite()
@@ -4330,16 +4420,28 @@ impl Engine {
         history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
         previous_dt: Value,
         cached_snapshot: Option<BjtChargeSnapshot>,
+        cache_reuse: VbicCachedSnapshotReuse,
         voltage_abstol: Value,
         reltol: Value,
     ) -> Option<BjtChargeSnapshot> {
         let effective_method = Self::effective_companion_method(method, trap_order);
-        if let Some(snapshot) = cached_snapshot.filter(|snapshot| {
-            Self::vbic_snapshot_matches_external_bias(snapshot, &external, voltage_abstol, reltol)
-        }) {
+        let cached_snapshot_matches = |snapshot: &BjtChargeSnapshot| match cache_reuse {
+            VbicCachedSnapshotReuse::SeedOnly => {
+                Self::vbic_snapshot_matches_external_bias_exact(snapshot, &external)
+            }
+            VbicCachedSnapshotReuse::NewtonBypass => Self::vbic_snapshot_matches_external_bias(
+                snapshot,
+                &external,
+                voltage_abstol,
+                reltol,
+            ),
+        };
+        if let Some(snapshot) = cached_snapshot.filter(cached_snapshot_matches) {
             return Some(snapshot);
         }
-        if let Some(cached_snapshot) = cached_snapshot.as_ref() {
+        if matches!(cache_reuse, VbicCachedSnapshotReuse::NewtonBypass)
+            && let Some(cached_snapshot) = cached_snapshot.as_ref()
+        {
             let candidate_snapshot = bjt.charge_snapshot_for_dynamic_state(
                 external[0],
                 external[1],
@@ -4388,6 +4490,50 @@ impl Engine {
             bjt.dynamic_internal_state_seed(external[0], external[1], external[2], external[3]),
             seed_internal,
         );
+        let cached_acceptance_reference =
+            cached_snapshot.map(|snapshot| (snapshot.reduction.external_voltages, snapshot));
+        let history_acceptance_reference = history_internal_prev.zip(history_linear_prev).map(
+            |(history_internal_prev, history_linear_prev)| {
+                let previous_external = Self::vbic_external_from_linear_history(
+                    bjt,
+                    history_internal_prev,
+                    history_linear_prev,
+                );
+                let previous_snapshot = bjt.charge_snapshot_for_dynamic_state(
+                    previous_external[0],
+                    previous_external[1],
+                    previous_external[2],
+                    previous_external[3],
+                    *history_internal_prev,
+                );
+                (previous_external, previous_snapshot)
+            },
+        );
+        let bounded_snapshot_if_acceptable = |result: &VbicBestEffortSolve| {
+            if !Self::vbic_dynamic_snapshot_best_effort_is_bounded(result) {
+                return None;
+            }
+
+            let strict = Self::vbic_dynamic_snapshot_solution_is_acceptable(
+                &result.1,
+                &result.0.reduction.external_voltages,
+                &result.0.reduction.internal_voltages,
+            );
+            let predictor_ok = cached_acceptance_reference
+                .or(history_acceptance_reference)
+                .map(|(previous_external, previous_snapshot)| {
+                    Self::vbic_local_candidate_is_acceptable(
+                        bjt,
+                        previous_external,
+                        &previous_snapshot,
+                        &result.0,
+                        &result.1,
+                    )
+                })
+                .unwrap_or(false);
+
+            (strict || predictor_ok).then_some(result.0)
+        };
         // Match ngspice's predictor/load flow: first solve the current timepoint
         // directly from a predicted/live seed, and only fall back to local
         // continuation when that direct solve cannot produce a usable snapshot.
@@ -4496,9 +4642,8 @@ impl Engine {
                     }),
                 Self::vbic_dynamic_snapshot_best_effort_is_bounded,
             );
-            if let Some((snapshot, _, _, _)) = bounded_best_effort
-                .as_ref()
-                .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+            if let Some(result) = bounded_best_effort.as_ref()
+                && let Some(snapshot) = bounded_snapshot_if_acceptable(result)
             {
                 return Some(snapshot.clone());
             }
@@ -4518,9 +4663,8 @@ impl Engine {
         } else if let (Some(history_internal_prev), Some(history_linear_prev)) =
             (history_internal_prev, history_linear_prev)
         {
-            if let Some((snapshot, _, _, _)) = bounded_best_effort
-                .as_ref()
-                .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+            if let Some(result) = bounded_best_effort.as_ref()
+                && let Some(snapshot) = bounded_snapshot_if_acceptable(result)
             {
                 return Some(snapshot.clone());
             }
@@ -4545,8 +4689,8 @@ impl Engine {
             }
         }
 
-        if let Some((snapshot, _, _, _)) = bounded_best_effort
-            .filter(|result| Self::vbic_dynamic_snapshot_best_effort_is_bounded(result))
+        if let Some(result) = bounded_best_effort.as_ref()
+            && let Some(snapshot) = bounded_snapshot_if_acceptable(result)
         {
             return Some(snapshot);
         }
@@ -4596,19 +4740,123 @@ impl Engine {
         history_internal_prev: &[Value; BJT_INTERNAL_STATE_DIM],
         history_linear_prev: &VbicPredictorLinearBranchState,
     ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
-        let previous_external =
-            Self::vbic_external_from_linear_history(bjt, history_internal_prev, history_linear_prev);
-        previous_external
+        Self::vbic_dynamic_internal_seed_from_predicted_linear_history(
+            bjt,
+            target_external,
+            history_internal_prev,
+            history_linear_prev,
+            None,
+            0.0,
+            0.0,
+        )
+    }
+
+    #[inline]
+    fn vbic_predictor_linear_branch_state_is_finite(
+        linear: &VbicPredictorLinearBranchState,
+    ) -> bool {
+        [
+            linear.vrcx,
+            linear.vrci,
+            linear.vrbx,
+            linear.vrbi,
+            linear.vre,
+            linear.vrbp,
+            linear.vrs,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+    }
+
+    #[inline]
+    fn predict_vbic_linear_branch_state_from_history(
+        history_linear_prev: &VbicPredictorLinearBranchState,
+        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        dt: Value,
+        previous_dt: Value,
+    ) -> VbicPredictorLinearBranchState {
+        let predict_component = |previous: Value, previous_previous: Option<Value>| {
+            Self::predict_transient_history_value(previous, previous_previous, dt, previous_dt)
+        };
+
+        VbicPredictorLinearBranchState {
+            vrcx: predict_component(
+                history_linear_prev.vrcx,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrcx),
+            ),
+            vrci: predict_component(
+                history_linear_prev.vrci,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrci),
+            ),
+            vrbx: predict_component(
+                history_linear_prev.vrbx,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrbx),
+            ),
+            vrbi: predict_component(
+                history_linear_prev.vrbi,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrbi),
+            ),
+            vre: predict_component(
+                history_linear_prev.vre,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vre),
+            ),
+            vrbp: predict_component(
+                history_linear_prev.vrbp,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrbp),
+            ),
+            vrs: predict_component(
+                history_linear_prev.vrs,
+                history_linear_prev_prev.map(|prev_prev| prev_prev.vrs),
+            ),
+        }
+    }
+
+    #[inline]
+    fn vbic_dynamic_internal_seed_from_predicted_linear_history(
+        bjt: &crate::device::Bjt,
+        target_external: [Value; BJT_EXTERNAL_STATE_DIM],
+        history_internal_prev: &[Value; BJT_INTERNAL_STATE_DIM],
+        history_linear_prev: &VbicPredictorLinearBranchState,
+        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        dt: Value,
+        previous_dt: Value,
+    ) -> Option<[Value; BJT_INTERNAL_STATE_DIM]> {
+        let predicted_linear = Self::predict_vbic_linear_branch_state_from_history(
+            history_linear_prev,
+            history_linear_prev_prev,
+            dt,
+            previous_dt,
+        );
+        if !Self::vbic_predictor_linear_branch_state_is_finite(&predicted_linear) {
+            return None;
+        }
+
+        let polarity = match bjt.bjt_type {
+            BjtType::Npn => 1.0,
+            BjtType::Pnp => -1.0,
+        };
+
+        let mut seed_internal = *history_internal_prev;
+        seed_internal[BJT_VCX_STATE_INDEX] =
+            target_external[BJT_EXT_C_INDEX] - polarity * predicted_linear.vrcx;
+        seed_internal[BJT_VCI_STATE_INDEX] =
+            seed_internal[BJT_VCX_STATE_INDEX] - polarity * predicted_linear.vrci;
+        seed_internal[BJT_VBX_STATE_INDEX] =
+            target_external[BJT_EXT_B_INDEX] - polarity * predicted_linear.vrbx;
+        seed_internal[BJT_VBI_STATE_INDEX] =
+            seed_internal[BJT_VBX_STATE_INDEX] - polarity * predicted_linear.vrbi;
+        seed_internal[BJT_VEI_STATE_INDEX] =
+            target_external[BJT_EXT_E_INDEX] - polarity * predicted_linear.vre;
+        seed_internal[BJT_VBP_STATE_INDEX] =
+            seed_internal[BJT_VCX_STATE_INDEX] + polarity * predicted_linear.vrbp;
+        seed_internal[BJT_VSI_STATE_INDEX] =
+            target_external[BJT_EXT_S_INDEX] - polarity * predicted_linear.vrs;
+
+        seed_internal
             .iter()
+            .take(BJT_THERMAL_STATE_INDEX)
             .all(|value| value.is_finite())
-            .then(|| {
-                Self::vbic_continuation_seed_from_snapshot(
-                    bjt,
-                    previous_external,
-                    *history_internal_prev,
-                    target_external,
-                )
-            })
+            .then(|| seed_internal)
     }
 
     #[inline]
@@ -4621,7 +4869,7 @@ impl Engine {
         history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
         history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
         history_linear_prev: Option<&VbicPredictorLinearBranchState>,
-        _history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
         dt: Value,
         previous_dt: Value,
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
@@ -4634,33 +4882,47 @@ impl Engine {
         }
         let history_internal_prev_prev = history_internal_prev_prev
             .filter(|history| history.iter().all(|value| value.is_finite()));
+        let history_linear_prev = history_linear_prev
+            .filter(|linear| Self::vbic_predictor_linear_branch_state_is_finite(linear));
+        let history_linear_prev_prev = history_linear_prev_prev
+            .filter(|linear| Self::vbic_predictor_linear_branch_state_is_finite(linear));
 
         // With `PREDICTOR`, ngspice seeds explicit VBIC unknowns from accepted
-        // history before re-evaluating the device at the current iterate. In
-        // the reduced formulation we only have the hidden internal state, so
-        // use the accepted history plus reconstructed external bias to project
-        // the static VBIC core toward the proposed external bias whenever that
-        // linear history is available.
+        // history before re-evaluating the device at the current iterate.
+        // The reduced formulation does not expose ngspice's explicit internal
+        // state vector, so reconstruct the hidden internal nodes from the
+        // predicted accepted branch history first, then let the dynamic solve
+        // refine that seed at the current external iterate.
         let target_external = [vc, vb, ve, vs];
         let mut seed_internal = history_linear_prev
             .and_then(|history_linear_prev| {
-                Self::vbic_dynamic_internal_seed_from_linear_history(
+                Self::vbic_dynamic_internal_seed_from_predicted_linear_history(
                     bjt,
                     target_external,
                     history_internal_prev,
                     history_linear_prev,
+                    history_linear_prev_prev,
+                    dt,
+                    previous_dt,
                 )
+            })
+            .or_else(|| {
+                history_linear_prev.and_then(|history_linear_prev| {
+                    Self::vbic_dynamic_internal_seed_from_linear_history(
+                        bjt,
+                        target_external,
+                        history_internal_prev,
+                        history_linear_prev,
+                    )
+                })
             })
             .unwrap_or(live_seed);
         if bjt.uses_vbic_dynamic_charges() && bjt.td > 0.0 {
-            seed_internal[BJT_DELAY_XF1_STATE_INDEX] = Self::predict_transient_history_value(
-                history_internal_prev[BJT_DELAY_XF1_STATE_INDEX],
-                history_internal_prev_prev.map(|history_internal_prev_prev| {
-                    history_internal_prev_prev[BJT_DELAY_XF1_STATE_INDEX]
-                }),
-                dt,
-                previous_dt,
-            );
+            // Match ngspice's MODEINITPRED behavior for VBIC excess-phase states:
+            // xf1 stays anchored to the accepted state1 solution, while xf2 is
+            // linearly extrapolated from accepted history.
+            seed_internal[BJT_DELAY_XF1_STATE_INDEX] =
+                history_internal_prev[BJT_DELAY_XF1_STATE_INDEX];
             seed_internal[BJT_DELAY_XF2_STATE_INDEX] = Self::predict_transient_history_value(
                 history_internal_prev[BJT_DELAY_XF2_STATE_INDEX],
                 history_internal_prev_prev.map(|history_internal_prev_prev| {
@@ -4735,6 +4997,7 @@ impl Engine {
                 history.dynamic_linear_prev_prev.get(idx),
                 history.accepted_dt_prev,
                 vbic_snapshot_cache.and_then(|cache| cache.get(idx).copied().flatten()),
+                VbicCachedSnapshotReuse::SeedOnly,
                 snapshot_reuse_abstol,
                 snapshot_reuse_reltol,
             )?;
@@ -4863,11 +5126,9 @@ impl Engine {
                     .copied()
                     .flatten()
                     .filter(|snapshot| {
-                        Self::check_voltage_convergence_with_tolerances(
-                            &snapshot.reduction.external_voltages,
+                        Self::vbic_snapshot_matches_external_bias_exact(
+                            snapshot,
                             &candidate_external,
-                            voltage_abstol,
-                            reltol,
                         )
                     });
             let snapshot = if let Some(snapshot) = cached_snapshot {
@@ -4890,6 +5151,7 @@ impl Engine {
                     history.dynamic_linear_prev_prev.get(idx),
                     history.accepted_dt_prev,
                     vbic_snapshot_cache.get(idx).copied().flatten(),
+                    VbicCachedSnapshotReuse::SeedOnly,
                     snapshot_reuse_abstol,
                     snapshot_reuse_reltol,
                 )?
@@ -4939,12 +5201,146 @@ impl Engine {
     }
 
     #[inline]
-    fn should_retry_vbic_ngspice_truncation(limit: Value, dt: Value) -> bool {
+    fn legacy_bjt_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &BjtTransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
+            if bjt.uses_vbic_dynamic_charges() {
+                continue;
+            }
+
+            let vc = Self::node_voltage(candidate_solution, bjt.node_collector);
+            let vb = Self::node_voltage(candidate_solution, bjt.node_base);
+            let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
+            let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
+            let snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+            let (vbe, vbc, vcs) = Self::legacy_bjt_charge_branch_voltages(&snapshot);
+            let charges = bjt.legacy_transient_charge_state(vbe, vbc, vcs);
+
+            for (branch_idx, capacitance, q_curr) in [
+                (BJT_QBE_BRANCH_INDEX, charges.capbe, charges.qbe),
+                (BJT_QBC_BRANCH_INDEX, charges.capbc, charges.qbc),
+                (BJT_QBCP_BRANCH_INDEX, charges.capcs, charges.qcs),
+            ] {
+                if capacitance <= 0.0 {
+                    continue;
+                }
+                let q_prev = history.charge_q_prev[idx][branch_idx];
+                let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
+                let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
+                let cq_prev = history.charge_cq_prev[idx][branch_idx];
+                let cq_curr = Self::jfet_companion_ccap(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
+    #[inline]
+    fn bjt_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &BjtTransientHistory,
+        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+        voltage_abstol: Value,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        if let Some(vbic_limit) = Self::vbic_ngspice_truncation_limit(
+            circuit,
+            candidate_solution,
+            method,
+            trap_order,
+            dt,
+            history,
+            vbic_snapshot_cache,
+            voltage_abstol,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        ) {
+            limit = limit.min(vbic_limit);
+            found_branch = true;
+        }
+
+        if let Some(legacy_limit) = Self::legacy_bjt_ngspice_truncation_limit(
+            circuit,
+            candidate_solution,
+            method,
+            trap_order,
+            dt,
+            history,
+            reltol,
+            current_abstol,
+            charge_abstol,
+            trtol,
+        ) {
+            limit = limit.min(legacy_limit);
+            found_branch = true;
+        }
+
+        found_branch.then_some(limit)
+    }
+
+    #[inline]
+    fn should_retry_ngspice_charge_truncation(limit: Value, dt: Value) -> bool {
         limit.is_finite() && dt.is_finite() && dt > 0.0 && limit <= 0.9 * dt
     }
 
     #[inline]
-    fn should_promote_vbic_ngspice_trapezoidal_order(limit: Value, dt: Value) -> bool {
+    fn should_promote_ngspice_charge_truncation(limit: Value, dt: Value) -> bool {
         limit.is_finite() && dt.is_finite() && dt > 0.0 && limit > 1.05 * dt
     }
 
@@ -4987,6 +5383,21 @@ impl Engine {
     }
 
     #[inline]
+    fn vbic_excess_phase_startup_step_cap(
+        hinted_max_step: Value,
+        smallest_vbic_excess_phase_td: Option<Value>,
+    ) -> Option<Value> {
+        let td = smallest_vbic_excess_phase_td.filter(|td| td.is_finite() && *td > 0.0)?;
+        let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
+            hinted_max_step
+        } else {
+            Value::INFINITY
+        };
+
+        Some((td * 0.25).clamp(1e-15, hinted_max_step))
+    }
+
+    #[inline]
     fn should_use_vbic_charge_lte_startup_guard(
         has_vbic_excess_phase: bool,
         step_time: Value,
@@ -5000,6 +5411,21 @@ impl Engine {
                     hinted_max_step,
                     smallest_vbic_excess_phase_td,
                 )
+    }
+
+    #[inline]
+    fn should_hold_vbic_excess_phase_first_order(
+        has_vbic_excess_phase: bool,
+        _accepted_time: Value,
+        _hinted_max_step: Value,
+        _smallest_vbic_excess_phase_td: Option<Value>,
+    ) -> bool {
+        // ngspice does not impose a VBIC-specific first-order hold once the
+        // current timepoint has been accepted. Promotion back to order 2 is
+        // controlled solely by the same order-2 truncation check used for any
+        // trapezoidal transient step.
+        let _ = has_vbic_excess_phase;
+        false
     }
 
     #[inline]
@@ -5039,6 +5465,26 @@ impl Engine {
                 hinted_max_step,
                 smallest_vbic_excess_phase_td,
             )
+    }
+
+    #[inline]
+    fn bjt_charge_truncation_covers_transient_lte(
+        circuit: &crate::circuit::Circuit,
+        bjt_truncation_limit: Option<Value>,
+    ) -> bool {
+        bjt_truncation_limit.is_some()
+            && !circuit.bjts.devices.is_empty()
+            && circuit.capacitors.is_empty()
+            && circuit.inductors.is_empty()
+            && circuit.diodes.is_empty()
+            && circuit.mosfets.is_empty()
+            && circuit.jfets.is_empty()
+            && circuit.tlines.is_empty()
+            && circuit.coupled_tlines.is_empty()
+            && circuit.coupled_inductor_pairs.is_empty()
+            && circuit.multi_winding_transformers.is_empty()
+            && circuit.jiles_atherton_inductors.is_empty()
+            && !circuit.has_xspice_devices()
     }
 
     #[inline]
@@ -5132,13 +5578,8 @@ impl Engine {
             return false;
         }
 
-        if circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.uses_vbic_dynamic_charges())
-        {
-            let Some(limit) = Self::vbic_ngspice_truncation_limit(
+        if !circuit.bjts.devices.is_empty() {
+            let Some(limit) = Self::bjt_ngspice_truncation_limit(
                 circuit,
                 accepted_solution,
                 method,
@@ -5154,7 +5595,7 @@ impl Engine {
             ) else {
                 return false;
             };
-            return Self::should_promote_vbic_ngspice_trapezoidal_order(limit, dt);
+            return Self::should_promote_ngspice_charge_truncation(limit, dt);
         }
 
         let (candidate_lte, accept, uses_vbic_charge_lte) = Self::estimate_transient_lte(
@@ -5304,6 +5745,16 @@ impl Engine {
     }
 
     #[inline]
+    fn legacy_bjt_charge_branch_voltages(snapshot: &BjtChargeSnapshot) -> (Value, Value, Value) {
+        let internal = &snapshot.reduction.internal_voltages;
+        (
+            internal[BJT_VBI_STATE_INDEX] - internal[BJT_VEI_STATE_INDEX],
+            internal[BJT_VBI_STATE_INDEX] - internal[BJT_VCI_STATE_INDEX],
+            internal[BJT_VCX_STATE_INDEX] - internal[BJT_VSI_STATE_INDEX],
+        )
+    }
+
+    #[inline]
     fn initialize_bjt_history(
         circuit: &crate::circuit::Circuit,
         solution: &[Value],
@@ -5339,18 +5790,31 @@ impl Engine {
             let vbe = vb - ve;
             let vbc = vb - vc;
             let vcs = vc - vs;
-            history.vbe_prev.push(vbe);
-            history.vbe_prev_prev.push(vbe);
+            let charge_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+            let (history_vbe, history_vbc, history_vcs) = if bjt.uses_vbic_dynamic_charges() {
+                (vbe, vbc, vcs)
+            } else {
+                Self::legacy_bjt_charge_branch_voltages(&charge_snapshot)
+            };
+            history.vbe_prev.push(history_vbe);
+            history.vbe_prev_prev.push(history_vbe);
             history.ibe_prev.push(0.0);
-            history.vbc_prev.push(vbc);
-            history.vbc_prev_prev.push(vbc);
+            history.vbc_prev.push(history_vbc);
+            history.vbc_prev_prev.push(history_vbc);
             history.ibc_prev.push(0.0);
-            history.vcs_prev.push(vcs);
-            history.vcs_prev_prev.push(vcs);
+            history.vcs_prev.push(history_vcs);
+            history.vcs_prev_prev.push(history_vcs);
             history.ics_prev.push(0.0);
 
-            let charge_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
-            let charge_values = charge_snapshot.branches.map(|branch| branch.charge);
+            let mut charge_values = charge_snapshot.branches.map(|branch| branch.charge);
+            if !bjt.uses_vbic_dynamic_charges() {
+                let (legacy_vbe, legacy_vbc, legacy_vcs) =
+                    Self::legacy_bjt_charge_branch_voltages(&charge_snapshot);
+                let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
+                charge_values[BJT_QBE_BRANCH_INDEX] = charges.qbe;
+                charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
+                charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
+            }
             let predictor_linear = Self::vbic_predictor_linear_branch_state(
                 bjt,
                 [vc, vb, ve, vs],
@@ -5511,11 +5975,11 @@ impl Engine {
         dt: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &mut [Option<BjtChargeSnapshot>],
+        cache_reuse: VbicCachedSnapshotReuse,
         voltage_abstol: Value,
         reltol: Value,
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
-        let coeff = CompanionCoefficients::for_method(effective_method);
         let charge_factor = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(voltages, bjt.node_collector);
@@ -5544,6 +6008,7 @@ impl Engine {
                         history.dynamic_linear_prev_prev.get(idx),
                         history.accepted_dt_prev,
                         cached_snapshot,
+                        cache_reuse,
                         snapshot_reuse_abstol,
                         snapshot_reuse_reltol,
                     )
@@ -5638,67 +6103,95 @@ impl Engine {
                 continue;
             }
 
-            let vbe = history.vbe_prev[idx];
-            let vbc = history.vbc_prev[idx];
-            let (cbe, cbc) = bjt.junction_capacitances(vbe, vbc);
+            if charge_factor <= 0.0 {
+                continue;
+            }
+            let mut snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+            let (legacy_vbe, legacy_vbc, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages(&snapshot);
+            let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
 
-            if cbe.is_finite() && cbe > 0.0 {
-                let geq = coeff.capacitor_geq(cbe, dt);
-                let ieq = coeff.capacitor_ieq(
-                    cbe,
-                    dt,
-                    history.vbe_prev[idx],
-                    history.vbe_prev_prev[idx],
-                    history.ibe_prev[idx],
-                );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    bjt.node_base,
-                    bjt.node_emitter,
-                    geq,
-                    ieq,
-                );
+            if charges.capbe > 0.0 {
+                snapshot.branches[BJT_QBE_BRANCH_INDEX] = BjtChargeBranch {
+                    charge: charges.qbe,
+                    pos_internal: Some(BJT_VBI_STATE_INDEX),
+                    neg_internal: Some(BJT_VEI_STATE_INDEX),
+                    d_internal: {
+                        let mut d = [0.0; BJT_INTERNAL_STATE_DIM];
+                        d[BJT_VBI_STATE_INDEX] = charges.capbe;
+                        d[BJT_VEI_STATE_INDEX] = -charges.capbe;
+                        d
+                    },
+                    ..Default::default()
+                };
+            }
+            if charges.capbc > 0.0 {
+                snapshot.branches[BJT_QBC_BRANCH_INDEX] = BjtChargeBranch {
+                    charge: charges.qbc,
+                    pos_internal: Some(BJT_VBI_STATE_INDEX),
+                    neg_internal: Some(BJT_VCI_STATE_INDEX),
+                    d_internal: {
+                        let mut d = [0.0; BJT_INTERNAL_STATE_DIM];
+                        d[BJT_VBI_STATE_INDEX] = charges.capbc;
+                        d[BJT_VCI_STATE_INDEX] = -charges.capbc;
+                        d
+                    },
+                    ..Default::default()
+                };
+            }
+            if charges.capcs > 0.0 {
+                snapshot.branches[BJT_QBCP_BRANCH_INDEX] = BjtChargeBranch {
+                    charge: charges.qcs,
+                    pos_internal: Some(BJT_VCX_STATE_INDEX),
+                    neg_internal: Some(BJT_VSI_STATE_INDEX),
+                    d_internal: {
+                        let mut d = [0.0; BJT_INTERNAL_STATE_DIM];
+                        d[BJT_VCX_STATE_INDEX] = charges.capcs;
+                        d[BJT_VSI_STATE_INDEX] = -charges.capcs;
+                        d
+                    },
+                    ..Default::default()
+                };
             }
 
-            if cbc.is_finite() && cbc > 0.0 {
-                let geq = coeff.capacitor_geq(cbc, dt);
-                let ieq = coeff.capacitor_ieq(
-                    cbc,
-                    dt,
-                    history.vbc_prev[idx],
-                    history.vbc_prev_prev[idx],
-                    history.ibc_prev[idx],
-                );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    bjt.node_base,
-                    bjt.node_collector,
-                    geq,
-                    ieq,
-                );
-            }
+            let Some(linearization) = Self::assemble_vbic_transient_linearization(
+                bjt,
+                &snapshot,
+                effective_method,
+                trap_order,
+                dt,
+                &history.charge_q_prev[idx],
+                &history.charge_q_prev_prev[idx],
+                &history.charge_cq_prev[idx],
+            ) else {
+                continue;
+            };
+            let base_static_g = snapshot.reduction.g_reduced;
+            let Some((y_total, reduced_i_eq)) =
+                Self::vbic_reduce_transient_external_system(&linearization)
+            else {
+                continue;
+            };
+            let (_base_static_g, base_static_i_eq) = Self::vbic_static_stamped_external_system(
+                bjt,
+                &snapshot.reduction.external_voltages,
+            );
 
-            let ccs = bjt.cjcp;
-            if ccs.is_finite() && ccs > 0.0 && bjt.node_collector != bjt.node_substrate {
-                let geq = coeff.capacitor_geq(ccs, dt);
-                let ieq = coeff.capacitor_ieq(
-                    ccs,
-                    dt,
-                    history.vcs_prev[idx],
-                    history.vcs_prev_prev[idx],
-                    history.ics_prev[idx],
-                );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    bjt.node_collector,
-                    bjt.node_substrate,
-                    geq,
-                    ieq,
-                );
+            let mut delta = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
+            let mut delta_i_eq = [0.0; BJT_EXTERNAL_STATE_DIM];
+            for row in 0..BJT_EXTERNAL_STATE_DIM {
+                delta_i_eq[row] = reduced_i_eq[row] - base_static_i_eq[row];
+                for col in 0..BJT_EXTERNAL_STATE_DIM {
+                    delta[row][col] = y_total[row][col] - base_static_g[row][col];
+                }
             }
+            let nodes = [
+                bjt.node_collector,
+                bjt.node_base,
+                bjt.node_emitter,
+                bjt.node_substrate,
+            ];
+            Self::stamp_external_reduced_system(matrix, rhs, &nodes, &delta, &delta_i_eq);
         }
     }
 
@@ -6034,6 +6527,54 @@ impl Engine {
     }
 
     #[inline]
+    fn nonconvergence_retry_timestep(dt: Value, max_step: Value) -> Value {
+        if !dt.is_finite() || dt <= 0.0 {
+            0.0
+        } else {
+            // Mirror ngspice's DCtran non-convergence recovery: retract the
+            // failed timepoint and retry at one eighth of the rejected step.
+            (dt * 0.125).min(max_step)
+        }
+    }
+
+    #[inline]
+    fn apply_retry_timestep_floor(
+        proposed_dt: Value,
+        retry_floor_dt: Option<Value>,
+        max_step: Value,
+    ) -> Value {
+        let mut dt = proposed_dt.min(max_step);
+        if let Some(floor) = retry_floor_dt
+            .filter(|floor| floor.is_finite() && *floor > 0.0)
+            .map(|floor| floor.min(max_step))
+        {
+            dt = dt.max(floor);
+        }
+        dt
+    }
+
+    #[inline]
+    fn is_at_effective_retry_minimum(
+        timestep: &TimestepController,
+        retry_floor_dt: Option<Value>,
+    ) -> bool {
+        let effective_min = retry_floor_dt
+            .filter(|floor| floor.is_finite() && *floor > 0.0)
+            .map(|floor| floor.max(timestep.hard_min_dt()))
+            .unwrap_or_else(|| timestep.hard_min_dt());
+        timestep.dt() <= effective_min * 1.001
+    }
+
+    #[inline]
+    fn should_skip_post_accept_timestep_control_on_first_step(
+        accepted_point_count_before_push: usize,
+    ) -> bool {
+        // ngspice accepts the first transient point without any post-accept
+        // truncation/LTE check, then retries the same delta on the next step.
+        accepted_point_count_before_push <= 1
+    }
+
+    #[inline]
     fn force_accept_recovery_timestep(
         dt: Value,
         preferred_min_dt: Value,
@@ -6211,15 +6752,11 @@ impl Engine {
         for &branch_ordinal in &circuit.voltage_sources.branch_indices {
             restore_branch(branch_ordinal as usize);
         }
-        for &branch_ordinal in &circuit.vcvs.branch_indices {
-            restore_branch(branch_ordinal as usize);
-        }
-        for &branch_ordinal in &circuit.ccvs.branch_indices {
-            restore_branch(branch_ordinal as usize);
-        }
-        for source in &circuit.behavioral_sources.voltage_sources {
-            restore_branch(source.branch_ordinal);
-        }
+        // Keep dependent-source algebraic currents from the latest solver
+        // candidate. Their output-branch currents directly close KCL at the
+        // controlled output nodes, so blindly snapping them back to the
+        // previously accepted state can inject a large node residual even when
+        // the committed output voltage satisfies the ideal source relation.
     }
 
     #[inline]
@@ -6460,7 +6997,6 @@ impl Engine {
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
-        let coeff_update = CompanionCoefficients::for_method(effective_method);
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
             let vc = Self::node_voltage(accepted_solution, bjt.node_collector);
             let vb = Self::node_voltage(accepted_solution, bjt.node_base);
@@ -6493,6 +7029,7 @@ impl Engine {
                         bjt_history.dynamic_linear_prev_prev.get(idx),
                         bjt_history.accepted_dt_prev,
                         cached_snapshot,
+                        VbicCachedSnapshotReuse::SeedOnly,
                         snapshot_reuse_abstol,
                         snapshot_reuse_reltol,
                     )
@@ -6538,68 +7075,65 @@ impl Engine {
                 bjt_history.ics_prev[idx] = 0.0;
                 continue;
             }
-            let (cbe, cbc) = bjt.junction_capacitances(vbe, vbc);
+            let snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+            let (legacy_vbe, legacy_vbc, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages(&snapshot);
+            let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
+            let mut update_legacy_charge_branch =
+                |branch_idx: usize, capacitance: Value, voltage: Value, charge: Value| {
+                    let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
+                    let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
+                    let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
+                    let (_geq, _ieq, q_curr, cq_curr) = if capacitance > 0.0 {
+                        Self::nonlinear_charge_companion_terms(
+                            effective_method,
+                            trap_order,
+                            dt,
+                            capacitance,
+                            voltage,
+                            charge,
+                            q_prev,
+                            q_prev_prev,
+                            cq_prev,
+                        )
+                    } else {
+                        (0.0, 0.0, 0.0, 0.0)
+                    };
+                    bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
+                    bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
+                    bjt_history.charge_q_prev[idx][branch_idx] = q_curr;
+                    bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
+                    cq_curr
+                };
 
-            if cbe.is_finite() && cbe > 0.0 {
-                let geq = coeff_update.capacitor_geq(cbe, dt);
-                let ieq = coeff_update.capacitor_ieq(
-                    cbe,
-                    dt,
-                    bjt_history.vbe_prev[idx],
-                    bjt_history.vbe_prev_prev[idx],
-                    bjt_history.ibe_prev[idx],
-                );
-                let i_new = geq * vbe - ieq;
-                let v_old = bjt_history.vbe_prev[idx];
-                bjt_history.vbe_prev_prev[idx] = v_old;
-                bjt_history.vbe_prev[idx] = vbe;
-                bjt_history.ibe_prev[idx] = i_new;
-            } else {
-                bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
-                bjt_history.vbe_prev[idx] = vbe;
-                bjt_history.ibe_prev[idx] = 0.0;
-            }
+            let qbe_current = update_legacy_charge_branch(
+                BJT_QBE_BRANCH_INDEX,
+                charges.capbe,
+                legacy_vbe,
+                charges.qbe,
+            );
+            let qbc_current = update_legacy_charge_branch(
+                BJT_QBC_BRANCH_INDEX,
+                charges.capbc,
+                legacy_vbc,
+                charges.qbc,
+            );
+            let qcs_current = update_legacy_charge_branch(
+                BJT_QBCP_BRANCH_INDEX,
+                charges.capcs,
+                legacy_vcs,
+                charges.qcs,
+            );
 
-            if cbc.is_finite() && cbc > 0.0 {
-                let geq = coeff_update.capacitor_geq(cbc, dt);
-                let ieq = coeff_update.capacitor_ieq(
-                    cbc,
-                    dt,
-                    bjt_history.vbc_prev[idx],
-                    bjt_history.vbc_prev_prev[idx],
-                    bjt_history.ibc_prev[idx],
-                );
-                let i_new = geq * vbc - ieq;
-                let v_old = bjt_history.vbc_prev[idx];
-                bjt_history.vbc_prev_prev[idx] = v_old;
-                bjt_history.vbc_prev[idx] = vbc;
-                bjt_history.ibc_prev[idx] = i_new;
-            } else {
-                bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
-                bjt_history.vbc_prev[idx] = vbc;
-                bjt_history.ibc_prev[idx] = 0.0;
-            }
-
-            let ccs = bjt.cjcp;
-            if ccs.is_finite() && ccs > 0.0 && bjt.node_collector != bjt.node_substrate {
-                let geq = coeff_update.capacitor_geq(ccs, dt);
-                let ieq = coeff_update.capacitor_ieq(
-                    ccs,
-                    dt,
-                    bjt_history.vcs_prev[idx],
-                    bjt_history.vcs_prev_prev[idx],
-                    bjt_history.ics_prev[idx],
-                );
-                let i_new = geq * vcs - ieq;
-                let v_old = bjt_history.vcs_prev[idx];
-                bjt_history.vcs_prev_prev[idx] = v_old;
-                bjt_history.vcs_prev[idx] = vcs;
-                bjt_history.ics_prev[idx] = i_new;
-            } else {
-                bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
-                bjt_history.vcs_prev[idx] = vcs;
-                bjt_history.ics_prev[idx] = 0.0;
-            }
+            bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
+            bjt_history.vbe_prev[idx] = legacy_vbe;
+            bjt_history.ibe_prev[idx] = qbe_current;
+            bjt_history.vbc_prev_prev[idx] = bjt_history.vbc_prev[idx];
+            bjt_history.vbc_prev[idx] = legacy_vbc;
+            bjt_history.ibc_prev[idx] = qbc_current;
+            bjt_history.vcs_prev_prev[idx] = bjt_history.vcs_prev[idx];
+            bjt_history.vcs_prev[idx] = legacy_vcs;
+            bjt_history.ics_prev[idx] = qcs_current;
         }
 
         bjt_history.accepted_dt_prev_prev = bjt_history.accepted_dt_prev;
@@ -6818,6 +7352,7 @@ impl Engine {
             dt,
             bjt_history,
             vbic_snapshot_cache,
+            VbicCachedSnapshotReuse::SeedOnly,
             self.voltage_abstol(),
             self.voltage_reltol(),
         );
@@ -6951,6 +7486,9 @@ impl Engine {
         let (mut solution, initial_solution_mode) =
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(&solution);
+        }
         circuit.refresh_jiles_atherton_inductances(&solution);
 
         let num_nodes = circuit.num_nodes();
@@ -6990,13 +7528,13 @@ impl Engine {
             .filter(|bjt| bjt.uses_vbic_dynamic_charges() && bjt.td.is_finite() && bjt.td > 0.0)
             .map(|bjt| bjt.td)
             .min_by(|lhs, rhs| lhs.total_cmp(rhs));
-        let (startup_div, min_div) =
+        let (_startup_div, min_div) =
             Self::startup_timestep_divisors(has_bjts, has_vbic_excess_phase);
         let tran_step_hint = netlist.analyses.iter().find_map(|analysis| match analysis {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
-        let initial_step = (hinted_max_step / startup_div).min(tstop / 100.0);
+        let initial_step = Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step);
         let practical_min = Self::startup_practical_min_timestep_with_vbic_td(
             has_bjts,
             has_vbic_excess_phase,
@@ -7182,10 +7720,13 @@ impl Engine {
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
-                    "Transient progress: t={:.3e}s / {:.3e}s ({:.1}%), {} iterations",
+                    "Transient progress: t={:.12e}s / {:.3e}s ({:.1}%), dt={:.3e}, retries={}, order={}, {} iterations",
                     t,
                     tstop,
                     (t / tstop) * 100.0,
+                    timestep.dt(),
+                    retry_count,
+                    trap_order,
                     total_iterations
                 );
                 last_progress_log = std::time::Instant::now();
@@ -7221,7 +7762,7 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
-            let mut expected_source_delta = circuit.voltage_sources.max_expected_delta(t, t + dt);
+            let mut expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
             let biased_dt = Self::bias_transient_step_for_source_activity(
                 dt,
                 tstop - t,
@@ -7232,9 +7773,44 @@ impl Engine {
             );
             if biased_dt + 1e-30 < dt {
                 dt = biased_dt;
-                expected_source_delta = circuit.voltage_sources.max_expected_delta(t, t + dt);
+                expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+            }
+            if let Some(vbic_startup_step_cap) = Self::vbic_excess_phase_startup_step_cap(
+                hinted_max_step,
+                smallest_vbic_excess_phase_td,
+            )
+            .filter(|cap| {
+                has_vbic_excess_phase
+                    && dt > *cap
+                    && Self::should_use_vbic_charge_lte_startup_guard(
+                        has_vbic_excess_phase,
+                        t + dt,
+                        hinted_max_step,
+                        smallest_vbic_excess_phase_td,
+                    )
+            }) {
+                dt = vbic_startup_step_cap;
+                expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
             }
             let step_time = t + dt;
+            let retry_floor_source_activity_delta =
+                Self::startup_source_activity_delta_for_retry_floor(
+                    &circuit,
+                    t,
+                    dt,
+                    tstop,
+                    initial_step,
+                    timestep.preferred_min_dt(),
+                );
+            let legacy_bjt_retry_floor_dt = Self::legacy_bjt_startup_retry_floor(
+                has_bjts,
+                has_vbic_excess_phase,
+                step_time,
+                hinted_max_step,
+                retry_floor_source_activity_delta,
+                initial_step,
+                timestep.preferred_min_dt(),
+            );
             let newton_step_delta_limit = Self::startup_step_delta_limit_with_vbic_td(
                 initial_solution_mode,
                 has_vbic_excess_phase,
@@ -7411,6 +7987,11 @@ impl Engine {
                     dt,
                     &bjt_history,
                     &mut vbic_snapshot_cache,
+                    if _iter == 0 {
+                        VbicCachedSnapshotReuse::SeedOnly
+                    } else {
+                        VbicCachedSnapshotReuse::NewtonBypass
+                    },
                     self.voltage_abstol(),
                     self.voltage_reltol(),
                 );
@@ -7645,7 +8226,28 @@ impl Engine {
                                 &circuit,
                                 has_vbic_excess_phase,
                             );
-                        let device_converged = static_device_converged;
+                        let hidden_device_converged =
+                            if has_vbic_excess_phase && static_device_converged {
+                                // The reduced global Newton solve can satisfy external
+                                // voltage/residual checks while the hidden VBIC excess-phase
+                                // state still misses ngspice's device-local predictor
+                                // tolerances. Treat that hidden-state metric as part of
+                                // transient device convergence so delayed-transport startup
+                                // candidates are retried instead of being accepted stale.
+                                self.vbic_excess_phase_device_convergence_met(
+                                    &circuit,
+                                    &solution,
+                                    &new_solution,
+                                    current_method,
+                                    step_trap_order,
+                                    dt,
+                                    &bjt_history,
+                                    &vbic_snapshot_cache,
+                                )
+                            } else {
+                                true
+                            };
+                        let device_converged = static_device_converged && hidden_device_converged;
                         let nonlinear_residual_converged = if has_vbic_excess_phase
                             && !linearized_residual_converged
                             && device_converged
@@ -7710,7 +8312,7 @@ impl Engine {
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 let count = CONV_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if count < 10 {
+                if count < 10 || (t > 9.5e-8 && dt < 1.0e-15) {
                     // Check what specifically didn't converge
                     let v_conv = self.voltage_convergence_met(&solution, &new_solution);
                     let d_conv_static = !circuit.has_nonlinear_devices()
@@ -7732,7 +8334,7 @@ impl Engine {
                     } else {
                         true
                     };
-                    let d_conv = d_conv_static;
+                    let d_conv = d_conv_static && d_conv_hidden;
                     let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
@@ -7825,24 +8427,31 @@ impl Engine {
                         t,
                         total_iterations,
                         dt,
-                        dt * 0.25
+                        Self::nonconvergence_retry_timestep(dt, max_step)
                     );
                 }
 
-                // Convergence failed - reduce timestep significantly (4x) and retry
-                // BUT skip reduction if we're in post-force-accept cooldown to avoid ping-pong
+                // Match ngspice's non-convergence recovery: retry at one eighth
+                // of the rejected timestep, unless a force-accept cooldown is
+                // temporarily holding dt steady to avoid ping-pong.
                 if force_accept_cooldown > 0 {
                     force_accept_cooldown -= 1;
                     // During cooldown, keep timestep at current level (don't shrink)
                 } else {
-                    timestep.force_step(dt * 0.25);
+                    let retry_dt = Self::apply_retry_timestep_floor(
+                        Self::nonconvergence_retry_timestep(dt, max_step),
+                        legacy_bjt_retry_floor_dt,
+                        max_step,
+                    );
+                    timestep.force_step(retry_dt);
                 }
 
                 // Force accept when recovery is unlikely:
                 // - After MAX_RETRIES attempts (regardless of timestep state), OR
                 // - At minimum timestep AND at least MIN_RETRIES_AT_MIN have been tried
                 // This prevents both infinite loops and force-accept floods
-                let at_min_dt = timestep.is_at_minimum();
+                let at_min_dt =
+                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt
                     && retry_count
@@ -7882,6 +8491,18 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
+                    let vbic_hidden_bypass_metric = self
+                        .force_candidate_vbic_hidden_bypass_metric_met(
+                            &circuit,
+                            has_vbic_excess_phase,
+                            &solution,
+                            &bounded_force_candidate,
+                            current_method,
+                            step_trap_order,
+                            dt,
+                            &bjt_history,
+                            &vbic_snapshot_cache,
+                        );
                     let stagnant_force_candidate = Self::is_stagnant_force_candidate(
                         &circuit,
                         &solution,
@@ -7889,7 +8510,7 @@ impl Engine {
                         num_nodes,
                         self.voltage_abstol(),
                         self.current_abstol(),
-                    );
+                    ) && !vbic_hidden_bypass_metric;
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -7986,8 +8607,8 @@ impl Engine {
                     let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
                         Self::effective_trapezoidal_order(current_method, 1, false);
-                    let force_accept_vbic_truncation_limit = if has_vbic_excess_phase {
-                        Self::vbic_ngspice_truncation_limit(
+                    let force_accept_bjt_truncation_limit = if has_bjts {
+                        Self::bjt_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
                             current_method,
@@ -8064,13 +8685,13 @@ impl Engine {
                         dt,
                         timestep.preferred_min_dt(),
                         max_step,
-                        force_accept_vbic_truncation_limit,
+                        force_accept_bjt_truncation_limit,
                     );
                     let v0_force = solution.first().copied().unwrap_or(0.0);
                     static FORCE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
                     let count = FORCE_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if count < 32 {
+                    if count < 32 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::warn!(
                             "FORCE-ACCEPT at t={:.12e}s accepted_t={:.12e}s dt={:.3e} next_dt={:.3e} node_dv={:.3e} full_dv={:.3e} top_nodes={:?} v0={:.4} trunc_limit={:?} retry_count={}",
                             t,
@@ -8081,7 +8702,7 @@ impl Engine {
                             force_candidate_full_delta,
                             top_force_nodes,
                             v0_force,
-                            force_accept_vbic_truncation_limit,
+                            force_accept_bjt_truncation_limit,
                             retry_count
                         );
                     }
@@ -8105,7 +8726,9 @@ impl Engine {
                 continue;
             }
 
-            let vbic_truncation_limit = if has_vbic_excess_phase {
+            let first_accepted_transient_step =
+                Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len());
+            let vbic_truncation_limit = if !first_accepted_transient_step && has_vbic_excess_phase {
                 Self::vbic_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
@@ -8124,17 +8747,40 @@ impl Engine {
             } else {
                 None
             };
+            let legacy_bjt_truncation_limit = if !first_accepted_transient_step && has_bjts {
+                Self::legacy_bjt_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &bjt_history,
+                    self.voltage_reltol(),
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    NGSPICE_DEFAULT_TRTOL,
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let bjt_truncation_limit = match (vbic_truncation_limit, legacy_bjt_truncation_limit) {
+                (Some(vbic), Some(legacy)) => Some(vbic.min(legacy)),
+                (Some(vbic), None) => Some(vbic),
+                (None, Some(legacy)) => Some(legacy),
+                (None, None) => None,
+            };
 
-            if let Some(limit) = vbic_truncation_limit
-                && Self::should_retry_vbic_ngspice_truncation(limit, dt)
+            if let Some(limit) = bjt_truncation_limit
+                && Self::should_retry_ngspice_charge_truncation(limit, dt)
             {
-                static VBIC_TRUNC_REJECT_LOG_COUNT: std::sync::atomic::AtomicUsize =
+                static BJT_TRUNC_REJECT_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 let log_count =
-                    VBIC_TRUNC_REJECT_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if log_count < 40 {
+                    BJT_TRUNC_REJECT_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                     log::warn!(
-                        "VBIC truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, method={:?}, order={}",
+                        "BJT charge truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, method={:?}, order={}",
                         t,
                         dt,
                         limit,
@@ -8174,12 +8820,22 @@ impl Engine {
                     vbic_truncation_limit,
                     using_vbic_charge_lte_estimator,
                 );
-            let (lte, accept, uses_vbic_charge_lte) = if defer_voltage_lte_to_vbic_truncation {
+            let defer_voltage_lte_to_bjt_truncation = !has_vbic_excess_phase
+                && Self::bjt_charge_truncation_covers_transient_lte(&circuit, bjt_truncation_limit);
+            let (lte, accept, uses_vbic_charge_lte) = if first_accepted_transient_step {
+                (0.0, true, false)
+            } else if defer_voltage_lte_to_vbic_truncation {
                 // ngspice's excess-phase startup control is charge/truncation-driven.
                 // When that authoritative truncation limit is available but our
                 // supplemental reduced charge-LTE estimator is intentionally idle
                 // (typically because dt collapsed near delmin), do not let the
                 // generic voltage LTE controller create a false reject loop.
+                (0.0, true, false)
+            } else if defer_voltage_lte_to_bjt_truncation {
+                // Classic SPICE drives legacy BJT timesteps from device charge
+                // truncation (BJTtrunc -> CKTterr). For BJT-only reactive
+                // decks, the generic node-voltage predictor is a supplemental
+                // guard, not the authoritative LTE controller.
                 (0.0, true, false)
             } else {
                 Self::estimate_transient_lte(
@@ -8197,7 +8853,7 @@ impl Engine {
                     self.voltage_reltol(),
                 )
             };
-            let lte_scale = if is_strictly_linear_transient {
+            let lte_scale = if first_accepted_transient_step || is_strictly_linear_transient {
                 1.0
             } else {
                 Self::recommend_transient_lte_scale(
@@ -8213,7 +8869,7 @@ impl Engine {
                         std::sync::atomic::AtomicUsize::new(0);
                     let log_count = VBIC_CHARGE_LTE_REJECT_LOG_COUNT
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 {
+                    if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::warn!(
                             "VBIC charge-LTE reject at t={:.6e}, dt={:.3e}, lte={:.3e}, scale={:.3e}, order={}, pref_min={:.3e}",
                             t,
@@ -8231,12 +8887,21 @@ impl Engine {
                 // smaller timestep instead of forcing trapezoidal back to order 1.
                 trap_order = Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
                 timestep.adjust(lte / lte_scale);
+                let clamped_retry_dt = Self::apply_retry_timestep_floor(
+                    timestep.dt(),
+                    legacy_bjt_retry_floor_dt,
+                    max_step,
+                );
+                if clamped_retry_dt > timestep.dt() + 1e-30 {
+                    timestep.force_step(clamped_retry_dt);
+                }
 
                 // Force accept when recovery is unlikely:
                 // - After MAX_RETRIES attempts (regardless of timestep state), OR
                 // - At minimum timestep AND at least MIN_RETRIES_AT_MIN have been tried
                 // This prevents both infinite loops and force-accept floods
-                let at_min_dt = timestep.is_at_minimum();
+                let at_min_dt =
+                    Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
                 let exhausted_at_min = at_min_dt
                     && retry_count
@@ -8276,6 +8941,18 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
+                    let vbic_hidden_bypass_metric = self
+                        .force_candidate_vbic_hidden_bypass_metric_met(
+                            &circuit,
+                            has_vbic_excess_phase,
+                            &solution,
+                            &bounded_force_candidate,
+                            current_method,
+                            step_trap_order,
+                            dt,
+                            &bjt_history,
+                            &vbic_snapshot_cache,
+                        );
                     let stagnant_force_candidate = Self::is_stagnant_force_candidate(
                         &circuit,
                         &solution,
@@ -8283,7 +8960,7 @@ impl Engine {
                         num_nodes,
                         self.voltage_abstol(),
                         self.current_abstol(),
-                    );
+                    ) && !vbic_hidden_bypass_metric;
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -8365,8 +9042,8 @@ impl Engine {
                     let method_after_step = current_integration_method(&trapgear);
                     let accepted_step_trap_order =
                         Self::effective_trapezoidal_order(current_method, 1, false);
-                    let force_accept_vbic_truncation_limit = if has_vbic_excess_phase {
-                        Self::vbic_ngspice_truncation_limit(
+                    let force_accept_bjt_truncation_limit = if has_bjts {
+                        Self::bjt_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
                             current_method,
@@ -8442,8 +9119,20 @@ impl Engine {
                         dt,
                         timestep.preferred_min_dt(),
                         max_step,
-                        force_accept_vbic_truncation_limit,
+                        force_accept_bjt_truncation_limit,
                     );
+                    if t > 9.5e-8 && dt < 1.0e-15 {
+                        log::warn!(
+                            "LTE FORCE-ACCEPT at t={:.12e}s accepted_t={:.12e}s dt={:.3e} next_dt={:.3e} trunc_limit={:?} lte={:.3e} retry_count={}",
+                            t,
+                            t + dt,
+                            dt,
+                            next_force_dt,
+                            force_accept_bjt_truncation_limit,
+                            lte,
+                            retry_count
+                        );
+                    }
                     retry_count = 0; // Reset for next timepoint
                     force_accept_cooldown = if has_vbic_excess_phase {
                         0
@@ -8516,19 +9205,6 @@ impl Engine {
                 nonlinear_state_matches_new_solution = true;
             }
 
-            // CRITICAL: Grow timestep back after successful convergence
-            // This prevents staying stuck at minimum timestep after force-accepts
-            // LTE estimator recommends scale based on error - apply it to timestep
-            let scale = if is_strictly_linear_transient {
-                1.0
-            } else {
-                lte_scale
-            };
-            if scale > 1.0 {
-                // Grow timestep gradually (limit to 1.5x per successful step)
-                let new_dt = (dt * scale.min(1.5)).min(max_step);
-                timestep.force_step(new_dt);
-            }
             Self::update_reactive_history(
                 &mut circuit,
                 &new_solution,
@@ -8568,39 +9244,78 @@ impl Engine {
             for (i, currents) in result.branch_currents.iter_mut().enumerate() {
                 currents.push(solution.get(num_nodes + i).copied().unwrap_or(0.0));
             }
-            let scale = lte_estimator.recommend_scale(lte);
-            timestep.adjust(lte / scale);
+            if first_accepted_transient_step {
+                timestep.force_step(dt);
+            } else {
+                Self::recover_timestep_after_accepted_step(
+                    &mut timestep,
+                    &lte_estimator,
+                    &new_solution,
+                    dt,
+                    max_step,
+                    is_strictly_linear_transient,
+                    expected_source_delta,
+                    Some(lte_scale),
+                );
+            }
             if hit_breakpoint {
                 let restart_dt = breakpoints.mark_breakpoint_solved(t);
                 timestep.force_step(restart_dt.min(max_step));
             }
-            if let Some(limit) = vbic_truncation_limit
+            if !first_accepted_transient_step
+                && let Some(limit) = bjt_truncation_limit
                 && limit.is_finite()
                 && limit > 0.0
                 && limit + 1e-18 < timestep.dt()
             {
+                if t > 9.5e-8 && dt < 1.0e-15 {
+                    log::warn!(
+                        "BJT post-accept timestep cap at t={:.12e}, accepted_dt={:.3e}, requested_next={:.3e}, limit={:.3e}, order={}",
+                        t,
+                        dt,
+                        timestep.dt(),
+                        limit,
+                        step_trap_order
+                    );
+                }
                 timestep.force_step(limit);
             }
-            if matches!(
+            if first_accepted_transient_step
+                && matches!(
+                    current_method,
+                    IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
+                )
+            {
+                trap_order = 1;
+            } else if matches!(
                 current_method,
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
             ) {
-                let should_promote = Self::should_promote_trapezoidal_order(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    dt,
-                    is_strictly_linear_transient,
-                    &bjt_history,
-                    &lte_estimator,
-                    vbic_charge_lte_estimator.as_ref(),
-                    &vbic_snapshot_cache,
-                    self.voltage_abstol(),
-                    self.voltage_reltol(),
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
-                );
+                let should_promote = if Self::should_hold_vbic_excess_phase_first_order(
+                    has_vbic_excess_phase,
+                    t,
+                    hinted_max_step,
+                    smallest_vbic_excess_phase_td,
+                ) {
+                    false
+                } else {
+                    Self::should_promote_trapezoidal_order(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        dt,
+                        is_strictly_linear_transient,
+                        &bjt_history,
+                        &lte_estimator,
+                        vbic_charge_lte_estimator.as_ref(),
+                        &vbic_snapshot_cache,
+                        self.voltage_abstol(),
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        NGSPICE_DEFAULT_TRTOL,
+                    )
+                };
                 trap_order = Self::next_trapezoidal_order_after_accepted_step(
                     step_trap_order,
                     hit_breakpoint,
@@ -8923,6 +9638,62 @@ mod abort_tests {
         .expect("Failed to parse BJT amp netlist")
     }
 
+    fn legacy_bjt_charge_history_fixture() -> (
+        crate::circuit::Circuit,
+        Vec<Value>,
+        usize,
+        [Value; 3],
+        [Value; 3],
+    ) {
+        let netlist = crate::Netlist::parse(
+            "Legacy BJT charge-history fixture\n\
+             Q1 c b e qnd\n\
+             .MODEL qnd NPN (LEVEL=1 BF=50 IS=1e-15 RB=70 RC=40 CCS=2p TF=0.1n TR=10n CJE=0.9p CJC=1.5p PC=0.85 VA=50)\n\
+             .end",
+        )
+        .expect("parse legacy BJT charge-history fixture");
+        let engine = Engine::default();
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("build legacy BJT charge-history circuit");
+
+        let idx = circuit
+            .bjts
+            .devices
+            .iter()
+            .position(|device| device.name == "Q1")
+            .expect("find legacy BJT charge-history Q1");
+        let bjt = circuit.bjts.devices[idx].clone();
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        for (node, value) in [
+            (bjt.node_collector, 2.5),
+            (bjt.node_base, 0.85),
+            (bjt.node_emitter, 0.1),
+            (bjt.node_substrate, 0.0),
+        ] {
+            if node > 0 {
+                solution[node - 1] = value;
+            }
+        }
+        circuit.update_nonlinear(&solution);
+
+        let vc = Engine::node_voltage(&solution, bjt.node_collector);
+        let vb = Engine::node_voltage(&solution, bjt.node_base);
+        let ve = Engine::node_voltage(&solution, bjt.node_emitter);
+        let vs = Engine::node_voltage(&solution, bjt.node_substrate);
+        let snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let (legacy_vbe, legacy_vbc, legacy_vcs) =
+            Engine::legacy_bjt_charge_branch_voltages(&snapshot);
+
+        (
+            circuit,
+            solution,
+            idx,
+            [vb - ve, vb - vc, vc - vs],
+            [legacy_vbe, legacy_vbc, legacy_vcs],
+        )
+    }
+
     #[test]
     fn test_transient_no_abort_completes() {
         let engine = Engine::default();
@@ -8973,6 +9744,248 @@ mod abort_tests {
             // If simulation finished before 5 checks, that's OK
             assert!(result.is_ok(), "Simulation finished before abort threshold");
         }
+    }
+
+    #[test]
+    fn test_initialize_bjt_history_uses_internal_legacy_charge_branch_voltages() {
+        let (circuit, solution, idx, external, internal) = legacy_bjt_charge_history_fixture();
+
+        assert!(
+            (internal[0] - external[0]).abs() > 1e-9
+                || (internal[1] - external[1]).abs() > 1e-9
+                || (internal[2] - external[2]).abs() > 1e-9,
+            "expected the legacy BJT fixture to exercise internal charge branch voltages"
+        );
+
+        let history = Engine::initialize_bjt_history(&circuit, &solution);
+        let bjt = circuit.bjts.devices[idx].clone();
+        let charges = bjt.legacy_transient_charge_state(internal[0], internal[1], internal[2]);
+
+        for (label, actual, expected) in [
+            ("vbe", history.vbe_prev[idx], internal[0]),
+            ("vbc", history.vbc_prev[idx], internal[1]),
+            ("vcs", history.vcs_prev[idx], internal[2]),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "expected legacy {label} history to use internal charge branch voltage: actual={actual:.12e}, expected={expected:.12e}"
+            );
+        }
+        for (label, actual, expected) in [
+            (
+                "qbe",
+                history.charge_q_prev[idx][BJT_QBE_BRANCH_INDEX],
+                charges.qbe,
+            ),
+            (
+                "qbc",
+                history.charge_q_prev[idx][BJT_QBC_BRANCH_INDEX],
+                charges.qbc,
+            ),
+            (
+                "qcs",
+                history.charge_q_prev[idx][BJT_QBCP_BRANCH_INDEX],
+                charges.qcs,
+            ),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-18,
+                "expected legacy {label} history charge to match the internal-voltage charge state: actual={actual:.12e}, expected={expected:.12e}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_update_reactive_history_uses_internal_legacy_charge_branch_voltages() {
+        let (mut circuit, solution, idx, _external, internal) = legacy_bjt_charge_history_fixture();
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &solution);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &solution);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution);
+        let mut breakpoints = BreakpointManager::new();
+        let tline_dc_refs: Vec<(Value, Value)> = Vec::new();
+        let coupled_tline_refs: Vec<CoupledTlineReferenceState> = Vec::new();
+        let mut dynamic_breakpoints_added = 0;
+        let mut warned_dynamic_breakpoint_cap = false;
+
+        Engine::update_reactive_history(
+            &mut circuit,
+            &solution,
+            0.0,
+            1e-12,
+            IntegrationMethod::Trapezoidal,
+            1,
+            &mut bjt_history,
+            &mut jfet_history,
+            &mut mosfet_history,
+            None,
+            false,
+            &tline_dc_refs,
+            &coupled_tline_refs,
+            &mut breakpoints,
+            200e-9,
+            1e-3,
+            1e-6,
+            &mut dynamic_breakpoints_added,
+            &mut warned_dynamic_breakpoint_cap,
+        );
+
+        let bjt = circuit.bjts.devices[idx].clone();
+        let charges = bjt.legacy_transient_charge_state(internal[0], internal[1], internal[2]);
+
+        for (label, actual, expected) in [
+            ("vbe", bjt_history.vbe_prev[idx], internal[0]),
+            ("vbc", bjt_history.vbc_prev[idx], internal[1]),
+            ("vcs", bjt_history.vcs_prev[idx], internal[2]),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-12,
+                "expected accepted-step legacy {label} history to stay on the internal charge branch voltage: actual={actual:.12e}, expected={expected:.12e}"
+            );
+        }
+        for (label, actual, expected) in [
+            (
+                "qbe",
+                bjt_history.charge_q_prev[idx][BJT_QBE_BRANCH_INDEX],
+                charges.qbe,
+            ),
+            (
+                "qbc",
+                bjt_history.charge_q_prev[idx][BJT_QBC_BRANCH_INDEX],
+                charges.qbc,
+            ),
+            (
+                "qcs",
+                bjt_history.charge_q_prev[idx][BJT_QBCP_BRANCH_INDEX],
+                charges.qcs,
+            ),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-18,
+                "expected accepted-step legacy {label} history charge to match the internal-voltage charge state: actual={actual:.12e}, expected={expected:.12e}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_legacy_bjt_ngspice_truncation_limit_uses_internal_charge_state() {
+        let (circuit, solution, idx, external, internal) = legacy_bjt_charge_history_fixture();
+        let mut history = Engine::initialize_bjt_history(&circuit, &solution);
+        history.accepted_dt_prev = 1e-12;
+        history.accepted_dt_prev_prev = 1e-12;
+
+        assert!(
+            (internal[0] - external[0]).abs() > 1e-9
+                || (internal[1] - external[1]).abs() > 1e-9
+                || (internal[2] - external[2]).abs() > 1e-9,
+            "fixture must distinguish external terminal voltages from internal charge branch voltages"
+        );
+
+        let bjt = &circuit.bjts.devices[idx];
+        let mut candidate = solution.clone();
+        for (node, value) in [
+            (bjt.node_collector, 2.42),
+            (bjt.node_base, 0.872),
+            (bjt.node_emitter, 0.104),
+            (bjt.node_substrate, 0.0),
+        ] {
+            if node > 0 {
+                candidate[node - 1] = value;
+            }
+        }
+
+        let dt = 1e-12;
+        let actual = Engine::legacy_bjt_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1e-3,
+            1e-12,
+            1e-14,
+            NGSPICE_DEFAULT_TRTOL,
+        )
+        .expect("legacy BJT charge truncation should produce a timestep limit");
+
+        let vc = Engine::node_voltage(&candidate, bjt.node_collector);
+        let vb = Engine::node_voltage(&candidate, bjt.node_base);
+        let ve = Engine::node_voltage(&candidate, bjt.node_emitter);
+        let vs = Engine::node_voltage(&candidate, bjt.node_substrate);
+        let snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let (legacy_vbe, legacy_vbc, legacy_vcs) =
+            Engine::legacy_bjt_charge_branch_voltages(&snapshot);
+        let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
+        let effective_method =
+            Engine::effective_companion_method(IntegrationMethod::Trapezoidal, 1);
+
+        let mut expected = 2.0 * dt;
+        for (branch_idx, capacitance, q_curr) in [
+            (BJT_QBE_BRANCH_INDEX, charges.capbe, charges.qbe),
+            (BJT_QBC_BRANCH_INDEX, charges.capbc, charges.qbc),
+            (BJT_QBCP_BRANCH_INDEX, charges.capcs, charges.qcs),
+        ] {
+            if capacitance <= 0.0 {
+                continue;
+            }
+            let q_prev = history.charge_q_prev[idx][branch_idx];
+            let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
+            let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
+            let cq_prev = history.charge_cq_prev[idx][branch_idx];
+            let cq_curr = Engine::jfet_companion_ccap(
+                effective_method,
+                1,
+                dt,
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            );
+            let branch_limit = Engine::ngspice_charge_truncation_limit(
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_curr,
+                cq_prev,
+                dt,
+                history.accepted_dt_prev,
+                history.accepted_dt_prev_prev,
+                effective_method,
+                1,
+                1e-3,
+                1e-12,
+                1e-14,
+                NGSPICE_DEFAULT_TRTOL,
+            )
+            .expect("manual legacy BJT branch truncation limit");
+            expected = expected.min(branch_limit);
+        }
+
+        assert!(
+            (actual - expected).abs() <= expected.abs().max(1.0) * 1e-12,
+            "expected legacy BJT truncation limit to match internal charge branch CKTterr calculation: actual={actual:.12e}, expected={expected:.12e}"
+        );
+    }
+
+    #[test]
+    fn test_bjt_charge_truncation_lte_deferral_requires_covered_reactive_topology() {
+        let (mut circuit, _solution, _idx, _external, _internal) =
+            legacy_bjt_charge_history_fixture();
+
+        assert!(Engine::bjt_charge_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12)
+        ));
+        assert!(!Engine::bjt_charge_truncation_covers_transient_lte(
+            &circuit, None
+        ));
+
+        circuit.capacitors.add("Cextra".to_string(), 1, 0, 1e-12);
+        assert!(!Engine::bjt_charge_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12)
+        ));
     }
 
     #[test]
@@ -9287,6 +10300,45 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_bounded_force_accept_candidate_preserves_vcvs_branch_current_candidate() {
+        let mut circuit = crate::circuit::Circuit::new();
+        let out_pos = circuit.get_or_create_node("OUTP");
+        let out_neg = circuit.get_or_create_node("OUTN");
+        let ctrl_pos = circuit.get_or_create_node("CTRLP");
+        let ctrl_neg = circuit.get_or_create_node("CTRLN");
+        circuit.vcvs.add(
+            "E1".to_string(),
+            out_pos,
+            out_neg,
+            ctrl_pos,
+            ctrl_neg,
+            1,
+            2.0,
+        );
+
+        let previous = vec![1.5, -0.5, 2.0, 1.0, 2.5e-6];
+        let candidate = vec![1.5, -0.5, 2.0, 1.0, 7.5e-4];
+        let protected_nodes = circuit.force_accept_protected_nodes();
+        let floating_pairs = circuit.force_accept_floating_ideal_output_pairs();
+
+        let bounded = Engine::bounded_force_accept_candidate(
+            &circuit,
+            &previous,
+            &candidate,
+            0.0,
+            circuit.num_nodes(),
+            MAX_FORCE_ACCEPT_DELTA_V,
+            &protected_nodes,
+            &floating_pairs,
+        );
+
+        assert!(
+            (bounded[4] - candidate[4]).abs() < 1e-18,
+            "expected the controlled-source branch current to remain aligned with the solver candidate"
+        );
+    }
+
+    #[test]
     fn test_bounded_force_accept_candidate_preserves_inductor_branch_current_candidate() {
         let mut circuit = crate::circuit::Circuit::new();
         let node_pos = circuit.get_or_create_node("P");
@@ -9446,6 +10498,17 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_nonconvergence_retry_timestep_matches_ngspice_eighth_step_cut() {
+        assert!((Engine::nonconvergence_retry_timestep(8e-12, 1e-8) - 1e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_should_skip_post_accept_timestep_control_on_first_step_only() {
+        assert!(Engine::should_skip_post_accept_timestep_control_on_first_step(1));
+        assert!(!Engine::should_skip_post_accept_timestep_control_on_first_step(2));
+    }
+
+    #[test]
     fn test_force_accept_recovery_timestep_respects_max_step_cap() {
         assert!(
             (Engine::force_accept_recovery_timestep(8e-12, 1e-12, 3e-12, None) - 3e-12).abs()
@@ -9502,30 +10565,30 @@ mod abort_tests {
     }
 
     #[test]
-    fn test_should_retry_vbic_ngspice_truncation_matches_ngspice_reject_threshold() {
-        assert!(Engine::should_retry_vbic_ngspice_truncation(
+    fn test_should_retry_ngspice_charge_truncation_matches_ngspice_reject_threshold() {
+        assert!(Engine::should_retry_ngspice_charge_truncation(
             8.9e-13, 1.0e-12
         ));
-        assert!(Engine::should_retry_vbic_ngspice_truncation(
+        assert!(Engine::should_retry_ngspice_charge_truncation(
             9.0e-13, 1.0e-12
         ));
-        assert!(!Engine::should_retry_vbic_ngspice_truncation(
+        assert!(!Engine::should_retry_ngspice_charge_truncation(
             9.1e-13, 1.0e-12
         ));
-        assert!(!Engine::should_retry_vbic_ngspice_truncation(
+        assert!(!Engine::should_retry_ngspice_charge_truncation(
             1.4e-12, 1.0e-12
         ));
     }
 
     #[test]
-    fn test_should_promote_vbic_ngspice_trapezoidal_order_matches_ngspice_threshold() {
-        assert!(!Engine::should_promote_vbic_ngspice_trapezoidal_order(
+    fn test_should_promote_ngspice_charge_truncation_matches_ngspice_threshold() {
+        assert!(!Engine::should_promote_ngspice_charge_truncation(
             1.04e-12, 1.0e-12
         ));
-        assert!(!Engine::should_promote_vbic_ngspice_trapezoidal_order(
+        assert!(!Engine::should_promote_ngspice_charge_truncation(
             1.05e-12, 1.0e-12
         ));
-        assert!(Engine::should_promote_vbic_ngspice_trapezoidal_order(
+        assert!(Engine::should_promote_ngspice_charge_truncation(
             1.06e-12, 1.0e-12
         ));
     }
@@ -9583,6 +10646,18 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_vbic_excess_phase_startup_step_cap_tracks_td_quarter() {
+        let cap = Engine::vbic_excess_phase_startup_step_cap(1e-8, Some(2e-11))
+            .expect("expected td-derived startup cap");
+        assert!((cap - 5e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_vbic_excess_phase_startup_step_cap_returns_none_without_td() {
+        assert!(Engine::vbic_excess_phase_startup_step_cap(1e-8, None).is_none());
+    }
+
+    #[test]
     fn test_should_use_vbic_charge_lte_startup_guard_turns_off_after_startup_window() {
         assert!(Engine::should_use_vbic_charge_lte_startup_guard(
             true,
@@ -9593,6 +10668,28 @@ mod abort_tests {
         assert!(!Engine::should_use_vbic_charge_lte_startup_guard(
             true,
             6.5e-10,
+            1e-8,
+            Some(2e-11)
+        ));
+    }
+
+    #[test]
+    fn test_should_hold_vbic_excess_phase_first_order_follows_ngspice_no_special_case() {
+        assert!(!Engine::should_hold_vbic_excess_phase_first_order(
+            true,
+            6.4e-10,
+            1e-8,
+            Some(2e-11)
+        ));
+        assert!(!Engine::should_hold_vbic_excess_phase_first_order(
+            true,
+            6.5e-10,
+            1e-8,
+            Some(2e-11)
+        ));
+        assert!(!Engine::should_hold_vbic_excess_phase_first_order(
+            false,
+            1e-10,
             1e-8,
             Some(2e-11)
         ));
@@ -9848,7 +10945,7 @@ mod abort_tests {
     }
 
     #[test]
-    fn test_startup_force_accept_delta_limit_does_not_extend_vbic_td_window_after_dc_op() {
+    fn test_startup_force_accept_delta_limit_relaxes_early_vbic_excess_phase_steps_after_dc_op() {
         let base = 5e-2;
         let relaxed = Engine::startup_force_accept_delta_limit_with_vbic_td(
             startup::InitialSolutionMode::DcOperatingPoint,
@@ -9858,10 +10955,21 @@ mod abort_tests {
             10e-9,
             base,
         );
-        assert!(
-            (relaxed - base).abs() < 1e-18,
-            "expected force-accept commits to stay on the base leash after a valid DC operating point, even inside the excess-phase TD warmup window"
+        assert!((relaxed - VBIC_STARTUP_RECOVERY_DELTA_V).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_startup_force_accept_delta_limit_returns_to_base_after_vbic_td_window() {
+        let base = 5e-2;
+        let late = Engine::startup_force_accept_delta_limit_with_vbic_td(
+            startup::InitialSolutionMode::DcOperatingPoint,
+            true,
+            Some(20e-12),
+            1e-9,
+            10e-9,
+            base,
         );
+        assert!((late - base).abs() < 1e-18);
     }
 
     #[test]
@@ -9897,6 +11005,24 @@ mod abort_tests {
         let (startup_div, min_div) = Engine::startup_timestep_divisors(false, false);
         assert!((startup_div - 10.0).abs() < 1e-12);
         assert!((min_div - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_ngspice_initial_timestep_uses_tran_print_step_instead_of_tmax() {
+        let initial = Engine::ngspice_initial_timestep(2e-10, Some(1e-9), 10e-9);
+        assert!((initial - 2e-13).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_ngspice_initial_timestep_falls_back_to_max_step_without_tran_hint() {
+        let initial = Engine::ngspice_initial_timestep(1e-6, None, 20e-9);
+        assert!((initial - 1e-9).abs() < 1e-21);
+    }
+
+    #[test]
+    fn test_ngspice_initial_timestep_ignores_nonphysical_tran_hint() {
+        let initial = Engine::ngspice_initial_timestep(1e-6, Some(-1.0), 20e-9);
+        assert!((initial - 1e-9).abs() < 1e-21);
     }
 
     #[test]
@@ -9977,6 +11103,351 @@ mod abort_tests {
     fn test_ngspice_hard_min_timestep_honors_smaller_user_floor() {
         let hard_min = Engine::ngspice_hard_min_timestep(10e-9, 1e-21);
         assert!((hard_min - 1e-21).abs() < 1e-33);
+    }
+
+    #[test]
+    fn test_legacy_bjt_startup_retry_floor_uses_practical_floor_when_initial_step_is_larger() {
+        let floor =
+            Engine::legacy_bjt_startup_retry_floor(true, false, 1e-12, 2e-9, 0.0, 2e-10, 1e-10);
+        assert_eq!(floor, Some(1e-10));
+    }
+
+    #[test]
+    fn test_legacy_bjt_startup_retry_floor_respects_smaller_initial_step() {
+        let floor =
+            Engine::legacy_bjt_startup_retry_floor(true, false, 1e-12, 20e-12, 0.0, 1e-12, 20e-12);
+        assert_eq!(floor, Some(1e-12));
+    }
+
+    #[test]
+    fn test_legacy_bjt_startup_retry_floor_uses_half_floor_for_active_source() {
+        let floor = Engine::legacy_bjt_startup_retry_floor(
+            true,
+            false,
+            1e-12,
+            2e-9,
+            SOURCE_ACTIVE_DELTA,
+            2e-10,
+            1e-10,
+        );
+        assert_eq!(floor, Some(5e-11));
+    }
+
+    #[test]
+    fn test_startup_source_activity_delta_for_retry_floor_looks_across_retry_floor() {
+        let mut circuit = crate::circuit::Circuit::new();
+        let input = circuit.get_or_create_node("in");
+        circuit.voltage_sources.add_with_ac_and_spec(
+            "VIN".to_string(),
+            input,
+            0,
+            1,
+            0.0,
+            0.0,
+            0.0,
+            Some(crate::netlist::SourceSpec::Pulse {
+                v1: 0.0,
+                v2: 5.0,
+                delay: 2e-9,
+                rise: 2e-9,
+                fall: 2e-9,
+                width: 80e-9,
+                period: 200e-9,
+            }),
+        );
+        circuit.voltage_sources.set_transient_context(2e-9, 200e-9);
+
+        let delta = Engine::startup_source_activity_delta_for_retry_floor(
+            &circuit, 2.008e-9, 2e-12, 200e-9, 2e-10, 1e-10,
+        );
+        assert!(
+            delta > SOURCE_ACTIVE_DELTA,
+            "expected pulse activity over retry-floor horizon, got {:.6e}",
+            delta
+        );
+
+        let floor = Engine::legacy_bjt_startup_retry_floor(
+            true, false, 2.010e-9, 2e-9, delta, 2e-10, 1e-10,
+        );
+        assert_eq!(floor, Some(5e-11));
+    }
+
+    #[test]
+    fn test_apply_retry_timestep_floor_prevents_quiet_bjt_delmin_collapse() {
+        let retry_dt = Engine::apply_retry_timestep_floor(2e-22, Some(1e-12), 2e-9);
+        assert!((retry_dt - 1e-12).abs() < 1e-24);
+    }
+
+    #[test]
+    fn test_recover_timestep_after_accepted_step_caps_growth_below_generic_doubling() {
+        let dt = 2e-13;
+        let mut timestep = TimestepController::new_with_preferred_min(dt, 1e-19, 1e-12, 10e-9);
+        let lte_estimator = LteEstimator::with_tolerances(1e-3, 1e-6);
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &lte_estimator,
+            &[0.0],
+            dt,
+            10e-9,
+            false,
+            0.0,
+            Some(2.0),
+        );
+
+        assert!(
+            (timestep.dt() - 3e-13).abs() < 1e-24,
+            "expected accepted-step recovery to cap growth at 1.5x instead of generic doubling, got {:.6e}",
+            timestep.dt()
+        );
+    }
+
+    #[test]
+    fn test_recover_timestep_after_accepted_step_stays_flat_when_source_is_active() {
+        let dt = 1e-9;
+        let mut timestep = TimestepController::new_with_preferred_min(dt, 1e-19, 1e-12, 10e-9);
+        let lte_estimator = LteEstimator::with_tolerances(1e-3, 1e-6);
+
+        Engine::recover_timestep_after_accepted_step(
+            &mut timestep,
+            &lte_estimator,
+            &[0.0],
+            dt,
+            10e-9,
+            false,
+            SOURCE_ACTIVE_DELTA * 4.0,
+            Some(2.0),
+        );
+
+        assert!(
+            (timestep.dt() - dt).abs() < 1e-24,
+            "expected active-source accepted-step recovery to hold dt instead of growing, got {:.6e}",
+            timestep.dt()
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_vbic_diffamp_step_control_replay_200ps() {
+        let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/vbic/diffamp.cir");
+        let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+        let focused_source = source
+            .replace(".TRAN 1n 1u 0 10n", ".TRAN 1n 2e-10 0 10n")
+            .replace(".AC DEC 25 100k 1G\n", "")
+            .replace(".print ac v(e1_p)\n", "");
+        let netlist = crate::Netlist::parse(&focused_source).expect("parse focused diffamp deck");
+
+        let mut config = crate::SimulationConfig::default();
+        config.integration_method = IntegrationMethod::Trapezoidal;
+        config.min_timestep = 1e-12;
+        let engine = Engine::new(config);
+        let result = engine
+            .run_tran(&netlist, 2e-10, 10e-9)
+            .expect("focused diffamp transient");
+
+        let mut circuit = engine
+            .build_circuit(&netlist)
+            .expect("build diffamp circuit");
+        let num_nodes = circuit.num_nodes();
+        let num_branches = circuit.num_branches();
+        let e1_p_idx = result
+            .node_index_named("E1_P")
+            .expect("E1_P node should exist")
+            - 1;
+
+        let solution_at = |point_idx: usize| {
+            let mut solution = vec![0.0; num_nodes + num_branches];
+            for node_idx in 0..num_nodes {
+                solution[node_idx] = result.voltages[node_idx][point_idx];
+            }
+            for branch_idx in 0..num_branches {
+                solution[num_nodes + branch_idx] = result.branch_currents[branch_idx][point_idx];
+            }
+            solution
+        };
+
+        let initial_solution = solution_at(0);
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &initial_solution);
+        bjt_history.accepted_dt_prev = 10e-9;
+        bjt_history.accepted_dt_prev_prev = 10e-9;
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &initial_solution);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &initial_solution);
+        let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &initial_solution, 0.0);
+        let coupled_tline_refs =
+            Engine::initialize_coupled_tline_history(&mut circuit, &initial_solution, 0.0);
+        let mut breakpoints = BreakpointManager::new();
+        let mut dynamic_tline_breakpoints_added = 0_usize;
+        let mut warned_dynamic_tline_breakpoint_cap = false;
+        let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
+        let mut lte_estimator =
+            LteEstimator::with_tolerances(engine.voltage_reltol(), engine.voltage_abstol());
+        let mut vbic_charge_lte_estimator = Some(LteEstimator::with_tolerances(
+            engine.voltage_reltol(),
+            engine.charge_abstol(),
+        ));
+        let initial_dt = Engine::ngspice_initial_timestep(2e-10, Some(1e-9), 10e-9);
+        Engine::record_vbic_truncation_charge_state(
+            &mut vbic_charge_lte_estimator,
+            &circuit,
+            &initial_solution,
+            IntegrationMethod::Trapezoidal,
+            1,
+            initial_dt,
+            &bjt_history,
+            Some(&vbic_snapshot_cache),
+            1,
+        );
+
+        let smallest_td = Some(2e-11);
+        let preferred_min_dt = 1e-12;
+        let mut trap_order = 1_u8;
+
+        for point_idx in 1..result.time.len().min(12) {
+            let previous_time = result.time[point_idx - 1];
+            let current_time = result.time[point_idx];
+            let dt = current_time - previous_time;
+            let previous_solution = solution_at(point_idx - 1);
+            let solution = solution_at(point_idx);
+            let hidden_converged = engine.vbic_excess_phase_device_convergence_met(
+                &circuit,
+                &previous_solution,
+                &solution,
+                IntegrationMethod::Trapezoidal,
+                trap_order,
+                dt,
+                &bjt_history,
+                &vbic_snapshot_cache,
+            );
+            let trunc_limit = Engine::vbic_ngspice_truncation_limit(
+                &circuit,
+                &solution,
+                IntegrationMethod::Trapezoidal,
+                trap_order,
+                dt,
+                &bjt_history,
+                &vbic_snapshot_cache,
+                engine.voltage_abstol(),
+                engine.voltage_reltol(),
+                engine.current_abstol(),
+                engine.charge_abstol(),
+                NGSPICE_DEFAULT_TRTOL,
+            );
+            let active_vbic_charge_lte = if Engine::should_use_vbic_charge_lte_estimator(
+                true,
+                current_time,
+                10e-9,
+                smallest_td,
+                dt,
+                preferred_min_dt,
+            ) {
+                vbic_charge_lte_estimator.as_ref()
+            } else {
+                None
+            };
+            let (lte, lte_accept, uses_charge_lte) = Engine::estimate_transient_lte(
+                &circuit,
+                &solution,
+                IntegrationMethod::Trapezoidal,
+                trap_order,
+                dt,
+                false,
+                &bjt_history,
+                &lte_estimator,
+                active_vbic_charge_lte,
+                Some(&vbic_snapshot_cache),
+                engine.voltage_abstol(),
+                engine.voltage_reltol(),
+            );
+            eprintln!(
+                "replay step[{point_idx}] t={current_time:.12e}s dt={dt:.12e} order={} v(e1_p)={:.9e} hidden_converged={} trunc_limit={:?} retry={} lte={:.6e} lte_accept={} uses_charge_lte={}",
+                trap_order,
+                result.voltages[e1_p_idx][point_idx],
+                hidden_converged,
+                trunc_limit,
+                trunc_limit
+                    .map(|limit| Engine::should_retry_ngspice_charge_truncation(limit, dt))
+                    .unwrap_or(false),
+                lte,
+                lte_accept,
+                uses_charge_lte
+            );
+
+            lte_estimator.record(&solution, dt);
+            let accepted_method_order = if trap_order <= 1 { 1 } else { 2 };
+            lte_estimator.set_method_order(accepted_method_order);
+            Engine::record_vbic_truncation_charge_state(
+                &mut vbic_charge_lte_estimator,
+                &circuit,
+                &solution,
+                IntegrationMethod::Trapezoidal,
+                trap_order,
+                dt,
+                &bjt_history,
+                Some(&vbic_snapshot_cache),
+                accepted_method_order,
+            );
+            Engine::update_reactive_history(
+                &mut circuit,
+                &solution,
+                previous_time,
+                dt,
+                IntegrationMethod::Trapezoidal,
+                trap_order,
+                &mut bjt_history,
+                &mut jfet_history,
+                &mut mosfet_history,
+                Some(&vbic_snapshot_cache),
+                false,
+                &tline_dc_refs,
+                &coupled_tline_refs,
+                &mut breakpoints,
+                2e-10,
+                engine.voltage_reltol(),
+                engine.voltage_abstol(),
+                &mut dynamic_tline_breakpoints_added,
+                &mut warned_dynamic_tline_breakpoint_cap,
+            );
+
+            let should_promote = if Engine::should_hold_vbic_excess_phase_first_order(
+                true,
+                current_time,
+                10e-9,
+                smallest_td,
+            ) {
+                false
+            } else {
+                Engine::should_promote_trapezoidal_order(
+                    &circuit,
+                    &solution,
+                    IntegrationMethod::Trapezoidal,
+                    dt,
+                    false,
+                    &bjt_history,
+                    &lte_estimator,
+                    vbic_charge_lte_estimator.as_ref(),
+                    &vbic_snapshot_cache,
+                    engine.voltage_abstol(),
+                    engine.voltage_reltol(),
+                    engine.current_abstol(),
+                    engine.charge_abstol(),
+                    NGSPICE_DEFAULT_TRTOL,
+                )
+            };
+            let next_order = Engine::next_trapezoidal_order_after_accepted_step(
+                trap_order,
+                false,
+                should_promote,
+            );
+            eprintln!(
+                "  replay post-accept[{point_idx}] should_promote={} next_order={} accepted_dt_prev={:.12e} accepted_dt_prev_prev={:.12e}",
+                should_promote,
+                next_order,
+                bjt_history.accepted_dt_prev,
+                bjt_history.accepted_dt_prev_prev
+            );
+            trap_order = next_order;
+        }
     }
 
     fn vbic_focus_test_bjt() -> (crate::device::Bjt, f64, f64, f64, f64) {
@@ -10268,6 +11739,7 @@ Q1 C B E 0 N1\n\
             Some(history_linear_prev_prev),
             dt / 2.0,
             cached_snapshot,
+            VbicCachedSnapshotReuse::NewtonBypass,
             1e-12,
             1e-9,
         )
@@ -11332,6 +12804,7 @@ Q1 C B E 0 N1\n\
             Some(&history_linear_prev_prev),
             dt / 2.0,
             None,
+            VbicCachedSnapshotReuse::SeedOnly,
             1e-12,
             1e-9,
         )
@@ -12792,7 +14265,7 @@ Q1 C B E 0 N1\n\
     }
 
     #[test]
-    fn test_vbic_snapshot_convergence_met_accounts_for_hidden_vxf2_term() {
+    fn test_vbic_snapshot_convergence_met_accounts_for_hidden_vxf2_predictor_term() {
         let (mut bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
         bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
 
@@ -13156,13 +14629,7 @@ Q1 C B E 0 N1\n\
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
         let mut expected = bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
         if bjt.uses_vbic_dynamic_charges() && bjt.td > 0.0 {
-            expected[BJT_DELAY_XF1_STATE_INDEX] = Engine::predict_transient_history_value(
-                history_prev[BJT_DELAY_XF1_STATE_INDEX],
-                history_prev_prev
-                    .map(|history_prev_prev| history_prev_prev[BJT_DELAY_XF1_STATE_INDEX]),
-                dt,
-                prev_dt,
-            );
+            expected[BJT_DELAY_XF1_STATE_INDEX] = history_prev[BJT_DELAY_XF1_STATE_INDEX];
             expected[BJT_DELAY_XF2_STATE_INDEX] = Engine::predict_transient_history_value(
                 history_prev[BJT_DELAY_XF2_STATE_INDEX],
                 history_prev_prev
@@ -13191,24 +14658,30 @@ Q1 C B E 0 N1\n\
         history_prev: &[Value; BJT_INTERNAL_STATE_DIM],
         history_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
         history_linear_prev: &VbicPredictorLinearBranchState,
+        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
         dt: Value,
         prev_dt: Value,
     ) -> [Value; BJT_INTERNAL_STATE_DIM] {
-        let mut expected = Engine::vbic_dynamic_internal_seed_from_linear_history(
+        let mut expected = Engine::vbic_dynamic_internal_seed_from_predicted_linear_history(
             bjt,
             target_external,
             history_prev,
             history_linear_prev,
+            history_linear_prev_prev,
+            dt,
+            prev_dt,
         )
+        .or_else(|| {
+            Engine::vbic_dynamic_internal_seed_from_linear_history(
+                bjt,
+                target_external,
+                history_prev,
+                history_linear_prev,
+            )
+        })
         .expect("build expected VBIC linear-history seed");
         if bjt.uses_vbic_dynamic_charges() && bjt.td > 0.0 {
-            expected[BJT_DELAY_XF1_STATE_INDEX] = Engine::predict_transient_history_value(
-                history_prev[BJT_DELAY_XF1_STATE_INDEX],
-                history_prev_prev
-                    .map(|history_prev_prev| history_prev_prev[BJT_DELAY_XF1_STATE_INDEX]),
-                dt,
-                prev_dt,
-            );
+            expected[BJT_DELAY_XF1_STATE_INDEX] = history_prev[BJT_DELAY_XF1_STATE_INDEX];
             expected[BJT_DELAY_XF2_STATE_INDEX] = Engine::predict_transient_history_value(
                 history_prev[BJT_DELAY_XF2_STATE_INDEX],
                 history_prev_prev
@@ -13340,7 +14813,8 @@ Q1 C B E 0 N1\n\
     }
 
     #[test]
-    fn test_vbic_dynamic_internal_seed_from_history_predicts_delay_nodes_from_two_level_history() {
+    fn test_vbic_dynamic_internal_seed_from_history_anchors_xf1_and_predicts_xf2_from_two_level_history()
+     {
         let (mut bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
         bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
 
@@ -13380,7 +14854,7 @@ Q1 C B E 0 N1\n\
         assert!(
             (merged_seed[BJT_DELAY_XF1_STATE_INDEX] - expected[BJT_DELAY_XF1_STATE_INDEX]).abs()
                 < 1e-18,
-            "expected reduced VBIC predictor to extrapolate xf1 from accepted excess-phase history"
+            "expected reduced VBIC predictor to keep xf1 anchored to the accepted excess-phase state"
         );
         assert!(
             (merged_seed[BJT_DELAY_XF2_STATE_INDEX] - expected[BJT_DELAY_XF2_STATE_INDEX]).abs()
@@ -13390,8 +14864,8 @@ Q1 C B E 0 N1\n\
         assert!(
             (merged_seed[BJT_DELAY_XF1_STATE_INDEX] - history_prev[BJT_DELAY_XF1_STATE_INDEX])
                 .abs()
-                > 1e-9,
-            "expected the xf1 predictor case to move materially away from the accepted xf1 state"
+                < 1e-18,
+            "expected the xf1 seed to remain pinned to the accepted xf1 state"
         );
         assert!(
             (merged_seed[BJT_DELAY_XF2_STATE_INDEX] - history_prev[BJT_DELAY_XF2_STATE_INDEX])
@@ -13490,6 +14964,7 @@ Q1 C B E 0 N1\n\
             &history_prev,
             None,
             &history_linear_prev,
+            None,
             dt,
             0.0,
         );
@@ -13517,7 +14992,7 @@ Q1 C B E 0 N1\n\
 
     #[test]
     fn test_vbic_dynamic_internal_seed_from_history_with_linear_history_preserves_dynamic_predictor()
-    {
+     {
         let (mut bjt, vc, vb, ve, vs) = vbic_self_heated_focus_test_bjt();
         bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
 
@@ -13563,6 +15038,7 @@ Q1 C B E 0 N1\n\
             &history_prev,
             Some(&history_prev_prev),
             &history_linear_prev,
+            Some(&history_linear_prev_prev),
             dt,
             prev_dt,
         );
@@ -13574,12 +15050,14 @@ Q1 C B E 0 N1\n\
             );
         }
         assert!(
-            (merged_seed[BJT_DELAY_XF1_STATE_INDEX] - history_prev[BJT_DELAY_XF1_STATE_INDEX]).abs()
-                > 1e-9,
-            "expected linear-history VBIC predictor to extrapolate xf1 from accepted history"
+            (merged_seed[BJT_DELAY_XF1_STATE_INDEX] - history_prev[BJT_DELAY_XF1_STATE_INDEX])
+                .abs()
+                < 1e-18,
+            "expected linear-history VBIC predictor to keep xf1 pinned to accepted history"
         );
         assert!(
-            (merged_seed[BJT_DELAY_XF2_STATE_INDEX] - history_prev[BJT_DELAY_XF2_STATE_INDEX]).abs()
+            (merged_seed[BJT_DELAY_XF2_STATE_INDEX] - history_prev[BJT_DELAY_XF2_STATE_INDEX])
+                .abs()
                 > 1e-9,
             "expected linear-history VBIC predictor to extrapolate xf2 from accepted history"
         );
@@ -13814,6 +15292,7 @@ Q1 C B E 0 N1\n\
             Some(&nan_linear),
             dt,
             Some(cached_snapshot),
+            VbicCachedSnapshotReuse::NewtonBypass,
             VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
             VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
         )
@@ -13894,6 +15373,7 @@ Q1 C B E 0 N1\n\
                 Some(&history_linear_prev),
                 dt,
                 Some(cached_snapshot),
+                VbicCachedSnapshotReuse::SeedOnly,
                 VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
                 VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
             )
@@ -13975,25 +15455,27 @@ Q1 C B E 0 N1\n\
             "expected the cached VBIC hidden state to remain locally acceptable across a small external perturbation"
         );
 
-        let resolved_snapshot = Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-            &bjt,
-            target_external,
-            method,
-            trap_order,
-            dt,
-            &q_prev,
-            &q_prev_prev,
-            &cq_prev,
-            Some(&cached_snapshot.reduction.internal_voltages),
-            None,
-            None,
-            None,
-            dt,
-            Some(cached_snapshot),
-            1e-6,
-            1e-3,
-        )
-        .expect("resolve locally acceptable cached-state snapshot");
+        let resolved_snapshot =
+            Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+                &bjt,
+                target_external,
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&cached_snapshot.reduction.internal_voltages),
+                None,
+                None,
+                None,
+                dt,
+                Some(cached_snapshot),
+                VbicCachedSnapshotReuse::NewtonBypass,
+                1e-6,
+                1e-3,
+            )
+            .expect("resolve locally acceptable cached-state snapshot");
 
         for idx in 0..BJT_INTERNAL_STATE_DIM {
             assert!(
@@ -14131,7 +15613,11 @@ Q1 C B E 0 N1\n\
         );
         let continuation_scale = 1.0;
 
-        for idx in [BJT_VCI_STATE_INDEX, BJT_VBI_STATE_INDEX, BJT_VEI_STATE_INDEX] {
+        for idx in [
+            BJT_VCI_STATE_INDEX,
+            BJT_VBI_STATE_INDEX,
+            BJT_VEI_STATE_INDEX,
+        ] {
             let secant = current_internal[idx]
                 + (current_internal[idx] - previous_internal[idx]) * continuation_scale;
             assert!(
@@ -14145,7 +15631,10 @@ Q1 C B E 0 N1\n\
             );
         }
         assert!(
-            bjt.vbic_dynamic_internal_state_within_local_branch_envelope(anchored, current_internal),
+            bjt.vbic_dynamic_internal_state_within_local_branch_envelope(
+                anchored,
+                current_internal
+            ),
             "expected accepted-path VBIC continuation seeding to remain inside the local branch limiter envelope"
         );
     }
@@ -14198,7 +15687,11 @@ Q1 C B E 0 N1\n\
             .fold(0.0_f64, Value::max);
         let expected_scale = proposed_step / previous_step;
 
-        for idx in [BJT_VCI_STATE_INDEX, BJT_VBI_STATE_INDEX, BJT_VEI_STATE_INDEX] {
+        for idx in [
+            BJT_VCI_STATE_INDEX,
+            BJT_VBI_STATE_INDEX,
+            BJT_VEI_STATE_INDEX,
+        ] {
             let expected = current_internal[idx]
                 + (current_internal[idx] - previous_internal[idx]) * expected_scale;
             let anchored_delta = (anchored[idx] - current_internal[idx]).abs();
@@ -14213,7 +15706,10 @@ Q1 C B E 0 N1\n\
             );
         }
         assert!(
-            bjt.vbic_dynamic_internal_state_within_local_branch_envelope(anchored, current_internal),
+            bjt.vbic_dynamic_internal_state_within_local_branch_envelope(
+                anchored,
+                current_internal
+            ),
             "expected tiny-step accepted-path continuation seeding to remain inside the local branch limiter envelope"
         );
     }
@@ -14348,8 +15844,9 @@ Q1 C B E 0 N1\n\
             },
         );
 
-        let (candidate_snapshot, candidate_linearization, _, residual_norm) = candidate
-            .expect("expected a best-effort Q11 runtime-bias candidate across the large history jump");
+        let (candidate_snapshot, candidate_linearization, _, residual_norm) = candidate.expect(
+            "expected a best-effort Q11 runtime-bias candidate across the large history jump",
+        );
 
         assert!(
             residual_norm.is_finite() && residual_norm < 5.0e-2,
@@ -14471,6 +15968,195 @@ Q1 C B E 0 N1\n\
     }
 
     #[test]
+    fn test_vbic_snapshot_resolution_does_not_return_unacceptable_bounded_best_effort_for_large_q11_jump()
+     {
+        let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/vbic/diffamp.cir");
+        let source = std::fs::read_to_string(&deck_path).expect("read diffamp deck");
+        let netlist = crate::Netlist::parse(&source).expect("parse diffamp deck");
+
+        let mut config = crate::SimulationConfig::default();
+        config.integration_method = IntegrationMethod::Trapezoidal;
+        config.temperature = 300.15;
+        let engine = Engine::new(config);
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("build diffamp circuit");
+
+        let q11 = circuit
+            .bjts
+            .devices
+            .iter()
+            .find(|device| device.name == "Q11")
+            .expect("find Q11")
+            .clone();
+
+        let method = IntegrationMethod::Trapezoidal;
+        let trap_order = 2;
+        let dt = 5.893e-21;
+        let history_external = [6.597_288e-1, 6.597_288e-1, 0.0, 0.0];
+        let target_external = [4.584_418e-1, 4.584_418e-1, 0.0, 0.0];
+
+        let previous_snapshot = q11.charge_snapshot(
+            history_external[0],
+            history_external[1],
+            history_external[2],
+            history_external[3],
+        );
+        let q_prev = previous_snapshot.branches.map(|branch| branch.charge);
+        let q_prev_prev = q_prev;
+        let cq_prev = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        let history_internal_prev = previous_snapshot.reduction.internal_voltages;
+        let history_linear_prev = Engine::vbic_predictor_linear_branch_state(
+            &q11,
+            previous_snapshot.reduction.external_voltages,
+            previous_snapshot.reduction.internal_voltages,
+        );
+        let live_target_seed = q11.dynamic_internal_state_seed(
+            target_external[0],
+            target_external[1],
+            target_external[2],
+            target_external[3],
+        );
+        let merged_seed = Engine::vbic_dynamic_internal_seed_from_history_with_linear_history(
+            &q11,
+            target_external[0],
+            target_external[1],
+            target_external[2],
+            target_external[3],
+            Some(&history_internal_prev),
+            Some(&history_internal_prev),
+            Some(&history_linear_prev),
+            Some(&history_linear_prev),
+            dt,
+            dt,
+        );
+
+        let bounded_best_effort = Engine::choose_preferred_vbic_best_effort_result(
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&history_internal_prev),
+            ),
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&live_target_seed),
+            ),
+            Engine::vbic_dynamic_snapshot_best_effort_is_bounded,
+        );
+        let bounded_best_effort = Engine::choose_preferred_vbic_best_effort_result(
+            bounded_best_effort,
+            Engine::solve_vbic_dynamic_snapshot_best_effort(
+                &q11,
+                target_external[0],
+                target_external[1],
+                target_external[2],
+                target_external[3],
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+                Some(&merged_seed),
+            ),
+            Engine::vbic_dynamic_snapshot_best_effort_is_bounded,
+        )
+        .expect("expected bounded best-effort Q11 candidate across large history jump");
+
+        assert!(Engine::vbic_dynamic_snapshot_best_effort_is_bounded(
+            &bounded_best_effort
+        ));
+        assert!(
+            !Engine::vbic_dynamic_snapshot_solution_is_acceptable(
+                &bounded_best_effort.1,
+                &bounded_best_effort.0.reduction.external_voltages,
+                &bounded_best_effort.0.reduction.internal_voltages,
+            ),
+            "expected the large-jump Q11 best-effort candidate to miss the strict reduced-equation acceptance gate"
+        );
+        assert!(
+            !Engine::vbic_local_candidate_is_acceptable(
+                &q11,
+                previous_snapshot.reduction.external_voltages,
+                &previous_snapshot,
+                &bounded_best_effort.0,
+                &bounded_best_effort.1,
+            ),
+            "expected the large-jump Q11 best-effort candidate to miss the ngspice-style local predictor gate"
+        );
+
+        let resolved = Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+            &q11,
+            target_external,
+            method,
+            trap_order,
+            dt,
+            &q_prev,
+            &q_prev_prev,
+            &cq_prev,
+            Some(&history_internal_prev),
+            Some(&history_internal_prev),
+            Some(&history_linear_prev),
+            Some(&history_linear_prev),
+            dt,
+            Some(previous_snapshot),
+            VbicCachedSnapshotReuse::NewtonBypass,
+            VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
+            VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
+        );
+
+        if let Some(snapshot) = resolved {
+            let linearization = Engine::assemble_vbic_transient_linearization(
+                &q11,
+                &snapshot,
+                method,
+                trap_order,
+                dt,
+                &q_prev,
+                &q_prev_prev,
+                &cq_prev,
+            )
+            .expect("assemble resolved Q11 transient linearization");
+            let strict = Engine::vbic_dynamic_snapshot_solution_is_acceptable(
+                &linearization,
+                &snapshot.reduction.external_voltages,
+                &snapshot.reduction.internal_voltages,
+            );
+            let predictor_ok = Engine::vbic_local_candidate_is_acceptable(
+                &q11,
+                previous_snapshot.reduction.external_voltages,
+                &previous_snapshot,
+                &snapshot,
+                &linearization,
+            );
+            assert!(
+                strict || predictor_ok,
+                "expected resolved Q11 snapshot to be either strictly solved or locally predictor-acceptable"
+            );
+        }
+    }
+
+    #[test]
     #[ignore]
     fn test_vbic_diffamp_q11_continuation_returns_target_snapshot_across_large_history_jump() {
         let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -14559,8 +16245,8 @@ Q1 C B E 0 N1\n\
     }
 
     #[test]
-    fn test_finalize_vbic_continuation_target_snapshot_keeps_target_when_strict_polish_is_unavailable(
-    ) {
+    fn test_finalize_vbic_continuation_target_snapshot_keeps_target_when_strict_polish_is_unavailable()
+     {
         let (mut bjt, vc, vb, ve, vs) = vbic_focus_test_bjt();
         bjt_update_for_external_bias(&mut bjt, vc, vb, ve, vs);
 
@@ -14583,7 +16269,8 @@ Q1 C B E 0 N1\n\
 
         for idx in 0..BJT_EXTERNAL_STATE_DIM {
             assert!(
-                (finalized.reduction.external_voltages[idx] - snapshot.reduction.external_voltages[idx])
+                (finalized.reduction.external_voltages[idx]
+                    - snapshot.reduction.external_voltages[idx])
                     .abs()
                     < 1e-18,
                 "expected finalized target snapshot to preserve external voltage at index {idx}"
@@ -14591,7 +16278,8 @@ Q1 C B E 0 N1\n\
         }
         for idx in 0..BJT_INTERNAL_STATE_DIM {
             assert!(
-                (finalized.reduction.internal_voltages[idx] - snapshot.reduction.internal_voltages[idx])
+                (finalized.reduction.internal_voltages[idx]
+                    - snapshot.reduction.internal_voltages[idx])
                     .abs()
                     < 1e-18,
                 "expected finalized target snapshot to preserve internal state at index {idx}"
@@ -15028,13 +16716,19 @@ Q1 C B E 0 N1\n\
             dt,
             &history,
             &mut vbic_snapshot_cache,
+            VbicCachedSnapshotReuse::NewtonBypass,
             voltage_abstol,
             reltol,
         );
 
         let stamped_snapshot = vbic_snapshot_cache[0]
             .expect("expected transient BJT stamping to preserve a reusable VBIC snapshot");
-        for (idx, expected) in cached_snapshot.reduction.external_voltages.iter().enumerate() {
+        for (idx, expected) in cached_snapshot
+            .reduction
+            .external_voltages
+            .iter()
+            .enumerate()
+        {
             assert!(
                 (stamped_snapshot.reduction.external_voltages[idx] - *expected).abs() < 1e-18,
                 "expected transient stamping to reuse the cached VBIC snapshot at external index {idx}"
@@ -15047,6 +16741,133 @@ Q1 C B E 0 N1\n\
                     .abs()
                     < 1e-18,
                 "expected transient BJT stamping to keep the cached VBIC internal state when the candidate bias stays within solver tolerance at internal index {idx}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_stamp_bjt_transient_companions_seed_only_rebuilds_nearby_vbic_snapshot() {
+        let (circuit, vc, vb, ve, vs) = vbic_npn_diffamp_input_test_circuit();
+        let bjt = circuit.bjts.devices[0].clone();
+        let size = circuit.num_nodes() + circuit.num_branches();
+        let dt = 1e-11;
+        let trap_order = 2;
+        let method = IntegrationMethod::Trapezoidal;
+        let voltage_abstol = 1e-6;
+        let reltol = 1e-3;
+        let mut base_solution = vec![0.0; size];
+        for (node, value) in [
+            (bjt.node_collector, vc),
+            (bjt.node_base, vb),
+            (bjt.node_emitter, ve),
+            (bjt.node_substrate, vs),
+        ] {
+            if node > 0 {
+                base_solution[node - 1] = value;
+            }
+        }
+
+        let mut history = Engine::initialize_bjt_history(&circuit, &base_solution);
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+
+        let cached_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
+        let q_prev = cached_snapshot.branches.map(|branch| branch.charge);
+        history.charge_q_prev[0] = q_prev;
+        history.charge_q_prev_prev[0] = q_prev;
+        history.charge_q_prev_prev_prev[0] = q_prev;
+        history.charge_cq_prev[0] = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
+        history.dynamic_internal_prev[0] = [Value::NAN; BJT_INTERNAL_STATE_DIM];
+        history.dynamic_internal_prev_prev[0] = [Value::NAN; BJT_INTERNAL_STATE_DIM];
+        history.dynamic_linear_prev[0] = VbicPredictorLinearBranchState {
+            vrcx: Value::NAN,
+            vrci: Value::NAN,
+            vrbx: Value::NAN,
+            vrbi: Value::NAN,
+            vre: Value::NAN,
+            vrbp: Value::NAN,
+            vrs: Value::NAN,
+        };
+        history.dynamic_linear_prev_prev[0] = history.dynamic_linear_prev[0];
+
+        let target_external = [vc + 1.0e-4, vb - 2.0e-4, ve + 5.0e-5, vs];
+        assert!(
+            Engine::vbic_snapshot_matches_external_bias(
+                &cached_snapshot,
+                &target_external,
+                voltage_abstol,
+                reltol,
+            ),
+            "expected the cached VBIC snapshot to stay within ordinary solver tolerance"
+        );
+
+        let expected_snapshot =
+            Engine::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+                &bjt,
+                target_external,
+                method,
+                trap_order,
+                dt,
+                &history.charge_q_prev[0],
+                &history.charge_q_prev_prev[0],
+                &history.charge_cq_prev[0],
+                Some(&history.dynamic_internal_prev[0]),
+                Some(&history.dynamic_internal_prev_prev[0]),
+                Some(&history.dynamic_linear_prev[0]),
+                Some(&history.dynamic_linear_prev_prev[0]),
+                history.accepted_dt_prev,
+                Some(cached_snapshot),
+                VbicCachedSnapshotReuse::SeedOnly,
+                voltage_abstol,
+                reltol,
+            )
+            .expect("resolve expected VBIC snapshot in seed-only mode");
+
+        let mut candidate_solution = base_solution.clone();
+        for (node, value) in [
+            (bjt.node_collector, target_external[0]),
+            (bjt.node_base, target_external[1]),
+            (bjt.node_emitter, target_external[2]),
+            (bjt.node_substrate, target_external[3]),
+        ] {
+            if node > 0 {
+                candidate_solution[node - 1] = value;
+            }
+        }
+
+        let mut matrix = dense_static_matrix(size);
+        let mut rhs = vec![0.0; size];
+        let mut vbic_snapshot_cache = vec![Some(cached_snapshot); circuit.bjts.devices.len()];
+        Engine::stamp_bjt_transient_companions(
+            &circuit,
+            &mut matrix,
+            &mut rhs,
+            &candidate_solution,
+            method,
+            trap_order,
+            dt,
+            &history,
+            &mut vbic_snapshot_cache,
+            VbicCachedSnapshotReuse::SeedOnly,
+            voltage_abstol,
+            reltol,
+        );
+
+        let stamped_snapshot = vbic_snapshot_cache[0]
+            .expect("expected seed-only transient stamping to refresh the VBIC snapshot");
+        for (idx, expected) in target_external.iter().enumerate() {
+            assert!(
+                (stamped_snapshot.reduction.external_voltages[idx] - *expected).abs() < 1e-18,
+                "expected seed-only transient stamping to resolve the target external bias at index {idx}"
+            );
+        }
+        for idx in 0..BJT_INTERNAL_STATE_DIM {
+            assert!(
+                (stamped_snapshot.reduction.internal_voltages[idx]
+                    - expected_snapshot.reduction.internal_voltages[idx])
+                    .abs()
+                    < 1e-12,
+                "expected seed-only transient stamping to match the resolved VBIC hidden state at internal index {idx}"
             );
         }
     }
@@ -15134,6 +16955,7 @@ Q1 C B E 0 N1\n\
                 Some(&history.dynamic_linear_prev_prev[0]),
                 history.accepted_dt_prev,
                 Some(cached_snapshot),
+                VbicCachedSnapshotReuse::NewtonBypass,
                 voltage_abstol,
                 reltol,
             )
@@ -15152,6 +16974,7 @@ Q1 C B E 0 N1\n\
             dt,
             &history,
             &mut vbic_snapshot_cache,
+            VbicCachedSnapshotReuse::NewtonBypass,
             voltage_abstol,
             reltol,
         );
@@ -15802,6 +17625,7 @@ Q1 C B E 0 N1\n\
             dt,
             &history,
             &mut vbic_snapshot_cache,
+            VbicCachedSnapshotReuse::SeedOnly,
             1e-6,
             1e-3,
         );
@@ -15894,6 +17718,7 @@ Q1 C B E 0 N1\n\
                 history.dynamic_linear_prev_prev.get(idx),
                 history.accepted_dt_prev,
                 None,
+                VbicCachedSnapshotReuse::SeedOnly,
                 VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
                 VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
             );

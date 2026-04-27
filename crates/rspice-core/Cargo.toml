@@ -69,4 +69,9 @@ criterion = "0.5"
 name = "simulation_kernels"
 harness = false
 
+[[bin]]
+name = "rspice-ngspice-case-runner"
+path = "src/bin/ngspice_case_runner.rs"
+test = false
+
 

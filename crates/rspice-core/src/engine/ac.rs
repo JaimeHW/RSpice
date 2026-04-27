@@ -389,7 +389,12 @@ impl Engine {
             let vc = Self::ac_node_voltage(op_voltages, bjt.node_collector);
             let vb = Self::ac_node_voltage(op_voltages, bjt.node_base);
             let ve = Self::ac_node_voltage(op_voltages, bjt.node_emitter);
-            let (cbe, cbc) = bjt.junction_capacitances(vb - ve, vb - vc);
+            let vs = Self::ac_node_voltage(op_voltages, bjt.node_substrate);
+            let (legacy_vbe, legacy_vbc, legacy_vcs) =
+                bjt.legacy_charge_branch_voltages(vc, vb, ve, vs);
+            let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
+            let cbe = charges.capbe;
+            let cbc = charges.capbc;
 
             if cbe.is_finite() && cbe > 0.0 {
                 Self::stamp_imag_two_terminal(matrix, bjt.node_base, bjt.node_emitter, omega * cbe);
@@ -402,12 +407,12 @@ impl Engine {
                     omega * cbc,
                 );
             }
-            if bjt.cjcp.is_finite() && bjt.cjcp > 0.0 {
+            if charges.capcs.is_finite() && charges.capcs > 0.0 {
                 Self::stamp_imag_two_terminal(
                     matrix,
                     bjt.node_collector,
                     bjt.node_substrate,
-                    omega * bjt.cjcp,
+                    omega * charges.capcs,
                 );
             }
         }

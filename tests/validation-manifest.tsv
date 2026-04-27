@@ -9,6 +9,8 @@ bsim3soifd/ring51.cir	smoke
 bsim3soipd/ring51.cir	smoke
 general/diffpair.cir	smoke
 general/fourbitadder.cir	smoke
+general/mosmem.cir	smoke
+general/rc.cir	smoke
 general/rca3040.cir	smoke
 mesa/mesa-12.cir	scripted_control
 mesa/mesa12.cir	smoke
