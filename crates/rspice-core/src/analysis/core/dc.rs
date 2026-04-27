@@ -67,9 +67,8 @@ impl DcSweep {
         }
 
         let mut points = Vec::new();
-        let mut value = self.start;
         let eps = (self.step.abs() * 1e-9).max(1e-18);
-        let mut guard = 0usize;
+        let mut point_index = 0usize;
         const MAX_POINTS: usize = 2_000_000;
 
         let done = |x: Value| -> bool {
@@ -80,13 +79,18 @@ impl DcSweep {
             }
         };
 
-        while !done(value) {
-            points.push(value);
-            guard += 1;
-            if guard >= MAX_POINTS {
+        loop {
+            let value = self.start + self.step * point_index as Value;
+            if done(value) {
                 break;
             }
-            value += self.step;
+
+            let snapped_to_stop = (value - self.stop).abs() <= eps;
+            points.push(if snapped_to_stop { self.stop } else { value });
+            point_index += 1;
+            if snapped_to_stop || point_index >= MAX_POINTS {
+                break;
+            }
         }
 
         if points.is_empty() {
@@ -117,7 +121,7 @@ mod tests {
         let points = sweep.points();
 
         assert_eq!(points.len(), 41);
-        assert!((points[40] - 2.0).abs() <= 1e-10);
+        assert_eq!(points[40], 2.0);
     }
 
     #[test]
@@ -127,7 +131,16 @@ mod tests {
 
         assert_eq!(points.len(), 61);
         assert!((points[0] - 0.0).abs() <= 1e-12);
-        assert!((points[60] + 3.0).abs() <= 1e-10);
+        assert_eq!(points[60], -3.0);
+    }
+
+    #[test]
+    fn test_dc_sweep_points_snap_decimal_endpoint() {
+        let sweep = DcSweep::new("VGS".to_string(), 0.0, 5.0, 0.01);
+        let points = sweep.points();
+
+        assert_eq!(points.len(), 501);
+        assert_eq!(points[500], 5.0);
     }
 
     #[test]

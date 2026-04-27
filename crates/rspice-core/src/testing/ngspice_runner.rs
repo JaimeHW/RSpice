@@ -1599,8 +1599,7 @@ impl TestRunner {
         }
 
         let mut points = Vec::new();
-        let mut x = start;
-        let mut guard = 0usize;
+        let mut point_index = 0usize;
         let max_points = 2_000_000usize;
         let eps = (step.abs() * 1e-9).max(1e-18);
         let done = |value: Value| -> bool {
@@ -1611,13 +1610,21 @@ impl TestRunner {
             }
         };
 
-        while !done(x) {
-            points.push(x);
-            guard += 1;
-            if guard >= max_points {
+        loop {
+            let value = start + step * point_index as Value;
+            if done(value) {
+                break;
+            }
+
+            let snapped_to_stop = (value - stop).abs() <= eps;
+            points.push(if snapped_to_stop { stop } else { value });
+            point_index += 1;
+            if point_index >= max_points {
                 return Err("DC sweep exceeded point limit".to_string());
             }
-            x += step;
+            if snapped_to_stop {
+                break;
+            }
         }
         if points.is_empty() {
             points.push(start);
@@ -5518,6 +5525,15 @@ mod tests {
             3,
             "expected the zero-crossing points to fail, got {mismatches:?}"
         );
+    }
+
+    #[test]
+    fn test_generate_sweep_points_snaps_decimal_endpoint() {
+        let points = TestRunner::generate_sweep_points(0.0, 5.0, 0.01)
+            .expect("decimal sweep should be valid");
+
+        assert_eq!(points.len(), 501);
+        assert_eq!(points[500], 5.0);
     }
 
     #[test]
