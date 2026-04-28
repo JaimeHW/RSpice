@@ -368,6 +368,8 @@ impl TestRunner {
         // Fixing method here avoids TrapGear switching artifacts in waveform
         // comparisons while preserving production defaults elsewhere.
         config.integration_method = crate::analysis::IntegrationMethod::Trapezoidal;
+        // ngspice regression references run at 27C -> 300.15 K by default.
+        config.temperature = 300.15;
         // Sub-ps floor improves waveform alignment around steep HFET/MESA edges.
         config.min_timestep = 1e-12;
         Engine::new(config)
@@ -5619,6 +5621,7 @@ mod tests {
             config.integration_method,
             crate::analysis::IntegrationMethod::Trapezoidal
         );
+        assert!((config.temperature - 300.15).abs() < 1e-12);
         assert!((config.min_timestep - 1e-12).abs() < 1e-30);
     }
 
