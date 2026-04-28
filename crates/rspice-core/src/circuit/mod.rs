@@ -302,6 +302,8 @@ pub struct Capacitors {
     pub v_prev: Vec<Value>,
     /// Voltage from 2 steps ago (t - 2*dt) for Gear2/BDF2
     pub v_prev_prev: Vec<Value>,
+    /// Voltage from 3 steps ago for ngspice-style charge truncation.
+    pub v_prev_prev_prev: Vec<Value>,
     /// Previous timestep capacitor current (for trapezoidal companion model)
     /// Required for accurate trapezoidal integration: ieq = geq * v_n + i_n
     pub i_prev: Vec<Value>,
@@ -322,6 +324,7 @@ impl Capacitors {
         self.capacitances.push(capacitance);
         self.v_prev.push(0.0);
         self.v_prev_prev.push(0.0);
+        self.v_prev_prev_prev.push(0.0);
         self.i_prev.push(0.0); // Initial capacitor current is zero
         self.i_eq.push(0.0);
         self.ic.push(None);
@@ -340,6 +343,7 @@ impl Capacitors {
         self.capacitances.push(capacitance);
         self.v_prev.push(ic); // Initialize v_prev to IC
         self.v_prev_prev.push(ic); // Initialize v_prev_prev to IC as well
+        self.v_prev_prev_prev.push(ic);
         self.i_prev.push(0.0); // Initial capacitor current is zero (DC steady state)
         self.i_eq.push(0.0);
         self.ic.push(Some(ic));
@@ -376,6 +380,7 @@ impl Capacitors {
                 let v_dc = v_pos - v_neg;
                 self.v_prev[i] = v_dc;
                 self.v_prev_prev[i] = v_dc;
+                self.v_prev_prev_prev[i] = v_dc;
             }
         }
     }
@@ -459,6 +464,7 @@ impl Capacitors {
             let i_curr = geq * v_curr - i_eq;
 
             // Advance history
+            self.v_prev_prev_prev[i] = self.v_prev_prev[i];
             self.v_prev_prev[i] = self.v_prev[i];
             self.v_prev[i] = v_curr;
             self.i_prev[i] = i_curr;

@@ -5116,6 +5116,77 @@ impl Engine {
     }
 
     #[inline]
+    fn capacitor_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        prev_dt: Value,
+        prev_prev_dt: Value,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if !prev_dt.is_finite() || prev_dt <= 0.0 {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let coeff = CompanionCoefficients::for_method(effective_method);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let capacitance = circuit.capacitors.capacitances[idx];
+            if !capacitance.is_finite() || capacitance <= 0.0 {
+                continue;
+            }
+
+            let voltage = Self::differential_voltage(candidate_solution, cap.pp.row, cap.nn.row);
+            let q_curr = capacitance * voltage;
+            let q_prev = capacitance * circuit.capacitors.v_prev[idx];
+            let q_prev_prev = capacitance * circuit.capacitors.v_prev_prev[idx];
+            let q_prev_prev_prev = capacitance * circuit.capacitors.v_prev_prev_prev[idx];
+            let geq = coeff.capacitor_geq(capacitance, dt);
+            let ieq = coeff.capacitor_ieq(
+                capacitance,
+                dt,
+                circuit.capacitors.v_prev[idx],
+                circuit.capacitors.v_prev_prev[idx],
+                circuit.capacitors.i_prev[idx],
+            );
+            let cq_curr = geq * voltage - ieq;
+            let cq_prev = circuit.capacitors.i_prev[idx];
+
+            let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_curr,
+                cq_prev,
+                dt,
+                prev_dt,
+                prev_prev_dt,
+                effective_method,
+                trap_order,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+
+        found_branch.then_some(limit)
+    }
+
+    #[inline]
     fn vbic_ngspice_truncation_limit(
         circuit: &crate::circuit::Circuit,
         candidate_solution: &[Value],
@@ -5763,6 +5834,33 @@ impl Engine {
             && circuit.multi_winding_transformers.is_empty()
             && circuit.jiles_atherton_inductors.is_empty()
             && !circuit.has_xspice_devices()
+    }
+
+    #[inline]
+    fn ngspice_device_truncation_covers_transient_lte(
+        circuit: &crate::circuit::Circuit,
+        capacitor_truncation_limit: Option<Value>,
+        bjt_truncation_limit: Option<Value>,
+        jfet_truncation_limit: Option<Value>,
+        mosfet_truncation_limit: Option<Value>,
+    ) -> bool {
+        if circuit.has_xspice_devices()
+            || !circuit.diodes.is_empty()
+            || !circuit.inductors.is_empty()
+            || !circuit.coupled_inductor_pairs.is_empty()
+            || !circuit.multi_winding_transformers.is_empty()
+            || !circuit.jiles_atherton_inductors.is_empty()
+        {
+            return false;
+        }
+
+        let capacitor_controlled =
+            circuit.capacitors.is_empty() || capacitor_truncation_limit.is_some();
+        let bjt_controlled = circuit.bjts.devices.is_empty() || bjt_truncation_limit.is_some();
+        let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
+        let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
+
+        capacitor_controlled && bjt_controlled && jfet_controlled && mosfet_controlled
     }
 
     #[inline]
@@ -7222,6 +7320,7 @@ impl Engine {
             let i_new = geq * v_new - ieq;
 
             let v_old = circuit.capacitors.v_prev[cap_idx];
+            circuit.capacitors.v_prev_prev_prev[cap_idx] = circuit.capacitors.v_prev_prev[cap_idx];
             circuit.capacitors.v_prev_prev[cap_idx] = v_old;
             circuit.capacitors.v_prev[cap_idx] = v_new;
             circuit.capacitors.i_prev[cap_idx] = i_new;
@@ -7987,6 +8086,7 @@ impl Engine {
                 - if nn == 0 { 0.0 } else { solution[nn - 1] };
             circuit.capacitors.v_prev[cap_idx] = v_dc;
             circuit.capacitors.v_prev_prev[cap_idx] = v_dc;
+            circuit.capacitors.v_prev_prev_prev[cap_idx] = v_dc;
             log::info!(
                 "Capacitor {} init: v_dc={:.4}, np={}, nn={}",
                 circuit.capacitors.names[cap_idx],
@@ -9000,6 +9100,25 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_capacitor_truncation_limit = if !circuit.capacitors.is_empty()
+                    {
+                        Self::capacitor_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            mosfet_history.accepted_dt_prev,
+                            mosfet_history.accepted_dt_prev_prev,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            NGSPICE_DEFAULT_TRTOL,
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -9020,7 +9139,10 @@ impl Engine {
                         };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
-                            force_accept_bjt_truncation_limit,
+                            Self::min_truncation_limit(
+                                force_accept_capacitor_truncation_limit,
+                                force_accept_bjt_truncation_limit,
+                            ),
                             force_accept_jfet_truncation_limit,
                         ),
                         force_accept_mosfet_truncation_limit,
@@ -9165,6 +9287,25 @@ impl Engine {
             };
             let bjt_truncation_limit =
                 Self::min_truncation_limit(vbic_truncation_limit, legacy_bjt_truncation_limit);
+            let capacitor_truncation_limit =
+                if !first_accepted_transient_step && !circuit.capacitors.is_empty() {
+                    Self::capacitor_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        mosfet_history.accepted_dt_prev,
+                        mosfet_history.accepted_dt_prev_prev,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        NGSPICE_DEFAULT_TRTOL,
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let jfet_truncation_limit = if !first_accepted_transient_step
                 && !suppress_gate_charge
                 && !circuit.jfets.is_empty()
@@ -9206,7 +9347,10 @@ impl Engine {
                 None
             };
             let device_truncation_limit = Self::min_truncation_limit(
-                Self::min_truncation_limit(bjt_truncation_limit, jfet_truncation_limit),
+                Self::min_truncation_limit(
+                    Self::min_truncation_limit(capacitor_truncation_limit, bjt_truncation_limit),
+                    jfet_truncation_limit,
+                ),
                 mosfet_truncation_limit,
             );
 
@@ -9274,6 +9418,14 @@ impl Engine {
                     &circuit,
                     mosfet_truncation_limit,
                 );
+            let defer_voltage_lte_to_ngspice_device_truncation = !has_vbic_excess_phase
+                && Self::ngspice_device_truncation_covers_transient_lte(
+                    &circuit,
+                    capacitor_truncation_limit,
+                    bjt_truncation_limit,
+                    jfet_truncation_limit,
+                    mosfet_truncation_limit,
+                );
             let (lte, accept, uses_vbic_charge_lte) = if first_accepted_transient_step {
                 (0.0, true, false)
             } else if defer_voltage_lte_to_vbic_truncation {
@@ -9300,6 +9452,13 @@ impl Engine {
                 // MOS transient gate-charge control is the device-local
                 // MOStrunc/MOS6trunc CKTterr path in ngspice. In MOS-only
                 // reactive decks it is the authoritative timestep controller.
+                (0.0, true, false)
+            } else if defer_voltage_lte_to_ngspice_device_truncation {
+                // Classic ngspice uses device-local CKTterr truncation drivers
+                // (CAPtrunc, MOStrunc, BJTtrunc, etc.) rather than an additional
+                // global node-voltage predictor. Transmission-line decks rely on
+                // their model max-step/breakpoint controls plus those connected
+                // dynamic devices.
                 (0.0, true, false)
             } else {
                 Self::estimate_transient_lte(
@@ -10855,6 +11014,115 @@ mod abort_tests {
         assert!(!Engine::mosfet_charge_truncation_covers_transient_lte(
             &circuit,
             Some(1e-12)
+        ));
+    }
+
+    #[test]
+    fn test_capacitor_ngspice_truncation_limit_matches_cktterr_mapping() {
+        let mut circuit = crate::circuit::Circuit::new();
+        let node = circuit.get_or_create_node("out");
+        let capacitance = 2.5e-12;
+        circuit
+            .capacitors
+            .add("Cload".to_string(), node, 0, capacitance);
+        circuit.capacitors.v_prev[0] = 1.0;
+        circuit.capacitors.v_prev_prev[0] = 0.82;
+        circuit.capacitors.v_prev_prev_prev[0] = 0.70;
+        circuit.capacitors.i_prev[0] = 1.5e-6;
+
+        let candidate = vec![1.22];
+        let dt = 1e-12;
+        let prev_dt = 1.1e-12;
+        let prev_prev_dt = 0.9e-12;
+        let actual = Engine::capacitor_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            2,
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            1e-3,
+            1e-12,
+            1e-14,
+            NGSPICE_DEFAULT_TRTOL,
+        )
+        .expect("capacitor CKTterr limit");
+
+        let effective_method =
+            Engine::effective_companion_method(IntegrationMethod::Trapezoidal, 2);
+        let coeff = CompanionCoefficients::for_method(effective_method);
+        let geq = coeff.capacitor_geq(capacitance, dt);
+        let ieq = coeff.capacitor_ieq(
+            capacitance,
+            dt,
+            circuit.capacitors.v_prev[0],
+            circuit.capacitors.v_prev_prev[0],
+            circuit.capacitors.i_prev[0],
+        );
+        let voltage = candidate[0];
+        let branch_limit = Engine::ngspice_charge_truncation_limit(
+            capacitance * voltage,
+            capacitance * circuit.capacitors.v_prev[0],
+            capacitance * circuit.capacitors.v_prev_prev[0],
+            capacitance * circuit.capacitors.v_prev_prev_prev[0],
+            geq * voltage - ieq,
+            circuit.capacitors.i_prev[0],
+            dt,
+            prev_dt,
+            prev_prev_dt,
+            effective_method,
+            2,
+            1e-3,
+            1e-12,
+            1e-14,
+            NGSPICE_DEFAULT_TRTOL,
+        )
+        .expect("manual CKTterr limit");
+        let expected = (2.0 * dt).min(branch_limit);
+
+        assert!(
+            (actual - expected).abs() <= expected.abs().max(1e-30) * 1e-12,
+            "expected capacitor truncation to map voltage history into CKTterr charge state"
+        );
+    }
+
+    #[test]
+    fn test_ngspice_device_truncation_lte_deferral_allows_transmission_line_topology() {
+        let mut circuit = crate::circuit::Circuit::new();
+        let near = circuit.get_or_create_node("near");
+        let far = circuit.get_or_create_node("far");
+        circuit.capacitors.add("Cload".to_string(), near, 0, 1e-12);
+        circuit.tlines.push(crate::device::TransmissionLine::new(
+            "T1".to_string(),
+            near,
+            0,
+            far,
+            0,
+            50.0,
+            1e-9,
+        ));
+
+        assert!(Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12),
+            None,
+            None,
+            None,
+        ));
+        assert!(!Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit, None, None, None, None,
+        ));
+
+        circuit
+            .inductors
+            .add("Lunsupported".to_string(), near, 0, 1, 1e-9);
+        assert!(!Engine::ngspice_device_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12),
+            None,
+            None,
+            None,
         ));
     }
 
