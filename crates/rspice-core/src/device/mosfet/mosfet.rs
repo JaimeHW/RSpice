@@ -1322,7 +1322,6 @@ impl Mosfet {
         (cgs_int, cgd_int, cgb_int)
     }
 
-
     /// Calculate overlap capacitances for AC analysis
     /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
     pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
@@ -1386,10 +1385,6 @@ impl Mosfet {
     /// Return the cached drain current at the converged operating point.
     pub fn drain_current(&self) -> Value {
         self.id
-    }
-
-    pub(crate) fn branch_voltages_at(&self, voltages: &[Value]) -> (Value, Value, Value) {
-        self.branch_voltages(voltages)
     }
 
     #[inline]

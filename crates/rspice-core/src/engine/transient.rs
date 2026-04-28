@@ -1570,7 +1570,7 @@ impl Engine {
                 q_prev_prev[branch_idx],
                 cq_prev[branch_idx],
             );
-            let mut i_eq = charge_factor
+            let i_eq = charge_factor
                 * branch.linearization_dot(
                     &snapshot.reduction.internal_voltages,
                     &snapshot.reduction.external_voltages,
@@ -8451,7 +8451,6 @@ impl Engine {
         let mut last_progress_log = std::time::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
-        let mut nonlinear_state_matches_solution = false;
 
         while t < tstop && total_iterations < max_total_iterations {
             // Progress logging every 2 seconds
@@ -8732,7 +8731,6 @@ impl Engine {
                 circuit.refresh_jiles_atherton_inductances(&new_solution);
                 if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
                     circuit.update_nonlinear(&new_solution);
-                    nonlinear_state_matches_new_solution = true;
                 }
 
                 // Stamp capacitor companion models for transient
@@ -9184,7 +9182,6 @@ impl Engine {
             }
 
             if !converged {
-                nonlinear_state_matches_solution = false;
                 retry_count += 1;
                 trap_order = 1;
                 if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some() && t >= 2.0e-9 {
@@ -9449,7 +9446,6 @@ impl Engine {
                             }
                             return Err(SimulationError::ConvergenceFailed(total_iterations));
                         }
-                        nonlinear_state_matches_solution = false;
                         continue;
                     }
                     let clipped_force_candidate = Self::is_clipped_force_candidate(
@@ -9488,11 +9484,9 @@ impl Engine {
                     // Project ideal-source constraints first, then clip source-free
                     // node movement so the committed state stays physically bounded.
                     new_solution = bounded_force_candidate;
-                    nonlinear_state_matches_new_solution = false;
 
                     if circuit.has_nonlinear_devices() {
                         circuit.update_nonlinear(&new_solution);
-                        nonlinear_state_matches_new_solution = true;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -9627,7 +9621,6 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    nonlinear_state_matches_solution = nonlinear_state_matches_new_solution;
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -9856,7 +9849,6 @@ impl Engine {
                             step_trap_order
                         );
                     }
-                    nonlinear_state_matches_solution = false;
                     retry_count += 1;
                     // Match ngspice truncation retries: keep the current integration
                     // order and only reduce the timestep.
@@ -10005,7 +9997,6 @@ impl Engine {
                         );
                     }
                 }
-                nonlinear_state_matches_solution = false;
                 retry_count += 1;
                 // LTE/truncation rejects in ngspice retry the same order at a
                 // smaller timestep instead of forcing trapezoidal back to order 1.
@@ -10133,7 +10124,6 @@ impl Engine {
                             }
                             return Err(SimulationError::ConvergenceFailed(total_iterations));
                         }
-                        nonlinear_state_matches_solution = false;
                         continue;
                     }
                     let clipped_force_candidate = Self::is_clipped_force_candidate(
@@ -10157,11 +10147,9 @@ impl Engine {
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
                     }
                     new_solution = bounded_force_candidate;
-                    nonlinear_state_matches_new_solution = false;
 
                     if circuit.has_nonlinear_devices() {
                         circuit.update_nonlinear(&new_solution);
-                        nonlinear_state_matches_new_solution = true;
                     }
 
                     let method_after_step = current_integration_method(&trapgear);
@@ -10274,7 +10262,6 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
-                    nonlinear_state_matches_solution = nonlinear_state_matches_new_solution;
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -10340,7 +10327,6 @@ impl Engine {
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
                 trap_order = 1;
-                nonlinear_state_matches_solution = false;
                 continue;
             }
             stale_accept_count = 0;
@@ -10390,7 +10376,6 @@ impl Engine {
 
             if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
                 circuit.update_nonlinear(&new_solution);
-                nonlinear_state_matches_new_solution = true;
             }
 
             let promoted_trapezoidal_order_limit = if !first_accepted_transient_step
@@ -10454,7 +10439,6 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
-            nonlinear_state_matches_solution = nonlinear_state_matches_new_solution;
 
             // Store results
             result.time.push(t);

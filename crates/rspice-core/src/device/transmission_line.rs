@@ -296,44 +296,6 @@ fn twiceintlinfunc(
 }
 
 #[inline]
-fn thriceintlinfunc(
-    lolimit: Value,
-    hilimit: Value,
-    secondlolimit: Value,
-    thirdlolimit: Value,
-    lovalue: Value,
-    hivalue: Value,
-    t1: Value,
-    t2: Value,
-) -> Value {
-    let width = t2 - t1;
-    if width == 0.0 {
-        return 0.0;
-    }
-    let slope = (hivalue - lovalue) / width;
-
-    let temp1 = hilimit - t1;
-    let temp2 = lolimit - t1;
-    let temp3 = secondlolimit - t1;
-    let temp4 = thirdlolimit - t1;
-    let temp5 = hilimit - thirdlolimit;
-    let temp6 = lolimit - thirdlolimit;
-    let temp7 = secondlolimit - thirdlolimit;
-    let temp8 = hilimit - lolimit;
-    let temp9 = hilimit - secondlolimit;
-    let temp10 = lolimit - secondlolimit;
-
-    let mut value =
-        lovalue * ((temp5 * temp5 * temp5 - temp6 * temp6 * temp6) / 3.0 - temp7 * temp5 * temp8);
-    value += slope
-        * ((((temp1 * temp1 * temp1 * temp1 - temp2 * temp2 * temp2 * temp2) * 0.25
-            - temp3 * temp3 * temp3 * temp8)
-            / 3.0)
-            - temp4 * temp4 * 0.5 * (temp9 * temp9 - temp10 * temp10));
-    value * 0.5
-}
-
-#[inline]
 fn bessel_i0(x: Value) -> Value {
     let ax = x.abs();
     if ax < 3.75 {
@@ -571,7 +533,6 @@ fn distributed_rlc_coefficients(
             h2_first = h2_dummy1;
             h2_relval = (reltol * h2_dummy1).abs();
 
-            h3_lo1 = 0.0;
             h3_hi1 = if hi1 <= delay || beta == 0.0 {
                 0.0
             } else {
@@ -587,7 +548,7 @@ fn distributed_rlc_coefficients(
     let mut hi1 = current_time - time_list[time_index];
     let mut delta1 = hi1 - lo1;
     let exp_term0 = (-beta * hi1).exp();
-    let mut h1_lo1 = 0.0;
+    let mut h1_lo1: Value;
     let mut h1_hi1 = if beta == 0.0 {
         hi1
     } else if hi1 == 0.0 {
@@ -605,21 +566,17 @@ fn distributed_rlc_coefficients(
 
     let mut lo2 = 0.0;
     let mut hi2 = 0.0;
-    let mut delta2 = 0.0;
-    let mut h1_lo2 = 0.0;
-    let mut h1_hi2 = 0.0;
-    let mut h2_lo2 = 0.0;
-    let mut h2_hi2 = 0.0;
-    let mut h3_lo2 = 0.0;
-    let mut h3_hi2 = 0.0;
-    let mut h2_dummy2 = 0.0;
-    let mut h3_dummy2 = 0.0;
+    let mut h1_hi2: Value;
+    let mut h2_lo2: Value;
+    let mut h2_hi2: Value;
+    let mut h3_hi2: Value;
+    let mut h2_dummy2: Value;
+    let mut h3_dummy2: Value;
 
     for i in (1..=time_index).rev() {
         if do_h1 || do_h2 || do_h3 {
             lo2 = lo1;
             hi2 = hi1;
-            delta2 = delta1;
 
             lo1 = hi2;
             hi1 = current_time - time_list[i - 1];
@@ -627,7 +584,6 @@ fn distributed_rlc_coefficients(
         }
 
         if do_h1 {
-            h1_lo2 = h1_lo1;
             h1_hi2 = h1_hi1;
             let h1_dummy2 = h1_dummy1;
 
@@ -686,7 +642,6 @@ fn distributed_rlc_coefficients(
             }
 
             if do_h3 {
-                h3_lo2 = h3_lo1;
                 h3_hi2 = h3_hi1;
                 h3_dummy2 = h3_dummy1;
 
