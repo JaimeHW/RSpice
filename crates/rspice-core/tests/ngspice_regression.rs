@@ -17,6 +17,8 @@ use std::{
 
 const FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS: u128 = 30_000;
 const DEFAULT_HARD_CASE_TIMEOUT_MS: u128 = 30_000;
+const CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
+const CASE_RUNNER_RESULT_GRACE_DIVISOR: u128 = 10;
 const FULL_SUITE_TIMEOUT_OVERHEAD_MS: u128 = 60_000;
 const CASE_RUNNER_EXE: &str = env!("CARGO_BIN_EXE_rspice-ngspice-case-runner");
 
@@ -115,6 +117,7 @@ fn run_case_with_watchdog_with_timeout(
 ) -> TestResult {
     let start = Instant::now();
     let hard_timeout_ms = hard_timeout_ms.max(1);
+    let child_timeout_ms = case_runner_soft_timeout_ms(hard_timeout_ms);
     let result_path = unique_case_result_path(cir_path);
     let mut child = match Command::new(CASE_RUNNER_EXE)
         .arg("--test-dir")
@@ -134,7 +137,7 @@ fn run_case_with_watchdog_with_timeout(
         .arg("--verbose")
         .arg(config.verbose.to_string())
         .arg("--max-time-per-test-ms")
-        .arg(hard_timeout_ms.to_string())
+        .arg(child_timeout_ms.to_string())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
@@ -205,6 +208,15 @@ fn hard_case_timeout_ms(config: &TestRunnerConfig) -> u128 {
 
 fn resolve_hard_case_timeout_ms(config_timeout_ms: u128, hard_cap_ms: u128) -> u128 {
     config_timeout_ms.max(1).min(hard_cap_ms.max(1))
+}
+
+fn case_runner_soft_timeout_ms(hard_timeout_ms: u128) -> u128 {
+    let hard_timeout_ms = hard_timeout_ms.max(1);
+    let grace = (hard_timeout_ms / CASE_RUNNER_RESULT_GRACE_DIVISOR)
+        .max(1)
+        .min(CASE_RUNNER_RESULT_GRACE_MS)
+        .min(hard_timeout_ms.saturating_sub(1));
+    hard_timeout_ms.saturating_sub(grace).max(1)
 }
 
 fn full_suite_timeout_ms(suites: &[String]) -> u128 {
@@ -777,6 +789,15 @@ fn test_hard_case_timeout_is_always_finite_and_capped() {
     assert_eq!(resolve_hard_case_timeout_ms(90_000, 120_000), 90_000);
     assert_eq!(resolve_hard_case_timeout_ms(0, 30_000), 1);
     assert_eq!(resolve_hard_case_timeout_ms(90_000, 0), 1);
+}
+
+#[test]
+fn test_case_runner_soft_timeout_leaves_result_grace_before_hard_kill() {
+    assert_eq!(case_runner_soft_timeout_ms(30_000), 29_000);
+    assert_eq!(case_runner_soft_timeout_ms(5_000), 4_500);
+    assert_eq!(case_runner_soft_timeout_ms(10), 9);
+    assert_eq!(case_runner_soft_timeout_ms(1), 1);
+    assert_eq!(case_runner_soft_timeout_ms(0), 1);
 }
 
 #[test]
