@@ -3756,6 +3756,10 @@ impl NonlinearDevice for Jfet {
         let vgs_raw = vg - vs;
         let vgd_raw = vg - vd;
         if self.matches_last_raw_branch_input(vgs_raw, vgd_raw) {
+            if self.vgs.is_finite() && self.vds.is_finite() {
+                self.vgs_prev = self.vgs;
+                self.vds_prev = self.vds;
+            }
             return;
         }
 
@@ -5376,5 +5380,29 @@ mod tests {
             "reloading the same Newton iterate must keep the same limited drain-source state"
         );
         assert_eq!(jfet.limiter_applied, first_limiter_state);
+    }
+
+    #[test]
+    fn test_repeated_jfet_update_marks_identical_branch_state_converged() {
+        let criteria = NonlinearConvergenceCriteria::voltage_only(1e-6);
+        let mut jfet = Jfet::njf("J1", 1, 2, 0).with_params(
+            JfetParams::new()
+                .with_vto(-3.5)
+                .with_beta(4.1e-4)
+                .with_lambda(0.002),
+        );
+
+        let voltages = [24.806_346_452_790_688, -2.0];
+        jfet.update(&voltages);
+        assert!(
+            !jfet.is_converged(criteria),
+            "first load establishes a branch history and should require another Newton check"
+        );
+
+        jfet.update(&voltages);
+        assert!(
+            jfet.is_converged(criteria),
+            "a repeated raw branch input represents a fixed device state and must converge"
+        );
     }
 }
