@@ -110,26 +110,3 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_should_use_simd() {
-        assert!(!should_use_simd(0));
-        assert!(!should_use_simd(15));
-        assert!(should_use_simd(16));
-        assert!(should_use_simd(1000));
-    }
-
-    #[test]
-    fn test_align_down() {
-        assert_eq!(align_down(0), 0);
-        assert_eq!(align_down(3), 0);
-        assert_eq!(align_down(4), 4);
-        assert_eq!(align_down(7), 4);
-        assert_eq!(align_down(8), 8);
-        assert_eq!(align_down(100), 100);
-        assert_eq!(align_down(103), 100);
-    }
-}

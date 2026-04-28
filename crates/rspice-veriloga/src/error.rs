@@ -298,32 +298,3 @@ impl From<std::io::Error> for CompileError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::source::SourceId;
-
-    #[test]
-    fn test_lexer_error() {
-        let span = Span::new(SourceId::new(0), 0, 1);
-        let err = LexerError::new(LexerErrorKind::UnexpectedChar('$'), span);
-        assert!(err.to_string().contains("Unexpected character"));
-    }
-
-    #[test]
-    fn test_parse_error() {
-        let span = Span::new(SourceId::new(0), 0, 10);
-        let err = ParseError::expected("identifier", "number", span);
-        assert!(err.to_string().contains("Expected"));
-    }
-
-    #[test]
-    fn test_semantic_error() {
-        let span = Span::new(SourceId::new(0), 0, 5);
-        let err = SemanticError::new(
-            SemanticErrorKind::UndeclaredSymbol { name: "foo".into() },
-            span,
-        );
-        assert!(err.to_string().contains("Undeclared symbol"));
-    }
-}

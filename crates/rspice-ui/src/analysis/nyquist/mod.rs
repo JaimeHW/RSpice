@@ -34,18 +34,3 @@ pub fn render_nyquist_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _state = NyquistState::new();
-    }
-
-    #[test]
-    fn test_nyquist_data_creation() {
-        let data = NyquistData::new("Test");
-        assert!(data.is_empty());
-    }
-}

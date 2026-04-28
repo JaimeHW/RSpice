@@ -52,10 +52,6 @@ impl NodeResolver {
     }
 }
 
-#[cfg(test)]
-pub(super) fn parse_output_node(output: &str, resolver: &NodeResolver) -> Option<usize> {
-    resolver.parse_voltage_probe(output).map(|(pos, _)| pos)
-}
 
 pub(super) fn parse_voltage_probe_spec(spec: &str) -> Option<(String, Option<String>)> {
     let trimmed = spec.trim();

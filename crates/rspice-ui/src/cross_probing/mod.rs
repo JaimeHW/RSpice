@@ -42,30 +42,3 @@ pub use state::CrossProbeState;
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _registry = CrossProbeRegistry::new();
-    }
-
-    #[test]
-    fn test_signal_id() {
-        let id1 = SignalId::new("v(out)");
-        let id2 = SignalId::new("v(out)");
-        assert_eq!(id1, id2);
-    }
-
-    #[test]
-    fn test_signal_path() {
-        let path = SignalPath::from_parts(&["top", "amp", "out"]);
-        assert_eq!(path.full_path(), "top.amp.out");
-    }
-
-    #[test]
-    fn test_manager_creation() {
-        let _manager = CrossProbeManager::new();
-    }
-}

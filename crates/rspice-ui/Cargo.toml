@@ -92,14 +92,3 @@ dirs = "5.0"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 env_logger = "0.11"
 
-[dev-dependencies]
-tempfile = "3"
-criterion = "0.5"
-
-[[bench]]
-name = "cadence_psf"
-harness = false
-
-[[bench]]
-name = "waveform_fft"
-harness = false

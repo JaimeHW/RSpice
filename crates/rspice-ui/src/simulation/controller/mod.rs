@@ -44,8 +44,6 @@ mod touchstone;
 mod transient_post;
 pub(crate) use transient_post::DerivedViewerLoadState;
 
-#[cfg(test)]
-use self::spice_value::parse_spice_value;
 use self::spice_value::parse_spice_value_checked;
 
 #[derive(Debug, Clone)]

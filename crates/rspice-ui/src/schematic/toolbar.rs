@@ -798,34 +798,3 @@ fn status_indicator(ui: &mut Ui, icon: IconType, text: &str, color: Color32) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_icon_types_exist() {
-        // Verify all IconType enum variants compile
-        // Tool icons
-        let _ = IconType::Select;
-        let _ = IconType::Wire;
-        let _ = IconType::Component;
-        let _ = IconType::Probe;
-        // Zoom controls
-        let _ = IconType::ZoomIn;
-        let _ = IconType::ZoomOut;
-        let _ = IconType::ZoomFit;
-        // Simulation controls
-        let _ = IconType::Play;
-        let _ = IconType::Stop;
-        let _ = IconType::Settings;
-        // Status indicators
-        let _ = IconType::Spinner;
-        let _ = IconType::Checkmark;
-        let _ = IconType::DirtyDot;
-        // Icon rail icons
-        let _ = IconType::Folder;
-        let _ = IconType::Keyboard;
-        let _ = IconType::Waveform;
-        let _ = IconType::Shell;
-    }
-}

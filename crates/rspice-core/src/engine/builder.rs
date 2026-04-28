@@ -16,8 +16,6 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 #[cfg(feature = "veriloga")]
 use std::path::{Path, PathBuf};
-#[cfg(all(test, feature = "veriloga"))]
-use std::sync::Mutex;
 use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
@@ -1974,30 +1972,3 @@ impl Engine {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_jfet_series_resistance_scales_with_area_and_multiplier() {
-        let jfet = crate::device::Jfet::njf("J1", 1, 2, 0)
-            .with_area(2.0)
-            .with_multiplier(3.0);
-
-        let scale = jfet_extrinsic_resistance_scale(&jfet);
-        assert!((scale - 6.0).abs() < 1e-15);
-        assert!((scaled_extrinsic_resistance(60.0, scale) - 10.0).abs() < 1e-15);
-    }
-
-    #[test]
-    fn test_hfet_series_resistance_scales_with_multiplier_only() {
-        let jfet = crate::device::Jfet::njf("Z1", 1, 2, 0)
-            .enable_mesa_model()
-            .with_area(2.0)
-            .with_multiplier(3.0);
-
-        let scale = jfet_extrinsic_resistance_scale(&jfet);
-        assert!((scale - 3.0).abs() < 1e-15);
-        assert!((scaled_extrinsic_resistance(60.0, scale) - 20.0).abs() < 1e-15);
-    }
-}

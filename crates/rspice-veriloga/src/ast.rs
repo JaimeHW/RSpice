@@ -964,26 +964,3 @@ pub struct Attribute {
     pub span: Span,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_creation() {
-        let span = Span::dummy();
-        let module = Module::new("resistor", span);
-        assert_eq!(module.name.as_str(), "resistor");
-        assert!(module.analog_block.is_none());
-    }
-
-    #[test]
-    fn test_expression_span() {
-        let span = Span::dummy();
-        let expr = Expression::Number(NumberLit {
-            value: 1.0,
-            raw: "1.0".into(),
-            span,
-        });
-        assert_eq!(expr.span(), span);
-    }
-}

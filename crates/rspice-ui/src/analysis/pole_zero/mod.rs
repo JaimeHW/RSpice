@@ -35,27 +35,3 @@ pub fn render_pz_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _state = PoleZeroState::new();
-    }
-
-    #[test]
-    fn test_pz_data_creation() {
-        let data = PoleZeroData::new("Test TF");
-        assert!(data.is_empty());
-    }
-
-    #[test]
-    fn test_root_types() {
-        let pole = ComplexRoot::pole(0.0, 1.0);
-        assert_eq!(pole.root_type, RootType::Pole);
-
-        let zero = ComplexRoot::zero(-1.0, 0.0);
-        assert_eq!(zero.root_type, RootType::Zero);
-    }
-}

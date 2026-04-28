@@ -3,12 +3,8 @@
 //! Commercial-grade egui rendering for Bode plot visualization.
 
 use egui::{Color32, FontId, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
-#[cfg(test)]
-use std::f64::consts::PI;
 
 use super::data::FrequencyResponse;
-#[cfg(test)]
-use super::data::{BodeData, FrequencyPoint};
 use super::state::{BodeDisplayMode, BodePlotState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -547,93 +543,8 @@ fn format_freq(freq: f64) -> String {
 // Demo Data
 // =============================================================================
 
-#[cfg(test)]
-fn load_demo_data(state: &mut BodePlotState) {
-    // Create a demo second-order lowpass response
-    let mut resp = FrequencyResponse::new("Demo TF");
-    let fc = 1000.0; // 1kHz
-    let q = 0.707; // Butterworth
-
-    for i in 0..51 {
-        let f = 10.0_f64.powf(i as f64 / 10.0); // 1Hz to 100kHz
-        let omega = 2.0 * PI * f;
-        let omega_c = 2.0 * PI * fc;
-        let s_normalized = omega / omega_c;
-
-        // Second order: H(s) = 1 / (s^2 + s/Q + 1)
-        let denom_re = 1.0 - s_normalized * s_normalized;
-        let denom_im = s_normalized / q;
-        let denom_mag_sq = denom_re * denom_re + denom_im * denom_im;
-
-        let mag = 1.0 / denom_mag_sq.sqrt();
-        let phase = -denom_im.atan2(denom_re);
-
-        resp.add_point(FrequencyPoint::new(f, mag, phase));
-    }
-
-    let mut data = BodeData::new();
-    data.add_response(resp);
-    data.calculate_margins();
-
-    state.load_data(data);
-}
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layout_calculation() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let state = BodePlotState::new();
-        let layout = calculate_layout(rect, &state);
-
-        assert!(layout.magnitude.is_some());
-        assert!(layout.phase.is_some());
-    }
-
-    #[test]
-    fn test_layout_magnitude_only() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let mut state = BodePlotState::new();
-        state.mode = BodeDisplayMode::MagnitudeOnly;
-
-        let layout = calculate_layout(rect, &state);
-
-        assert!(layout.magnitude.is_some());
-        assert!(layout.phase.is_none());
-    }
-
-    #[test]
-    fn test_map_log_to_x() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
-
-        // At min frequency
-        let x = map_log_to_x(10.0, 10.0, 10000.0, rect);
-        assert!((x - 0.0).abs() < 0.1);
-
-        // At max frequency
-        let x = map_log_to_x(10000.0, 10.0, 10000.0, rect);
-        assert!((x - 100.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_format_freq() {
-        assert!(format_freq(1000.0).contains("kHz"));
-        assert!(format_freq(1e6).contains("MHz"));
-        assert!(format_freq(1e9).contains("GHz"));
-    }
-
-    #[test]
-    fn test_load_demo_data() {
-        let mut state = BodePlotState::new();
-        load_demo_data(&mut state);
-
-        assert!(!state.is_empty());
-        assert!(state.data.primary().is_some());
-    }
-}

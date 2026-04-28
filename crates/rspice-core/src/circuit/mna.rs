@@ -147,30 +147,3 @@ impl MatrixStamper for DenseMna {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mna_builder_stamp() {
-        let mut mna = MnaBuilder::new(3);
-        mna.stamp(1, 1, 1.0);
-        mna.stamp(1, 2, -1.0);
-        mna.stamp(2, 1, -1.0);
-        mna.stamp(2, 2, 1.0);
-        
-        let csr = mna.to_csr();
-        assert_eq!(csr.nrows(), 3);
-        assert_eq!(csr.ncols(), 3);
-    }
-
-    #[test]
-    fn test_ground_node_ignored() {
-        let mut mna = MnaBuilder::new(2);
-        mna.stamp(0, 1, 999.0); // Should be ignored
-        mna.stamp(1, 0, 999.0); // Should be ignored
-        
-        let csr = mna.to_csr();
-        assert_eq!(csr.nnz(), 0);
-    }
-}

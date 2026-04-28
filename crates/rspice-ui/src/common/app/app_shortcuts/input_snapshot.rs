@@ -49,14 +49,6 @@ impl ShortcutInputSnapshot {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn from_keys(pressed_keys: &[Key], modifiers: Modifiers, has_focus: bool) -> Self {
-        Self {
-            pressed_keys: pressed_keys.to_vec(),
-            modifiers,
-            has_focus,
-        }
-    }
 
     pub(super) fn key_pressed(&self, key: Key) -> bool {
         self.pressed_keys.contains(&key)

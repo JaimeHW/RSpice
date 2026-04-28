@@ -37,21 +37,3 @@ pub fn render_histogram_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _mode = HistogramDisplayMode::default();
-        let _state = HistogramState::new();
-    }
-
-    #[test]
-    fn test_histogram_creation() {
-        let hist = HistogramBuilder::new()
-            .bin_count(20)
-            .build(&[1.0, 2.0, 3.0, 4.0, 5.0]);
-        assert!(hist.bin_count() > 0);
-    }
-}

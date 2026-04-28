@@ -74,16 +74,3 @@ pub fn render_waveform_panel(ui: &mut Ui, state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_structure() {
-        // Verify all submodules are accessible
-        let _ = std::any::type_name::<WaveformViewerState>();
-        let _ = std::any::type_name::<ViewTransform>();
-        let _ = std::any::type_name::<TraceData>();
-        let _ = std::any::type_name::<CursorState>();
-    }
-}

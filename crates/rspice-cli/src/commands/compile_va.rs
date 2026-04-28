@@ -135,7 +135,3 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    // Verilog-A compilation tests would require fixture files
-}

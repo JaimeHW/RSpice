@@ -3010,16 +3010,6 @@ impl HbSolver {
     }
 
     /// Compute full residual including linear and nonlinear contributions
-    #[cfg(test)]
-    fn compute_full_residual(&mut self, state: &mut HbSolverState) {
-        // Start with linear residual
-        self.compute_linear_residual(state);
-
-        // Add nonlinear device currents (evaluated in time domain via FFT)
-        if self.has_nonlinear_devices() {
-            self.add_nonlinear_residual(state);
-        }
-    }
 
     /// Add nonlinear device contributions to residual
     fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) {
@@ -3302,66 +3292,6 @@ impl HbSolver {
     ///
     /// Starts with Î± = 1 (full Newton step), reduces if residual doesn't decrease.
     /// This is critical for convergence on highly nonlinear circuits.
-    #[cfg(test)]
-    fn apply_line_search(
-        &mut self,
-        state: &mut HbSolverState,
-        delta_x: &[Vec<Complex64>],
-    ) -> Result<(), HbError> {
-        let initial_norm = state.residual_norm;
-        let armijo_c = 1e-4; // Sufficient decrease parameter
-        let min_alpha = 0.01; // Minimum step size
-
-        let mut alpha = 1.0;
-        let mut best_alpha = alpha;
-        let mut best_norm = f64::INFINITY;
-
-        // Save original solution
-        let x_orig: Vec<Vec<Complex64>> = state.x.clone();
-
-        // Try different step sizes
-        while alpha >= min_alpha {
-            // Apply update: X_new = X_old + Î± * Î”X
-            for (node, dx_node) in delta_x.iter().enumerate() {
-                for (k, &dx) in dx_node.iter().enumerate() {
-                    if node < state.x.len() && k < state.x[node].len() {
-                        state.x[node][k] = x_orig[node][k] + alpha * dx;
-                    }
-                }
-            }
-
-            // Recompute residual
-            self.compute_full_residual(state);
-
-            // Check sufficient decrease (Armijo condition)
-            if state.residual_norm < initial_norm * (1.0 - armijo_c * alpha) {
-                return Ok(());
-            }
-
-            // Track best step
-            if state.residual_norm < best_norm {
-                best_norm = state.residual_norm;
-                best_alpha = alpha;
-            }
-
-            // Reduce step size
-            alpha *= 0.5;
-        }
-
-        // Use best step found even if Armijo not satisfied
-        if best_alpha < 1.0 {
-            for (node, dx_node) in delta_x.iter().enumerate() {
-                for (k, &dx) in dx_node.iter().enumerate() {
-                    if node < state.x.len() && k < state.x[node].len() {
-                        state.x[node][k] = x_orig[node][k] + best_alpha * dx;
-                    }
-                }
-            }
-            self.compute_full_residual(state);
-        }
-
-        Ok(())
-    }
 
     /// Legacy newton_step for backward compatibility
     pub fn newton_step(

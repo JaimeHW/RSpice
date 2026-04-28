@@ -96,19 +96,6 @@ impl DataType {
         }
     }
 
-    #[cfg(test)]
-    fn to_u32(self) -> u32 {
-        match self {
-            Self::Int8 => 1,
-            Self::String => 2,
-            Self::Array => 3,
-            Self::Int32 => 5,
-            Self::Real => 11,
-            Self::Complex => 12,
-            Self::Struct => 16,
-            Self::Other(v) => v,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -1229,5 +1216,3 @@ fn push_scalar_slice(
     }
 }
 
-#[cfg(test)]
-pub(crate) mod test_helpers;

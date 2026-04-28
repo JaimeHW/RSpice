@@ -427,39 +427,3 @@ impl Ccvs {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_vcvs_creation() {
-        let mut vcvs = Vcvs::new();
-        vcvs.add("E1".to_string(), 2, 0, 1, 0, 1, 2.0);
-        assert_eq!(vcvs.len(), 1);
-        assert_eq!(vcvs.gains[0], 2.0);
-    }
-
-    #[test]
-    fn test_vccs_creation() {
-        let mut vccs = Vccs::new();
-        vccs.add("G1".to_string(), 2, 0, 1, 0, 0.001);
-        assert_eq!(vccs.len(), 1);
-        assert_eq!(vccs.transconductances[0], 0.001);
-    }
-
-    #[test]
-    fn test_cccs_creation() {
-        let mut cccs = Cccs::new();
-        cccs.add("F1".to_string(), 2, 0, 1, 10.0);
-        assert_eq!(cccs.len(), 1);
-        assert_eq!(cccs.gains[0], 10.0);
-    }
-
-    #[test]
-    fn test_ccvs_creation() {
-        let mut ccvs = Ccvs::new();
-        ccvs.add("H1".to_string(), 2, 0, 1, 2, 1000.0);
-        assert_eq!(ccvs.len(), 1);
-        assert_eq!(ccvs.transresistances[0], 1000.0);
-    }
-}

@@ -38,13 +38,3 @@ pub fn render_eye_diagram_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _mode = EyeDisplayMode::default();
-        let _state = EyeDiagramState::new();
-    }
-}

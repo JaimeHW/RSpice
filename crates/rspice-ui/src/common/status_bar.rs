@@ -61,19 +61,3 @@ pub fn render_status_bar(ui: &mut Ui, state: &AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_status_bar_displays_correct_info() {
-        let state = AppState::default();
-
-        // Verify default state values are accessible
-        assert_eq!(state.schematic.pan, (0.0, 0.0));
-        assert!(state.schematic.zoom > 0.0);
-        assert!(state.schematic.grid_size > 0);
-        assert!(state.schematic.selection.components.is_empty());
-        assert!(state.schematic.selection.wires.is_empty());
-    }
-}

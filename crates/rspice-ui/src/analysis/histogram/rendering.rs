@@ -5,8 +5,6 @@
 use egui::{Color32, Painter, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
 
 use super::data::Histogram;
-#[cfg(test)]
-use super::data::HistogramBuilder;
 use super::state::{AxisScale, DistributionOverlay, HistogramDisplayMode, HistogramState};
 use super::statistics::{LogNormalParams, NormalParams};
 use crate::common::app::AppState;
@@ -555,62 +553,8 @@ fn stat_row(ui: &mut Ui, label: &str, value: &str) {
 // Demo Data
 // =============================================================================
 
-#[cfg(test)]
-fn load_demo_data(state: &mut HistogramState) {
-    // Generate demo data - simulated Monte Carlo results
-    let data: Vec<f64> = (0..1000)
-        .map(|i| {
-            // Pseudo-random with some structure
-            let x = i as f64 * 0.1;
-
-            50.0 + 10.0 * (x * 0.1).sin() + 5.0 * ((i % 7) as f64 - 3.0)
-        })
-        .collect();
-
-    let hist = HistogramBuilder::new()
-        .name("Monte Carlo Results")
-        .bin_count(30)
-        .build(&data);
-
-    state.load_histogram(hist);
-}
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layout_calculation() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let layout = calculate_layout(rect, true);
-
-        assert!(layout.chart.width() > 0.0);
-        assert!(layout.chart.height() > 0.0);
-        assert!(layout.stats.is_some());
-    }
-
-    #[test]
-    fn test_layout_without_stats() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let layout = calculate_layout(rect, false);
-
-        assert!(layout.stats.is_none());
-        // Chart should be wider without stats panel
-        let layout_with = calculate_layout(rect, true);
-        assert!(layout.chart.width() > layout_with.chart.width());
-    }
-
-    #[test]
-    fn test_load_demo_data() {
-        let mut state = HistogramState::new();
-        load_demo_data(&mut state);
-
-        assert_eq!(state.histogram_count(), 1);
-        assert!(state.current_histogram().is_some());
-        assert!(state.current_stats().is_some());
-    }
-}

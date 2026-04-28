@@ -627,12 +627,6 @@ struct TraceBucket {
     max: Option<TraceScreenSample>,
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone, Default)]
-struct TracePolyline {
-    points: Vec<Pos2>,
-    visible_samples: usize,
-}
 
 #[derive(Debug, Default)]
 struct TraceRenderScratch {
@@ -770,19 +764,6 @@ fn collect_bucket_points(points: &mut Vec<Pos2>, bucket: &TraceBucket) {
     }
 }
 
-#[cfg(test)]
-fn build_trace_polyline(
-    layout: &ViewerLayout,
-    view: &ViewTransform,
-    trace: &TraceData,
-) -> TracePolyline {
-    let mut scratch = TraceRenderScratch::default();
-    let visible_samples = build_trace_polyline_in_scratch(layout, view, trace, &mut scratch);
-    TracePolyline {
-        points: scratch.points,
-        visible_samples,
-    }
-}
 
 fn build_trace_polyline_in_scratch(
     layout: &ViewerLayout,

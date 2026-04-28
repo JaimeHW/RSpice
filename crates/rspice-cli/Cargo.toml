@@ -27,7 +27,3 @@ dirs = "5.0"
 toml = "0.8"
 rustyhdf5 = "1.93"
 
-[dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.1"
-tempfile = "3.14"

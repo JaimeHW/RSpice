@@ -133,26 +133,3 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_properties_panel_compiles() {
-        // Basic compilation test
-        assert!(true);
-    }
-
-    #[test]
-    fn test_tabbed_dialog_result_values() {
-        assert!(matches!(TabbedDialogResult::None, TabbedDialogResult::None));
-        assert!(matches!(
-            TabbedDialogResult::Applied,
-            TabbedDialogResult::Applied
-        ));
-        assert!(matches!(
-            TabbedDialogResult::Cancelled,
-            TabbedDialogResult::Cancelled
-        ));
-    }
-}

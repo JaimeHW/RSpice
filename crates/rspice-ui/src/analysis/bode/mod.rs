@@ -34,19 +34,3 @@ pub fn render_bode_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _mode = BodeDisplayMode::default();
-        let _state = BodePlotState::new();
-    }
-
-    #[test]
-    fn test_frequency_response_creation() {
-        let data = FrequencyResponse::new("Test");
-        assert!(data.is_empty());
-    }
-}

@@ -6,8 +6,6 @@ use egui::{
     Color32, CursorIcon, FontId, Pos2, Rect, Rounding, Sense, Shape, Stroke, Ui, UiBuilder, Vec2,
 };
 use std::cell::RefCell;
-#[cfg(test)]
-use std::f64::consts::PI;
 
 use super::data::{FftData, FftPoint, SpectrumNormalization};
 use super::state::{FftState, FrequencyScale, InputFidelity, MagnitudeScale};
@@ -1101,13 +1099,6 @@ fn render_trace(painter: &egui::Painter, rect: Rect, data: &FftData, state: &Fft
     });
 }
 
-#[cfg(test)]
-fn segment_is_trivially_outside_rect(x0: f32, y0: f32, x1: f32, y1: f32, rect: Rect) -> bool {
-    (x0 < rect.min.x && x1 < rect.min.x)
-        || (x0 > rect.max.x && x1 > rect.max.x)
-        || (y0 < rect.min.y && y1 < rect.min.y)
-        || (y0 > rect.max.y && y1 > rect.max.y)
-}
 
 #[derive(Debug, Clone, Copy)]
 struct SpectrumScreenSample {
@@ -1238,12 +1229,6 @@ fn collect_spectrum_bucket_points(points: &mut Vec<Pos2>, bucket: &SpectrumBucke
     }
 }
 
-#[cfg(test)]
-fn build_spectrum_polyline(rect: Rect, data: &FftData, state: &FftState) -> Vec<Pos2> {
-    let mut scratch = SpectrumRenderScratch::default();
-    build_spectrum_polyline_in_scratch(rect, data, state, &mut scratch);
-    scratch.points
-}
 
 fn build_spectrum_polyline_in_scratch(
     rect: Rect,
@@ -1321,63 +1306,6 @@ fn build_spectrum_polyline_in_scratch(
     visible_bins
 }
 
-#[cfg(test)]
-fn clip_line_segment_to_rect(start: Pos2, end: Pos2, rect: Rect) -> Option<[Pos2; 2]> {
-    if !(start.x.is_finite() && start.y.is_finite() && end.x.is_finite() && end.y.is_finite()) {
-        return None;
-    }
-
-    let dx = end.x - start.x;
-    let dy = end.y - start.y;
-    let mut t_min = 0.0f32;
-    let mut t_max = 1.0f32;
-
-    // Liang-Barsky clipping against left, right, top, bottom boundaries.
-    for (p, q) in [
-        (-dx, start.x - rect.min.x),
-        (dx, rect.max.x - start.x),
-        (-dy, start.y - rect.min.y),
-        (dy, rect.max.y - start.y),
-    ] {
-        if p.abs() <= f32::EPSILON {
-            if q < 0.0 {
-                return None;
-            }
-            continue;
-        }
-
-        let t = q / p;
-        if p < 0.0 {
-            if t > t_max {
-                return None;
-            }
-            if t > t_min {
-                t_min = t;
-            }
-        } else {
-            if t < t_min {
-                return None;
-            }
-            if t < t_max {
-                t_max = t;
-            }
-        }
-    }
-
-    if t_max < t_min {
-        return None;
-    }
-
-    let clipped_start = Pos2::new(
-        (start.x + dx * t_min).clamp(rect.min.x, rect.max.x),
-        (start.y + dy * t_min).clamp(rect.min.y, rect.max.y),
-    );
-    let clipped_end = Pos2::new(
-        (start.x + dx * t_max).clamp(rect.min.x, rect.max.x),
-        (start.y + dy * t_max).clamp(rect.min.y, rect.max.y),
-    );
-    Some([clipped_start, clipped_end])
-}
 
 #[derive(Debug, Clone)]
 struct PlotCursorLabelSpec {
@@ -2248,34 +2176,6 @@ fn format_freq(freq: f64) -> String {
 // Demo Data
 // =============================================================================
 
-#[cfg(test)]
-fn load_demo_data(state: &mut FftState) {
-    // Generate demo signal: 1kHz fundamental + harmonics + noise
-    let fs = 44100.0;
-    let n = 4096;
-    let f0 = 1000.0;
-    let time: Vec<f64> = (0..n).map(|i| i as f64 / fs).collect();
-
-    let data: Vec<f64> = (0..n)
-        .map(|i| {
-            let t = i as f64 / fs;
-            let fundamental = (2.0 * PI * f0 * t).sin();
-            let h2 = 0.05 * (2.0 * PI * 2.0 * f0 * t).sin(); // 5% 2nd
-            let h3 = 0.02 * (2.0 * PI * 3.0 * f0 * t).sin(); // 2% 3rd
-            let noise = (i as f64 * 12345.6789).sin() * 0.001;
-            fundamental + h2 + h3 + noise
-        })
-        .collect();
-
-    if let Some(prepared) = crate::analysis::fft::prepare_fft_input_with_options(
-        "Demo Signal",
-        &time,
-        &data,
-        state.input_options_for_waveform(&time),
-    ) {
-        state.load_prepared_input(prepared);
-    }
-}
 
 // =============================================================================
 // Tests

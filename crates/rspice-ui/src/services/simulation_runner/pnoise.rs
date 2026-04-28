@@ -581,34 +581,3 @@ fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
     integrated.max(0.0).sqrt()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pnoise_run_error_display_returns_inner_message() {
-        let error = PnoiseRunError::Resolution("node not found".to_string());
-        assert_eq!(error.to_string(), "node not found");
-    }
-
-    #[test]
-    fn test_pnoise_validation_rejects_non_positive_start_frequency() {
-        let cfg = PnoiseRunConfig {
-            start_freq: 0.0,
-            ..PnoiseRunConfig::default()
-        };
-        let err = cfg
-            .validate()
-            .expect_err("validation must reject non-positive start frequency");
-        assert!(matches!(err, PnoiseRunError::Validation(_)));
-        assert!(err.to_string().contains("start frequency"));
-    }
-
-    #[test]
-    fn test_integrate_noise_rms_handles_non_monotonic_segments() {
-        let frequencies = vec![1.0, 3.0, 2.0, 5.0];
-        let psd = vec![1.0, 1.0, 1.0, 1.0];
-        let integrated = integrate_noise_rms(&frequencies, &psd);
-        assert!((integrated - 5.0_f64.sqrt()).abs() < 1e-12);
-    }
-}

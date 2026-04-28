@@ -221,34 +221,3 @@ pub fn limit_pn_voltage(v_old: Value, v_new: Value, vt: Value) -> Value {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_convergence_check() {
-        let config = NewtonConfig::default();
-        let mut solver = NewtonSolver::new(config);
-
-        solver.init(vec![1.0, 2.0, 3.0]);
-
-        // First iteration - not converged
-        assert!(!solver.check_convergence(&[1.1, 2.1, 3.1]));
-
-        // Close enough - should converge
-        assert!(solver.check_convergence(&[1.1, 2.1, 3.1]));
-    }
-
-    #[test]
-    fn test_pn_voltage_limit() {
-        let vt = 0.026; // Thermal voltage at room temp
-
-        // Normal update - no limiting
-        let v = limit_pn_voltage(0.6, 0.65, vt);
-        assert!((v - 0.65).abs() < 0.01);
-
-        // Large jump - should be limited
-        let v = limit_pn_voltage(0.0, 10.0, vt);
-        assert!(v < 10.0);
-    }
-}

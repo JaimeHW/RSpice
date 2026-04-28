@@ -94,11 +94,6 @@ pub(super) fn veriloga_model_cache() -> &'static RwLock<HashMap<PathBuf, CachedV
     CACHE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-#[cfg(all(test, feature = "veriloga"))]
-pub(super) fn veriloga_cache_test_guard() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-}
 
 #[cfg(feature = "veriloga")]
 pub(super) fn clear_in_memory_veriloga_cache() {

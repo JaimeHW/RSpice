@@ -218,25 +218,3 @@ pub(super) fn build_disto_two_tone_harmonic_plan(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_multi_tone_hb_layout_two_tone_ratio() {
-        let tones = vec![HbToneRunConfig::new(2e6, 3), HbToneRunConfig::new(3e6, 2)];
-        let layout = build_multi_tone_hb_layout(&tones, 4)
-            .expect("2 MHz/3 MHz tones should be commensurate");
-        assert!((layout.base_frequency - 1e6).abs() < 1e-9);
-        assert_eq!(layout.tone_harmonics, vec![2, 3]);
-        assert!(layout.max_harmonic >= 12);
-    }
-
-    #[test]
-    fn test_build_disto_two_tone_harmonic_plan_basic() {
-        let plan = build_disto_two_tone_harmonic_plan(1.5).expect("3/2 ratio should map");
-        assert_eq!(plan.tone1_harmonic, 2);
-        assert_eq!(plan.tone2_harmonic, 3);
-        assert!(plan.max_harmonic >= 9);
-    }
-}

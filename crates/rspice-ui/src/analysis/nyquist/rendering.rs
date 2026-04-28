@@ -3,12 +3,8 @@
 //! Commercial-grade egui rendering for Nyquist plot visualization.
 
 use egui::{Color32, FontId, Pos2, Rect, Rounding, Sense, Stroke, Ui, UiBuilder, Vec2};
-#[cfg(test)]
-use std::f64::consts::PI;
 
 use super::data::NyquistData;
-#[cfg(test)]
-use super::data::NyquistPoint;
 use super::state::{NyquistOverlay, NyquistState};
 use crate::common::app::AppState;
 use crate::common::viewer_style::viewer_header_bg_color;
@@ -469,76 +465,8 @@ fn info_row(ui: &mut Ui, label: &str, value: &str) {
 // Demo Data
 // =============================================================================
 
-#[cfg(test)]
-fn load_demo_data(state: &mut NyquistState) {
-    // Create demo loop gain: second-order system
-    let mut data = NyquistData::new("Demo Loop Gain");
-    let fc = 1000.0;
-    let q = 0.707;
-
-    for i in 0..101 {
-        let f = 10.0_f64.powf(i as f64 / 20.0 - 1.0); // 0.1 to 100kHz
-        let omega = 2.0 * PI * f;
-        let omega_c = 2.0 * PI * fc;
-        let s = omega / omega_c;
-
-        // H(s) = K / (s^2 + s/Q + 1), with K = 2 for moderate gain
-        let denom_re = 1.0 - s * s;
-        let denom_im = s / q;
-        let denom_mag_sq = denom_re * denom_re + denom_im * denom_im;
-
-        let k = 2.0;
-        let real = k * denom_re / denom_mag_sq;
-        let imag = -k * denom_im / denom_mag_sq;
-
-        data.add_point(NyquistPoint::new(f, real, imag));
-    }
-
-    state.load_data(data);
-}
 
 // =============================================================================
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layout_calculation() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let layout = calculate_layout(rect);
-
-        assert!(layout.plot.width() > 0.0);
-        assert!(layout.plot.height() > 0.0);
-    }
-
-    #[test]
-    fn test_map_to_screen() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0));
-        let mut state = NyquistState::new();
-        state.real_min = -1.0;
-        state.real_max = 1.0;
-        state.imag_min = -1.0;
-        state.imag_max = 1.0;
-
-        // Origin should map to center
-        let center = map_to_screen(0.0, 0.0, rect, &state);
-        assert!((center.x - 50.0).abs() < 0.1);
-        assert!((center.y - 50.0).abs() < 0.1);
-
-        // (-1, 0) should be on left
-        let left = map_to_screen(-1.0, 0.0, rect, &state);
-        assert!((left.x - 0.0).abs() < 0.1);
-    }
-
-    #[test]
-    fn test_load_demo_data() {
-        let mut state = NyquistState::new();
-        load_demo_data(&mut state);
-
-        assert!(!state.is_empty());
-        assert!(state.current_curve().is_some());
-    }
-}

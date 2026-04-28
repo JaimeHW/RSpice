@@ -33,39 +33,6 @@ pub(crate) enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
-    #[cfg(test)]
-    pub(crate) const ALL: [ShortcutCommand; 30] = [
-        ShortcutCommand::FileNew,
-        ShortcutCommand::FileOpen,
-        ShortcutCommand::FileSave,
-        ShortcutCommand::EditUndo,
-        ShortcutCommand::EditRedo,
-        ShortcutCommand::EditCopy,
-        ShortcutCommand::EditPaste,
-        ShortcutCommand::EditCut,
-        ShortcutCommand::EditDelete,
-        ShortcutCommand::EditSelectAll,
-        ShortcutCommand::ToggleBrowserPanel,
-        ShortcutCommand::ToggleLogPanel,
-        ShortcutCommand::ShowShortcutsHelp,
-        ShortcutCommand::ToolSelect,
-        ShortcutCommand::ToolWire,
-        ShortcutCommand::PlaceGround,
-        ShortcutCommand::PlaceVoltageSource,
-        ShortcutCommand::PlaceCurrentSource,
-        ShortcutCommand::PlaceCapacitor,
-        ShortcutCommand::PlaceInductor,
-        ShortcutCommand::PlaceDiode,
-        ShortcutCommand::PlaceNmos,
-        ShortcutCommand::PlaceNpnBjt,
-        ShortcutCommand::ToolProbe,
-        ShortcutCommand::PlaceResistor,
-        ShortcutCommand::RotateSelectionOrPreview,
-        ShortcutCommand::MirrorSelectionHorizontal,
-        ShortcutCommand::MirrorSelectionVertical,
-        ShortcutCommand::OpenPropertiesEditor,
-        ShortcutCommand::EscapeCancel,
-    ];
 
     pub(crate) fn display_name(self) -> &'static str {
         match self {

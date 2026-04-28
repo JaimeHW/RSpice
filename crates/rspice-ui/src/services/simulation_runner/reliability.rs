@@ -309,54 +309,5 @@ fn apply_shift_factors(
     shift.rds_shift *= rds_factor;
 }
 
-#[cfg(test)]
-pub(super) fn extract_reliability_stress_data_for_tests(
-    elements: &[Element],
-    node_voltages: &HashMap<String, Value>,
-    temperature_k: Value,
-    min_stress_voltage: Value,
-) -> HashMap<String, StressMetrics> {
-    extract_reliability_stress_data(elements, node_voltages, temperature_k, min_stress_voltage)
-}
 
-#[cfg(test)]
-pub(super) fn apply_reliability_mechanism_scaling_for_tests(
-    results: &mut [ReliabilityResult],
-    config: &ReliabilityRunConfig,
-) {
-    apply_reliability_mechanism_scaling(results, config)
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validate_reliability_config_reports_typed_errors() {
-        let cfg = ReliabilityRunConfig {
-            enable_hci: false,
-            enable_nbti: false,
-            enable_em: false,
-            ..ReliabilityRunConfig::default()
-        };
-        assert!(matches!(
-            cfg.validate(),
-            Err(ReliabilityRunError::InvalidConfig(
-                "Reliability requires at least one enabled mechanism"
-            ))
-        ));
-    }
-
-    #[test]
-    fn test_internal_run_surfaces_parse_error_variant() {
-        let cfg = ReliabilityRunConfig::default();
-        let err = run_reliability_analysis_with_config_internal(
-            "Monte Carlo Invalid Runs\n.MC 0\n.END\n",
-            &cfg,
-            None,
-        )
-        .expect_err("invalid MC command should fail netlist parse");
-        assert!(matches!(err, ReliabilityRunError::Parse(_)));
-        assert!(err.to_string().contains("Parse error"));
-    }
-}

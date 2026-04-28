@@ -1,7 +1,6 @@
 use super::*;
 
 impl SimulationController {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn update_waveforms(
         &mut self,
         state: &mut AppState,

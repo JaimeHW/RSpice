@@ -2,21 +2,7 @@
 //!
 //! Async wrapper around rspice-core for running simulations from the GUI.
 
-#[cfg(test)]
-use crate::output_spec::{OutputSpec, OutputVoltageSpec, resolve_node_or_ground_index};
-#[cfg(test)]
-use crate::simulation::reliability_engine::{ParamShift, ReliabilityResult, StressMetrics};
-#[cfg(test)]
-use num_complex::Complex64;
-#[cfg(test)]
-use rspice_core::Value;
-#[cfg(test)]
-use rspice_core::analysis::ac::AcResult;
-#[cfg(test)]
-use rspice_core::engine::Engine;
 use rspice_core::engine::SimulationConfig;
-#[cfg(test)]
-use rspice_core::netlist::{Element, ElementKind, StepSweep};
 use rspice_core::{SimulationConfigOverrides, resolve_simulation_config};
 
 mod harmonic_basis;
@@ -47,8 +33,6 @@ mod tf;
 mod transient;
 pub use ac::{AcData, run_ac_analysis, run_ac_analysis_with_source_path};
 pub use dc_sweep::{DcSweepData, run_dc_sweep, run_dc_sweep_with_source_path};
-#[cfg(test)]
-use disto::interpolate_magnitude_at_for_tests;
 pub use disto::{
     DistoData, DistoFrequencySweep, DistoRunConfig, DistoTrace, run_disto_analysis,
     run_disto_analysis_with_source_path,
@@ -87,8 +71,6 @@ pub use pnoise::{
     run_pnoise_analysis_with_config, run_pnoise_analysis_with_config_and_source_path,
     run_pnoise_analysis_with_source_path,
 };
-#[cfg(test)]
-use pnoise_sideband::{build_pnoise_sideband_translated_frequencies, fold_sideband_samples};
 pub use pole_zero::{
     PoleZeroData, run_pole_zero_analysis, run_pole_zero_analysis_with_source_path,
 };
@@ -131,51 +113,11 @@ pub use transient::{
     run_transient_analysis, run_transient_analysis_with_source_path,
 };
 
-#[cfg(test)]
-fn inject_param_overrides(
-    netlist_text: &str,
-    vars: &std::collections::HashMap<String, Value>,
-) -> String {
-    optimization::inject_param_overrides_for_tests(netlist_text, vars)
-}
 
-#[cfg(test)]
-fn format_param_override_value(value: Value) -> String {
-    optimization::format_param_override_value_for_tests(value)
-}
 
-#[cfg(test)]
-fn extract_reliability_stress_data(
-    elements: &[Element],
-    node_voltages: &std::collections::HashMap<String, Value>,
-    temperature_k: Value,
-    min_stress_voltage: Value,
-) -> std::collections::HashMap<String, StressMetrics> {
-    reliability::extract_reliability_stress_data_for_tests(
-        elements,
-        node_voltages,
-        temperature_k,
-        min_stress_voltage,
-    )
-}
 
-#[cfg(test)]
-fn apply_reliability_mechanism_scaling(
-    results: &mut [ReliabilityResult],
-    config: &ReliabilityRunConfig,
-) {
-    reliability::apply_reliability_mechanism_scaling_for_tests(results, config)
-}
 
-#[cfg(test)]
-fn expand_step_sweep_values(sweep: &StepSweep) -> Result<Vec<Value>, String> {
-    sweeps::expand_step_sweep_values_for_tests(sweep)
-}
 
-#[cfg(test)]
-fn extract_temp_points(netlist: &rspice_core::Netlist) -> Vec<Value> {
-    sweeps::extract_temp_points_for_tests(netlist)
-}
 
 // =============================================================================
 // Platform-agnostic timing utilities

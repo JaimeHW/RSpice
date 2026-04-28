@@ -34,10 +34,6 @@ cranelift-native = { version = "0.115", optional = true }
 
 [build-dependencies]
 
-[dev-dependencies]
-approx.workspace = true
-env_logger.workspace = true
-
 [features]
 default = []
 # Enable Verilog-AMS mixed-signal support

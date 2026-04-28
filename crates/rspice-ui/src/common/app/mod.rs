@@ -48,8 +48,6 @@ mod app_dialog_state;
 pub use app_dialog_state::DialogState;
 
 mod app_serialization;
-#[cfg(test)]
-use app_serialization::{PanelSizesSer, PanelVisibilitySer, ViewerWorkspaceSer};
 
 mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
@@ -415,25 +413,7 @@ impl eframe::App for RSpiceApp {
 }
 
 impl RSpiceApp {
-    #[cfg(test)]
-    pub(super) fn new_for_tests(state: AppState) -> Self {
-        Self {
-            state,
-            first_frame: false,
-            symbol_library: None,
-            simulation_controller: crate::simulation::SimulationController::new(),
-            file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
-            export_workflow_io: Box::new(crate::common::export_workflow::NativeExportWorkflowIo),
-        }
-    }
 
-    #[cfg(test)]
-    fn set_file_workflow_io_for_test(
-        &mut self,
-        io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
-    ) {
-        self.file_workflow_io = io;
-    }
 
     fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.exit_requested {

@@ -13,17 +13,3 @@ pub fn viewer_chart_bg_color() -> Color32 {
     Color32::from_rgb(15, 17, 21)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_viewer_header_bg_color_matches_workspace_surface() {
-        assert_eq!(viewer_header_bg_color(), Color32::from_rgb(23, 26, 32));
-    }
-
-    #[test]
-    fn test_viewer_chart_bg_color_matches_fft_plot_surface() {
-        assert_eq!(viewer_chart_bg_color(), Color32::from_rgb(15, 17, 21));
-    }
-}

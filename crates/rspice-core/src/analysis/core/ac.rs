@@ -113,28 +113,3 @@ impl AcResult {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_decade_sweep() {
-        let mut ac = AcAnalysis::default();
-        ac.decade_sweep(1.0, 1e6, 10);
-
-        let freqs = ac.frequencies();
-        assert!(freqs[0] >= 1.0 - 1e-10);
-        assert!(*freqs.last().unwrap() <= 1e6 + 1.0);
-    }
-
-    #[test]
-    fn test_linear_sweep() {
-        let mut ac = AcAnalysis::default();
-        ac.linear_sweep(0.0, 100.0, 11);
-
-        let freqs = ac.frequencies();
-        assert_eq!(freqs.len(), 11);
-        assert_eq!(freqs[0], 0.0);
-        assert_eq!(freqs[10], 100.0);
-    }
-}

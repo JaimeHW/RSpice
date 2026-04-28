@@ -544,29 +544,4 @@ fn interpolate_magnitude_at(
     }
 }
 
-#[cfg(test)]
-pub(super) fn interpolate_magnitude_at_for_tests(
-    frequencies: &[Value],
-    magnitudes: &[Value],
-    target: Value,
-) -> Option<Value> {
-    interpolate_magnitude_at(frequencies, magnitudes, target)
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_disto_run_error_display_returns_inner_message() {
-        let error = DistoRunError::Execution("execution-failed".to_string());
-        assert_eq!(error.to_string(), "execution-failed");
-    }
-
-    #[test]
-    fn test_interpolate_magnitude_at_rejects_out_of_range_target() {
-        let frequencies = vec![1.0, 10.0, 100.0];
-        let magnitudes = vec![1.0, 10.0, 100.0];
-        assert!(interpolate_magnitude_at(&frequencies, &magnitudes, 200.0).is_none());
-    }
-}

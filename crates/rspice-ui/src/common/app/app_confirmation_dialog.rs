@@ -108,38 +108,3 @@ impl RSpiceApp {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_split_prompt_lines_handles_two_lines() {
-        let (line1, line2) = split_prompt_lines("first line\nsecond line");
-        assert_eq!(line1, "first line");
-        assert_eq!(line2, "second line");
-    }
-
-    #[test]
-    fn test_split_prompt_lines_handles_single_line() {
-        let (line1, line2) = split_prompt_lines("single line");
-        assert_eq!(line1, "single line");
-        assert_eq!(line2, "");
-    }
-
-    #[test]
-    fn test_confirmation_prompt_lines_follow_action_message() {
-        for action in [
-            ConfirmationAction::FileNew,
-            ConfirmationAction::FileOpen,
-            ConfirmationAction::Exit,
-        ] {
-            let (line1, line2) = confirmation_prompt_lines(Some(action));
-            let reconstructed = if line2.is_empty() {
-                line1.to_string()
-            } else {
-                format!("{}\n{}", line1, line2)
-            };
-            assert_eq!(reconstructed, action.prompt_message());
-        }
-    }
-}

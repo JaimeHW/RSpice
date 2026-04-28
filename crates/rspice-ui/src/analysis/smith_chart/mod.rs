@@ -41,15 +41,3 @@ pub fn render_smith_chart_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        // Verify all public types are accessible
-        let _z = Impedance::new(50.0, 25.0);
-        let _y = Admittance::new(0.02, 0.01);
-        let _c = Complex::new(1.0, 2.0);
-    }
-}

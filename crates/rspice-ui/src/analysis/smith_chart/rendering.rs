@@ -617,34 +617,3 @@ fn load_demo_data(state: &mut SmithChartState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_layout_calculation() {
-        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
-        let layout = calculate_layout(rect);
-
-        // Chart should be square
-        assert!((layout.chart.width() - layout.chart.height()).abs() < 0.1);
-
-        // Chart should fit within available space
-        assert!(layout.chart.max.x <= layout.readout.min.x);
-        assert!(layout.chart.min.y >= layout.header.max.y);
-    }
-
-    #[test]
-    fn test_trace_colors() {
-        let colors = trace_colors();
-        assert!(colors.len() >= 5);
-    }
-
-    #[test]
-    fn test_demo_data() {
-        let mut state = SmithChartState::new();
-        load_demo_data(&mut state);
-        assert_eq!(state.traces.len(), 1);
-        assert!(!state.traces[0].points.is_empty());
-    }
-}

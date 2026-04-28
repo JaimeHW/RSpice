@@ -346,12 +346,6 @@ impl SimulationController {
             >= 2
     }
 
-    #[cfg(test)]
-    pub(super) fn preferred_viewer_for_analysis(
-        analysis_type: AnalysisType,
-    ) -> crate::viewers::ActiveViewer {
-        crate::common::analysis_navigation::preferred_viewer(analysis_type)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

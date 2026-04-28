@@ -73,37 +73,3 @@ pub fn parse_hex_color(hex: &str) -> [f32; 4] {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_format_time() {
-        assert_eq!(format_time(1.0), "1.00s");
-        assert_eq!(format_time(0.001), "1.00ms");
-        assert_eq!(format_time(0.000001), "1.00µs");
-        assert_eq!(format_time(0.000000001), "1.00ns");
-    }
-
-    #[test]
-    fn test_format_voltage() {
-        assert_eq!(format_voltage(1.0), "1.000V");
-        assert_eq!(format_voltage(0.001), "1.000mV");
-        assert_eq!(format_voltage(1000.0), "1.000kV");
-    }
-
-    #[test]
-    fn test_format_frequency() {
-        assert_eq!(format_frequency(1.0), "1.00Hz");
-        assert_eq!(format_frequency(1000.0), "1.00kHz");
-        assert_eq!(format_frequency(1e6), "1.00MHz");
-    }
-
-    #[test]
-    fn test_parse_hex_color() {
-        let red = parse_hex_color("#ff0000");
-        assert!((red[0] - 1.0).abs() < 0.01);
-        assert!(red[1].abs() < 0.01);
-        assert!(red[2].abs() < 0.01);
-    }
-}

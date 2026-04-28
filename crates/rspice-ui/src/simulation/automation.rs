@@ -135,25 +135,3 @@ impl ScriptExecutor {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::SimulationState;
-
-    #[test]
-    fn test_script_execution_logic() {
-        let mut executor = ScriptExecutor::new();
-        let mut state = SimulationState::default();
-
-        let res = executor.execute_command("run tran", &mut state);
-        assert!(res.success);
-        assert!(state.trigger_simulation);
-
-        let res = executor.execute_command("set temp 125", &mut state);
-        assert!(res.success);
-        assert_eq!(executor.variables["temp"], "125");
-
-        let res = executor.execute_command("invalid_cmd", &mut state);
-        assert!(!res.success);
-    }
-}

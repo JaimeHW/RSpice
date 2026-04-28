@@ -32,9 +32,5 @@ rspice-core = { path = "../rspice-core" }
 # For complex number support in AC results
 num-complex.workspace = true
 
-[dev-dependencies]
-# Testing utilities
-approx.workspace = true
-
 [build-dependencies]
 pyo3-build-config = { version = "0.23", features = ["resolve-config"] }

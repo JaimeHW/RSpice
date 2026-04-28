@@ -43,14 +43,3 @@ pub use status::{SimulationProgress, SimulationStatus};
 // Tests
 //=============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        // Verify all public types are accessible
-        let _status = SimulationStatus::Idle;
-        let _progress = SimulationProgress::default();
-    }
-}

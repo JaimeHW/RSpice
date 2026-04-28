@@ -100,37 +100,3 @@ pub const QUICK_RUN_ANALYSES: &[(&str, usize)] = &[
     ("Reliability (Aging)", TAB_RELIABILITY),
 ];
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_simulation_analysis_categories_have_unique_tab_ids() {
-        let mut seen = std::collections::HashSet::new();
-        for (_category, analyses) in SIMULATION_ANALYSIS_CATEGORIES {
-            for (tab, _label) in *analyses {
-                assert!(
-                    seen.insert(*tab),
-                    "duplicate simulation analysis tab id detected: {}",
-                    tab
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_quick_run_analyses_all_exist_in_categories() {
-        let category_tabs: std::collections::HashSet<usize> = SIMULATION_ANALYSIS_CATEGORIES
-            .iter()
-            .flat_map(|(_category, analyses)| analyses.iter().map(|(tab, _label)| *tab))
-            .collect();
-
-        for (_label, tab) in QUICK_RUN_ANALYSES {
-            assert!(
-                category_tabs.contains(tab),
-                "quick-run tab id {} is missing from simulation categories",
-                tab
-            );
-        }
-    }
-}

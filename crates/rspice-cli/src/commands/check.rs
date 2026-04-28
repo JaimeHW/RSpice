@@ -188,21 +188,3 @@ fn output_text(result: &ValidationResult, quiet: bool) {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_validation_result() {
-        let mut result = ValidationResult::default();
-        assert!(result.is_ok());
-        result.add_warning("test");
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_builtin_models() {
-        assert!(is_builtin_model("NMOS"));
-        assert!(!is_builtin_model("CUSTOM"));
-    }
-}

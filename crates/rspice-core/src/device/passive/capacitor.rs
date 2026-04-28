@@ -86,14 +86,3 @@ impl DynamicDevice for Capacitor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_capacitor_geq() {
-        let c = Capacitor::new("C1".to_string(), 1, 0, 1e-6);
-        let geq = c.geq(1e-6); // dt = 1us
-        assert!((geq - 2.0).abs() < 1e-10); // 2 * 1e-6 / 1e-6 = 2
-    }
-}

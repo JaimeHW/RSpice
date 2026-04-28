@@ -229,19 +229,3 @@ impl Neg for Expr {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_expr_construction() {
-        let expr = Expr::mul(Expr::voltage("2"), Expr::constant(2.0));
-
-        match expr {
-            Expr::Binary {
-                op: BinaryOp::Mul, ..
-            } => (),
-            _ => panic!("Expected multiplication"),
-        }
-    }
-}

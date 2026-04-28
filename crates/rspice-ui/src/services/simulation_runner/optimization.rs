@@ -565,15 +565,4 @@ fn is_valid_param_identifier(name: &str) -> bool {
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-#[cfg(test)]
-pub(super) fn inject_param_overrides_for_tests(
-    netlist_text: &str,
-    vars: &HashMap<String, Value>,
-) -> String {
-    inject_param_overrides(netlist_text, vars)
-}
 
-#[cfg(test)]
-pub(super) fn format_param_override_value_for_tests(value: Value) -> String {
-    format_param_override_value(value)
-}

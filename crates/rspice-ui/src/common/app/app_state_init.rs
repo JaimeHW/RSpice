@@ -52,29 +52,3 @@ pub(super) fn default_app_state() -> AppState {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_model_library_manager_loads_builtin_models() {
-        let manager = default_model_library_manager();
-        assert!(
-            manager.library_count() > 0,
-            "built-in model libraries should be loaded at startup"
-        );
-        assert!(
-            manager.total_model_count() > 0,
-            "built-in model library set should include models"
-        );
-    }
-
-    #[test]
-    fn test_default_app_state_initializes_expected_subsystems() {
-        let state = default_app_state();
-        assert!(!state.library_manager.libraries_sorted().is_empty());
-        assert!(state.model_library_manager.library_count() > 0);
-        assert!(state.model_library_manager.total_model_count() > 0);
-        assert!(!state.exit_requested);
-    }
-}

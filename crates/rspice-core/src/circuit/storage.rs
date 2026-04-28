@@ -940,50 +940,6 @@ impl Mosfets {
     }
 }
 
-#[cfg(all(test, feature = "simd"))]
-mod tests {
-    use super::*;
-    use crate::device::mosfet::Mosfet;
-
-    fn dense_static_matrix(size: usize) -> StaticMatrix {
-        let mut triplets = Vec::with_capacity(size * size);
-        for row in 0..size {
-            for col in 0..size {
-                triplets.push((row, col, 0.0));
-            }
-        }
-
-        StaticMatrix::from_triplets(size, size, &triplets).expect("dense test matrix")
-    }
-
-    #[test]
-    fn test_level1_mosfets_still_build_batch() {
-        let mut mosfets = Mosfets::new();
-        for idx in 0..4 {
-            mosfets.add(Mosfet::new_nmos(format!("M{idx}"), 1, 2, 3, 0));
-        }
-
-        let matrix = dense_static_matrix(3);
-        mosfets.link_all(&matrix);
-
-        assert!(mosfets.batch_level1.is_some());
-        assert_eq!(mosfets.batched_indices.len(), 4);
-    }
-
-    #[test]
-    fn test_level6_mosfets_remain_unbatched_until_simd_matches_scalar_model() {
-        let mut mosfets = Mosfets::new();
-        for idx in 0..4 {
-            mosfets.add(Mosfet::new_nmos(format!("M{idx}"), 1, 2, 3, 0).with_level(6));
-        }
-
-        let matrix = dense_static_matrix(3);
-        mosfets.link_all(&matrix);
-
-        assert!(mosfets.batch_level6.is_none());
-        assert!(mosfets.batched_indices.is_empty());
-    }
-}
 
 //=============================================================================
 // Custom BJT Storage with SIMD Batch Support

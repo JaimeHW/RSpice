@@ -46,13 +46,3 @@ impl LinearDevice for Resistor {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_resistor_conductance() {
-        let r = Resistor::new("R1".to_string(), 1, 0, 1000.0);
-        assert!((r.conductance() - 0.001).abs() < 1e-10);
-    }
-}

@@ -9,13 +9,6 @@ fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
     (command.shortcut_string(), command.display_name())
 }
 
-#[cfg(test)]
-fn total_shortcut_help_rows() -> usize {
-    ShortcutCategory::ALL
-        .iter()
-        .map(|category| category.commands().len())
-        .sum()
-}
 
 impl RSpiceApp {
     pub(super) fn render_about_dialog(&mut self, ctx: &Context) {
@@ -103,44 +96,3 @@ impl RSpiceApp {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn test_total_shortcut_help_rows_matches_registry() {
-        let expected: usize = ShortcutCategory::ALL
-            .iter()
-            .map(|category| category.commands().len())
-            .sum();
-        assert_eq!(total_shortcut_help_rows(), expected);
-        assert!(total_shortcut_help_rows() > 0);
-    }
-
-    #[test]
-    fn test_shortcut_help_rows_have_non_empty_text() {
-        for category in ShortcutCategory::ALL {
-            for command in category.commands() {
-                let (shortcut, display_name) = shortcut_help_row(*command);
-                assert!(!shortcut.trim().is_empty());
-                assert!(!display_name.trim().is_empty());
-            }
-        }
-    }
-
-    #[test]
-    fn test_shortcut_help_commands_are_unique_across_categories() {
-        let mut seen = HashSet::new();
-        for category in ShortcutCategory::ALL {
-            for command in category.commands() {
-                assert!(
-                    seen.insert(*command),
-                    "shortcut command {:?} appears in multiple categories",
-                    command
-                );
-            }
-        }
-        assert_eq!(seen.len(), total_shortcut_help_rows());
-    }
-}

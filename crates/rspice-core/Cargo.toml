@@ -59,16 +59,6 @@ rspice-veriloga = { path = "../rspice-veriloga", optional = true }
 # SIMD acceleration (optional)
 wide = { version = "0.7", optional = true }
 
-[dev-dependencies]
-approx.workspace = true
-env_logger.workspace = true
-rspice-veriloga = { path = "../rspice-veriloga" }
-criterion = "0.5"
-
-[[bench]]
-name = "simulation_kernels"
-harness = false
-
 [[bin]]
 name = "rspice-ngspice-case-runner"
 path = "src/bin/ngspice_case_runner.rs"

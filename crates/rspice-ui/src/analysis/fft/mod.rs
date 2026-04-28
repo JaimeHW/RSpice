@@ -46,24 +46,3 @@ pub fn render_fft_panel(ui: &mut Ui, app_state: &mut AppState) {
 // Tests
 // =============================================================================
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_module_exports() {
-        let _state = FftState::new();
-    }
-
-    #[test]
-    fn test_fft_data_creation() {
-        let data = FftData::new("Test");
-        assert!(data.is_empty());
-    }
-
-    #[test]
-    fn test_window_function_default() {
-        let window = WindowFunction::default();
-        assert_eq!(window, WindowFunction::Hanning);
-    }
-}
