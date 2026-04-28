@@ -296,4 +296,3 @@ fn format_freq(f: f64) -> String {
         format!("{}", f)
     }
 }
-

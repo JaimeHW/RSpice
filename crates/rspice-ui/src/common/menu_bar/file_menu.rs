@@ -198,4 +198,3 @@ fn request_exit(state: &mut AppState) {
         state.exit_requested = true;
     }
 }
-

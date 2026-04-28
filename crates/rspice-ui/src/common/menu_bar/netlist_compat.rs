@@ -69,4 +69,3 @@ pub(super) fn quote_netlist_path(path: &str) -> String {
     let escaped = path.replace('"', "\\\"");
     format!("\"{}\"", escaped)
 }
-

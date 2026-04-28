@@ -315,4 +315,3 @@ fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
 
     String::from_utf16(&utf16).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
-

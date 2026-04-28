@@ -963,4 +963,3 @@ pub struct Attribute {
     pub value: Option<Expression>,
     pub span: Span,
 }
-

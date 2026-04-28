@@ -249,4 +249,3 @@ pub(super) fn action_veriloga_recompile_library(state: &mut AppState) {
         ok_count, fail_count
     )));
 }
-

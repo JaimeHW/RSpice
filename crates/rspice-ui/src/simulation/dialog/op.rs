@@ -145,4 +145,3 @@ impl OpDialogState {
         ui.checkbox(&mut self.source_stepping, "Enable Source Stepping");
     }
 }
-

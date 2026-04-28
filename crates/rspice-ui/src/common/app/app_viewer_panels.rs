@@ -512,4 +512,3 @@ fn render_viewer_status_placeholder(ui: &mut Ui, title: &str, message: &str) {
             });
         });
 }
-

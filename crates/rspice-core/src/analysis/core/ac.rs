@@ -112,4 +112,3 @@ impl AcResult {
         20.0 * self.voltage_magnitude(node).log10()
     }
 }
-

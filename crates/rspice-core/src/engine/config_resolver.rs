@@ -209,4 +209,3 @@ fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
         None
     }
 }
-

@@ -212,4 +212,3 @@ fn format_year(v: f64) -> String {
         format!("{:.4}", v)
     }
 }
-

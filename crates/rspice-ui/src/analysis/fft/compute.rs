@@ -161,4 +161,3 @@ fn map_window(window: WindowFunction) -> super::window::WindowFunction {
         WindowFunction::Blackman => super::window::WindowFunction::Blackman,
     }
 }
-

@@ -580,4 +580,3 @@ fn integrate_noise_rms(frequencies: &[Value], psd: &[Value]) -> Value {
     }
     integrated.max(0.0).sqrt()
 }
-

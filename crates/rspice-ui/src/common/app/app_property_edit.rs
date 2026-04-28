@@ -42,4 +42,3 @@ pub(super) fn apply_component_property_edits(
         }
     })
 }
-

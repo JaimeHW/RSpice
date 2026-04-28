@@ -194,4 +194,3 @@ impl<T: Clone> SchematicHistory<T> {
         self.future_descriptions.last().map(|s| s.as_str())
     }
 }
-

@@ -34,4 +34,3 @@ pub(crate) fn ensure_file_extension(path: &mut std::path::PathBuf, expected_ext:
         path.set_extension(expected_ext);
     }
 }
-

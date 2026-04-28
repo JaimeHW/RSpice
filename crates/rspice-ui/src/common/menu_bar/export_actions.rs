@@ -161,4 +161,3 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
         _ => spice_netlist,
     })
 }
-

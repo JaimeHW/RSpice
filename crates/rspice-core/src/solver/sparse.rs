@@ -686,4 +686,3 @@ pub fn solve_gauss(mut a: Vec<Vec<Value>>, mut b: Vec<Value>) -> Result<Vec<Valu
 
     Ok(x)
 }
-

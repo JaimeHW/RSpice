@@ -206,4 +206,3 @@ fn run_electrical_rule_check(state: &mut AppState) {
     state.dialogs.drc_results = Some(result);
     state.dialogs.drc_dialog = true;
 }
-

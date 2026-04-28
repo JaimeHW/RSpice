@@ -1208,4 +1208,3 @@ pub enum NodeIdentifier {
     #[pyo3(transparent)]
     Name(String),
 }
-

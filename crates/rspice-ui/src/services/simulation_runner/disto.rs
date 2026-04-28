@@ -543,5 +543,3 @@ fn interpolate_magnitude_at(
         }
     }
 }
-
-

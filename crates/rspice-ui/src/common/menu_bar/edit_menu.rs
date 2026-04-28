@@ -85,4 +85,3 @@ fn select_all_components_and_wires(state: &mut AppState) {
         state.schematic.selection.select_wire(wire.id);
     }
 }
-

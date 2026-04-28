@@ -822,4 +822,3 @@ fn run_temp(
         temperatures,
     )
 }
-

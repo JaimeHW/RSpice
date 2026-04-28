@@ -134,4 +134,3 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
 
     Ok(())
 }
-

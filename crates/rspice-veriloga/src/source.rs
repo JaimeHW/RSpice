@@ -181,4 +181,3 @@ impl SourceMap {
             .map(|s| &s.content[span.start as usize..span.end as usize])
     }
 }
-

@@ -45,4 +45,3 @@ impl LinearDevice for Resistor {
         matrix.stamp(self.node_neg, self.node_neg, g);
     }
 }
-

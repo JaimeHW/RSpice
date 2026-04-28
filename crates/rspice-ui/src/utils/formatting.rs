@@ -72,4 +72,3 @@ pub fn parse_hex_color(hex: &str) -> [f32; 4] {
         [1.0, 1.0, 1.0, 1.0]
     }
 }
-

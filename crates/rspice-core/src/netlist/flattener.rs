@@ -779,4 +779,3 @@ fn is_simple_probe_name(s: &str) -> bool {
     s.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':')
 }
-

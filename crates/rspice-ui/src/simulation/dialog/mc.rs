@@ -253,4 +253,3 @@ impl McDialogState {
         ui.checkbox(&mut self.save_all_runs, "Save All Run Data");
     }
 }
-

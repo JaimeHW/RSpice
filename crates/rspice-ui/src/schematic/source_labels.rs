@@ -401,4 +401,3 @@ fn looks_like_placeholder(value: &str) -> bool {
             | "noiseval"
     )
 }
-

@@ -56,4 +56,3 @@ pub fn simulation_error_to_pyerr(err: rspice_core::engine::SimulationError) -> P
         _ => SimulationError::new_err(err.to_string()),
     }
 }
-

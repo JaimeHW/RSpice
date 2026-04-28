@@ -297,4 +297,3 @@ impl From<std::io::Error> for CompileError {
         }
     }
 }
-

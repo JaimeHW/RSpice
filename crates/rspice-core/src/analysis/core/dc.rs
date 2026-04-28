@@ -100,4 +100,3 @@ impl DcSweep {
         points
     }
 }
-

@@ -132,4 +132,3 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
 
     result
 }
-

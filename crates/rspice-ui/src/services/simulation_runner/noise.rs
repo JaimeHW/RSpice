@@ -120,4 +120,3 @@ pub fn run_noise_analysis_with_source_path(
 
     Ok(NoiseData::from_results(results))
 }
-

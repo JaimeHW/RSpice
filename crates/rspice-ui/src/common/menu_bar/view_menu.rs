@@ -135,4 +135,3 @@ fn activate_specialized_viewer(state: &mut AppState, viewer: ActiveViewer) {
         opened.name()
     )));
 }
-

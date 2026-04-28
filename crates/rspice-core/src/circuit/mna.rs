@@ -146,4 +146,3 @@ impl MatrixStamper for DenseMna {
         }
     }
 }
-

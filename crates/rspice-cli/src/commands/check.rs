@@ -187,4 +187,3 @@ fn output_text(result: &ValidationResult, quiet: bool) {
         println!("✓ Netlist is valid");
     }
 }
-

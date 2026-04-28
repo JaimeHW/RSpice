@@ -308,6 +308,3 @@ fn apply_shift_factors(
     shift.mobility_shift *= mobility_factor;
     shift.rds_shift *= rds_factor;
 }
-
-
-

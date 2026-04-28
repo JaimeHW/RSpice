@@ -234,4 +234,3 @@ impl Clone for HbFft {
         Self::new(self.num_harmonics, self.fft_size / (self.num_harmonics + 1))
     }
 }
-

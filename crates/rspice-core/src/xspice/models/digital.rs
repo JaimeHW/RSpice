@@ -1031,4 +1031,3 @@ impl CodeModel for DigitalRom {
         Ok(())
     }
 }
-

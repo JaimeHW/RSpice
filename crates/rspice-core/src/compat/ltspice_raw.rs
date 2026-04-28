@@ -493,4 +493,3 @@ fn read_f32_le<R: Read>(reader: &mut R) -> Result<f32, RawParseError> {
     reader.read_exact(&mut buf)?;
     Ok(f32::from_le_bytes(buf))
 }
-

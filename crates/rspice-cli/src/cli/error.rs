@@ -208,4 +208,3 @@ impl From<rspice_core::SimulationError> for CliError {
         }
     }
 }
-

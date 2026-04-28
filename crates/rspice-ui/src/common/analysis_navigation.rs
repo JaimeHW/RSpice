@@ -132,4 +132,3 @@ pub fn preferred_viewers(analysis_type: AnalysisType) -> &'static [ActiveViewer]
         AnalysisType::HarmonicBalance | AnalysisType::Pss => WAVEFORM_ONLY,
     }
 }
-

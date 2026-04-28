@@ -436,4 +436,3 @@ impl SimulationDiagnostics {
         lines.join("\n")
     }
 }
-

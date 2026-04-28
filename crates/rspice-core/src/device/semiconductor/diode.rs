@@ -340,4 +340,3 @@ impl NonlinearDevice for Diode {
         (self.prev_vd - self.prev_vd_old).abs() < tolerance
     }
 }
-

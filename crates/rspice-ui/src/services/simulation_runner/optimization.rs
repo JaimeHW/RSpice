@@ -564,5 +564,3 @@ fn is_valid_param_identifier(name: &str) -> bool {
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
-
-

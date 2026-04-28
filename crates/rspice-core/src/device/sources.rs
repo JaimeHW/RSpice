@@ -243,4 +243,3 @@ impl LinearDevice for CurrentSource {
         matrix.stamp_rhs(self.node_neg, self.dc_value);
     }
 }
-

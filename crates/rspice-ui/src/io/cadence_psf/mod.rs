@@ -1215,4 +1215,3 @@ fn push_scalar_slice(
         ))),
     }
 }
-

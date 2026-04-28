@@ -262,4 +262,3 @@ impl Default for PssConfig {
         Self::new(1e9) // 1 GHz default
     }
 }
-

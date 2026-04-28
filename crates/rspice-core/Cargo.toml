@@ -63,5 +63,3 @@ wide = { version = "0.7", optional = true }
 name = "rspice-ngspice-case-runner"
 path = "src/bin/ngspice_case_runner.rs"
 test = false
-
-

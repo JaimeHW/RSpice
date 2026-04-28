@@ -254,4 +254,3 @@ fn format_scalar(v: f64) -> String {
         format!("{:.6}", v)
     }
 }
-

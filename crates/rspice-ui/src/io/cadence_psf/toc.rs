@@ -133,4 +133,3 @@ pub(super) fn parse_toc(data: &[u8]) -> Result<Toc, CadencePsfError> {
 
     Ok(Toc { entries })
 }
-

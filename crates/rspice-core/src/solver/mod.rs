@@ -234,4 +234,3 @@ impl From<crate::engine::SimulationConfig> for Simulator {
         Self::from(&config)
     }
 }
-

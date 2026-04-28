@@ -427,4 +427,3 @@ impl OutputFormat {
         matches!(self, OutputFormat::Raw | OutputFormat::Hdf5)
     }
 }
-

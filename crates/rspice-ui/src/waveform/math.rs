@@ -558,4 +558,3 @@ pub fn eval_expression(
     let ast = parse(&tokens)?;
     evaluate(&ast, signals)
 }
-

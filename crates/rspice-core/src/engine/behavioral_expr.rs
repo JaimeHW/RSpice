@@ -217,4 +217,3 @@ fn serialize_expr(expr: &NetExpr) -> String {
         }
     }
 }
-

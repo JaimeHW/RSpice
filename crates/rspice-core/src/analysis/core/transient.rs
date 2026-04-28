@@ -1090,4 +1090,3 @@ pub struct TrapGearStats {
     pub smooth_steps: usize,
     pub max_sign_changes: usize,
 }
-

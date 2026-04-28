@@ -843,4 +843,3 @@ impl<'a> Lexer<'a> {
         Ok(Token::with_text(TokenKind::Directive, span, text))
     }
 }
-

@@ -124,4 +124,3 @@ impl TypeMetaCache {
         Ok(min_size)
     }
 }
-

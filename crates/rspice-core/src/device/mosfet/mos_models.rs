@@ -394,4 +394,3 @@ pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
     // Use K1/K2 formulation for short channels (level 3+)
     vth_k1k2 + dvth_sce + dvth_bias
 }
-

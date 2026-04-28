@@ -12,4 +12,3 @@ pub fn viewer_header_bg_color() -> Color32 {
 pub fn viewer_chart_bg_color() -> Color32 {
     Color32::from_rgb(15, 17, 21)
 }
-

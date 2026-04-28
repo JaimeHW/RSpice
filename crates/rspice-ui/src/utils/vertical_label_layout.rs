@@ -295,4 +295,3 @@ fn overlap_area(a: Rect, b: Rect) -> f32 {
         (max_x - min_x) * (max_y - min_y)
     }
 }
-

@@ -1014,4 +1014,3 @@ pub(super) fn resolve_xspice_model_instance(
         string_params: model_def.string_params.clone(),
     })
 }
-

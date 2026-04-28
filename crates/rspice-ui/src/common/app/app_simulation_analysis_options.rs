@@ -346,4 +346,3 @@ pub(super) fn render_analysis_options(dialogs: &mut DialogState, ui: &mut egui::
         _ => {}
     }
 }
-

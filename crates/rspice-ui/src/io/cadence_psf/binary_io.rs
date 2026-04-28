@@ -77,4 +77,3 @@ pub(super) fn read_f64(cursor: &mut &[u8]) -> Result<f64, CadencePsfError> {
 pub(super) fn peek_u32(data: &[u8]) -> u32 {
     u32::from_be_bytes([data[0], data[1], data[2], data[3]])
 }
-

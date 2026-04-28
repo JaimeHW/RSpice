@@ -206,4 +206,3 @@ impl AppState {
         self.viewer_workspace.active_viewer()
     }
 }
-

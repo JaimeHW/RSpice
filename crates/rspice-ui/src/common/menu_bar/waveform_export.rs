@@ -167,4 +167,3 @@ fn signal_type_from_waveform_name(name: &str) -> crate::io::SignalType {
         crate::io::SignalType::Unknown
     }
 }
-

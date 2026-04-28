@@ -189,4 +189,3 @@ pub(super) fn extract_temp_points(netlist: &rspice_core::Netlist) -> Vec<Value> 
     }
     temperatures
 }
-

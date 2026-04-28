@@ -499,4 +499,3 @@ pub fn run_pstb_analysis_with_source_path(
     let cfg = PstbRunConfig::default();
     run_pstb_analysis_with_config_and_source_path(netlist_text, &cfg, source_path)
 }
-

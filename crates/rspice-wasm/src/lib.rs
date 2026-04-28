@@ -169,4 +169,3 @@ pub fn run_transient_analysis_js(
         run_transient_analysis(source, tstop, max_step).map_err(|err| JsValue::from_str(&err))?;
     serialize_to_js(&result)
 }
-

@@ -99,4 +99,3 @@ pub const QUICK_RUN_ANALYSES: &[(&str, usize)] = &[
     ("Temperature Sweep", TAB_TEMPERATURE),
     ("Reliability (Aging)", TAB_RELIABILITY),
 ];
-

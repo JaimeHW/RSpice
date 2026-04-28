@@ -1083,5 +1083,3 @@ fn run_temperature_sweep(
 
     Ok(results)
 }
-
-

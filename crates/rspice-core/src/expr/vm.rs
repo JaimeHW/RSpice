@@ -397,4 +397,3 @@ fn interpolate_segment(x: Value, x1: Value, y1: Value, x2: Value, y2: Value, fla
     let t = (x - x1) / (x2 - x1);
     y1 + t * (y2 - y1)
 }
-

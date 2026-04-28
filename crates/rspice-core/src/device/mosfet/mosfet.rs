@@ -2480,4 +2480,3 @@ impl NonlinearDevice for Mosfet {
         (bulk_current_hat - bulk_current).abs() < bulk_current_tol
     }
 }
-

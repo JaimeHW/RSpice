@@ -428,4 +428,3 @@ fn read_required_f64_attr(attrs: &HashMap<String, AttrValue>, name: &str) -> Res
         ))),
     }
 }
-

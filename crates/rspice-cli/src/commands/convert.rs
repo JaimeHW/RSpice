@@ -330,4 +330,3 @@ fn write_line<W: Write>(
     write_fmt(writer, path, args)?;
     write_newline(writer, path)
 }
-

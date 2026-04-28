@@ -307,4 +307,3 @@ fn output_text(result: &CompareResult, quiet: bool) {
         }
     }
 }
-

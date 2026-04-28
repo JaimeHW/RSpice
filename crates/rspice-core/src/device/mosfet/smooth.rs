@@ -96,4 +96,3 @@ pub fn smooth_clamp(x: Value, min_val: Value, max_val: Value, smoothing: Value) 
 pub fn smooth_positive(x: Value, smoothing: Value) -> Value {
     smooth_max(x, 0.0, smoothing)
 }
-

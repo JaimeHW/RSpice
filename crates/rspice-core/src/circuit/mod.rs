@@ -3533,4 +3533,3 @@ pub struct Node {
 
 /// Circuit (legacy compatibility wrapper)
 pub type Circuit = CircuitData;
-

@@ -464,4 +464,3 @@ impl Default for ShootingNewtonSolver {
         Self::new(1e-6, 100)
     }
 }
-

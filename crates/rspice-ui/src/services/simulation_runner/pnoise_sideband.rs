@@ -175,4 +175,3 @@ pub(super) fn fold_sideband_contributors(
 
     Ok(contributors)
 }
-

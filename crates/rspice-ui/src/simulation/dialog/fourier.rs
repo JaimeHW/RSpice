@@ -216,4 +216,3 @@ fn format_time(t: f64) -> String {
         format!("{}p", t / 1e-12)
     }
 }
-

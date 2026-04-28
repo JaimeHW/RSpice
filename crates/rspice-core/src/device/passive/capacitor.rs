@@ -85,4 +85,3 @@ impl DynamicDevice for Capacitor {
         self.voltage_prev = v;
     }
 }
-

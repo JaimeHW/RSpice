@@ -443,4 +443,3 @@ fn invert_complex_matrix(matrix: &[Vec<Complex64>]) -> Option<Vec<Vec<Complex64>
     }
     Some(inverse)
 }
-

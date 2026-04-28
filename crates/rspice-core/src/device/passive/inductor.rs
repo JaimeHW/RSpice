@@ -98,4 +98,3 @@ impl DynamicDevice for Inductor {
         self.voltage_prev = v;
     }
 }
-

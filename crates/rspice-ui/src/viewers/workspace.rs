@@ -160,4 +160,3 @@ impl ViewerWorkspace {
         self.active_viewer() == viewer
     }
 }
-

@@ -845,4 +845,3 @@ pub mod autodiff {
         }
     }
 }
-

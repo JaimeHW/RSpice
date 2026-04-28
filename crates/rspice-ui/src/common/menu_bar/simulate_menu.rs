@@ -107,4 +107,3 @@ fn open_simulation_options(state: &mut AppState) {
     state.dialogs.simulation_options_errors.clear();
     state.dialogs.simulation_options = true;
 }
-

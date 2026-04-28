@@ -104,4 +104,3 @@ fn open_issue_report_link(state: &mut AppState) {
 fn open_about_dialog(state: &mut AppState) {
     state.dialogs.about = true;
 }
-

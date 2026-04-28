@@ -7703,4 +7703,3 @@ impl NonlinearDevice for Bjt {
         self.legacy_bjt_is_converged(criteria)
     }
 }
-

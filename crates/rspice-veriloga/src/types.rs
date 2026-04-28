@@ -473,4 +473,3 @@ impl Default for FunctionRegistry {
         Self::new()
     }
 }
-

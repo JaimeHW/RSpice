@@ -537,4 +537,3 @@ fn parse_variable_specs(input: &str) -> Result<Vec<OptimizationVariableConfig>, 
     }
     Ok(variables)
 }
-

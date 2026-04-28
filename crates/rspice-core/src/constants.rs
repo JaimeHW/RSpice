@@ -226,4 +226,3 @@ pub fn safe_exp(x: Value) -> Value {
 pub fn clamp_with_margin(x: Value, min: Value, max: Value) -> Value {
     x.max(min + EPSILON).min(max - EPSILON)
 }
-

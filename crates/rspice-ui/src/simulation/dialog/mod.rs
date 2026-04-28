@@ -109,4 +109,3 @@ pub use framework::{DialogResult, DialogTab, SimulationDialog};
 pub use options::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };
-

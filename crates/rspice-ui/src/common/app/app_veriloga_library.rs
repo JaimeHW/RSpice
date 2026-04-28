@@ -142,4 +142,3 @@ fn temporary_path_for(path: &Path) -> PathBuf {
         nonce
     ))
 }
-

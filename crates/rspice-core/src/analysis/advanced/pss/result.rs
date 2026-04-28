@@ -294,4 +294,3 @@ impl PeriodicWaveform {
         harmonics
     }
 }
-

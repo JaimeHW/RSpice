@@ -178,4 +178,3 @@ impl VerilogADevices {
         }
     }
 }
-

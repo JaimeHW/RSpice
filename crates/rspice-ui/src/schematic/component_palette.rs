@@ -155,5 +155,3 @@ const PALETTE: &[ComponentPaletteSection] = &[
 pub fn component_palette() -> &'static [ComponentPaletteSection] {
     PALETTE
 }
-
-

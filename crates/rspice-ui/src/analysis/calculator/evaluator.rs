@@ -187,4 +187,3 @@ fn apply_op_scalar(op: BinaryOp, l: f64, r: f64) -> f64 {
         BinaryOp::Pow => l.powf(r),
     }
 }
-

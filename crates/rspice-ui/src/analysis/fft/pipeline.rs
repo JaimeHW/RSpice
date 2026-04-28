@@ -577,4 +577,3 @@ fn remove_dc_offset(samples: &mut [f64]) {
         *sample -= mean;
     }
 }
-

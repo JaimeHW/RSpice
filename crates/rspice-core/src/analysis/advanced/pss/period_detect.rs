@@ -669,4 +669,3 @@ impl Default for PeriodDetector {
         Self::with_guess(1e-9) // Default 1 ns period (1 GHz)
     }
 }
-

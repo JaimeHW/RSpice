@@ -259,4 +259,3 @@ impl HbResult {
             })
     }
 }
-

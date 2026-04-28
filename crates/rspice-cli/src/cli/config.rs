@@ -275,4 +275,3 @@ pub enum ConfigError {
     #[error("Failed to parse config file {path}: {message}")]
     ParseError { path: PathBuf, message: String },
 }
-

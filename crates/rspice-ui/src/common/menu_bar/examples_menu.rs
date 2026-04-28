@@ -32,4 +32,3 @@ pub(super) fn load_named_example(state: &mut AppState, name: &str) -> bool {
     )));
     true
 }
-

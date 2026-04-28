@@ -211,4 +211,3 @@ impl Default for VerilogACompiler {
         Self::new(CompilerOptions::default())
     }
 }
-

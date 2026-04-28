@@ -51,4 +51,3 @@ pub(super) fn default_app_state() -> AppState {
         analysis,
     }
 }
-
