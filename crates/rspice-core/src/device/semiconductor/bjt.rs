@@ -33,7 +33,7 @@ pub struct BjtIndices {
     pub ee: Option<CscIndex>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 struct BjtLinearization {
     ic: Value,
     ib: Value,
@@ -87,6 +87,7 @@ struct BjtIntrinsicBranches {
 pub(crate) struct LegacyTransientChargeState {
     pub qbe: Value,
     pub capbe: Value,
+    pub capbe_vbc: Value,
     pub qbc: Value,
     pub capbc: Value,
     pub qcs: Value,
@@ -115,6 +116,13 @@ struct VbicNonlinearBranchVoltages {
     vbep: Value,
     vbcp: Value,
     vrth: Value,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct LegacyNonlinearBranchVoltages {
+    vbe: Value,
+    vbc: Value,
+    vsub: Value,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -444,6 +452,7 @@ const IDX_VSI: usize = 6;
 const IDX_VRTH: usize = 7;
 const DYNAMIC_INTERNAL_DIM: usize = INTERNAL_DIM + 2;
 const VBIC_LIMITED_BRANCH_DIM: usize = 6;
+const LEGACY_LIMITED_BRANCH_DIM: usize = 3;
 const IDX_VXF1: usize = INTERNAL_DIM;
 const IDX_VXF2: usize = INTERNAL_DIM + 1;
 const IDX_QCTH: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
@@ -2893,10 +2902,13 @@ impl Bjt {
 
         let mut argtf = 0.0;
         let mut arg2 = 0.0;
+        let mut arg3 = 0.0;
         if self.tf != 0.0 && vbe_eff > 0.0 && self.xtf != 0.0 {
             argtf = self.xtf;
+            let mut ovtf = 0.0;
             if self.vtf > 0.0 {
-                argtf *= Self::limited_exp(vbc_eff / (self.vtf * 1.44)).0;
+                ovtf = 1.0 / (self.vtf * 1.44);
+                argtf *= Self::limited_exp(vbc_eff * ovtf).0;
             }
             arg2 = argtf;
             if self.itf > 0.0 {
@@ -2904,6 +2916,7 @@ impl Bjt {
                 argtf *= temp * temp;
                 arg2 = argtf * (3.0 - temp - temp);
             }
+            arg3 = transport.ifi * argtf * ovtf;
         }
 
         let qb = transport.qb.max(1e-18);
@@ -2914,6 +2927,11 @@ impl Bjt {
         };
         let gbe_dynamic = if self.tf != 0.0 {
             (transport.gfi * (1.0 + arg2) - qbe_diffusion_current * transport.dqb_dvbe_eff) / qb
+        } else {
+            0.0
+        };
+        let geqcb_dynamic = if self.tf != 0.0 && vbe_eff > 0.0 {
+            (arg3 - qbe_diffusion_current * transport.dqb_dvbc_eff) / qb
         } else {
             0.0
         };
@@ -2928,6 +2946,7 @@ impl Bjt {
         LegacyTransientChargeState {
             qbe: p * (self.tf * qbe_diffusion_current + self.cje * qbe_dep_norm + self.cbeo * vbe),
             capbe: (self.tf * gbe_dynamic + self.cje * capbe_dep + self.cbeo).max(0.0),
+            capbe_vbc: self.tf * geqcb_dynamic,
             qbc: p * (self.tr * transport.iri + self.cjc * qbc_dep_norm + self.cbco * vbc),
             capbc: (self.tr * transport.gri + self.cjc * capbc_dep + self.cbco).max(0.0),
             qcs: -p * (self.cjcp * qsub_norm),
@@ -2954,7 +2973,7 @@ impl Bjt {
         (
             static_internal[IDX_VBI] - static_internal[IDX_VEI],
             static_internal[IDX_VBI] - static_internal[IDX_VCI],
-            static_internal[IDX_VCX] - static_internal[IDX_VSI],
+            static_internal[IDX_VCI] - static_internal[IDX_VSI],
         )
     }
 
@@ -3650,6 +3669,28 @@ impl Bjt {
         }
     }
 
+    #[inline]
+    fn legacy_limiting_parameters(&self, previous_vrth: Value) -> (Value, Value, Value) {
+        self.with_temperature_variant(previous_vrth, |model| {
+            let vt = model.vt.max(1e-18);
+            let vcrit = Self::junction_critical_voltage(vt, model.is);
+            (vt, vcrit, 50.0)
+        })
+    }
+
+    #[inline]
+    fn legacy_nonlinear_branch_voltages(
+        &self,
+        internal: [Value; INTERNAL_DIM],
+    ) -> LegacyNonlinearBranchVoltages {
+        let p = self.polarity();
+        LegacyNonlinearBranchVoltages {
+            vbe: p * (internal[IDX_VBI] - internal[IDX_VEI]),
+            vbc: p * (internal[IDX_VBI] - internal[IDX_VCI]),
+            vsub: p * (internal[IDX_VSI] - internal[IDX_VCI]),
+        }
+    }
+
     fn project_vbic_limited_branches_onto_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
@@ -3718,6 +3759,61 @@ impl Bjt {
         projected
     }
 
+    fn project_legacy_limited_branches_onto_internal_state(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+        limited: LegacyNonlinearBranchVoltages,
+    ) -> [Value; INTERNAL_DIM] {
+        let p = self.polarity();
+        let raw_nodes = [
+            raw[IDX_VCX],
+            raw[IDX_VCI],
+            raw[IDX_VBX],
+            raw[IDX_VBI],
+            raw[IDX_VEI],
+            raw[IDX_VBP],
+            raw[IDX_VSI],
+        ];
+        let constraints = [
+            [0.0, 0.0, 0.0, p, -p, 0.0, 0.0],
+            [0.0, -p, 0.0, p, 0.0, 0.0, 0.0],
+            [0.0, -p, 0.0, 0.0, 0.0, 0.0, p],
+        ];
+        let targets = [limited.vbe, limited.vbc, limited.vsub];
+
+        let mut residual = [0.0; LEGACY_LIMITED_BRANCH_DIM];
+        for row in 0..LEGACY_LIMITED_BRANCH_DIM {
+            residual[row] = -targets[row];
+            for col in 0..raw_nodes.len() {
+                residual[row] += constraints[row][col] * raw_nodes[col];
+            }
+        }
+
+        let mut gram = [[0.0; LEGACY_LIMITED_BRANCH_DIM]; LEGACY_LIMITED_BRANCH_DIM];
+        for row in 0..LEGACY_LIMITED_BRANCH_DIM {
+            for col in 0..LEGACY_LIMITED_BRANCH_DIM {
+                gram[row][col] = (0..raw_nodes.len())
+                    .map(|idx| constraints[row][idx] * constraints[col][idx])
+                    .sum();
+            }
+        }
+
+        let Some(lagrange) =
+            Self::solve_small_dense_system(&gram, &residual, LEGACY_LIMITED_BRANCH_DIM)
+        else {
+            return raw;
+        };
+
+        let mut projected = raw;
+        for node_idx in 0..raw_nodes.len() {
+            let correction = (0..LEGACY_LIMITED_BRANCH_DIM)
+                .map(|row| constraints[row][node_idx] * lagrange[row])
+                .sum::<Value>();
+            projected[node_idx] = raw_nodes[node_idx] - correction;
+        }
+        projected
+    }
+
     fn limit_vbic_internal_state_to_previous(
         &self,
         raw: [Value; INTERNAL_DIM],
@@ -3777,6 +3873,38 @@ impl Bjt {
 
         let projected =
             self.project_vbic_limited_branches_onto_internal_state(raw, limited_branches);
+        if projected.iter().all(|value| value.is_finite()) {
+            projected
+        } else {
+            raw
+        }
+    }
+
+    fn limit_legacy_internal_state_to_previous(
+        &self,
+        raw: [Value; INTERNAL_DIM],
+        previous: [Value; INTERNAL_DIM],
+    ) -> [Value; INTERNAL_DIM] {
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            return raw;
+        }
+
+        let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
+        let previous_branches = self.legacy_nonlinear_branch_voltages(previous);
+        let (vt, vcrit, sub_vcrit) = self.legacy_limiting_parameters(previous[IDX_VRTH]);
+        let limited_branches = LegacyNonlinearBranchVoltages {
+            vbe: Self::limit_junction_voltage(raw_branches.vbe, previous_branches.vbe, vt, vcrit),
+            vbc: Self::limit_junction_voltage(raw_branches.vbc, previous_branches.vbc, vt, vcrit),
+            vsub: Self::limit_junction_voltage(
+                raw_branches.vsub,
+                previous_branches.vsub,
+                vt,
+                sub_vcrit,
+            ),
+        };
+
+        let projected =
+            self.project_legacy_limited_branches_onto_internal_state(raw, limited_branches);
         if projected.iter().all(|value| value.is_finite()) {
             projected
         } else {
@@ -3850,17 +3978,19 @@ impl Bjt {
         raw: [Value; INTERNAL_DIM],
         previous: [Value; INTERNAL_DIM],
     ) -> [Value; INTERNAL_DIM] {
-        if self.charge_model == BjtChargeModel::Vbic {
+        let mut limited = if self.charge_model == BjtChargeModel::Vbic {
             self.limit_vbic_internal_state_to_previous(raw, previous)
-        } else if self.self_heating_enabled() {
-            let mut limited = raw;
+        } else {
+            self.limit_legacy_internal_state_to_previous(raw, previous)
+        };
+
+        if self.charge_model != BjtChargeModel::Vbic && self.self_heating_enabled() {
             limited[IDX_VRTH] =
                 Self::limit_logarithmic_step(raw[IDX_VRTH], previous[IDX_VRTH], 100.0)
                     .max(1.0 - self.requested_temperature());
-            limited
-        } else {
-            raw
         }
+
+        limited
     }
 
     fn predict_intrinsic_state_from_previous_external_bias_unlimited(
@@ -5860,9 +5990,10 @@ impl Bjt {
     fn charge_snapshot_from_base(&self, base: BjtReducedLinearization) -> BjtChargeSnapshot {
         let template = self.dynamic_reduction_template(base);
         if !self.uses_vbic_dynamic_charges() {
+            let branches = self.legacy_dynamic_charge_branches(&template);
             return BjtChargeSnapshot {
                 reduction: template,
-                branches: [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT],
+                branches,
             };
         }
 
@@ -5931,6 +6062,115 @@ impl Bjt {
         BjtChargeSnapshot {
             reduction,
             branches,
+        }
+    }
+
+    fn legacy_dynamic_charge_branches(
+        &self,
+        reduction: &BjtDynamicReduction,
+    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
+        let mut branches = [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT];
+        let internal = &reduction.internal_voltages;
+        let vbe = internal[IDX_VBI] - internal[IDX_VEI];
+        let vbc = internal[IDX_VBI] - internal[IDX_VCI];
+        let vcs = internal[IDX_VCI] - internal[IDX_VSI];
+        let charges = self.legacy_transient_charge_state(vbe, vbc, vcs);
+        let collector_terminal = self.legacy_charge_collector_terminal();
+        let base_terminal = self.legacy_charge_base_terminal();
+        let emitter_terminal = self.legacy_charge_emitter_terminal();
+        let substrate_terminal = self.legacy_charge_substrate_terminal();
+
+        if charges.qbe.is_finite()
+            && charges.capbe.is_finite()
+            && charges.capbe_vbc.is_finite()
+            && (charges.capbe > 0.0 || charges.capbe_vbc != 0.0)
+        {
+            let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+            d_internal[IDX_VBI] = charges.capbe + charges.capbe_vbc;
+            d_internal[IDX_VCI] = -charges.capbe_vbc;
+            d_internal[IDX_VEI] = -charges.capbe;
+            branches[0] =
+                Self::charge_branch(charges.qbe, d_internal, base_terminal, emitter_terminal);
+        }
+
+        if charges.qbc.is_finite() && charges.capbc.is_finite() && charges.capbc > 0.0 {
+            let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+            d_internal[IDX_VBI] = charges.capbc;
+            d_internal[IDX_VCI] = -charges.capbc;
+            branches[2] =
+                Self::charge_branch(charges.qbc, d_internal, base_terminal, collector_terminal);
+        }
+
+        if charges.qcs.is_finite() && charges.capcs.is_finite() && charges.capcs > 0.0 {
+            let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+            d_internal[IDX_VCI] = charges.capcs;
+            d_internal[IDX_VSI] = -charges.capcs;
+            branches[7] = Self::charge_branch(
+                charges.qcs,
+                d_internal,
+                collector_terminal,
+                substrate_terminal,
+            );
+        }
+
+        branches
+    }
+
+    #[inline]
+    fn charge_branch(
+        charge: Value,
+        d_internal: [Value; BJT_INTERNAL_STATE_DIM],
+        pos: (Option<usize>, Option<usize>),
+        neg: (Option<usize>, Option<usize>),
+    ) -> BjtChargeBranch {
+        BjtChargeBranch {
+            charge,
+            d_internal,
+            pos_internal: pos.0,
+            pos_external: pos.1,
+            neg_internal: neg.0,
+            neg_external: neg.1,
+            ..Default::default()
+        }
+    }
+
+    #[inline]
+    fn legacy_charge_collector_terminal(&self) -> (Option<usize>, Option<usize>) {
+        if Self::series_active(self.rci) {
+            (Some(IDX_VCI), None)
+        } else if Self::series_active(self.rcx) {
+            (Some(IDX_VCX), None)
+        } else {
+            (None, Some(EXT_C))
+        }
+    }
+
+    #[inline]
+    fn legacy_charge_base_terminal(&self) -> (Option<usize>, Option<usize>) {
+        if Self::series_active(self.rbi) {
+            (Some(IDX_VBI), None)
+        } else if Self::series_active(self.rbx) {
+            (Some(IDX_VBX), None)
+        } else {
+            (None, Some(EXT_B))
+        }
+    }
+
+    #[inline]
+    fn legacy_charge_emitter_terminal(&self) -> (Option<usize>, Option<usize>) {
+        if Self::series_active(self.re) {
+            (Some(IDX_VEI), None)
+        } else {
+            (None, Some(EXT_E))
+        }
+    }
+
+    #[inline]
+    fn legacy_charge_substrate_terminal(&self) -> (Option<usize>, Option<usize>) {
+        if Self::series_active(self.rs) {
+            (Some(IDX_VSI), None)
+        } else {
+            (None, Some(EXT_S))
         }
     }
 
@@ -6020,9 +6260,10 @@ impl Bjt {
         let reduction = self.dynamic_reduction_for_internal_state(vc, vb, ve, vs, internal);
 
         if !self.uses_vbic_dynamic_charges() {
+            let branches = self.legacy_dynamic_charge_branches(&reduction);
             return BjtChargeSnapshot {
                 reduction,
-                branches: [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT],
+                branches,
             };
         }
 
@@ -7332,11 +7573,11 @@ impl Bjt {
 
         if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
             if vold > 0.0 {
-                let arg = (vnew - vold) / vt;
+                let arg = 1.0 + (vnew - vold) / vt;
                 if arg > 0.0 {
-                    vold + vt * (2.0 + (arg - 2.0).max(1e-18).ln())
+                    vold + vt * arg.ln()
                 } else {
-                    vold - vt * (2.0 + (2.0 - arg).max(1e-18).ln())
+                    vcrit
                 }
             } else {
                 vt * (vnew / vt).max(1e-18).ln()
