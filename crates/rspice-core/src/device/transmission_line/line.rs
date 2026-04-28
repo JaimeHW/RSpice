@@ -1,0 +1,647 @@
+use super::*;
+
+#[derive(Debug, Clone, Copy)]
+struct TlineStateSample {
+    time: Value,
+    v1: Value,
+    i1: Value,
+    v2: Value,
+    i2: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct TransmissionLine {
+    /// Instance name
+    pub name: String,
+
+    // Port 1 nodes
+    pub node1_pos: NodeId,
+    pub node1_neg: NodeId,
+
+    // Port 2 nodes
+    pub node2_pos: NodeId,
+    pub node2_neg: NodeId,
+
+    // Parameters
+    /// Characteristic impedance (Î©)
+    pub z0: Value,
+    /// Propagation delay (s)
+    pub td: Value,
+    /// Frequency for loss calculation (optional)
+    pub freq: Option<Value>,
+    /// Normalized length (optional)
+    pub nl: Option<Value>,
+    /// One-way attenuation factor (0 < a <= 1)
+    attenuation: Value,
+    /// DC equivalent series resistance used to couple near/far conductors
+    /// during operating-point solves. `0` means "ideal short fallback".
+    dc_series_resistance: Value,
+    /// Characteristic loss-dispersion time constant used to smooth the
+    /// delayed-wave history for RLGC model-card lines.
+    loss_time_constant: Value,
+
+    // Internal state
+    /// Branch indices for current variables
+    branch1: Option<NodeId>,
+    branch2: Option<NodeId>,
+
+    // History buffers for delayed values
+    /// V1 + Z0*I1 history
+    history_forward: DelayBuffer,
+    /// V2 + Z0*I2 history
+    history_backward: DelayBuffer,
+    /// Smoothed forward wave stored into the delay history
+    filtered_forward_wave: Value,
+    /// Smoothed backward wave stored into the delay history
+    filtered_backward_wave: Value,
+    /// Whether the filtered wave state has been seeded yet
+    history_initialized: bool,
+    /// First accepted port state, retained even if old history samples are trimmed.
+    initial_state: Option<TlineStateSample>,
+    /// Absolute port state history used by distributed-RLC kernels.
+    state_history: VecDeque<TlineStateSample>,
+    /// Optional distributed RLC transient kernel configuration.
+    distributed_rlc: Option<DistributedRlcKernel>,
+    /// Cached transient companion response for the current candidate time.
+    distributed_rlc_cache: Cell<Option<(Value, TlineTransientResponse)>>,
+
+    /// Current simulation time
+    current_time: Value,
+}
+
+impl TransmissionLine {
+    #[inline]
+    fn quadratic_interp_coefficients(
+        t: Value,
+        t1: Value,
+        t2: Value,
+        t3: Value,
+    ) -> Option<(Value, Value, Value)> {
+        if t == t1 {
+            return Some((1.0, 0.0, 0.0));
+        }
+        if t == t2 {
+            return Some((0.0, 1.0, 0.0));
+        }
+        if t == t3 {
+            return Some((0.0, 0.0, 1.0));
+        }
+        if (t2 - t1) == 0.0 || (t3 - t2) == 0.0 || (t1 - t3) == 0.0 {
+            return None;
+        }
+
+        let mut f1 = (t - t2) * (t - t3);
+        let mut f2 = (t - t1) * (t - t3);
+        let mut f3 = (t - t1) * (t - t2);
+
+        f1 /= (t1 - t2) * (t1 - t3);
+        f2 /= (t2 - t1) * (t2 - t3);
+        f3 /= (t3 - t1) * (t3 - t2);
+        Some((f1, f2, f3))
+    }
+
+    #[inline]
+    fn linear_interp_coefficients(t: Value, t1: Value, t2: Value) -> Option<(Value, Value)> {
+        if t1 == t2 {
+            return None;
+        }
+        if t == t1 {
+            return Some((1.0, 0.0));
+        }
+        if t == t2 {
+            return Some((0.0, 1.0));
+        }
+        let w2 = (t - t1) / (t2 - t1);
+        Some((1.0 - w2, w2))
+    }
+
+    #[inline]
+    fn ltra_mixed_interpolate<F>(
+        prev2: Option<&TlineStateSample>,
+        prev: &TlineStateSample,
+        next: &TlineStateSample,
+        target: Value,
+        selector: F,
+    ) -> Value
+    where
+        F: Fn(&TlineStateSample) -> Value + Copy,
+    {
+        if let Some(sample0) = prev2
+            && let Some((q0, q1, q2)) =
+                Self::quadratic_interp_coefficients(target, sample0.time, prev.time, next.time)
+        {
+            let v0 = selector(sample0);
+            let v1 = selector(prev);
+            let v2 = selector(next);
+            let quad = q0 * v0 + q1 * v1 + q2 * v2;
+            let min_v = v0.min(v1).min(v2);
+            let max_v = v0.max(v1).max(v2);
+            if quad >= min_v && quad <= max_v {
+                return quad;
+            }
+        }
+
+        if let Some((l0, l1)) = Self::linear_interp_coefficients(target, prev.time, next.time) {
+            l0 * selector(prev) + l1 * selector(next)
+        } else {
+            selector(next)
+        }
+    }
+
+    /// Create a new lossless transmission line
+    pub fn new(
+        name: String,
+        node1_pos: NodeId,
+        node1_neg: NodeId,
+        node2_pos: NodeId,
+        node2_neg: NodeId,
+        z0: Value,
+        td: Value,
+    ) -> Self {
+        Self {
+            name,
+            node1_pos,
+            node1_neg,
+            node2_pos,
+            node2_neg,
+            z0,
+            td,
+            freq: None,
+            nl: None,
+            attenuation: 1.0,
+            dc_series_resistance: 0.0,
+            loss_time_constant: 0.0,
+            branch1: None,
+            branch2: None,
+            history_forward: DelayBuffer::new(td),
+            history_backward: DelayBuffer::new(td),
+            filtered_forward_wave: 0.0,
+            filtered_backward_wave: 0.0,
+            history_initialized: false,
+            initial_state: None,
+            state_history: VecDeque::new(),
+            distributed_rlc: None,
+            distributed_rlc_cache: Cell::new(None),
+            current_time: 0.0,
+        }
+    }
+
+    /// Create from frequency and normalized length
+    pub fn from_frequency(
+        name: String,
+        node1_pos: NodeId,
+        node1_neg: NodeId,
+        node2_pos: NodeId,
+        node2_neg: NodeId,
+        z0: Value,
+        freq: Value,
+        nl: Value,
+    ) -> Self {
+        // TD = NL / freq (number of wavelengths at frequency)
+        let td = nl / freq;
+
+        let mut tl = Self::new(name, node1_pos, node1_neg, node2_pos, node2_neg, z0, td);
+        tl.freq = Some(freq);
+        tl.nl = Some(nl);
+        tl
+    }
+
+    /// Set branch indices for MNA
+    pub fn set_branches(&mut self, branch1: NodeId, branch2: NodeId) {
+        self.branch1 = Some(branch1);
+        self.branch2 = Some(branch2);
+    }
+
+    /// Get characteristic impedance
+    #[inline]
+    pub fn impedance(&self) -> Value {
+        self.z0
+    }
+
+    /// Get propagation delay
+    #[inline]
+    pub fn delay(&self) -> Value {
+        self.td
+    }
+
+    /// Set one-way attenuation factor.
+    ///
+    /// Values are clamped to the physically meaningful range `(0, 1]`.
+    pub fn set_attenuation(&mut self, attenuation: Value) {
+        self.attenuation = attenuation.clamp(1e-6, 1.0);
+    }
+
+    /// Get one-way attenuation factor.
+    #[inline]
+    pub fn attenuation(&self) -> Value {
+        self.attenuation
+    }
+
+    /// Configure the DC equivalent series resistance used by OP/DC analyses.
+    pub fn set_dc_series_resistance(&mut self, resistance: Value) {
+        if resistance.is_finite() && resistance > 0.0 {
+            self.dc_series_resistance = resistance;
+        } else {
+            self.dc_series_resistance = 0.0;
+        }
+    }
+
+    /// Get the configured DC series resistance.
+    #[inline]
+    pub fn dc_series_resistance(&self) -> Value {
+        self.dc_series_resistance
+    }
+
+    /// Configure the lossy-line history smoothing time constant.
+    pub fn set_loss_time_constant(&mut self, tau: Value) {
+        self.loss_time_constant = if tau.is_finite() && tau > 0.0 {
+            tau
+        } else {
+            0.0
+        };
+    }
+
+    /// Get the configured lossy-line history smoothing time constant.
+    #[inline]
+    pub fn loss_time_constant(&self) -> Value {
+        self.loss_time_constant
+    }
+
+    #[inline]
+    pub fn has_distributed_rlgc(&self) -> bool {
+        self.distributed_rlc.is_some()
+    }
+
+    /// Configure a distributed-RLC transient kernel for lossy scalar propagation.
+    ///
+    /// This follows the ngspice LTRA RLC special case for `G = 0`, which is the
+    /// physically relevant regime for the copied transmission regression decks.
+    pub fn set_distributed_rlgc(&mut self, r: Value, l: Value, g: Value, c: Value, len: Value) {
+        self.set_distributed_rlgc_with_compaction(
+            r,
+            l,
+            g,
+            c,
+            len,
+            DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT,
+            DISTRIBUTED_RLC_COMPACT_ABSTOL_DEFAULT,
+        );
+    }
+
+    /// Configure a distributed-RLC kernel with ngspice-style straight-line
+    /// compaction tolerances for its safe-step estimate.
+    pub fn set_distributed_rlgc_with_compaction(
+        &mut self,
+        r: Value,
+        l: Value,
+        g: Value,
+        c: Value,
+        len: Value,
+        compact_reltol: Value,
+        compact_abstol: Value,
+    ) {
+        if !r.is_finite()
+            || !l.is_finite()
+            || !g.is_finite()
+            || !c.is_finite()
+            || !len.is_finite()
+            || l <= 0.0
+            || c <= 0.0
+            || len <= 0.0
+            || g.abs() > 1e-18
+        {
+            self.distributed_rlc = None;
+            self.distributed_rlc_cache.set(None);
+            return;
+        }
+
+        let alpha = 0.5 * (r / l);
+        let beta = alpha;
+        let attenuation = (-beta * self.td).exp().clamp(1e-6, 1.0);
+        let max_safe_step =
+            distributed_rlc_max_safe_step(self.td, alpha, beta, compact_reltol, compact_abstol)
+                .unwrap_or(self.td);
+        self.distributed_rlc = Some(DistributedRlcKernel {
+            alpha,
+            beta,
+            attenuation,
+            int_h1dash: if alpha > 0.0 { -1.0 } else { 0.0 },
+            int_h2: if alpha > 0.0 { 1.0 - attenuation } else { 0.0 },
+            int_h3dash: if alpha > 0.0 { -attenuation } else { 0.0 },
+            max_safe_step,
+        });
+        self.attenuation = attenuation;
+        self.distributed_rlc_cache.set(None);
+    }
+
+    #[inline]
+    pub fn distributed_rlgc_max_safe_step(&self) -> Option<Value> {
+        self.distributed_rlc
+            .as_ref()
+            .map(|kernel| kernel.max_safe_step)
+    }
+
+    /// Get DC equivalent conductance used by OP/DC fallback stamping.
+    #[inline]
+    pub fn dc_series_conductance(&self) -> Value {
+        let r = if self.dc_series_resistance > 0.0 {
+            self.dc_series_resistance
+        } else {
+            TLINE_DC_SHORT_RESISTANCE
+        };
+        1.0 / r
+    }
+
+    /// Get propagation velocity (if freq and nl are set)
+    pub fn velocity(&self) -> Option<Value> {
+        match (self.freq, self.nl) {
+            (Some(f), Some(nl)) => {
+                // v = wavelength * freq = (length/nl) * freq
+                // But we don't have physical length, just normalized
+                Some(f / nl * self.td)
+            }
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn initial_state(&self) -> TlineStateSample {
+        self.initial_state.unwrap_or(TlineStateSample {
+            time: 0.0,
+            v1: 0.0,
+            i1: 0.0,
+            v2: 0.0,
+            i2: 0.0,
+        })
+    }
+
+    fn delayed_state(&self, time: Value) -> TlineStateSample {
+        let target = time - self.td;
+        let initial = self.initial_state();
+        if self.state_history.is_empty() || target <= initial.time {
+            return initial;
+        }
+
+        let mut prev2: Option<&TlineStateSample> = None;
+        let mut prev: Option<&TlineStateSample> = None;
+        for sample in &self.state_history {
+            if sample.time >= target {
+                if let Some(prev_sample) = prev {
+                    if sample.time <= prev_sample.time {
+                        return *sample;
+                    }
+                    return TlineStateSample {
+                        time: target,
+                        v1: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
+                            s.v1
+                        }),
+                        i1: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
+                            s.i1
+                        }),
+                        v2: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
+                            s.v2
+                        }),
+                        i2: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
+                            s.i2
+                        }),
+                    };
+                }
+                return *sample;
+            }
+            prev2 = prev;
+            prev = Some(sample);
+        }
+
+        self.state_history.back().copied().unwrap_or(initial)
+    }
+
+    fn distributed_rlc_response(
+        &self,
+        kernel: &DistributedRlcKernel,
+        time: Value,
+    ) -> TlineTransientResponse {
+        let g = self.conductance();
+        let initial = self.initial_state();
+        let history_len = self.state_history.len();
+        if history_len == 0 {
+            return TlineTransientResponse::uncoupled(g, 0.0, 0.0);
+        }
+
+        let delayed = self.delayed_state(time);
+        let mut input1 = kernel.attenuation * (g * delayed.v2 + delayed.i2);
+        let mut input2 = kernel.attenuation * (g * delayed.v1 + delayed.i1);
+
+        let last_time = self
+            .state_history
+            .back()
+            .map(|sample| sample.time)
+            .unwrap_or(0.0);
+        if time <= last_time {
+            return TlineTransientResponse::uncoupled(g, input1, input2);
+        }
+
+        let time_list = self
+            .state_history
+            .iter()
+            .map(|sample| sample.time)
+            .collect::<Vec<_>>();
+        let coeffs = distributed_rlc_coefficients(
+            self.td,
+            kernel.alpha,
+            kernel.beta,
+            time,
+            &time_list,
+            DISTRIBUTED_RLC_CHOP_RELTOL,
+        );
+
+        let mut dummy1 = 0.0;
+        let mut dummy2 = 0.0;
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h1dash.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.v1 - initial.v1);
+                dummy2 += coeff * (sample.v2 - initial.v2);
+            }
+        }
+        dummy1 += initial.v1 * kernel.int_h1dash;
+        dummy2 += initial.v2 * kernel.int_h1dash;
+        dummy1 -= initial.v1 * coeffs.h1dash_first;
+        dummy2 -= initial.v2 * coeffs.h1dash_first;
+        input1 -= g * dummy1;
+        input2 -= g * dummy2;
+
+        dummy1 = if coeffs.h2_first != 0.0 {
+            (delayed.i2 - initial.i2) * coeffs.h2_first
+        } else {
+            0.0
+        };
+        dummy2 = if coeffs.h2_first != 0.0 {
+            (delayed.i1 - initial.i1) * coeffs.h2_first
+        } else {
+            0.0
+        };
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h2.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.i2 - initial.i2);
+                dummy2 += coeff * (sample.i1 - initial.i1);
+            }
+        }
+        dummy1 += initial.i2 * kernel.int_h2;
+        dummy2 += initial.i1 * kernel.int_h2;
+        input1 += dummy1;
+        input2 += dummy2;
+
+        dummy1 = if coeffs.h3dash_first != 0.0 {
+            (delayed.v2 - initial.v2) * coeffs.h3dash_first
+        } else {
+            0.0
+        };
+        dummy2 = if coeffs.h3dash_first != 0.0 {
+            (delayed.v1 - initial.v1) * coeffs.h3dash_first
+        } else {
+            0.0
+        };
+        for (idx, sample) in self.state_history.iter().enumerate().skip(1) {
+            let coeff = coeffs.h3dash.get(idx).copied().unwrap_or(0.0);
+            if coeff != 0.0 {
+                dummy1 += coeff * (sample.v2 - initial.v2);
+                dummy2 += coeff * (sample.v1 - initial.v1);
+            }
+        }
+        dummy1 += initial.v2 * kernel.int_h3dash;
+        dummy2 += initial.v1 * kernel.int_h3dash;
+        input1 += g * dummy1;
+        input2 += g * dummy2;
+
+        // Match ngspice's LTRA RLC load split: only the local h1dash startup
+        // term is stamped into the matrix, while the h2/h3dash first terms stay
+        // on the delayed-history RHS. Treating h2/h3dash as same-step matrix
+        // coupling creates nonphysical cross-port interaction before one delay.
+        TlineTransientResponse::uncoupled(g * (1.0 + coeffs.h1dash_first), input1, input2)
+    }
+
+    /// Return the transient companion conductance and equivalent currents.
+    pub(crate) fn transient_port_response(&self, time: Value) -> TlineTransientResponse {
+        if let Some(kernel) = &self.distributed_rlc {
+            if let Some((cached_time, response)) = self.distributed_rlc_cache.get()
+                && (cached_time - time).abs() < 1e-18
+            {
+                return response;
+            }
+            let response = self.distributed_rlc_response(kernel, time);
+            self.distributed_rlc_cache.set(Some((time, response)));
+            return response;
+        }
+
+        let g = self.conductance();
+        let delayed = self.delayed_state(time);
+        let i_eq_port1 = self.attenuation * (g * delayed.v2 + delayed.i2);
+        let i_eq_port2 = self.attenuation * (g * delayed.v1 + delayed.i1);
+        TlineTransientResponse::uncoupled(g, i_eq_port1, i_eq_port2)
+    }
+
+    /// Update history buffers with current state
+    pub fn update_history(&mut self, time: Value, v1: Value, i1: Value, v2: Value, i2: Value) {
+        let raw_forward = v1 + self.z0 * i1;
+        let raw_backward = v2 + self.z0 * i2;
+
+        // Store the launched traveling waves directly in the delay history.
+        // Timestep-local smoothing made the line response depend on the accepted
+        // solver step sequence, which is nonphysical and destabilized delayed
+        // arrivals once transmission-line breakpoints were added.
+        if !self.history_initialized {
+            self.history_initialized = true;
+        }
+        self.filtered_forward_wave = raw_forward;
+        self.filtered_backward_wave = raw_backward;
+
+        // Forward wave: V1 + Z0*I1 propagates to port 2
+        self.history_forward.push(time, self.filtered_forward_wave);
+
+        // Backward wave: V2 + Z0*I2 propagates to port 1
+        self.history_backward
+            .push(time, self.filtered_backward_wave);
+        self.state_history.push_back(TlineStateSample {
+            time,
+            v1,
+            i1,
+            v2,
+            i2,
+        });
+        if self.initial_state.is_none() {
+            self.initial_state = self.state_history.front().copied();
+        }
+        self.distributed_rlc_cache.set(None);
+        if self.distributed_rlc.is_none() {
+            let history_horizon = self.td * 1.5;
+            while let Some(sample) = self.state_history.front() {
+                if time - sample.time > history_horizon {
+                    self.state_history.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+        self.current_time = time;
+    }
+
+    /// Get delayed forward wave (arrives at port 2)
+    pub fn delayed_forward(&self) -> Value {
+        self.delayed_forward_at(self.current_time)
+    }
+
+    /// Get delayed backward wave (arrives at port 1)
+    pub fn delayed_backward(&self) -> Value {
+        self.delayed_backward_at(self.current_time)
+    }
+
+    /// Get delayed forward wave at an explicit simulation time.
+    pub fn delayed_forward_at(&self, time: Value) -> Value {
+        self.delayed_forward_raw_at(time) * self.attenuation
+    }
+
+    /// Get delayed backward wave at an explicit simulation time.
+    pub fn delayed_backward_at(&self, time: Value) -> Value {
+        self.delayed_backward_raw_at(time) * self.attenuation
+    }
+
+    /// Get the delayed forward history wave without applying one-way attenuation.
+    pub fn delayed_forward_raw_at(&self, time: Value) -> Value {
+        self.history_forward.get_delayed(time, self.td)
+    }
+
+    /// Get the delayed backward history wave without applying one-way attenuation.
+    pub fn delayed_backward_raw_at(&self, time: Value) -> Value {
+        self.history_backward.get_delayed(time, self.td)
+    }
+
+    #[inline]
+    pub fn launched_forward_wave(&self) -> Value {
+        self.filtered_forward_wave
+    }
+
+    #[inline]
+    pub fn launched_backward_wave(&self) -> Value {
+        self.filtered_backward_wave
+    }
+
+    /// Reset for new simulation
+    pub fn reset(&mut self) {
+        self.history_forward.clear();
+        self.history_backward.clear();
+        self.filtered_forward_wave = 0.0;
+        self.filtered_backward_wave = 0.0;
+        self.history_initialized = false;
+        self.initial_state = None;
+        self.state_history.clear();
+        self.distributed_rlc_cache.set(None);
+        self.current_time = 0.0;
+    }
+
+    /// Get equivalent conductance (G = 1/Z0)
+    #[inline]
+    pub fn conductance(&self) -> Value {
+        1.0 / self.z0
+    }
+}
