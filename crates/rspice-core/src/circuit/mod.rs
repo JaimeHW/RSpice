@@ -3021,6 +3021,22 @@ impl CircuitData {
             .stamp_all_direct(matrix, |br_ordinal| num_nodes + br_ordinal);
     }
 
+    /// Stamp the linear part of the t=0 transient operating point.
+    ///
+    /// Time-varying independent sources are evaluated at the requested
+    /// transient time, while transmission lines use their DC fallback
+    /// conductance so their far ends start from the correct operating point
+    /// before delayed-wave companions take over for t > 0.
+    pub fn stamp_transient_operating_point_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+    ) {
+        self.stamp_transient_linear_direct(matrix, rhs);
+        self.stamp_tlines_dc_direct(matrix);
+        self.stamp_coupled_tlines_dc_direct(matrix);
+    }
+
     /// Stamp all devices with scaled source values (for source stepping)
     pub fn stamp_dc_direct_scaled(
         &self,

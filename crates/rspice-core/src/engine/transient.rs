@@ -10128,6 +10128,36 @@ mod abort_tests {
         .expect("Failed to parse netlist")
     }
 
+    #[test]
+    fn test_transient_operating_point_seeds_tline_far_end_from_dc_fallback() {
+        let netlist = Netlist::parse(
+            "Transmission line transient operating point\n\
+             V1 in 0 DC 5\n\
+             T1 in 0 out 0 Z0=50 TD=1n\n\
+             .tran 1p 1p\n\
+             .end",
+        )
+        .expect("parse transmission-line operating point netlist");
+
+        let engine = Engine::default();
+        let result = engine
+            .run_tran(&netlist, 1e-12, 1e-12)
+            .expect("transient operating point should solve");
+
+        let source = result
+            .try_voltage_at_named("in", 0)
+            .expect("source node should be present");
+        let far_end = result
+            .try_voltage_at_named("out", 0)
+            .expect("far-end node should be present");
+
+        assert!((source - 5.0).abs() < 1e-9);
+        assert!(
+            (far_end - source).abs() < 1e-9,
+            "transient t=0 solve must seed the line far end from the DC fallback; got source={source:.12e}, far_end={far_end:.12e}"
+        );
+    }
+
     fn simple_bjt_amp_netlist() -> Netlist {
         Netlist::parse(
             "Simple BJT amplifier regression\n\

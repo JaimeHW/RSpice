@@ -685,7 +685,7 @@ impl Engine {
             matrix.add(i, i, gmin);
         }
 
-        circuit.stamp_transient_linear_direct(matrix, rhs);
+        circuit.stamp_transient_operating_point_direct(matrix, rhs);
         let num_nodes = circuit.num_nodes();
         circuit
             .voltage_sources
