@@ -573,8 +573,25 @@ impl LteEstimator {
     /// Estimate LTE using linear extrapolation vs actual value
     /// Returns (lte_estimate, should_accept)
     pub fn estimate(&self, current: &[Value], dt: Value) -> (Value, bool) {
+        self.estimate_prefix(current, current.len(), dt)
+    }
+
+    /// Estimate LTE for the first `prefix_len` solution entries.
+    ///
+    /// Transient Newton vectors include algebraic branch-current unknowns for
+    /// voltage sources and inductors. Those currents can legitimately jump to
+    /// enforce KCL around capacitive edges, so generic LTE control should be
+    /// applied to dynamic node-voltage state unless a device-local charge
+    /// controller is being used.
+    pub fn estimate_prefix(
+        &self,
+        current: &[Value],
+        prefix_len: usize,
+        dt: Value,
+    ) -> (Value, bool) {
+        let len = prefix_len.min(current.len());
         // Need at least one previous point to estimate
-        if self.history_count < 1 || self.prev_solution.len() != current.len() {
+        if len == 0 || self.history_count < 1 || self.prev_solution.len() < len {
             return (0.0, true); // Accept, no history yet
         }
 
@@ -582,7 +599,7 @@ impl LteEstimator {
 
         // For trapezoidal, LTE ~ (dt^3 / 12) * d^3v/dt^3
         // We approximate by comparing predicted (linear extrapolation) vs actual
-        for (i, &curr_val) in current.iter().enumerate() {
+        for (i, &curr_val) in current.iter().take(len).enumerate() {
             let prev_val = self.prev_solution[i];
             let prev_prev_val = self.prev_prev_solution.get(i).copied().unwrap_or(prev_val);
             let prev_prev_prev_val = self
@@ -1165,6 +1182,31 @@ mod tests {
         assert!((predicted[1] - expected1).abs() < 1e-18);
         assert!((predicted[2] - 6.5).abs() < 1e-18);
         assert!((predicted[3] - -6.0).abs() < 1e-18);
+    }
+
+    #[test]
+    fn test_lte_estimator_prefix_ignores_algebraic_suffix() {
+        let mut estimator = LteEstimator::with_tolerances(1e-3, 1e-6);
+        estimator.set_method_order(1);
+        estimator.record(&[1.0, 10.0], 1.0);
+        estimator.record(&[1.1, 20.0], 1.0);
+
+        let candidate = [1.2, 1.0e6];
+        let (full_lte, full_accept) = estimator.estimate(&candidate, 1.0);
+        let (prefix_lte, prefix_accept) = estimator.estimate_prefix(&candidate, 1, 1.0);
+
+        assert!(
+            !full_accept,
+            "full-vector LTE should reject the algebraic suffix jump: lte={full_lte:.12e}"
+        );
+        assert!(
+            prefix_accept,
+            "prefix LTE should ignore algebraic suffix entries: lte={prefix_lte:.12e}"
+        );
+        assert!(
+            prefix_lte <= 1e-12,
+            "prefix state follows the accepted linear history exactly"
+        );
     }
 
     #[test]

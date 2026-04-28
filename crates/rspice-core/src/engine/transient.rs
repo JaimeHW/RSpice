@@ -178,18 +178,21 @@ struct MosfetTransientHistory {
     capgs_prev_half: Vec<Value>,
     qgs_prev: Vec<Value>,
     qgs_prev_prev: Vec<Value>,
+    qgs_prev_prev_prev: Vec<Value>,
     cqgs_prev: Vec<Value>,
     vgd_prev: Vec<Value>,
     vgd_prev_prev: Vec<Value>,
     capgd_prev_half: Vec<Value>,
     qgd_prev: Vec<Value>,
     qgd_prev_prev: Vec<Value>,
+    qgd_prev_prev_prev: Vec<Value>,
     cqgd_prev: Vec<Value>,
     vgb_prev: Vec<Value>,
     vgb_prev_prev: Vec<Value>,
     capgb_prev_half: Vec<Value>,
     qgb_prev: Vec<Value>,
     qgb_prev_prev: Vec<Value>,
+    qgb_prev_prev_prev: Vec<Value>,
     cqgb_prev: Vec<Value>,
     vbs_j_prev: Vec<Value>,
     vbs_j_prev_prev: Vec<Value>,
@@ -201,6 +204,8 @@ struct MosfetTransientHistory {
     qbd_prev: Vec<Value>,
     qbd_prev_prev: Vec<Value>,
     cqbd_prev: Vec<Value>,
+    accepted_dt_prev: Value,
+    accepted_dt_prev_prev: Value,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1066,9 +1071,24 @@ impl Engine {
         jfet: &crate::device::Jfet,
         voltages: &[Value],
     ) -> (Value, Value) {
-        // For HFET/MESA models, drive charge-history updates from limited internal
-        // branch state (ngspice-compatible vgspp/vgdpp behavior). For legacy
-        // Shichman-Hodges JFETs, use raw terminal deltas.
+        // ngspice HFET1 keeps two voltage tracks: limited vgs/vgd for nonlinear
+        // channel/capacitance evaluation, and raw vgspp/vgdpp for charge history.
+        // The transient qgs/qgd update must follow the raw branch voltage so a
+        // source edge injects the same charge current even when DEVfetlim limits
+        // the nonlinear control voltage during Newton iterations.
+        if matches!(
+            jfet.params.channel_model,
+            crate::device::JfetChannelModel::Hfet1
+        ) && jfet.params.hfet_level >= 5
+        {
+            let vg = Self::node_voltage(voltages, jfet.gate);
+            let vd = Self::node_voltage(voltages, jfet.drain);
+            let vs = Self::node_voltage(voltages, jfet.source);
+            return (vg - vs, vg - vd);
+        }
+
+        // MESA/HFET2-style devices keep using the limited internal branch state,
+        // matching the existing level-2..4 path and its convergence behavior.
         if matches!(
             jfet.params.channel_model,
             crate::device::JfetChannelModel::Hfet1
@@ -5436,6 +5456,113 @@ impl Engine {
     }
 
     #[inline]
+    fn mosfet_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &MosfetTransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
+            let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(candidate_solution);
+            let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(candidate_solution);
+            let (cgs_half, cgd_half, cgb_half) =
+                mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+            let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
+
+            for (
+                capacitance,
+                voltage,
+                voltage_prev,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_prev,
+            ) in [
+                (
+                    cgs_half + history.capgs_prev_half[idx] + cgs_ov,
+                    vgs,
+                    history.vgs_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgs_prev_prev[idx],
+                    history.qgs_prev_prev_prev[idx],
+                    history.cqgs_prev[idx],
+                ),
+                (
+                    cgd_half + history.capgd_prev_half[idx] + cgd_ov,
+                    vgd,
+                    history.vgd_prev[idx],
+                    history.qgd_prev[idx],
+                    history.qgd_prev_prev[idx],
+                    history.qgd_prev_prev_prev[idx],
+                    history.cqgd_prev[idx],
+                ),
+                (
+                    cgb_half + history.capgb_prev_half[idx] + cgb_ov,
+                    vgb,
+                    history.vgb_prev[idx],
+                    history.qgb_prev[idx],
+                    history.qgb_prev_prev[idx],
+                    history.qgb_prev_prev_prev[idx],
+                    history.cqgb_prev[idx],
+                ),
+            ] {
+                if !capacitance.is_finite() || capacitance <= 0.0 {
+                    continue;
+                }
+
+                let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    capacitance,
+                    voltage,
+                    voltage_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
+    #[inline]
     fn min_truncation_limit(first: Option<Value>, second: Option<Value>) -> Option<Value> {
         match (first, second) {
             (Some(a), Some(b)) => Some(a.min(b)),
@@ -5619,6 +5746,26 @@ impl Engine {
     }
 
     #[inline]
+    fn mosfet_charge_truncation_covers_transient_lte(
+        circuit: &crate::circuit::Circuit,
+        mosfet_truncation_limit: Option<Value>,
+    ) -> bool {
+        mosfet_truncation_limit.is_some()
+            && !circuit.mosfets.is_empty()
+            && circuit.capacitors.is_empty()
+            && circuit.inductors.is_empty()
+            && circuit.diodes.is_empty()
+            && circuit.bjts.devices.is_empty()
+            && circuit.jfets.is_empty()
+            && circuit.tlines.is_empty()
+            && circuit.coupled_tlines.is_empty()
+            && circuit.coupled_inductor_pairs.is_empty()
+            && circuit.multi_winding_transformers.is_empty()
+            && circuit.jiles_atherton_inductors.is_empty()
+            && !circuit.has_xspice_devices()
+    }
+
+    #[inline]
     fn estimate_transient_lte(
         circuit: &crate::circuit::Circuit,
         candidate_solution: &[Value],
@@ -5656,7 +5803,8 @@ impl Engine {
             return (lte, accept, true);
         }
 
-        let (lte, accept) = voltage_lte_estimator.estimate(candidate_solution, dt);
+        let (lte, accept) =
+            voltage_lte_estimator.estimate_prefix(candidate_solution, circuit.num_nodes(), dt);
         (lte, accept, false)
     }
 
@@ -5685,6 +5833,7 @@ impl Engine {
         is_strictly_linear_transient: bool,
         history: &BjtTransientHistory,
         jfet_history: &JfetTransientHistory,
+        mosfet_history: &MosfetTransientHistory,
         voltage_lte_estimator: &LteEstimator,
         vbic_charge_lte_estimator: Option<&LteEstimator>,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
@@ -5749,6 +5898,29 @@ impl Engine {
                 return false;
             }
             if Self::jfet_charge_truncation_covers_transient_lte(circuit, Some(limit)) {
+                return true;
+            }
+        }
+
+        if !circuit.mosfets.is_empty() {
+            let Some(limit) = Self::mosfet_ngspice_truncation_limit(
+                circuit,
+                accepted_solution,
+                method,
+                2,
+                dt,
+                mosfet_history,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            ) else {
+                return false;
+            };
+            if !Self::should_promote_ngspice_charge_truncation(limit, dt) {
+                return false;
+            }
+            if Self::mosfet_charge_truncation_covers_transient_lte(circuit, Some(limit)) {
                 return true;
             }
         }
@@ -6050,18 +6222,21 @@ impl Engine {
             capgs_prev_half: Vec::with_capacity(n),
             qgs_prev: Vec::with_capacity(n),
             qgs_prev_prev: Vec::with_capacity(n),
+            qgs_prev_prev_prev: Vec::with_capacity(n),
             cqgs_prev: Vec::with_capacity(n),
             vgd_prev: Vec::with_capacity(n),
             vgd_prev_prev: Vec::with_capacity(n),
             capgd_prev_half: Vec::with_capacity(n),
             qgd_prev: Vec::with_capacity(n),
             qgd_prev_prev: Vec::with_capacity(n),
+            qgd_prev_prev_prev: Vec::with_capacity(n),
             cqgd_prev: Vec::with_capacity(n),
             vgb_prev: Vec::with_capacity(n),
             vgb_prev_prev: Vec::with_capacity(n),
             capgb_prev_half: Vec::with_capacity(n),
             qgb_prev: Vec::with_capacity(n),
             qgb_prev_prev: Vec::with_capacity(n),
+            qgb_prev_prev_prev: Vec::with_capacity(n),
             cqgb_prev: Vec::with_capacity(n),
             vbs_j_prev: Vec::with_capacity(n),
             vbs_j_prev_prev: Vec::with_capacity(n),
@@ -6073,6 +6248,8 @@ impl Engine {
             qbd_prev: Vec::with_capacity(n),
             qbd_prev_prev: Vec::with_capacity(n),
             cqbd_prev: Vec::with_capacity(n),
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
         };
 
         for mos in &circuit.mosfets.devices {
@@ -6090,6 +6267,7 @@ impl Engine {
             history.capgs_prev_half.push(cgs_half);
             history.qgs_prev.push(cgs.max(0.0) * vgs);
             history.qgs_prev_prev.push(cgs.max(0.0) * vgs);
+            history.qgs_prev_prev_prev.push(cgs.max(0.0) * vgs);
             history.cqgs_prev.push(0.0);
 
             history.vgd_prev.push(vgd);
@@ -6097,6 +6275,7 @@ impl Engine {
             history.capgd_prev_half.push(cgd_half);
             history.qgd_prev.push(cgd.max(0.0) * vgd);
             history.qgd_prev_prev.push(cgd.max(0.0) * vgd);
+            history.qgd_prev_prev_prev.push(cgd.max(0.0) * vgd);
             history.cqgd_prev.push(0.0);
 
             history.vgb_prev.push(vgb);
@@ -6104,6 +6283,7 @@ impl Engine {
             history.capgb_prev_half.push(cgb_half);
             history.qgb_prev.push(cgb.max(0.0) * vgb);
             history.qgb_prev_prev.push(cgb.max(0.0) * vgb);
+            history.qgb_prev_prev_prev.push(cgb.max(0.0) * vgb);
             history.cqgb_prev.push(0.0);
 
             let vbs_j = mos.body_source_charge_branch_voltage(vbs);
@@ -7028,7 +7208,9 @@ impl Engine {
             let v_new = Self::differential_voltage(accepted_solution, np, nn);
 
             // Compute new capacitor current from OLD history before rotating it.
-            let coeff_update = CompanionCoefficients::for_method(method);
+            let coeff_update = CompanionCoefficients::for_method(Self::effective_companion_method(
+                method, trap_order,
+            ));
             let geq = coeff_update.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
             let ieq = coeff_update.capacitor_ieq(
                 circuit.capacitors.capacitances[cap_idx],
@@ -7376,6 +7558,7 @@ impl Engine {
                     mosfet_history.qgs_prev_prev[idx],
                     mosfet_history.cqgs_prev[idx],
                 );
+                mosfet_history.qgs_prev_prev_prev[idx] = mosfet_history.qgs_prev_prev[idx];
                 mosfet_history.qgs_prev_prev[idx] = mosfet_history.qgs_prev[idx];
                 mosfet_history.qgs_prev[idx] = qgs_curr;
                 mosfet_history.cqgs_prev[idx] = cqgs_curr;
@@ -7391,6 +7574,7 @@ impl Engine {
                     mosfet_history.qgd_prev_prev[idx],
                     mosfet_history.cqgd_prev[idx],
                 );
+                mosfet_history.qgd_prev_prev_prev[idx] = mosfet_history.qgd_prev_prev[idx];
                 mosfet_history.qgd_prev_prev[idx] = mosfet_history.qgd_prev[idx];
                 mosfet_history.qgd_prev[idx] = qgd_curr;
                 mosfet_history.cqgd_prev[idx] = cqgd_curr;
@@ -7406,6 +7590,7 @@ impl Engine {
                     mosfet_history.qgb_prev_prev[idx],
                     mosfet_history.cqgb_prev[idx],
                 );
+                mosfet_history.qgb_prev_prev_prev[idx] = mosfet_history.qgb_prev_prev[idx];
                 mosfet_history.qgb_prev_prev[idx] = mosfet_history.qgb_prev[idx];
                 mosfet_history.qgb_prev[idx] = qgb_curr;
                 mosfet_history.cqgb_prev[idx] = cqgb_curr;
@@ -7449,6 +7634,8 @@ impl Engine {
             mosfet_history.qbd_prev[idx] = qbd_curr;
             mosfet_history.cqbd_prev[idx] = cqbd_curr;
         }
+        mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
+        mosfet_history.accepted_dt_prev = dt;
     }
 
     #[inline]
@@ -7843,6 +8030,8 @@ impl Engine {
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
+        mosfet_history.accepted_dt_prev = hinted_max_step;
+        mosfet_history.accepted_dt_prev_prev = hinted_max_step;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
@@ -8811,9 +9000,30 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_mosfet_truncation_limit =
+                        if !suppress_gate_charge && !circuit.mosfets.is_empty() {
+                            Self::mosfet_ngspice_truncation_limit(
+                                &circuit,
+                                &new_solution,
+                                current_method,
+                                accepted_step_trap_order,
+                                dt,
+                                &mosfet_history,
+                                self.voltage_reltol(),
+                                self.current_abstol(),
+                                self.charge_abstol(),
+                                NGSPICE_DEFAULT_TRTOL,
+                            )
+                            .filter(|limit| limit.is_finite() && *limit > 0.0)
+                        } else {
+                            None
+                        };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
-                        force_accept_bjt_truncation_limit,
-                        force_accept_jfet_truncation_limit,
+                        Self::min_truncation_limit(
+                            force_accept_bjt_truncation_limit,
+                            force_accept_jfet_truncation_limit,
+                        ),
+                        force_accept_mosfet_truncation_limit,
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -8975,8 +9185,30 @@ impl Engine {
             } else {
                 None
             };
-            let device_truncation_limit =
-                Self::min_truncation_limit(bjt_truncation_limit, jfet_truncation_limit);
+            let mosfet_truncation_limit = if !first_accepted_transient_step
+                && !suppress_gate_charge
+                && !circuit.mosfets.is_empty()
+            {
+                Self::mosfet_ngspice_truncation_limit(
+                    &circuit,
+                    &new_solution,
+                    current_method,
+                    step_trap_order,
+                    dt,
+                    &mosfet_history,
+                    self.voltage_reltol(),
+                    self.current_abstol(),
+                    self.charge_abstol(),
+                    NGSPICE_DEFAULT_TRTOL,
+                )
+                .filter(|limit| limit.is_finite() && *limit > 0.0)
+            } else {
+                None
+            };
+            let device_truncation_limit = Self::min_truncation_limit(
+                Self::min_truncation_limit(bjt_truncation_limit, jfet_truncation_limit),
+                mosfet_truncation_limit,
+            );
 
             if let Some(limit) = device_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
@@ -9035,6 +9267,13 @@ impl Engine {
                     &circuit,
                     jfet_truncation_limit,
                 );
+            let defer_voltage_lte_to_mosfet_truncation = !has_vbic_excess_phase
+                && !has_bjts
+                && circuit.jfets.is_empty()
+                && Self::mosfet_charge_truncation_covers_transient_lte(
+                    &circuit,
+                    mosfet_truncation_limit,
+                );
             let (lte, accept, uses_vbic_charge_lte) = if first_accepted_transient_step {
                 (0.0, true, false)
             } else if defer_voltage_lte_to_vbic_truncation {
@@ -9056,6 +9295,11 @@ impl Engine {
                 // For JFET-only reactive decks, keep that charge controller
                 // authoritative instead of letting generic node-voltage LTE
                 // collapse the timestep around sharp nonlinear gate edges.
+                (0.0, true, false)
+            } else if defer_voltage_lte_to_mosfet_truncation {
+                // MOS transient gate-charge control is the device-local
+                // MOStrunc/MOS6trunc CKTterr path in ngspice. In MOS-only
+                // reactive decks it is the authoritative timestep controller.
                 (0.0, true, false)
             } else {
                 Self::estimate_transient_lte(
@@ -9299,9 +9543,30 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_mosfet_truncation_limit =
+                        if !suppress_gate_charge && !circuit.mosfets.is_empty() {
+                            Self::mosfet_ngspice_truncation_limit(
+                                &circuit,
+                                &new_solution,
+                                current_method,
+                                accepted_step_trap_order,
+                                dt,
+                                &mosfet_history,
+                                self.voltage_reltol(),
+                                self.current_abstol(),
+                                self.charge_abstol(),
+                                NGSPICE_DEFAULT_TRTOL,
+                            )
+                            .filter(|limit| limit.is_finite() && *limit > 0.0)
+                        } else {
+                            None
+                        };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
-                        force_accept_bjt_truncation_limit,
-                        force_accept_jfet_truncation_limit,
+                        Self::min_truncation_limit(
+                            force_accept_bjt_truncation_limit,
+                            force_accept_jfet_truncation_limit,
+                        ),
+                        force_accept_mosfet_truncation_limit,
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -9549,6 +9814,7 @@ impl Engine {
                         is_strictly_linear_transient,
                         &bjt_history,
                         &jfet_history,
+                        &mosfet_history,
                         &lte_estimator,
                         vbic_charge_lte_estimator.as_ref(),
                         &vbic_snapshot_cache,
@@ -9784,7 +10050,7 @@ mod abort_tests {
     }
 
     #[test]
-    fn test_jfet_charge_branch_voltages_hfet_level5_uses_internal_branch_state_when_available() {
+    fn test_jfet_charge_branch_voltages_hfet_level5_uses_raw_terminal_state() {
         use crate::device::NonlinearDevice;
 
         let mut z = crate::device::Jfet::njf("Z1", 1, 2, 3).enable_hfet_model();
@@ -9799,13 +10065,13 @@ mod abort_tests {
         let vgs_raw = voltages[1] - voltages[2];
         let vgd_raw = voltages[1] - voltages[0];
 
-        // HFET level-5 charge history should follow the same limited branch
-        // state used by model internals when that state is available.
-        assert!((vgs_charge - vgs_internal).abs() < 1e-15);
-        assert!((vgd_charge - vgd_internal).abs() < 1e-15);
+        // HFET1 charge history must follow ngspice vgspp/vgdpp: raw
+        // gate-to-internal-terminal voltages, not DEVfetlim-clipped controls.
+        assert!((vgs_charge - vgs_raw).abs() < 1e-15);
+        assert!((vgd_charge - vgd_raw).abs() < 1e-15);
         assert!(
-            (vgs_charge - vgs_raw).abs() > 1e-6 || (vgd_charge - vgd_raw).abs() > 1e-6,
-            "expected limited branch voltages to differ from raw branch voltages"
+            (vgs_internal - vgs_raw).abs() > 1e-6 || (vgd_internal - vgd_raw).abs() > 1e-6,
+            "test setup should exercise a limiter-clipped HFET control state"
         );
     }
 
@@ -9954,6 +10220,52 @@ mod abort_tests {
         let jfet = circuit.jfets[idx].clone();
         let mut solution = vec![0.0; circuit.matrix_size()];
         for (node, value) in [(jfet.drain, 2.0), (jfet.gate, 0.35), (jfet.source, -0.1)] {
+            if node > 0 {
+                solution[node - 1] = value;
+            }
+        }
+        circuit.update_nonlinear(&solution);
+
+        (circuit, solution, idx)
+    }
+
+    fn mosfet_charge_history_fixture() -> (crate::circuit::Circuit, Vec<Value>, usize) {
+        let mut circuit = crate::circuit::Circuit::new();
+        let drain = circuit.get_or_create_node("d");
+        let gate = circuit.get_or_create_node("g");
+        let source = circuit.get_or_create_node("s");
+        let bulk = circuit.get_or_create_node("b");
+        let params = std::collections::HashMap::from([
+            ("LEVEL".to_string(), 6.0),
+            ("VT0".to_string(), 0.69486),
+            ("KC".to_string(), 3.8921e-5),
+            ("NC".to_string(), 1.1739),
+            ("KV".to_string(), 0.91602),
+            ("NV".to_string(), 0.87225),
+            ("GAMMA".to_string(), 0.60309),
+            ("PHI".to_string(), 1.0),
+            ("TOX".to_string(), 1.98e-8),
+            ("CGSO".to_string(), 3.93e-10),
+            ("CGDO".to_string(), 3.93e-10),
+            ("CGBO".to_string(), 1.0e-10),
+            ("LD".to_string(), 0.1e-6),
+            ("LAMBDA0".to_string(), 0.013333),
+            ("LAMBDA1".to_string(), 0.0),
+        ]);
+        let mosfet = crate::device::Mosfet::new_nmos("M1".to_string(), drain, gate, source, bulk)
+            .with_params(&params)
+            .with_geometry(5.0e-6, 1.0e-6);
+        circuit.mosfets.add(mosfet);
+
+        let idx = 0;
+        let mosfet = circuit.mosfets.devices[idx].clone();
+        let mut solution = vec![0.0; circuit.matrix_size()];
+        for (node, value) in [
+            (mosfet.node_drain, 1.8),
+            (mosfet.node_gate, 1.0),
+            (mosfet.node_source, 0.0),
+            (mosfet.node_bulk, 0.0),
+        ] {
             if node > 0 {
                 solution[node - 1] = value;
             }
@@ -10339,6 +10651,126 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_mosfet_ngspice_truncation_limit_matches_gate_charge_cktterr() {
+        let (circuit, solution, idx) = mosfet_charge_history_fixture();
+        let mut history = Engine::initialize_mosfet_history(&circuit, &solution);
+        history.accepted_dt_prev = 1e-12;
+        history.accepted_dt_prev_prev = 1e-12;
+        history.qgs_prev_prev[idx] = history.qgs_prev[idx] - 3.0e-15;
+        history.qgs_prev_prev_prev[idx] = history.qgs_prev_prev[idx] - 2.0e-15;
+        history.qgd_prev_prev[idx] = history.qgd_prev[idx] + 2.0e-15;
+        history.qgd_prev_prev_prev[idx] = history.qgd_prev_prev[idx] + 1.0e-15;
+        history.qgb_prev_prev[idx] = history.qgb_prev[idx] - 1.5e-15;
+        history.qgb_prev_prev_prev[idx] = history.qgb_prev_prev[idx] - 0.5e-15;
+
+        let mosfet = &circuit.mosfets.devices[idx];
+        let mut candidate = solution.clone();
+        for (node, value) in [
+            (mosfet.node_drain, 1.62),
+            (mosfet.node_gate, 1.14),
+            (mosfet.node_source, 0.04),
+            (mosfet.node_bulk, -0.02),
+        ] {
+            if node > 0 {
+                candidate[node - 1] = value;
+            }
+        }
+
+        let dt = 1e-12;
+        let actual = Engine::mosfet_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1e-3,
+            1e-12,
+            1e-14,
+            NGSPICE_DEFAULT_TRTOL,
+        )
+        .expect("MOSFET gate charge truncation should produce a timestep limit");
+
+        let effective_method =
+            Engine::effective_companion_method(IntegrationMethod::Trapezoidal, 1);
+        let (vgs_eval, vds_eval, vbs_eval) = mosfet.eval_branch_voltages_at(&candidate);
+        let (vgs, vgd, vgb) = mosfet.gate_charge_branch_voltages_at(&candidate);
+        let (cgs_half, cgd_half, cgb_half) =
+            mosfet.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+        let (cgs_ov, cgd_ov, cgb_ov) = mosfet.overlap_capacitances();
+        let mut expected = 2.0 * dt;
+
+        for (capacitance, voltage, voltage_prev, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
+            (
+                cgs_half + history.capgs_prev_half[idx] + cgs_ov,
+                vgs,
+                history.vgs_prev[idx],
+                history.qgs_prev[idx],
+                history.qgs_prev_prev[idx],
+                history.qgs_prev_prev_prev[idx],
+                history.cqgs_prev[idx],
+            ),
+            (
+                cgd_half + history.capgd_prev_half[idx] + cgd_ov,
+                vgd,
+                history.vgd_prev[idx],
+                history.qgd_prev[idx],
+                history.qgd_prev_prev[idx],
+                history.qgd_prev_prev_prev[idx],
+                history.cqgd_prev[idx],
+            ),
+            (
+                cgb_half + history.capgb_prev_half[idx] + cgb_ov,
+                vgb,
+                history.vgb_prev[idx],
+                history.qgb_prev[idx],
+                history.qgb_prev_prev[idx],
+                history.qgb_prev_prev_prev[idx],
+                history.cqgb_prev[idx],
+            ),
+        ] {
+            if capacitance <= 0.0 {
+                continue;
+            }
+            let (_geq, _ieq, q_curr, cq_curr) = Engine::jfet_companion_terms(
+                effective_method,
+                1,
+                dt,
+                capacitance,
+                voltage,
+                voltage_prev,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            );
+            let branch_limit = Engine::ngspice_charge_truncation_limit(
+                q_curr,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_curr,
+                cq_prev,
+                dt,
+                history.accepted_dt_prev,
+                history.accepted_dt_prev_prev,
+                effective_method,
+                1,
+                1e-3,
+                1e-12,
+                1e-14,
+                NGSPICE_DEFAULT_TRTOL,
+            )
+            .expect("manual MOSFET gate charge branch truncation limit");
+            expected = expected.min(branch_limit);
+        }
+
+        assert!(
+            (actual - expected).abs() <= expected.abs().max(1.0) * 1e-12,
+            "expected MOSFET truncation limit to match gate charge CKTterr calculation: actual={actual:.12e}, expected={expected:.12e}"
+        );
+    }
+
+    #[test]
     fn test_bjt_charge_truncation_lte_deferral_requires_covered_reactive_topology() {
         let (mut circuit, _solution, _idx, _external, _internal) =
             legacy_bjt_charge_history_fixture();
@@ -10372,6 +10804,25 @@ mod abort_tests {
 
         circuit.capacitors.add("Cextra".to_string(), 1, 0, 1e-12);
         assert!(!Engine::jfet_charge_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12)
+        ));
+    }
+
+    #[test]
+    fn test_mosfet_charge_truncation_lte_deferral_requires_covered_reactive_topology() {
+        let (mut circuit, _solution, _idx) = mosfet_charge_history_fixture();
+
+        assert!(Engine::mosfet_charge_truncation_covers_transient_lte(
+            &circuit,
+            Some(1e-12)
+        ));
+        assert!(!Engine::mosfet_charge_truncation_covers_transient_lte(
+            &circuit, None
+        ));
+
+        circuit.capacitors.add("Cextra".to_string(), 1, 0, 1e-12);
+        assert!(!Engine::mosfet_charge_truncation_covers_transient_lte(
             &circuit,
             Some(1e-12)
         ));
@@ -11221,6 +11672,67 @@ mod abort_tests {
     }
 
     #[test]
+    fn test_update_reactive_history_uses_restart_order_for_capacitor_current() {
+        let c = 1e-12;
+        let dt = 5e-10;
+        let v_prev = 1.0;
+        let v_new = 1.2;
+        let stale_trapezoidal_current = 7.0;
+
+        let mut circuit = crate::circuit::Circuit::new();
+        let node = circuit.get_or_create_node("p");
+        circuit.capacitors.add("C1".to_string(), node, 0, c);
+        circuit.capacitors.v_prev[0] = v_prev;
+        circuit.capacitors.v_prev_prev[0] = v_prev;
+        circuit.capacitors.i_prev[0] = stale_trapezoidal_current;
+
+        let solution = vec![v_new; circuit.matrix_size()];
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &solution);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &solution);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &solution);
+        let mut breakpoints = BreakpointManager::new();
+        let tline_dc_refs: Vec<(Value, Value)> = Vec::new();
+        let coupled_tline_refs: Vec<CoupledTlineReferenceState> = Vec::new();
+        let mut dynamic_breakpoints_added = 0;
+        let mut warned_dynamic_breakpoint_cap = false;
+
+        Engine::update_reactive_history(
+            &mut circuit,
+            &solution,
+            dt,
+            dt,
+            IntegrationMethod::Trapezoidal,
+            1,
+            &mut bjt_history,
+            &mut jfet_history,
+            &mut mosfet_history,
+            None,
+            false,
+            &tline_dc_refs,
+            &coupled_tline_refs,
+            &mut breakpoints,
+            10.0 * dt,
+            1e-3,
+            1e-6,
+            &mut dynamic_breakpoints_added,
+            &mut warned_dynamic_breakpoint_cap,
+        );
+
+        let expected_backward_euler_current = c * (v_new - v_prev) / dt;
+        let stale_trapezoidal_identity_current =
+            (2.0 * c / dt) * v_new - ((2.0 * c / dt) * v_prev + stale_trapezoidal_current);
+
+        assert!(
+            (circuit.capacitors.i_prev[0] - expected_backward_euler_current).abs() < 1e-18,
+            "accepted order-1 trapezoidal restart must update capacitor history with backward Euler current"
+        );
+        assert!(
+            (circuit.capacitors.i_prev[0] - stale_trapezoidal_identity_current).abs() > 1e-3,
+            "test setup must distinguish restart-order history from stale trapezoidal history"
+        );
+    }
+
+    #[test]
     fn test_linear_charge_history_ieq_matches_trapezoidal_companion_identity() {
         let dt = 5e-10;
         let q_prev = 4.2e-12;
@@ -11814,6 +12326,7 @@ mod abort_tests {
                     false,
                     &bjt_history,
                     &jfet_history,
+                    &mosfet_history,
                     &lte_estimator,
                     vbic_charge_lte_estimator.as_ref(),
                     &vbic_snapshot_cache,
