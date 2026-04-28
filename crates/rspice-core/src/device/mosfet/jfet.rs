@@ -468,6 +468,8 @@ pub struct Jfet {
     vds: Value,
     vgs_prev: Value,
     vds_prev: Value,
+    last_raw_vgs: Value,
+    last_raw_vgd: Value,
     eval_valid: bool,
     limiter_applied: bool,
     eval_ids: Value,
@@ -513,6 +515,8 @@ impl Jfet {
             vds: Value::NAN,
             vgs_prev: Value::NAN,
             vds_prev: Value::NAN,
+            last_raw_vgs: Value::NAN,
+            last_raw_vgd: Value::NAN,
             eval_valid: false,
             limiter_applied: false,
             eval_ids: 0.0,
@@ -557,6 +561,8 @@ impl Jfet {
             vds: Value::NAN,
             vgs_prev: Value::NAN,
             vds_prev: Value::NAN,
+            last_raw_vgs: Value::NAN,
+            last_raw_vgd: Value::NAN,
             eval_valid: false,
             limiter_applied: false,
             eval_ids: 0.0,
@@ -1737,6 +1743,15 @@ impl Jfet {
     #[inline]
     pub(crate) fn model_order(&self) -> usize {
         self.model_order
+    }
+
+    #[inline]
+    fn matches_last_raw_branch_input(&self, vgs_raw: Value, vgd_raw: Value) -> bool {
+        self.eval_valid
+            && self.last_raw_vgs.is_finite()
+            && self.last_raw_vgd.is_finite()
+            && vgs_raw == self.last_raw_vgs
+            && vgd_raw == self.last_raw_vgd
     }
 
     /// SPICE DEVfetlim voltage limiting helper.
@@ -3740,6 +3755,9 @@ impl NonlinearDevice for Jfet {
         let vs = Self::node_voltage(voltages, self.source);
         let vgs_raw = vg - vs;
         let vgd_raw = vg - vd;
+        if self.matches_last_raw_branch_input(vgs_raw, vgd_raw) {
+            return;
+        }
 
         let vgs_prev = self.vgs;
         let vds_prev = self.vds;
@@ -3774,11 +3792,7 @@ impl NonlinearDevice for Jfet {
                 vgs = vgs_limited;
                 vgd = vgd_limited;
             }
-            let vgs_before_fetlim = vgs;
-            let vgd_before_fetlim = vgd;
             let (vgs_limited, vgd_limited) = self.hfet_limited_branch_voltages(vgs, vgd);
-            limiter_applied |= (vgs_limited - vgs_before_fetlim).abs() > 0.0;
-            limiter_applied |= (vgd_limited - vgd_before_fetlim).abs() > 0.0;
             vgs = vgs_limited;
             vgd = vgd_limited;
         }
@@ -3815,6 +3829,8 @@ impl NonlinearDevice for Jfet {
         self.vgs = vgs;
         self.vds = vds;
         self.limiter_applied = limiter_applied;
+        self.last_raw_vgs = vgs_raw;
+        self.last_raw_vgd = vgd_raw;
 
         if !bypassed {
             let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) =
@@ -5306,7 +5322,7 @@ mod tests {
     #[test]
     fn test_mesa_update_sets_limiter_applied_on_large_forward_step() {
         let mut jfet = Jfet::njf("Z1", 1, 2, 3).enable_mesa_model();
-        // Seed finite previous state so pnjlim/fetlim operate in iterative mode.
+        // Seed finite previous state so pnjlim operates in iterative mode.
         jfet.vgs = 0.0;
         jfet.vds = 0.0;
 
@@ -5316,7 +5332,49 @@ mod tests {
 
         assert!(
             jfet.limiter_applied,
-            "large forward branch jump should trigger pnjlim/fetlim limiting"
+            "large forward branch jump should trigger pnjlim nonconvergence"
         );
+    }
+
+    #[test]
+    fn test_hfet_fetlim_clamp_does_not_set_limiter_applied_flag() {
+        let mut jfet = Jfet::njf("Z1", 1, 2, 3).enable_hfet_model();
+        jfet.vgs = 0.0;
+        jfet.vds = 0.0;
+
+        // HFET1 uses DEVfetlim without ngspice's PN-junction icheck path.
+        let voltages = [0.0, 5.0, 0.0];
+        jfet.update(&voltages);
+
+        assert!(jfet.vgs < 5.0, "DEVfetlim should clamp the raw branch step");
+        assert!(
+            !jfet.limiter_applied,
+            "ngspice DEVfetlim does not set the device nonconvergence flag"
+        );
+    }
+
+    #[test]
+    fn test_jfet_update_is_idempotent_for_same_raw_branch_input() {
+        let mut jfet = Jfet::njf("Z1", 1, 2, 3).enable_mesa_model();
+        jfet.vgs = -1.0;
+        jfet.vds = 0.0;
+
+        let voltages = [5.0, -2.0, 0.0];
+        jfet.update(&voltages);
+        let first_vgs = jfet.vgs;
+        let first_vds = jfet.vds;
+        let first_limiter_state = jfet.limiter_applied;
+
+        jfet.update(&voltages);
+
+        assert_eq!(
+            jfet.vgs, first_vgs,
+            "reloading the same Newton iterate must not advance branch limiting"
+        );
+        assert_eq!(
+            jfet.vds, first_vds,
+            "reloading the same Newton iterate must keep the same limited drain-source state"
+        );
+        assert_eq!(jfet.limiter_applied, first_limiter_state);
     }
 }
