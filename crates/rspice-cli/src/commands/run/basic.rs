@@ -263,7 +263,7 @@ pub(super) fn run_transient(
     tstart: f64,
     max_step: Option<f64>,
 ) -> Result<(), CliError> {
-    let internal_max_step = max_step.unwrap_or(tstep * 10.0).max(1e-18);
+    let internal_max_step = resolve_transient_max_step(tstep, tstop, tstart, max_step);
 
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
@@ -689,5 +689,37 @@ fn raw_export_format(format: OutputFormat) -> rspice_core::analysis::RawFormat {
     match format {
         OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
         _ => rspice_core::analysis::RawFormat::Binary,
+    }
+}
+
+fn resolve_transient_max_step(
+    tstep: f64,
+    tstop: f64,
+    tstart: f64,
+    explicit_max_step: Option<f64>,
+) -> f64 {
+    explicit_max_step
+        .filter(|step| step.is_finite() && *step > 0.0)
+        .unwrap_or_else(|| default_transient_max_step(tstep, tstop, tstart))
+        .max(1e-18)
+}
+
+fn default_transient_max_step(tstep: f64, tstop: f64, tstart: f64) -> f64 {
+    let analysis_window = tstop - tstart;
+    let fallback_window = if analysis_window.is_finite() && analysis_window > 0.0 {
+        analysis_window
+    } else {
+        tstop.abs().max(tstep.abs())
+    };
+    let window_limit = if fallback_window.is_finite() && fallback_window > 0.0 {
+        fallback_window / 50.0
+    } else {
+        1e-18
+    };
+
+    if tstep.is_finite() && tstep > 0.0 && tstep < window_limit {
+        tstep
+    } else {
+        window_limit
     }
 }
