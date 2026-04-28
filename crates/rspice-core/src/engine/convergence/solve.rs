@@ -1,0 +1,624 @@
+//! Linear, nonlinear, and transient operating-point solve entry points.
+
+use super::*;
+
+impl Engine {
+    /// Solve a linear circuit (no nonlinear devices)
+    pub(crate) fn solve_linear(
+        &self,
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut rhs = vec![0.0; size];
+
+        matrix.clear_values();
+        rhs.fill(0.0);
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin_floor);
+
+        let direct_result = matrix.solve(&rhs);
+        if let Ok(sol) = direct_result {
+            return Ok(sol);
+        }
+
+        let mut last_err = direct_result.expect_err("checked Err branch");
+        let conv_cfg = &self.config.convergence_config;
+
+        if conv_cfg.gmin_stepping {
+            match self.gmin_stepping(circuit, matrix) {
+                Ok(sol) => return Ok(sol),
+                Err(e) => {
+                    last_err = e;
+                }
+            }
+        }
+
+        if conv_cfg.source_stepping {
+            return self
+                .source_stepping(circuit, matrix)
+                .map_err(SimulationError::Solver);
+        }
+
+        Err(SimulationError::Solver(last_err))
+    }
+
+    /// Solve a nonlinear circuit using Newton-Raphson iteration
+    ///
+    /// This performs a linear pre-solve to get a warm-start initial guess,
+    /// which helps convergence especially for BJT circuits where starting
+    /// from 0V puts the transistor in an unphysical state.
+    #[allow(dead_code)]
+    pub(crate) fn solve_nonlinear(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], &NoAbort)
+    }
+
+    /// Solve nonlinear DC with optional node-voltage hint overrides.
+    ///
+    /// `node_hints` entries are `(node_id, voltage)` with node IDs using the
+    /// standard 1-based non-ground circuit numbering.
+    #[allow(dead_code)]
+    pub(crate) fn solve_nonlinear_with_node_hints(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        node_hints: &[(usize, Value)],
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, node_hints, &NoAbort)
+    }
+
+    pub(crate) fn solve_nonlinear_with_node_hints_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut initial_guess = self
+            .linear_presolve_for_guess(circuit, matrix)
+            .unwrap_or_else(|| vec![0.0; size]);
+
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            initial_guess[node_id - 1] = voltage;
+        }
+
+        Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
+        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
+    }
+
+    /// Solve a nonlinear circuit using Newton-Raphson iteration with optional initial guess
+    ///
+    /// # Arguments
+    /// * `circuit` - Circuit data with nonlinear devices
+    /// * `matrix` - Sparse matrix structure for MNA
+    /// * `initial_guess` - Optional initial solution vector (e.g., from previous DC sweep point)
+    ///
+    /// Using a good initial guess (like the previous sweep point solution) significantly
+    /// improves convergence speed and robustness for nonlinear circuits.
+    ///
+    /// # Returns
+    /// The converged solution vector, or error if Newton-Raphson fails to converge.
+    #[allow(dead_code)]
+    pub(crate) fn solve_nonlinear_with_guess(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+    ) -> Result<Vec<Value>, SimulationError> {
+        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, initial_guess, &NoAbort)
+    }
+
+    pub(crate) fn solve_nonlinear_with_guess_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        // Sanitize any warm-start seed before Newton so pathological presolve
+        // artifacts do not launch the iteration from physically impossible rails.
+        let mut solution = initial_guess
+            .map(|guess| Self::sanitize_initial_guess(guess, size))
+            .unwrap_or_else(|| vec![0.0; size]);
+        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        let startup_seed = solution.clone();
+        self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
+        let mut rhs = vec![0.0; size];
+        // Newton-Raphson iteration
+        let mut hit_voltage_limit = false;
+        let mut limited_nodes: Vec<usize> = Vec::new();
+        let mut damping_state = NewtonDampingState::default();
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
+        // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
+        // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
+        let dc_max_iterations = self.nonlinear_iteration_budget(10);
+        for iteration in 0..dc_max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
+            // Debug trace first few iterations
+            if iteration < 5 {
+                log::debug!(
+                    "Newton iter {}: V = {:?}",
+                    iteration,
+                    solution
+                        .iter()
+                        .take(circuit.num_nodes())
+                        .map(|v| format!("{:.2}", v))
+                        .collect::<Vec<_>>()
+                );
+            }
+            // Clear matrix and RHS for this iteration
+            matrix.clear_values();
+            rhs.fill(0.0);
+            let node_count = circuit.num_nodes().min(size);
+            for i in 0..node_count {
+                matrix.add(i, i, gmin_floor);
+            }
+            // Stamp linear devices
+            circuit.stamp_dc_direct(matrix, &mut rhs);
+            // Update nonlinear/behavioral/XSPICE devices with current solution and stamp
+            self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+            // Solve linearized system
+            let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            // Voltage-limiting style damping is critical for strongly-coupled
+            // semiconductor nonlinearities, but it can unnecessarily throttle
+            // behavioral-only fixed-point updates (e.g., B-source macros that
+            // legitimately require kilovolt-level solution jumps).
+            let mut new_solution = if requires_conservative_nonlinear_limiting {
+                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
+                    self.nonlinear_merit(circuit, matrix, trial)
+                })
+            } else {
+                raw_solution
+            };
+            if requires_conservative_nonlinear_limiting {
+                Self::limit_vbic_external_updates(
+                    circuit,
+                    &mut new_solution,
+                    &solution,
+                    circuit.num_nodes().min(size),
+                    None,
+                    false,
+                );
+            }
+            // Solution limiting: prevent numerical blow-up by clamping extreme values
+            // This is a critical convergence aid for circuits with strong nonlinearities
+            for (i, v) in new_solution.iter_mut().enumerate() {
+                if !v.is_finite() {
+                    log::debug!(
+                        "DC iter {}: NaN/Inf at node {}, resetting to 0",
+                        iteration,
+                        i + 1
+                    );
+                    *v = 0.0; // Replace NaN/Inf with zero
+                } else if requires_conservative_nonlinear_limiting
+                    && v.abs() > Self::MAX_NODE_VOLTAGE
+                {
+                    if !hit_voltage_limit {
+                        hit_voltage_limit = true;
+                        log::debug!(
+                            "DC iter {}: Voltage limiting triggered - Newton-Raphson may struggle to converge",
+                            iteration
+                        );
+                    }
+                    if !limited_nodes.contains(&i) {
+                        limited_nodes.push(i);
+                        log::debug!(
+                            "  Node {}: {:.2e}V -> clamped to {:.0}V",
+                            i + 1,
+                            *v,
+                            v.signum() * Self::MAX_NODE_VOLTAGE
+                        );
+                    }
+                    *v = v.signum() * Self::MAX_NODE_VOLTAGE;
+                }
+            }
+            // Check convergence (both voltage change and device convergence)
+            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let linearized_residual_converged =
+                self.residual_convergence_met(matrix, &new_solution, &rhs);
+            // Device convergence must be checked at the candidate iterate, not the prior iterate.
+            self.update_device_states_for_dc(circuit, &new_solution);
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged =
+                self.nonlinear_residual_converged(circuit, matrix, &new_solution);
+            solution = new_solution;
+            if voltage_converged
+                && linearized_residual_converged
+                && device_converged
+                && nonlinear_residual_converged
+            {
+                if hit_voltage_limit {
+                    log::info!(
+                        "DC operating point converged after {} iterations (voltage limiting was triggered)",
+                        iteration + 1
+                    );
+                }
+                if let Some(refined) =
+                    self.refine_fallback_candidate(circuit, matrix, &solution, abort)
+                {
+                    return Ok(refined);
+                }
+                return Ok(solution);
+            }
+        }
+        // Log diagnostic information when falling back to convergence aids.
+        if hit_voltage_limit {
+            log::warn!(
+                "DC Newton-Raphson did not converge after {} iterations. \
+                Voltage limiting triggered on {} node(s). Trying configured convergence aids...",
+                dc_max_iterations,
+                limited_nodes.len()
+            );
+        } else {
+            log::info!(
+                "DC Newton-Raphson did not converge after {} iterations. Trying configured convergence aids...",
+                dc_max_iterations
+            );
+        }
+        let conv_cfg = &self.config.convergence_config;
+        let allow_source = conv_cfg.source_stepping;
+        let allow_pseudo = conv_cfg.pseudo_transient;
+        let allow_gmin = conv_cfg.gmin_stepping;
+        let allow_arc = conv_cfg.arc_length;
+        if !allow_source && !allow_pseudo && !allow_gmin && !allow_arc {
+            return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
+        }
+
+        if let Some(legacy_seed) = self.legacy_hfet_inverse_branch_seed(circuit, &startup_seed) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if let Some(restarted) =
+                self.warm_restart_after_fallback(circuit, matrix, &legacy_seed, abort)
+            {
+                log::info!(
+                    "Legacy HFET inverse-branch restart accepted after direct Newton failed."
+                );
+                return Ok(restarted);
+            }
+        }
+
+        let zero_seed = vec![0.0; solution.len()];
+        let mut fallback_seed =
+            self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0);
+
+        if allow_source {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.source_stepping_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
+                Ok(source_stepped) => {
+                    log::info!(
+                        "DC operating point after source stepping ({} nodes): {:?}",
+                        source_stepped.len(),
+                        source_stepped.iter().take(10).collect::<Vec<_>>()
+                    );
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        source_stepped.clone(),
+                        "Source stepping",
+                        abort,
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &source_stepped,
+                        1.0,
+                    );
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
+                        log::info!(
+                            "Source stepping warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                }
+                Err(e) => {
+                    if !allow_pseudo && !allow_gmin && !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "Source stepping failed with {}. Escalating to next configured aid.",
+                        e
+                    );
+                }
+            }
+        }
+
+        if allow_pseudo {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.pseudo_transient_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
+                Ok(pseudo_solution) => {
+                    log::info!(
+                        "DC operating point after pseudo-transient continuation ({} nodes): {:?}",
+                        pseudo_solution.len(),
+                        pseudo_solution.iter().take(10).collect::<Vec<_>>()
+                    );
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        pseudo_solution.clone(),
+                        "Pseudo-transient continuation",
+                        abort,
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &pseudo_solution,
+                        1.0,
+                    );
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
+                        log::info!(
+                            "Pseudo-transient continuation warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                }
+                Err(e) => {
+                    if !allow_gmin && !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "Pseudo-transient continuation failed with {}. Escalating to next configured aid.",
+                        e
+                    );
+                }
+            }
+        }
+
+        if allow_gmin {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
+                Ok(gmin_solution) => {
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        gmin_solution.clone(),
+                        "GMIN stepping",
+                        abort,
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &gmin_solution,
+                        1.0,
+                    );
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
+                        log::info!(
+                            "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                }
+                Err(e) => {
+                    if !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "GMIN stepping failed with {}. Escalating to arc-length continuation.",
+                        e
+                    );
+                }
+            }
+        }
+
+        if allow_arc {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let arc_solution = self.arc_length_continuation_nonlinear_with_guess_and_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            )?;
+            if let Some(candidate) = self.evaluate_fallback_candidate(
+                circuit,
+                matrix,
+                arc_solution.clone(),
+                "Arc-length continuation",
+                abort,
+            ) {
+                return Ok(candidate);
+            }
+            if let Some(restarted) =
+                self.warm_restart_after_fallback(circuit, matrix, &arc_solution, abort)
+            {
+                log::info!(
+                    "Arc-length continuation warmed the nonlinear state; direct Newton restart accepted."
+                );
+                return Ok(restarted);
+            }
+        }
+        Err(SimulationError::ConvergenceFailed(dc_max_iterations))
+    }
+
+    pub(crate) fn solve_linear_transient_operating_point_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+
+        let size = circuit.matrix_size();
+        matrix.clear_values();
+        let mut rhs = vec![0.0; size];
+        Self::stamp_transient_operating_point_linear(
+            circuit,
+            matrix,
+            &mut rhs,
+            time,
+            self.config.convergence_config.gmin_target.max(0.0),
+        );
+        matrix.solve(&rhs).map_err(SimulationError::Solver)
+    }
+
+    pub(crate) fn solve_nonlinear_transient_op_with_node_hints_and_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        time: Value,
+        node_hints: &[(usize, Value)],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let size = circuit.matrix_size();
+        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let mut solution = self
+            .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
+                Self::stamp_transient_operating_point_linear(circuit, matrix, rhs, time, 0.0);
+            })
+            .unwrap_or_else(|| vec![0.0; size]);
+
+        for &(node_id, voltage) in node_hints {
+            if !voltage.is_finite() || node_id == 0 || node_id > circuit.num_nodes() {
+                continue;
+            }
+            solution[node_id - 1] = voltage;
+        }
+
+        solution = Self::sanitize_initial_guess(&solution, size);
+        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        self.prime_operating_point_seed(
+            circuit,
+            &solution,
+            time,
+            crate::xspice::AnalysisType::Transient,
+        );
+
+        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let mut rhs = vec![0.0; size];
+        let mut damping_state = NewtonDampingState::default();
+        let tranop_max_iterations = self.nonlinear_iteration_budget(10);
+
+        for iteration in 0..tranop_max_iterations {
+            if Self::should_abort_iteration(abort, iteration) {
+                return Err(SimulationError::Aborted);
+            }
+
+            matrix.clear_values();
+            rhs.fill(0.0);
+
+            circuit.refresh_jiles_atherton_inductances(&solution);
+            Self::stamp_transient_operating_point_linear(
+                circuit, matrix, &mut rhs, time, gmin_floor,
+            );
+            self.stamp_nonlinear_devices_for_operating_point(
+                circuit,
+                matrix,
+                &mut rhs,
+                &solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+            );
+
+            let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let mut new_solution = if requires_conservative_nonlinear_limiting {
+                self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
+                    self.nonlinear_merit_with_linear_stamp(
+                        circuit,
+                        matrix,
+                        trial,
+                        |circuit, matrix, rhs| {
+                            circuit.refresh_jiles_atherton_inductances(trial);
+                            Self::stamp_transient_operating_point_linear(
+                                circuit, matrix, rhs, time, gmin_floor,
+                            );
+                        },
+                    )
+                })
+            } else {
+                raw_solution
+            };
+            if requires_conservative_nonlinear_limiting {
+                Self::limit_vbic_external_updates(
+                    circuit,
+                    &mut new_solution,
+                    &solution,
+                    circuit.num_nodes().min(size),
+                    None,
+                    false,
+                );
+            }
+            Self::clamp_solution_to_physical_bounds(&mut new_solution);
+
+            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let linearized_residual_converged =
+                self.residual_convergence_met(matrix, &new_solution, &rhs);
+            self.update_device_states_for_operating_point(
+                circuit,
+                &new_solution,
+                time,
+                crate::xspice::AnalysisType::Transient,
+            );
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = self.nonlinear_residual_converged_with_linear_stamp(
+                circuit,
+                matrix,
+                &new_solution,
+                |circuit, matrix, rhs| {
+                    circuit.refresh_jiles_atherton_inductances(&new_solution);
+                    Self::stamp_transient_operating_point_linear(
+                        circuit, matrix, rhs, time, gmin_floor,
+                    );
+                },
+            );
+
+            solution = new_solution;
+            if voltage_converged
+                && linearized_residual_converged
+                && device_converged
+                && nonlinear_residual_converged
+            {
+                return Ok(solution);
+            }
+        }
+
+        Err(SimulationError::ConvergenceFailed(tranop_max_iterations))
+    }
+}
