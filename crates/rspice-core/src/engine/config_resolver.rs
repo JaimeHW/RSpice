@@ -5,7 +5,6 @@
 //! 2. netlist `.OPTIONS`
 //! 3. explicit runtime overrides (CLI/UI/Python/etc.)
 
-
 use super::{ConvergenceConfig, SimulationConfig};
 use crate::Value;
 use crate::analysis::IntegrationMethod;

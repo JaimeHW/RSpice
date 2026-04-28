@@ -94,7 +94,6 @@ pub(super) fn veriloga_model_cache() -> &'static RwLock<HashMap<PathBuf, CachedV
     CACHE.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
-
 #[cfg(feature = "veriloga")]
 pub(super) fn clear_in_memory_veriloga_cache() {
     if let Ok(mut cache) = veriloga_model_cache().write() {

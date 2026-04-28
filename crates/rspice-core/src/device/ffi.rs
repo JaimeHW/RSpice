@@ -549,8 +549,6 @@ impl FfiModelRegistry {
 /// Represents a simple two-terminal resistor that can be
 /// controlled by FFI. Useful for testing the interface.
 
-
-
 //=============================================================================
 // FFI Error Types
 //=============================================================================
