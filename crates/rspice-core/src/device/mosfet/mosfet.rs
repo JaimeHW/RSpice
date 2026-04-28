@@ -530,9 +530,9 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, Value, Value) {
         if !self.has_branch_history
-            || !self.vgs_prev.is_finite()
-            || !self.vds_prev.is_finite()
-            || !self.vbs_prev.is_finite()
+            || !self.eval_vgs_prev.is_finite()
+            || !self.eval_vds_prev.is_finite()
+            || !self.eval_vbs_prev.is_finite()
         {
             return (vgs, vds, vbs);
         }
@@ -541,13 +541,16 @@ impl Mosfet {
         let mut vgs_m = p * vgs;
         let mut vds_m = p * vds;
         let mut vbs_m = p * vbs;
-        let vold_vgs = p * self.vgs_prev;
-        let vold_vds = p * self.vds_prev;
-        let vold_vbs = p * self.vbs_prev;
+        let old_vgs = self.eval_vgs_prev;
+        let old_vds = self.eval_vds_prev;
+        let old_vbs = self.eval_vbs_prev;
+        let vold_vgs = p * old_vgs;
+        let vold_vds = p * old_vds;
+        let vold_vbs = p * old_vbs;
         let mut vbd_m = vbs_m - vds_m;
         let vgd_initial_m = vgs_m - vds_m;
         let vgdo = vold_vgs - vold_vds;
-        let von = self.model_space_onset_voltage(self.vgs_prev, self.vds_prev, self.vbs_prev);
+        let von = self.model_space_onset_voltage(old_vgs, old_vds, old_vbs);
 
         if vold_vds >= 0.0 {
             vgs_m = Self::dev_fetlim(vgs_m, vold_vgs, von);
@@ -612,11 +615,12 @@ impl Mosfet {
 
     /// Set model parameters from a DeviceModel
     pub fn with_params(mut self, params: &std::collections::HashMap<String, Value>) -> Self {
-        const EPS0: Value = 8.854_187_817e-12;
+        const EPS0: Value = 8.854_214_871e-12;
         const EPS_SI_REL: Value = 11.7;
         const EPS_OX_REL: Value = 3.9;
         const Q_E: Value = 1.602_176_634e-19;
         const V_T_REF: Value = 0.025_85;
+        const REFTEMP: Value = 300.15;
         const N_I_CM3: Value = 1.45e10;
 
         if let Some(level) = params
@@ -640,6 +644,12 @@ impl Mosfet {
             .get("PHI")
             .copied()
             .filter(|v| v.is_finite() && *v > 0.0);
+        let vto_explicit = params
+            .get("VTO")
+            .or_else(|| params.get("VT0"))
+            .or_else(|| params.get("VTH0"))
+            .copied()
+            .filter(|v| v.is_finite());
 
         let tox = params
             .get("TOX")
@@ -651,11 +661,7 @@ impl Mosfet {
             .filter(|v| v.is_finite() && *v > 0.0);
 
         // Level 1 parameters
-        if let Some(&v) = params
-            .get("VTO")
-            .or_else(|| params.get("VT0"))
-            .or_else(|| params.get("VTH0"))
-        {
+        if let Some(v) = vto_explicit {
             self.vto = v;
         }
         if let Some(v) = kp_explicit {
@@ -786,6 +792,43 @@ impl Mosfet {
                 if gamma_derived.is_finite() && gamma_derived >= 0.0 {
                     self.gamma = gamma_derived;
                 }
+            }
+        }
+        if vto_explicit.is_none()
+            && let Some(nsub_cm3) = nsub
+            && nsub_cm3 > N_I_CM3
+            && self.cox > 0.0
+            && self.cox.is_finite()
+            && self.phi > 0.0
+        {
+            // Match the Berkeley MOS1/2/3/6 preprocessing path: when VT0 is
+            // omitted, ngspice derives it from flat-band voltage, substrate
+            // doping, surface-state density, and gate material at nominal temp.
+            let egfet = 1.16 - (7.02e-4 * REFTEMP * REFTEMP) / (REFTEMP + 1108.0);
+            let p = self.polarity();
+            let gate_type = params
+                .get("TPG")
+                .or_else(|| params.get("GATE"))
+                .copied()
+                .filter(|v| v.is_finite())
+                .unwrap_or(1.0);
+            let fermis = p * 0.5 * self.phi;
+            let wkfng = if gate_type == 0.0 {
+                3.2
+            } else {
+                let fermig = p * gate_type * 0.5 * egfet;
+                3.25 + 0.5 * egfet - fermig
+            };
+            let wkfngs = wkfng - (3.25 + 0.5 * egfet + fermis);
+            let surface_state_density = params
+                .get("NSS")
+                .copied()
+                .filter(|v| v.is_finite())
+                .unwrap_or(0.0);
+            let vfb = wkfngs - surface_state_density * 1.0e4 * Q_E / self.cox;
+            let derived_vto = vfb + p * (self.gamma * self.phi.sqrt() + self.phi);
+            if derived_vto.is_finite() {
+                self.vto = derived_vto;
             }
         }
         // BSIM3 parameters
