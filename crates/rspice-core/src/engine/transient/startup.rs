@@ -355,7 +355,9 @@ impl Engine {
             })
             .unwrap_or(stop_window);
 
-        (stop_window.min(step_seed) / 10.0).max(1e-30)
+        // dctran.c first seeds delta as MIN(TSTOP/100, TSTEP)/10, then
+        // cuts the first timepoint after the t=0 breakpoint by another 10.
+        (stop_window.min(step_seed) / 100.0).max(1e-30)
     }
 
     #[inline]
@@ -431,18 +433,19 @@ impl Engine {
             return None;
         }
 
-        // Legacy BJT startup decks can otherwise collapse into ngspice's raw
-        // delmin path. Keep quiet retries above the smaller of the requested
-        // initial timestep and practical startup floor; during active source
-        // edges, use a sub-floor so the waveform is still resolved without
-        // falling into attosecond recovery loops.
+        // Quiet startup points must be allowed to shrink/retry normally. A
+        // synthetic floor there is indistinguishable from a true minimum step
+        // to the retry controller, which can force-accept nonconverged BJT
+        // charge states and poison the transient history before any source
+        // transition occurs. Keep the floor only for active source edges, where
+        // it prevents pathological recovery-sized steps while still resolving
+        // the waveform.
+        if source_activity_delta < SOURCE_ACTIVE_DELTA {
+            return None;
+        }
         let retry_floor = initial_timestep.min(preferred_min_timestep);
         if retry_floor.is_finite() && retry_floor > 0.0 {
-            if source_activity_delta >= SOURCE_ACTIVE_DELTA {
-                Some((retry_floor * 0.5).max(1e-15).min(retry_floor))
-            } else {
-                Some(retry_floor)
-            }
+            Some((retry_floor * 0.5).max(1e-15).min(retry_floor))
         } else {
             None
         }

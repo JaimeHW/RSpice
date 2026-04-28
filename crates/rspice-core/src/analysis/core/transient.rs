@@ -222,8 +222,8 @@ const BREAKPOINT_TOLERANCE: Value = 1e-15;
 
 /// Breakpoint manager for handling discontinuities
 ///
-/// Ensures solver lands exactly on breakpoints and restarts with minimal timestep
-/// immediately after, preventing numerical ringing from stepping over discontinuities.
+/// Ensures solver lands exactly on breakpoints and restarts from the same
+/// one-tenth saved-delta rule used by ngspice's `dctran.c`.
 #[derive(Debug, Default)]
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
@@ -232,6 +232,8 @@ pub struct BreakpointManager {
     current_index: usize,
     /// Flag indicating we just passed a breakpoint
     just_passed_breakpoint: bool,
+    /// Timestep that was proposed before it was cut/equalized for a breakpoint.
+    saved_delta_before_breakpoint: Option<Value>,
 }
 
 impl BreakpointManager {
@@ -293,16 +295,12 @@ impl BreakpointManager {
                 let time_to_bp = bp - current_time;
 
                 if proposed_dt >= time_to_bp {
-                    // Force landing exactly on breakpoint
-                    self.just_passed_breakpoint = false; // Will be set after solving at BP
-                    if time_to_bp < MIN_STEP_AFTER_BREAKPOINT {
-                        (time_to_bp, true)
-                    } else {
-                        (time_to_bp.max(MIN_STEP_AFTER_BREAKPOINT), true)
-                    }
-                } else if proposed_dt > time_to_bp * 0.9 {
-                    // Close to breakpoint - go directly there
+                    self.saved_delta_before_breakpoint = Some(proposed_dt);
+                    self.just_passed_breakpoint = false;
                     (time_to_bp, true)
+                } else if current_time + 1.9 * proposed_dt > bp {
+                    self.saved_delta_before_breakpoint = Some(proposed_dt);
+                    (time_to_bp / 2.0, false)
                 } else {
                     (proposed_dt, false)
                 }
@@ -312,7 +310,7 @@ impl BreakpointManager {
     }
 
     /// Mark that we just solved at a breakpoint (call after solving at BP)
-    /// Returns the recommended minimal timestep for restart
+    /// Returns the ngspice-style restart timestep.
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
         // Advance current_index past this breakpoint
         while self.current_index < self.breakpoints.len()
@@ -321,7 +319,20 @@ impl BreakpointManager {
             self.current_index += 1;
         }
         self.just_passed_breakpoint = true;
-        MIN_STEP_AFTER_BREAKPOINT
+        let next_gap = self
+            .next_after(time)
+            .map(|next| next - time)
+            .filter(|gap| gap.is_finite() && *gap > 0.0)
+            .unwrap_or(Value::INFINITY);
+        let saved_delta = self
+            .saved_delta_before_breakpoint
+            .take()
+            .filter(|delta| delta.is_finite() && *delta > 0.0);
+
+        saved_delta
+            .map(|delta| 0.1 * delta.min(next_gap))
+            .filter(|restart| restart.is_finite() && *restart > 0.0)
+            .unwrap_or(MIN_STEP_AFTER_BREAKPOINT)
     }
 
     /// Check if we just passed a breakpoint and should use minimal timestep
