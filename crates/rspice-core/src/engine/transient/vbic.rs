@@ -653,16 +653,9 @@ impl Engine {
         current_state
     }
 
-    pub(super) const VBIC_DYNAMIC_INTERNAL_ACCEPT_RESIDUAL_NORM: Value = 1e-6;
     pub(super) const VBIC_DYNAMIC_BOUNDED_BEST_EFFORT_RESIDUAL_NORM: Value = 5e-2;
     pub(super) const VBIC_HOMOTOPY_MIN_LAMBDA_STEP: Value = 1e-6;
     pub(super) const VBIC_CONTINUATION_MIN_TRIAL_STEP: Value = 1.0 / 64.0;
-
-    #[inline]
-    pub(super) fn vbic_dynamic_snapshot_residual_is_acceptable(residual_norm: Value) -> bool {
-        residual_norm.is_finite()
-            && residual_norm <= Self::VBIC_DYNAMIC_INTERNAL_ACCEPT_RESIDUAL_NORM
-    }
 
     #[inline]
     pub(super) fn vbic_dynamic_snapshot_best_effort_is_bounded(
@@ -2567,44 +2560,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn resolve_vbic_snapshot_for_external_bias(
-        bjt: &crate::device::Bjt,
-        external: [Value; BJT_EXTERNAL_STATE_DIM],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
-        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
-        history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        previous_dt: Value,
-        cached_snapshot: Option<BjtChargeSnapshot>,
-        voltage_abstol: Value,
-        reltol: Value,
-    ) -> Option<BjtChargeSnapshot> {
-        Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-            bjt,
-            external,
-            method,
-            trap_order,
-            dt,
-            q_prev,
-            q_prev_prev,
-            cq_prev,
-            history_internal_prev,
-            history_internal_prev_prev,
-            None,
-            None,
-            previous_dt,
-            cached_snapshot,
-            VbicCachedSnapshotReuse::SeedOnly,
-            voltage_abstol,
-            reltol,
-        )
-    }
-
-    #[inline]
     pub(super) fn vbic_external_from_linear_history(
         bjt: &crate::device::Bjt,
         internal: &[Value; BJT_INTERNAL_STATE_DIM],
@@ -3457,33 +3412,6 @@ impl Engine {
         reltol: Value,
     ) -> (Value, Value) {
         (voltage_abstol, reltol)
-    }
-
-    #[inline]
-    pub(super) fn vbic_dynamic_internal_seed_from_history(
-        bjt: &crate::device::Bjt,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
-        dt: Value,
-        previous_dt: Value,
-    ) -> [Value; BJT_INTERNAL_STATE_DIM] {
-        Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
-            bjt,
-            vc,
-            vb,
-            ve,
-            vs,
-            history_internal_prev,
-            history_internal_prev_prev,
-            None,
-            None,
-            dt,
-            previous_dt,
-        )
     }
 
     #[inline]

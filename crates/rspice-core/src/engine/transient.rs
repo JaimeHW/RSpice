@@ -891,16 +891,6 @@ impl Engine {
     }
 
     #[inline]
-    fn tline_transient_port_conductance(tl: &crate::device::TransmissionLine) -> Value {
-        1.0 / Self::tline_transient_port_impedance(tl)
-    }
-
-    #[inline]
-    fn tline_transient_wave_attenuation(tl: &crate::device::TransmissionLine) -> Value {
-        tl.attenuation()
-    }
-
-    #[inline]
     fn stamp_tline_port(
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],

@@ -1099,21 +1099,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn clip_floating_ideal_output_common_modes(
-        previous_solution: &[Value],
-        candidate_solution: &mut [Value],
-        common_mode_delta_limit: Value,
-        floating_ideal_output_pairs: &[(crate::NodeId, crate::NodeId)],
-    ) {
-        Self::clip_ideal_output_common_modes(
-            previous_solution,
-            candidate_solution,
-            common_mode_delta_limit,
-            floating_ideal_output_pairs,
-        );
-    }
-
-    #[inline]
     pub(super) fn clip_ideal_output_common_modes(
         previous_solution: &[Value],
         candidate_solution: &mut [Value],

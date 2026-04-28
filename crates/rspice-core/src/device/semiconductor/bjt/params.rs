@@ -525,14 +525,6 @@ impl Bjt {
         self.rth = self.rth_nominal.max(0.0);
         self.cth = self.thermal_capacitance();
     }
-
-    pub(super) fn temperature_variant(&self, thermal_rise: Value) -> Self {
-        let mut variant = self.clone_without_thermal_variant_cache();
-        let active_temperature = (self.requested_temperature() + thermal_rise).max(1.0);
-        variant.refresh_operating_scaling_for(active_temperature);
-        variant
-    }
-
     /// Set active device temperature (Kelvin).
     pub fn set_temperature(&mut self, temp_k: Value) {
         if temp_k.is_finite() && temp_k > 0.0 {

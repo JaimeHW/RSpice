@@ -217,16 +217,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn startup_step_delta_limit(
-        mode: InitialSolutionMode,
-        time: Value,
-        max_step: Value,
-        base_limit: Value,
-    ) -> Value {
-        Self::startup_step_delta_limit_with_vbic_td(mode, false, None, time, max_step, base_limit)
-    }
-
-    #[inline]
     pub(super) fn startup_step_delta_limit_with_vbic_td(
         mode: InitialSolutionMode,
         has_vbic_excess_phase: bool,
@@ -358,24 +348,6 @@ impl Engine {
         // dctran.c first seeds delta as MIN(TSTOP/100, TSTEP)/10, then
         // cuts the first timepoint after the t=0 breakpoint by another 10.
         (stop_window.min(step_seed) / 100.0).max(1e-30)
-    }
-
-    #[inline]
-    pub(super) fn startup_practical_min_timestep(
-        has_bjts: bool,
-        has_vbic_excess_phase: bool,
-        hinted_max_step: Value,
-        min_div: Value,
-        tran_step_hint: Option<Value>,
-    ) -> Value {
-        Self::startup_practical_min_timestep_with_vbic_td(
-            has_bjts,
-            has_vbic_excess_phase,
-            hinted_max_step,
-            min_div,
-            tran_step_hint,
-            None,
-        )
     }
 
     #[inline]

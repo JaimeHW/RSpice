@@ -265,9 +265,6 @@ impl Bjt {
         if !has_self_heat {
             vrth = 0.0;
         }
-        let linearized = self
-            .with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
-
         IntrinsicTerminalState {
             vcx,
             vci,
@@ -277,7 +274,6 @@ impl Bjt {
             vbp,
             vsi,
             vrth,
-            linearized,
         }
     }
 
@@ -483,75 +479,6 @@ impl Bjt {
         };
 
         [collector, base, emitter, substrate]
-    }
-
-    pub(super) fn intrinsic_branch_linearizations_for_model(
-        model: &Self,
-        vci: Value,
-        vbi: Value,
-        vei: Value,
-    ) -> (
-        BranchLinearization,
-        BranchLinearization,
-        BranchLinearization,
-    ) {
-        let p = model.polarity();
-        let vbe = vbi - vei;
-        let vbc = vbi - vci;
-        let vbe_eff = p * vbe;
-        let vbc_eff = p * vbc;
-
-        let ibe = model.diode_current_with_is(model.ibei, vbe_eff, model.nei)
-            + model.diode_current_with_is(model.iben, vbe_eff, model.nen);
-        let dibe_dvbe = model.diode_conductance_with_is(model.ibei, vbe_eff, model.nei)
-            + model.diode_conductance_with_is(model.iben, vbe_eff, model.nen);
-        let ibe_branch = Self::branch_from_vbe_vbc(p * ibe, dibe_dvbe, 0.0);
-
-        let transport = model.transport_charge_state(vbe_eff, vbc_eff);
-        let bc = model.base_collector_current_state(transport, vbc_eff);
-        let ibc_branch = Self::branch_from_vbe_vbc(p * bc.ibc, bc.dibc_dvbe_eff, bc.dibc_dvbc_eff);
-
-        let iciei = transport.itzf - transport.itzr;
-        let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
-        let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
-        let iciei_branch = Self::branch_from_vbe_vbc(p * iciei, diciei_dvbe, diciei_dvbc);
-
-        (ibe_branch, ibc_branch, iciei_branch)
-    }
-
-    pub(super) fn intrinsic_branch_linearizations(
-        &self,
-        vci: Value,
-        vbi: Value,
-        vei: Value,
-        vrth: Value,
-    ) -> (
-        BranchLinearization,
-        BranchLinearization,
-        BranchLinearization,
-    ) {
-        let (mut ibe, mut ibc, mut iciei) = self.with_temperature_variant(vrth, |model| {
-            Self::intrinsic_branch_linearizations_for_model(model, vci, vbi, vei)
-        });
-
-        if self.self_heating_enabled() {
-            let h = self.thermal_derivative_step(vrth);
-            let (ibe_plus, ibc_plus, iciei_plus) = self
-                .with_temperature_variant(vrth + h, |model| {
-                    Self::intrinsic_branch_linearizations_for_model(model, vci, vbi, vei)
-                });
-            let (ibe_minus, ibc_minus, iciei_minus) = self
-                .with_temperature_variant(vrth - h, |model| {
-                    Self::intrinsic_branch_linearizations_for_model(model, vci, vbi, vei)
-                });
-            let denom = 2.0 * h;
-
-            ibe.d_internal[IDX_VRTH] = (ibe_plus.current - ibe_minus.current) / denom;
-            ibc.d_internal[IDX_VRTH] = (ibc_plus.current - ibc_minus.current) / denom;
-            iciei.d_internal[IDX_VRTH] = (iciei_plus.current - iciei_minus.current) / denom;
-        }
-
-        (ibe, ibc, iciei)
     }
 
     pub(super) fn thermal_sink_branch(&self, vrth: Value) -> BranchLinearization {
@@ -862,18 +789,6 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn vbic_transient_convergence_state(
-        &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        internal: [Value; BJT_INTERNAL_STATE_DIM],
-    ) -> VbicTransientConvergenceState {
-        let snapshot = self.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, internal);
-        self.vbic_transient_convergence_state_for_snapshot(vc, vb, ve, vs, &snapshot)
-    }
-
     #[inline]
     pub(super) fn vbic_predicted_branch_current(
         previous: &BranchLinearization,
@@ -994,40 +909,6 @@ impl Bjt {
         true
     }
 
-    pub(super) fn solve_intrinsic_base_voltage(&self, vc: Value, vb: Value, ve: Value) -> Value {
-        let rb = self.rb;
-        if !rb.is_finite() || rb <= 0.0 {
-            return vb;
-        }
-
-        let g_rb = 1.0 / rb.max(1e-12);
-        let mut vbi = if self.vbi.is_finite() {
-            self.vbi
-        } else {
-            vb - self.ib * rb
-        };
-        if !vbi.is_finite() {
-            vbi = vb;
-        }
-
-        for _ in 0..12 {
-            let linearized = self.linearize_currents(vbi - ve, vbi - vc);
-            let f = linearized.ib - g_rb * (vb - vbi);
-            let df = linearized.dib_dvbe + linearized.dib_dvbc + g_rb;
-            if !df.is_finite() || df.abs() < 1e-18 {
-                break;
-            }
-
-            let delta = (-f / df).clamp(-0.1, 0.1);
-            vbi += delta;
-            if delta.abs() < 1e-12 {
-                break;
-            }
-        }
-
-        vbi
-    }
-
     pub(super) fn small_signal_row_coefficients(
         &self,
         vc: Value,
@@ -1084,32 +965,6 @@ impl Bjt {
         (linearized.ic, linearized.ib, ie)
     }
 
-    /// Get transconductance gm = dIc/dVbe with Gummel-Poon high-injection
-    ///
-    /// Includes the reduction in gm at high currents due to high-injection.
-    pub(super) fn gm(&self, vbe: Value) -> Value {
-        let p = self.polarity();
-        let vbe_eff = p * vbe;
-
-        // Base diode conductance
-        let g_diode = self.diode_conductance(vbe_eff, self.nf);
-        let if_diode = self.diode_current(vbe_eff, self.nf);
-
-        // High-injection correction factor.
-        // IKF<=0 disables high-injection rolloff per SPICE semantics.
-        let hf = if self.ikf > 0.0 {
-            let ikf_ratio = if_diode.max(0.0) / self.ikf;
-            1.0 / (1.0 + ikf_ratio)
-        } else {
-            1.0
-        };
-
-        // At low currents: gm ≈ g_diode
-        // At high currents: gm ≈ g_diode * hf (reduced)
-        // Apply minimum conductance floor for numerical stability
-        (g_diode * hf).max(1e-15)
-    }
-
     /// Get output conductance go = dIc/dVce (Early effect)
     #[allow(dead_code)]
     pub(super) fn go(&self, ic: Value) -> Value {
@@ -1126,15 +981,6 @@ impl Bjt {
         let vp = self.polarity() * vbe;
         let g = self.diode_conductance_with_is(self.ibei, vp, self.nei)
             + self.diode_conductance_with_is(self.iben, vp, self.nen);
-        g.max(1e-15) // Minimum floor prevents singular matrix
-    }
-
-    /// Get base-collector junction conductance
-    /// Includes minimum conductance floor for numerical stability
-    pub(super) fn gbc(&self, vbc: Value) -> Value {
-        let vp = self.polarity() * vbc;
-        let g = self.diode_conductance_with_is(self.ibci, vp, self.nci)
-            + self.diode_conductance_with_is(self.ibcn, vp, self.ncn);
         g.max(1e-15) // Minimum floor prevents singular matrix
     }
 

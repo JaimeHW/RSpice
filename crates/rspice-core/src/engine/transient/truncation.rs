@@ -1195,47 +1195,6 @@ impl Engine {
     }
 
     #[inline]
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn should_promote_trapezoidal_order(
-        circuit: &crate::circuit::Circuit,
-        accepted_solution: &[Value],
-        method: IntegrationMethod,
-        dt: Value,
-        is_strictly_linear_transient: bool,
-        history: &BjtTransientHistory,
-        jfet_history: &JfetTransientHistory,
-        mosfet_history: &MosfetTransientHistory,
-        voltage_lte_estimator: &LteEstimator,
-        vbic_charge_lte_estimator: Option<&LteEstimator>,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        voltage_abstol: Value,
-        reltol: Value,
-        current_abstol: Value,
-        charge_abstol: Value,
-        trtol: Value,
-    ) -> bool {
-        Self::promoted_trapezoidal_order_timestep_limit(
-            circuit,
-            accepted_solution,
-            method,
-            dt,
-            is_strictly_linear_transient,
-            history,
-            jfet_history,
-            mosfet_history,
-            voltage_lte_estimator,
-            vbic_charge_lte_estimator,
-            vbic_snapshot_cache,
-            voltage_abstol,
-            reltol,
-            current_abstol,
-            charge_abstol,
-            trtol,
-        )
-        .is_some()
-    }
-
-    #[inline]
     pub(super) fn record_vbic_truncation_charge_state(
         estimator: &mut Option<LteEstimator>,
         circuit: &crate::circuit::Circuit,

@@ -45,24 +45,6 @@ impl Bjt {
         (self.ic, self.ib, self.ie)
     }
 
-    /// Return the net current leaving a physical node, summing any tied BJT terminals.
-    pub(crate) fn node_current(&self, node: NodeId) -> Value {
-        let mut current = 0.0;
-        if self.node_collector == node {
-            current += self.ic;
-        }
-        if self.node_base == node {
-            current += self.ib;
-        }
-        if self.node_emitter == node {
-            current += self.ie;
-        }
-        if self.node_substrate == node {
-            current += self.isub;
-        }
-        current
-    }
-
     /// Return the shot-noise branch currents referenced to the physical junctions.
     pub fn noise_branch_currents(&self) -> (Value, Value, Value) {
         let vp_be = self.polarity() * self.vbe;
@@ -758,43 +740,6 @@ impl Bjt {
 
     pub(super) fn linearize_currents(&self, vbe: Value, vbc: Value) -> BjtLinearization {
         self.linearize_currents_with_branches(vbe, vbc).0
-    }
-
-    #[inline]
-    pub(super) fn collector_row_coefficients(
-        &self,
-        linearized: BjtLinearization,
-    ) -> BjtRowCoefficients {
-        [
-            -linearized.dic_dvbc,
-            linearized.dic_dvbe + linearized.dic_dvbc,
-            -linearized.dic_dvbe,
-            0.0,
-        ]
-    }
-
-    #[inline]
-    pub(super) fn base_row_coefficients(&self, linearized: BjtLinearization) -> BjtRowCoefficients {
-        [
-            -linearized.dib_dvbc,
-            linearized.dib_dvbe + linearized.dib_dvbc,
-            -linearized.dib_dvbe,
-            0.0,
-        ]
-    }
-
-    #[inline]
-    pub(super) fn emitter_row_coefficients(
-        &self,
-        linearized: BjtLinearization,
-    ) -> BjtRowCoefficients {
-        let collector = self.collector_row_coefficients(linearized);
-        let base = self.base_row_coefficients(linearized);
-        let mut emitter = [0.0; EXTERNAL_DIM];
-        for idx in 0..EXTERNAL_DIM {
-            emitter[idx] = -(collector[idx] + base[idx]);
-        }
-        emitter
     }
 
     #[inline]
@@ -2177,10 +2122,6 @@ impl Bjt {
         vs: Value,
     ) -> IntrinsicTerminalState {
         if self.cache_matches_external_biases(vc, vb, ve, vs) {
-            let thermal_model = self
-                .self_heating_enabled()
-                .then(|| self.temperature_variant(self.vrth));
-            let model = thermal_model.as_ref().unwrap_or(self);
             IntrinsicTerminalState {
                 vcx: self.vcx,
                 vci: self.vci,
@@ -2190,7 +2131,6 @@ impl Bjt {
                 vbp: self.vbp,
                 vsi: self.vsi,
                 vrth: self.vrth,
-                linearized: model.linearize_currents(self.vbe, self.vbc),
             }
         } else {
             self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
@@ -2632,27 +2572,6 @@ impl Bjt {
         self.intrinsic_state_residual_jacobian_with_thermal_scale(vc, vb, ve, vs, state, 1.0)
     }
 
-    pub(super) fn internal_kcl_linearization(
-        &self,
-        state: IntrinsicTerminalState,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-    ) -> (
-        EvaluatedBjtState,
-        [[Value; INTERNAL_DIM]; INTERNAL_DIM],
-        [[Value; EXTERNAL_DIM]; INTERNAL_DIM],
-    ) {
-        let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
-        );
-        let (jacobian, external_partials, _) =
-            self.internal_kcl_linearization_from_eval(state, eval, vc, vb, ve, vs);
-        (eval, jacobian, external_partials)
-    }
-
     pub(super) fn internal_kcl_linearization_from_eval(
         &self,
         state: IntrinsicTerminalState,
@@ -2922,8 +2841,6 @@ impl Bjt {
         internal: [Value; INTERNAL_DIM],
     ) -> IntrinsicTerminalState {
         let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
-        let linearized = self
-            .with_temperature_variant(vrth, |model| model.linearize_currents(vbi - vei, vbi - vci));
 
         IntrinsicTerminalState {
             vcx,
@@ -2934,7 +2851,6 @@ impl Bjt {
             vbp,
             vsi,
             vrth,
-            linearized,
         }
     }
 

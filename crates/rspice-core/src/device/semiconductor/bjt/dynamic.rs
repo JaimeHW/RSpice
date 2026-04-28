@@ -276,55 +276,6 @@ impl Bjt {
         self.apply_vbic_excess_phase_transport(reduction, transport, d_itzf_d_vrth)
     }
 
-    pub(super) fn build_dynamic_reduction(
-        &self,
-        base: BjtReducedLinearization,
-    ) -> BjtDynamicReduction {
-        let reduction = self.dynamic_reduction_template(base);
-        if !self.uses_vbic_dynamic_charges() {
-            return reduction;
-        }
-
-        let vrth = reduction.internal_voltages[IDX_VRTH];
-        let base_inputs = if self.self_heating_enabled() {
-            self.temperature_variant(vrth)
-                .dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages)
-        } else {
-            self.dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages)
-        };
-        let d_itzf_d_vrth = if self.self_heating_enabled() && self.td > 0.0 {
-            let h = self.thermal_derivative_step(vrth);
-            let mut plus_internal = reduction.internal_voltages;
-            plus_internal[IDX_VRTH] = vrth + h;
-            let mut minus_internal = reduction.internal_voltages;
-            minus_internal[IDX_VRTH] = vrth - h;
-            let plus = self
-                .temperature_variant(vrth + h)
-                .dynamic_charge_inputs(reduction.external_voltages, plus_internal);
-            let minus = self
-                .temperature_variant(vrth - h)
-                .dynamic_charge_inputs(reduction.external_voltages, minus_internal);
-            (plus.transport.itzf - minus.transport.itzf) / (2.0 * h)
-        } else {
-            0.0
-        };
-
-        self.build_dynamic_reduction_from_transport(reduction, base_inputs.transport, d_itzf_d_vrth)
-    }
-
-    pub(super) fn dynamic_charge_branches_fixed_temperature(
-        &self,
-        reduction: &BjtDynamicReduction,
-    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
-        if !self.uses_vbic_dynamic_charges() {
-            return [BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT];
-        }
-
-        let inputs =
-            self.dynamic_charge_inputs(reduction.external_voltages, reduction.internal_voltages);
-        self.dynamic_charge_branches_from_inputs(reduction, inputs)
-    }
-
     pub(super) fn dynamic_charge_branches_from_inputs(
         &self,
         reduction: &BjtDynamicReduction,
@@ -512,40 +463,6 @@ impl Bjt {
             qxf2.charge = self.td * vxf2 / 3.0;
             qxf2.d_internal[IDX_VXF2] = self.td / 3.0;
             branches[IDX_QXF2] = qxf2;
-        }
-
-        branches
-    }
-
-    pub(super) fn dynamic_charge_branches(
-        &self,
-        reduction: &BjtDynamicReduction,
-    ) -> [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT] {
-        let vrth = reduction.internal_voltages[IDX_VRTH];
-        let mut branches = self.with_temperature_variant(vrth, |model| {
-            model.dynamic_charge_branches_fixed_temperature(reduction)
-        });
-
-        if !self.self_heating_enabled() {
-            return branches;
-        }
-
-        let h = self.thermal_derivative_step(vrth);
-        let mut plus_reduction = *reduction;
-        plus_reduction.internal_voltages[IDX_VRTH] = vrth + h;
-        let mut minus_reduction = *reduction;
-        minus_reduction.internal_voltages[IDX_VRTH] = vrth - h;
-        let plus = self.with_temperature_variant(vrth + h, |model| {
-            model.dynamic_charge_branches_fixed_temperature(&plus_reduction)
-        });
-        let minus = self.with_temperature_variant(vrth - h, |model| {
-            model.dynamic_charge_branches_fixed_temperature(&minus_reduction)
-        });
-        let denom = 2.0 * h;
-
-        for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
-            branches[branch_idx].d_internal[IDX_VRTH] =
-                (plus[branch_idx].charge - minus[branch_idx].charge) / denom;
         }
 
         branches
@@ -948,28 +865,6 @@ impl Bjt {
         }
 
         let state = self.intrinsic_state_for_biases(vc, vb, ve, vs);
-        let eval = self.evaluate_state(
-            vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
-            state.vsi, state.vrth,
-        );
-        let terminal = self.external_terminal_branches(eval);
-        [
-            terminal[EXT_C].current,
-            terminal[EXT_B].current,
-            terminal[EXT_E].current,
-            terminal[EXT_S].current,
-        ]
-    }
-
-    pub(crate) fn external_terminal_currents_for_internal_state(
-        &self,
-        vc: Value,
-        vb: Value,
-        ve: Value,
-        vs: Value,
-        internal: [Value; INTERNAL_DIM],
-    ) -> [Value; EXTERNAL_DIM] {
-        let state = self.intrinsic_state_from_internal_vector(internal);
         let eval = self.evaluate_state(
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
             state.vsi, state.vrth,

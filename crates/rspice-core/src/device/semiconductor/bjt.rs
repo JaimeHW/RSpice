@@ -109,7 +109,6 @@ struct IntrinsicTerminalState {
     vbp: Value,
     vsi: Value,
     vrth: Value,
-    linearized: BjtLinearization,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -383,22 +382,6 @@ struct EvaluatedBjtState {
     ibcp: BranchLinearization,
     iccp: BranchLinearization,
     irs: BranchLinearization,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ExtendedOperatingPointState {
-    vcx: Value,
-    vci: Value,
-    vbx: Value,
-    vbi: Value,
-    vei: Value,
-    vbp: Value,
-    vsi: Value,
-    vrth: Value,
-    ic: Value,
-    ib: Value,
-    ie: Value,
-    isub: Value,
 }
 
 type BjtRowCoefficients = [Value; EXTERNAL_DIM];
