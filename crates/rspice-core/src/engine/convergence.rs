@@ -971,6 +971,135 @@ impl Engine {
         }
     }
 
+    fn legacy_hfet_inverse_branch_seed(
+        &self,
+        circuit: &CircuitData,
+        base_seed: &[Value],
+    ) -> Option<Vec<Value>> {
+        let first_legacy_hfet = circuit
+            .jfets
+            .iter()
+            .find(|jfet| jfet.uses_hfet_legacy_inverse_mode())?;
+        let node_count = circuit.num_nodes();
+        if node_count == 0 || base_seed.len() < node_count {
+            return None;
+        }
+
+        let polarity = first_legacy_hfet.jfet_type.polarity();
+        let threshold = (polarity * first_legacy_hfet.params.vto)
+            .abs()
+            .clamp(0.05, 1.0);
+        let branch_bias = -polarity * threshold;
+        if !branch_bias.is_finite() || branch_bias.abs() < 1.0e-12 {
+            return None;
+        }
+
+        let mut seed = Self::normalize_initial_guess(base_seed, circuit.matrix_size());
+        let mut fixed = vec![false; node_count + 1];
+        fixed[0] = true;
+
+        for src_idx in 0..circuit.voltage_sources.names.len() {
+            let pos = circuit.voltage_sources.node_pos[src_idx];
+            let neg = circuit.voltage_sources.node_neg[src_idx];
+            let dc = circuit.voltage_sources.dc_values[src_idx];
+            if !dc.is_finite() {
+                continue;
+            }
+            match (pos, neg) {
+                (node, 0) if node > 0 && node <= node_count => {
+                    fixed[node] = true;
+                    seed[node - 1] = dc;
+                }
+                (0, node) if node > 0 && node <= node_count => {
+                    fixed[node] = true;
+                    seed[node - 1] = -dc;
+                }
+                (pos_node, neg_node)
+                    if pos_node > 0
+                        && pos_node <= node_count
+                        && neg_node > 0
+                        && neg_node <= node_count =>
+                {
+                    fixed[pos_node] = true;
+                    fixed[neg_node] = true;
+                }
+                _ => {}
+            }
+        }
+
+        let mut hfet_terminal = vec![false; node_count + 1];
+        for jfet in &circuit.jfets {
+            if !jfet.uses_hfet_legacy_inverse_mode() {
+                continue;
+            }
+            for node in [jfet.drain, jfet.gate, jfet.source] {
+                if node <= node_count {
+                    hfet_terminal[node] = true;
+                }
+            }
+        }
+
+        let mut resistor_graph = vec![Vec::new(); node_count + 1];
+        for stamp in &circuit.resistors.stamps {
+            let a = stamp.pp.row;
+            let b = stamp.nn.row;
+            if a <= node_count && b <= node_count && a != b {
+                resistor_graph[a].push(b);
+                resistor_graph[b].push(a);
+            }
+        }
+
+        let mut visited = vec![false; node_count + 1];
+        let mut any_seeded = false;
+        let mut queue = std::collections::VecDeque::new();
+        for start in 0..=node_count {
+            if visited[start] {
+                continue;
+            }
+
+            visited[start] = true;
+            queue.push_back(start);
+            let mut component = Vec::new();
+            let mut anchor_voltage = None;
+            let mut has_conflicting_anchors = false;
+            let mut has_legacy_hfet_terminal = false;
+
+            while let Some(node) = queue.pop_front() {
+                component.push(node);
+                has_legacy_hfet_terminal |= hfet_terminal[node];
+                if fixed[node] {
+                    let voltage = if node == 0 { 0.0 } else { seed[node - 1] };
+                    match anchor_voltage {
+                        None => anchor_voltage = Some(voltage),
+                        Some(anchor) if (anchor - voltage).abs() <= 1.0e-12 => {}
+                        Some(_) => has_conflicting_anchors = true,
+                    }
+                }
+
+                for &other in &resistor_graph[node] {
+                    if other <= node_count && !visited[other] {
+                        visited[other] = true;
+                        queue.push_back(other);
+                    }
+                }
+            }
+
+            if !has_legacy_hfet_terminal || has_conflicting_anchors {
+                continue;
+            }
+
+            let component_seed = anchor_voltage.unwrap_or(branch_bias);
+            for node in component {
+                if node > 0 {
+                    seed[node - 1] = component_seed;
+                    any_seeded = true;
+                }
+            }
+        }
+
+        any_seeded.then_some(seed)
+    }
+
     fn validate_nonlinear_solution(
         &self,
         circuit: &mut CircuitData,
@@ -1361,6 +1490,7 @@ impl Engine {
             .map(|guess| Self::sanitize_initial_guess(guess, size))
             .unwrap_or_else(|| vec![0.0; size]);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        let startup_seed = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         let mut rhs = vec![0.0; size];
         // Newton-Raphson iteration
@@ -1506,6 +1636,21 @@ impl Engine {
         if !allow_source && !allow_pseudo && !allow_gmin && !allow_arc {
             return Err(SimulationError::ConvergenceFailed(dc_max_iterations));
         }
+
+        if let Some(legacy_seed) = self.legacy_hfet_inverse_branch_seed(circuit, &startup_seed) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            if let Some(restarted) =
+                self.warm_restart_after_fallback(circuit, matrix, &legacy_seed, abort)
+            {
+                log::info!(
+                    "Legacy HFET inverse-branch restart accepted after direct Newton failed."
+                );
+                return Ok(restarted);
+            }
+        }
+
         let zero_seed = vec![0.0; solution.len()];
         let mut fallback_seed =
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0);
@@ -2876,6 +3021,63 @@ D1 1 0 DMOD
             matches!(result, Err(crate::engine::SimulationError::Aborted)),
             "expected immediate abort, got: {:?}",
             result
+        );
+    }
+
+    #[test]
+    fn test_legacy_hfet_inverse_branch_seed_biases_floating_hfet_terminals() {
+        let deck_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/hfet/inverter.cir");
+        let source = std::fs::read_to_string(&deck_path).expect("read hfet inverter deck");
+        let netlist = crate::Netlist::parse(&source).expect("parse hfet inverter deck");
+        let engine = Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).expect("build circuit");
+        let mut matrix = engine.build_matrix(&circuit).expect("build matrix");
+        circuit.link_indices(&matrix);
+        let linear_seed = engine
+            .linear_presolve_for_guess(&mut circuit, &mut matrix)
+            .expect("linear presolve should produce a finite seed");
+
+        let seed = engine
+            .legacy_hfet_inverse_branch_seed(&circuit, &linear_seed)
+            .expect("legacy HFET deck should receive an inverse-branch seed");
+
+        let node_voltage = |name: &str| {
+            let node = circuit
+                .get_node_by_name(name)
+                .unwrap_or_else(|| panic!("missing node {name}"));
+            seed[node - 1]
+        };
+
+        for name in [
+            "3",
+            "4",
+            "x1.Z2.__dint",
+            "x1.Z1.__sint",
+            "x2.Z2.__dint",
+            "x2.Z1.__sint",
+        ] {
+            assert!(
+                (node_voltage(name) + 0.3).abs() < 1e-12,
+                "{name} should be seeded onto the inverse HFET branch"
+            );
+        }
+
+        assert!(
+            (node_voltage("1") - 2.0).abs() < 1e-12,
+            "ground-referenced supplies must remain fixed"
+        );
+        assert!(
+            node_voltage("2").abs() < 1e-12,
+            "ground-referenced inputs must remain fixed"
+        );
+        assert!(
+            (node_voltage("x1.Z1.__dint") - 2.0).abs() < 1e-12,
+            "series nodes tied to fixed supplies must retain their presolved bias"
+        );
+        assert!(
+            node_voltage("x1.Z2.__sint").abs() < 1e-12,
+            "series nodes tied to fixed inputs must retain their presolved bias"
         );
     }
 }
