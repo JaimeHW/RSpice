@@ -1,6 +1,5 @@
 # Rust
 /target/
-Cargo.lock
 
 # IDE
 .idea/
@@ -28,4 +27,8 @@ Thumbs.db
 # Test outputs
 *.raw
 *.log
+/diagnostics/
+/rtlinv_*.csv
+/rtlinv_*.json
+/rtlinv_*.cir
 .agent/
