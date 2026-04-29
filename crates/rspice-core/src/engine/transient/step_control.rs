@@ -286,11 +286,26 @@ impl Engine {
         remaining_time: Value,
         at_breakpoint: bool,
         expected_source_delta: Value,
+        interior_source_delta: Value,
         practical_min_dt: Value,
         preferred_min_dt: Value,
         recovery_cap_enabled: bool,
+        nonlinear_source_ramp_cap_enabled: bool,
     ) -> Value {
         let mut dt = proposed_dt.min(remaining_time);
+        let source_is_moving_before_endpoint =
+            !at_breakpoint || interior_source_delta >= SOURCE_ACTIVE_DELTA;
+        if nonlinear_source_ramp_cap_enabled
+            && expected_source_delta.is_finite()
+            && expected_source_delta > SOURCE_RAMP_TRACKING_DELTA
+            && source_is_moving_before_endpoint
+        {
+            let ramp_cap = dt * (SOURCE_RAMP_TRACKING_DELTA / expected_source_delta);
+            if ramp_cap.is_finite() && ramp_cap > 0.0 {
+                dt = dt.min(ramp_cap.max(practical_min_dt));
+            }
+        }
+
         if at_breakpoint || !recovery_cap_enabled {
             return dt;
         }

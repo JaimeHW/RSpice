@@ -66,6 +66,8 @@ const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 const VBIC_STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 /// Source edge magnitude that triggers transient source-step capping.
 const SOURCE_ACTIVE_DELTA: Value = 1e-2;
+/// Largest single source movement to allow on proactive nonlinear ramp tracking.
+const SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
 /// Safety cap for synthesized transmission-line arrival breakpoints.
 const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
 /// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
@@ -588,25 +590,28 @@ impl Engine {
             }
 
             total_iterations += 1;
-            let (dt, at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
-            if fixed_method.is_none() {
-                trapgear.set_at_breakpoint(at_breakpoint);
-            } else if let Some(method) = fixed_method {
-                trapgear.force_method(method);
-            }
+            let (dt, mut at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
             let mut expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+            let interior_source_delta = if at_breakpoint && dt.is_finite() && dt > 0.0 {
+                Self::max_expected_source_delta(&circuit, t, t + 0.5 * dt)
+            } else {
+                expected_source_delta
+            };
             let biased_dt = Self::bias_transient_step_for_source_activity(
                 dt,
                 tstop - t,
                 at_breakpoint,
                 expected_source_delta,
+                interior_source_delta,
                 practical_min,
                 timestep.preferred_min_dt(),
                 Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
+                requires_conservative_nonlinear_limiting,
             );
             if biased_dt + 1e-30 < dt {
                 dt = biased_dt;
+                at_breakpoint = breakpoints.at_breakpoint(t + dt);
                 expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
             }
             if let Some(vbic_startup_step_cap) = Self::vbic_excess_phase_startup_step_cap(
@@ -624,7 +629,13 @@ impl Engine {
                     )
             }) {
                 dt = vbic_startup_step_cap;
+                at_breakpoint = breakpoints.at_breakpoint(t + dt);
                 expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+            }
+            if fixed_method.is_none() {
+                trapgear.set_at_breakpoint(at_breakpoint);
+            } else if let Some(method) = fixed_method {
+                trapgear.force_method(method);
             }
             let step_time = t + dt;
             let retry_floor_source_activity_delta =
@@ -1897,19 +1908,6 @@ impl Engine {
                 ),
                 mosfet_truncation_limit,
             );
-            if std::env::var_os("RSPICE_TRACE_MOS6").is_some() && t + dt <= 5.0e-9 {
-                eprintln!(
-                    "trace preaccept t0={:.12e} t1={:.12e} dt={:.12e} order={} first={} limits cap={:?} mos={:?} dev={:?}",
-                    t,
-                    t + dt,
-                    dt,
-                    step_trap_order,
-                    first_accepted_transient_step,
-                    capacitor_truncation_limit,
-                    mosfet_truncation_limit,
-                    device_truncation_limit
-                );
-            }
 
             if let Some(limit) = device_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
@@ -2435,27 +2433,6 @@ impl Engine {
             // Accept this timestep
             t += dt;
             let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
-            static ACCEPT_TRACE_COUNT: std::sync::atomic::AtomicUsize =
-                std::sync::atomic::AtomicUsize::new(0);
-            let accept_trace_count =
-                ACCEPT_TRACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let trace_accept_edge = t >= 1.8e-9 && t <= 4.5e-9 && accept_trace_count < 256;
-            if std::env::var_os("RSPICE_TRACE_ACCEPT").is_some()
-                && (result.time.len() <= 16 || trace_accept_edge)
-            {
-                let node_delta = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
-                let top_nodes = Self::top_abs_delta_prefix_named(
-                    &solution,
-                    &new_solution,
-                    &result.node_names,
-                    num_nodes,
-                    6,
-                );
-                eprintln!(
-                    "trace accept t={:.12e} dt={:.12e} order={} node_delta={:.12e} top_nodes={:?}",
-                    t, dt, step_trap_order, node_delta, top_nodes
-                );
-            }
             let method_after_step = current_integration_method(&trapgear);
             lte_estimator.record(&new_solution, dt);
             lte_estimator
@@ -2611,18 +2588,6 @@ impl Engine {
                 {
                     timestep.force_step(limit);
                 }
-            }
-            if std::env::var_os("RSPICE_TRACE_MOS6").is_some() && t <= 5.0e-9 {
-                eprintln!(
-                    "trace postaccept t={:.12e} dt={:.12e} step_order={} next_order={} next_dt={:.12e} promoted={:?} hit_bp={}",
-                    t,
-                    dt,
-                    step_trap_order,
-                    trap_order,
-                    timestep.dt(),
-                    promoted_trapezoidal_order_limit,
-                    hit_breakpoint
-                );
             }
         }
 

@@ -298,9 +298,6 @@ impl BreakpointManager {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
                     (time_to_bp, true)
-                } else if current_time + 1.9 * proposed_dt > bp {
-                    self.saved_delta_before_breakpoint = Some(proposed_dt);
-                    (time_to_bp / 2.0, false)
                 } else {
                     (proposed_dt, false)
                 }
