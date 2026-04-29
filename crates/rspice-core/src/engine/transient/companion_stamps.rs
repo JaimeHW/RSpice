@@ -376,21 +376,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn ngspice_predictor_charge(
-        dt: Value,
-        previous_dt: Value,
-        q_prev: Value,
-        q_prev_prev: Value,
-    ) -> Option<Value> {
-        if !(dt.is_finite() && dt > 0.0 && previous_dt.is_finite() && previous_dt > 0.0) {
-            return None;
-        }
-        let xfact = dt / previous_dt;
-        let predicted = (1.0 + xfact) * q_prev - xfact * q_prev_prev;
-        predicted.is_finite().then_some(predicted)
-    }
-
-    #[inline]
     pub(super) fn nonlinear_charge_companion_terms(
         method: IntegrationMethod,
         trap_order: u8,

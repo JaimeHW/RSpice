@@ -804,8 +804,6 @@ impl Engine {
                 has_vbic_excess_phase,
                 retry_count,
             );
-            let first_transient_solve_step =
-                Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len());
             let mut converged = false;
             if expected_source_delta <= SOURCE_ACTIVE_DELTA
                 && !circuit.has_xspice_devices()
@@ -943,10 +941,6 @@ impl Engine {
                     dt,
                     &mosfet_history,
                     suppress_gate_charge,
-                    _iter == 0
-                        && !first_transient_solve_step
-                        && mosfet_history.accepted_dt_prev.is_finite()
-                        && mosfet_history.accepted_dt_prev > 0.0,
                 );
                 Self::stamp_tline_companions(
                     &circuit,

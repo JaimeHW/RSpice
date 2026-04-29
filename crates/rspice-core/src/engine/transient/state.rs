@@ -554,10 +554,8 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
-        predict_gate_charge: bool,
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
-        let gate_charge_prediction_dt = predict_gate_charge.then_some(history.accepted_dt_prev);
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
             let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
             let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(voltages);
@@ -569,39 +567,17 @@ impl Engine {
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
             if !suppress_gate_charge {
-                let (geq_gs, ieq_gs, _qgs_curr, _cqgs_curr) = if let Some(q_pred) =
-                    gate_charge_prediction_dt.and_then(|previous_dt| {
-                        Self::ngspice_predictor_charge(
-                            dt,
-                            previous_dt,
-                            history.qgs_prev[idx],
-                            history.qgs_prev_prev[idx],
-                        )
-                    }) {
-                    Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgs,
-                        vgs,
-                        q_pred,
-                        history.qgs_prev[idx],
-                        history.qgs_prev_prev[idx],
-                        history.cqgs_prev[idx],
-                    )
-                } else {
-                    Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgs,
-                        vgs,
-                        history.vgs_prev[idx],
-                        history.qgs_prev[idx],
-                        history.qgs_prev_prev[idx],
-                        history.cqgs_prev[idx],
-                    )
-                };
+                let (geq_gs, ieq_gs, _qgs_curr, _cqgs_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    cgs,
+                    vgs,
+                    history.vgs_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgs_prev_prev[idx],
+                    history.cqgs_prev[idx],
+                );
                 if geq_gs > 0.0 {
                     Self::stamp_two_terminal_companion(
                         matrix,
@@ -613,39 +589,17 @@ impl Engine {
                     );
                 }
 
-                let (geq_gd, ieq_gd, _qgd_curr, _cqgd_curr) = if let Some(q_pred) =
-                    gate_charge_prediction_dt.and_then(|previous_dt| {
-                        Self::ngspice_predictor_charge(
-                            dt,
-                            previous_dt,
-                            history.qgd_prev[idx],
-                            history.qgd_prev_prev[idx],
-                        )
-                    }) {
-                    Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgd,
-                        vgd,
-                        q_pred,
-                        history.qgd_prev[idx],
-                        history.qgd_prev_prev[idx],
-                        history.cqgd_prev[idx],
-                    )
-                } else {
-                    Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgd,
-                        vgd,
-                        history.vgd_prev[idx],
-                        history.qgd_prev[idx],
-                        history.qgd_prev_prev[idx],
-                        history.cqgd_prev[idx],
-                    )
-                };
+                let (geq_gd, ieq_gd, _qgd_curr, _cqgd_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    cgd,
+                    vgd,
+                    history.vgd_prev[idx],
+                    history.qgd_prev[idx],
+                    history.qgd_prev_prev[idx],
+                    history.cqgd_prev[idx],
+                );
                 if geq_gd > 0.0 {
                     Self::stamp_two_terminal_companion(
                         matrix,
@@ -657,39 +611,17 @@ impl Engine {
                     );
                 }
 
-                let (geq_gb, ieq_gb, _qgb_curr, _cqgb_curr) = if let Some(q_pred) =
-                    gate_charge_prediction_dt.and_then(|previous_dt| {
-                        Self::ngspice_predictor_charge(
-                            dt,
-                            previous_dt,
-                            history.qgb_prev[idx],
-                            history.qgb_prev_prev[idx],
-                        )
-                    }) {
-                    Self::nonlinear_charge_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgb,
-                        vgb,
-                        q_pred,
-                        history.qgb_prev[idx],
-                        history.qgb_prev_prev[idx],
-                        history.cqgb_prev[idx],
-                    )
-                } else {
-                    Self::jfet_companion_terms(
-                        effective_method,
-                        trap_order,
-                        dt,
-                        cgb,
-                        vgb,
-                        history.vgb_prev[idx],
-                        history.qgb_prev[idx],
-                        history.qgb_prev_prev[idx],
-                        history.cqgb_prev[idx],
-                    )
-                };
+                let (geq_gb, ieq_gb, _qgb_curr, _cqgb_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    cgb,
+                    vgb,
+                    history.vgb_prev[idx],
+                    history.qgb_prev[idx],
+                    history.qgb_prev_prev[idx],
+                    history.cqgb_prev[idx],
+                );
                 if geq_gb > 0.0 {
                     Self::stamp_two_terminal_companion(
                         matrix,

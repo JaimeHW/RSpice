@@ -94,7 +94,6 @@ impl Engine {
             dt,
             mosfet_history,
             suppress_gate_charge,
-            false,
         );
         Self::stamp_tline_companions(circuit, matrix, rhs, time, tline_dc_refs);
         Self::stamp_coupled_tline_companions(circuit, matrix, rhs, time, coupled_tline_refs);
