@@ -557,12 +557,24 @@ impl Bjt {
         let internal = &reduction.internal_voltages;
         let vbe = internal[IDX_VBI] - internal[IDX_VEI];
         let vbc = internal[IDX_VBI] - internal[IDX_VCI];
-        let vcs = internal[IDX_VCI] - internal[IDX_VSI];
-        let charges = self.legacy_transient_charge_state(vbe, vbc, vcs);
         let collector_terminal = self.legacy_charge_collector_terminal();
         let base_terminal = self.legacy_charge_base_terminal();
         let emitter_terminal = self.legacy_charge_emitter_terminal();
         let substrate_terminal = self.legacy_charge_substrate_terminal();
+        let substrate_connection_terminal = self.legacy_charge_substrate_connection_terminal();
+        let terminal_voltage = |terminal: (Option<usize>, Option<usize>)| -> Value {
+            if let Some(idx) = terminal.0 {
+                reduction.internal_voltages[idx]
+            } else if let Some(idx) = terminal.1 {
+                reduction.external_voltages[idx]
+            } else {
+                0.0
+            }
+        };
+        let vbx = reduction.external_voltages[EXT_B] - terminal_voltage(collector_terminal);
+        let vcs =
+            terminal_voltage(substrate_connection_terminal) - terminal_voltage(substrate_terminal);
+        let charges = self.legacy_transient_charge_state_with_vbx(vbe, vbc, vbx, vcs);
 
         if charges.qbe.is_finite()
             && charges.capbe.is_finite()
@@ -585,16 +597,43 @@ impl Bjt {
                 Self::charge_branch(charges.qbc, d_internal, base_terminal, collector_terminal);
         }
 
+        if charges.qbx.is_finite() && charges.capbx.is_finite() && charges.capbx > 0.0 {
+            let mut branch = BjtChargeBranch {
+                charge: charges.qbx,
+                pos_external: Some(EXT_B),
+                neg_internal: collector_terminal.0,
+                neg_external: collector_terminal.1,
+                ..Default::default()
+            };
+            branch.d_external[EXT_B] = charges.capbx;
+            if let Some(idx) = collector_terminal.0 {
+                branch.d_internal[idx] -= charges.capbx;
+            } else if let Some(idx) = collector_terminal.1 {
+                branch.d_external[idx] -= charges.capbx;
+            }
+            branches[3] = branch;
+        }
+
         if charges.qcs.is_finite() && charges.capcs.is_finite() && charges.capcs > 0.0 {
-            let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
-            d_internal[IDX_VCI] = charges.capcs;
-            d_internal[IDX_VSI] = -charges.capcs;
-            branches[7] = Self::charge_branch(
-                charges.qcs,
-                d_internal,
-                collector_terminal,
-                substrate_terminal,
-            );
+            let mut branch = BjtChargeBranch {
+                charge: charges.qcs,
+                pos_internal: substrate_connection_terminal.0,
+                pos_external: substrate_connection_terminal.1,
+                neg_internal: substrate_terminal.0,
+                neg_external: substrate_terminal.1,
+                ..Default::default()
+            };
+            if let Some(idx) = substrate_connection_terminal.0 {
+                branch.d_internal[idx] += charges.capcs;
+            } else if let Some(idx) = substrate_connection_terminal.1 {
+                branch.d_external[idx] += charges.capcs;
+            }
+            if let Some(idx) = substrate_terminal.0 {
+                branch.d_internal[idx] -= charges.capcs;
+            } else if let Some(idx) = substrate_terminal.1 {
+                branch.d_external[idx] -= charges.capcs;
+            }
+            branches[7] = branch;
         }
 
         branches
@@ -655,6 +694,16 @@ impl Bjt {
             (Some(IDX_VSI), None)
         } else {
             (None, Some(EXT_S))
+        }
+    }
+
+    #[inline]
+    pub(super) fn legacy_charge_substrate_connection_terminal(
+        &self,
+    ) -> (Option<usize>, Option<usize>) {
+        match self.substrate_topology {
+            BjtSubstrateTopology::Vertical => self.legacy_charge_collector_terminal(),
+            BjtSubstrateTopology::Lateral => self.legacy_charge_base_terminal(),
         }
     }
 

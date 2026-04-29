@@ -7,12 +7,51 @@ impl Engine {
     pub(super) fn legacy_bjt_charge_branch_voltages(
         snapshot: &BjtChargeSnapshot,
     ) -> (Value, Value, Value) {
+        let (vbe, vbc, _vbx, vcs) = Self::legacy_bjt_charge_branch_voltages_with_vbx(snapshot);
+        (vbe, vbc, vcs)
+    }
+
+    #[inline]
+    pub(super) fn legacy_bjt_charge_branch_voltages_with_vbx(
+        snapshot: &BjtChargeSnapshot,
+    ) -> (Value, Value, Value, Value) {
         let internal = &snapshot.reduction.internal_voltages;
         (
             internal[BJT_VBI_STATE_INDEX] - internal[BJT_VEI_STATE_INDEX],
             internal[BJT_VBI_STATE_INDEX] - internal[BJT_VCI_STATE_INDEX],
-            internal[BJT_VCI_STATE_INDEX] - internal[BJT_VSI_STATE_INDEX],
+            Self::legacy_bjt_charge_branch_voltage(
+                snapshot,
+                &snapshot.branches[BJT_QBCX_BRANCH_INDEX],
+            ),
+            Self::legacy_bjt_charge_branch_voltage(
+                snapshot,
+                &snapshot.branches[BJT_QBCP_BRANCH_INDEX],
+            ),
         )
+    }
+
+    #[inline]
+    pub(super) fn legacy_bjt_charge_branch_voltage(
+        snapshot: &BjtChargeSnapshot,
+        branch: &BjtChargeBranch,
+    ) -> Value {
+        Self::legacy_bjt_terminal_voltage(snapshot, branch.pos_internal, branch.pos_external)
+            - Self::legacy_bjt_terminal_voltage(snapshot, branch.neg_internal, branch.neg_external)
+    }
+
+    #[inline]
+    fn legacy_bjt_terminal_voltage(
+        snapshot: &BjtChargeSnapshot,
+        internal: Option<usize>,
+        external: Option<usize>,
+    ) -> Value {
+        if let Some(idx) = internal {
+            snapshot.reduction.internal_voltages[idx]
+        } else if let Some(idx) = external {
+            snapshot.reduction.external_voltages[idx]
+        } else {
+            0.0
+        }
     }
 
     #[inline]
@@ -69,11 +108,14 @@ impl Engine {
 
             let mut charge_values = charge_snapshot.branches.map(|branch| branch.charge);
             if !bjt.uses_vbic_dynamic_charges() {
-                let (legacy_vbe, legacy_vbc, legacy_vcs) =
-                    Self::legacy_bjt_charge_branch_voltages(&charge_snapshot);
-                let charges = bjt.legacy_transient_charge_state(legacy_vbe, legacy_vbc, legacy_vcs);
+                let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                    Self::legacy_bjt_charge_branch_voltages_with_vbx(&charge_snapshot);
+                let charges = bjt.legacy_transient_charge_state_with_vbx(
+                    legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+                );
                 charge_values[BJT_QBE_BRANCH_INDEX] = charges.qbe;
                 charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
+                charge_values[BJT_QBCX_BRANCH_INDEX] = charges.qbx;
                 charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
             }
             let predictor_linear = Self::vbic_predictor_linear_branch_state(

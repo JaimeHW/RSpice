@@ -709,6 +709,194 @@ impl Engine {
     }
 
     #[inline]
+    pub(in crate::engine::transient) fn solve_legacy_bjt_ngspice_transient_snapshot(
+        bjt: &crate::device::Bjt,
+        external: [Value; BJT_EXTERNAL_STATE_DIM],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        history_internal_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
+        history_internal_prev_prev: Option<&[Value; BJT_INTERNAL_STATE_DIM]>,
+        history_linear_prev: Option<&VbicPredictorLinearBranchState>,
+        history_linear_prev_prev: Option<&VbicPredictorLinearBranchState>,
+        previous_dt: Value,
+        cached_snapshot: Option<BjtChargeSnapshot>,
+    ) -> Option<BjtChargeSnapshot> {
+        let [vc, vb, ve, vs] = external;
+        let cached_seed = cached_snapshot.map(|snapshot| snapshot.reduction.internal_voltages);
+        let predicted_seed = Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
+            bjt,
+            vc,
+            vb,
+            ve,
+            vs,
+            history_internal_prev,
+            history_internal_prev_prev,
+            history_linear_prev,
+            history_linear_prev_prev,
+            dt,
+            previous_dt,
+        );
+        let live_seed = bjt.dynamic_internal_state_seed(vc, vb, ve, vs);
+
+        let mut best_snapshot = None;
+        let mut best_norm = Value::INFINITY;
+        for seed in [cached_seed, Some(predicted_seed), Some(live_seed)]
+            .into_iter()
+            .flatten()
+        {
+            let Some((snapshot, norm)) =
+                Self::solve_legacy_bjt_ngspice_transient_snapshot_from_seed(
+                    bjt,
+                    external,
+                    method,
+                    trap_order,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                    seed,
+                )
+            else {
+                continue;
+            };
+
+            if norm < best_norm {
+                best_norm = norm;
+                best_snapshot = Some(snapshot);
+            }
+            if norm <= 1e-11 {
+                break;
+            }
+        }
+
+        best_snapshot
+    }
+
+    #[inline]
+    fn solve_legacy_bjt_ngspice_transient_snapshot_from_seed(
+        bjt: &crate::device::Bjt,
+        external: [Value; BJT_EXTERNAL_STATE_DIM],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        seed: [Value; BJT_INTERNAL_STATE_DIM],
+    ) -> Option<(BjtChargeSnapshot, Value)> {
+        let [vc, vb, ve, vs] = external;
+        let mut snapshot = bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, seed);
+        let mut linearization = Self::assemble_vbic_transient_linearization(
+            bjt,
+            &snapshot,
+            method,
+            trap_order,
+            dt,
+            q_prev,
+            q_prev_prev,
+            cq_prev,
+        )?;
+        let residual = Self::vbic_internal_equation_residual(
+            &linearization,
+            &snapshot.reduction.external_voltages,
+            &snapshot.reduction.internal_voltages,
+        );
+        let mut norm = Self::legacy_bjt_internal_residual_norm(&residual);
+        let mut best_snapshot = snapshot;
+        let mut best_norm = norm;
+
+        for _ in 0..18 {
+            if norm <= 1e-11 {
+                return Some((snapshot, norm));
+            }
+
+            let target_internal = Self::solve_vbic_static_core_from_linearization(
+                &linearization,
+                &snapshot.reduction.external_voltages,
+                &snapshot.reduction.internal_voltages,
+            )?;
+            let current_internal = snapshot.reduction.internal_voltages;
+            let max_delta = target_internal
+                .iter()
+                .zip(current_internal.iter())
+                .take(BJT_STATIC_CORE_STATE_DIM)
+                .map(|(target, current)| (target - current).abs())
+                .fold(0.0_f64, Value::max);
+            if !max_delta.is_finite() || max_delta <= 1e-12 {
+                break;
+            }
+
+            let mut accepted = None;
+            let mut alpha = 1.0;
+            for _ in 0..12 {
+                let mut candidate_internal = current_internal;
+                for idx in 0..BJT_STATIC_CORE_STATE_DIM {
+                    candidate_internal[idx] = current_internal[idx]
+                        + alpha * (target_internal[idx] - current_internal[idx]);
+                }
+                let candidate_snapshot =
+                    bjt.charge_snapshot_for_dynamic_state(vc, vb, ve, vs, candidate_internal);
+                let Some(candidate_linearization) = Self::assemble_vbic_transient_linearization(
+                    bjt,
+                    &candidate_snapshot,
+                    method,
+                    trap_order,
+                    dt,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                ) else {
+                    alpha *= 0.5;
+                    continue;
+                };
+                let candidate_residual = Self::vbic_internal_equation_residual(
+                    &candidate_linearization,
+                    &candidate_snapshot.reduction.external_voltages,
+                    &candidate_snapshot.reduction.internal_voltages,
+                );
+                let candidate_norm = Self::legacy_bjt_internal_residual_norm(&candidate_residual);
+
+                if candidate_norm.is_finite() && candidate_norm < best_norm {
+                    best_norm = candidate_norm;
+                    best_snapshot = candidate_snapshot;
+                }
+                if candidate_norm.is_finite()
+                    && (candidate_norm <= norm * 0.8 || candidate_norm <= 1e-11)
+                {
+                    accepted = Some((candidate_snapshot, candidate_linearization, candidate_norm));
+                    break;
+                }
+
+                alpha *= 0.5;
+            }
+
+            let Some((next_snapshot, next_linearization, next_norm)) = accepted else {
+                break;
+            };
+            snapshot = next_snapshot;
+            linearization = next_linearization;
+            norm = next_norm;
+        }
+
+        if best_norm.is_finite() && best_norm <= 1e-8 {
+            Some((best_snapshot, best_norm))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn legacy_bjt_internal_residual_norm(residual: &[Value; BJT_INTERNAL_STATE_DIM]) -> Value {
+        residual[..BJT_STATIC_CORE_STATE_DIM]
+            .iter()
+            .fold(0.0_f64, |norm, value| norm.max(value.abs()))
+    }
+
+    #[inline]
     pub(in crate::engine::transient) fn resolve_vbic_snapshot_for_external_bias_with_linear_history(
         bjt: &crate::device::Bjt,
         external: [Value; BJT_EXTERNAL_STATE_DIM],
@@ -728,11 +916,53 @@ impl Engine {
         voltage_abstol: Value,
         reltol: Value,
     ) -> Option<BjtChargeSnapshot> {
+        let effective_method = Self::effective_companion_method(method, trap_order);
         if !bjt.uses_vbic_dynamic_charges() {
-            return Some(bjt.charge_snapshot(external[0], external[1], external[2], external[3]));
+            if !Self::legacy_bjt_ngspice_backend_enabled() {
+                return Some(bjt.charge_snapshot(
+                    external[0],
+                    external[1],
+                    external[2],
+                    external[3],
+                ));
+            }
+
+            let cached_snapshot_matches = |snapshot: &BjtChargeSnapshot| match cache_reuse {
+                VbicCachedSnapshotReuse::SeedOnly => {
+                    Self::vbic_snapshot_matches_external_bias_exact(snapshot, &external)
+                }
+                VbicCachedSnapshotReuse::NewtonBypass => Self::vbic_snapshot_matches_external_bias(
+                    snapshot,
+                    &external,
+                    voltage_abstol,
+                    reltol,
+                ),
+            };
+            if let Some(snapshot) = cached_snapshot.filter(cached_snapshot_matches) {
+                return Some(snapshot);
+            }
+
+            return Self::solve_legacy_bjt_ngspice_transient_snapshot(
+                bjt,
+                external,
+                effective_method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+                history_internal_prev,
+                history_internal_prev_prev,
+                history_linear_prev,
+                history_linear_prev_prev,
+                previous_dt,
+                cached_snapshot,
+            )
+            .or_else(|| {
+                Some(bjt.charge_snapshot(external[0], external[1], external[2], external[3]))
+            });
         }
 
-        let effective_method = Self::effective_companion_method(method, trap_order);
         let cached_snapshot_matches = |snapshot: &BjtChargeSnapshot| match cache_reuse {
             VbicCachedSnapshotReuse::SeedOnly => {
                 Self::vbic_snapshot_matches_external_bias_exact(snapshot, &external)

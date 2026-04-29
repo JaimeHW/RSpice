@@ -5,6 +5,7 @@ use super::*;
 impl Bjt {
     #[inline]
     pub(super) fn apply_legacy_spice_model_defaults(&mut self) {
+        self.substrate_topology = BjtSubstrateTopology::default_for_type(self.bjt_type);
         self.is_nominal = 1e-16;
         self.is = self.is_nominal;
         self.bf = 100.0;
@@ -37,6 +38,7 @@ impl Bjt {
         self.ccso_nominal = 0.0;
         self.cje = 0.0;
         self.cjc = 0.0;
+        self.xcjc = 1.0;
         self.cjcp = 0.0;
         self.cjep = 0.0;
         self.cbeo = 0.0;
@@ -78,6 +80,7 @@ impl Bjt {
 
     #[inline]
     pub(super) fn apply_vbic_model_defaults(&mut self) {
+        self.substrate_topology = BjtSubstrateTopology::default_for_type(self.bjt_type);
         self.is_nominal = 1e-16;
         self.is = self.is_nominal;
         self.nf_nominal = 1.0;
@@ -113,6 +116,7 @@ impl Bjt {
         self.cjcp_nominal = 0.0;
         self.cje = 0.0;
         self.cjc = 0.0;
+        self.xcjc = 1.0;
         self.cjep = 0.0;
         self.cjcp = 0.0;
         self.vje = 0.75;
@@ -579,6 +583,11 @@ impl Bjt {
         if let Some(&v) = params.get("BR") {
             self.br = v;
         }
+        if let Some(&v) = params.get("SUBS")
+            && v.is_finite()
+        {
+            self.substrate_topology = BjtSubstrateTopology::from_ngspice_subs(v, self.bjt_type);
+        }
         if let Some(&v) = params.get("NF") {
             self.nf_nominal = v;
             self.nf = v;
@@ -929,6 +938,11 @@ impl Bjt {
         }
         if let Some(&v) = params.get("CJC") {
             self.cjc_nominal = v.max(0.0);
+        }
+        if let Some(&v) = params.get("XCJC")
+            && v.is_finite()
+        {
+            self.xcjc = v;
         }
         if let Some(&v) = params.get("CBEO")
             && v.is_finite()

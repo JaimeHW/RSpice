@@ -849,64 +849,59 @@ impl Bjt {
         voltages_converged && currents_converged
     }
 
-    #[inline]
-    pub(super) fn legacy_predicted_terminal_current(
-        previous: &BjtReducedLinearization,
-        terminal_idx: usize,
-        previous_current: Value,
-        current_external: [Value; EXTERNAL_DIM],
-    ) -> Value {
-        let mut predicted = previous_current;
-        for (col_idx, current_voltage) in current_external.into_iter().enumerate() {
-            predicted += previous.g_reduced[terminal_idx][col_idx]
-                * (current_voltage - previous.external_voltages[col_idx]);
-        }
-        predicted
-    }
-
     pub(super) fn legacy_bjt_is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         if !self.previous_reduced_linearization_valid {
             return false;
         }
 
-        let previous = &self.previous_reduced_linearization;
-        let current_external = [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext];
-        if !previous
-            .external_voltages
-            .iter()
-            .chain(current_external.iter())
-            .all(|value| value.is_finite())
-        {
+        let reltol = criteria.relative_tolerance();
+        let current_tol = criteria.current_tolerance();
+        let p = self.polarity();
+        let previous = self.intrinsic_linearization_prev;
+        let current = self.intrinsic_linearization;
+        let previous_vbe = p * self.vbe_prev;
+        let previous_vbc = p * self.vbc_prev;
+        let current_vbe = p * self.vbe;
+        let current_vbc = p * self.vbc;
+
+        let delvbe = current_vbe - previous_vbe;
+        let delvbc = current_vbc - previous_vbc;
+        let previous_cc = p * previous.ic;
+        let current_cc = p * current.ic;
+        let previous_cb = p * previous.ib;
+        let current_cb = p * current.ib;
+        let cchat = previous_cc + previous.dic_dvbe * delvbe + previous.dic_dvbc * delvbc;
+        let cbhat = previous_cb + previous.dib_dvbe * delvbe + previous.dib_dvbc * delvbc;
+
+        let values = [
+            previous_vbe,
+            previous_vbc,
+            current_vbe,
+            current_vbc,
+            delvbe,
+            delvbc,
+            previous_cc,
+            current_cc,
+            previous_cb,
+            current_cb,
+            cchat,
+            cbhat,
+            previous.dic_dvbe,
+            previous.dic_dvbc,
+            previous.dib_dvbe,
+            previous.dib_dvbc,
+        ];
+        if !values.iter().all(|value| value.is_finite()) {
             return false;
         }
 
-        let reltol = criteria.relative_tolerance();
-        let current_tol = criteria.current_tolerance();
-        for (terminal_idx, previous_current, actual) in [
-            (EXT_C, self.ic_prev, self.ic),
-            (EXT_B, self.ib_prev, self.ib),
-        ] {
-            if !actual.is_finite()
-                || !previous_current.is_finite()
-                || !previous.g_reduced[terminal_idx]
-                    .iter()
-                    .all(|value| value.is_finite())
-            {
-                return false;
-            }
-            let predicted = Self::legacy_predicted_terminal_current(
-                previous,
-                terminal_idx,
-                previous_current,
-                current_external,
-            );
-            let tol = reltol * predicted.abs().max(actual.abs()) + current_tol;
-            if (predicted - actual).abs() > tol {
-                return false;
-            }
+        let collector_tol = reltol * cchat.abs().max(current_cc.abs()) + current_tol;
+        if (cchat - current_cc).abs() > collector_tol {
+            return false;
         }
 
-        true
+        let base_tol = reltol * cbhat.abs().max(current_cb.abs()) + current_tol;
+        (cbhat - current_cb).abs() <= base_tol
     }
 
     pub(super) fn small_signal_row_coefficients(

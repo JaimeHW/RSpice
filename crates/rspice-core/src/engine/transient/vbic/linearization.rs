@@ -169,6 +169,19 @@ impl Engine {
             return None;
         }
 
+        if !bjt.uses_vbic_dynamic_charges() && Self::legacy_bjt_ngspice_backend_enabled() {
+            return Self::assemble_legacy_bjt_ngspice_transient_linearization(
+                bjt,
+                snapshot,
+                method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            );
+        }
+
         let mut g_ii = snapshot.reduction.g_ii;
         let mut g_ie = snapshot.reduction.g_ie;
         let mut g_ei = snapshot.reduction.g_ei;
@@ -307,6 +320,387 @@ impl Engine {
             z_i,
             z_e,
         })
+    }
+
+    #[inline]
+    pub(in crate::engine::transient) fn legacy_bjt_ngspice_backend_enabled() -> bool {
+        static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var("RSPICE_EXPERIMENTAL_NGSPICE_BJT")
+                .map(|value| {
+                    matches!(
+                        value.as_str(),
+                        "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
+                    )
+                })
+                .unwrap_or(false)
+        })
+    }
+
+    #[inline]
+    pub(in crate::engine::transient) fn assemble_legacy_bjt_ngspice_transient_linearization(
+        bjt: &crate::device::Bjt,
+        snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+    ) -> Option<VbicTransientLinearization> {
+        let charge_factor = Self::jfet_companion_geq(method, trap_order, 1.0, dt);
+        if charge_factor <= 0.0 {
+            return None;
+        }
+
+        let mut g_ii = snapshot.reduction.g_ii;
+        let mut g_ie = snapshot.reduction.g_ie;
+        let mut g_ei = snapshot.reduction.g_ei;
+        let mut g_ee = snapshot.reduction.g_ee;
+        let mut z_i = snapshot.reduction.z_i_static;
+        let mut z_e = snapshot.reduction.z_e_static;
+
+        let (vbe, vbc, vbx, vcs) = Self::legacy_bjt_charge_branch_voltages_with_vbx(snapshot);
+        let charges = bjt.legacy_transient_charge_state_with_vbx(vbe, vbc, vbx, vcs);
+        let qbe_branch = snapshot.branches[BJT_QBE_BRANCH_INDEX];
+        let qbc_branch = snapshot.branches[BJT_QBC_BRANCH_INDEX];
+        let qbx_branch = snapshot.branches[BJT_QBCX_BRANCH_INDEX];
+        let qcs_branch = snapshot.branches[BJT_QBCP_BRANCH_INDEX];
+        let mut has_dynamic_charge = false;
+
+        if qbe_branch.is_active() {
+            if charges.capbe.is_finite() && charges.capbe > 0.0 {
+                let cqbe = Self::jfet_companion_ccap(
+                    method,
+                    trap_order,
+                    dt,
+                    charges.qbe,
+                    q_prev[BJT_QBE_BRANCH_INDEX],
+                    q_prev_prev[BJT_QBE_BRANCH_INDEX],
+                    cq_prev[BJT_QBE_BRANCH_INDEX],
+                );
+                let geqbe = charge_factor * charges.capbe;
+                let i_eq = geqbe
+                    * Self::legacy_bjt_internal_branch_voltage(
+                        snapshot,
+                        BJT_VBI_STATE_INDEX,
+                        BJT_VEI_STATE_INDEX,
+                    )
+                    - cqbe;
+                Self::stamp_legacy_bjt_two_terminal_companion(
+                    &qbe_branch,
+                    BJT_VBI_STATE_INDEX,
+                    BJT_VEI_STATE_INDEX,
+                    geqbe,
+                    i_eq,
+                    &mut g_ii,
+                    &mut g_ie,
+                    &mut g_ei,
+                    &mut g_ee,
+                    &mut z_i,
+                    &mut z_e,
+                );
+                has_dynamic_charge = true;
+            }
+
+            if qbc_branch.is_active()
+                && charges.capbe_vbc.is_finite()
+                && charges.capbe_vbc.abs() > 0.0
+            {
+                let geqcb = charge_factor * charges.capbe_vbc;
+                let vbc = Self::legacy_bjt_internal_branch_voltage(
+                    snapshot,
+                    BJT_VBI_STATE_INDEX,
+                    BJT_VCI_STATE_INDEX,
+                );
+                let i_eq = geqcb * vbc;
+                Self::stamp_legacy_bjt_controlled_companion(
+                    &qbe_branch,
+                    BJT_VBI_STATE_INDEX,
+                    BJT_VCI_STATE_INDEX,
+                    geqcb,
+                    i_eq,
+                    &mut g_ii,
+                    &mut g_ie,
+                    &mut g_ei,
+                    &mut g_ee,
+                    &mut z_i,
+                    &mut z_e,
+                );
+                has_dynamic_charge = true;
+            }
+        }
+
+        if qbc_branch.is_active() && charges.capbc.is_finite() && charges.capbc > 0.0 {
+            let cqbc = Self::jfet_companion_ccap(
+                method,
+                trap_order,
+                dt,
+                charges.qbc,
+                q_prev[BJT_QBC_BRANCH_INDEX],
+                q_prev_prev[BJT_QBC_BRANCH_INDEX],
+                cq_prev[BJT_QBC_BRANCH_INDEX],
+            );
+            let geqbc = charge_factor * charges.capbc;
+            let i_eq = geqbc
+                * Self::legacy_bjt_internal_branch_voltage(
+                    snapshot,
+                    BJT_VBI_STATE_INDEX,
+                    BJT_VCI_STATE_INDEX,
+                )
+                - cqbc;
+            Self::stamp_legacy_bjt_two_terminal_companion(
+                &qbc_branch,
+                BJT_VBI_STATE_INDEX,
+                BJT_VCI_STATE_INDEX,
+                geqbc,
+                i_eq,
+                &mut g_ii,
+                &mut g_ie,
+                &mut g_ei,
+                &mut g_ee,
+                &mut z_i,
+                &mut z_e,
+            );
+            has_dynamic_charge = true;
+        }
+
+        if qbx_branch.is_active() && charges.capbx.is_finite() && charges.capbx > 0.0 {
+            let cqbx = Self::jfet_companion_ccap(
+                method,
+                trap_order,
+                dt,
+                charges.qbx,
+                q_prev[BJT_QBCX_BRANCH_INDEX],
+                q_prev_prev[BJT_QBCX_BRANCH_INDEX],
+                cq_prev[BJT_QBCX_BRANCH_INDEX],
+            );
+            let geqbx = charge_factor * charges.capbx;
+            let i_eq = geqbx * Self::legacy_bjt_charge_branch_voltage(snapshot, &qbx_branch) - cqbx;
+            Self::stamp_legacy_bjt_branch_voltage_companion(
+                &qbx_branch,
+                geqbx,
+                i_eq,
+                &mut g_ii,
+                &mut g_ie,
+                &mut g_ei,
+                &mut g_ee,
+                &mut z_i,
+                &mut z_e,
+            );
+            has_dynamic_charge = true;
+        }
+
+        if qcs_branch.is_active() && charges.capcs.is_finite() && charges.capcs > 0.0 {
+            let cqcs = Self::jfet_companion_ccap(
+                method,
+                trap_order,
+                dt,
+                charges.qcs,
+                q_prev[BJT_QBCP_BRANCH_INDEX],
+                q_prev_prev[BJT_QBCP_BRANCH_INDEX],
+                cq_prev[BJT_QBCP_BRANCH_INDEX],
+            );
+            let geqcs = charge_factor * charges.capcs;
+            let i_eq = geqcs * Self::legacy_bjt_charge_branch_voltage(snapshot, &qcs_branch) - cqcs;
+            Self::stamp_legacy_bjt_branch_voltage_companion(
+                &qcs_branch,
+                geqcs,
+                i_eq,
+                &mut g_ii,
+                &mut g_ie,
+                &mut g_ei,
+                &mut g_ee,
+                &mut z_i,
+                &mut z_e,
+            );
+            has_dynamic_charge = true;
+        }
+
+        has_dynamic_charge.then_some(VbicTransientLinearization {
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        })
+    }
+
+    #[inline]
+    fn legacy_bjt_internal_branch_voltage(
+        snapshot: &crate::device::semiconductor::BjtChargeSnapshot,
+        pos: usize,
+        neg: usize,
+    ) -> Value {
+        snapshot.reduction.internal_voltages[pos] - snapshot.reduction.internal_voltages[neg]
+    }
+
+    #[inline]
+    fn stamp_legacy_bjt_two_terminal_companion(
+        branch: &BjtChargeBranch,
+        control_pos_internal: usize,
+        control_neg_internal: usize,
+        geq: Value,
+        i_eq: Value,
+        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
+        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        Self::stamp_legacy_bjt_controlled_companion(
+            branch,
+            control_pos_internal,
+            control_neg_internal,
+            geq,
+            i_eq,
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        );
+    }
+
+    #[inline]
+    fn stamp_legacy_bjt_controlled_companion(
+        current_branch: &BjtChargeBranch,
+        control_pos_internal: usize,
+        control_neg_internal: usize,
+        transconductance: Value,
+        i_eq: Value,
+        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
+        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+        let d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
+        d_internal[control_pos_internal] += transconductance;
+        d_internal[control_neg_internal] -= transconductance;
+        Self::stamp_legacy_bjt_companion(
+            current_branch,
+            &d_internal,
+            &d_external,
+            i_eq,
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        );
+    }
+
+    #[inline]
+    fn stamp_legacy_bjt_branch_voltage_companion(
+        branch: &BjtChargeBranch,
+        transconductance: Value,
+        i_eq: Value,
+        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
+        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        let mut d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+        let mut d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
+        Self::add_legacy_bjt_terminal_control(
+            branch.pos_internal,
+            branch.pos_external,
+            transconductance,
+            &mut d_internal,
+            &mut d_external,
+        );
+        Self::add_legacy_bjt_terminal_control(
+            branch.neg_internal,
+            branch.neg_external,
+            -transconductance,
+            &mut d_internal,
+            &mut d_external,
+        );
+        Self::stamp_legacy_bjt_companion(
+            branch,
+            &d_internal,
+            &d_external,
+            i_eq,
+            g_ii,
+            g_ie,
+            g_ei,
+            g_ee,
+            z_i,
+            z_e,
+        );
+    }
+
+    #[inline]
+    fn add_legacy_bjt_terminal_control(
+        internal: Option<usize>,
+        external: Option<usize>,
+        value: Value,
+        d_internal: &mut [Value; BJT_INTERNAL_STATE_DIM],
+        d_external: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        if let Some(idx) = internal {
+            d_internal[idx] += value;
+        } else if let Some(idx) = external {
+            d_external[idx] += value;
+        }
+    }
+
+    #[inline]
+    fn stamp_legacy_bjt_companion(
+        current_branch: &BjtChargeBranch,
+        d_internal: &[Value; BJT_INTERNAL_STATE_DIM],
+        d_external: &[Value; BJT_EXTERNAL_STATE_DIM],
+        i_eq: Value,
+        g_ii: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ie: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
+        g_ei: &mut [[Value; BJT_INTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        g_ee: &mut [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM],
+        z_i: &mut [Value; BJT_INTERNAL_STATE_DIM],
+        z_e: &mut [Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        for (row_sign, row_internal, row_external) in [
+            (
+                1.0,
+                current_branch.pos_internal,
+                current_branch.pos_external,
+            ),
+            (
+                -1.0,
+                current_branch.neg_internal,
+                current_branch.neg_external,
+            ),
+        ] {
+            if let Some(row) = row_internal {
+                // Hidden legacy rows are branch-balance equations; their current
+                // orientation is opposite the external terminal KCL orientation.
+                let row_sign = -row_sign;
+                for col in 0..BJT_INTERNAL_STATE_DIM {
+                    g_ii[row][col] += row_sign * d_internal[col];
+                }
+                for col in 0..BJT_EXTERNAL_STATE_DIM {
+                    g_ie[row][col] += row_sign * d_external[col];
+                }
+                z_i[row] += row_sign * i_eq;
+            }
+            if let Some(row) = row_external {
+                for col in 0..BJT_INTERNAL_STATE_DIM {
+                    g_ei[row][col] += row_sign * d_internal[col];
+                }
+                for col in 0..BJT_EXTERNAL_STATE_DIM {
+                    g_ee[row][col] += row_sign * d_external[col];
+                }
+                z_e[row] += row_sign * i_eq;
+            }
+        }
     }
 
     #[inline]

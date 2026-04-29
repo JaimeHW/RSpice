@@ -90,10 +90,23 @@ impl Bjt {
         vbc: Value,
         vcs: Value,
     ) -> LegacyTransientChargeState {
+        self.legacy_transient_charge_state_with_vbx(vbe, vbc, vbc, vcs)
+    }
+
+    pub(crate) fn legacy_transient_charge_state_with_vbx(
+        &self,
+        vbe: Value,
+        vbc: Value,
+        vbx: Value,
+        vcs: Value,
+    ) -> LegacyTransientChargeState {
         let p = self.polarity();
         let vbe_eff = p * vbe;
         let vbc_eff = p * vbc;
-        let vsub_eff = -p * vcs;
+        let vbx_eff = p * vbx;
+        let substrate_sign = self.substrate_topology.ngspice_sign();
+        let substrate_polarity = p * substrate_sign;
+        let vsub_eff = -substrate_polarity * vcs;
         let transport = self.legacy_transport_charge_state(vbe_eff, vbc_eff);
 
         let mut argtf = 0.0;
@@ -134,16 +147,22 @@ impl Bjt {
             self.vbic_depletion_charge_and_derivative(vbe_eff, self.vje, self.mje, self.fc, 0.0);
         let (qbc_dep_norm, capbc_dep) =
             self.vbic_depletion_charge_and_derivative(vbc_eff, self.vjc, self.mjc, self.fc, 0.0);
+        let (qbx_dep_norm, capbx_dep) =
+            self.vbic_depletion_charge_and_derivative(vbx_eff, self.vjc, self.mjc, self.fc, 0.0);
         let (qsub_norm, capsub_dep) =
             self.vbic_depletion_charge_and_derivative(vsub_eff, self.ps, self.ms, 0.0, 0.0);
+        let cjc_internal = self.cjc * self.xcjc;
+        let cjc_external = self.cjc - cjc_internal;
 
         LegacyTransientChargeState {
             qbe: p * (self.tf * qbe_diffusion_current + self.cje * qbe_dep_norm + self.cbeo * vbe),
             capbe: (self.tf * gbe_dynamic + self.cje * capbe_dep + self.cbeo).max(0.0),
             capbe_vbc: self.tf * geqcb_dynamic,
-            qbc: p * (self.tr * transport.iri + self.cjc * qbc_dep_norm + self.cbco * vbc),
-            capbc: (self.tr * transport.gri + self.cjc * capbc_dep + self.cbco).max(0.0),
-            qcs: -p * (self.cjcp * qsub_norm),
+            qbc: p * (self.tr * transport.iri + cjc_internal * qbc_dep_norm + self.cbco * vbc),
+            capbc: (self.tr * transport.gri + cjc_internal * capbc_dep + self.cbco).max(0.0),
+            qbx: p * (cjc_external * qbx_dep_norm),
+            capbx: (cjc_external * capbx_dep).max(0.0),
+            qcs: -substrate_polarity * (self.cjcp * qsub_norm),
             capcs: (self.cjcp * capsub_dep).max(0.0),
         }
     }
@@ -164,10 +183,22 @@ impl Bjt {
             static_internal.copy_from_slice(&internal[..INTERNAL_DIM]);
             static_internal
         };
+        let external = [vc, vb, ve, vs];
+        let terminal_voltage = |terminal: (Option<usize>, Option<usize>)| -> Value {
+            if let Some(idx) = terminal.0 {
+                static_internal[idx]
+            } else if let Some(idx) = terminal.1 {
+                external[idx]
+            } else {
+                0.0
+            }
+        };
+        let substrate_connection = self.legacy_charge_substrate_connection_terminal();
+        let substrate_terminal = self.legacy_charge_substrate_terminal();
         (
             static_internal[IDX_VBI] - static_internal[IDX_VEI],
             static_internal[IDX_VBI] - static_internal[IDX_VCI],
-            static_internal[IDX_VCI] - static_internal[IDX_VSI],
+            terminal_voltage(substrate_connection) - terminal_voltage(substrate_terminal),
         )
     }
 

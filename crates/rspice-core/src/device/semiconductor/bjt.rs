@@ -20,6 +20,42 @@ pub enum BjtType {
     Pnp,
 }
 
+/// Ngspice legacy BJT substrate-charge topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BjtSubstrateTopology {
+    Vertical,
+    Lateral,
+}
+
+impl BjtSubstrateTopology {
+    #[inline]
+    pub(crate) fn default_for_type(bjt_type: BjtType) -> Self {
+        match bjt_type {
+            BjtType::Npn => Self::Vertical,
+            BjtType::Pnp => Self::Lateral,
+        }
+    }
+
+    #[inline]
+    pub(crate) fn from_ngspice_subs(value: Value, bjt_type: BjtType) -> Self {
+        if (value.round() as i32) == -1 {
+            Self::Lateral
+        } else if (value.round() as i32) == 1 {
+            Self::Vertical
+        } else {
+            Self::default_for_type(bjt_type)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn ngspice_sign(self) -> Value {
+        match self {
+            Self::Vertical => 1.0,
+            Self::Lateral => -1.0,
+        }
+    }
+}
+
 /// Pre-computed stamp indices for O(1) matrix access (3-terminal device)
 /// Layout: [row][col] where row/col are C, B, E
 #[derive(Debug, Clone, Default)]
@@ -95,6 +131,8 @@ pub(crate) struct LegacyTransientChargeState {
     pub capbe_vbc: Value,
     pub qbc: Value,
     pub capbc: Value,
+    pub qbx: Value,
+    pub capbx: Value,
     pub qcs: Value,
     pub capcs: Value,
 }
@@ -461,6 +499,7 @@ const EXT_S: usize = 3;
 pub struct Bjt {
     pub name: String,
     pub bjt_type: BjtType,
+    pub substrate_topology: BjtSubstrateTopology,
     charge_model: BjtChargeModel,
 
     // Node connections
@@ -589,6 +628,8 @@ pub struct Bjt {
     pub mje: Value,
     /// Zero-bias B-C junction capacitance (CJC)
     pub cjc: Value,
+    /// Fraction of CJC assigned to the internal B-C junction (XCJC)
+    pub xcjc: Value,
     /// Zero-bias collector-substrate capacitance (CJCP)
     pub cjcp: Value,
     /// Zero-bias extrinsic B-C capacitance (CJEP)
@@ -794,6 +835,7 @@ pub struct Bjt {
     ib: Value,
     ie: Value,
     isub: Value,
+    intrinsic_linearization: BjtLinearization,
 
     // Previous iteration values (for convergence)
     vbe_prev: Value,
@@ -810,6 +852,7 @@ pub struct Bjt {
     ib_prev: Value,
     ie_prev: Value,
     isub_prev: Value,
+    intrinsic_linearization_prev: BjtLinearization,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: BjtIndices,
@@ -846,6 +889,7 @@ impl Bjt {
         Self {
             name,
             bjt_type,
+            substrate_topology: BjtSubstrateTopology::default_for_type(bjt_type),
             charge_model: BjtChargeModel::LegacyGummelPoon,
             node_collector: collector,
             node_base: base,
@@ -913,7 +957,8 @@ impl Bjt {
             aje: -0.5,
             mje: 0.33,    // B-E grading coefficient
             cjc: 0.5e-12, // B-C junction capacitance
-            cjcp: 0.0,    // C-S junction capacitance
+            xcjc: 1.0,
+            cjcp: 0.0, // C-S junction capacitance
             cjep: 0.0,
             cbeo: 0.0,
             cbco: 0.0,
@@ -1024,6 +1069,7 @@ impl Bjt {
             ib: 0.0,
             ie: 0.0,
             isub: 0.0,
+            intrinsic_linearization: BjtLinearization::default(),
             vbe_prev: 0.0,
             vbc_prev: 0.0,
             vcx_prev: 0.0,
@@ -1038,6 +1084,7 @@ impl Bjt {
             ib_prev: 0.0,
             ie_prev: 0.0,
             isub_prev: 0.0,
+            intrinsic_linearization_prev: BjtLinearization::default(),
             indices: BjtIndices::default(),
             reduced_linearization_cache: Cell::new(BjtReducedLinearization::default()),
             reduced_linearization_cache_valid: Cell::new(false),
@@ -1227,13 +1274,12 @@ impl Bjt {
 
     #[inline]
     fn uses_vbic_charge_model(params: &std::collections::HashMap<String, Value>) -> bool {
-        if params
+        if let Some(level) = params
             .get("LEVEL")
             .copied()
             .filter(|level| level.is_finite())
-            .is_some_and(|level| level >= 4.0)
         {
-            return true;
+            return level >= 4.0;
         }
 
         [
@@ -1279,6 +1325,7 @@ impl NonlinearDevice for Bjt {
         self.ib_prev = self.ib;
         self.ie_prev = self.ie;
         self.isub_prev = self.isub;
+        self.intrinsic_linearization_prev = self.intrinsic_linearization;
 
         let state = if self.charge_model == BjtChargeModel::Vbic {
             self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
@@ -1309,6 +1356,7 @@ impl NonlinearDevice for Bjt {
         self.ib = terminal_currents[EXT_B].current;
         self.ie = terminal_currents[EXT_E].current;
         self.isub = terminal_currents[EXT_S].current;
+        self.intrinsic_linearization = eval.linearized;
         self.reduced_linearization_cache.set(reduced);
         self.reduced_linearization_cache_valid.set(true);
         self.charge_snapshot_cache_valid.set(false);
