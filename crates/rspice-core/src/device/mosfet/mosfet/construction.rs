@@ -471,9 +471,41 @@ impl Mosfet {
             self.cgdo = 0.0;
             self.cgbo = 0.0;
         }
+        if self.level == 6 {
+            // Berkeley MOS6 has its own model-card defaults in ngspice
+            // mos6set.c; explicit parameters below still override.
+            self.vto = 0.0;
+            self.gamma = 0.0;
+            self.phi = 0.6;
+            self.lambda = 0.0;
+            self.u0 = 600.0;
+            self.cox = 0.0;
+            self.kp = 0.0;
+            self.cgso = 0.0;
+            self.cgdo = 0.0;
+            self.cgbo = 0.0;
+            self.cj = 0.0;
+            self.cjsw = 0.0;
+            self.pb = 0.8;
+            self.mj = 0.5;
+            self.mjsw = 0.5;
+            self.fc = 0.5;
+            self.kc = 5.0e-5;
+            self.nc = 1.0;
+            self.kv = 2.0;
+            self.nv = 0.5;
+            self.gamma1 = 0.0;
+            self.sigma = 0.0;
+            self.lambda0 = 0.0;
+            self.lambda1 = 0.0;
+        }
 
         let kp_explicit = params
             .get("KP")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0);
+        let kc_explicit = params
+            .get("KC")
             .copied()
             .filter(|v| v.is_finite() && *v > 0.0);
         let gamma_explicit = params
@@ -681,6 +713,16 @@ impl Mosfet {
         if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;
         }
+        if self.level == 6
+            && kc_explicit.is_none()
+            && tox.is_some()
+            && self.u0.is_finite()
+            && self.u0 > 0.0
+            && self.cox.is_finite()
+            && self.cox > 0.0
+        {
+            self.kc = 0.5 * self.u0 * 1.0e-4 * self.cox;
+        }
         if let Some(&v) = params.get("UA") {
             self.ua = v;
         }
@@ -819,7 +861,7 @@ impl Mosfet {
             self.thermal_noise_gamma = v;
         }
         // Level 6 parameters
-        if let Some(&v) = params.get("KC") {
+        if let Some(v) = kc_explicit {
             self.kc = v;
         }
         if let Some(&v) = params.get("NC") {
@@ -983,5 +1025,53 @@ mod tests {
         assert_eq!(mos.kp, 2.0e-5);
         assert_eq!(mos.phi, 0.7);
         assert_eq!(mos.cgso, 1.5e-9);
+    }
+
+    #[test]
+    fn level6_model_defaults_match_berkeley_mos6_baseline() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 6.0);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        assert_eq!(mos.level, 6);
+        assert_eq!(mos.vto, 0.0);
+        assert_eq!(mos.gamma, 0.0);
+        assert_eq!(mos.phi, 0.6);
+        assert_eq!(mos.lambda, 0.0);
+        assert_eq!(mos.u0, 600.0);
+        assert_eq!(mos.cox, 0.0);
+        assert_eq!(mos.kp, 0.0);
+        assert_eq!(mos.cgso, 0.0);
+        assert_eq!(mos.cgdo, 0.0);
+        assert_eq!(mos.cgbo, 0.0);
+        assert_eq!(mos.cj, 0.0);
+        assert_eq!(mos.cjsw, 0.0);
+        assert_eq!(mos.pb, 0.8);
+        assert_eq!(mos.mj, 0.5);
+        assert_eq!(mos.mjsw, 0.5);
+        assert_eq!(mos.fc, 0.5);
+        assert_eq!(mos.kc, 5.0e-5);
+        assert_eq!(mos.nc, 1.0);
+        assert_eq!(mos.kv, 2.0);
+        assert_eq!(mos.nv, 0.5);
+        assert_eq!(mos.gamma1, 0.0);
+        assert_eq!(mos.sigma, 0.0);
+        assert_eq!(mos.lambda0, 0.0);
+        assert_eq!(mos.lambda1, 0.0);
+    }
+
+    #[test]
+    fn level6_derives_kc_from_tox_and_mobility_when_omitted() {
+        let tox = 1.0e-7;
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 6.0);
+        params.insert("TOX".to_string(), tox);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        let cox = 3.9 * 8.854_214_871e-12 / tox;
+        let expected_kc = 0.5 * 600.0 * 1.0e-4 * cox;
+        assert!((mos.kc - expected_kc).abs() <= expected_kc * 1.0e-12);
     }
 }
