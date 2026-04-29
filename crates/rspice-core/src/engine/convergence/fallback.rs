@@ -111,6 +111,7 @@ impl Engine {
         }
         let mut used_iterations = 0usize;
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let mut residual_stall_iterations = 0usize;
 
         for iter in 0..max_iterations {
             if Self::should_abort_iteration(abort, iter) {
@@ -151,19 +152,33 @@ impl Engine {
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
             self.update_device_states_for_dc(circuit, &new_solution);
+            let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            let nonlinear_residual_converged = self.nonlinear_residual_converged_scaled(
+                circuit,
+                matrix,
+                &new_solution,
+                source_scale,
+            );
             solution = new_solution;
 
             if voltage_converged
                 && linearized_residual_converged
-                && circuit.nonlinear_converged(self.device_convergence_criteria())
-                && self.nonlinear_residual_converged_scaled(
-                    circuit,
-                    matrix,
-                    &solution,
-                    source_scale,
-                )
+                && device_converged
+                && nonlinear_residual_converged
             {
                 return (solution, true, used_iterations);
+            }
+
+            if voltage_converged
+                && device_converged
+                && (!linearized_residual_converged || !nonlinear_residual_converged)
+            {
+                residual_stall_iterations += 1;
+                if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
+                    break;
+                }
+            } else {
+                residual_stall_iterations = 0;
             }
         }
 

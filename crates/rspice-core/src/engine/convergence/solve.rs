@@ -144,7 +144,11 @@ impl Engine {
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
         let dc_max_iterations = self.nonlinear_iteration_budget(10);
+        let mut direct_iterations = 0usize;
+        let mut residual_stall_iterations = 0usize;
+        let mut residual_stalled = false;
         for iteration in 0..dc_max_iterations {
+            direct_iterations = iteration + 1;
             if Self::should_abort_iteration(abort, iteration) {
                 return Err(SimulationError::Aborted);
             }
@@ -254,14 +258,32 @@ impl Engine {
                 }
                 return Ok(solution);
             }
+
+            if voltage_converged
+                && device_converged
+                && (!linearized_residual_converged || !nonlinear_residual_converged)
+            {
+                residual_stall_iterations += 1;
+                if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
+                    residual_stalled = true;
+                    break;
+                }
+            } else {
+                residual_stall_iterations = 0;
+            }
         }
         // Log diagnostic information when falling back to convergence aids.
         if hit_voltage_limit {
             log::warn!(
                 "DC Newton-Raphson did not converge after {} iterations. \
                 Voltage limiting triggered on {} node(s). Trying configured convergence aids...",
-                dc_max_iterations,
+                direct_iterations.max(1),
                 limited_nodes.len()
+            );
+        } else if residual_stalled {
+            log::info!(
+                "DC Newton-Raphson residual checks stalled after {} iterations. Trying configured convergence aids...",
+                direct_iterations.max(1)
             );
         } else {
             log::info!(
