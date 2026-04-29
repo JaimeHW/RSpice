@@ -52,7 +52,9 @@ impl Mosfet {
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn oxide_capacitance_total(&self) -> Value {
-        let channel_length = if self.level == 6 {
+        let channel_length = if self.level == 2 {
+            self.level2_effective_length()
+        } else if self.level == 6 {
             self.level6_effective_length()
         } else {
             self.l
@@ -162,6 +164,10 @@ impl Mosfet {
 
         let (mode, von, vdsat) = if self.level == 6 {
             self.level6_meyer_state(vgs, vds, vbs)
+        } else if self.level == 2 {
+            let eval = self.level2_evaluate(vgs, vds, vbs);
+            let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
+            (mode, eval.von, eval.vdsat)
         } else {
             let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
             let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
@@ -188,8 +194,10 @@ impl Mosfet {
         let cgs = self.cgso * self.w;
         // Cgd_overlap = CGDO * W
         let cgd = self.cgdo * self.w;
-        // MOS6 uses effective channel length for gate-bulk overlap.
-        let cgb_length = if self.level == 6 {
+        // MOS2 and MOS6 use effective channel length for gate-bulk overlap.
+        let cgb_length = if self.level == 2 {
+            self.level2_effective_length()
+        } else if self.level == 6 {
             self.level6_effective_length()
         } else {
             self.l
@@ -212,7 +220,9 @@ impl Mosfet {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
 
         // Intrinsic gate oxide capacitance
-        let channel_length = if self.level == 6 {
+        let channel_length = if self.level == 2 {
+            self.level2_effective_length()
+        } else if self.level == 6 {
             self.level6_effective_length()
         } else {
             self.l

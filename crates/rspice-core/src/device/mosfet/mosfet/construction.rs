@@ -81,6 +81,16 @@ impl Mosfet {
             pclm: 1.3,    // Channel length modulation
             rdsw: 200.0,  // S/D resistance (ohm*um)
 
+            // Berkeley MOS2 defaults from ngspice mos2set.c
+            mos2_substrate_doping: 0.0,
+            mos2_narrow_factor: 0.0,
+            mos2_crit_field_exp: 0.0,
+            mos2_crit_field: 1.0e4,
+            mos2_max_drift_vel: 0.0,
+            mos2_junction_depth: 0.0,
+            mos2_channel_charge: 1.0,
+            mos2_fast_surface_state_density: 0.0,
+
             // BSIM4 parameters
             dvt0: 2.2,     // Short-channel Vth roll-off
             dvt1: 0.53,    // First-order roll-off
@@ -202,6 +212,8 @@ impl Mosfet {
             }
         } else if self.level == 6 {
             self.level6_meyer_state(vgs, vds, vbs).1
+        } else if self.level == 2 {
+            self.level2_model_space_onset_voltage(vgs, vds, vbs)
         } else {
             self.vth(vbs)
         }
@@ -392,6 +404,12 @@ impl Mosfet {
             return (id, region, gm, gds, gmb, id_eq);
         }
 
+        if self.level == 2 {
+            let (id, region, gm, gds, gmb) = self.level2_operating_point(vgs, vds, vbs);
+            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+            return (id, region, gm, gds, gmb, id_eq);
+        }
+
         if self.level == 1 {
             let (id, region, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
             let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
@@ -439,6 +457,21 @@ impl Mosfet {
             self.level = level;
         }
 
+        if self.level == 2 {
+            // Berkeley MOS2 has distinct model-card defaults from the generic
+            // level-1 constructor; explicit parameters below still override.
+            self.vto = 0.0;
+            self.gamma = 0.0;
+            self.phi = 0.6;
+            self.lambda = 0.0;
+            self.u0 = 600.0;
+            self.cox = EPS_OX_REL * EPS0 / 1.0e-7;
+            self.kp = self.u0 * 1.0e-4 * self.cox;
+            self.cgso = 0.0;
+            self.cgdo = 0.0;
+            self.cgbo = 0.0;
+        }
+
         let kp_explicit = params
             .get("KP")
             .copied()
@@ -466,6 +499,9 @@ impl Mosfet {
             .get("NSUB")
             .copied()
             .filter(|v| v.is_finite() && *v > 0.0);
+        if let Some(v) = nsub {
+            self.mos2_substrate_doping = v;
+        }
 
         // Level 1 parameters
         if let Some(v) = vto_explicit {
@@ -575,6 +611,9 @@ impl Mosfet {
                 .or_else(|| params.get("UO"))
                 .copied()
                 .filter(|v| v.is_finite() && *v > 0.0);
+            let u0_cm = u0_cm.or_else(|| {
+                (self.level == 2 && self.u0.is_finite() && self.u0 > 0.0).then_some(self.u0)
+            });
             if let Some(u0_cm) = u0_cm {
                 let u0_m = u0_cm * 1e-4;
                 let kp_derived = u0_m * self.cox;
@@ -665,6 +704,55 @@ impl Mosfet {
         }
         if let Some(&v) = params.get("RDSW") {
             self.rdsw = v;
+        }
+        if let Some(v) = params
+            .get("DELTA")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.mos2_narrow_factor = v;
+        }
+        if let Some(v) = params
+            .get("UEXP")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.mos2_crit_field_exp = v;
+        }
+        if let Some(v) = params
+            .get("UCRIT")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.mos2_crit_field = v;
+        }
+        if let Some(v) = params
+            .get("VMAX")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.mos2_max_drift_vel = v;
+        }
+        if let Some(v) = params
+            .get("XJ")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.mos2_junction_depth = v;
+        }
+        if let Some(v) = params
+            .get("NEFF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.mos2_channel_charge = v;
+        }
+        if let Some(v) = params
+            .get("NFS")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.mos2_fast_surface_state_density = v;
         }
         // BSIM4 parameters
         if let Some(&v) = params.get("DVT0") {
@@ -853,5 +941,47 @@ impl Mosfet {
 
         self.refresh_legacy_bsim_size_params();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn level2_model_defaults_match_berkeley_mos2_baseline() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        assert_eq!(mos.level, 2);
+        assert_eq!(mos.vto, 0.0);
+        assert_eq!(mos.gamma, 0.0);
+        assert_eq!(mos.phi, 0.6);
+        assert_eq!(mos.lambda, 0.0);
+        assert_eq!(mos.u0, 600.0);
+        assert_eq!(mos.cgso, 0.0);
+        assert_eq!(mos.cgdo, 0.0);
+        assert_eq!(mos.cgbo, 0.0);
+        assert!(mos.kp > 0.0);
+    }
+
+    #[test]
+    fn level2_model_defaults_preserve_explicit_parameters() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("LAMBDA".to_string(), 0.025);
+        params.insert("KP".to_string(), 2.0e-5);
+        params.insert("PHI".to_string(), 0.7);
+        params.insert("CGSO".to_string(), 1.5e-9);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        assert_eq!(mos.lambda, 0.025);
+        assert_eq!(mos.kp, 2.0e-5);
+        assert_eq!(mos.phi, 0.7);
+        assert_eq!(mos.cgso, 1.5e-9);
     }
 }

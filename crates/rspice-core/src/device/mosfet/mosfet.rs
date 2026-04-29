@@ -18,6 +18,7 @@ mod capacitance;
 mod construction;
 mod current;
 mod junctions;
+mod mos2;
 mod nonlinear;
 mod operating_point;
 mod stamping;
@@ -150,6 +151,24 @@ pub struct Mosfet {
     pub pclm: Value,
     /// Source/drain resistance (RDSW) in ohm*um
     pub rdsw: Value,
+
+    // Berkeley MOS2 parameters
+    /// Substrate doping (NSUB) in cm^-3.
+    pub mos2_substrate_doping: Value,
+    /// Narrow-channel factor (DELTA).
+    pub mos2_narrow_factor: Value,
+    /// Critical field exponent (UEXP).
+    pub mos2_crit_field_exp: Value,
+    /// Critical field (UCRIT) in V/cm.
+    pub mos2_crit_field: Value,
+    /// Maximum carrier drift velocity (VMAX).
+    pub mos2_max_drift_vel: Value,
+    /// Junction depth (XJ) in meters.
+    pub mos2_junction_depth: Value,
+    /// Effective channel charge coefficient (NEFF).
+    pub mos2_channel_charge: Value,
+    /// Fast surface state density (NFS) in cm^-2.
+    pub mos2_fast_surface_state_density: Value,
 
     // BSIM4-specific parameters for enhanced short-channel modeling
     /// Short-channel Vth roll-off coefficient 0 (DVT0)

@@ -106,6 +106,11 @@ impl Mosfet {
             return (id, region);
         }
 
+        if self.level == 2 {
+            let eval = self.level2_evaluate(vgs, vds, vbs);
+            return (eval.id, eval.region);
+        }
+
         // Superimpose forward and reverse-oriented channel currents to preserve
         // source/drain symmetry while maintaining smooth behavior around Vds = 0.
         let (id_forward, region_forward) = self.calculate_id_forward(vgs, vds, vbs);
@@ -460,6 +465,11 @@ impl Mosfet {
 
         if self.level == 6 {
             let (_, _, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
+            return (gm, gds, gmb);
+        }
+
+        if self.level == 2 {
+            let (_, _, gm, gds, gmb) = self.level2_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 
