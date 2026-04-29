@@ -326,15 +326,24 @@ impl Engine {
     pub(in crate::engine::transient) fn legacy_bjt_ngspice_backend_enabled() -> bool {
         static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ENABLED.get_or_init(|| {
-            std::env::var("RSPICE_EXPERIMENTAL_NGSPICE_BJT")
-                .map(|value| {
-                    matches!(
-                        value.as_str(),
-                        "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON"
-                    )
-                })
-                .unwrap_or(false)
+            // The ngspice-compatible path is the production backend for legacy
+            // Gummel-Poon BJTs. Keep an opt-out for bisecting numerical issues.
+            let configured = std::env::var("RSPICE_LEGACY_BJT_BACKEND")
+                .or_else(|_| std::env::var("RSPICE_EXPERIMENTAL_NGSPICE_BJT"));
+            configured
+                .ok()
+                .and_then(|value| Self::parse_legacy_bjt_backend_flag(&value))
+                .unwrap_or(true)
         })
+    }
+
+    #[inline]
+    fn parse_legacy_bjt_backend_flag(value: &str) -> Option<bool> {
+        match value.trim() {
+            "1" | "true" | "TRUE" | "yes" | "YES" | "on" | "ON" => Some(true),
+            "0" | "false" | "FALSE" | "no" | "NO" | "off" | "OFF" => Some(false),
+            _ => None,
+        }
     }
 
     #[inline]
@@ -1143,5 +1152,22 @@ impl Engine {
         [Value; BJT_EXTERNAL_STATE_DIM],
     ) {
         bjt.stamped_reduced_external_system(external[0], external[1], external[2], external[3])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Engine;
+
+    #[test]
+    fn legacy_bjt_backend_flag_accepts_enable_and_disable_tokens() {
+        for value in ["1", "true", "TRUE", "yes", "YES", "on", "ON"] {
+            assert_eq!(Engine::parse_legacy_bjt_backend_flag(value), Some(true));
+        }
+        for value in ["0", "false", "FALSE", "no", "NO", "off", "OFF"] {
+            assert_eq!(Engine::parse_legacy_bjt_backend_flag(value), Some(false));
+        }
+        assert_eq!(Engine::parse_legacy_bjt_backend_flag(""), None);
+        assert_eq!(Engine::parse_legacy_bjt_backend_flag("maybe"), None);
     }
 }
