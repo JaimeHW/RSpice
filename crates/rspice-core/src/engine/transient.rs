@@ -45,6 +45,12 @@ const MAX_BRANCH_STATE_MAGNITUDE: Value = 1e12;
 ///
 /// This bound controls nonlinear solve trust-region size.
 const MAX_NEWTON_ITER_DELTA_V: Value = 1e-2;
+/// Initial global trust-region limit for the ngspice legacy-BJT backend.
+///
+/// Legacy BJTs use ngspice-style local pnjlim limiting internally; this wider
+/// nodal leash lets sharp switching steps converge without removing the global
+/// guardrail completely.
+const LEGACY_NGSPICE_BJT_NEWTON_ITER_DELTA_V: Value = 1.5e-2;
 /// Largest node trust-region used after repeated finite Newton corrections.
 ///
 /// Device-local junction limiting still governs semiconductor branch voltages;
@@ -335,6 +341,29 @@ impl Engine {
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();
+        let legacy_ngspice_bjt_only_nonlinearity = Self::legacy_bjt_ngspice_backend_enabled()
+            && !circuit.bjts.is_empty()
+            && circuit
+                .bjts
+                .devices
+                .iter()
+                .all(|bjt| !bjt.uses_vbic_dynamic_charges())
+            && circuit.diodes.is_empty()
+            && circuit.mosfets.is_empty()
+            && circuit.jfets.is_empty()
+            && circuit.vswitches.is_empty()
+            && circuit.iswitches.is_empty()
+            && !circuit.has_xspice_devices()
+            && {
+                #[cfg(feature = "veriloga")]
+                {
+                    !circuit.has_veriloga_devices()
+                }
+                #[cfg(not(feature = "veriloga"))]
+                {
+                    true
+                }
+            };
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
@@ -668,7 +697,11 @@ impl Engine {
                 smallest_vbic_excess_phase_td,
                 step_time,
                 hinted_max_step,
-                MAX_NEWTON_ITER_DELTA_V,
+                if legacy_ngspice_bjt_only_nonlinearity {
+                    LEGACY_NGSPICE_BJT_NEWTON_ITER_DELTA_V
+                } else {
+                    MAX_NEWTON_ITER_DELTA_V
+                },
             );
             let force_accept_delta_limit = Self::startup_force_accept_delta_limit_with_vbic_td(
                 initial_solution_mode,
