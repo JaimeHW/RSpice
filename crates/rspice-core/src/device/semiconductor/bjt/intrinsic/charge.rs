@@ -8,10 +8,8 @@ impl Bjt {
         vbe_eff: Value,
         vbc_eff: Value,
     ) -> TransportChargeState {
-        let ifi = self.diode_current(vbe_eff, self.nf).max(0.0);
-        let iri = self
-            .diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr)
-            .max(0.0);
+        let ifi = self.diode_current(vbe_eff, self.nf);
+        let iri = self.diode_current_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
         let gfi = self.diode_conductance(vbe_eff, self.nf);
         let gri = self.diode_conductance_with_is(self.is * self.isrr.max(0.0), vbc_eff, self.nr);
 
@@ -46,7 +44,12 @@ impl Bjt {
             let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
             let dq2_dvbe_eff = inv_rolloff_f * gfi;
             let dq2_dvbc_eff = inv_rolloff_r * gri;
-            let sqrt_term = (1.0 + 4.0 * q2).sqrt().max(1e-18);
+            let sqrt_arg = (1.0 + 4.0 * q2).max(0.0);
+            let sqrt_term = if sqrt_arg > 0.0 {
+                sqrt_arg.sqrt().max(1e-18)
+            } else {
+                1.0
+            };
             (
                 (0.5 * q1 * (1.0 + sqrt_term)).max(1e-12),
                 0.5 * (1.0 + sqrt_term) * dq1_dvbe_eff + q1 * dq2_dvbe_eff / sqrt_term,
@@ -113,20 +116,18 @@ impl Bjt {
         }
 
         let qb = transport.qb.max(1e-18);
-        let qbe_diffusion_current = if self.tf != 0.0 {
-            transport.ifi * (1.0 + argtf) / qb
+        let (qbe_diffusion_current, gbe_dynamic, geqcb_dynamic) = if self.tf != 0.0 && vbe_eff > 0.0
+        {
+            let qbe_diffusion_current = transport.ifi * (1.0 + argtf) / qb;
+            let gbe_dynamic = (transport.gfi * (1.0 + arg2)
+                - qbe_diffusion_current * transport.dqb_dvbe_eff)
+                / qb;
+            let geqcb_dynamic = (arg3 - qbe_diffusion_current * transport.dqb_dvbc_eff) / qb;
+            (qbe_diffusion_current, gbe_dynamic, geqcb_dynamic)
+        } else if self.tf != 0.0 {
+            (transport.ifi, transport.gfi, 0.0)
         } else {
-            0.0
-        };
-        let gbe_dynamic = if self.tf != 0.0 {
-            (transport.gfi * (1.0 + arg2) - qbe_diffusion_current * transport.dqb_dvbe_eff) / qb
-        } else {
-            0.0
-        };
-        let geqcb_dynamic = if self.tf != 0.0 && vbe_eff > 0.0 {
-            (arg3 - qbe_diffusion_current * transport.dqb_dvbc_eff) / qb
-        } else {
-            0.0
+            (0.0, 0.0, 0.0)
         };
 
         let (qbe_dep_norm, capbe_dep) =

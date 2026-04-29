@@ -397,6 +397,11 @@ pub(super) fn parse_bjt(
                 let name_upper = raw_name.to_ascii_uppercase();
                 stream.advance();
 
+                if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
+                    instance_params.push(("OFF".to_string(), 1.0));
+                    continue;
+                }
+
                 if stream.consume(&TokenKind::Equals) {
                     let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
                         line: line_num,

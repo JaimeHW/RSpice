@@ -355,7 +355,15 @@ impl Bjt {
         let mut best_state = state;
         let mut best_residual_norm = Value::INFINITY;
 
-        for iteration in 0..32 {
+        let max_iterations = if self.charge_model == BjtChargeModel::LegacyGummelPoon
+            && self.has_intrinsic_state_unknowns()
+        {
+            128
+        } else {
+            32
+        };
+
+        for iteration in 0..max_iterations {
             let (residual, jacobian) = self.intrinsic_state_residual_jacobian_with_thermal_scale(
                 vc,
                 vb,

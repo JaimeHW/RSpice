@@ -29,6 +29,7 @@ impl Bjt {
         self.re_nominal = 0.0;
         self.cje_nominal = 0.0;
         self.cjc_nominal = 0.0;
+        self.cjcp_nominal = 0.0;
         self.cjep_nominal = 0.0;
         self.cbeo_nominal = 0.0;
         self.cbco_nominal = 0.0;
@@ -36,11 +37,22 @@ impl Bjt {
         self.ccso_nominal = 0.0;
         self.cje = 0.0;
         self.cjc = 0.0;
+        self.cjcp = 0.0;
         self.cjep = 0.0;
         self.cbeo = 0.0;
         self.cbco = 0.0;
         self.qco = 0.0;
         self.ccso = 0.0;
+        self.vje = 0.75;
+        self.vjc = 0.75;
+        self.ps = 0.75;
+        self.vje_nominal = self.vje;
+        self.vjc_nominal = self.vjc;
+        self.ps_nominal = self.ps;
+        self.mje = 0.33;
+        self.mjc = 0.33;
+        self.ms = 0.0;
+        self.fc = 0.5;
         self.tf = 0.0;
         self.qtf = 0.0;
         self.xtf = 0.0;
@@ -888,7 +900,12 @@ impl Bjt {
         if let Some(&v) = params.get("CJEP") {
             self.cjep_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("MJE") {
+        if let Some(v) = params
+            .get("MJE")
+            .copied()
+            .or_else(|| params.get("ME").copied())
+            .filter(|v| v.is_finite())
+        {
             self.mje = v;
         }
         if let Some(&v) = params.get("PE")
@@ -937,17 +954,22 @@ impl Bjt {
         {
             self.cjcp_nominal = v.max(0.0);
         }
-        if let Some(&v) = params.get("MJC") {
+        if let Some(v) = params
+            .get("MJC")
+            .copied()
+            .or_else(|| params.get("MC").copied())
+            .filter(|v| v.is_finite())
+        {
             self.mjc = v;
         }
-        if let Some(&v) = params.get("PS")
+        if let Some(&v) = params.get("PS").or_else(|| params.get("VJS"))
             && v.is_finite()
             && v > 0.0
         {
             self.ps = v;
             self.ps_nominal = v;
         }
-        if let Some(&v) = params.get("MS")
+        if let Some(&v) = params.get("MS").or_else(|| params.get("MJS"))
             && v.is_finite()
         {
             self.ms = v;
@@ -1190,6 +1212,11 @@ impl Bjt {
                 if *value > 0.0 {
                     self.m = *value;
                 }
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("OFF") {
+                self.initial_off = *value != 0.0;
                 continue;
             }
 

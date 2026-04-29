@@ -180,8 +180,9 @@ impl Engine {
         let mut z_i = snapshot.reduction.z_i_static;
         let mut z_e = snapshot.reduction.z_e_static;
         let mut has_dynamic_charge = false;
+        let use_vbic_dynamic_charges = bjt.uses_vbic_dynamic_charges();
 
-        if bjt.uses_vbic_dynamic_charges() {
+        if use_vbic_dynamic_charges {
             for branch in bjt.vbic_delay_static_branches(&snapshot.reduction) {
                 if !branch.is_active() {
                     continue;
@@ -208,7 +209,7 @@ impl Engine {
         }
 
         for (branch_idx, full_branch) in snapshot.branches.iter().enumerate() {
-            let (branch, ccap_history_sign) = if bjt.uses_vbic_dynamic_charges() {
+            let (branch, ccap_history_sign) = if use_vbic_dynamic_charges {
                 let Some(branch) =
                     Self::vbic_transient_owning_charge_branch(bjt, branch_idx, full_branch)
                 else {
@@ -218,6 +219,39 @@ impl Engine {
                     branch,
                     Self::vbic_transient_owning_charge_ccap_sign(bjt, branch_idx),
                 )
+            } else if branch_idx == BJT_QBE_BRANCH_INDEX {
+                let capbe = -full_branch.d_internal[BJT_VEI_STATE_INDEX];
+                let capbe_vbc = -full_branch.d_internal[BJT_VCI_STATE_INDEX];
+
+                if capbe_vbc.is_finite() && capbe_vbc.abs() > 0.0 {
+                    let geqcb = charge_factor * capbe_vbc;
+                    let mut cross_branch = crate::device::semiconductor::BjtCurrentBranch {
+                        pos_internal: full_branch.pos_internal,
+                        neg_internal: full_branch.neg_internal,
+                        pos_external: full_branch.pos_external,
+                        neg_external: full_branch.neg_external,
+                        ..Default::default()
+                    };
+                    cross_branch.d_internal[BJT_VBI_STATE_INDEX] = geqcb;
+                    cross_branch.d_internal[BJT_VCI_STATE_INDEX] = -geqcb;
+                    cross_branch.accumulate_derivatives(&mut g_ii, &mut g_ie, &mut g_ei, &mut g_ee);
+                    let i_eq = cross_branch.linearization_dot(
+                        &snapshot.reduction.internal_voltages,
+                        &snapshot.reduction.external_voltages,
+                    ) - cross_branch.current;
+                    cross_branch.accumulate_source(i_eq, &mut z_i, &mut z_e);
+                }
+
+                if !capbe.is_finite() || capbe <= 0.0 {
+                    continue;
+                }
+
+                let mut owning_branch = *full_branch;
+                owning_branch.d_internal = [0.0; BJT_INTERNAL_STATE_DIM];
+                owning_branch.d_external = [0.0; BJT_EXTERNAL_STATE_DIM];
+                owning_branch.d_internal[BJT_VBI_STATE_INDEX] = capbe;
+                owning_branch.d_internal[BJT_VEI_STATE_INDEX] = -capbe;
+                (owning_branch, 1.0)
             } else {
                 if !full_branch.is_active() {
                     continue;

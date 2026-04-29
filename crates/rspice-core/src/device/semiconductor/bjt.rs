@@ -669,6 +669,8 @@ pub struct Bjt {
     pub area: Value,
     /// Instance multiplicity factor
     pub m: Value,
+    /// Instance OFF flag used for operating-point startup seeding.
+    initial_off: bool,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
     /// Flicker noise current exponent (AF)
@@ -951,6 +953,7 @@ impl Bjt {
             ncnp: 2.0,
             area: 1.0,
             m: 1.0,
+            initial_off: false,
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
@@ -1069,6 +1072,11 @@ impl Bjt {
     #[inline]
     fn instance_scale(&self) -> Value {
         (self.area * self.m).max(1e-18)
+    }
+
+    #[inline]
+    pub(crate) fn is_initially_off(&self) -> bool {
+        self.initial_off
     }
 
     #[inline]

@@ -1011,11 +1011,11 @@ impl Bjt {
 
         if vnew > vcrit && (vnew - vold).abs() > 2.0 * vt {
             if vold > 0.0 {
-                let arg = 1.0 + (vnew - vold) / vt;
+                let arg = (vnew - vold) / vt;
                 if arg > 0.0 {
-                    vold + vt * arg.ln()
+                    vold + vt * (2.0 + (arg - 2.0).ln())
                 } else {
-                    vcrit
+                    vold - vt * (2.0 + (2.0 - arg).ln())
                 }
             } else {
                 vt * (vnew / vt).max(1e-18).ln()

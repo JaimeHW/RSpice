@@ -11,33 +11,41 @@ impl Bjt {
         }
     }
 
-    /// Diode current: I = Is * (exp(V / (n * Vt)) - 1)
-    ///
-    /// SPICE-style voltage limiting:
-    /// - Forward: limit to 80*n*Vt to prevent exp overflow
-    /// - Reverse: for V < -5*n*Vt, use linear extrapolation (negligible current)
+    fn diode_iv_with_is(&self, isat: Value, v: Value, n: Value) -> (Value, Value) {
+        let nvt = n * self.vt;
+        if !isat.is_finite() || isat <= 0.0 || !v.is_finite() || !nvt.is_finite() || nvt <= 0.0 {
+            return (0.0, 0.0);
+        }
+
+        let v_forward = 80.0 * nvt;
+        if v > v_forward {
+            let exp_forward = (v_forward / nvt).exp();
+            let current_forward = isat * (exp_forward - 1.0);
+            let conductance_forward = isat * exp_forward / nvt;
+            return (
+                current_forward + conductance_forward * (v - v_forward),
+                conductance_forward,
+            );
+        }
+
+        if v >= -3.0 * nvt {
+            let exp_v = (v / nvt).exp();
+            return (isat * (exp_v - 1.0), isat * exp_v / nvt);
+        }
+
+        let arg = 3.0 * nvt / (v * std::f64::consts::E);
+        let arg3 = arg * arg * arg;
+        (-isat * (1.0 + arg3), isat * 3.0 * arg3 / v)
+    }
+
+    /// Diode current using ngspice's BJT reverse-bias continuation.
     pub(in crate::device::semiconductor::bjt) fn diode_current_with_is(
         &self,
         isat: Value,
         v: Value,
         n: Value,
     ) -> Value {
-        let nvt = n * self.vt;
-        let v_crit = 80.0 * nvt; // Forward limit
-        let v_rev = -5.0 * nvt; // Reverse limit (around -0.13V at room temp)
-
-        if v > v_crit {
-            // Forward saturation - linear extrapolation
-            let i_crit = isat * ((v_crit / nvt).exp() - 1.0);
-            let g_crit = (isat / nvt) * (v_crit / nvt).exp();
-            i_crit + g_crit * (v - v_crit)
-        } else if v < v_rev {
-            // Deep reverse bias - essentially just -Is (negligible)
-            -isat
-        } else {
-            // Normal operating region
-            isat * ((v / nvt).exp() - 1.0)
-        }
+        self.diode_iv_with_is(isat, v, n).0
     }
 
     #[inline]
@@ -45,32 +53,14 @@ impl Bjt {
         self.diode_current_with_is(self.is, v, n)
     }
 
-    /// Diode conductance: g = Is / (n * Vt) * exp(V / (n * Vt))
-    ///
-    /// SPICE-style limiting with minimum conductance floor for numerical stability
+    /// Diode conductance using the exact derivative of `diode_current_with_is`.
     pub(in crate::device::semiconductor::bjt) fn diode_conductance_with_is(
         &self,
         isat: Value,
         v: Value,
         n: Value,
     ) -> Value {
-        let nvt = n * self.vt;
-        let v_crit = 80.0 * nvt;
-        let v_rev = -5.0 * nvt;
-
-        let g = if v > v_crit {
-            // Forward saturation - constant high conductance
-            (isat / nvt) * (v_crit / nvt).exp()
-        } else if v < v_rev {
-            // Deep reverse bias - minimum conductance
-            1e-15
-        } else {
-            // Normal region
-            (isat / nvt) * (v / nvt).exp()
-        };
-
-        // Apply minimum conductance floor
-        g.max(1e-15)
+        self.diode_iv_with_is(isat, v, n).1
     }
 
     #[inline]
