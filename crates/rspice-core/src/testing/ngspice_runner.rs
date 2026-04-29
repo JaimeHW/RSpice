@@ -285,6 +285,7 @@ impl Default for TestRunnerConfig {
 pub struct TestRunner {
     config: TestRunnerConfig,
     test_dir: PathBuf,
+    validation_manifest_root: PathBuf,
     validation_manifest: HashMap<String, ValidationContract>,
 }
 
@@ -292,9 +293,12 @@ impl TestRunner {
     /// Create a new test runner for the given test directory
     pub fn new<P: AsRef<Path>>(test_dir: P, config: TestRunnerConfig) -> Self {
         let test_dir = test_dir.as_ref().to_path_buf();
+        let (validation_manifest_root, validation_manifest) =
+            Self::load_validation_manifest(&test_dir);
         Self {
             config,
-            validation_manifest: Self::load_validation_manifest(&test_dir),
+            validation_manifest_root,
+            validation_manifest,
             test_dir,
         }
     }
