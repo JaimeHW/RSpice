@@ -68,6 +68,107 @@ impl Engine {
         solution
     }
 
+    pub(super) fn nonlinear_transient_startup_warmup_seed(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        seed: &[Value],
+        time: Value,
+    ) -> Vec<Value> {
+        const WARMUP_ITERS: usize = 96;
+        const MAX_WARMUP_DELTA_V: Value = 2e-1;
+
+        let size = circuit.matrix_size();
+        let mut solution = seed.to_vec();
+        let mut rhs = vec![0.0; size];
+
+        for _ in 0..WARMUP_ITERS {
+            matrix.clear_values();
+            rhs.fill(0.0);
+
+            for i in 0..size {
+                matrix.add(i, i, 1e-6);
+            }
+            circuit.stamp_transient_operating_point_direct(matrix, &mut rhs);
+            let num_nodes = circuit.num_nodes();
+            circuit
+                .voltage_sources
+                .update_transient_rhs(&mut rhs, time, |br_ordinal| num_nodes + br_ordinal);
+            circuit.current_sources.update_transient_rhs(&mut rhs, time);
+
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&solution);
+                circuit.stamp_nonlinear(matrix, &mut rhs, &solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &solution, time);
+            }
+
+            let Ok(mut proposal) = matrix.solve(&rhs) else {
+                break;
+            };
+
+            for i in 0..size {
+                let old = solution[i];
+                let mut new_v = proposal[i];
+                if !new_v.is_finite() {
+                    new_v = old;
+                }
+                let delta = (new_v - old).clamp(-MAX_WARMUP_DELTA_V, MAX_WARMUP_DELTA_V);
+                proposal[i] = old + delta;
+            }
+
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&proposal);
+            }
+            if self.voltage_convergence_met(&solution, &proposal) {
+                solution = proposal;
+                break;
+            }
+            solution = proposal;
+        }
+
+        solution
+    }
+
+    fn t0_transient_seed_after_dc_fallback(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        dc_solution: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Option<Vec<Value>> {
+        let source_delta = circuit
+            .voltage_sources
+            .max_dc_to_transient_delta(0.0)
+            .max(circuit.current_sources.max_dc_to_transient_delta(0.0));
+        if source_delta < SOURCE_ACTIVE_DELTA {
+            return None;
+        }
+
+        let Ok(mut transient_seed) =
+            self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
+        else {
+            return None;
+        };
+
+        for value in &mut transient_seed {
+            if !value.is_finite() {
+                *value = 0.0;
+            }
+        }
+
+        let seed_delta = transient_seed
+            .iter()
+            .zip(dc_solution.iter())
+            .map(|(tran, dc)| (tran - dc).abs())
+            .fold(0.0, Value::max);
+
+        if seed_delta < SOURCE_ACTIVE_DELTA {
+            return None;
+        }
+
+        Some(self.nonlinear_transient_startup_warmup_seed(circuit, matrix, &transient_seed, 0.0))
+    }
+
     pub(super) fn solve_transient_initial_solution(
         &self,
         netlist: &Netlist,
@@ -102,7 +203,18 @@ impl Engine {
         }
 
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
-            Ok(solution) => Ok((solution, InitialSolutionMode::DcOperatingPoint)),
+            Ok(solution) => {
+                if let Some(seed) =
+                    self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)
+                {
+                    log::warn!(
+                        "Transient startup using source-consistent t=0 seed after DC OP fallback."
+                    );
+                    Ok((seed, InitialSolutionMode::LinearizedSeed))
+                } else {
+                    Ok((solution, InitialSolutionMode::DcOperatingPoint))
+                }
+            }
             Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
             Err(primary_err) => {
                 log::warn!(

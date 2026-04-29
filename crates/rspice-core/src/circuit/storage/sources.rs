@@ -286,6 +286,21 @@ impl VoltageSources {
             .fold(0.0, Value::max)
     }
 
+    #[inline]
+    pub fn max_dc_to_transient_delta(&self, time: Value) -> Value {
+        let context = self.transient_context;
+        self.source_specs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, spec)| spec.as_ref().map(|spec| (idx, spec)))
+            .map(|(idx, spec)| {
+                (Self::evaluate_source_at_time_with_context(spec, time, context)
+                    - self.dc_values[idx])
+                    .abs()
+            })
+            .fold(0.0, Value::max)
+    }
+
     fn load_pwl_waveform_cached(
         path: &str,
         time_scale: Value,
@@ -730,6 +745,21 @@ impl CurrentSources {
                 (VoltageSources::evaluate_source_at_time_with_context(spec, t1, context)
                     - VoltageSources::evaluate_source_at_time_with_context(spec, t0, context))
                 .abs()
+            })
+            .fold(0.0, Value::max)
+    }
+
+    #[inline]
+    pub fn max_dc_to_transient_delta(&self, time: Value) -> Value {
+        let context = self.transient_context;
+        self.source_specs
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, spec)| spec.as_ref().map(|spec| (idx, spec)))
+            .map(|(idx, spec)| {
+                (VoltageSources::evaluate_source_at_time_with_context(spec, time, context)
+                    - self.dc_values[idx])
+                    .abs()
             })
             .fold(0.0, Value::max)
     }
