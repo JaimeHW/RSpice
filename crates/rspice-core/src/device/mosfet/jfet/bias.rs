@@ -273,7 +273,7 @@ impl Jfet {
         let arg_eff = arg.clamp(-80.0, 80.0);
         let earg = arg_eff.exp();
 
-        let mut g = csat * expe / nvt + ggrwl * earg * (1.0 + arg_eff) + self.junction_gmin;
+        let mut g = csat * expe / nvt + ggrwl * earg * (1.0 - arg_eff) + self.junction_gmin;
         let mut i = csat * (expe - 1.0) + ggrwl * v_int * earg + self.junction_gmin * v_int;
         if !i.is_finite() {
             i = 0.0;
