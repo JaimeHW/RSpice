@@ -341,6 +341,8 @@ pub struct Jfet {
     vds: Value,
     vgs_prev: Value,
     vds_prev: Value,
+    last_raw_vgs_prev: Value,
+    last_raw_vgd_prev: Value,
     last_raw_vgs: Value,
     last_raw_vgd: Value,
     eval_valid: bool,
@@ -360,6 +362,8 @@ pub struct Jfet {
     model_order: usize,
     hfet_legacy_inverse_mode: bool,
     hfet_legacy_inverse_active: bool,
+    /// Device-local junction GMIN used by ngspice-style gate diode loading.
+    junction_gmin: Value,
     /// Pre-computed matrix indices for O(1) direct stamping
     pub indices: JfetIndices,
 }

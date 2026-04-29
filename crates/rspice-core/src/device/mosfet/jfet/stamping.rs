@@ -3,6 +3,52 @@
 use super::*;
 
 impl Jfet {
+    fn cache_operating_terms_at(&mut self, vgs: Value, vds: Value, vgd: Value) {
+        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) =
+            self.compute_operating_terms(vgs, vds, vgd);
+        self.eval_ids = ids;
+        self.eval_gm = gm;
+        self.eval_gds = gds;
+        self.eval_igs = igs;
+        self.eval_igd = igd;
+        self.eval_ggs = ggs;
+        self.eval_ggd = ggd;
+        self.eval_vds_linear = vds_linear;
+        self.lin_vgs = vgs;
+        self.lin_vgd = vgd;
+        self.lin_cg = igs + igd;
+        self.lin_cd = ids - igd;
+        self.eval_valid = true;
+    }
+
+    /// Re-linearize directly at the supplied candidate solution.
+    ///
+    /// This is used only by static residual/validation probes. Regular Newton
+    /// updates must continue to use ngspice-style branch limiting, but fallback
+    /// candidates are already full operating-point candidates and must be
+    /// evaluated at their actual terminal voltages.
+    pub(crate) fn update_static_linearization(&mut self, voltages: &[Value]) {
+        let vd = Self::node_voltage(voltages, self.drain);
+        let vg = Self::node_voltage(voltages, self.gate);
+        let vs = Self::node_voltage(voltages, self.source);
+        let vgs = vg - vs;
+        let vgd = vg - vd;
+        let vds = vgs - vgd;
+
+        if self.vgs.is_finite() && self.vds.is_finite() {
+            self.vgs_prev = self.vgs;
+            self.vds_prev = self.vds;
+        }
+        self.vgs = vgs;
+        self.vds = vds;
+        self.limiter_applied = false;
+        self.last_raw_vgs_prev = self.last_raw_vgs;
+        self.last_raw_vgd_prev = self.last_raw_vgd;
+        self.last_raw_vgs = vgs;
+        self.last_raw_vgd = vgd;
+        self.cache_operating_terms_at(vgs, vds, vgd);
+    }
+
     /// Link this device to a StaticMatrix for O(1) direct stamping.
     pub fn link(&mut self, matrix: &StaticMatrix) {
         let d = self.drain;
@@ -119,11 +165,15 @@ impl NonlinearDevice for Jfet {
                 self.vgs_prev = self.vgs;
                 self.vds_prev = self.vds;
             }
+            self.last_raw_vgs_prev = self.last_raw_vgs;
+            self.last_raw_vgd_prev = self.last_raw_vgd;
             return;
         }
 
         let vgs_prev = self.vgs;
         let vds_prev = self.vds;
+        let last_raw_vgs_prev = self.last_raw_vgs;
+        let last_raw_vgd_prev = self.last_raw_vgd;
         let vgd_prev = if vgs_prev.is_finite() && vds_prev.is_finite() {
             vgs_prev - vds_prev
         } else {
@@ -156,12 +206,23 @@ impl NonlinearDevice for Jfet {
                 vgd = vgd_limited;
             }
             let (vgs_limited, vgd_limited) = self.hfet_limited_branch_voltages(vgs, vgd);
+            limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
+            limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
+            vgs = vgs_limited;
+            vgd = vgd_limited;
+        } else if matches!(self.params.channel_model, JfetChannelModel::ShichmanHodges) {
+            let (vgs_limited, vgd_limited) = self.classic_limited_branch_voltages(vgs, vgd);
+            limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
+            limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
             vgs = vgs_limited;
             vgd = vgd_limited;
         }
 
         let mut bypassed = false;
-        if self.eval_valid && vgs_prev.is_finite() && vgd_prev.is_finite() {
+        let can_use_static_bypass = !(matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_level >= 5);
+        if can_use_static_bypass && self.eval_valid && vgs_prev.is_finite() && vgd_prev.is_finite()
+        {
             const RELTOL: Value = 1e-3;
             const VOLT_TOL: Value = 1e-6;
             const ABSTOL: Value = 1e-12;
@@ -192,25 +253,13 @@ impl NonlinearDevice for Jfet {
         self.vgs = vgs;
         self.vds = vds;
         self.limiter_applied = limiter_applied;
+        self.last_raw_vgs_prev = last_raw_vgs_prev;
+        self.last_raw_vgd_prev = last_raw_vgd_prev;
         self.last_raw_vgs = vgs_raw;
         self.last_raw_vgd = vgd_raw;
 
         if !bypassed {
-            let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) =
-                self.compute_operating_terms(vgs, vds, vgd);
-            self.eval_ids = ids;
-            self.eval_gm = gm;
-            self.eval_gds = gds;
-            self.eval_igs = igs;
-            self.eval_igd = igd;
-            self.eval_ggs = ggs;
-            self.eval_ggd = ggd;
-            self.eval_vds_linear = vds_linear;
-            self.lin_vgs = vgs;
-            self.lin_vgd = vgd;
-            self.lin_cg = igs + igd;
-            self.lin_cd = ids - igd;
-            self.eval_valid = true;
+            self.cache_operating_terms_at(vgs, vds, vgd);
         }
     }
 
@@ -278,7 +327,31 @@ impl NonlinearDevice for Jfet {
         let vgs_tol = RELTOL * self.vgs.abs().max(self.vgs_prev.abs()) + tolerance;
         let vds_tol = RELTOL * self.vds.abs().max(self.vds_prev.abs()) + tolerance;
 
-        vgs_diff < vgs_tol && vds_diff < vds_tol
+        if vgs_diff >= vgs_tol || vds_diff >= vds_tol {
+            return false;
+        }
+
+        if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_level >= 5
+        {
+            if !self.last_raw_vgs.is_finite()
+                || !self.last_raw_vgs_prev.is_finite()
+                || !self.last_raw_vgd.is_finite()
+                || !self.last_raw_vgd_prev.is_finite()
+            {
+                return false;
+            }
+
+            let raw_vgs_diff = (self.last_raw_vgs - self.last_raw_vgs_prev).abs();
+            let raw_vgd_diff = (self.last_raw_vgd - self.last_raw_vgd_prev).abs();
+            let raw_vgs_tol =
+                RELTOL * self.last_raw_vgs.abs().max(self.last_raw_vgs_prev.abs()) + tolerance;
+            let raw_vgd_tol =
+                RELTOL * self.last_raw_vgd.abs().max(self.last_raw_vgd_prev.abs()) + tolerance;
+            return raw_vgs_diff < raw_vgs_tol && raw_vgd_diff < raw_vgd_tol;
+        }
+
+        true
     }
 }
 

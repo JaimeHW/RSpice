@@ -24,6 +24,8 @@ impl Jfet {
             vds: Value::NAN,
             vgs_prev: Value::NAN,
             vds_prev: Value::NAN,
+            last_raw_vgs_prev: Value::NAN,
+            last_raw_vgd_prev: Value::NAN,
             last_raw_vgs: Value::NAN,
             last_raw_vgd: Value::NAN,
             eval_valid: false,
@@ -43,6 +45,7 @@ impl Jfet {
             model_order: usize::MAX,
             hfet_legacy_inverse_mode: false,
             hfet_legacy_inverse_active: false,
+            junction_gmin: 1.0e-12,
             indices: JfetIndices::default(),
         }
     }
@@ -70,6 +73,8 @@ impl Jfet {
             vds: Value::NAN,
             vgs_prev: Value::NAN,
             vds_prev: Value::NAN,
+            last_raw_vgs_prev: Value::NAN,
+            last_raw_vgd_prev: Value::NAN,
             last_raw_vgs: Value::NAN,
             last_raw_vgd: Value::NAN,
             eval_valid: false,
@@ -89,6 +94,7 @@ impl Jfet {
             model_order: usize::MAX,
             hfet_legacy_inverse_mode: false,
             hfet_legacy_inverse_active: false,
+            junction_gmin: 1.0e-12,
             indices: JfetIndices::default(),
         }
     }

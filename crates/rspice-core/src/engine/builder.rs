@@ -1297,6 +1297,9 @@ impl Engine {
         for mos in &mut circuit.mosfets.devices {
             mos.set_junction_gmin(junction_gmin);
         }
+        for jfet in &mut circuit.jfets {
+            jfet.set_junction_gmin(junction_gmin);
+        }
 
         Ok(circuit)
     }

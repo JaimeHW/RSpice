@@ -203,7 +203,6 @@ impl Jfet {
         m2: Value,
         rg: Value,
     ) -> (Value, Value) {
-        const HFET_GMIN: Value = 1e-12;
         let temp_k = if temp.is_finite() && temp > 0.0 {
             temp
         } else {
@@ -216,7 +215,7 @@ impl Jfet {
 
         let (mut il, mut gl) = if is1 > 0.0 && is2 > 0.0 {
             Self::hfet_leak(
-                HFET_GMIN,
+                self.junction_gmin,
                 vt,
                 v_int,
                 rg.max(0.0),
@@ -251,7 +250,6 @@ impl Jfet {
     /// MESA gate branch approximation (`mesaload.c`): ASTAR Schottky + GGR + GMIN.
     pub(super) fn mesa_gate_branch(&self, v_int: Value, temp: Value) -> (Value, Value) {
         const K_BOLTZMANN: Value = 1.380649e-23;
-        const MESA_GMIN: Value = 1e-12;
 
         let temp_k = if temp.is_finite() && temp > 0.0 {
             temp
@@ -275,13 +273,13 @@ impl Jfet {
         let arg_eff = arg.clamp(-80.0, 80.0);
         let earg = arg_eff.exp();
 
-        let mut g = csat * expe / nvt + ggrwl * earg * (1.0 - arg_eff) + MESA_GMIN;
-        let mut i = csat * (expe - 1.0) + ggrwl * v_int * earg + MESA_GMIN * v_int;
+        let mut g = csat * expe / nvt + ggrwl * earg * (1.0 + arg_eff) + self.junction_gmin;
+        let mut i = csat * (expe - 1.0) + ggrwl * v_int * earg + self.junction_gmin * v_int;
         if !i.is_finite() {
             i = 0.0;
         }
         if !g.is_finite() {
-            g = MESA_GMIN;
+            g = self.junction_gmin;
         }
         (i, g)
     }
@@ -320,7 +318,15 @@ impl Jfet {
 
     #[inline]
     pub(crate) fn set_hfet_legacy_inverse_active(&mut self, active: bool) {
-        self.hfet_legacy_inverse_active = self.uses_hfet_legacy_inverse_mode() && active;
+        let active = self.uses_hfet_legacy_inverse_mode() && active;
+        if self.hfet_legacy_inverse_active != active {
+            self.hfet_legacy_inverse_active = active;
+            self.eval_valid = false;
+            self.last_raw_vgs = Value::NAN;
+            self.last_raw_vgd = Value::NAN;
+            self.last_raw_vgs_prev = Value::NAN;
+            self.last_raw_vgd_prev = Value::NAN;
+        }
     }
 
     #[inline]
@@ -334,8 +340,26 @@ impl Jfet {
     }
 
     #[inline]
+    pub(crate) fn set_junction_gmin(&mut self, gmin: Value) {
+        let gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+        if self.junction_gmin != gmin {
+            self.junction_gmin = gmin;
+            self.eval_valid = false;
+            self.last_raw_vgs = Value::NAN;
+            self.last_raw_vgd = Value::NAN;
+            self.last_raw_vgs_prev = Value::NAN;
+            self.last_raw_vgd_prev = Value::NAN;
+        }
+    }
+
+    #[inline]
     pub(super) fn matches_last_raw_branch_input(&self, vgs_raw: Value, vgd_raw: Value) -> bool {
         self.eval_valid
+            && !self.limiter_applied
             && self.last_raw_vgs.is_finite()
             && self.last_raw_vgd.is_finite()
             && vgs_raw == self.last_raw_vgs
@@ -422,6 +446,52 @@ impl Jfet {
             }
         }
         vnew
+    }
+
+    #[inline]
+    pub(super) fn classic_gate_vcrit(&self, nvt: Value) -> Value {
+        let isat = (self.params.is * self.junction_scale()).max(0.0);
+        if isat > 0.0 && nvt > 0.0 {
+            let arg = (nvt / (core::f64::consts::SQRT_2 * isat)).max(1.0);
+            nvt * arg.ln()
+        } else {
+            1.0
+        }
+    }
+
+    #[inline]
+    pub(super) fn classic_limited_branch_voltages(
+        &self,
+        vgs_new: Value,
+        vgd_new: Value,
+    ) -> (Value, Value) {
+        let pol = self.jfet_type.polarity();
+        if !pol.is_finite() || pol.abs() < 0.5 {
+            return (vgs_new, vgd_new);
+        }
+
+        if !self.vgs.is_finite() || !self.vds.is_finite() {
+            // ngspice JFET MODEINITJCT seeds active devices at -1 V on both
+            // internal gate junctions before regular limiting takes over.
+            let seed = -1.0 / pol;
+            return (seed, seed);
+        }
+
+        let temp_k = self.params.tnom.max(1.0);
+        let nvt = (self.params.n.max(1e-12) * self.thermal_voltage(temp_k)).max(1e-12);
+        let vcrit = self.classic_gate_vcrit(nvt);
+
+        let vgs_old_int = pol * self.vgs;
+        let vgd_old_int = pol * (self.vgs - self.vds);
+        let mut vgs_int = pol * vgs_new;
+        let mut vgd_int = pol * vgd_new;
+
+        vgs_int = Self::pnjlim(vgs_int, vgs_old_int, nvt, vcrit);
+        vgd_int = Self::pnjlim(vgd_int, vgd_old_int, nvt, vcrit);
+        vgs_int = Self::fetlim(vgs_int, vgs_old_int, self.params.vto);
+        vgd_int = Self::fetlim(vgd_int, vgd_old_int, self.params.vto);
+
+        (vgs_int / pol, vgd_int / pol)
     }
 
     #[inline]
