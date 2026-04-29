@@ -12,7 +12,7 @@ const DERIVATIVE_REL_STEP: Value = 1e-6;
 const DERIVATIVE_ABS_STEP: Value = 1e-9;
 
 /// Compiled behavioral voltage source
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BehavioralVoltageSource {
     /// Device name
     pub name: String,
@@ -291,7 +291,7 @@ impl BehavioralVoltageSource {
 }
 
 /// Compiled behavioral current source
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BehavioralCurrentSource {
     /// Device name
     pub name: String,
@@ -570,7 +570,7 @@ impl BehavioralCurrentSource {
 }
 
 /// Storage for behavioral sources (not SoA due to compiled programs)
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct BehavioralSources {
     pub voltage_sources: Vec<BehavioralVoltageSource>,
     pub current_sources: Vec<BehavioralCurrentSource>,

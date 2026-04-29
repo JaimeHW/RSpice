@@ -56,6 +56,7 @@ impl PortConnection {
 //=============================================================================
 
 /// An instantiated XSPICE code model in a circuit
+#[derive(Clone)]
 pub struct XspiceInstance {
     /// Instance name (e.g., "A1")
     pub name: String,

@@ -26,6 +26,30 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
+        linear_stamp: F,
+    ) -> bool
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
+            circuit,
+            matrix,
+            solution,
+            junction_gmin,
+            linear_stamp,
+        )
+    }
+
+    pub(in crate::engine::convergence) fn nonlinear_residual_converged_with_linear_stamp_and_junction_gmin<
+        F,
+    >(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        junction_gmin: Value,
         mut linear_stamp: F,
     ) -> bool
     where
@@ -36,11 +60,20 @@ impl Engine {
             return false;
         }
 
+        let snapshot = circuit.nonlinear_state_snapshot();
         let mut rhs = vec![0.0; size];
-        matrix.clear_values();
-        linear_stamp(circuit, matrix, &mut rhs);
-        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
-        self.residual_convergence_met(matrix, solution, &rhs)
+        let mut residual_matrix = matrix.clone_structure();
+        linear_stamp(circuit, &mut residual_matrix, &mut rhs);
+        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+            circuit,
+            &mut residual_matrix,
+            &mut rhs,
+            solution,
+            junction_gmin,
+        );
+        let converged = self.residual_convergence_met(&residual_matrix, solution, &rhs);
+        circuit.restore_nonlinear_state(snapshot);
+        converged
     }
 
     pub(in crate::engine::convergence) fn nonlinear_residual_converged(
@@ -93,10 +126,12 @@ impl Engine {
         solution: &[Value],
         gmin: Value,
     ) -> bool {
-        self.nonlinear_residual_converged_with_linear_stamp(
+        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        self.nonlinear_residual_converged_with_linear_stamp_and_junction_gmin(
             circuit,
             matrix,
             solution,
+            junction_gmin,
             |circuit, matrix, rhs| {
                 let node_count = circuit.num_nodes().min(rhs.len());
                 for i in 0..node_count {
@@ -134,6 +169,28 @@ impl Engine {
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         solution: &[Value],
+        linear_stamp: F,
+    ) -> Option<Value>
+    where
+        F: FnMut(&mut CircuitData, &mut StaticMatrix, &mut [Value]),
+    {
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.nonlinear_merit_with_linear_stamp_and_junction_gmin(
+            circuit,
+            matrix,
+            solution,
+            junction_gmin,
+            linear_stamp,
+        )
+    }
+
+    pub(in crate::engine::convergence) fn nonlinear_merit_with_linear_stamp_and_junction_gmin<F>(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        solution: &[Value],
+        junction_gmin: Value,
         mut linear_stamp: F,
     ) -> Option<Value>
     where
@@ -144,13 +201,29 @@ impl Engine {
             return None;
         }
 
+        let snapshot = circuit.nonlinear_state_snapshot();
         let mut rhs = vec![0.0; size];
-        matrix.clear_values();
-        linear_stamp(circuit, matrix, &mut rhs);
-        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
+        let mut residual_matrix = matrix.clone_structure();
+        linear_stamp(circuit, &mut residual_matrix, &mut rhs);
+        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+            circuit,
+            &mut residual_matrix,
+            &mut rhs,
+            solution,
+            junction_gmin,
+        );
 
-        let next_solution = matrix.solve(&rhs).ok()?;
-        Some(Self::step_l2_norm(solution, &next_solution))
+        let merit = residual_matrix
+            .scaled_residual_inf_norm(
+                solution,
+                &rhs,
+                self.current_abstol(),
+                self.residual_reltol(),
+            )
+            .ok()
+            .filter(|norm| norm.is_finite());
+        circuit.restore_nonlinear_state(snapshot);
+        merit
     }
 
     pub(in crate::engine::convergence) fn nonlinear_merit(
@@ -193,13 +266,20 @@ impl Engine {
         solution: &[Value],
         gmin: Value,
     ) -> Option<Value> {
-        self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            let node_count = circuit.num_nodes().min(rhs.len());
-            for i in 0..node_count {
-                matrix.add(i, i, gmin);
-            }
-            circuit.stamp_dc_direct(matrix, rhs);
-        })
+        let junction_gmin = self.effective_device_junction_gmin(gmin);
+        self.nonlinear_merit_with_linear_stamp_and_junction_gmin(
+            circuit,
+            matrix,
+            solution,
+            junction_gmin,
+            |circuit, matrix, rhs| {
+                let node_count = circuit.num_nodes().min(rhs.len());
+                for i in 0..node_count {
+                    matrix.add(i, i, gmin);
+                }
+                circuit.stamp_dc_direct(matrix, rhs);
+            },
+        )
     }
 
     pub(in crate::engine::convergence) fn nonlinear_merit_with_pseudo_transient(

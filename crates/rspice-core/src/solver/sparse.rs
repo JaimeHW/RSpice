@@ -45,6 +45,22 @@ pub struct StaticMatrix {
 }
 
 impl StaticMatrix {
+    /// Create a zero-valued matrix with the same sparsity structure.
+    ///
+    /// This is used for residual probes that must stamp into an independent
+    /// numeric workspace while preserving O(1) matrix-entry lookup.
+    pub fn clone_structure(&self) -> Self {
+        Self {
+            nrows: self.nrows,
+            ncols: self.ncols,
+            col_ptrs: self.col_ptrs.clone(),
+            row_indices: self.row_indices.clone(),
+            values: vec![0.0; self.values.len()],
+            position_map: self.position_map.clone(),
+            symbolic_lu: None,
+        }
+    }
+
     fn to_dense_real(&self) -> Vec<Vec<Value>> {
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {

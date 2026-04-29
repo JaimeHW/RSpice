@@ -126,12 +126,22 @@ impl Engine {
         F: FnMut(&[Value]) -> Option<Value>,
     {
         let base_merit = merit(old).unwrap_or(Value::INFINITY);
-        let mut best_solution = proposal.to_vec();
-        let mut best_merit = merit(proposal).unwrap_or(Value::INFINITY);
+        let proposal_merit = merit(proposal).unwrap_or(Value::INFINITY);
 
-        if best_merit.is_finite() && (!base_merit.is_finite() || best_merit <= base_merit) {
-            return best_solution;
+        if proposal_merit.is_finite() && (!base_merit.is_finite() || proposal_merit <= base_merit) {
+            return proposal.to_vec();
         }
+
+        let mut best_solution = if base_merit.is_finite() {
+            old.to_vec()
+        } else {
+            proposal.to_vec()
+        };
+        let mut best_merit = if base_merit.is_finite() {
+            base_merit
+        } else {
+            proposal_merit
+        };
 
         let mut alpha = Self::LINE_SEARCH_BACKTRACK;
         for _ in 0..Self::LINE_SEARCH_MAX_ITERS {
@@ -168,7 +178,8 @@ impl Engine {
             DampingStrategy::None => proposal.to_vec(),
             DampingStrategy::LineSearch => Self::line_search_step(old, proposal, &mut merit),
             DampingStrategy::VoltageLimiting => {
-                Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT)
+                let limited = Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
+                Self::line_search_step(old, &limited, &mut merit)
             }
             DampingStrategy::BankRose => {
                 let step_norm = Self::step_l2_norm(old, proposal);
@@ -296,26 +307,45 @@ impl Engine {
             return false;
         }
 
-        // Re-evaluate one Newton linearization at the candidate point and require
-        // a small fixed-point update plus device-level convergence.
+        // Re-evaluate one Newton linearization at the candidate point without
+        // allowing limiter history from the trial evaluation to escape into the
+        // caller's ongoing nonlinear iteration. Fallback candidates are static
+        // operating-point solutions; their acceptance should be governed by the
+        // residual and fixed-point update, not by the previous device history
+        // used to protect Newton steps while finding them.
+        let snapshot = circuit.nonlinear_state_snapshot();
         let mut rhs = vec![0.0; size];
-        matrix.clear_values();
+        let mut validation_matrix = matrix.clone_structure();
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         let node_count = circuit.num_nodes().min(size);
         for i in 0..node_count {
-            matrix.add(i, i, gmin_floor);
+            validation_matrix.add(i, i, gmin_floor);
         }
-        circuit.stamp_dc_direct(matrix, &mut rhs);
-        self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, solution);
-        let residual_converged = self.residual_convergence_met(matrix, solution, &rhs);
+        circuit.stamp_dc_direct(&mut validation_matrix, &mut rhs);
+        self.stamp_static_probe_nonlinear_devices_for_dc(
+            circuit,
+            &mut validation_matrix,
+            &mut rhs,
+            solution,
+        );
+        let residual_norm = validation_matrix
+            .scaled_residual_inf_norm(
+                solution,
+                &rhs,
+                self.current_abstol(),
+                self.residual_reltol(),
+            )
+            .unwrap_or(Value::INFINITY);
+        let residual_converged = residual_norm.is_finite() && residual_norm <= 1.0;
 
-        let Ok(next_solution) = matrix.solve(&rhs) else {
+        let Ok(next_solution) = validation_matrix.solve(&rhs) else {
+            circuit.restore_nonlinear_state(snapshot);
             return false;
         };
 
-        residual_converged && self.voltage_convergence_met(solution, &next_solution) && {
-            self.update_device_states_for_dc(circuit, solution);
-            circuit.nonlinear_converged(self.device_convergence_criteria())
-        }
+        let fixed_point_converged = self.voltage_convergence_met(solution, &next_solution);
+        circuit.restore_nonlinear_state(snapshot);
+
+        residual_converged && fixed_point_converged
     }
 }

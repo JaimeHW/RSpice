@@ -2,6 +2,12 @@
 
 use super::*;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::engine::convergence) enum CorrectorSeedMode {
+    Limited,
+    StaticJfet,
+}
+
 impl Engine {
     pub(in crate::engine::convergence) fn normalize_initial_guess(
         initial_guess: &[Value],
@@ -75,8 +81,34 @@ impl Engine {
         max_iterations: usize,
         abort: &dyn AbortSignal,
     ) -> (Vec<Value>, bool, usize) {
+        self.solve_scaled_nonlinear_corrector_with_seed_mode(
+            circuit,
+            matrix,
+            source_scale,
+            initial_solution,
+            damping_state,
+            max_iterations,
+            abort,
+            CorrectorSeedMode::Limited,
+        )
+    }
+
+    pub(in crate::engine::convergence) fn solve_scaled_nonlinear_corrector_with_seed_mode(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        source_scale: Value,
+        initial_solution: &[Value],
+        damping_state: &mut NewtonDampingState,
+        max_iterations: usize,
+        abort: &dyn AbortSignal,
+        seed_mode: CorrectorSeedMode,
+    ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
+        if seed_mode == CorrectorSeedMode::StaticJfet {
+            circuit.update_jfet_static_linearizations(&solution);
+        }
         let mut used_iterations = 0usize;
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
@@ -195,7 +227,7 @@ impl Engine {
     ) -> Option<Vec<Value>> {
         let mut damping_state = NewtonDampingState::default();
         let refinement_iterations = self.continuation_iteration_budget(4, 12);
-        let (refined, converged, _) = self.solve_scaled_nonlinear_corrector(
+        let (refined, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
             circuit,
             matrix,
             1.0,
@@ -203,6 +235,7 @@ impl Engine {
             &mut damping_state,
             refinement_iterations,
             abort,
+            CorrectorSeedMode::StaticJfet,
         );
         if converged || self.validate_nonlinear_solution(circuit, matrix, &refined) {
             Some(refined)
@@ -220,7 +253,7 @@ impl Engine {
     ) -> Option<Vec<Value>> {
         let mut damping_state = NewtonDampingState::default();
         let restart_iterations = self.nonlinear_iteration_budget(10);
-        let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector(
+        let (restarted, converged, _) = self.solve_scaled_nonlinear_corrector_with_seed_mode(
             circuit,
             matrix,
             1.0,
@@ -228,6 +261,7 @@ impl Engine {
             &mut damping_state,
             restart_iterations,
             abort,
+            CorrectorSeedMode::StaticJfet,
         );
         if converged || self.validate_nonlinear_solution(circuit, matrix, &restarted) {
             Some(restarted)
@@ -380,21 +414,24 @@ impl Engine {
         const VCE_SAT: Value = 0.2; // Saturation voltage
 
         for bjt in &circuit.bjts.devices {
+            if bjt.is_initially_off() {
+                continue;
+            }
+
             let collector_node = bjt.node_collector;
             let base_node = bjt.node_base;
             let emitter_node = bjt.node_emitter;
 
-            if base_node == 0 || emitter_node == 0 {
+            if base_node == 0 {
                 continue;
             }
 
-            let vc = if collector_node > 0 {
-                guess[collector_node - 1]
-            } else {
-                0.0
+            let node_voltage = |node: usize| {
+                if node > 0 { guess[node - 1] } else { 0.0 }
             };
+            let vc = node_voltage(collector_node);
             let vb = guess[base_node - 1];
-            let ve = guess[emitter_node - 1];
+            let ve = node_voltage(emitter_node);
 
             // Strategy: Start with emitter voltage from linear presolve (respects resistor network)
             // Adjust base to be VBE_FORWARD above emitter

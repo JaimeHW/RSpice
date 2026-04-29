@@ -165,7 +165,7 @@ impl<'a> Context<'a> {
 }
 
 /// Bytecode virtual machine
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Vm {
     stack: Vec<Value>,
 }

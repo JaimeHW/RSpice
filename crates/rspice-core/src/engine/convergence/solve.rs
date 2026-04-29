@@ -138,7 +138,8 @@ impl Engine {
         let mut limited_nodes: Vec<usize> = Vec::new();
         let mut damping_state = NewtonDampingState::default();
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
-        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let requires_conservative_nonlinear_limiting =
+            circuit.requires_conservative_solution_damping();
         // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
@@ -509,6 +510,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = self
             .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {
                 Self::stamp_transient_operating_point_linear(circuit, matrix, rhs, time, 0.0);
@@ -531,7 +533,8 @@ impl Engine {
             crate::xspice::AnalysisType::Transient,
         );
 
-        let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let requires_conservative_nonlinear_limiting =
+            circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
         let mut damping_state = NewtonDampingState::default();
         let tranop_max_iterations = self.nonlinear_iteration_budget(10);
@@ -555,6 +558,7 @@ impl Engine {
                 &solution,
                 time,
                 crate::xspice::AnalysisType::Transient,
+                junction_gmin,
             );
 
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
@@ -595,6 +599,7 @@ impl Engine {
                 &new_solution,
                 time,
                 crate::xspice::AnalysisType::Transient,
+                junction_gmin,
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = self.nonlinear_residual_converged_with_linear_stamp(

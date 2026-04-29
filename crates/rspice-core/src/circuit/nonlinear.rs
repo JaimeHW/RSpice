@@ -1,5 +1,19 @@
 use super::*;
 
+#[derive(Debug, Clone)]
+pub(crate) struct NonlinearDeviceStateSnapshot {
+    diodes: Diodes,
+    bjts: Bjts,
+    mosfets: Mosfets,
+    jfets: Vec<crate::device::Jfet>,
+    vswitches: Vec<crate::device::VoltageSwitch>,
+    iswitches: Vec<crate::device::CurrentSwitch>,
+    behavioral_sources: BehavioralSources,
+    xspice_instances: Vec<XspiceInstance>,
+    #[cfg(feature = "veriloga")]
+    veriloga_devices: crate::device::veriloga::VerilogADevices,
+}
+
 impl CircuitData {
     /// Check if circuit has any nonlinear devices requiring Newton-Raphson
     pub fn has_nonlinear_devices(&self) -> bool {
@@ -46,6 +60,95 @@ impl CircuitData {
             }
     }
 
+    /// Check whether the nonlinear solve should apply global nodal damping.
+    ///
+    /// Classic JFETs already use ngspice-style local gate-branch limiting
+    /// (`DEVpnjlim`/`DEVfetlim`). For circuits made only from those devices,
+    /// global line-search damping adds substantial cost without improving the
+    /// Newton path. Keep it enabled for other compact models and mixed
+    /// nonlinear circuits where device-local limiting is not sufficient.
+    #[inline]
+    pub fn requires_conservative_solution_damping(&self) -> bool {
+        if !self.diodes.is_empty()
+            || !self.bjts.is_empty()
+            || !self.mosfets.is_empty()
+            || !self.vswitches.is_empty()
+            || !self.iswitches.is_empty()
+            || self.has_xspice_devices()
+        {
+            return true;
+        }
+
+        #[cfg(feature = "veriloga")]
+        {
+            if self.has_veriloga_devices() {
+                return true;
+            }
+        }
+
+        self.jfets.iter().any(|jfet| {
+            !matches!(
+                jfet.params.channel_model,
+                crate::device::JfetChannelModel::ShichmanHodges
+            )
+        })
+    }
+
+    /// Set the circuit-level semiconductor junction GMIN seen by compact models.
+    ///
+    /// ngspice passes the active `CKTgmin` into device junction branches during
+    /// gmin stepping, not only as a nodal shunt. Keep model-local gate/body
+    /// diode loading aligned with the continuation stage.
+    pub fn set_semiconductor_junction_gmin(&mut self, gmin: Value) {
+        let gmin = if gmin.is_finite() && gmin > 0.0 {
+            gmin
+        } else {
+            0.0
+        };
+        for mos in &mut self.mosfets.devices {
+            mos.set_junction_gmin(gmin);
+        }
+        for jfet in &mut self.jfets {
+            jfet.set_junction_gmin(gmin);
+        }
+    }
+
+    /// Capture mutable nonlinear evaluation state before probing trial residuals.
+    ///
+    /// Newton line-search and fallback merit functions evaluate rejected trial
+    /// points. Those probes must not commit device limiter caches, previous
+    /// voltages, behavioral-source linearization scratch, or code-model context.
+    pub(crate) fn nonlinear_state_snapshot(&self) -> NonlinearDeviceStateSnapshot {
+        NonlinearDeviceStateSnapshot {
+            diodes: self.diodes.clone(),
+            bjts: self.bjts.clone(),
+            mosfets: self.mosfets.clone(),
+            jfets: self.jfets.clone(),
+            vswitches: self.vswitches.clone(),
+            iswitches: self.iswitches.clone(),
+            behavioral_sources: self.behavioral_sources.clone(),
+            xspice_instances: self.xspice_instances.clone(),
+            #[cfg(feature = "veriloga")]
+            veriloga_devices: self.veriloga_devices.clone(),
+        }
+    }
+
+    /// Restore mutable nonlinear evaluation state after a trial residual probe.
+    pub(crate) fn restore_nonlinear_state(&mut self, snapshot: NonlinearDeviceStateSnapshot) {
+        self.diodes = snapshot.diodes;
+        self.bjts = snapshot.bjts;
+        self.mosfets = snapshot.mosfets;
+        self.jfets = snapshot.jfets;
+        self.vswitches = snapshot.vswitches;
+        self.iswitches = snapshot.iswitches;
+        self.behavioral_sources = snapshot.behavioral_sources;
+        self.xspice_instances = snapshot.xspice_instances;
+        #[cfg(feature = "veriloga")]
+        {
+            self.veriloga_devices = snapshot.veriloga_devices;
+        }
+    }
+
     /// Update all nonlinear devices with current solution
     pub fn update_nonlinear(&mut self, voltages: &[Value]) {
         use crate::device::NonlinearDevice;
@@ -73,6 +176,27 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         {
             self.veriloga_devices_mut().update_all_voltages(voltages);
+        }
+    }
+
+    /// Re-linearize JFET/MESFET devices directly at a static probe solution.
+    ///
+    /// Normal nonlinear updates intentionally apply ngspice-style branch
+    /// limiting to protect Newton iterations. Residual and fallback validation
+    /// probes, however, need the JFET stamp at the candidate voltage itself so
+    /// they can measure the actual operating-point equation error.
+    pub(crate) fn update_jfet_static_linearizations(&mut self, voltages: &[Value]) {
+        let mut order: Vec<usize> = (0..self.jfets.len()).collect();
+        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), idx));
+        let mut hfet_inverse_latched = false;
+        for idx in order {
+            let jfet = &mut self.jfets[idx];
+            let uses_hfet_legacy_inverse = jfet.uses_hfet_legacy_inverse_mode();
+            jfet.set_hfet_legacy_inverse_active(uses_hfet_legacy_inverse && hfet_inverse_latched);
+            jfet.update_static_linearization(voltages);
+            if uses_hfet_legacy_inverse && jfet.internal_vds_limited_state() < 0.0 {
+                hfet_inverse_latched = true;
+            }
         }
     }
 

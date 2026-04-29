@@ -4,12 +4,50 @@ use super::*;
 
 impl Engine {
     #[inline]
+    pub(in crate::engine::convergence) fn effective_device_junction_gmin(
+        &self,
+        gmin: Value,
+    ) -> Value {
+        let configured = self
+            .config
+            .convergence_config
+            .gmin_initial
+            .max(self.config.convergence_config.gmin_target)
+            .max(0.0);
+        if gmin.is_finite() && gmin > configured {
+            gmin
+        } else {
+            configured
+        }
+    }
+
+    #[inline]
     pub(in crate::engine::convergence) fn stamp_nonlinear_devices_for_dc(
         &self,
         circuit: &mut CircuitData,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
+    ) {
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            junction_gmin,
+        );
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn stamp_nonlinear_devices_for_dc_with_junction_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        junction_gmin: Value,
     ) {
         self.stamp_nonlinear_devices_for_operating_point(
             circuit,
@@ -18,7 +56,52 @@ impl Engine {
             solution,
             0.0,
             crate::xspice::AnalysisType::DcOp,
+            junction_gmin,
         );
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn stamp_static_probe_nonlinear_devices_for_dc(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+    ) {
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            junction_gmin,
+        );
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        solution: &[Value],
+        junction_gmin: Value,
+    ) {
+        circuit.set_semiconductor_junction_gmin(junction_gmin);
+        circuit.update_nonlinear(solution);
+        circuit.update_jfet_static_linearizations(solution);
+        circuit.stamp_nonlinear(matrix, rhs, solution);
+        circuit.stamp_behavioral(matrix, rhs, solution, 0.0);
+        if circuit.has_xspice_devices() {
+            circuit.evaluate_xspice_with_analysis(
+                0.0,
+                0.0,
+                solution,
+                crate::xspice::AnalysisType::DcOp,
+            );
+            circuit.stamp_xspice(matrix, rhs);
+        }
     }
 
     #[inline]
@@ -30,7 +113,9 @@ impl Engine {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
+        junction_gmin: Value,
     ) {
+        circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         circuit.stamp_nonlinear(matrix, rhs, solution);
         circuit.stamp_behavioral(matrix, rhs, solution, time);
@@ -46,11 +131,24 @@ impl Engine {
         circuit: &mut CircuitData,
         solution: &[Value],
     ) {
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.update_device_states_for_dc_with_junction_gmin(circuit, solution, junction_gmin);
+    }
+
+    #[inline]
+    pub(in crate::engine::convergence) fn update_device_states_for_dc_with_junction_gmin(
+        &self,
+        circuit: &mut CircuitData,
+        solution: &[Value],
+        junction_gmin: Value,
+    ) {
         self.update_device_states_for_operating_point(
             circuit,
             solution,
             0.0,
             crate::xspice::AnalysisType::DcOp,
+            junction_gmin,
         );
     }
 
@@ -61,7 +159,9 @@ impl Engine {
         solution: &[Value],
         time: Value,
         analysis: crate::xspice::AnalysisType,
+        junction_gmin: Value,
     ) {
+        circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.update_nonlinear(solution);
         if circuit.has_xspice_devices() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
@@ -76,7 +176,15 @@ impl Engine {
         time: Value,
         analysis: crate::xspice::AnalysisType,
     ) {
-        self.update_device_states_for_operating_point(circuit, solution, time, analysis);
+        let junction_gmin =
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target);
+        self.update_device_states_for_operating_point(
+            circuit,
+            solution,
+            time,
+            analysis,
+            junction_gmin,
+        );
     }
 
     #[inline]

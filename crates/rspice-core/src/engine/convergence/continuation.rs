@@ -161,9 +161,11 @@ impl Engine {
     /// * `matrix` - Sparse matrix structure
     /// * `initial_guess` - Starting solution (e.g., from failed Newton iteration or previous sweep point)
     ///
-    /// Source stepping ramps sources from 0% to 100% in steps, which helps
+    /// Source stepping ramps sources from 0% to 100%, which helps
     /// find operating points in difficult circuits with strong nonlinearities.
-    /// Uses finer granularity (11 steps) for commercial-grade convergence handling.
+    /// The adaptive implementation below only advances after a converged
+    /// corrector solve at the target scale; failed trial states are rolled back
+    /// and retried with a smaller source increment.
     #[allow(dead_code)]
     pub(crate) fn source_stepping_nonlinear_with_guess(
         &self,
@@ -186,10 +188,13 @@ impl Engine {
         initial_guess: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
-        // Finer source stepping for difficult circuits (mirrors Spectre/HSPICE approach)
-        // Smaller initial steps help with BJT/MOSFET turn-on regions
-        const SOURCE_SCALES: &[Value] =
-            &[0.0, 0.01, 0.05, 0.1, 0.2, 0.35, 0.5, 0.65, 0.8, 0.9, 1.0];
+        const INITIAL_SOURCE_STEP: Value = 0.02;
+        const MAX_SOURCE_STEP: Value = 0.2;
+        const MIN_SOURCE_STEP: Value = 1.0e-4;
+        const SOURCE_STEP_GROWTH: Value = 1.35;
+        const SOURCE_STEP_SHRINK: Value = 0.5;
+        const SOURCE_SCALE_EPS: Value = 1.0e-12;
+        const MAX_SOURCE_ATTEMPTS: usize = 512;
 
         let size = circuit.matrix_size();
 
@@ -198,89 +203,97 @@ impl Engine {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, initial_guess, &zero_guess, 0.0);
         let mut damping_state = NewtonDampingState::default();
         let source_iterations = self.continuation_iteration_budget(20, 16);
-        let (bootstrap_solution, _, _) = self.solve_scaled_nonlinear_corrector(
-            circuit,
-            matrix,
-            0.0,
-            &solution,
-            &mut damping_state,
-            source_iterations,
-            abort,
-        );
+        let mut total_iterations = 0usize;
+        let (bootstrap_solution, bootstrap_converged, bootstrap_iterations) = self
+            .solve_scaled_nonlinear_corrector(
+                circuit,
+                matrix,
+                0.0,
+                &solution,
+                &mut damping_state,
+                source_iterations,
+                abort,
+            );
+        total_iterations += bootstrap_iterations;
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if !bootstrap_converged {
+            return Err(SimulationError::ConvergenceFailed(
+                total_iterations.max(source_iterations),
+            ));
+        }
         solution = bootstrap_solution;
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
 
-        for (scale_idx, &scale) in SOURCE_SCALES.iter().enumerate().skip(1) {
-            if Self::should_abort_iteration(abort, scale_idx) {
+        let mut accepted_scale = 0.0;
+        let mut source_step = INITIAL_SOURCE_STEP;
+        let mut attempts = 0usize;
+
+        while accepted_scale < 1.0 - SOURCE_SCALE_EPS {
+            if attempts >= MAX_SOURCE_ATTEMPTS {
+                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            }
+            if Self::should_abort_iteration(abort, attempts) {
                 return Err(SimulationError::Aborted);
             }
-            // Run Newton iterations at this source level
-            // Use robust iteration budget so continuation still has work even
-            // when the base direct-Newton budget is intentionally small.
-            for iteration in 0..source_iterations {
-                if Self::should_abort_iteration(abort, iteration) {
-                    return Err(SimulationError::Aborted);
-                }
-                let mut rhs = vec![0.0; size];
 
-                matrix.clear_values();
+            let target_scale = (accepted_scale + source_step).min(1.0);
+            if target_scale <= accepted_scale + SOURCE_SCALE_EPS {
+                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            }
 
-                // Add GMIN
-                let node_count = circuit.num_nodes().min(size);
-                for i in 0..node_count {
-                    matrix.add(i, i, gmin_floor);
-                }
+            let accepted_state = circuit.nonlinear_state_snapshot();
+            let mut trial_damping_state = damping_state;
+            let (candidate, converged, used_iterations) = self.solve_scaled_nonlinear_corrector(
+                circuit,
+                matrix,
+                target_scale,
+                &solution,
+                &mut trial_damping_state,
+                source_iterations,
+                abort,
+            );
+            total_iterations = total_iterations.saturating_add(used_iterations);
 
-                // Stamp linear devices with scaled sources
-                circuit.stamp_dc_direct_scaled(matrix, &mut rhs, scale);
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
 
-                // Stamp nonlinear/behavioral/XSPICE devices
-                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
-
-                match matrix.solve(&rhs) {
-                    Ok(raw_solution) => {
-                        let mut new_solution = self.apply_damping_strategy(
-                            &solution,
-                            &raw_solution,
-                            &mut damping_state,
-                            |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, scale),
-                        );
-                        Self::limit_vbic_external_updates(
-                            circuit,
-                            &mut new_solution,
-                            &solution,
-                            circuit.num_nodes().min(size),
-                            None,
-                            false,
-                        );
-                        Self::clamp_solution_to_physical_bounds(&mut new_solution);
-
-                        let converged = self.voltage_convergence_met(&solution, &new_solution);
-                        let linearized_residual_converged =
-                            self.residual_convergence_met(matrix, &new_solution, &rhs);
-                        self.update_device_states_for_dc(circuit, &new_solution);
-                        solution = new_solution;
-                        if converged
-                            && linearized_residual_converged
-                            && circuit.nonlinear_converged(self.device_convergence_criteria())
-                            && self.nonlinear_residual_converged_scaled(
-                                circuit, matrix, &solution, scale,
-                            )
-                        {
-                            break;
-                        }
-                    }
-                    Err(e) if scale == 1.0 => {
-                        return Err(SimulationError::Solver(e));
-                    }
-                    Err(_) => {
-                        break; // Try next scale
-                    }
+            if converged {
+                solution = candidate;
+                accepted_scale = target_scale;
+                damping_state = trial_damping_state;
+                source_step = (source_step * SOURCE_STEP_GROWTH).min(MAX_SOURCE_STEP);
+            } else {
+                circuit.restore_nonlinear_state(accepted_state);
+                source_step *= SOURCE_STEP_SHRINK;
+                if source_step < MIN_SOURCE_STEP {
+                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
                 }
             }
+
+            attempts += 1;
         }
 
-        Ok(solution)
+        let (polished_solution, converged, polish_iterations) = self
+            .solve_scaled_nonlinear_corrector(
+                circuit,
+                matrix,
+                1.0,
+                &solution,
+                &mut damping_state,
+                source_iterations,
+                abort,
+            );
+        total_iterations = total_iterations.saturating_add(polish_iterations);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if !converged {
+            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+        }
+
+        Ok(polished_solution)
     }
 
     /// Pseudo-transient continuation for difficult nonlinear circuits.
@@ -559,6 +572,7 @@ impl Engine {
             if Self::should_abort_iteration(abort, step) {
                 return Err(SimulationError::Aborted);
             }
+            let junction_gmin = self.effective_device_junction_gmin(gmin);
             log::debug!("GMIN stepping: step {} with GMIN = {:.2e}", step + 1, gmin);
 
             // Use more iterations for GMIN stepping to allow convergence
@@ -578,7 +592,13 @@ impl Engine {
 
                 // Stamp linear and nonlinear devices
                 circuit.stamp_dc_direct(matrix, &mut rhs);
-                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+                self.stamp_nonlinear_devices_for_dc_with_junction_gmin(
+                    circuit,
+                    matrix,
+                    &mut rhs,
+                    &solution,
+                    junction_gmin,
+                );
 
                 // Log RHS on first iteration of first GMIN step for debugging
                 if step == 0 && iteration == 0 {
@@ -609,7 +629,11 @@ impl Engine {
                         let converged = self.voltage_convergence_met(&solution, &new_solution);
                         let linearized_residual_converged =
                             self.residual_convergence_met(matrix, &new_solution, &rhs);
-                        self.update_device_states_for_dc(circuit, &new_solution);
+                        self.update_device_states_for_dc_with_junction_gmin(
+                            circuit,
+                            &new_solution,
+                            junction_gmin,
+                        );
                         solution = new_solution;
                         if converged
                             && linearized_residual_converged
