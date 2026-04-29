@@ -101,6 +101,11 @@ impl Mosfet {
             return self.calculate_id_level6(vgs, vds, vbs);
         }
 
+        if self.level == 1 {
+            let (id, region, _, _, _) = self.level1_operating_point(vgs, vds, vbs);
+            return (id, region);
+        }
+
         // Superimpose forward and reverse-oriented channel currents to preserve
         // source/drain symmetry while maintaining smooth behavior around Vds = 0.
         let (id_forward, region_forward) = self.calculate_id_forward(vgs, vds, vbs);
@@ -117,6 +122,89 @@ impl Mosfet {
         };
 
         (id, region)
+    }
+
+    /// Source-matched ngspice MOS1 operating point.
+    ///
+    /// The Level-1 path follows the Shichman-Hodges block in
+    /// `mos1load.c`: polarity folding, explicit normal/inverse mode
+    /// selection, body-effect onset voltage, and the original analytic
+    /// derivatives transformed back to the instance terminal orientation.
+    pub(in crate::device::mosfet::mosfet) fn level1_operating_point(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, MosRegion, Value, Value, Value) {
+        if !vgs.is_finite() || !vds.is_finite() || !vbs.is_finite() {
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+        }
+
+        let p = self.polarity();
+        let vgs_m = p * vgs;
+        let vds_m = p * vds;
+        let vbs_m = p * vbs;
+        let vbd_m = vbs_m - vds_m;
+        let vgd_m = vgs_m - vds_m;
+
+        let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
+        let vdshere = vds_m * mode;
+        let vbsvbd = if mode > 0.0 { vbs_m } else { vbd_m };
+        let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
+
+        let phi = self.phi.max(1.0e-12);
+        let sqrt_phi = phi.sqrt();
+        let sarg = if vbsvbd <= 0.0 {
+            (phi - vbsvbd).max(0.0).sqrt()
+        } else {
+            (sqrt_phi - vbsvbd / (sqrt_phi + sqrt_phi)).max(0.0)
+        };
+
+        let von = p * self.vto + self.gamma * (sarg - sqrt_phi);
+        let vgst = vg_active - von;
+        if !vgst.is_finite() || vgst <= 0.0 {
+            return (0.0, MosRegion::Cutoff, 0.0, 0.0, 0.0);
+        }
+
+        let arg = if sarg <= 0.0 {
+            0.0
+        } else {
+            self.gamma / (sarg + sarg)
+        };
+        let effective_length = (self.l - 2.0 * self.ld).max(1.0e-12);
+        let beta = self.kp * self.w / effective_length;
+        let betap = beta * (1.0 + self.lambda * vdshere);
+
+        let (cdrain, region, gm_model, gds_model, gmb_model) = if vgst <= vdshere {
+            let cdrain = 0.5 * betap * vgst * vgst;
+            let gm = betap * vgst;
+            let gds = 0.5 * self.lambda * beta * vgst * vgst;
+            let gmb = gm * arg;
+            (cdrain, MosRegion::Saturation, gm, gds, gmb)
+        } else {
+            let cdrain = betap * vdshere * (vgst - 0.5 * vdshere);
+            let gm = betap * vdshere;
+            let gds =
+                betap * (vgst - vdshere) + self.lambda * beta * vdshere * (vgst - 0.5 * vdshere);
+            let gmb = gm * arg;
+            (cdrain, MosRegion::Linear, gm, gds, gmb)
+        };
+
+        let id = p * mode * cdrain;
+        let (gm, gds, gmb) = if mode > 0.0 {
+            (gm_model, gds_model, gmb_model)
+        } else {
+            (-gm_model, gm_model + gds_model + gmb_model, -gmb_model)
+        };
+
+        let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
+        (
+            sanitize(id),
+            region,
+            sanitize(gm),
+            sanitize(gds),
+            sanitize(gmb),
+        )
     }
 
     pub(in crate::device::mosfet::mosfet) fn calculate_id_forward(
@@ -372,6 +460,11 @@ impl Mosfet {
 
         if self.level == 6 {
             let (_, _, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
+            return (gm, gds, gmb);
+        }
+
+        if self.level == 1 {
+            let (_, _, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 

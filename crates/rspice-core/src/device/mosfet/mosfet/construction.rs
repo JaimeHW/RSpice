@@ -203,7 +203,7 @@ impl Mosfet {
         } else if self.level == 6 {
             self.level6_meyer_state(vgs, vds, vbs).1
         } else {
-            self.polarity() * self.vth(vbs)
+            self.vth(vbs)
         }
     }
 
@@ -388,6 +388,12 @@ impl Mosfet {
 
         if self.level == 6 {
             let (id, region, gm, gds, gmb) = self.level6_operating_point(vgs, vds, vbs);
+            let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
+            return (id, region, gm, gds, gmb, id_eq);
+        }
+
+        if self.level == 1 {
+            let (id, region, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
             let id_eq = id - gm * vgs - gds * vds - gmb * vbs;
             return (id, region, gm, gds, gmb, id_eq);
         }
