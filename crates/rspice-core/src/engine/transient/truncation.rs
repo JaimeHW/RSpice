@@ -142,7 +142,11 @@ impl Engine {
             return None;
         }
 
-        let mut limit = trtol.max(1.0) * tol / denom;
+        if !trtol.is_finite() || trtol <= 0.0 {
+            return None;
+        }
+
+        let mut limit = trtol * tol / denom;
         if order >= 2 {
             limit = limit.sqrt();
         }
@@ -369,6 +373,7 @@ impl Engine {
             for branch_idx in [
                 BJT_QBE_BRANCH_INDEX,
                 BJT_QBC_BRANCH_INDEX,
+                BJT_QBCX_BRANCH_INDEX,
                 BJT_QBCP_BRANCH_INDEX,
             ] {
                 let branch = snapshot.branches[branch_idx];
@@ -593,7 +598,6 @@ impl Engine {
         let effective_method = Self::effective_companion_method(method, trap_order);
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
-        let mut trace_min: Option<(&str, &str, Value, Value, Value, Value, Value, Value)> = None;
 
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
             let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(candidate_solution);
@@ -603,7 +607,7 @@ impl Engine {
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
 
             for (
-                branch,
+                _branch,
                 capacitance,
                 voltage,
                 voltage_prev,
@@ -678,32 +682,8 @@ impl Engine {
                     continue;
                 };
                 found_branch = true;
-                if std::env::var_os("RSPICE_TRACE_MOS6_BRANCH").is_some() && branch_limit < limit {
-                    trace_min = Some((
-                        mos.name.as_str(),
-                        branch,
-                        branch_limit,
-                        capacitance,
-                        voltage,
-                        q_curr,
-                        q_prev,
-                        cq_curr,
-                    ));
-                }
                 limit = limit.min(branch_limit);
             }
-        }
-
-        if std::env::var_os("RSPICE_TRACE_MOS6_BRANCH").is_some()
-            && dt >= 1.0e-10
-            && dt <= 5.5e-10
-            && let Some((name, branch, branch_limit, cap, voltage, q_curr, q_prev, cq_curr)) =
-                trace_min
-        {
-            eprintln!(
-                "trace mosbranch dt={:.12e} order={} limit={:.12e} dev={} branch={} cap={:.12e} v={:.12e} q={:.12e} qprev={:.12e} cq={:.12e}",
-                dt, trap_order, branch_limit, name, branch, cap, voltage, q_curr, q_prev, cq_curr
-            );
         }
 
         found_branch.then_some(limit)

@@ -32,7 +32,11 @@ use std::collections::VecDeque;
 /// resistance is available from model parameters.
 const TLINE_DC_SHORT_RESISTANCE: Value = 1e-3;
 /// Relative tolerance used to truncate negligible distributed-RLC kernel terms.
-const DISTRIBUTED_RLC_CHOP_RELTOL: Value = 1e-3;
+///
+/// Ngspice leaves the LTRA impulse-response chop tolerance at zero unless an
+/// internal/user option sets it, so checked-in LTRA regression decks expect the
+/// full history convolution rather than a lossy tail truncation.
+const DISTRIBUTED_RLC_CHOP_RELTOL: Value = 0.0;
 /// Default relative tolerance for ngspice-style LTRA straight-line compaction.
 const DISTRIBUTED_RLC_COMPACT_RELTOL_DEFAULT: Value = 1e-3;
 /// Default absolute tolerance for ngspice-style LTRA straight-line compaction.

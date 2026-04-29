@@ -116,7 +116,7 @@ impl TransmissionLine {
     }
 
     #[inline]
-    fn ltra_mixed_interpolate<F>(
+    fn ltra_quadratic_interpolate<F>(
         prev2: Option<&TlineStateSample>,
         prev: &TlineStateSample,
         next: &TlineStateSample,
@@ -133,12 +133,7 @@ impl TransmissionLine {
             let v0 = selector(sample0);
             let v1 = selector(prev);
             let v2 = selector(next);
-            let quad = q0 * v0 + q1 * v1 + q2 * v2;
-            let min_v = v0.min(v1).min(v2);
-            let max_v = v0.max(v1).max(v2);
-            if quad >= min_v && quad <= max_v {
-                return quad;
-            }
+            return q0 * v0 + q1 * v1 + q2 * v2;
         }
 
         if let Some((l0, l1)) = Self::linear_interp_coefficients(target, prev.time, next.time) {
@@ -392,18 +387,34 @@ impl TransmissionLine {
                     }
                     return TlineStateSample {
                         time: target,
-                        v1: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
-                            s.v1
-                        }),
-                        i1: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
-                            s.i1
-                        }),
-                        v2: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
-                            s.v2
-                        }),
-                        i2: Self::ltra_mixed_interpolate(prev2, prev_sample, sample, target, |s| {
-                            s.i2
-                        }),
+                        v1: Self::ltra_quadratic_interpolate(
+                            prev2,
+                            prev_sample,
+                            sample,
+                            target,
+                            |s| s.v1,
+                        ),
+                        i1: Self::ltra_quadratic_interpolate(
+                            prev2,
+                            prev_sample,
+                            sample,
+                            target,
+                            |s| s.i1,
+                        ),
+                        v2: Self::ltra_quadratic_interpolate(
+                            prev2,
+                            prev_sample,
+                            sample,
+                            target,
+                            |s| s.v2,
+                        ),
+                        i2: Self::ltra_quadratic_interpolate(
+                            prev2,
+                            prev_sample,
+                            sample,
+                            target,
+                            |s| s.i2,
+                        ),
                     };
                 }
                 return *sample;

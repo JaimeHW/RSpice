@@ -150,6 +150,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_h2(
 }
 
 #[inline]
+#[allow(dead_code)]
 pub(in crate::device::transmission_line) fn distributed_rlc_h3dash_int(
     time: Value,
     delay: Value,
@@ -194,16 +195,18 @@ pub(in crate::device::transmission_line) fn distributed_rlc_max_safe_step(
 
     let x_small = delay;
     let y1_small = distributed_rlc_h2(x_small, delay, alpha, beta);
-    let y2_small = distributed_rlc_h3dash_int(x_small, delay, beta);
     let mut x_big = delay * 10.0;
     let mut x_mid = 0.5 * (x_big + x_small);
 
     for _ in 0..=50 {
         let y1_big = distributed_rlc_h2(x_big, delay, alpha, beta);
         let y1_mid = distributed_rlc_h2(x_mid, delay, alpha, beta);
-        let y2_big = distributed_rlc_h3dash_int(x_big, delay, beta);
-        let y2_mid = distributed_rlc_h3dash_int(x_mid, delay, beta);
 
+        // Ngspice's LTRA RLC prepass applies the straight-line safe-step
+        // criterion to the h2 kernel here.  The h3dash kernel still
+        // participates in the convolution coefficients, but not in this
+        // model-level timestep hint; constraining both changes the accepted
+        // time grid and produces step-history-dependent waveform drift.
         let done_h2 = distributed_rlc_straight_line_check(
             x_big,
             y1_big,
@@ -214,18 +217,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_max_safe_step(
             compact_reltol,
             compact_abstol,
         );
-        let done_h3 = distributed_rlc_straight_line_check(
-            x_big,
-            y2_big,
-            x_mid,
-            y2_mid,
-            x_small,
-            y2_small,
-            compact_reltol,
-            compact_abstol,
-        );
-
-        if done_h2 && done_h3 {
+        if done_h2 {
             break;
         }
 
@@ -342,8 +334,8 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
     let h1_relval = (h1_dummy1 * reltol).abs();
 
     let mut do_h1 = true;
-    let mut do_h2 = h2_first != 0.0;
-    let mut do_h3 = h3dash_first != 0.0;
+    let mut do_h2 = true;
+    let mut do_h3 = true;
 
     let mut lo2 = 0.0;
     let mut hi2 = 0.0;
