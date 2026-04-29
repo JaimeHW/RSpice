@@ -75,6 +75,7 @@ pub fn resolve_simulation_config(
 
     let mut temperature = base.temperature;
     let mut max_iterations = base.max_iterations;
+    let mut transient_max_iterations = base.transient_max_iterations;
     let mut min_timestep = base.min_timestep;
     let mut max_timestep = base.max_timestep;
     let mut integration_method = base.integration_method;
@@ -92,6 +93,9 @@ pub fn resolve_simulation_config(
         }
         if let Some(itl1) = opts.itl1 {
             max_iterations = itl1;
+        }
+        if let Some(itl4) = opts.itl4 {
+            transient_max_iterations = itl4;
         }
         if let Some(method) = opts
             .method
@@ -129,6 +133,7 @@ pub fn resolve_simulation_config(
     }
     if let Some(iters) = overrides.max_iterations {
         max_iterations = iters;
+        transient_max_iterations = iters;
     }
     if let Some(min_step) = overrides.min_timestep {
         min_timestep = min_step;
@@ -169,6 +174,7 @@ pub fn resolve_simulation_config(
 
     resolved.temperature = temperature;
     resolved.max_iterations = max_iterations;
+    resolved.transient_max_iterations = transient_max_iterations;
     resolved.min_timestep = min_timestep;
     resolved.max_timestep = max_timestep;
     resolved.integration_method = integration_method;

@@ -145,6 +145,12 @@ struct BjtTransientHistory {
 }
 
 #[derive(Debug, Clone, Copy)]
+struct TrapezoidalOrderTrial {
+    limit: Value,
+    promote: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct VbicTransientLinearization {
     g_ii: [[Value; BJT_INTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
     g_ie: [[Value; BJT_EXTERNAL_STATE_DIM]; BJT_INTERNAL_STATE_DIM],
@@ -758,10 +764,10 @@ impl Engine {
             let mut had_solver_candidate = false;
 
             // Newton-Raphson iteration for this timestep.
-            // Transient nonlinear regions (e.g., BJT turn-on) often need more
-            // iterations than DC. Use a higher budget here to reduce force-accept.
+            // Classic SPICE transient analysis uses the transient-specific ITL4
+            // budget, not the DC operating-point iteration limit.
             let tran_max_iterations = Self::transient_newton_iteration_budget(
-                self.config.max_iterations,
+                self.config.transient_max_iterations,
                 has_vbic_excess_phase,
                 retry_count,
             );
@@ -986,8 +992,6 @@ impl Engine {
                         let mut has_bad_values = false;
                         let mut logged_divergence = false;
 
-                        let mut first_bad_index = None;
-                        let mut first_bad_value = 0.0;
                         for (i, v) in sol.iter_mut().enumerate() {
                             let magnitude_limit = if i < num_nodes {
                                 MAX_VOLTAGE
@@ -995,10 +999,6 @@ impl Engine {
                                 MAX_BRANCH_STATE_MAGNITUDE
                             };
                             if !v.is_finite() {
-                                if first_bad_index.is_none() {
-                                    first_bad_index = Some(i);
-                                    first_bad_value = *v;
-                                }
                                 if !logged_divergence {
                                     log::debug!(
                                         "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
@@ -1012,10 +1012,6 @@ impl Engine {
                                 *v = new_solution[i];
                                 has_bad_values = true;
                             } else if v.abs() > magnitude_limit {
-                                if first_bad_index.is_none() {
-                                    first_bad_index = Some(i);
-                                    first_bad_value = *v;
-                                }
                                 if !logged_divergence {
                                     log::debug!(
                                         "Transient: Newton divergence at t={:.3e}s, state {}: {:.3e} - reducing timestep",
@@ -1083,27 +1079,6 @@ impl Engine {
                         // If this Newton step was numerically bad, keep the sanitized
                         // candidate and continue Newton iterations.
                         if has_bad_values {
-                            if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some()
-                                && t >= 2.0e-9
-                                && (_iter < 8 || _iter % 32 == 0)
-                            {
-                                let max_abs =
-                                    sol.iter().map(|value| value.abs()).fold(0.0, Value::max);
-                                let max_dv =
-                                    Self::max_abs_delta_prefix(&new_solution, &sol, num_nodes);
-                                eprintln!(
-                                    "trace bad_candidate t0={:.12e} t1={:.12e} dt={:.12e} iter={} retry={} bad_idx={:?} bad_value={:.12e} max_abs={:.12e} node_step={:.12e}",
-                                    t,
-                                    t + dt,
-                                    dt,
-                                    _iter,
-                                    retry_count,
-                                    first_bad_index,
-                                    first_bad_value,
-                                    max_abs,
-                                    max_dv
-                                );
-                            }
                             new_solution = sol;
                             nonlinear_state_matches_new_solution = false;
                             continue;
@@ -1123,15 +1098,6 @@ impl Engine {
                             self.voltage_abstol(),
                             self.voltage_reltol(),
                         );
-                        let trace_previous_newton_solution =
-                            if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some()
-                                && t >= 2.0e-9
-                                && (_iter < 8 || _iter % 32 == 0)
-                            {
-                                Some(new_solution.clone())
-                            } else {
-                                None
-                            };
                         let voltage_converged_relaxed = has_vbic_excess_phase
                             && Self::check_voltage_convergence_with_tolerances(
                                 &new_solution[..num_nodes],
@@ -1209,53 +1175,6 @@ impl Engine {
                         let residual_converged =
                             linearized_residual_converged || nonlinear_residual_converged;
 
-                        if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some()
-                            && t >= 2.0e-9
-                            && (_iter < 8 || _iter % 32 == 0)
-                        {
-                            let max_dv =
-                                Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
-                            let previous_newton_solution =
-                                trace_previous_newton_solution.as_ref().unwrap_or(&solution);
-                            let max_iter_step = Self::max_abs_delta_prefix(
-                                previous_newton_solution,
-                                &new_solution,
-                                num_nodes,
-                            );
-                            let top_nodes = Self::top_abs_delta_prefix_named(
-                                &solution,
-                                &new_solution,
-                                &result.node_names,
-                                num_nodes,
-                                4,
-                            );
-                            let top_iter_nodes = Self::top_abs_delta_prefix_named(
-                                previous_newton_solution,
-                                &new_solution,
-                                &result.node_names,
-                                num_nodes,
-                                4,
-                            );
-                            eprintln!(
-                                "trace newton t0={:.12e} t1={:.12e} dt={:.12e} iter={} retry={} vconv={} dev={} static_dev={} hidden={} lin_res={} nonlin_res={} max_from_prev={:.12e} iter_step={:.12e} top_nodes={:?} top_iter={:?}",
-                                t,
-                                t + dt,
-                                dt,
-                                _iter,
-                                retry_count,
-                                voltage_converged,
-                                device_converged,
-                                static_device_converged,
-                                hidden_device_converged,
-                                linearized_residual_converged,
-                                nonlinear_residual_converged,
-                                max_dv,
-                                max_iter_step,
-                                top_nodes,
-                                top_iter_nodes
-                            );
-                        }
-
                         let strict_converged =
                             voltage_converged && device_converged && residual_converged;
                         let vbic_relaxed_converged = Self::vbic_relaxed_convergence_met(
@@ -1272,16 +1191,6 @@ impl Engine {
                     }
                     Err(e) => {
                         had_solver_candidate = false;
-                        if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some() && t >= 2.0e-9 {
-                            eprintln!(
-                                "trace solve_err t0={:.12e} t1={:.12e} dt={:.12e} retry={} err={}",
-                                t,
-                                t + dt,
-                                dt,
-                                retry_count,
-                                e
-                            );
-                        }
                         log::debug!(
                             "Transient solve failed at t={:.6e}, dt={:.3e}: {}",
                             t + dt,
@@ -1296,16 +1205,6 @@ impl Engine {
             if !converged {
                 retry_count += 1;
                 trap_order = 1;
-                if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some() && t >= 2.0e-9 {
-                    eprintln!(
-                        "trace nonconv t0={:.12e} t1={:.12e} dt={:.12e} retry={} next_dt={:.12e}",
-                        t,
-                        t + dt,
-                        dt,
-                        retry_count,
-                        Self::nonconvergence_retry_timestep(dt, max_step)
-                    );
-                }
 
                 // Diagnostic logging for debugging convergence issues
                 static CONV_LOG_COUNT: std::sync::atomic::AtomicUsize =
@@ -1588,6 +1487,7 @@ impl Engine {
                     t += dt;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
                     if hit_breakpoint {
+                        t = breakpoints.snap_to_breakpoint(t);
                         let restart_dt = breakpoints.mark_breakpoint_solved(t);
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
                     }
@@ -1747,21 +1647,6 @@ impl Engine {
                         max_step,
                         force_accept_device_truncation_limit,
                     );
-                    if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some() && t >= 2.0e-9 {
-                        eprintln!(
-                            "trace force_accept accepted_t={:.12e} dt={:.12e} next_dt={:.12e} node_dv={:.12e} full_dv={:.12e} stale={} stagnant={} no_candidate={} trunc_limit={:?} retry_count={}",
-                            t,
-                            dt,
-                            next_force_dt,
-                            force_candidate_node_delta,
-                            force_candidate_full_delta,
-                            stale_force_candidate,
-                            stagnant_force_candidate,
-                            !had_solver_candidate,
-                            force_accept_device_truncation_limit,
-                            retry_count
-                        );
-                    }
                     let v0_force = solution.first().copied().unwrap_or(0.0);
                     static FORCE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
@@ -1831,6 +1716,7 @@ impl Engine {
                     dt,
                     &bjt_history,
                     &vbic_snapshot_cache,
+                    self.voltage_abstol(),
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
@@ -2065,20 +1951,6 @@ impl Engine {
                 )
             };
             if !accept {
-                if std::env::var_os("RSPICE_TRACE_RTLINV_EDGE").is_some() && t >= 2.0e-9 {
-                    eprintln!(
-                        "trace lte_reject t0={:.12e} t1={:.12e} dt={:.12e} retry={} lte={:.12e} scale={:.12e} order={} dev_limit={:?} bjt_limit={:?}",
-                        t,
-                        t + dt,
-                        dt,
-                        retry_count,
-                        lte,
-                        lte_scale,
-                        step_trap_order,
-                        device_truncation_limit,
-                        bjt_truncation_limit
-                    );
-                }
                 if uses_vbic_charge_lte {
                     static VBIC_CHARGE_LTE_REJECT_LOG_COUNT: std::sync::atomic::AtomicUsize =
                         std::sync::atomic::AtomicUsize::new(0);
@@ -2242,6 +2114,7 @@ impl Engine {
                     t += dt;
                     let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
                     if hit_breakpoint {
+                        t = breakpoints.snap_to_breakpoint(t);
                         let restart_dt = breakpoints.mark_breakpoint_solved(t);
                         timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
                     }
@@ -2433,6 +2306,9 @@ impl Engine {
             // Accept this timestep
             t += dt;
             let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
+            if hit_breakpoint {
+                t = breakpoints.snap_to_breakpoint(t);
+            }
             let method_after_step = current_integration_method(&trapgear);
             lte_estimator.record(&new_solution, dt);
             lte_estimator
@@ -2456,7 +2332,7 @@ impl Engine {
                 circuit.update_nonlinear(&new_solution);
             }
 
-            let promoted_trapezoidal_order_limit = if !first_accepted_transient_step
+            let trapezoidal_order_trial = if !first_accepted_transient_step
                 && matches!(
                     current_method,
                     IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -2468,7 +2344,7 @@ impl Engine {
                     hinted_max_step,
                     smallest_vbic_excess_phase_td,
                 ) {
-                Self::promoted_trapezoidal_order_timestep_limit(
+                Self::trapezoidal_order_trial_timestep_limit(
                     &circuit,
                     &new_solution,
                     current_method,
@@ -2574,19 +2450,18 @@ impl Engine {
                 current_method,
                 IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
             ) {
-                let should_promote = promoted_trapezoidal_order_limit.is_some();
+                let should_promote = trapezoidal_order_trial.is_some_and(|trial| trial.promote);
                 trap_order = Self::next_trapezoidal_order_after_accepted_step(
                     step_trap_order,
                     hit_breakpoint,
                     should_promote,
                 );
-                if trap_order == 2
-                    && let Some(limit) = promoted_trapezoidal_order_limit
-                    && limit.is_finite()
-                    && limit > 0.0
-                    && limit + 1e-18 < timestep.dt()
+                if let Some(trial) = trapezoidal_order_trial
+                    && trial.limit.is_finite()
+                    && trial.limit > 0.0
+                    && trial.limit + 1e-18 < timestep.dt()
                 {
-                    timestep.force_step(limit);
+                    timestep.force_step(trial.limit);
                 }
             }
         }

@@ -52,6 +52,11 @@ pub const DEFAULT_TOLERANCE: Value = VNTOL;
 /// Maximum Newton-Raphson iterations before declaring non-convergence
 pub const MAX_NR_ITERATIONS: usize = 50;
 
+/// Maximum Newton-Raphson iterations per transient timestep.
+///
+/// Matches the SPICE `ITL4` default used by ngspice.
+pub const MAX_TRANSIENT_NR_ITERATIONS: usize = 10;
+
 /// Maximum transient simulation retries per timepoint before force-accepting
 pub const MAX_TRANSIENT_RETRIES: usize = 20;
 

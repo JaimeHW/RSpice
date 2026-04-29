@@ -286,6 +286,17 @@ impl BreakpointManager {
             .any(|&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
     }
 
+    /// Return the exact breakpoint time when `time` is within the breakpoint
+    /// tolerance. This keeps source evaluation and breakpoint bookkeeping on
+    /// the same side of discontinuities after floating-point timestep cuts.
+    pub fn snap_to_breakpoint(&self, time: Value) -> Value {
+        self.breakpoints
+            .iter()
+            .find(|&&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
+            .copied()
+            .unwrap_or(time)
+    }
+
     /// Limit timestep to land exactly on next breakpoint
     ///
     /// Returns (adjusted_dt, will_land_on_breakpoint)

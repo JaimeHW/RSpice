@@ -117,7 +117,8 @@ impl Engine {
         }
 
         let mut diff = [q_curr, q_prev, q_prev_prev, q_prev_prev_prev];
-        let mut deltmp = [dt, prev_dt, prev_prev_dt];
+        let delta_old = [dt, prev_dt, prev_prev_dt];
+        let mut deltmp = delta_old;
         let mut j = usize::from(order);
         loop {
             for i in 0..=j {
@@ -132,7 +133,7 @@ impl Engine {
             }
             j -= 1;
             for i in 0..=j {
-                deltmp[i] += deltmp[i + 1];
+                deltmp[i] = deltmp[i + 1] + delta_old[i];
             }
         }
 
@@ -342,6 +343,7 @@ impl Engine {
         dt: Value,
         history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
+        voltage_abstol: Value,
         reltol: Value,
         current_abstol: Value,
         charge_abstol: Value,
@@ -361,19 +363,36 @@ impl Engine {
             let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
             let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
             let candidate_external = [vc, vb, ve, vs];
-            let snapshot = vbic_snapshot_cache
-                .get(idx)
-                .copied()
-                .flatten()
-                .filter(|snapshot| {
-                    Self::vbic_snapshot_matches_external_bias_exact(snapshot, &candidate_external)
-                })
-                .unwrap_or_else(|| bjt.charge_snapshot(vc, vb, ve, vs));
+            let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
+            let snapshot_reuse_reltol = reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
+            let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+                bjt,
+                candidate_external,
+                method,
+                trap_order,
+                dt,
+                &history.charge_q_prev[idx],
+                &history.charge_q_prev_prev[idx],
+                &history.charge_cq_prev[idx],
+                history.dynamic_internal_prev.get(idx),
+                history.dynamic_internal_prev_prev.get(idx),
+                history.dynamic_linear_prev.get(idx),
+                history.dynamic_linear_prev_prev.get(idx),
+                history.accepted_dt_prev,
+                vbic_snapshot_cache.get(idx).copied().flatten(),
+                VbicCachedSnapshotReuse::SeedOnly,
+                snapshot_reuse_abstol,
+                snapshot_reuse_reltol,
+            )?;
 
+            // Match ngspice's legacy BJT CKTterr coverage: qbe, qbc, qsub,
+            // and true qbcx only when an internal collector-resistance branch
+            // exists. Branch 3 is the XCJC external split charge in the
+            // legacy backend, so it is integrated but not used as a separate
+            // truncation limiter.
             for branch_idx in [
                 BJT_QBE_BRANCH_INDEX,
                 BJT_QBC_BRANCH_INDEX,
-                BJT_QBCX_BRANCH_INDEX,
                 BJT_QBCP_BRANCH_INDEX,
             ] {
                 let branch = snapshot.branches[branch_idx];
@@ -469,6 +488,7 @@ impl Engine {
             dt,
             history,
             vbic_snapshot_cache,
+            voltage_abstol,
             reltol,
             current_abstol,
             charge_abstol,
@@ -1082,7 +1102,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn promoted_trapezoidal_order_timestep_limit(
+    pub(super) fn trapezoidal_order_trial_timestep_limit(
         circuit: &crate::circuit::Circuit,
         accepted_solution: &[Value],
         method: IntegrationMethod,
@@ -1099,7 +1119,7 @@ impl Engine {
         current_abstol: Value,
         charge_abstol: Value,
         trtol: Value,
-    ) -> Option<Value> {
+    ) -> Option<TrapezoidalOrderTrial> {
         if !matches!(
             method,
             IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
@@ -1110,8 +1130,8 @@ impl Engine {
             return None;
         }
         // Match ngspice startup behavior: keep order-1 through the first accepted
-        // transient step, then only promote when an order-2 truncation/LTE check
-        // says the current timestep remains viable.
+        // transient step, then run the order-2 trial truncation check. The trial
+        // limit still caps the next step when it is not large enough to promote.
         if !(history.accepted_dt_prev.is_finite() && history.accepted_dt_prev > 0.0) {
             return None;
         }
@@ -1133,10 +1153,10 @@ impl Engine {
             charge_abstol,
             trtol,
         ) {
-            if Self::should_promote_ngspice_charge_truncation(limit, dt) {
-                return Some(limit);
-            }
-            return None;
+            return Some(TrapezoidalOrderTrial {
+                limit,
+                promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
+            });
         }
 
         let (candidate_lte, accept, uses_vbic_charge_lte) = Self::estimate_transient_lte(
@@ -1168,7 +1188,10 @@ impl Engine {
             )
         };
         if candidate_scale >= 0.95 {
-            Some(Value::INFINITY)
+            Some(TrapezoidalOrderTrial {
+                limit: Value::INFINITY,
+                promote: true,
+            })
         } else {
             None
         }

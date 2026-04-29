@@ -8,6 +8,11 @@ pub struct SimulationConfig {
     pub tolerance: Value,
     /// Maximum Newton-Raphson iterations
     pub max_iterations: usize,
+    /// Maximum Newton-Raphson iterations per transient timestep.
+    ///
+    /// This is the transient-specific SPICE `ITL4` limit. It is intentionally
+    /// separate from the DC operating-point iteration budget.
+    pub transient_max_iterations: usize,
     /// Preferred minimum timestep for transient analysis.
     ///
     /// The transient engine may temporarily shrink below this during nonlinear
@@ -212,6 +217,7 @@ impl Default for SimulationConfig {
         Self {
             tolerance: crate::constants::DEFAULT_TOLERANCE,
             max_iterations: crate::constants::MAX_NR_ITERATIONS,
+            transient_max_iterations: crate::constants::MAX_TRANSIENT_NR_ITERATIONS,
             min_timestep: crate::constants::MIN_TIMESTEP,
             max_timestep: crate::constants::MAX_TIMESTEP,
             temperature: crate::constants::TEMP_REFERENCE,
