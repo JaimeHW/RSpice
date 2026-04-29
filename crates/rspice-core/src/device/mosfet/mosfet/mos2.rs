@@ -235,11 +235,7 @@ impl Mosfet {
         };
 
         Mos2Evaluation {
-            id: if cdrain.is_finite() {
-                cdrain.max(0.0)
-            } else {
-                0.0
-            },
+            id: if cdrain.is_finite() { cdrain } else { 0.0 },
             region,
             von,
             vdsat,
