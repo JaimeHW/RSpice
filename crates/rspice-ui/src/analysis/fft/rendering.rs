@@ -1099,7 +1099,6 @@ fn render_trace(painter: &egui::Painter, rect: Rect, data: &FftData, state: &Fft
     });
 }
 
-
 #[derive(Debug, Clone, Copy)]
 struct SpectrumScreenSample {
     bin_index: usize,
@@ -1229,7 +1228,6 @@ fn collect_spectrum_bucket_points(points: &mut Vec<Pos2>, bucket: &SpectrumBucke
     }
 }
 
-
 fn build_spectrum_polyline_in_scratch(
     rect: Rect,
     data: &FftData,
@@ -1305,7 +1303,6 @@ fn build_spectrum_polyline_in_scratch(
 
     visible_bins
 }
-
 
 #[derive(Debug, Clone)]
 struct PlotCursorLabelSpec {
@@ -2175,7 +2172,6 @@ fn format_freq(freq: f64) -> String {
 // =============================================================================
 // Demo Data
 // =============================================================================
-
 
 // =============================================================================
 // Tests

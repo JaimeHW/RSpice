@@ -33,7 +33,6 @@ pub(crate) enum ShortcutCommand {
 }
 
 impl ShortcutCommand {
-
     pub(crate) fn display_name(self) -> &'static str {
         match self {
             ShortcutCommand::FileNew => "New",

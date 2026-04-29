@@ -95,7 +95,6 @@ impl DataType {
             other => Self::Other(other),
         }
     }
-
 }
 
 #[derive(Debug, Clone)]

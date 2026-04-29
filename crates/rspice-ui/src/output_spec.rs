@@ -233,7 +233,6 @@ pub(crate) fn parse_output_voltage_spec(
     })
 }
 
-
 pub(crate) fn dc_output_value(
     dc_result: &rspice_core::SimulationResult,
     output_spec: &OutputSpec,

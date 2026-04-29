@@ -328,7 +328,6 @@ fn render_library_cell(
     ));
 }
 
-
 fn build_placeable_instance_with_reason(
     lib_name: &str,
     cell: &Cell,

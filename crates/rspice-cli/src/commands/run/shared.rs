@@ -52,7 +52,6 @@ impl NodeResolver {
     }
 }
 
-
 pub(super) fn parse_voltage_probe_spec(spec: &str) -> Option<(String, Option<String>)> {
     let trimmed = spec.trim();
     if trimmed.is_empty() {

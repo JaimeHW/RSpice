@@ -413,8 +413,6 @@ impl eframe::App for RSpiceApp {
 }
 
 impl RSpiceApp {
-
-
     fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.exit_requested {
             return;

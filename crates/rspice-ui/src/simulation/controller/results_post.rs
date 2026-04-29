@@ -345,7 +345,6 @@ impl SimulationController {
             .count()
             >= 2
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

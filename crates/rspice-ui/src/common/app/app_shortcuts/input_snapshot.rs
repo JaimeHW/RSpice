@@ -49,7 +49,6 @@ impl ShortcutInputSnapshot {
         }
     }
 
-
     pub(super) fn key_pressed(&self, key: Key) -> bool {
         self.pressed_keys.contains(&key)
     }

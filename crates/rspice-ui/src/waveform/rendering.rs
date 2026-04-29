@@ -627,7 +627,6 @@ struct TraceBucket {
     max: Option<TraceScreenSample>,
 }
 
-
 #[derive(Debug, Default)]
 struct TraceRenderScratch {
     points: Vec<Pos2>,
@@ -763,7 +762,6 @@ fn collect_bucket_points(points: &mut Vec<Pos2>, bucket: &TraceBucket) {
         push_unique_point(points, sample.pos);
     }
 }
-
 
 fn build_trace_polyline_in_scratch(
     layout: &ViewerLayout,

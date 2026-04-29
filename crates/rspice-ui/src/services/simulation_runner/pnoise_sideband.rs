@@ -102,7 +102,6 @@ fn validate_sideband_shape(
     Ok(())
 }
 
-
 pub(super) fn fold_sideband_noise_results<F>(
     translated_results: &[NoiseResult],
     num_offsets: usize,

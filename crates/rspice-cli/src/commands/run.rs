@@ -507,7 +507,6 @@ fn run_requested_mode(ctx: &RunContext<'_>, config: &Config) -> Result<bool, Cli
     Ok(false)
 }
 
-
 fn run_disto(
     engine: &Engine,
     netlist: &Netlist,
@@ -634,7 +633,6 @@ fn run_step(
         step_cmd,
     )
 }
-
 
 fn run_monte_carlo(
     engine: &Engine,

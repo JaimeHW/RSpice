@@ -9,7 +9,6 @@ fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
     (command.shortcut_string(), command.display_name())
 }
 
-
 impl RSpiceApp {
     pub(super) fn render_about_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.about {
