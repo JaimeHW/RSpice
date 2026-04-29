@@ -412,10 +412,7 @@ impl Engine {
                 has_dynamic_charge = true;
             }
 
-            if qbc_branch.is_active()
-                && charges.capbe_vbc.is_finite()
-                && charges.capbe_vbc.abs() > 0.0
-            {
+            if charges.capbe_vbc.is_finite() && charges.capbe_vbc.abs() > 0.0 {
                 let geqcb = charge_factor * charges.capbe_vbc;
                 let vbc = Self::legacy_bjt_internal_branch_voltage(
                     snapshot,
