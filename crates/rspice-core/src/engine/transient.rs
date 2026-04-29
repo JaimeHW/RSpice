@@ -805,7 +805,12 @@ impl Engine {
                 retry_count,
             );
             let mut converged = false;
-            if expected_source_delta <= SOURCE_ACTIVE_DELTA
+            // Reusing the accepted state is only valid when a full restamp
+            // proves the linear companion equations are still satisfied.
+            // Nonlinear compact devices carry limiter state and charge history
+            // that must be re-solved at each accepted transient point.
+            if !circuit.has_nonlinear_devices()
+                && expected_source_delta <= SOURCE_ACTIVE_DELTA
                 && !circuit.has_xspice_devices()
                 && self.transient_nonlinear_residual_converged(
                     &mut circuit,
