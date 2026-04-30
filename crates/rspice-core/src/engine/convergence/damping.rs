@@ -343,7 +343,8 @@ impl Engine {
             return false;
         };
 
-        let fixed_point_converged = self.voltage_convergence_met(solution, &next_solution);
+        let fixed_point_converged =
+            self.node_voltage_convergence_met(solution, &next_solution, circuit.num_nodes());
         circuit.restore_nonlinear_state(snapshot);
 
         residual_converged && fixed_point_converged

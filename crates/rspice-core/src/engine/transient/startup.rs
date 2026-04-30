@@ -58,7 +58,7 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&proposal);
             }
-            if self.voltage_convergence_met(&solution, &proposal) {
+            if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
                 solution = proposal;
                 break;
             }
@@ -119,7 +119,7 @@ impl Engine {
             if circuit.has_nonlinear_devices() {
                 circuit.update_nonlinear(&proposal);
             }
-            if self.voltage_convergence_met(&solution, &proposal) {
+            if self.node_voltage_convergence_met(&solution, &proposal, circuit.num_nodes()) {
                 solution = proposal;
                 break;
             }

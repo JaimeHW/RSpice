@@ -88,10 +88,20 @@ impl Engine {
     }
 
     #[inline]
-    pub(crate) fn voltage_convergence_met(&self, old: &[Value], new: &[Value]) -> bool {
+    pub(crate) fn node_voltage_convergence_met(
+        &self,
+        old: &[Value],
+        new: &[Value],
+        node_count: usize,
+    ) -> bool {
+        if old.len() != new.len() || old.iter().chain(new.iter()).any(|v| !v.is_finite()) {
+            return false;
+        }
+
+        let limit = node_count.min(old.len()).min(new.len());
         Self::check_voltage_convergence_with_tolerances(
-            old,
-            new,
+            &old[..limit],
+            &new[..limit],
             self.voltage_abstol(),
             self.voltage_reltol(),
         )
@@ -137,5 +147,37 @@ impl Engine {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_voltage_convergence_ignores_branch_current_unknowns() {
+        let engine = Engine::default();
+        let previous = [1.0, -2.0, 0.0, 0.0];
+        let next = [1.0 + 1e-8, -2.0 - 1e-8, 1.0e3, -1.0e3];
+
+        assert!(engine.node_voltage_convergence_met(&previous, &next, 2));
+    }
+
+    #[test]
+    fn node_voltage_convergence_rejects_node_voltage_motion() {
+        let engine = Engine::default();
+        let previous = [1.0, -2.0, 0.0, 0.0];
+        let next = [1.0 + 1e-1, -2.0, 0.0, 0.0];
+
+        assert!(!engine.node_voltage_convergence_met(&previous, &next, 2));
+    }
+
+    #[test]
+    fn node_voltage_convergence_rejects_non_finite_solution_entries() {
+        let engine = Engine::default();
+        let previous = [1.0, -2.0, 0.0];
+        let next = [1.0, -2.0, Value::NAN];
+
+        assert!(!engine.node_voltage_convergence_met(&previous, &next, 2));
     }
 }

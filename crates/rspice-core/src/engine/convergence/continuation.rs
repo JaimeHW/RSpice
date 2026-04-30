@@ -388,7 +388,11 @@ impl Engine {
                 );
                 Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-                let converged = self.voltage_convergence_met(&solution, &new_solution);
+                let converged = self.node_voltage_convergence_met(
+                    &solution,
+                    &new_solution,
+                    circuit.num_nodes(),
+                );
                 let linearized_residual_converged =
                     self.residual_convergence_met(matrix, &new_solution, &rhs);
                 self.update_device_states_for_dc(circuit, &new_solution);
@@ -626,7 +630,11 @@ impl Engine {
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-                        let converged = self.voltage_convergence_met(&solution, &new_solution);
+                        let converged = self.node_voltage_convergence_met(
+                            &solution,
+                            &new_solution,
+                            circuit.num_nodes(),
+                        );
                         let linearized_residual_converged =
                             self.residual_convergence_met(matrix, &new_solution, &rhs);
                         self.update_device_states_for_dc_with_junction_gmin(

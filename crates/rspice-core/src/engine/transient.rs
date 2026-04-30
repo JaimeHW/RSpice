@@ -1247,7 +1247,8 @@ impl Engine {
                 let count = CONV_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if count < 10 || (t > 9.5e-8 && dt < 1.0e-15) {
                     // Check what specifically didn't converge
-                    let v_conv = self.voltage_convergence_met(&solution, &new_solution);
+                    let v_conv =
+                        self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
                     let d_conv_static = !circuit.has_nonlinear_devices()
                         || self.transient_static_device_convergence_met(
                             &circuit,

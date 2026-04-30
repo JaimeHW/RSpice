@@ -231,7 +231,8 @@ impl Engine {
                 }
             }
             // Check convergence (both voltage change and device convergence)
-            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let voltage_converged =
+                self.node_voltage_convergence_met(&solution, &new_solution, node_count);
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
@@ -613,7 +614,8 @@ impl Engine {
             }
             Self::clamp_solution_to_physical_bounds(&mut new_solution);
 
-            let voltage_converged = self.voltage_convergence_met(&solution, &new_solution);
+            let voltage_converged =
+                self.node_voltage_convergence_met(&solution, &new_solution, circuit.num_nodes());
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
             self.update_device_states_for_operating_point(

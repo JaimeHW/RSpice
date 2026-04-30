@@ -694,7 +694,11 @@ impl Engine {
 
                 match matrix.solve(&rhs) {
                     Ok(sol) => {
-                        let voltage_converged = self.voltage_convergence_met(&new_solution, &sol);
+                        let voltage_converged = self.node_voltage_convergence_met(
+                            &new_solution,
+                            &sol,
+                            circuit.num_nodes(),
+                        );
                         let linearized_residual_converged =
                             self.residual_convergence_met(matrix, &sol, &rhs);
 
