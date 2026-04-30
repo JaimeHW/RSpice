@@ -563,6 +563,8 @@ impl Bjt {
         let mut has_ibei = false;
         let mut has_ibci = false;
         let mut has_rth = false;
+        let mut legacy_rb: Option<Value> = None;
+        let mut legacy_rbm: Option<Value> = None;
         self.charge_model = if Self::uses_vbic_charge_model(params) {
             BjtChargeModel::Vbic
         } else {
@@ -613,12 +615,11 @@ impl Bjt {
             has_var = true;
         }
         if let Some(&v) = params.get("RB") {
-            self.rbx = v.max(0.0);
-            self.rbx_nominal = self.rbx;
-            self.rbi = 0.0;
-            self.rbi_nominal = self.rbi;
-            self.rb = self.rbx;
+            legacy_rb = Some(v.max(0.0));
             has_rb = true;
+        }
+        if let Some(&v) = params.get("RBM") {
+            legacy_rbm = Some(v.max(0.0));
         }
         if let Some(&v) = params.get("RC") {
             self.rcx = v.max(0.0);
@@ -827,6 +828,31 @@ impl Bjt {
             && v > 0.0
         {
             self.var = v;
+        }
+        if let Some(rb) = legacy_rb {
+            if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+                let rbm = legacy_rbm.unwrap_or(rb).min(rb);
+                self.rbx = rbm;
+                self.rbi = (rb - rbm).max(0.0);
+                self.rbx_nominal = self.rbx;
+                self.rbi_nominal = self.rbi;
+                self.rb = rb;
+            } else {
+                self.rbx = rb;
+                self.rbi = 0.0;
+                self.rbx_nominal = self.rbx;
+                self.rbi_nominal = self.rbi;
+                self.rb = self.rbx;
+            }
+        } else if let Some(rbm) = legacy_rbm
+            && self.charge_model == BjtChargeModel::LegacyGummelPoon
+        {
+            self.rbx = rbm;
+            self.rbi = 0.0;
+            self.rbx_nominal = self.rbx;
+            self.rbi_nominal = self.rbi;
+            self.rb = self.rbx;
+            has_rb = true;
         }
         if !has_rb {
             let rbx = params
@@ -1246,5 +1272,37 @@ impl Bjt {
 
         self.refresh_operating_scaling();
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn model_with(params: &[(&str, Value)]) -> Bjt {
+        let params = params
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), *value))
+            .collect::<HashMap<_, _>>();
+        Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&params)
+    }
+
+    #[test]
+    fn legacy_rb_without_rbm_stays_constant() {
+        let bjt = model_with(&[("RB", 50.0)]);
+
+        assert_eq!(bjt.rb, 50.0);
+        assert_eq!(bjt.rbx, 50.0);
+        assert_eq!(bjt.rbi, 0.0);
+    }
+
+    #[test]
+    fn legacy_rbm_partitions_base_resistance() {
+        let bjt = model_with(&[("RB", 50.0), ("RBM", 10.0)]);
+
+        assert_eq!(bjt.rb, 50.0);
+        assert_eq!(bjt.rbx, 10.0);
+        assert_eq!(bjt.rbi, 40.0);
     }
 }
