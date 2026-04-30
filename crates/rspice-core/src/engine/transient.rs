@@ -405,7 +405,24 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
-        let initial_step = Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step);
+        let mut breakpoints = BreakpointManager::new();
+        Self::collect_transient_source_breakpoints(
+            &circuit,
+            tstop,
+            source_step_hint,
+            &mut breakpoints,
+        );
+        let source_breakpoint_times = breakpoints.times().to_vec();
+        Self::collect_transient_tline_breakpoints(
+            &circuit,
+            &source_breakpoint_times,
+            tstop,
+            &mut breakpoints,
+        );
+        let initial_step = Self::ngspice_t0_breakpoint_limited_initial_timestep(
+            Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
+            breakpoints.next_after(0.0),
+        );
         let practical_min = Self::startup_practical_min_timestep_with_vbic_td(
             has_bjts,
             has_vbic_excess_phase,
@@ -421,20 +438,6 @@ impl Engine {
             hard_min_dt,
             preferred_min_dt,
             hinted_max_step,
-        );
-        let mut breakpoints = BreakpointManager::new();
-        Self::collect_transient_source_breakpoints(
-            &circuit,
-            tstop,
-            source_step_hint,
-            &mut breakpoints,
-        );
-        let source_breakpoint_times = breakpoints.times().to_vec();
-        Self::collect_transient_tline_breakpoints(
-            &circuit,
-            &source_breakpoint_times,
-            tstop,
-            &mut breakpoints,
         );
         let mut dynamic_tline_breakpoints_added = 0_usize;
         let mut warned_dynamic_tline_breakpoint_cap = false;

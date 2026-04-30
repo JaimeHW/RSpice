@@ -463,6 +463,25 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn ngspice_t0_breakpoint_limited_initial_timestep(
+        initial_step: Value,
+        first_breakpoint_after_zero: Option<Value>,
+    ) -> Value {
+        let Some(first_breakpoint_after_zero) = first_breakpoint_after_zero else {
+            return initial_step;
+        };
+        if !(first_breakpoint_after_zero.is_finite() && first_breakpoint_after_zero > 0.0) {
+            return initial_step;
+        }
+
+        // At t=0, dctran.c is sitting on the initial breakpoint. Once source
+        // accept hooks have inserted the first source corner, ngspice limits
+        // the first solved timestep to one-tenth of that gap and then applies
+        // the first-timepoint divide-by-ten, for an effective gap / 100 cap.
+        initial_step.min(first_breakpoint_after_zero / 100.0)
+    }
+
+    #[inline]
     pub(super) fn startup_practical_min_timestep_with_vbic_td(
         has_bjts: bool,
         has_vbic_excess_phase: bool,
@@ -554,5 +573,40 @@ impl Engine {
         let ngspice_delmin = (hinted_max_step * 1e-11).max(1e-30);
 
         preferred_min_timestep.min(ngspice_delmin)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(lhs: Value, rhs: Value) {
+        let scale = lhs.abs().max(rhs.abs()).max(1.0);
+        assert!(
+            (lhs - rhs).abs() <= 1e-15 * scale,
+            "left={lhs:.16e}, right={rhs:.16e}"
+        );
+    }
+
+    #[test]
+    fn t0_breakpoint_caps_initial_timestep_to_ngspice_first_gap_rule() {
+        let initial = Engine::ngspice_initial_timestep(10e-6, Some(0.1e-6), 0.1e-6);
+
+        assert_close(initial, 1e-9);
+        assert_close(
+            Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(1e-9)),
+            1e-11,
+        );
+    }
+
+    #[test]
+    fn t0_breakpoint_leaves_smaller_seed_unchanged() {
+        let initial = Engine::ngspice_initial_timestep(150e-9, Some(0.5e-9), 0.5e-9);
+
+        assert_close(initial, 5e-12);
+        assert_close(
+            Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(2e-9)),
+            5e-12,
+        );
     }
 }
