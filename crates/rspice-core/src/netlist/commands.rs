@@ -300,6 +300,8 @@ pub fn parse_model_params(
                 if let Some(value) = try_value(stream, params) {
                     model_params.push((name, value));
                 }
+            } else {
+                model_params.push((name, 1.0));
             }
         } else {
             stream.advance(); // Skip unknown token

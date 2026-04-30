@@ -315,3 +315,31 @@ fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
 
     String::from_utf16(&utf16).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_bare_model_flags_as_enabled_parameters() {
+        let netlist = Netlist::parse(
+            "flag model\n\
+             o1 1 0 2 0 lline\n\
+             .model lline ltra rel=1 r=12.45 g=0 l=8.972e-9 c=0.468e-12\n\
+             + len=16 steplimit compactrel=1.0e-3 compactabs=1.0e-14\n\
+             .tran 0.2n 1n\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+
+        let model = netlist
+            .models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("lline"))
+            .expect("model exists");
+
+        assert!(model.params.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("steplimit") && (*value - 1.0).abs() < f64::EPSILON
+        }));
+    }
+}

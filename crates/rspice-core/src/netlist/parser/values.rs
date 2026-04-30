@@ -166,6 +166,8 @@ pub(super) fn parse_model_params(
                         }
                     }
                 }
+            } else {
+                numeric_params.push((name, 1.0));
             }
         } else {
             stream.advance(); // Skip unknown token
