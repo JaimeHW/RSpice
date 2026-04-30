@@ -1048,8 +1048,23 @@ impl Engine {
                         )));
                     }
 
-                    let attenuation = model_params.and_then(|p| tline_model_attenuation(p, z0_eff));
-                    let loss_time_constant = model_params.and_then(tline_model_loss_time_constant);
+                    let txl_lossless_branch = model_params
+                        .map(|params| params.uses_txl_lossless_branch())
+                        .unwrap_or(false);
+                    let attenuation = model_params.and_then(|p| {
+                        if txl_lossless_branch {
+                            None
+                        } else {
+                            tline_model_attenuation(p, z0_eff)
+                        }
+                    });
+                    let loss_time_constant = model_params.and_then(|p| {
+                        if txl_lossless_branch {
+                            None
+                        } else {
+                            tline_model_loss_time_constant(p)
+                        }
+                    });
                     let compact_reltol = model_params
                         .and_then(|p| p.compactrel)
                         .unwrap_or_else(|| self.voltage_reltol());
@@ -1081,7 +1096,8 @@ impl Engine {
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
                         tline.set_dc_series_resistance(dc_series_resistance);
-                        if let Some(params) = model_params
+                        if !txl_lossless_branch
+                            && let Some(params) = model_params
                             && let (Some(l), Some(c), Some(len)) = (params.l, params.c, params.len)
                         {
                             let r = params.r.unwrap_or(0.0);

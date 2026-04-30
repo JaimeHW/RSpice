@@ -1,7 +1,20 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine::builder) enum TransmissionLineModelKind {
+    Ltra,
+    Txl,
+}
+
+impl Default for TransmissionLineModelKind {
+    fn default() -> Self {
+        Self::Ltra
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(in crate::engine::builder) struct TransmissionLineModelParams {
+    pub(in crate::engine::builder) kind: TransmissionLineModelKind,
     pub(in crate::engine::builder) z0: Option<f64>,
     pub(in crate::engine::builder) td: Option<f64>,
     pub(in crate::engine::builder) freq: Option<f64>,
@@ -15,6 +28,25 @@ pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) atten: Option<f64>,
     pub(in crate::engine::builder) compactrel: Option<f64>,
     pub(in crate::engine::builder) compactabs: Option<f64>,
+}
+
+impl TransmissionLineModelParams {
+    #[inline]
+    pub(in crate::engine::builder) fn uses_txl_lossless_branch(self) -> bool {
+        if self.kind != TransmissionLineModelKind::Txl {
+            return false;
+        }
+
+        let (Some(r), Some(l)) = (self.r, self.l) else {
+            return false;
+        };
+        if !r.is_finite() || !l.is_finite() || l <= 0.0 {
+            return false;
+        }
+
+        let g = self.g.unwrap_or(0.0);
+        g.is_finite() && g < 1.0e-2 && r / l < 5.0e5
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +68,11 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         .find(|m| m.name.eq_ignore_ascii_case(model_name))?;
 
     let mut params = TransmissionLineModelParams {
+        kind: if model.model_type.eq_ignore_ascii_case("TXL") {
+            TransmissionLineModelKind::Txl
+        } else {
+            TransmissionLineModelKind::Ltra
+        },
         z0: model_param(&model.params, &["Z0", "ZO"]),
         td: model_param(&model.params, &["TD", "TDELAY"]),
         freq: model_param(&model.params, &["F", "FREQ"]),
