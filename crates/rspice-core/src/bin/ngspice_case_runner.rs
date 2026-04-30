@@ -10,6 +10,9 @@ fn main() {
 
 fn run() -> Result<(), String> {
     let args = Args::parse(std::env::args().skip(1))?;
+    if args.config.verbose {
+        StderrLogger::install();
+    }
     let runner = TestRunner::new(&args.test_dir, args.config);
     let result = runner.run_test(&args.circuit);
     std::fs::write(&args.result, encode_test_result(&result)).map_err(|err| {
@@ -19,6 +22,31 @@ fn run() -> Result<(), String> {
         )
     })?;
     Ok(())
+}
+
+struct StderrLogger;
+
+impl StderrLogger {
+    fn install() {
+        static LOGGER: StderrLogger = StderrLogger;
+        if log::set_logger(&LOGGER).is_ok() {
+            log::set_max_level(log::LevelFilter::Info);
+        }
+    }
+}
+
+impl log::Log for StderrLogger {
+    fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+        metadata.level() <= log::Level::Info
+    }
+
+    fn log(&self, record: &log::Record<'_>) {
+        if self.enabled(record.metadata()) {
+            eprintln!("[{}] {}", record.level(), record.args());
+        }
+    }
+
+    fn flush(&self) {}
 }
 
 struct Args {
