@@ -121,6 +121,39 @@ impl Bjt {
     }
 
     #[inline]
+    pub(in crate::device::semiconductor::bjt) fn legacy_startup_vcrit(&self) -> Value {
+        let vt = self.vt.max(1e-12);
+        let isat = self.is.max(1e-300);
+        let arg = (vt / ((2.0_f64).sqrt() * isat)).max(1.0);
+        vt * arg.ln()
+    }
+
+    #[inline]
+    pub(in crate::device::semiconductor::bjt) fn legacy_startup_intrinsic_state_seed(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+    ) -> [Value; INTERNAL_DIM] {
+        let mut seed = self.intrinsic_state_seed_for_external_bias(external);
+        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
+            return seed;
+        }
+
+        let junction_seed = if self.initial_off {
+            0.0
+        } else {
+            self.legacy_startup_vcrit()
+        };
+        let active_base = seed[IDX_VEI] + self.polarity() * junction_seed;
+
+        seed[IDX_VCX] = active_base;
+        seed[IDX_VCI] = active_base;
+        seed[IDX_VBX] = active_base;
+        seed[IDX_VBI] = active_base;
+        seed[IDX_VBP] = active_base;
+        seed
+    }
+
+    #[inline]
     pub(in crate::device::semiconductor::bjt) fn initial_forward_bias_anchor_external(
         &self,
         target_external: [Value; EXTERNAL_DIM],

@@ -158,7 +158,16 @@ impl Bjt {
             vrth = 0.0;
         }
 
-        let state = [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth];
+        let state = if !reuse_previous_state && self.charge_model == BjtChargeModel::LegacyGummelPoon
+        {
+            let mut seed = self.legacy_startup_intrinsic_state_seed([vc, vb, ve, vs]);
+            if has_self_heat {
+                seed[IDX_VRTH] = vrth;
+            }
+            seed
+        } else {
+            [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth]
+        };
         let previous_external = [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext];
         let predicted_state = if reuse_previous_state {
             self.predict_intrinsic_state_from_previous_external_bias(
