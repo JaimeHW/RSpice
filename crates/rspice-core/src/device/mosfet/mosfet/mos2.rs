@@ -1,4 +1,5 @@
 use super::*;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
 const CHARGE: Value = 1.602_176_634e-19;
@@ -9,6 +10,268 @@ pub(in crate::device::mosfet::mosfet) struct Mos2Evaluation {
     pub(in crate::device::mosfet::mosfet) region: MosRegion,
     pub(in crate::device::mosfet::mosfet) von: Value,
     pub(in crate::device::mosfet::mosfet) vdsat: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Mos2ForwardOperatingPoint {
+    gm: Value,
+    gds: Value,
+    gmb: Value,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Dual3 {
+    value: Value,
+    derivative: [Value; 3],
+}
+
+impl Dual3 {
+    #[inline]
+    fn constant(value: Value) -> Self {
+        Self {
+            value,
+            derivative: [0.0; 3],
+        }
+    }
+
+    #[inline]
+    fn variable(value: Value, index: usize) -> Self {
+        let mut derivative = [0.0; 3];
+        derivative[index] = 1.0;
+        Self { value, derivative }
+    }
+
+    #[inline]
+    fn sqrt(self) -> Self {
+        let value = self.value.sqrt();
+        if value > 0.0 && value.is_finite() {
+            self.map_unary(value, 0.5 / value)
+        } else {
+            Self::constant(value)
+        }
+    }
+
+    #[inline]
+    fn powf(self, exponent: Value) -> Self {
+        let value = self.value.powf(exponent);
+        if self.value > 0.0 && value.is_finite() {
+            self.map_unary(value, exponent * self.value.powf(exponent - 1.0))
+        } else {
+            Self::constant(value)
+        }
+    }
+
+    #[inline]
+    fn max_const(self, floor: Value) -> Self {
+        if self.value > floor {
+            self
+        } else {
+            Self::constant(floor)
+        }
+    }
+
+    #[inline]
+    fn max(self, other: Self) -> Self {
+        if self.value >= other.value {
+            self
+        } else {
+            other
+        }
+    }
+
+    #[inline]
+    fn map_unary(self, value: Value, scale: Value) -> Self {
+        Self {
+            value,
+            derivative: [
+                self.derivative[0] * scale,
+                self.derivative[1] * scale,
+                self.derivative[2] * scale,
+            ],
+        }
+    }
+
+    #[inline]
+    fn sanitized_derivative(self, index: usize) -> Value {
+        let value = self.derivative[index];
+        if value.is_finite() { value } else { 0.0 }
+    }
+}
+
+impl Add for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: Self) -> Self::Output {
+        Self {
+            value: self.value + rhs.value,
+            derivative: [
+                self.derivative[0] + rhs.derivative[0],
+                self.derivative[1] + rhs.derivative[1],
+                self.derivative[2] + rhs.derivative[2],
+            ],
+        }
+    }
+}
+
+impl Add<Value> for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: Value) -> Self::Output {
+        Self {
+            value: self.value + rhs,
+            derivative: self.derivative,
+        }
+    }
+}
+
+impl Add<Dual3> for Value {
+    type Output = Dual3;
+
+    #[inline]
+    fn add(self, rhs: Dual3) -> Self::Output {
+        rhs + self
+    }
+}
+
+impl Sub for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self {
+            value: self.value - rhs.value,
+            derivative: [
+                self.derivative[0] - rhs.derivative[0],
+                self.derivative[1] - rhs.derivative[1],
+                self.derivative[2] - rhs.derivative[2],
+            ],
+        }
+    }
+}
+
+impl Sub<Value> for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: Value) -> Self::Output {
+        Self {
+            value: self.value - rhs,
+            derivative: self.derivative,
+        }
+    }
+}
+
+impl Sub<Dual3> for Value {
+    type Output = Dual3;
+
+    #[inline]
+    fn sub(self, rhs: Dual3) -> Self::Output {
+        Dual3 {
+            value: self - rhs.value,
+            derivative: [-rhs.derivative[0], -rhs.derivative[1], -rhs.derivative[2]],
+        }
+    }
+}
+
+impl Mul for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Self) -> Self::Output {
+        Self {
+            value: self.value * rhs.value,
+            derivative: [
+                self.derivative[0] * rhs.value + self.value * rhs.derivative[0],
+                self.derivative[1] * rhs.value + self.value * rhs.derivative[1],
+                self.derivative[2] * rhs.value + self.value * rhs.derivative[2],
+            ],
+        }
+    }
+}
+
+impl Mul<Value> for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Value) -> Self::Output {
+        Self {
+            value: self.value * rhs,
+            derivative: [
+                self.derivative[0] * rhs,
+                self.derivative[1] * rhs,
+                self.derivative[2] * rhs,
+            ],
+        }
+    }
+}
+
+impl Mul<Dual3> for Value {
+    type Output = Dual3;
+
+    #[inline]
+    fn mul(self, rhs: Dual3) -> Self::Output {
+        rhs * self
+    }
+}
+
+impl Div for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn div(self, rhs: Self) -> Self::Output {
+        let denominator = rhs.value * rhs.value;
+        Self {
+            value: self.value / rhs.value,
+            derivative: [
+                (self.derivative[0] * rhs.value - self.value * rhs.derivative[0]) / denominator,
+                (self.derivative[1] * rhs.value - self.value * rhs.derivative[1]) / denominator,
+                (self.derivative[2] * rhs.value - self.value * rhs.derivative[2]) / denominator,
+            ],
+        }
+    }
+}
+
+impl Div<Value> for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn div(self, rhs: Value) -> Self::Output {
+        Self {
+            value: self.value / rhs,
+            derivative: [
+                self.derivative[0] / rhs,
+                self.derivative[1] / rhs,
+                self.derivative[2] / rhs,
+            ],
+        }
+    }
+}
+
+impl Div<Dual3> for Value {
+    type Output = Dual3;
+
+    #[inline]
+    fn div(self, rhs: Dual3) -> Self::Output {
+        Dual3::constant(self) / rhs
+    }
+}
+
+impl Neg for Dual3 {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self::Output {
+        Self {
+            value: -self.value,
+            derivative: [
+                -self.derivative[0],
+                -self.derivative[1],
+                -self.derivative[2],
+            ],
+        }
+    }
 }
 
 impl Mosfet {
@@ -35,26 +298,36 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value) {
         let eval = self.level2_evaluate(vgs, vds, vbs);
-        let derivative = |dvgs: Value, dvds: Value, dvbs: Value, step: Value| -> Value {
-            if step <= 0.0 || !step.is_finite() {
-                return 0.0;
-            }
-            let plus =
-                self.level2_evaluate(vgs + dvgs * step, vds + dvds * step, vbs + dvbs * step);
-            let minus =
-                self.level2_evaluate(vgs - dvgs * step, vds - dvds * step, vbs - dvbs * step);
-            let slope = (plus.id - minus.id) / (2.0 * step);
-            if slope.is_finite() { slope } else { 0.0 }
+        let p = self.polarity();
+        let vgs_m = p * vgs;
+        let vds_m = p * vds;
+        let vbs_m = p * vbs;
+        let vbd_m = vbs_m - vds_m;
+        let vgd_m = vgs_m - vds_m;
+        let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
+        let lvds = mode * vds_m;
+        let lvbs = if mode > 0.0 { vbs_m } else { vbd_m };
+        let lvgs = if mode > 0.0 { vgs_m } else { vgd_m };
+
+        let forward = self.level2_forward_operating_point(lvgs, lvds, lvbs);
+        let (gm, gds, gmb) = if mode > 0.0 {
+            (forward.gm, forward.gds, forward.gmb)
+        } else {
+            (
+                -forward.gm,
+                forward.gm + forward.gds + forward.gmb,
+                -forward.gmb,
+            )
         };
+        let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
 
-        let gm_step = 1.0e-6 * vgs.abs().max(1.0);
-        let gds_step = 1.0e-6 * vds.abs().max(1.0);
-        let gmb_step = 1.0e-6 * vbs.abs().max(1.0);
-        let gm = derivative(1.0, 0.0, 0.0, gm_step);
-        let gds = derivative(0.0, 1.0, 0.0, gds_step);
-        let gmb = derivative(0.0, 0.0, 1.0, gmb_step);
-
-        (eval.id, eval.region, gm, gds, gmb)
+        (
+            eval.id,
+            eval.region,
+            sanitize(gm),
+            sanitize(gds),
+            sanitize(gmb),
+        )
     }
 
     #[inline]
@@ -242,6 +515,160 @@ impl Mosfet {
         }
     }
 
+    fn level2_forward_operating_point(
+        &self,
+        lvgs: Value,
+        lvds: Value,
+        lvbs: Value,
+    ) -> Mos2ForwardOperatingPoint {
+        let lvgs = Dual3::variable(lvgs, 0);
+        let lvds = Dual3::variable(lvds, 1);
+        let lvbs = Dual3::variable(lvbs, 2);
+        let effective_length = self.level2_effective_length();
+        let effective_width = self.w.max(1.0e-18);
+        let phi = self.phi.max(1.0e-12);
+        let sqrt_phi = phi.sqrt();
+        let phi_min_vbs = (phi - lvbs).max_const(1.0e-18);
+        let cox = self.cox.max(0.0);
+        let oxide_cap = cox * effective_length * effective_width;
+        let beta = self.kp * effective_width / effective_length;
+        let xd = self.level2_depletion_width_factor();
+        let model_vto = if self.polarity() < 0.0 {
+            -self.vto.abs()
+        } else {
+            self.vto
+        };
+        let t_vbi = model_vto - self.polarity() * self.gamma * sqrt_phi;
+
+        let sarg = if lvbs.value <= 0.0 {
+            phi_min_vbs.sqrt()
+        } else {
+            Dual3::constant(sqrt_phi) / (1.0 + 0.5 * lvbs / phi)
+        };
+        let barg_input = (phi_min_vbs + lvds).max_const(1.0e-18);
+        let barg = if (lvbs - lvds).value <= 0.0 {
+            barg_input.sqrt()
+        } else {
+            Dual3::constant(sqrt_phi) / (1.0 + 0.5 * (lvbs - lvds) / phi)
+        };
+
+        let factor = if oxide_cap > 0.0 {
+            0.125 * self.mos2_narrow_factor * 2.0 * std::f64::consts::PI * EPSSIL / oxide_cap
+                * effective_length
+        } else {
+            0.0
+        };
+        let eta = 1.0 + factor;
+        let vbin = self.polarity() * t_vbi + factor * phi_min_vbs;
+
+        let gamasd = self.level2_short_channel_gamma_dual(sarg, barg, effective_length, xd);
+        let von = vbin + gamasd * sarg;
+        let mut vdsat = Dual3::constant(0.0);
+
+        if (self.mos2_fast_surface_state_density == 0.0 || oxide_cap == 0.0)
+            && lvgs.value <= vbin.value
+        {
+            return Mos2ForwardOperatingPoint::from_dual(0.0);
+        }
+
+        let vgst = lvgs - von;
+        let sarg3 = sarg * sarg * sarg;
+        let body = barg * barg * barg - sarg3;
+
+        let critical_gate_overdrive = if cox > 0.0 {
+            self.mos2_crit_field * 100.0 * EPSSIL / cox
+        } else {
+            Value::INFINITY
+        };
+        let ufact = if vgst.value > critical_gate_overdrive && critical_gate_overdrive > 0.0 {
+            (critical_gate_overdrive / vgst).powf(self.mos2_crit_field_exp)
+        } else {
+            Dual3::constant(1.0)
+        };
+
+        let gammad = gamasd / eta;
+        let vgsx = if self.mos2_fast_surface_state_density != 0.0 && oxide_cap != 0.0 {
+            lvgs.max(von)
+        } else {
+            lvgs
+        };
+        if gammad.value > 0.0 {
+            let gammd2 = gammad * gammad;
+            let argv = (vgsx - vbin) / eta + phi_min_vbs;
+            if argv.value > 0.0 {
+                let arg1 = (1.0 + 4.0 * argv / gammd2).sqrt();
+                vdsat = ((vgsx - vbin) / eta + gammd2 * (1.0 - arg1) / 2.0).max_const(0.0);
+            }
+        } else {
+            vdsat = ((vgsx - vbin) / eta).max_const(0.0);
+        }
+
+        let mut xlamda = Dual3::constant(self.lambda);
+        let mut bodys = body;
+        if lvds.value != 0.0 {
+            let bsarg_input = (vdsat + phi_min_vbs).max_const(1.0e-18);
+            let bsarg = if (lvbs - vdsat).value <= 0.0 {
+                bsarg_input.sqrt()
+            } else {
+                Dual3::constant(sqrt_phi) / (1.0 + 0.5 * (lvbs - vdsat) / phi)
+            };
+            bodys = bsarg * bsarg * bsarg - sarg3;
+
+            if self.mos2_max_drift_vel <= 0.0
+                && self.mos2_substrate_doping > 0.0
+                && xlamda.value <= 0.0
+            {
+                let argv = (lvds - vdsat) / 4.0;
+                let sargv = (1.0 + argv * argv).sqrt();
+                let arg1 = (argv + sargv).max_const(0.0).sqrt();
+                xlamda = xd * arg1 / (effective_length * lvds);
+            }
+        }
+
+        let mut clfact = 1.0 - xlamda * lvds;
+        if !clfact.value.is_finite() || clfact.value <= 1.0e-12 {
+            clfact = Dual3::constant(1.0e-12);
+        }
+        let xleff = effective_length * clfact;
+        let deltal = xlamda * lvds * effective_length;
+        let mut punch_through_width = xd * self.pb.max(1.0e-12).sqrt();
+        if self.mos2_substrate_doping == 0.0 {
+            punch_through_width = 0.25e-6;
+        }
+        if xleff.value < punch_through_width {
+            let xld = effective_length - punch_through_width;
+            let denom = 1.0 + (deltal - xld) / punch_through_width;
+            if denom.value.is_finite() && denom.value > 1.0e-12 {
+                clfact = punch_through_width / denom / effective_length;
+            }
+        }
+
+        let beta1 = beta * ufact / clfact.max_const(1.0e-12);
+        if lvds.value <= 1.0e-10 {
+            let gds = if self.mos2_fast_surface_state_density != 0.0 && oxide_cap != 0.0 {
+                if lvgs.value <= von.value {
+                    beta1 * (von - vbin - gamasd * sarg)
+                } else {
+                    beta1 * (lvgs - vbin - gamasd * sarg)
+                }
+            } else if lvgs.value <= von.value {
+                Dual3::constant(0.0)
+            } else {
+                beta1 * (lvgs - vbin - gamasd * sarg)
+            };
+
+            return Mos2ForwardOperatingPoint::channel_conductance(gds.value);
+        }
+
+        let cdrain = if lvds.value <= vdsat.value {
+            beta1 * ((lvgs - vbin - eta * lvds / 2.0) * lvds - gamasd * body / 1.5)
+        } else {
+            beta1 * ((lvgs - vbin - eta * vdsat / 2.0) * vdsat - gamasd * bodys / 1.5)
+        };
+
+        Mos2ForwardOperatingPoint::from_dual(cdrain)
+    }
+
     #[inline]
     fn level2_short_channel_gamma(
         &self,
@@ -272,6 +699,34 @@ impl Mosfet {
     }
 
     #[inline]
+    fn level2_short_channel_gamma_dual(
+        &self,
+        sarg: Dual3,
+        barg: Dual3,
+        effective_length: Value,
+        xd: Value,
+    ) -> Dual3 {
+        if self.gamma <= 0.0 && self.mos2_substrate_doping <= 0.0 {
+            return Dual3::constant(self.gamma);
+        }
+
+        let mut argss = Dual3::constant(0.0);
+        let mut argsd = Dual3::constant(0.0);
+        if self.mos2_junction_depth > 0.0 && xd > 0.0 {
+            let xws = xd * sarg;
+            let xwd = xd * barg;
+            let scale = 2.0 / self.mos2_junction_depth;
+            let args = (1.0 + xws * scale).max_const(0.0).sqrt();
+            let argd = (1.0 + xwd * scale).max_const(0.0).sqrt();
+            let length_scale = 0.5 * self.mos2_junction_depth / effective_length;
+            argss = length_scale * (args - 1.0);
+            argsd = length_scale * (argd - 1.0);
+        }
+
+        self.gamma * (1.0 - argss - argsd)
+    }
+
+    #[inline]
     fn level2_depletion_width_factor(&self) -> Value {
         if self.mos2_substrate_doping <= 0.0 {
             return 0.0;
@@ -284,5 +739,127 @@ impl Mosfet {
         } else {
             ((EPSSIL + EPSSIL) / denom).sqrt()
         }
+    }
+}
+
+impl Mos2ForwardOperatingPoint {
+    #[inline]
+    fn from_dual(cdrain: impl Into<Dual3>) -> Self {
+        let cdrain = cdrain.into();
+        let (gm, gds, gmb) = if cdrain.value.is_finite() {
+            (
+                cdrain.sanitized_derivative(0),
+                cdrain.sanitized_derivative(1),
+                cdrain.sanitized_derivative(2),
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+
+        Self { gm, gds, gmb }
+    }
+
+    #[inline]
+    fn channel_conductance(gds: Value) -> Self {
+        Self {
+            gm: 0.0,
+            gds: if gds.is_finite() { gds } else { 0.0 },
+            gmb: 0.0,
+        }
+    }
+}
+
+impl From<Value> for Dual3 {
+    #[inline]
+    fn from(value: Value) -> Self {
+        Self::constant(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn mos2_reference_device() -> Mosfet {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("NSUB".to_string(), 2.2e15);
+        params.insert("UO".to_string(), 575.0);
+        params.insert("UCRIT".to_string(), 49.0e3);
+        params.insert("UEXP".to_string(), 0.1);
+        params.insert("TOX".to_string(), 0.11e-6);
+        params.insert("XJ".to_string(), 2.95e-6);
+        params.insert("LD".to_string(), 2.4485e-6);
+        params.insert("KP".to_string(), 2.0e-5);
+        params.insert("PHI".to_string(), 0.6);
+
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(30.0e-6, 12.0e-6)
+    }
+
+    #[test]
+    fn level2_exact_jacobian_matches_centered_difference() {
+        let mos = mos2_reference_device();
+        let cases = [(1.2, 0.15, -0.02), (3.5, 1.8, -0.35), (2.0, -0.4, -0.1)];
+
+        for (vgs, vds, vbs) in cases {
+            let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+            let finite_difference = |dvgs: Value, dvds: Value, dvbs: Value| {
+                let step = 1.0e-7;
+                let plus =
+                    mos.level2_evaluate(vgs + dvgs * step, vds + dvds * step, vbs + dvbs * step);
+                let minus =
+                    mos.level2_evaluate(vgs - dvgs * step, vds - dvds * step, vbs - dvbs * step);
+                (plus.id - minus.id) / (2.0 * step)
+            };
+
+            assert_relative(gm, finite_difference(1.0, 0.0, 0.0), 2.0e-5);
+            assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-5);
+            assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-5);
+        }
+    }
+
+    #[test]
+    fn level2_zero_drain_bias_keeps_channel_conductance() {
+        let mos = mos2_reference_device();
+        let vgs = 2.0;
+        let vbs = -0.1;
+        let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, 0.0, vbs);
+        let effective_length = mos.level2_effective_length();
+        let phi_min_vbs = mos.phi - vbs;
+        let sarg = phi_min_vbs.sqrt();
+        let factor = 0.125 * mos.mos2_narrow_factor * 2.0 * std::f64::consts::PI * EPSSIL
+            / (mos.cox * effective_length * mos.w)
+            * effective_length;
+        let vbin = mos.vto - mos.gamma * mos.phi.sqrt() + factor * phi_min_vbs;
+        let gamasd = mos.level2_short_channel_gamma(
+            sarg,
+            sarg,
+            effective_length,
+            mos.level2_depletion_width_factor(),
+        );
+        let vgst = vgs - (vbin + gamasd * sarg);
+        let critical_gate_overdrive = mos.mos2_crit_field * 100.0 * EPSSIL / mos.cox;
+        let ufact = if vgst > critical_gate_overdrive {
+            (critical_gate_overdrive / vgst).powf(mos.mos2_crit_field_exp)
+        } else {
+            1.0
+        };
+        let expected = mos.kp * mos.w / effective_length * ufact * (vgs - vbin - gamasd * sarg);
+
+        assert_eq!(gm, 0.0);
+        assert_eq!(gmb, 0.0);
+        assert!(gds > 0.0, "gds={gds:e}");
+        assert_relative(gds, expected, 1.0e-12);
+    }
+
+    fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
+        let scale = actual.abs().max(expected.abs()).max(1.0e-18);
+        assert!(
+            (actual - expected).abs() <= tolerance * scale,
+            "actual={actual:e} expected={expected:e}"
+        );
     }
 }
