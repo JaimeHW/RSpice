@@ -85,7 +85,12 @@ impl TestRunner {
             "transfer output-",
         )?;
 
-        let engine = self.create_dc_engine();
+        // Linearized transfer uses the converged DC operating point as the
+        // small-signal expansion point. Use the primary regression engine here
+        // to match .SENS and ngspice's direct operating-point path; the robust
+        // fallback engine is intentionally reserved for analyses that need a
+        // recovery pass after the primary solve fails.
+        let engine = self.create_dynamic_engine();
         let sensitivity = engine
             .run_sensitivity_linearized(netlist, output_pos_idx, output_neg_idx)
             .map_err(|err| format!("Linearized transfer analysis error: {err}"))?;
