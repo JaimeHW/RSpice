@@ -246,8 +246,9 @@ impl CircuitData {
     /// Re-project all ideal voltage-output equations after a force-accepted
     /// timestep so the accepted state remains consistent with independent and
     /// controlled source constraints.
-    pub fn enforce_ideal_voltage_constraints(&self, solution: &mut [Value], time: Value) {
-        self.voltage_sources
+    pub fn enforce_ideal_voltage_constraints(&self, solution: &mut [Value], time: Value) -> bool {
+        let mut changed = self
+            .voltage_sources
             .enforce_voltage_constraints(solution, time);
 
         for idx in 0..self.vcvs.len() {
@@ -258,7 +259,7 @@ impl CircuitData {
                 continue;
             };
             let target_voltage = self.vcvs.gains[idx] * (v_ctrl_pos - v_ctrl_neg);
-            project_two_terminal_voltage(
+            changed |= project_two_terminal_voltage(
                 solution,
                 self.vcvs.node_pos[idx],
                 self.vcvs.node_neg[idx],
@@ -279,12 +280,13 @@ impl CircuitData {
                 continue;
             }
             let target_voltage = self.ccvs.transresistances[idx] * ctrl_current;
-            project_two_terminal_voltage(
+            changed |= project_two_terminal_voltage(
                 solution,
                 self.ccvs.node_pos[idx],
                 self.ccvs.node_neg[idx],
                 target_voltage,
             );
         }
+        changed
     }
 }

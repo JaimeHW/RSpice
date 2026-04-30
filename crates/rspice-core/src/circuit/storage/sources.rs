@@ -541,7 +541,8 @@ impl VoltageSources {
     /// the voltage source node values may not satisfy V(n+) - V(n-) = Vs.
     /// This method corrects the solution vector to enforce this constraint
     /// for display purposes and to prevent drift.
-    pub fn enforce_voltage_constraints(&self, solution: &mut [Value], time: Value) {
+    pub fn enforce_voltage_constraints(&self, solution: &mut [Value], time: Value) -> bool {
+        let mut changed = false;
         for i in 0..self.names.len() {
             let np = self.node_pos[i];
             let nn = self.node_neg[i];
@@ -553,8 +554,9 @@ impl VoltageSources {
                 }
                 None => self.dc_values[i],
             };
-            project_two_terminal_voltage(solution, np, nn, v_source);
+            changed |= project_two_terminal_voltage(solution, np, nn, v_source);
         }
+        changed
     }
 }
 

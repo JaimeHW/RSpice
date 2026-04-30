@@ -2315,10 +2315,12 @@ impl Engine {
             retry_count = 0;
 
             // Keep ideal source constraints exact before LTE and state updates.
-            circuit
+            let projected_voltage_sources = circuit
                 .voltage_sources
                 .enforce_voltage_constraints(&mut new_solution, t + dt);
-            nonlinear_state_matches_new_solution = false;
+            if projected_voltage_sources {
+                nonlinear_state_matches_new_solution = false;
+            }
 
             if Self::is_stale_step(&solution, &new_solution, expected_source_delta, num_nodes) {
                 stale_accept_count += 1;

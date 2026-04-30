@@ -44,50 +44,65 @@ fn solution_node_voltage(solution: &[Value], node: NodeId) -> Option<Value> {
 }
 
 #[inline]
+fn projection_changed(old: Value, new: Value) -> bool {
+    let scale = old.abs().max(new.abs()).max(1.0);
+    (new - old).abs() > 64.0 * Value::EPSILON * scale
+}
+
+#[inline]
 fn project_two_terminal_voltage(
     solution: &mut [Value],
     node_pos: NodeId,
     node_neg: NodeId,
     target_voltage: Value,
-) {
+) -> bool {
     if !target_voltage.is_finite() {
-        return;
+        return false;
     }
 
     if node_neg == 0 && node_pos > 0 {
         if let Some(v) = solution.get_mut(node_pos - 1) {
+            let changed = projection_changed(*v, target_voltage);
             *v = target_voltage;
+            return changed;
         }
-        return;
+        return false;
     }
 
     if node_pos == 0 && node_neg > 0 {
         if let Some(v) = solution.get_mut(node_neg - 1) {
-            *v = -target_voltage;
+            let projected = -target_voltage;
+            let changed = projection_changed(*v, projected);
+            *v = projected;
+            return changed;
         }
-        return;
+        return false;
     }
 
     if node_pos == 0 || node_neg == 0 {
-        return;
+        return false;
     }
 
     let vp_idx = node_pos - 1;
     let vn_idx = node_neg - 1;
     if vp_idx >= solution.len() || vn_idx >= solution.len() {
-        return;
+        return false;
     }
 
     let vp = solution[vp_idx];
     let vn = solution[vn_idx];
     if !(vp.is_finite() && vn.is_finite()) {
-        return;
+        return false;
     }
 
     let midpoint = 0.5 * (vp + vn);
     let half_diff = 0.5 * target_voltage;
-    solution[vp_idx] = midpoint + half_diff;
-    solution[vn_idx] = midpoint - half_diff;
+    let projected_vp = midpoint + half_diff;
+    let projected_vn = midpoint - half_diff;
+    let changed = projection_changed(vp, projected_vp) || projection_changed(vn, projected_vn);
+    solution[vp_idx] = projected_vp;
+    solution[vn_idx] = projected_vn;
+    changed
 }
 
 /// Errors in circuit construction
