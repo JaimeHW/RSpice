@@ -169,6 +169,67 @@ impl Engine {
         Some(self.nonlinear_transient_startup_warmup_seed(circuit, matrix, &transient_seed, 0.0))
     }
 
+    fn t0_linearized_transient_startup_seed(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        abort: &dyn AbortSignal,
+    ) -> Option<Vec<Value>> {
+        let Ok(mut transient_seed) =
+            self.solve_linear_transient_operating_point_with_abort(circuit, matrix, 0.0, abort)
+        else {
+            return None;
+        };
+
+        for value in &mut transient_seed {
+            if !value.is_finite() {
+                *value = 0.0;
+            }
+        }
+
+        Some(self.nonlinear_transient_startup_warmup_seed(circuit, matrix, &transient_seed, 0.0))
+    }
+
+    fn solve_direct_dc_startup_with_abort(
+        &self,
+        netlist: &Netlist,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let mut direct_cfg = self.config.clone();
+        direct_cfg.convergence_config.gmin_stepping = false;
+        direct_cfg.convergence_config.source_stepping = false;
+        direct_cfg.convergence_config.pseudo_transient = false;
+        direct_cfg.convergence_config.arc_length = false;
+        let direct_engine = Engine::new(direct_cfg);
+        direct_engine.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort)
+    }
+
+    #[inline]
+    fn should_try_configured_dc_startup_aids(circuit: &crate::circuit::Circuit) -> bool {
+        const MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE: usize = 160;
+        circuit.matrix_size() <= MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE
+    }
+
+    fn transient_startup_from_dc_solution(
+        &self,
+        circuit: &mut crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        solution: Vec<Value>,
+        abort: &dyn AbortSignal,
+        mode: InitialSolutionMode,
+    ) -> (Vec<Value>, InitialSolutionMode) {
+        if let Some(seed) =
+            self.t0_transient_seed_after_dc_fallback(circuit, matrix, &solution, abort)
+        {
+            log::warn!("Transient startup using source-consistent t=0 seed after DC startup.");
+            (seed, InitialSolutionMode::LinearizedSeed)
+        } else {
+            (solution, mode)
+        }
+    }
+
     pub(super) fn solve_transient_initial_solution(
         &self,
         netlist: &Netlist,
@@ -196,11 +257,61 @@ impl Engine {
             Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
             Err(transient_err) => {
                 log::warn!(
-                    "Transient initial operating point failed: {}. Falling back to DC operating point startup.",
+                    "Transient initial operating point failed: {}. Trying direct DC operating point startup.",
                     transient_err
                 );
             }
         }
+
+        match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
+            Ok(solution) => {
+                return Ok(self.transient_startup_from_dc_solution(
+                    circuit,
+                    matrix,
+                    solution,
+                    abort,
+                    InitialSolutionMode::DcOperatingPoint,
+                ));
+            }
+            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Err(direct_dc_err) => {
+                log::warn!(
+                    "Direct transient-start DC operating point failed: {}. Trying bounded startup recovery aids.",
+                    direct_dc_err
+                );
+            }
+        }
+
+        if Self::should_try_configured_dc_startup_aids(circuit) {
+            match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
+                Ok(solution) => {
+                    log::warn!("Transient startup recovered using configured DC startup aids.");
+                    return Ok(self.transient_startup_from_dc_solution(
+                        circuit,
+                        matrix,
+                        solution,
+                        abort,
+                        InitialSolutionMode::DcOperatingPoint,
+                    ));
+                }
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(configured_dc_err) => {
+                    log::warn!(
+                        "Configured transient-start DC aids failed: {}. Trying source-consistent linearized startup seed.",
+                        configured_dc_err
+                    );
+                }
+            }
+        }
+
+        if let Some(seed) = self.t0_linearized_transient_startup_seed(circuit, matrix, abort) {
+            log::warn!("Transient startup using source-consistent linearized t=0 seed.");
+            return Ok((seed, InitialSolutionMode::LinearizedSeed));
+        }
+
+        log::warn!(
+            "Source-consistent linearized transient seed failed. Falling back to configured DC operating point startup."
+        );
 
         match self.solve_dc_operating_point_with_abort(netlist, circuit, matrix, abort) {
             Ok(solution) => {

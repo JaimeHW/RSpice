@@ -584,6 +584,7 @@ impl Engine {
         );
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
+        const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
         // Keep cancellation responsiveness tight for large transient decks where a
         // single accepted step can still be expensive.
         const ABORT_CHECK_INTERVAL: usize = 16;
@@ -802,9 +803,21 @@ impl Engine {
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
             // budget, not the DC operating-point iteration limit.
+            let linearized_startup_recovery_points = matches!(
+                initial_solution_mode,
+                startup::InitialSolutionMode::LinearizedSeed
+            ) && result.time.len()
+                <= LINEARIZED_STARTUP_RECOVERY_POINTS;
+            let startup_recovery = linearized_startup_recovery_points
+                || Self::in_startup_recovery_window(
+                    initial_solution_mode,
+                    step_time,
+                    hinted_max_step,
+                );
             let tran_max_iterations = Self::transient_newton_iteration_budget(
                 self.config.transient_max_iterations,
                 has_vbic_excess_phase,
+                startup_recovery,
                 retry_count,
             );
             let mut converged = false;
@@ -1743,7 +1756,10 @@ impl Engine {
             } else {
                 None
             };
-            let legacy_bjt_truncation_limit = if !first_accepted_transient_step && has_bjts {
+            let legacy_bjt_truncation_limit = if !linearized_startup_recovery_points
+                && !first_accepted_transient_step
+                && has_bjts
+            {
                 Self::legacy_bjt_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
@@ -1927,6 +1943,8 @@ impl Engine {
                     mosfet_truncation_limit,
                 );
             let (lte, accept, uses_vbic_charge_lte) = if first_accepted_transient_step {
+                (0.0, true, false)
+            } else if linearized_startup_recovery_points {
                 (0.0, true, false)
             } else if defer_voltage_lte_to_vbic_truncation {
                 // ngspice's excess-phase startup control is charge/truncation-driven.
@@ -2393,6 +2411,7 @@ impl Engine {
             }
 
             let trapezoidal_order_trial = if !first_accepted_transient_step
+                && !linearized_startup_recovery_points
                 && matches!(
                     current_method,
                     IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear

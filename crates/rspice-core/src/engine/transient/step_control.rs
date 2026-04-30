@@ -221,10 +221,13 @@ impl Engine {
     pub(super) fn transient_newton_iteration_budget(
         transient_max_iterations: usize,
         has_vbic_excess_phase: bool,
+        startup_recovery: bool,
         retry_count: usize,
     ) -> usize {
         let standard_budget = transient_max_iterations.max(1);
-        if !has_vbic_excess_phase {
+        if startup_recovery {
+            standard_budget.max(64).min(128)
+        } else if !has_vbic_excess_phase {
             standard_budget
         } else if retry_count == 0 {
             standard_budget.max(64).min(96)
