@@ -62,6 +62,16 @@ impl Dual3 {
     }
 
     #[inline]
+    fn exp(self) -> Self {
+        let value = self.value.exp();
+        if value.is_finite() {
+            self.map_unary(value, value)
+        } else {
+            Self::constant(value)
+        }
+    }
+
+    #[inline]
     fn max_const(self, floor: Value) -> Self {
         if self.value > floor {
             self
@@ -388,11 +398,21 @@ impl Mosfet {
         } else {
             sqrt_phi / (1.0 + 0.5 * lvbs / phi)
         };
+        let dsrgdb = if lvbs <= 0.0 {
+            -0.5 / sarg
+        } else {
+            -0.5 * sarg * sarg / (phi * sqrt_phi)
+        };
         let barg_input = (phi_min_vbs + lvds).max(1.0e-18);
         let barg = if (lvbs - lvds) <= 0.0 {
             barg_input.sqrt()
         } else {
             sqrt_phi / (1.0 + 0.5 * (lvbs - lvds) / phi)
+        };
+        let dbrgdb = if (lvbs - lvds) <= 0.0 {
+            -0.5 / barg
+        } else {
+            -0.5 * barg * barg / (phi * sqrt_phi)
         };
 
         let factor = if oxide_cap > 0.0 {
@@ -404,19 +424,33 @@ impl Mosfet {
         let eta = 1.0 + factor;
         let vbin = self.polarity() * t_vbi + factor * phi_min_vbs;
 
-        let gamasd = self.level2_short_channel_gamma(sarg, barg, effective_length, xd);
-        let von = vbin + gamasd * sarg;
+        let (gamasd, dgddvb) = self.level2_short_channel_gamma_with_body_derivative(
+            sarg,
+            barg,
+            dsrgdb,
+            dbrgdb,
+            effective_length,
+            xd,
+        );
+        let mut von = vbin + gamasd * sarg;
         let mut vdsat = 0.0;
 
-        if self.mos2_fast_surface_state_density == 0.0 || oxide_cap == 0.0 {
-            if lvgs <= vbin {
-                return Mos2Evaluation {
-                    id: 0.0,
-                    region: MosRegion::Cutoff,
-                    von,
-                    vdsat,
-                };
+        let fast_surface = self.mos2_fast_surface_state_density != 0.0 && oxide_cap > 0.0;
+        let mut argg = 0.0;
+        if fast_surface {
+            if let Some((delta_von, surface_argg)) =
+                self.level2_fast_surface_state_shift(gamasd, dgddvb, sarg, dsrgdb, factor, cox)
+            {
+                von += delta_von;
+                argg = surface_argg;
             }
+        } else if lvgs <= vbin {
+            return Mos2Evaluation {
+                id: 0.0,
+                region: MosRegion::Cutoff,
+                von,
+                vdsat,
+            };
         }
 
         let vgst = lvgs - von;
@@ -435,11 +469,7 @@ impl Mosfet {
         };
 
         let gammad = gamasd / eta;
-        let vgsx = if self.mos2_fast_surface_state_density != 0.0 && oxide_cap != 0.0 {
-            lvgs.max(von)
-        } else {
-            lvgs
-        };
+        let vgsx = if fast_surface { lvgs.max(von) } else { lvgs };
         if gammad > 0.0 {
             let gammd2 = gammad * gammad;
             let argv = (vgsx - vbin) / eta + phi_min_vbs;
@@ -498,7 +528,17 @@ impl Mosfet {
             };
         }
 
-        let (cdrain, region) = if lvds <= vdsat {
+        let (cdrain, region) = if fast_surface && lvgs <= von {
+            if vdsat <= 0.0 {
+                (0.0, MosRegion::Cutoff)
+            } else {
+                let vdson = vdsat.min(lvds);
+                let body_for_vdson = if lvds > vdsat { bodys } else { body };
+                let cdson = beta1
+                    * ((von - vbin - eta * vdson / 2.0) * vdson - gamasd * body_for_vdson / 1.5);
+                (cdson * (argg * (lvgs - von)).exp(), MosRegion::Cutoff)
+            }
+        } else if lvds <= vdsat {
             let current = beta1 * ((lvgs - vbin - eta * lvds / 2.0) * lvds - gamasd * body / 1.5);
             (current, MosRegion::Linear)
         } else {
@@ -545,6 +585,11 @@ impl Mosfet {
         } else {
             Dual3::constant(sqrt_phi) / (1.0 + 0.5 * lvbs / phi)
         };
+        let dsrgdb = if lvbs.value <= 0.0 {
+            -0.5 / sarg.value
+        } else {
+            -0.5 * sarg.value * sarg.value / (phi * sqrt_phi)
+        };
         let barg_input = (phi_min_vbs + lvds).max_const(1.0e-18);
         let barg = if (lvbs - lvds).value <= 0.0 {
             barg_input.sqrt()
@@ -562,12 +607,19 @@ impl Mosfet {
         let vbin = self.polarity() * t_vbi + factor * phi_min_vbs;
 
         let gamasd = self.level2_short_channel_gamma_dual(sarg, barg, effective_length, xd);
-        let von = vbin + gamasd * sarg;
+        let mut von = vbin + gamasd * sarg;
         let mut vdsat = Dual3::constant(0.0);
 
-        if (self.mos2_fast_surface_state_density == 0.0 || oxide_cap == 0.0)
-            && lvgs.value <= vbin.value
-        {
+        let fast_surface = self.mos2_fast_surface_state_density != 0.0 && oxide_cap > 0.0;
+        let mut argg = Dual3::constant(0.0);
+        if fast_surface {
+            if let Some((delta_von, surface_argg)) =
+                self.level2_fast_surface_state_shift_dual(gamasd, sarg, dsrgdb, factor, cox)
+            {
+                von = von + delta_von;
+                argg = surface_argg;
+            }
+        } else if lvgs.value <= vbin.value {
             return Mos2ForwardOperatingPoint::from_dual(0.0);
         }
 
@@ -587,11 +639,7 @@ impl Mosfet {
         };
 
         let gammad = gamasd / eta;
-        let vgsx = if self.mos2_fast_surface_state_density != 0.0 && oxide_cap != 0.0 {
-            lvgs.max(von)
-        } else {
-            lvgs
-        };
+        let vgsx = if fast_surface { lvgs.max(von) } else { lvgs };
         if gammad.value > 0.0 {
             let gammd2 = gammad * gammad;
             let argv = (vgsx - vbin) / eta + phi_min_vbs;
@@ -660,7 +708,25 @@ impl Mosfet {
             return Mos2ForwardOperatingPoint::channel_conductance(gds.value);
         }
 
-        let cdrain = if lvds.value <= vdsat.value {
+        let cdrain = if fast_surface && lvgs.value <= von.value {
+            if vdsat.value <= 0.0 {
+                Dual3::constant(0.0)
+            } else {
+                let vdson = if vdsat.value <= lvds.value {
+                    vdsat
+                } else {
+                    lvds
+                };
+                let body_for_vdson = if lvds.value > vdsat.value {
+                    bodys
+                } else {
+                    body
+                };
+                let cdson = beta1
+                    * ((von - vbin - eta * vdson / 2.0) * vdson - gamasd * body_for_vdson / 1.5);
+                cdson * (argg * (lvgs - von)).exp()
+            }
+        } else if lvds.value <= vdsat.value {
             beta1 * ((lvgs - vbin - eta * lvds / 2.0) * lvds - gamasd * body / 1.5)
         } else {
             beta1 * ((lvgs - vbin - eta * vdsat / 2.0) * vdsat - gamasd * bodys / 1.5)
@@ -670,32 +736,94 @@ impl Mosfet {
     }
 
     #[inline]
-    fn level2_short_channel_gamma(
+    fn level2_short_channel_gamma_with_body_derivative(
         &self,
         sarg: Value,
         barg: Value,
+        dsrgdb: Value,
+        dbrgdb: Value,
         effective_length: Value,
         xd: Value,
-    ) -> Value {
+    ) -> (Value, Value) {
         if self.gamma <= 0.0 && self.mos2_substrate_doping <= 0.0 {
-            return self.gamma;
+            return (self.gamma, 0.0);
         }
 
         let mut argss = 0.0;
         let mut argsd = 0.0;
+        let mut dbargs = 0.0;
+        let mut dbargd = 0.0;
         if self.mos2_junction_depth > 0.0 && xd > 0.0 {
-            let xws = xd * sarg;
-            let xwd = xd * barg;
             let scale = 2.0 / self.mos2_junction_depth;
-            let args = (1.0 + xws * scale).max(0.0).sqrt();
-            let argd = (1.0 + xwd * scale).max(0.0).sqrt();
+            let argxs = (1.0 + xd * sarg * scale).max(0.0);
+            let argxd = (1.0 + xd * barg * scale).max(0.0);
+            let args = argxs.sqrt();
+            let argd = argxd.sqrt();
             let length_scale = 0.5 * self.mos2_junction_depth / effective_length;
             argss = length_scale * (args - 1.0);
             argsd = length_scale * (argd - 1.0);
+
+            if args > 0.0 && argd > 0.0 {
+                let derivative_scale = 0.5 / effective_length;
+                dbargs = derivative_scale * xd * dsrgdb / args;
+                dbargd = derivative_scale * xd * dbrgdb / argd;
+            }
         }
 
-        let gamma = self.gamma * (1.0 - argss - argsd);
-        gamma
+        (
+            self.gamma * (1.0 - argss - argsd),
+            -self.gamma * (dbargs + dbargd),
+        )
+    }
+
+    #[inline]
+    fn level2_fast_surface_state_shift(
+        &self,
+        gamasd: Value,
+        dgddvb: Value,
+        sarg: Value,
+        dsrgdb: Value,
+        factor: Value,
+        cox: Value,
+    ) -> Option<(Value, Value)> {
+        if self.mos2_fast_surface_state_density == 0.0 || cox <= 0.0 {
+            return None;
+        }
+
+        let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
+        let cdonco = -(gamasd * dsrgdb + dgddvb * sarg) + factor;
+        let xn = 1.0 + cfs / cox + cdonco;
+        let thermal_slope = VT_REFERENCE * xn;
+        if thermal_slope.is_finite() && thermal_slope > 0.0 {
+            Some((thermal_slope, 1.0 / thermal_slope))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn level2_fast_surface_state_shift_dual(
+        &self,
+        gamasd: Dual3,
+        sarg: Dual3,
+        dsrgdb: Value,
+        factor: Value,
+        cox: Value,
+    ) -> Option<(Dual3, Dual3)> {
+        if self.mos2_fast_surface_state_density == 0.0 || cox <= 0.0 {
+            return None;
+        }
+
+        let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
+        let cdonco = -(gamasd.value * dsrgdb + gamasd.derivative[2] * sarg.value) + factor;
+        let xn = 1.0 + cfs / cox + cdonco;
+        let thermal_slope = VT_REFERENCE * xn;
+        if thermal_slope.is_finite() && thermal_slope > 0.0 {
+            let slope = Dual3::constant(thermal_slope);
+            Some((slope, 1.0 / slope))
+        } else {
+            None
+        }
     }
 
     #[inline]
@@ -834,9 +962,12 @@ mod tests {
             / (mos.cox * effective_length * mos.w)
             * effective_length;
         let vbin = mos.vto - mos.gamma * mos.phi.sqrt() + factor * phi_min_vbs;
-        let gamasd = mos.level2_short_channel_gamma(
+        let dsrgdb = -0.5 / sarg;
+        let (gamasd, _) = mos.level2_short_channel_gamma_with_body_derivative(
             sarg,
             sarg,
+            dsrgdb,
+            dsrgdb,
             effective_length,
             mos.level2_depletion_width_factor(),
         );
@@ -853,6 +984,23 @@ mod tests {
         assert_eq!(gmb, 0.0);
         assert!(gds > 0.0, "gds={gds:e}");
         assert_relative(gds, expected, 1.0e-12);
+    }
+
+    #[test]
+    fn level2_fast_surface_state_subthreshold_branch_is_finite() {
+        let mut mos = mos2_reference_device();
+        mos.mos2_fast_surface_state_density = 2.0e10;
+        let vgs = -0.25;
+        let vds = 0.8;
+        let vbs = -0.15;
+
+        let eval = mos.level2_evaluate(vgs, vds, vbs);
+        let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+
+        assert!(eval.id.is_finite() && eval.id > 0.0, "id={:e}", eval.id);
+        assert!(gm.is_finite() && gm > 0.0, "gm={gm:e}");
+        assert!(gds.is_finite(), "gds={gds:e}");
+        assert!(gmb.is_finite(), "gmb={gmb:e}");
     }
 
     fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
