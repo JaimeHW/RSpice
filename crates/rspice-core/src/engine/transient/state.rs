@@ -1403,10 +1403,19 @@ impl Engine {
             ) else {
                 continue;
             };
-            let (legacy_vbe, legacy_vbc, legacy_vcs) =
-                Self::legacy_bjt_charge_branch_voltages(&snapshot);
+            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages_with_vbx(&snapshot);
+            let legacy_charges = bjt.legacy_transient_charge_state_with_vbx(
+                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+            );
+            let mut charge_values = snapshot.branches.map(|branch| branch.charge);
+            charge_values[BJT_QBE_BRANCH_INDEX] = legacy_charges.qbe;
+            charge_values[BJT_QBC_BRANCH_INDEX] = legacy_charges.qbc;
+            charge_values[BJT_QBCX_BRANCH_INDEX] = legacy_charges.qbx;
+            charge_values[BJT_QBCP_BRANCH_INDEX] = legacy_charges.qcs;
             let mut cq_currents = [0.0; BJT_DYNAMIC_CHARGE_COUNT];
-            for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
+            for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
+                let charge = charge_values[branch_idx];
                 let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                 let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
@@ -1414,14 +1423,14 @@ impl Engine {
                     effective_method,
                     trap_order,
                     dt,
-                    branch.charge,
+                    charge,
                     q_prev,
                     q_prev_prev,
                     cq_prev,
                 );
                 bjt_history.charge_q_prev_prev_prev[idx][branch_idx] = q_prev_prev;
                 bjt_history.charge_q_prev_prev[idx][branch_idx] = q_prev;
-                bjt_history.charge_q_prev[idx][branch_idx] = branch.charge;
+                bjt_history.charge_q_prev[idx][branch_idx] = charge;
                 bjt_history.charge_cq_prev[idx][branch_idx] = cq_curr;
                 cq_currents[branch_idx] = cq_curr;
             }
