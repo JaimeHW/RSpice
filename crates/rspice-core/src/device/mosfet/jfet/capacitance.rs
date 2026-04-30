@@ -563,6 +563,16 @@ impl Jfet {
         }
     }
 
+    pub(crate) fn transient_drain_source_capacitance(&self) -> Value {
+        if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_level >= 5
+        {
+            self.params.hfet_cds.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
     pub(super) fn ac_real_terms_at_frequency(
         &self,
         vgs: Value,

@@ -117,6 +117,11 @@ struct JfetTransientHistory {
     qgd_prev_prev: Vec<Value>,
     qgd_prev_prev_prev: Vec<Value>,
     cqgd_prev: Vec<Value>,
+    vds_prev: Vec<Value>,
+    vds_prev_prev: Vec<Value>,
+    qds_prev: Vec<Value>,
+    qds_prev_prev: Vec<Value>,
+    cqds_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }

@@ -159,6 +159,11 @@ impl Engine {
             qgd_prev_prev: Vec::with_capacity(n),
             qgd_prev_prev_prev: Vec::with_capacity(n),
             cqgd_prev: Vec::with_capacity(n),
+            vds_prev: Vec::with_capacity(n),
+            vds_prev_prev: Vec::with_capacity(n),
+            qds_prev: Vec::with_capacity(n),
+            qds_prev_prev: Vec::with_capacity(n),
+            cqds_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
@@ -167,8 +172,11 @@ impl Engine {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, solution);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, solution);
             let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let cds = jfet.transient_drain_source_capacitance();
+            let vds_charge = vgs_eval - vgd_eval;
             let qgs = cgs.max(0.0) * vgs_charge;
             let qgd = cgd.max(0.0) * vgd_charge;
+            let qds = cds.max(0.0) * vds_charge;
             history.vgs_prev.push(vgs_charge);
             history.vgs_prev_prev.push(vgs_charge);
             history.qgs_prev.push(qgs);
@@ -181,6 +189,11 @@ impl Engine {
             history.qgd_prev_prev.push(qgd);
             history.qgd_prev_prev_prev.push(qgd);
             history.cqgd_prev.push(0.0);
+            history.vds_prev.push(vds_charge);
+            history.vds_prev_prev.push(vds_charge);
+            history.qds_prev.push(qds);
+            history.qds_prev_prev.push(qds);
+            history.cqds_prev.push(0.0);
         }
 
         history
@@ -502,16 +515,15 @@ impl Engine {
         history: &JfetTransientHistory,
         suppress_gate_charge: bool,
     ) {
-        if suppress_gate_charge {
-            return;
-        }
         let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, voltages);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, voltages);
             let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let cds = jfet.transient_drain_source_capacitance();
+            let vds_charge = vgs_eval - vgd_eval;
 
-            if cgs.is_finite() && cgs > 0.0 {
+            if !suppress_gate_charge && cgs.is_finite() && cgs > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
                     effective_method,
                     trap_order,
@@ -526,7 +538,7 @@ impl Engine {
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.source, geq, ieq);
             }
 
-            if cgd.is_finite() && cgd > 0.0 {
+            if !suppress_gate_charge && cgd.is_finite() && cgd > 0.0 {
                 let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
                     effective_method,
                     trap_order,
@@ -539,6 +551,28 @@ impl Engine {
                     history.cqgd_prev[idx],
                 );
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.drain, geq, ieq);
+            }
+
+            if cds.is_finite() && cds > 0.0 {
+                let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    cds,
+                    vds_charge,
+                    history.vds_prev[idx],
+                    history.qds_prev[idx],
+                    history.qds_prev_prev[idx],
+                    history.cqds_prev[idx],
+                );
+                Self::stamp_two_terminal_companion(
+                    matrix,
+                    rhs,
+                    jfet.drain,
+                    jfet.source,
+                    geq,
+                    ieq,
+                );
             }
         }
     }
@@ -1463,10 +1497,14 @@ impl Engine {
             let (vgs_charge, vgd_charge) =
                 Self::jfet_charge_branch_voltages(jfet, accepted_solution);
             let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let cds = jfet.transient_drain_source_capacitance();
+            let vds_charge = vgs_eval - vgd_eval;
             jfet_history.vgs_prev_prev[idx] = jfet_history.vgs_prev[idx];
             jfet_history.vgs_prev[idx] = vgs_charge;
             jfet_history.vgd_prev_prev[idx] = jfet_history.vgd_prev[idx];
             jfet_history.vgd_prev[idx] = vgd_charge;
+            jfet_history.vds_prev_prev[idx] = jfet_history.vds_prev[idx];
+            jfet_history.vds_prev[idx] = vds_charge;
             if !suppress_gate_charge_history {
                 let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
                     method,
@@ -1499,6 +1537,22 @@ impl Engine {
                 jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
                 jfet_history.qgd_prev[idx] = qgd_curr;
                 jfet_history.cqgd_prev[idx] = cqgd_curr;
+            }
+            if cds.is_finite() && cds > 0.0 {
+                let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
+                    method,
+                    trap_order,
+                    dt,
+                    cds,
+                    vds_charge,
+                    jfet_history.vds_prev_prev[idx],
+                    jfet_history.qds_prev[idx],
+                    jfet_history.qds_prev_prev[idx],
+                    jfet_history.cqds_prev[idx],
+                );
+                jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
+                jfet_history.qds_prev[idx] = qds_curr;
+                jfet_history.cqds_prev[idx] = cqds_curr;
             }
         }
         jfet_history.accepted_dt_prev_prev = jfet_history.accepted_dt_prev;
