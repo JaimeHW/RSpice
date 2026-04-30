@@ -6,7 +6,6 @@
 
 use super::{Engine, SimulationError};
 use crate::abort_signal::{AbortSignal, NoAbort};
-use crate::device::JfetChannelModel;
 use crate::solver::{SimulationResult, StaticMatrix};
 use crate::{CircuitData, Netlist, Value};
 
@@ -17,13 +16,6 @@ impl Engine {
         let mut result = SimulationResult::new(0, 0);
         result.node_names = vec!["0".to_string()];
         result
-    }
-
-    fn circuit_prefers_dc_sweep_substeps(circuit: &CircuitData) -> bool {
-        circuit.jfets.iter().any(|jfet| {
-            matches!(jfet.params.channel_model, JfetChannelModel::Hfet1)
-                && jfet.params.hfet_level >= 2
-        })
     }
 
     fn solve_nonlinear_dc_sweep_target_with_substeps(
@@ -232,11 +224,7 @@ impl Engine {
             // For the first point, apply .NODESET/.IC hints if present.
             let mut prev_solution: Option<Vec<Value>> = None;
             let mut prev_sweep_value: Option<Value> = None;
-            let mut dc_sweep_subdivisions = if Self::circuit_prefers_dc_sweep_substeps(&circuit) {
-                2
-            } else {
-                1
-            };
+            let mut dc_sweep_subdivisions = 2;
 
             for &sweep_value in &sweep_points {
                 if abort.is_aborted() {
@@ -250,46 +238,33 @@ impl Engine {
                 let solution = if circuit.has_nonlinear_devices() {
                     if let Some(seed) = prev_solution.as_deref() {
                         let previous_value = prev_sweep_value.unwrap_or(sweep_value);
-                        if dc_sweep_subdivisions > 1 {
-                            let (solution, subdivisions) = engine
-                                .solve_nonlinear_dc_sweep_target_with_substeps(
-                                    &mut circuit,
-                                    &mut matrix,
-                                    vsrc_idx,
-                                    previous_value,
-                                    sweep_value,
-                                    seed,
-                                    dc_sweep_subdivisions,
-                                    abort,
-                                )?;
-                            dc_sweep_subdivisions = subdivisions;
-                            solution
-                        } else {
-                            let start_state = circuit.nonlinear_state_snapshot();
-                            match engine.solve_nonlinear_with_guess_and_abort(
-                                &mut circuit,
-                                &mut matrix,
-                                Some(seed),
-                                abort,
-                            ) {
-                                Ok(solution) => solution,
-                                Err(_) => {
-                                    circuit.restore_nonlinear_state(start_state);
-                                    circuit.voltage_sources.dc_values[vsrc_idx] = previous_value;
-                                    let (solution, subdivisions) = engine
-                                        .solve_nonlinear_dc_sweep_target_with_substeps(
-                                            &mut circuit,
-                                            &mut matrix,
-                                            vsrc_idx,
-                                            previous_value,
-                                            sweep_value,
-                                            seed,
-                                            2,
-                                            abort,
-                                        )?;
-                                    dc_sweep_subdivisions = subdivisions;
-                                    solution
-                                }
+                        let start_state = circuit.nonlinear_state_snapshot();
+                        match engine.solve_nonlinear_with_guess_and_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            Some(seed),
+                            abort,
+                        ) {
+                            Ok(solution) => {
+                                dc_sweep_subdivisions = 2;
+                                solution
+                            }
+                            Err(_) => {
+                                circuit.restore_nonlinear_state(start_state);
+                                circuit.voltage_sources.dc_values[vsrc_idx] = previous_value;
+                                let (solution, subdivisions) = engine
+                                    .solve_nonlinear_dc_sweep_target_with_substeps(
+                                        &mut circuit,
+                                        &mut matrix,
+                                        vsrc_idx,
+                                        previous_value,
+                                        sweep_value,
+                                        seed,
+                                        dc_sweep_subdivisions,
+                                        abort,
+                                    )?;
+                                dc_sweep_subdivisions = subdivisions;
+                                solution
                             }
                         }
                     } else if node_hints.is_empty() {
