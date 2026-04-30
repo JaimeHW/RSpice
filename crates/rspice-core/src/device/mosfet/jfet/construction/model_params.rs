@@ -8,6 +8,9 @@ impl Jfet {
         if let Some(level) = params.get("LEVEL").copied().filter(|v| v.is_finite()) {
             p.hfet_level = level.round() as i32;
         }
+        if let Some(v) = params.get("GATEMOD").copied().filter(|v| v.is_finite()) {
+            p.hfet_gatemod = v.round() != 0.0;
+        }
 
         if let Some(v) = params
             .get("VTO")

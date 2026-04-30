@@ -175,6 +175,8 @@ pub struct JfetParams {
     /// - `2..=4`: MESA-style gate branches
     /// - `>=5`: HFET2-style gate branches
     pub hfet_level: i32,
+    /// HFET1 `GATEMOD` selector for the optional gate-current equations.
+    pub hfet_gatemod: bool,
     /// HFET/MESFET knee-shape parameter `M`.
     pub hfet_m: Value,
     /// HFET/MESFET capacitance knee parameter `MC`.

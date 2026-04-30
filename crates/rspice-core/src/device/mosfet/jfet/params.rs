@@ -25,6 +25,7 @@ impl Default for JfetParams {
             tnom: 300.15, // 27C nominal
             channel_model: JfetChannelModel::ShichmanHodges,
             hfet_level: 2,
+            hfet_gatemod: false,
             hfet_m: 3.0,
             hfet_mc: 3.0,
             hfet_gamma: 3.0,

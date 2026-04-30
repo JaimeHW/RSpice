@@ -127,6 +127,7 @@ impl Jfet {
         self.params.channel_model = JfetChannelModel::Hfet1;
         self.hfet_legacy_inverse_mode = true;
         self.params.hfet_level = 5;
+        self.params.hfet_gatemod = false;
         self.params.vto = if is_n { 0.15 } else { -0.15 };
         self.params.lambda = 0.15;
         self.params.eta = if is_n { 1.28 } else { 1.4 };
@@ -204,6 +205,7 @@ impl Jfet {
         // it does not use the HFET1 global inverse latch quirk.
         self.hfet_legacy_inverse_mode = false;
         self.params.hfet_level = 2;
+        self.params.hfet_gatemod = false;
         self.params.vto = if is_n { -1.26 } else { 1.26 };
         self.params.beta = 0.0085;
         self.params.lambda = 0.045;
