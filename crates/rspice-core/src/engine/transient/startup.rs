@@ -18,7 +18,7 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         seed: &[Value],
     ) -> Vec<Value> {
-        const WARMUP_ITERS: usize = 96;
+        const WARMUP_ITERS: usize = 16;
         const MAX_WARMUP_DELTA_V: Value = 2e-1;
 
         let size = circuit.matrix_size();
@@ -75,7 +75,7 @@ impl Engine {
         seed: &[Value],
         time: Value,
     ) -> Vec<Value> {
-        const WARMUP_ITERS: usize = 96;
+        const WARMUP_ITERS: usize = 16;
         const MAX_WARMUP_DELTA_V: Value = 2e-1;
 
         let size = circuit.matrix_size();

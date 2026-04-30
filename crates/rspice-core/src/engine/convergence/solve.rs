@@ -90,7 +90,6 @@ impl Engine {
             initial_guess[node_id - 1] = voltage;
         }
 
-        Self::apply_bjt_initial_guess_correction(&mut initial_guess, circuit);
         self.solve_nonlinear_with_guess_and_abort(circuit, matrix, Some(&initial_guess), abort)
     }
 
@@ -126,10 +125,14 @@ impl Engine {
         let size = circuit.matrix_size();
         // Sanitize any warm-start seed before Newton so pathological presolve
         // artifacts do not launch the iteration from physically impossible rails.
-        let mut solution = initial_guess
-            .map(|guess| Self::sanitize_initial_guess(guess, size, circuit.num_nodes().min(size)))
-            .unwrap_or_else(|| vec![0.0; size]);
-        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
+        let mut solution = match initial_guess {
+            Some(guess) => Self::sanitize_initial_guess(guess, size, circuit.num_nodes().min(size)),
+            None => {
+                let mut guess = vec![0.0; size];
+                Self::apply_bjt_initial_guess_correction(&mut guess, circuit);
+                guess
+            }
+        };
         let startup_seed = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
         let mut rhs = vec![0.0; size];
@@ -239,14 +242,11 @@ impl Engine {
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
-            let nonlinear_residual_converged =
-                self.nonlinear_residual_converged(circuit, matrix, &new_solution);
-            solution = new_solution;
-            if voltage_converged
-                && linearized_residual_converged
+            let nonlinear_residual_converged = voltage_converged
                 && device_converged
-                && nonlinear_residual_converged
-            {
+                && self.nonlinear_residual_converged(circuit, matrix, &new_solution);
+            solution = new_solution;
+            if voltage_converged && device_converged && nonlinear_residual_converged {
                 if hit_voltage_limit {
                     log::info!(
                         "DC operating point converged after {} iterations (voltage limiting was triggered)",
@@ -263,7 +263,7 @@ impl Engine {
 
             if voltage_converged
                 && device_converged
-                && (!linearized_residual_converged || !nonlinear_residual_converged)
+                && !(linearized_residual_converged || nonlinear_residual_converged)
             {
                 residual_stall_iterations += 1;
                 if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {
@@ -293,6 +293,16 @@ impl Engine {
                 dc_max_iterations
             );
         }
+
+        if residual_stalled
+            && let Some(refined) = self.refine_fallback_candidate(circuit, matrix, &solution, abort)
+        {
+            log::info!(
+                "Residual-stalled DC Newton candidate accepted after static-device polishing."
+            );
+            return Ok(refined);
+        }
+
         let conv_cfg = &self.config.convergence_config;
         let allow_source = conv_cfg.source_stepping;
         let allow_pseudo = conv_cfg.pseudo_transient;
@@ -643,7 +653,6 @@ impl Engine {
         }
 
         solution = Self::sanitize_initial_guess(&solution, size, circuit.num_nodes().min(size));
-        Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
         self.prime_operating_point_seed(
             circuit,
             &solution,
@@ -655,7 +664,7 @@ impl Engine {
             circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
         let mut damping_state = NewtonDampingState::default();
-        let tranop_max_iterations = self.nonlinear_iteration_budget(10);
+        let tranop_max_iterations = self.continuation_iteration_budget(1, 32);
 
         for iteration in 0..tranop_max_iterations {
             if Self::should_abort_iteration(abort, iteration) {
@@ -714,8 +723,6 @@ impl Engine {
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, circuit.num_nodes());
-            let linearized_residual_converged =
-                self.residual_convergence_met(matrix, &new_solution, &rhs);
             self.update_device_states_for_operating_point(
                 circuit,
                 &new_solution,
@@ -724,24 +731,22 @@ impl Engine {
                 junction_gmin,
             );
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
-            let nonlinear_residual_converged = self.nonlinear_residual_converged_with_linear_stamp(
-                circuit,
-                matrix,
-                &new_solution,
-                |circuit, matrix, rhs| {
-                    circuit.refresh_jiles_atherton_inductances(&new_solution);
-                    Self::stamp_transient_operating_point_linear(
-                        circuit, matrix, rhs, time, gmin_floor,
-                    );
-                },
-            );
+            let nonlinear_residual_converged = voltage_converged
+                && device_converged
+                && self.nonlinear_residual_converged_with_linear_stamp(
+                    circuit,
+                    matrix,
+                    &new_solution,
+                    |circuit, matrix, rhs| {
+                        circuit.refresh_jiles_atherton_inductances(&new_solution);
+                        Self::stamp_transient_operating_point_linear(
+                            circuit, matrix, rhs, time, gmin_floor,
+                        );
+                    },
+                );
 
             solution = new_solution;
-            if voltage_converged
-                && linearized_residual_converged
-                && device_converged
-                && nonlinear_residual_converged
-            {
+            if voltage_converged && device_converged && nonlinear_residual_converged {
                 return Ok(solution);
             }
         }

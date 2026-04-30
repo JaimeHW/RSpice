@@ -171,25 +171,23 @@ impl Engine {
                 self.update_device_states_for_dc(circuit, &new_solution);
             }
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
-            let nonlinear_residual_converged = self.nonlinear_residual_converged_scaled(
-                circuit,
-                matrix,
-                &new_solution,
-                source_scale,
-            );
+            let nonlinear_residual_converged = voltage_converged
+                && device_converged
+                && self.nonlinear_residual_converged_scaled(
+                    circuit,
+                    matrix,
+                    &new_solution,
+                    source_scale,
+                );
             solution = new_solution;
 
-            if voltage_converged
-                && linearized_residual_converged
-                && device_converged
-                && nonlinear_residual_converged
-            {
+            if voltage_converged && device_converged && nonlinear_residual_converged {
                 return (solution, true, used_iterations);
             }
 
             if voltage_converged
                 && device_converged
-                && (!linearized_residual_converged || !nonlinear_residual_converged)
+                && !(linearized_residual_converged || nonlinear_residual_converged)
             {
                 residual_stall_iterations += 1;
                 if residual_stall_iterations >= Self::DC_RESIDUAL_STALL_LIMIT {

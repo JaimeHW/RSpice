@@ -394,22 +394,21 @@ impl Engine {
                     &new_solution,
                     circuit.num_nodes(),
                 );
-                let linearized_residual_converged =
-                    self.residual_convergence_met(matrix, &new_solution, &rhs);
                 self.update_device_states_for_dc(circuit, &new_solution);
                 solution = new_solution;
-
-                if converged
-                    && linearized_residual_converged
-                    && circuit.nonlinear_converged(self.device_convergence_criteria())
+                let device_converged =
+                    circuit.nonlinear_converged(self.device_convergence_criteria());
+                let nonlinear_residual_converged = converged
+                    && device_converged
                     && self.nonlinear_residual_converged_with_pseudo_transient(
                         circuit,
                         matrix,
                         &solution,
                         &anchor_solution,
                         pseudo_conductance,
-                    )
-                {
+                    );
+
+                if converged && device_converged && nonlinear_residual_converged {
                     stage_converged = true;
                     break;
                 }
@@ -781,21 +780,20 @@ impl Engine {
                             &new_solution,
                             circuit.num_nodes(),
                         );
-                        let linearized_residual_converged =
-                            self.residual_convergence_met(matrix, &new_solution, &rhs);
                         self.update_device_states_for_dc_with_junction_gmin(
                             circuit,
                             &new_solution,
                             junction_gmin,
                         );
                         solution = new_solution;
-                        if converged
-                            && linearized_residual_converged
-                            && circuit.nonlinear_converged(self.device_convergence_criteria())
+                        let device_converged =
+                            circuit.nonlinear_converged(self.device_convergence_criteria());
+                        let nonlinear_residual_converged = converged
+                            && device_converged
                             && self.nonlinear_residual_converged_with_gmin(
                                 circuit, matrix, &solution, gmin,
-                            )
-                        {
+                            );
+                        if converged && device_converged && nonlinear_residual_converged {
                             break;
                         }
                     }
