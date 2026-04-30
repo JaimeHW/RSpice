@@ -167,6 +167,7 @@ impl SimulationOptions {
             min_timestep: Some(self.min_timestep),
             max_timestep: Some(self.max_timestep),
             integration_method: Some(self.core_integration_method()),
+            transient_trtol: None,
             convergence_preset: None,
             reltol: Some(self.reltol),
             abstol: Some(self.abstol),

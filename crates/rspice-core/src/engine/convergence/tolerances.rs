@@ -71,6 +71,11 @@ impl Engine {
     }
 
     #[inline]
+    pub(crate) fn transient_trtol(&self) -> Value {
+        Self::sanitize_positive_tolerance(self.config.transient_trtol, crate::constants::TRTOL)
+    }
+
+    #[inline]
     pub(crate) fn residual_reltol(&self) -> Value {
         let configured = self.config.convergence_config.residual_reltol;
         if configured.is_finite() && configured > 0.0 {

@@ -78,12 +78,6 @@ const SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
 const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
 /// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
 const MAX_DYNAMIC_TLINE_BREAKPOINTS: usize = 200_000;
-/// ngspice default transient truncation tolerance factor (`CKTtrtol`).
-///
-/// VBIC relies on the classic SPICE charge-state truncation controller in
-/// `vbictrunc.c`/`CKTterr`, which uses a more permissive scaling than the
-/// generic predictor-based LTE controller.
-const NGSPICE_DEFAULT_TRTOL: Value = 7.0;
 const VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL: Value = 1e-15;
 const VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL: Value = 1e-12;
 const BJT_VBIC_TRUNCATION_BRANCH_COUNT: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
@@ -1566,7 +1560,7 @@ impl Engine {
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
-                            NGSPICE_DEFAULT_TRTOL,
+                            self.transient_trtol(),
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -1584,7 +1578,7 @@ impl Engine {
                                 self.voltage_reltol(),
                                 self.current_abstol(),
                                 self.charge_abstol(),
-                                NGSPICE_DEFAULT_TRTOL,
+                                self.transient_trtol(),
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -1603,7 +1597,7 @@ impl Engine {
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
-                            NGSPICE_DEFAULT_TRTOL,
+                            self.transient_trtol(),
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -1621,7 +1615,7 @@ impl Engine {
                                 self.voltage_reltol(),
                                 self.current_abstol(),
                                 self.charge_abstol(),
-                                NGSPICE_DEFAULT_TRTOL,
+                                self.transient_trtol(),
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -1750,7 +1744,7 @@ impl Engine {
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
+                    self.transient_trtol(),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -1772,7 +1766,7 @@ impl Engine {
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
+                    self.transient_trtol(),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -1793,7 +1787,7 @@ impl Engine {
                         self.voltage_reltol(),
                         self.current_abstol(),
                         self.charge_abstol(),
-                        NGSPICE_DEFAULT_TRTOL,
+                        self.transient_trtol(),
                     )
                     .filter(|limit| limit.is_finite() && *limit > 0.0)
                 } else {
@@ -1813,7 +1807,7 @@ impl Engine {
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
+                    self.transient_trtol(),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -1833,7 +1827,7 @@ impl Engine {
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
+                    self.transient_trtol(),
                 )
                 .filter(|limit| limit.is_finite() && *limit > 0.0)
             } else {
@@ -2194,7 +2188,7 @@ impl Engine {
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
-                            NGSPICE_DEFAULT_TRTOL,
+                            self.transient_trtol(),
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -2212,7 +2206,7 @@ impl Engine {
                                 self.voltage_reltol(),
                                 self.current_abstol(),
                                 self.charge_abstol(),
-                                NGSPICE_DEFAULT_TRTOL,
+                                self.transient_trtol(),
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -2231,7 +2225,7 @@ impl Engine {
                             self.voltage_reltol(),
                             self.current_abstol(),
                             self.charge_abstol(),
-                            NGSPICE_DEFAULT_TRTOL,
+                            self.transient_trtol(),
                         )
                         .filter(|limit| limit.is_finite() && *limit > 0.0)
                     } else {
@@ -2249,7 +2243,7 @@ impl Engine {
                                 self.voltage_reltol(),
                                 self.current_abstol(),
                                 self.charge_abstol(),
-                                NGSPICE_DEFAULT_TRTOL,
+                                self.transient_trtol(),
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -2439,7 +2433,7 @@ impl Engine {
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
-                    NGSPICE_DEFAULT_TRTOL,
+                    self.transient_trtol(),
                 )
             } else {
                 None

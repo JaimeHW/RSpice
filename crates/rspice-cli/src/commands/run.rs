@@ -409,6 +409,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         min_timestep: args.min_step,
         max_timestep: args.max_step,
         integration_method: None,
+        transient_trtol: None,
         convergence_preset,
         reltol: args.reltol,
         abstol: args.abstol,

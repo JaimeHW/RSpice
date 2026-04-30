@@ -24,6 +24,8 @@ pub struct SimulationConfig {
     pub temperature: Value,
     /// Integration method for transient analysis
     pub integration_method: crate::analysis::IntegrationMethod,
+    /// Transient truncation tolerance factor for charge-state timestep control.
+    pub transient_trtol: Value,
     /// Model evaluation bypass configuration for latent device optimization
     pub bypass_config: BypassConfig,
     /// Convergence configuration for DC operating point
@@ -222,6 +224,7 @@ impl Default for SimulationConfig {
             max_timestep: crate::constants::MAX_TIMESTEP,
             temperature: crate::constants::TEMP_REFERENCE,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
+            transient_trtol: crate::constants::TRTOL,
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),
         }

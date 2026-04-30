@@ -30,6 +30,11 @@ pub const ITOL: Value = 1e-12;
 /// Similar to SPICE CHGTOL parameter.
 pub const CHGTOL: Value = 1e-14;
 
+/// Default transient truncation tolerance factor.
+///
+/// Similar to SPICE TRTOL parameter.
+pub const TRTOL: Value = 7.0;
+
 /// Default voltage tolerance (volts)
 ///
 /// Similar to SPICE VNTOL parameter.
