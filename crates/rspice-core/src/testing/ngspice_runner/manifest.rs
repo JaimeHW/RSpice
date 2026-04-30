@@ -25,7 +25,14 @@ impl TestRunner {
         let manifest_root = manifest_path
             .parent()
             .map(Path::to_path_buf)
-            .unwrap_or_else(|| test_dir.to_path_buf());
+            .unwrap_or_else(|| test_dir.to_path_buf())
+            .canonicalize()
+            .unwrap_or_else(|_| {
+                manifest_path
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| test_dir.to_path_buf())
+            });
         let Ok(content) = fs::read_to_string(&manifest_path) else {
             return (manifest_root, HashMap::new());
         };
@@ -65,9 +72,14 @@ impl TestRunner {
     }
 
     pub(super) fn manifest_key_for_path(&self, cir_path: &Path) -> Option<String> {
+        let normalized_cir_path = cir_path
+            .canonicalize()
+            .unwrap_or_else(|_| cir_path.to_path_buf());
         let relative = cir_path
             .strip_prefix(&self.validation_manifest_root)
             .or_else(|_| cir_path.strip_prefix(&self.test_dir))
+            .or_else(|_| normalized_cir_path.strip_prefix(&self.validation_manifest_root))
+            .or_else(|_| normalized_cir_path.strip_prefix(&self.test_dir))
             .ok()?;
         Some(Self::normalize_manifest_key(
             &relative.to_string_lossy().replace('\\', "/"),
@@ -110,5 +122,35 @@ mod tests {
         );
 
         fs::remove_dir_all(root).expect("remove temporary test directory");
+    }
+
+    #[test]
+    fn validation_manifest_matches_absolute_circuit_with_relative_test_dir() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after the Unix epoch")
+            .as_nanos();
+        let relative_root = PathBuf::from("target").join(format!("rspice_manifest_test_{unique}"));
+        let relative_subdir = relative_root.join("mesa");
+        let relative_circuit = relative_subdir.join("mesa13.cir");
+
+        fs::create_dir_all(&relative_subdir).expect("create temporary test directory");
+        fs::write(
+            relative_root.join("validation-manifest.tsv"),
+            "mesa/mesa13.cir\tsmoke\n",
+        )
+        .expect("write validation manifest");
+        fs::write(&relative_circuit, "mesa13\n.end\n").expect("write circuit");
+
+        let runner = TestRunner::new(&relative_root, TestRunnerConfig::default());
+        let absolute_circuit = std::env::current_dir()
+            .expect("current directory")
+            .join(&relative_circuit);
+        assert_eq!(
+            runner.validation_contract_for(&absolute_circuit),
+            Some(ValidationContract::Smoke)
+        );
+
+        fs::remove_dir_all(relative_root).expect("remove temporary test directory");
     }
 }

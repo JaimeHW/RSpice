@@ -292,7 +292,10 @@ pub struct TestRunner {
 impl TestRunner {
     /// Create a new test runner for the given test directory
     pub fn new<P: AsRef<Path>>(test_dir: P, config: TestRunnerConfig) -> Self {
-        let test_dir = test_dir.as_ref().to_path_buf();
+        let test_dir = test_dir
+            .as_ref()
+            .canonicalize()
+            .unwrap_or_else(|_| test_dir.as_ref().to_path_buf());
         let (validation_manifest_root, validation_manifest) =
             Self::load_validation_manifest(&test_dir);
         Self {
