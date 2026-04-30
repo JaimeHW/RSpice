@@ -1247,7 +1247,19 @@ impl Engine {
             let response = tl.transient_port_response(accepted_time);
             let (i1_actual, i2_actual) = response.port_currents(v1, v2);
             tl.update_history(accepted_time, v1, i1_actual, v2, i2_actual);
-            if !tl.has_distributed_rlgc() {
+            if tl.has_distributed_rlgc() {
+                if let Some(arrival) =
+                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, voltage_abstol)
+                {
+                    Self::schedule_dynamic_tline_breakpoint(
+                        breakpoints,
+                        arrival,
+                        tstop,
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                    );
+                }
+            } else {
                 Self::maybe_schedule_tline_arrival_breakpoint(
                     breakpoints,
                     accepted_time,

@@ -26,6 +26,8 @@ pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) len: Option<f64>,
     pub(in crate::engine::builder) alpha: Option<f64>,
     pub(in crate::engine::builder) atten: Option<f64>,
+    pub(in crate::engine::builder) rel: Option<f64>,
+    pub(in crate::engine::builder) abs: Option<f64>,
     pub(in crate::engine::builder) compactrel: Option<f64>,
     pub(in crate::engine::builder) compactabs: Option<f64>,
 }
@@ -84,6 +86,8 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         len: model_param(&model.params, &["LEN", "LENGTH"]),
         alpha: model_param(&model.params, &["ALPHA"]),
         atten: model_param(&model.params, &["ATTEN", "ATTENDB", "LOSSDB"]),
+        rel: model_param(&model.params, &["REL", "RELTOL"]),
+        abs: model_param(&model.params, &["ABS", "ABSTOL"]),
         compactrel: model_param(&model.params, &["COMPACTREL"]),
         compactabs: model_param(&model.params, &["COMPACTABS"]),
     };

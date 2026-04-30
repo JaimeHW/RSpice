@@ -313,4 +313,43 @@ impl Engine {
             }
         }
     }
+
+    #[inline]
+    pub(super) fn schedule_dynamic_tline_breakpoint(
+        breakpoints: &mut BreakpointManager,
+        arrival: Value,
+        tstop: Value,
+        dynamic_breakpoints_added: &mut usize,
+        warned_dynamic_breakpoint_cap: &mut bool,
+    ) {
+        if !(arrival.is_finite() && arrival >= 0.0 && arrival <= tstop) {
+            return;
+        }
+
+        if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS {
+            if !*warned_dynamic_breakpoint_cap {
+                log::warn!(
+                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
+                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
+                    tstop
+                );
+                *warned_dynamic_breakpoint_cap = true;
+            }
+            return;
+        }
+
+        if breakpoints.add(arrival) {
+            *dynamic_breakpoints_added += 1;
+            if *dynamic_breakpoints_added >= MAX_DYNAMIC_TLINE_BREAKPOINTS
+                && !*warned_dynamic_breakpoint_cap
+            {
+                log::warn!(
+                    "Capped dynamic transmission-line breakpoints at {} entries (tstop={:.3e}s)",
+                    MAX_DYNAMIC_TLINE_BREAKPOINTS,
+                    tstop
+                );
+                *warned_dynamic_breakpoint_cap = true;
+            }
+        }
+    }
 }

@@ -1096,6 +1096,12 @@ impl Engine {
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
                         tline.set_dc_series_resistance(dc_series_resistance);
+                        if let Some(params) = model_params {
+                            tline.set_ltra_breakpoint_tolerances(
+                                params.rel.unwrap_or(1.0),
+                                params.abs.unwrap_or(1.0),
+                            );
+                        }
                         if !txl_lossless_branch
                             && let Some(params) = model_params
                             && let (Some(l), Some(c), Some(len)) = (params.l, params.c, params.len)

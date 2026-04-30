@@ -64,6 +64,10 @@ pub struct TransmissionLine {
     distributed_rlc: Option<DistributedRlcKernel>,
     /// Cached transient companion response for the current candidate time.
     distributed_rlc_cache: Cell<Option<(Value, TlineTransientResponse)>>,
+    /// Relative derivative tolerance for ngspice-style LTRA breakpoints.
+    ltra_breakpoint_reltol: Value,
+    /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
+    ltra_breakpoint_abstol: Value,
 
     /// Current simulation time
     current_time: Value,
@@ -177,6 +181,8 @@ impl TransmissionLine {
             state_history: VecDeque::new(),
             distributed_rlc: None,
             distributed_rlc_cache: Cell::new(None),
+            ltra_breakpoint_reltol: 1.0,
+            ltra_breakpoint_abstol: 1.0,
             current_time: 0.0,
         }
     }
@@ -327,6 +333,117 @@ impl TransmissionLine {
         });
         self.attenuation = attenuation;
         self.distributed_rlc_cache.set(None);
+    }
+
+    /// Configure ngspice LTRA derivative-change breakpoint tolerances.
+    pub fn set_ltra_breakpoint_tolerances(&mut self, reltol: Value, abstol: Value) {
+        self.ltra_breakpoint_reltol = if reltol.is_finite() && reltol >= 0.0 {
+            reltol
+        } else {
+            1.0
+        };
+        self.ltra_breakpoint_abstol = if abstol.is_finite() && abstol >= 0.0 {
+            abstol
+        } else {
+            1.0
+        };
+    }
+
+    #[inline]
+    fn ltra_wave(sample: &TlineStateSample, z0: Value, attenuation: Value, forward: bool) -> Value {
+        if forward {
+            (sample.v1 + sample.i1 * z0) * attenuation
+        } else {
+            (sample.v2 + sample.i2 * z0) * attenuation
+        }
+    }
+
+    #[inline]
+    fn ltra_wave_is_steady(v1: Value, v2: Value, v3: Value, reltol: Value, abstol: Value) -> bool {
+        let max = v1.max(v2).max(v3);
+        let min = v1.min(v2).min(v3);
+        let threshold = (50.0 * (reltol / 3.0 * (v1 + v2 + v3) + abstol)).abs();
+        max - min < threshold
+    }
+
+    #[inline]
+    fn ltra_derivative_changed(
+        v_curr: Value,
+        v_prev: Value,
+        v_prev2: Value,
+        t_curr: Value,
+        t_prev: Value,
+        t_prev2: Value,
+        deriv_reltol: Value,
+        deriv_abstol: Value,
+        voltage_reltol: Value,
+        voltage_abstol: Value,
+    ) -> bool {
+        let dt_curr = t_curr - t_prev;
+        if !(dt_curr.is_finite() && dt_curr > 0.0) {
+            return false;
+        }
+        let d_curr = (v_curr - v_prev) / dt_curr;
+        let d_prev = if t_prev > t_prev2 {
+            (v_prev - v_prev2) / (t_prev - t_prev2)
+        } else {
+            0.0
+        };
+        let threshold = deriv_reltol * d_curr.abs().max(d_prev.abs()) + deriv_abstol;
+        (d_curr - d_prev).abs() >= threshold
+            && !Self::ltra_wave_is_steady(v_curr, v_prev, v_prev2, voltage_reltol, voltage_abstol)
+    }
+
+    /// Return the ngspice LTRA derivative breakpoint arrival time, if needed.
+    pub(crate) fn ltra_derivative_breakpoint_arrival(
+        &self,
+        voltage_reltol: Value,
+        voltage_abstol: Value,
+    ) -> Option<Value> {
+        let kernel = self.distributed_rlc.as_ref()?;
+        let len = self.state_history.len();
+        if len < 2 {
+            return None;
+        }
+
+        let curr = self.state_history.get(len - 1)?;
+        let prev = self.state_history.get(len - 2)?;
+        let prev2 = if len >= 3 {
+            self.state_history.get(len - 3).unwrap_or(prev)
+        } else {
+            prev
+        };
+
+        let forward_changed = Self::ltra_derivative_changed(
+            Self::ltra_wave(curr, self.z0, kernel.attenuation, true),
+            Self::ltra_wave(prev, self.z0, kernel.attenuation, true),
+            Self::ltra_wave(prev2, self.z0, kernel.attenuation, true),
+            curr.time,
+            prev.time,
+            prev2.time,
+            self.ltra_breakpoint_reltol,
+            self.ltra_breakpoint_abstol,
+            voltage_reltol,
+            voltage_abstol,
+        );
+        let backward_changed = Self::ltra_derivative_changed(
+            Self::ltra_wave(curr, self.z0, kernel.attenuation, false),
+            Self::ltra_wave(prev, self.z0, kernel.attenuation, false),
+            Self::ltra_wave(prev2, self.z0, kernel.attenuation, false),
+            curr.time,
+            prev.time,
+            prev2.time,
+            self.ltra_breakpoint_reltol,
+            self.ltra_breakpoint_abstol,
+            voltage_reltol,
+            voltage_abstol,
+        );
+
+        if forward_changed || backward_changed {
+            Some(prev.time + self.td)
+        } else {
+            None
+        }
     }
 
     #[inline]
