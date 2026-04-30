@@ -25,7 +25,9 @@ impl Engine {
         multiplier: usize,
         minimum: usize,
     ) -> usize {
-        self.nonlinear_iteration_budget(multiplier).max(minimum)
+        self.nonlinear_iteration_budget(multiplier)
+            .max(minimum)
+            .min(Self::MAX_CONTINUATION_CORRECTOR_ITERS)
     }
 
     #[inline]

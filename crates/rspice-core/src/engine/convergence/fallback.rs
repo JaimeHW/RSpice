@@ -6,6 +6,7 @@ use super::*;
 pub(in crate::engine::convergence) enum CorrectorSeedMode {
     Limited,
     StaticJfet,
+    StaticJfetEveryIteration,
 }
 
 impl Engine {
@@ -27,12 +28,13 @@ impl Engine {
     pub(in crate::engine::convergence) fn sanitize_initial_guess(
         initial_guess: &[Value],
         size: usize,
+        node_count: usize,
     ) -> Vec<Value> {
         let mut guess = Self::normalize_initial_guess(initial_guess, size);
-        if Self::is_suspicious_solution(&guess) {
+        if Self::is_suspicious_solution(&guess, node_count) {
             guess.fill(0.0);
         }
-        Self::clamp_solution_to_physical_bounds(&mut guess);
+        Self::clamp_solution_to_physical_bounds(&mut guess, node_count);
         guess
     }
 
@@ -45,8 +47,9 @@ impl Engine {
         source_scale: Value,
     ) -> Vec<Value> {
         let size = circuit.matrix_size();
-        let incumbent = Self::sanitize_initial_guess(incumbent, size);
-        let proposal = Self::sanitize_initial_guess(proposal, size);
+        let node_count = circuit.num_nodes().min(size);
+        let incumbent = Self::sanitize_initial_guess(incumbent, size, node_count);
+        let proposal = Self::sanitize_initial_guess(proposal, size, node_count);
 
         if incumbent == proposal {
             return incumbent;
@@ -106,7 +109,10 @@ impl Engine {
     ) -> (Vec<Value>, bool, usize) {
         let mut solution = initial_solution.to_vec();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
-        if seed_mode == CorrectorSeedMode::StaticJfet {
+        if matches!(
+            seed_mode,
+            CorrectorSeedMode::StaticJfet | CorrectorSeedMode::StaticJfetEveryIteration
+        ) {
             circuit.update_jfet_static_linearizations(&solution);
         }
         let mut used_iterations = 0usize;
@@ -127,7 +133,13 @@ impl Engine {
             }
 
             circuit.stamp_dc_direct_scaled(matrix, &mut rhs, source_scale);
-            self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+            if seed_mode == CorrectorSeedMode::StaticJfetEveryIteration {
+                self.stamp_static_probe_nonlinear_devices_for_dc(
+                    circuit, matrix, &mut rhs, &solution,
+                );
+            } else {
+                self.stamp_nonlinear_devices_for_dc(circuit, matrix, &mut rhs, &solution);
+            }
 
             let raw_solution = match matrix.solve(&rhs) {
                 Ok(sol) => sol,
@@ -146,13 +158,18 @@ impl Engine {
                 None,
                 false,
             );
-            Self::clamp_solution_to_physical_bounds(&mut new_solution);
+            Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, node_count);
             let linearized_residual_converged =
                 self.residual_convergence_met(matrix, &new_solution, &rhs);
-            self.update_device_states_for_dc(circuit, &new_solution);
+            if seed_mode == CorrectorSeedMode::StaticJfetEveryIteration {
+                self.update_device_states_for_dc(circuit, &new_solution);
+                circuit.update_jfet_static_linearizations(&new_solution);
+            } else {
+                self.update_device_states_for_dc(circuit, &new_solution);
+            }
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
             let nonlinear_residual_converged = self.nonlinear_residual_converged_scaled(
                 circuit,
@@ -194,7 +211,8 @@ impl Engine {
         method_name: &str,
         abort: &dyn AbortSignal,
     ) -> Option<Vec<Value>> {
-        let suspicious = Self::is_suspicious_solution(&candidate);
+        let node_count = circuit.num_nodes().min(candidate.len());
+        let suspicious = Self::is_suspicious_solution(&candidate, node_count);
         let validated =
             !suspicious && self.validate_nonlinear_solution(circuit, matrix, &candidate);
         if validated {
@@ -213,7 +231,7 @@ impl Engine {
         }
 
         if suspicious {
-            if Self::has_clamped_values(&candidate) {
+            if Self::has_clamped_values(&candidate, node_count) {
                 log::warn!(
                     "{} produced clamped/non-finite values; candidate rejected.",
                     method_name
@@ -251,7 +269,7 @@ impl Engine {
             &mut damping_state,
             refinement_iterations,
             abort,
-            CorrectorSeedMode::StaticJfet,
+            CorrectorSeedMode::StaticJfetEveryIteration,
         );
         if converged || self.validate_nonlinear_solution(circuit, matrix, &refined) {
             Some(refined)

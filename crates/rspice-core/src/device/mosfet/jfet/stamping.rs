@@ -3,9 +3,39 @@
 use super::*;
 
 impl Jfet {
-    fn cache_operating_terms_at(&mut self, vgs: Value, vds: Value, vgd: Value) {
-        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) =
+    fn regularized_gate_conductance(
+        &self,
+        voltage: Value,
+        current: Value,
+        conductance: Value,
+    ) -> Value {
+        if conductance.is_finite() && conductance >= self.junction_gmin {
+            return conductance;
+        }
+
+        if voltage.abs() > 1.0e-12 {
+            let chord = current / voltage;
+            if chord.is_finite() && chord > self.junction_gmin {
+                return chord;
+            }
+        }
+
+        self.junction_gmin
+    }
+
+    fn cache_operating_terms_at(
+        &mut self,
+        vgs: Value,
+        vds: Value,
+        vgd: Value,
+        regularize_gate_conductance: bool,
+    ) {
+        let (ids, gm, gds, igs, igd, mut ggs, mut ggd, vds_linear) =
             self.compute_operating_terms(vgs, vds, vgd);
+        if regularize_gate_conductance && self.has_gate_generation_branch() {
+            ggs = self.regularized_gate_conductance(vgs, igs, ggs);
+            ggd = self.regularized_gate_conductance(vgd, igd, ggd);
+        }
         self.eval_ids = ids;
         self.eval_gm = gm;
         self.eval_gds = gds;
@@ -46,7 +76,7 @@ impl Jfet {
         self.last_raw_vgd_prev = self.last_raw_vgd;
         self.last_raw_vgs = vgs;
         self.last_raw_vgd = vgd;
-        self.cache_operating_terms_at(vgs, vds, vgd);
+        self.cache_operating_terms_at(vgs, vds, vgd, false);
     }
 
     /// Link this device to a StaticMatrix for O(1) direct stamping.
@@ -259,7 +289,7 @@ impl NonlinearDevice for Jfet {
         self.last_raw_vgd = vgd_raw;
 
         if !bypassed {
-            self.cache_operating_terms_at(vgs, vds, vgd);
+            self.cache_operating_terms_at(vgs, vds, vgd, true);
         }
     }
 

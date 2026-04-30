@@ -250,21 +250,43 @@ impl Engine {
                                 solution
                             }
                             Err(_) => {
-                                circuit.restore_nonlinear_state(start_state);
-                                circuit.voltage_sources.dc_values[vsrc_idx] = previous_value;
-                                let (solution, subdivisions) = engine
-                                    .solve_nonlinear_dc_sweep_target_with_substeps(
+                                circuit.restore_nonlinear_state(start_state.clone());
+                                circuit.voltage_sources.dc_values[vsrc_idx] = sweep_value;
+                                let fresh_attempt = if node_hints.is_empty() {
+                                    engine.solve_nonlinear_with_node_hints_and_abort(
                                         &mut circuit,
                                         &mut matrix,
-                                        vsrc_idx,
-                                        previous_value,
-                                        sweep_value,
-                                        seed,
-                                        dc_sweep_subdivisions,
+                                        &[],
                                         abort,
-                                    )?;
-                                dc_sweep_subdivisions = subdivisions;
-                                solution
+                                    )
+                                } else {
+                                    engine.solve_nonlinear_with_node_hints_and_abort(
+                                        &mut circuit,
+                                        &mut matrix,
+                                        &node_hints,
+                                        abort,
+                                    )
+                                };
+                                if let Ok(solution) = fresh_attempt {
+                                    dc_sweep_subdivisions = 2;
+                                    solution
+                                } else {
+                                    circuit.restore_nonlinear_state(start_state);
+                                    circuit.voltage_sources.dc_values[vsrc_idx] = previous_value;
+                                    let (solution, subdivisions) = engine
+                                        .solve_nonlinear_dc_sweep_target_with_substeps(
+                                            &mut circuit,
+                                            &mut matrix,
+                                            vsrc_idx,
+                                            previous_value,
+                                            sweep_value,
+                                            seed,
+                                            dc_sweep_subdivisions,
+                                            abort,
+                                        )?;
+                                    dc_sweep_subdivisions = subdivisions;
+                                    solution
+                                }
                             }
                         }
                     } else if node_hints.is_empty() {

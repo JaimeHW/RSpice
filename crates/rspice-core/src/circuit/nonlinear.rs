@@ -113,6 +113,24 @@ impl CircuitData {
         }
     }
 
+    /// Return true when any JFET-family compact model exposes a stiff gate
+    /// generation-recombination branch that can benefit from homotopy.
+    pub(crate) fn has_jfet_gate_generation_branches(&self) -> bool {
+        self.jfets
+            .iter()
+            .any(crate::device::Jfet::has_gate_generation_branch)
+    }
+
+    /// Scale JFET-family gate generation-recombination branches during
+    /// continuation. A scale of 1.0 restores the physical model equations.
+    pub(crate) fn set_jfet_gate_generation_scale(&mut self, scale: Value) {
+        for jfet in &mut self.jfets {
+            if jfet.has_gate_generation_branch() {
+                jfet.set_gate_generation_scale(scale);
+            }
+        }
+    }
+
     /// Capture mutable nonlinear evaluation state before probing trial residuals.
     ///
     /// Newton line-search and fallback merit functions evaluate rejected trial

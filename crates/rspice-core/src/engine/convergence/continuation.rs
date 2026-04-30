@@ -325,12 +325,13 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut solution = Self::normalize_initial_guess(initial_guess, size);
-        if Self::is_suspicious_solution(&solution) {
+        let node_count = circuit.num_nodes().min(size);
+        if Self::is_suspicious_solution(&solution, node_count) {
             solution.fill(0.0);
         }
         let mut anchor_solution = solution.clone();
-        Self::clamp_solution_to_physical_bounds(&mut solution);
-        Self::clamp_solution_to_physical_bounds(&mut anchor_solution);
+        Self::clamp_solution_to_physical_bounds(&mut solution, node_count);
+        Self::clamp_solution_to_physical_bounds(&mut anchor_solution, node_count);
 
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
@@ -386,7 +387,7 @@ impl Engine {
                     None,
                     false,
                 );
-                Self::clamp_solution_to_physical_bounds(&mut new_solution);
+                Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
                 let converged = self.node_voltage_convergence_met(
                     &solution,
@@ -454,10 +455,11 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut current_solution = Self::normalize_initial_guess(initial_guess, size);
-        if Self::is_suspicious_solution(&current_solution) {
+        let node_count = circuit.num_nodes().min(size);
+        if Self::is_suspicious_solution(&current_solution, node_count) {
             current_solution.fill(0.0);
         }
-        Self::clamp_solution_to_physical_bounds(&mut current_solution);
+        Self::clamp_solution_to_physical_bounds(&mut current_solution, node_count);
         let arc_newton_iters = self.continuation_iteration_budget(8, 16);
 
         let mut arc_cfg = ArcLengthConfig {
@@ -526,6 +528,141 @@ impl Engine {
         }
     }
 
+    /// Homotopy for stiff JFET-family gate generation-recombination branches.
+    ///
+    /// The final accepted point is always solved and validated with the full
+    /// branch strength. Intermediate scales only provide a smoother path to the
+    /// same operating-point equations.
+    pub(crate) fn gate_generation_stepping_nonlinear_with_abort(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<Value>, SimulationError> {
+        if !circuit.has_jfet_gate_generation_branches() {
+            return Err(SimulationError::ConvergenceFailed(0));
+        }
+
+        const INITIAL_STEP: Value = 0.02;
+        const MAX_STEP: Value = 0.2;
+        const MIN_STEP: Value = 1.0e-4;
+        const STEP_GROWTH: Value = 1.35;
+        const STEP_SHRINK: Value = 0.5;
+        const SCALE_EPS: Value = 1.0e-12;
+        const MAX_ATTEMPTS: usize = 512;
+
+        let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
+        let mut solution = Self::sanitize_initial_guess(initial_guess, size, node_count);
+        let mut damping_state = NewtonDampingState::default();
+        let corrector_iterations = self.continuation_iteration_budget(8, 16);
+        let mut total_iterations = 0usize;
+
+        circuit.set_jfet_gate_generation_scale(0.0);
+        let (relaxed_solution, relaxed_converged, relaxed_iterations) = self
+            .solve_scaled_nonlinear_corrector_with_seed_mode(
+                circuit,
+                matrix,
+                1.0,
+                &solution,
+                &mut damping_state,
+                corrector_iterations,
+                abort,
+                super::fallback::CorrectorSeedMode::Limited,
+            );
+        total_iterations = total_iterations.saturating_add(relaxed_iterations);
+        if abort.is_aborted() {
+            circuit.set_jfet_gate_generation_scale(1.0);
+            return Err(SimulationError::Aborted);
+        }
+        if !relaxed_converged {
+            circuit.set_jfet_gate_generation_scale(1.0);
+            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+        }
+        solution = relaxed_solution;
+
+        let mut accepted_scale = 0.0;
+        let mut scale_step = INITIAL_STEP;
+        let mut attempts = 0usize;
+
+        while accepted_scale < 1.0 - SCALE_EPS {
+            if attempts >= MAX_ATTEMPTS {
+                circuit.set_jfet_gate_generation_scale(1.0);
+                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            }
+            if Self::should_abort_iteration(abort, attempts) {
+                circuit.set_jfet_gate_generation_scale(1.0);
+                return Err(SimulationError::Aborted);
+            }
+
+            let target_scale = (accepted_scale + scale_step).min(1.0);
+            if target_scale <= accepted_scale + SCALE_EPS {
+                circuit.set_jfet_gate_generation_scale(1.0);
+                return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+            }
+
+            let accepted_state = circuit.nonlinear_state_snapshot();
+            let mut trial_damping_state = damping_state;
+            circuit.set_jfet_gate_generation_scale(target_scale);
+            let (candidate, converged, used_iterations) = self
+                .solve_scaled_nonlinear_corrector_with_seed_mode(
+                    circuit,
+                    matrix,
+                    1.0,
+                    &solution,
+                    &mut trial_damping_state,
+                    corrector_iterations,
+                    abort,
+                    super::fallback::CorrectorSeedMode::Limited,
+                );
+            total_iterations = total_iterations.saturating_add(used_iterations);
+
+            if abort.is_aborted() {
+                circuit.set_jfet_gate_generation_scale(1.0);
+                return Err(SimulationError::Aborted);
+            }
+
+            if converged {
+                solution = candidate;
+                accepted_scale = target_scale;
+                damping_state = trial_damping_state;
+                scale_step = (scale_step * STEP_GROWTH).min(MAX_STEP);
+            } else {
+                circuit.restore_nonlinear_state(accepted_state);
+                scale_step *= STEP_SHRINK;
+                if scale_step < MIN_STEP {
+                    circuit.set_jfet_gate_generation_scale(1.0);
+                    return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+                }
+            }
+
+            attempts += 1;
+        }
+
+        circuit.set_jfet_gate_generation_scale(1.0);
+        let (polished, converged, polish_iterations) = self
+            .solve_scaled_nonlinear_corrector_with_seed_mode(
+                circuit,
+                matrix,
+                1.0,
+                &solution,
+                &mut damping_state,
+                corrector_iterations,
+                abort,
+                super::fallback::CorrectorSeedMode::Limited,
+            );
+        total_iterations = total_iterations.saturating_add(polish_iterations);
+        if abort.is_aborted() {
+            return Err(SimulationError::Aborted);
+        }
+        if !converged {
+            return Err(SimulationError::ConvergenceFailed(total_iterations.max(1)));
+        }
+
+        Ok(polished)
+    }
+
     /// GMIN stepping for very difficult nonlinear circuits
     ///
     /// GMIN stepping starts with a large GMIN (1e-3) added to each node,
@@ -553,11 +690,13 @@ impl Engine {
         let gmin_scales = self.gmin_nonlinear_schedule();
 
         let size = circuit.matrix_size();
+        let node_count = circuit.num_nodes().min(size);
 
         // Check for suspicious values - not just clamped at Â±999V but also
         // suspiciously uniform values that indicate failed source stepping.
         // Reset to zero if the guess looks like garbage.
-        let is_garbage = Self::has_suspicious_uniformity(initial_guess);
+        let node_guess_len = node_count.min(initial_guess.len());
+        let is_garbage = Self::has_suspicious_uniformity(&initial_guess[..node_guess_len]);
 
         let mut solution: Vec<Value> = if is_garbage {
             log::debug!("GMIN stepping: resetting garbage initial guess to zero");
@@ -565,7 +704,14 @@ impl Engine {
         } else {
             initial_guess
                 .iter()
-                .map(|&v| if v.abs() >= 999.0 { 0.0 } else { v })
+                .enumerate()
+                .map(|(idx, &v)| {
+                    if idx < node_count && v.abs() >= 999.0 {
+                        0.0
+                    } else {
+                        v
+                    }
+                })
                 .collect()
         };
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
@@ -628,7 +774,7 @@ impl Engine {
                             None,
                             false,
                         );
-                        Self::clamp_solution_to_physical_bounds(&mut new_solution);
+                        Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
                         let converged = self.node_voltage_convergence_met(
                             &solution,
@@ -691,10 +837,12 @@ impl Engine {
         );
 
         // Final check: detect both clamped values and suspicious uniformity
-        let has_clamped = solution.iter().any(|&v| v.abs() >= 999.0);
+        let has_clamped = Self::has_clamped_values(&solution, node_count);
 
         // Check for suspicious uniformity (same issue as source stepping)
-        let has_suspicious_uniformity = Self::has_suspicious_uniformity(&solution);
+        let final_node_count = node_count.min(solution.len());
+        let has_suspicious_uniformity =
+            Self::has_suspicious_uniformity(&solution[..final_node_count]);
 
         if has_clamped {
             log::warn!(

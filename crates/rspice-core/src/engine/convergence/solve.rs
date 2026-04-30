@@ -127,7 +127,7 @@ impl Engine {
         // Sanitize any warm-start seed before Newton so pathological presolve
         // artifacts do not launch the iteration from physically impossible rails.
         let mut solution = initial_guess
-            .map(|guess| Self::sanitize_initial_guess(guess, size))
+            .map(|guess| Self::sanitize_initial_guess(guess, size, circuit.num_nodes().min(size)))
             .unwrap_or_else(|| vec![0.0; size]);
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
         let startup_seed = solution.clone();
@@ -208,7 +208,8 @@ impl Engine {
                         i + 1
                     );
                     *v = 0.0; // Replace NaN/Inf with zero
-                } else if requires_conservative_nonlinear_limiting
+                } else if i < node_count
+                    && requires_conservative_nonlinear_limiting
                     && v.abs() > Self::MAX_NODE_VOLTAGE
                 {
                     if !hit_voltage_limit {
@@ -318,6 +319,49 @@ impl Engine {
         let zero_seed = vec![0.0; solution.len()];
         let mut fallback_seed =
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0);
+        let prefer_gate_generation_aids = circuit.has_jfet_gate_generation_branches();
+        let mut gmin_attempted = false;
+
+        if prefer_gate_generation_aids && allow_gmin {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            gmin_attempted = true;
+            match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
+                Ok(gmin_solution) => {
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        gmin_solution.clone(),
+                        "GMIN stepping",
+                        abort,
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &gmin_solution,
+                        1.0,
+                    );
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
+                        log::info!(
+                            "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                }
+                Err(e) => {
+                    log::warn!(
+                        "Early GMIN stepping for gate generation branch failed with {}. Continuing with configured aids.",
+                        e
+                    );
+                }
+            }
+        }
 
         if allow_source {
             if abort.is_aborted() {
@@ -425,7 +469,7 @@ impl Engine {
             }
         }
 
-        if allow_gmin {
+        if allow_gmin && !gmin_attempted {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
@@ -462,6 +506,57 @@ impl Engine {
                     }
                     log::warn!(
                         "GMIN stepping failed with {}. Escalating to arc-length continuation.",
+                        e
+                    );
+                }
+            }
+        }
+
+        if circuit.has_jfet_gate_generation_branches() {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match self.gate_generation_stepping_nonlinear_with_abort(
+                circuit,
+                matrix,
+                &fallback_seed,
+                abort,
+            ) {
+                Ok(gate_solution) => {
+                    log::info!(
+                        "Gate generation continuation produced a DC operating-point candidate."
+                    );
+                    if let Some(candidate) = self.evaluate_fallback_candidate(
+                        circuit,
+                        matrix,
+                        gate_solution.clone(),
+                        "Gate generation continuation",
+                        abort,
+                    ) {
+                        return Ok(candidate);
+                    }
+                    fallback_seed = self.prefer_lower_merit_scaled_seed(
+                        circuit,
+                        matrix,
+                        &fallback_seed,
+                        &gate_solution,
+                        1.0,
+                    );
+                    if let Some(restarted) =
+                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)
+                    {
+                        log::info!(
+                            "Gate generation continuation warmed the nonlinear state; direct Newton restart accepted."
+                        );
+                        return Ok(restarted);
+                    }
+                }
+                Err(e) => {
+                    if !allow_arc {
+                        return Err(e);
+                    }
+                    log::warn!(
+                        "Gate generation continuation failed with {}. Escalating to arc-length continuation.",
                         e
                     );
                 }
@@ -547,7 +642,7 @@ impl Engine {
             solution[node_id - 1] = voltage;
         }
 
-        solution = Self::sanitize_initial_guess(&solution, size);
+        solution = Self::sanitize_initial_guess(&solution, size, circuit.num_nodes().min(size));
         Self::apply_bjt_initial_guess_correction(&mut solution, circuit);
         self.prime_operating_point_seed(
             circuit,
@@ -612,7 +707,10 @@ impl Engine {
                     false,
                 );
             }
-            Self::clamp_solution_to_physical_bounds(&mut new_solution);
+            Self::clamp_solution_to_physical_bounds(
+                &mut new_solution,
+                circuit.num_nodes().min(size),
+            );
 
             let voltage_converged =
                 self.node_voltage_convergence_met(&solution, &new_solution, circuit.num_nodes());

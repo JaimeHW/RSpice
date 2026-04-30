@@ -4,8 +4,15 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::convergence) fn has_clamped_values(solution: &[Value]) -> bool {
-        solution.iter().any(|&v| !v.is_finite() || v.abs() >= 999.0)
+    pub(in crate::engine::convergence) fn has_clamped_values(
+        solution: &[Value],
+        node_count: usize,
+    ) -> bool {
+        solution.iter().any(|&v| !v.is_finite())
+            || solution
+                .iter()
+                .take(node_count.min(solution.len()))
+                .any(|&v| v.abs() >= 999.0)
     }
 
     #[inline]
@@ -42,8 +49,13 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn is_suspicious_solution(solution: &[Value]) -> bool {
-        Self::has_clamped_values(solution) || Self::has_suspicious_uniformity(solution)
+    pub(in crate::engine::convergence) fn is_suspicious_solution(
+        solution: &[Value],
+        node_count: usize,
+    ) -> bool {
+        let node_limit = node_count.min(solution.len());
+        Self::has_clamped_values(solution, node_limit)
+            || Self::has_suspicious_uniformity(&solution[..node_limit])
     }
 
     #[inline]
@@ -199,11 +211,17 @@ impl Engine {
 
     pub(in crate::engine::convergence) fn clamp_solution_to_physical_bounds(
         solution: &mut [Value],
+        node_count: usize,
     ) {
         for v in solution.iter_mut() {
             if !v.is_finite() {
                 *v = 0.0;
-            } else if v.abs() > Self::MAX_NODE_VOLTAGE {
+            }
+        }
+
+        let node_limit = node_count.min(solution.len());
+        for v in solution.iter_mut().take(node_limit) {
+            if v.abs() > Self::MAX_NODE_VOLTAGE {
                 *v = v.signum() * Self::MAX_NODE_VOLTAGE;
             }
         }
@@ -345,8 +363,36 @@ impl Engine {
 
         let fixed_point_converged =
             self.node_voltage_convergence_met(solution, &next_solution, circuit.num_nodes());
+        let residual_only_acceptable =
+            residual_converged && circuit.has_jfet_gate_generation_branches();
         circuit.restore_nonlinear_state(snapshot);
 
-        residual_converged && fixed_point_converged
+        residual_converged && (fixed_point_converged || residual_only_acceptable)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn physical_clamp_only_limits_node_voltage_unknowns() {
+        let mut solution = vec![1500.0, -1500.0, 2500.0, -2500.0];
+
+        Engine::clamp_solution_to_physical_bounds(&mut solution, 2);
+
+        assert_eq!(solution[0], Engine::MAX_NODE_VOLTAGE);
+        assert_eq!(solution[1], -Engine::MAX_NODE_VOLTAGE);
+        assert_eq!(solution[2], 2500.0);
+        assert_eq!(solution[3], -2500.0);
+    }
+
+    #[test]
+    fn physical_clamp_replaces_non_finite_unknowns_everywhere() {
+        let mut solution = vec![0.0, Value::NAN, Value::INFINITY];
+
+        Engine::clamp_solution_to_physical_bounds(&mut solution, 1);
+
+        assert_eq!(solution, vec![0.0, 0.0, 0.0]);
     }
 }

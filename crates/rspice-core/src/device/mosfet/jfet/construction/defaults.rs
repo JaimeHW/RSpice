@@ -46,6 +46,7 @@ impl Jfet {
             hfet_legacy_inverse_mode: false,
             hfet_legacy_inverse_active: false,
             junction_gmin: 1.0e-12,
+            gate_generation_scale: 1.0,
             indices: JfetIndices::default(),
         }
     }
@@ -95,6 +96,7 @@ impl Jfet {
             hfet_legacy_inverse_mode: false,
             hfet_legacy_inverse_active: false,
             junction_gmin: 1.0e-12,
+            gate_generation_scale: 1.0,
             indices: JfetIndices::default(),
         }
     }

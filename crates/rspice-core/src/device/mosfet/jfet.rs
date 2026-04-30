@@ -364,6 +364,8 @@ pub struct Jfet {
     hfet_legacy_inverse_active: bool,
     /// Device-local junction GMIN used by ngspice-style gate diode loading.
     junction_gmin: Value,
+    /// Continuation scale for stiff gate generation-recombination branches.
+    gate_generation_scale: Value,
     /// Pre-computed matrix indices for O(1) direct stamping
     pub indices: JfetIndices,
 }

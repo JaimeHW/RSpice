@@ -229,7 +229,8 @@ impl Jfet {
         };
 
         // ngspice HFET generation-recombination branch: GGRWL * v * exp(-v*DEL/vt)
-        let ggrwl = self.params.hfet_ggr.max(0.0) * scale;
+        let ggrwl =
+            self.params.hfet_ggr.max(0.0) * self.gate_generation_scale.clamp(0.0, 1.0) * scale;
         if ggrwl > 0.0 {
             let arg = -v_int * self.params.hfet_del / vt;
             let arg_eff = arg.clamp(-80.0, 80.0);
@@ -264,6 +265,7 @@ impl Jfet {
         let texp = (-phib / (K_BOLTZMANN * temp_k)).clamp(-80.0, 80.0).exp();
         let csat = 0.5 * astar * temp_k * temp_k * texp * 2.0 * scale;
         let ggrwl = self.params.hfet_ggr.max(0.0)
+            * self.gate_generation_scale.clamp(0.0, 1.0)
             * 2.0
             * scale
             * (self.params.mesa_xchi * (temp_k - self.params.tnom)).exp();
@@ -348,6 +350,30 @@ impl Jfet {
         };
         if self.junction_gmin != gmin {
             self.junction_gmin = gmin;
+            self.eval_valid = false;
+            self.last_raw_vgs = Value::NAN;
+            self.last_raw_vgd = Value::NAN;
+            self.last_raw_vgs_prev = Value::NAN;
+            self.last_raw_vgd_prev = Value::NAN;
+        }
+    }
+
+    #[inline]
+    pub(crate) fn has_gate_generation_branch(&self) -> bool {
+        matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_ggr.is_finite()
+            && self.params.hfet_ggr > 0.0
+    }
+
+    #[inline]
+    pub(crate) fn set_gate_generation_scale(&mut self, scale: Value) {
+        let scale = if scale.is_finite() {
+            scale.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if (self.gate_generation_scale - scale).abs() > Value::EPSILON {
+            self.gate_generation_scale = scale;
             self.eval_valid = false;
             self.last_raw_vgs = Value::NAN;
             self.last_raw_vgd = Value::NAN;
