@@ -111,7 +111,7 @@ pub fn resolve_simulation_config(
                 residual_reltol = reltol;
             }
         }
-        if let Some(vntol) = opts.vntol.or(opts.abstol) {
+        if let Some(vntol) = opts.vntol {
             voltage_abstol = vntol;
         }
         if let Some(iabstol) = opts.iabstol.or(opts.abstol) {
@@ -212,5 +212,45 @@ fn parse_integration_method_option(method: &str) -> Option<IntegrationMethod> {
         Some(IntegrationMethod::TrapGear)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deck_abstol_updates_current_tolerance_only() {
+        let mut base = SimulationConfig::default();
+        base.convergence_config.voltage_abstol = 1.0e-6;
+        base.convergence_config.current_abstol = 1.0e-12;
+
+        let options = NetlistSimulationOptions {
+            abstol: Some(5.0e-9),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+
+        assert_eq!(resolved.convergence_config.voltage_abstol, 1.0e-6);
+        assert_eq!(resolved.convergence_config.current_abstol, 5.0e-9);
+    }
+
+    #[test]
+    fn deck_vntol_and_iabstol_remain_independent() {
+        let base = SimulationConfig::default();
+        let options = NetlistSimulationOptions {
+            abstol: Some(5.0e-9),
+            vntol: Some(2.0e-6),
+            iabstol: Some(7.0e-12),
+            ..Default::default()
+        };
+
+        let resolved =
+            resolve_simulation_config(&base, Some(&options), &SimulationConfigOverrides::default());
+
+        assert_eq!(resolved.convergence_config.voltage_abstol, 2.0e-6);
+        assert_eq!(resolved.convergence_config.current_abstol, 7.0e-12);
     }
 }
