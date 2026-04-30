@@ -303,7 +303,25 @@ impl Jfet {
                     let (igd_int, ggd) = self.mesa_gate_branch(vgd_int, temp_drain);
                     (igs_int, ggs, igd_int, ggd)
                 } else if !self.params.hfet_gatemod {
-                    (0.0, 0.0, 0.0, 0.0)
+                    let (igs_int, ggs) = self.hfet_gate_branch(
+                        vgs_int,
+                        temp_source,
+                        self.params.hfet_js1s,
+                        self.params.hfet_js2s,
+                        self.params.hfet_m1s,
+                        self.params.hfet_m2s,
+                        self.params.hfet_rgs,
+                    );
+                    let (igd_int, ggd) = self.hfet_gate_branch(
+                        vgd_int,
+                        temp_drain,
+                        self.params.hfet_js1d,
+                        self.params.hfet_js2d,
+                        self.params.hfet_m1d,
+                        self.params.hfet_m2d,
+                        self.params.hfet_rgd,
+                    );
+                    (igs_int, ggs, igd_int, ggd)
                 } else {
                     let (igs_int, ggs) = self.hfet_gate_branch(
                         vgs_int,

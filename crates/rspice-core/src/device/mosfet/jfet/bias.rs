@@ -360,8 +360,8 @@ impl Jfet {
 
     #[inline]
     pub(crate) fn has_gate_generation_branch(&self) -> bool {
-        let gate_model_active = matches!(self.params.hfet_level, 2..=4)
-            || (self.params.hfet_level >= 5 && self.params.hfet_gatemod);
+        let gate_model_active =
+            matches!(self.params.hfet_level, 2..=4) || self.params.hfet_level >= 5;
         matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && gate_model_active
             && self.params.hfet_ggr.is_finite()
