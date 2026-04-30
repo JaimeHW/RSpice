@@ -2199,6 +2199,25 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_capacitor_truncation_limit = if !circuit.capacitors.is_empty()
+                    {
+                        Self::capacitor_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            mosfet_history.accepted_dt_prev,
+                            mosfet_history.accepted_dt_prev_prev,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            NGSPICE_DEFAULT_TRTOL,
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -2219,7 +2238,10 @@ impl Engine {
                         };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
-                            force_accept_bjt_truncation_limit,
+                            Self::min_truncation_limit(
+                                force_accept_capacitor_truncation_limit,
+                                force_accept_bjt_truncation_limit,
+                            ),
                             force_accept_jfet_truncation_limit,
                         ),
                         force_accept_mosfet_truncation_limit,
