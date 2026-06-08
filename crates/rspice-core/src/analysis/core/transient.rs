@@ -220,6 +220,9 @@ const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 /// Tolerance for detecting exact breakpoint landing
 const BREAKPOINT_TOLERANCE: Value = 1e-15;
 
+/// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
+const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
+
 /// Breakpoint manager for handling discontinuities
 ///
 /// Ensures solver lands exactly on breakpoints and restarts from the same
@@ -301,14 +304,25 @@ impl BreakpointManager {
     ///
     /// Returns (adjusted_dt, will_land_on_breakpoint)
     pub fn limit_step(&mut self, current_time: Value, proposed_dt: Value) -> (Value, bool) {
+        if !current_time.is_finite() || !proposed_dt.is_finite() || proposed_dt <= 0.0 {
+            return (proposed_dt, false);
+        }
+
         match self.next_after(current_time) {
             Some(bp) => {
                 let time_to_bp = bp - current_time;
+                if !time_to_bp.is_finite() || time_to_bp <= 0.0 {
+                    return (proposed_dt, false);
+                }
 
-                if proposed_dt >= time_to_bp {
+                if current_time + proposed_dt >= bp {
                     self.saved_delta_before_breakpoint = Some(proposed_dt);
                     self.just_passed_breakpoint = false;
                     (time_to_bp, true)
+                } else if current_time + BREAKPOINT_EQUALIZATION_FACTOR * proposed_dt > bp {
+                    self.saved_delta_before_breakpoint = Some(proposed_dt);
+                    self.just_passed_breakpoint = false;
+                    (time_to_bp / 2.0, false)
                 } else {
                     (proposed_dt, false)
                 }
@@ -372,6 +386,69 @@ impl BreakpointManager {
     /// Borrow the sorted breakpoint schedule.
     pub fn times(&self) -> &[Value] {
         &self.breakpoints
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_manager_tests {
+    use super::*;
+
+    #[test]
+    fn limit_step_direct_hit_lands_on_breakpoint() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+        assert!(!breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn limit_step_equalizes_last_two_steps_without_marking_breakpoint_hit() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, 6.0);
+
+        assert_eq!(dt, 5.0);
+        assert!(!lands_on_breakpoint);
+        assert!(!breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn limit_step_keeps_ordinary_step_before_equalization_window() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, 5.0);
+
+        assert_eq!(dt, 5.0);
+        assert!(!lands_on_breakpoint);
+        assert!(!breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn limit_step_ignores_non_positive_or_non_finite_inputs() {
+        let mut breakpoints = BreakpointManager::new();
+        breakpoints.add(10.0);
+
+        for proposed_dt in [0.0, -1.0, Value::INFINITY, Value::NAN] {
+            let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, proposed_dt);
+
+            if proposed_dt.is_nan() {
+                assert!(dt.is_nan());
+            } else {
+                assert_eq!(dt, proposed_dt);
+            }
+            assert!(!lands_on_breakpoint);
+        }
+
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(Value::INFINITY, 1.0);
+
+        assert_eq!(dt, 1.0);
+        assert!(!lands_on_breakpoint);
     }
 }
 
