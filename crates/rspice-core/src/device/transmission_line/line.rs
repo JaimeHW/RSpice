@@ -540,6 +540,11 @@ impl TransmissionLine {
     }
 
     #[inline]
+    fn ltra_current_input(v: Value, i: Value, admittance: Value, attenuation: Value) -> Value {
+        (v * admittance + i) * attenuation
+    }
+
+    #[inline]
     fn ltra_wave_is_steady(v1: Value, v2: Value, v3: Value, reltol: Value, abstol: Value) -> bool {
         let max = v1.max(v2).max(v3);
         let min = v1.min(v2).min(v3);
@@ -573,6 +578,58 @@ impl TransmissionLine {
         let threshold = deriv_reltol * d_curr.abs().max(d_prev.abs()) + deriv_abstol;
         (d_curr - d_prev).abs() >= threshold
             && !Self::ltra_wave_is_steady(v_curr, v_prev, v_prev2, voltage_reltol, steady_abstol)
+    }
+
+    /// Return the ngspice LTRA candidate-step truncation limit for scalar RLC lines.
+    pub(crate) fn ltra_candidate_truncation_limit(
+        &self,
+        candidate_time: Value,
+        candidate_v1: Value,
+        candidate_i1: Value,
+        candidate_v2: Value,
+        candidate_i2: Value,
+    ) -> Option<Value> {
+        let kernel = self.distributed_rlc.as_ref()?;
+        let mut limit = kernel.max_safe_step;
+
+        let len = self.state_history.len();
+        if len < 2 {
+            return (limit.is_finite() && limit > 0.0).then_some(limit);
+        }
+
+        let curr = self.state_history.get(len - 1)?;
+        let prev = self.state_history.get(len - 2)?;
+        let candidate_dt = candidate_time - curr.time;
+        let prev_dt = curr.time - prev.time;
+        if !(candidate_dt.is_finite() && candidate_dt > 0.0 && prev_dt.is_finite() && prev_dt > 0.0)
+        {
+            return (limit.is_finite() && limit > 0.0).then_some(limit);
+        }
+
+        let admit = self.conductance();
+        let candidate_port2 =
+            Self::ltra_current_input(candidate_v2, candidate_i2, admit, kernel.attenuation);
+        let curr_port2 = Self::ltra_current_input(curr.v2, curr.i2, admit, kernel.attenuation);
+        let prev_port2 = Self::ltra_current_input(prev.v2, prev.i2, admit, kernel.attenuation);
+        let candidate_port1 =
+            Self::ltra_current_input(candidate_v1, candidate_i1, admit, kernel.attenuation);
+        let curr_port1 = Self::ltra_current_input(curr.v1, curr.i1, admit, kernel.attenuation);
+        let prev_port1 = Self::ltra_current_input(prev.v1, prev.i1, admit, kernel.attenuation);
+
+        let d1 = (candidate_port2 - curr_port2) / candidate_dt;
+        let d2 = (curr_port2 - prev_port2) / prev_dt;
+        let d3 = (candidate_port1 - curr_port1) / candidate_dt;
+        let d4 = (curr_port1 - prev_port1) / prev_dt;
+
+        let port2_changed = (d1 - d2).abs()
+            >= self.ltra_breakpoint_reltol * d1.abs().max(d2.abs()) + self.ltra_breakpoint_abstol;
+        let port1_changed = (d3 - d4).abs()
+            >= self.ltra_breakpoint_reltol * d3.abs().max(d4.abs()) + self.ltra_breakpoint_abstol;
+        if port1_changed || port2_changed {
+            limit = limit.min(self.td);
+        }
+
+        (limit.is_finite() && limit > 0.0).then_some(limit)
     }
 
     /// Return the ngspice LTRA derivative breakpoint arrival time, if needed.
@@ -1049,6 +1106,45 @@ mod tests {
             reltol,
             voltage_abstol,
         ));
+    }
+
+    #[test]
+    fn ltra_candidate_truncation_keeps_max_safe_step_without_history_pair() {
+        let line = distributed_line(&[(0.0, 0.0)]);
+        let limit = line
+            .ltra_candidate_truncation_limit(0.1, 0.0, 0.0, 0.0, 0.0)
+            .unwrap();
+
+        assert_close(limit, line.distributed_rlgc_max_safe_step().unwrap());
+    }
+
+    #[test]
+    fn ltra_candidate_truncation_cuts_to_delay_on_derivative_change() {
+        let mut line = distributed_line(&[(0.0, 0.0), (1.0, 0.0)]);
+        line.distributed_rlc.as_mut().unwrap().max_safe_step = 2.0;
+        line.set_ltra_breakpoint_tolerances(0.0, 0.5);
+
+        let limit = line
+            .ltra_candidate_truncation_limit(2.0, 2.0, 0.0, 0.0, 0.0)
+            .unwrap();
+
+        assert_close(limit, line.delay());
+    }
+
+    #[test]
+    fn ltra_candidate_truncation_uses_current_like_input() {
+        let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 2.0, 1.0);
+        line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
+        line.distributed_rlc.as_mut().unwrap().max_safe_step = 2.0;
+        line.set_ltra_breakpoint_tolerances(0.0, 0.1);
+        line.update_history(0.0, 0.0, 0.0, 0.0, 0.0);
+        line.update_history(1.0, 0.0, 0.0, 2.0, -1.0);
+
+        let limit = line
+            .ltra_candidate_truncation_limit(2.0, 0.0, 0.0, 4.0, -2.0)
+            .unwrap();
+
+        assert_close(limit, 2.0);
     }
 
     #[test]

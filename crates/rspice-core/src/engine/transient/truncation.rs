@@ -723,6 +723,38 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn ltra_candidate_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        candidate_time: Value,
+    ) -> Option<Value> {
+        let mut limit = Value::INFINITY;
+        let mut found_line = false;
+
+        for tl in &circuit.tlines {
+            let Some((br1, br2)) = tl.ltra_branch_matrix_indices() else {
+                continue;
+            };
+
+            let v1 = Self::differential_voltage(candidate_solution, tl.node1_pos, tl.node1_neg);
+            let v2 = Self::differential_voltage(candidate_solution, tl.node2_pos, tl.node2_neg);
+            let i1 = candidate_solution.get(br1 - 1).copied().unwrap_or(0.0);
+            let i2 = candidate_solution.get(br2 - 1).copied().unwrap_or(0.0);
+            let Some(line_limit) = tl
+                .ltra_candidate_truncation_limit(candidate_time, v1, i1, v2, i2)
+                .filter(|line_limit| line_limit.is_finite() && *line_limit > 0.0)
+            else {
+                continue;
+            };
+
+            limit = limit.min(line_limit);
+            found_line = true;
+        }
+
+        found_line.then_some(limit)
+    }
+
+    #[inline]
     #[allow(clippy::too_many_arguments)]
     pub(super) fn ngspice_device_truncation_limit(
         circuit: &crate::circuit::Circuit,

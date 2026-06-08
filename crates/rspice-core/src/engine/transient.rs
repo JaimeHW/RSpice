@@ -1866,8 +1866,15 @@ impl Engine {
                 ),
                 mosfet_truncation_limit,
             );
+            let ltra_truncation_limit = if !first_accepted_transient_step {
+                Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
+            } else {
+                None
+            };
+            let candidate_truncation_limit =
+                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit);
 
-            if let Some(limit) = device_truncation_limit
+            if let Some(limit) = candidate_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
             {
                 let retry_dt = limit.clamp(timestep.hard_min_dt(), max_step);
@@ -1880,7 +1887,7 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 20 {
                         log::warn!(
-                            "Device charge truncation reached minimum retry step at t={:.6e}, dt={:.3e}, limit={:.3e}, retry_count={}; accepting converged solution",
+                            "Candidate truncation reached minimum retry step at t={:.6e}, dt={:.3e}, limit={:.3e}, retry_count={}; accepting converged solution",
                             t,
                             dt,
                             limit,
@@ -1894,7 +1901,7 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::warn!(
-                            "Device charge truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, mos={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
@@ -1902,6 +1909,7 @@ impl Engine {
                             bjt_truncation_limit,
                             jfet_truncation_limit,
                             mosfet_truncation_limit,
+                            ltra_truncation_limit,
                             current_method,
                             step_trap_order
                         );
@@ -2523,14 +2531,14 @@ impl Engine {
                 timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
             }
             if !first_accepted_transient_step
-                && let Some(limit) = device_truncation_limit
+                && let Some(limit) = candidate_truncation_limit
                 && limit.is_finite()
                 && limit > 0.0
                 && limit + 1e-18 < timestep.dt()
             {
                 if t > 9.5e-8 && dt < 1.0e-15 {
                     log::warn!(
-                        "Device post-accept timestep cap at t={:.12e}, accepted_dt={:.3e}, requested_next={:.3e}, limit={:.3e}, order={}",
+                        "Candidate post-accept timestep cap at t={:.12e}, accepted_dt={:.3e}, requested_next={:.3e}, limit={:.3e}, order={}",
                         t,
                         dt,
                         timestep.dt(),
