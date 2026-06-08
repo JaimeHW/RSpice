@@ -297,6 +297,18 @@ impl Engine {
         engine.run_tran_with_abort_resolved(netlist, tstop, max_step, abort)
     }
 
+    #[inline]
+    fn should_enable_nonlinear_source_ramp_cap(
+        circuit: &crate::circuit::Circuit,
+        requires_conservative_nonlinear_limiting: bool,
+    ) -> bool {
+        // Native TXL keeps its own accepted-point history and is governed by
+        // transmission-line breakpoints/truncation. Otherwise, keep the nonlinear
+        // source-ramp limiter active, including for distributed-RLGC/LTRA scalar lines.
+        requires_conservative_nonlinear_limiting
+            && !circuit.tlines.iter().any(|tl| tl.has_txl_runtime())
+    }
+
     fn run_tran_with_abort_resolved(
         &self,
         netlist: &Netlist,
@@ -364,6 +376,10 @@ impl Engine {
                 }
             };
         let requires_conservative_nonlinear_limiting = circuit.has_physical_nonlinear_devices();
+        let nonlinear_source_ramp_cap_enabled = Self::should_enable_nonlinear_source_ramp_cap(
+            &circuit,
+            requires_conservative_nonlinear_limiting,
+        );
         let enforce_force_candidate_safety =
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient =
@@ -645,7 +661,7 @@ impl Engine {
                 practical_min,
                 timestep.preferred_min_dt(),
                 Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                requires_conservative_nonlinear_limiting,
+                nonlinear_source_ramp_cap_enabled,
             );
             if biased_dt + 1e-30 < dt {
                 dt = biased_dt;
@@ -2636,5 +2652,43 @@ impl Engine {
         let mut compressed = recorder.to_transient_result();
         compressed.node_names = result.node_names.clone();
         Ok(compressed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scalar_line(name: &str) -> crate::device::TransmissionLine {
+        crate::device::TransmissionLine::new(name.to_string(), 1, 0, 2, 0, 50.0, 1.0e-9)
+    }
+
+    #[test]
+    fn transmission_source_ramp_cap_is_disabled_only_for_native_txl() {
+        let circuit = crate::circuit::Circuit::new();
+        assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
+            &circuit, false
+        ));
+        assert!(Engine::should_enable_nonlinear_source_ramp_cap(
+            &circuit, true
+        ));
+
+        let mut ltra_circuit = crate::circuit::Circuit::new();
+        let mut ltra_line = scalar_line("TLTRA");
+        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
+        ltra_circuit.tlines.push(ltra_line);
+        assert!(Engine::should_enable_nonlinear_source_ramp_cap(
+            &ltra_circuit,
+            true
+        ));
+
+        let mut txl_circuit = crate::circuit::Circuit::new();
+        let mut txl_line = scalar_line("TTXL");
+        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        txl_circuit.tlines.push(txl_line);
+        assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
+            &txl_circuit,
+            true
+        ));
     }
 }
