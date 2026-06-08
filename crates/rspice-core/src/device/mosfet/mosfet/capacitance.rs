@@ -51,15 +51,17 @@ impl Mosfet {
     }
 
     #[inline]
+    pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_length(&self) -> Value {
+        match self.level {
+            1 | 6 => self.level6_effective_length(),
+            2 => self.level2_effective_length(),
+            _ => self.l,
+        }
+    }
+
+    #[inline]
     pub(in crate::device::mosfet::mosfet) fn oxide_capacitance_total(&self) -> Value {
-        let channel_length = if self.level == 2 {
-            self.level2_effective_length()
-        } else if self.level == 6 {
-            self.level6_effective_length()
-        } else {
-            self.l
-        };
-        self.cox * self.w * channel_length
+        self.cox * self.w * self.classic_meyer_effective_length()
     }
 
     #[inline]
@@ -194,14 +196,7 @@ impl Mosfet {
         let cgs = self.cgso * self.w;
         // Cgd_overlap = CGDO * W
         let cgd = self.cgdo * self.w;
-        // MOS2 and MOS6 use effective channel length for gate-bulk overlap.
-        let cgb_length = if self.level == 2 {
-            self.level2_effective_length()
-        } else if self.level == 6 {
-            self.level6_effective_length()
-        } else {
-            self.l
-        };
+        let cgb_length = self.classic_meyer_effective_length();
         let cgb = self.cgbo * cgb_length;
 
         (cgs, cgd, cgb)
@@ -220,14 +215,7 @@ impl Mosfet {
         let (cgs_ov, cgd_ov, cgb_ov) = self.overlap_capacitances();
 
         // Intrinsic gate oxide capacitance
-        let channel_length = if self.level == 2 {
-            self.level2_effective_length()
-        } else if self.level == 6 {
-            self.level6_effective_length()
-        } else {
-            self.l
-        };
-        let cox_wl = self.cox * self.w * channel_length;
+        let cox_wl = self.cox * self.w * self.classic_meyer_effective_length();
 
         // Determine operating region from stored values
         let vgs_eff = self.polarity() * self.vgs;
@@ -284,5 +272,25 @@ impl Mosfet {
         }
 
         self.limited_branch_voltages_for_eval(vgs, vds, vbs)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level1_meyer_capacitance_uses_lateral_diffusion_effective_length() {
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0);
+        mos.level = 1;
+        mos.l = 1.2e-6;
+        mos.w = 5.0e-6;
+        mos.ld = 0.1e-6;
+        mos.cox = 1.742e-3;
+        mos.cgbo = 4.0e-10;
+
+        let leff = mos.l - 2.0 * mos.ld;
+        assert!((mos.oxide_capacitance_total() - mos.cox * mos.w * leff).abs() < 1.0e-30);
+        assert!((mos.overlap_capacitances().2 - mos.cgbo * leff).abs() < 1.0e-30);
     }
 }
