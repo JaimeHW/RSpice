@@ -1110,6 +1110,19 @@ impl Engine {
                                 params.rel.unwrap_or(1.0),
                                 params.abs.unwrap_or(1.0),
                             );
+                            if !params.is_txl() {
+                                match params.ltra_interpolation {
+                                    LtraInterpolationMode::Linear => {
+                                        tline.set_ltra_linear_interpolation()
+                                    }
+                                    LtraInterpolationMode::Quadratic => {
+                                        tline.set_ltra_quadratic_interpolation()
+                                    }
+                                    LtraInterpolationMode::Mixed => {
+                                        tline.set_ltra_mixed_interpolation()
+                                    }
+                                }
+                            }
                         }
                         let native_txl = if allow_native_txl
                             && !txl_lossless_branch

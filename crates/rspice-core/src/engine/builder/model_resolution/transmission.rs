@@ -14,6 +14,21 @@ impl Default for TransmissionLineModelKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine::builder) enum LtraInterpolationMode {
+    Linear,
+    Quadratic,
+    Mixed,
+}
+
+impl Default for LtraInterpolationMode {
+    fn default() -> Self {
+        // Ngspice's no-flag setup uses quadratic unless global LTRA history
+        // compaction is enabled; RSpice does not implement that compaction yet.
+        Self::Quadratic
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) kind: TransmissionLineModelKind,
@@ -32,6 +47,7 @@ pub(in crate::engine::builder) struct TransmissionLineModelParams {
     pub(in crate::engine::builder) abs: Option<f64>,
     pub(in crate::engine::builder) compactrel: Option<f64>,
     pub(in crate::engine::builder) compactabs: Option<f64>,
+    pub(in crate::engine::builder) ltra_interpolation: LtraInterpolationMode,
 }
 
 impl TransmissionLineModelParams {
@@ -56,6 +72,24 @@ impl TransmissionLineModelParams {
         let g = self.g.unwrap_or(0.0);
         g.is_finite() && g < 1.0e-2 && r / l < 5.0e5
     }
+}
+
+fn resolve_ltra_interpolation_mode(params: &[(String, f64)]) -> LtraInterpolationMode {
+    let mut mode = LtraInterpolationMode::default();
+    for (name, value) in params {
+        if !value.is_finite() || *value == 0.0 {
+            continue;
+        }
+
+        if name.eq_ignore_ascii_case("LININTERP") {
+            mode = LtraInterpolationMode::Linear;
+        } else if name.eq_ignore_ascii_case("QUADINTERP") {
+            mode = LtraInterpolationMode::Quadratic;
+        } else if name.eq_ignore_ascii_case("MIXEDINTERP") {
+            mode = LtraInterpolationMode::Mixed;
+        }
+    }
+    mode
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +136,7 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         abs: model_param(&model.params, &["ABS", "ABSTOL"]),
         compactrel: model_param(&model.params, &["COMPACTREL"]),
         compactabs: model_param(&model.params, &["COMPACTABS"]),
+        ltra_interpolation: resolve_ltra_interpolation_mode(&model.params),
     };
 
     if params.kind == TransmissionLineModelKind::Txl {
@@ -504,11 +539,50 @@ mod tests {
             .expect("CPL model exists")
     }
 
-    fn resolve_test_txl(source: &str) -> TransmissionLineModelParams {
+    fn resolve_test_tline(source: &str) -> TransmissionLineModelParams {
         let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
         resolve_tline_model_params(&netlist, "y")
-            .expect("TXL model resolves")
-            .expect("TXL model exists")
+            .expect("transmission-line model resolves")
+            .expect("transmission-line model exists")
+    }
+
+    fn resolve_test_txl(source: &str) -> TransmissionLineModelParams {
+        let params = resolve_test_tline(source);
+        assert_eq!(params.kind, TransmissionLineModelKind::Txl);
+        params
+    }
+
+    #[test]
+    fn ltra_interpolation_flags_select_requested_mode() {
+        let default = resolve_test_tline(
+            r#"title
+.model y ltra z0=50 td=1n
+.end
+"#,
+        );
+        let lin = resolve_test_tline(
+            r#"title
+.model y ltra z0=50 td=1n lininterp
+.end
+"#,
+        );
+        let quad = resolve_test_tline(
+            r#"title
+.model y ltra z0=50 td=1n quadinterp
+.end
+"#,
+        );
+        let mixed = resolve_test_tline(
+            r#"title
+.model y ltra z0=50 td=1n mixedinterp
+.end
+"#,
+        );
+
+        assert_eq!(default.ltra_interpolation, LtraInterpolationMode::Quadratic);
+        assert_eq!(lin.ltra_interpolation, LtraInterpolationMode::Linear);
+        assert_eq!(quad.ltra_interpolation, LtraInterpolationMode::Quadratic);
+        assert_eq!(mixed.ltra_interpolation, LtraInterpolationMode::Mixed);
     }
 
     #[test]

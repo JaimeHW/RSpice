@@ -9,6 +9,13 @@ struct TlineStateSample {
     i2: Value,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DelayedInterpolationMode {
+    Linear,
+    Quadratic,
+    Mixed,
+}
+
 #[derive(Debug, Clone)]
 pub struct TransmissionLine {
     /// Instance name
@@ -64,6 +71,8 @@ pub struct TransmissionLine {
     distributed_rlc: Option<DistributedRlcKernel>,
     /// Cached transient companion response for the current candidate time.
     distributed_rlc_cache: Cell<Option<(Value, TlineTransientResponse)>>,
+    /// Interpolation mode selected by ngspice LTRA model flags.
+    ltra_interpolation_mode: DelayedInterpolationMode,
     /// Relative derivative tolerance for ngspice-style LTRA breakpoints.
     ltra_breakpoint_reltol: Value,
     /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
@@ -126,7 +135,45 @@ impl TransmissionLine {
     }
 
     #[inline]
-    fn ltra_quadratic_interpolate<F>(
+    fn linear_interpolate<F>(
+        prev: &TlineStateSample,
+        next: &TlineStateSample,
+        target: Value,
+        selector: F,
+    ) -> Value
+    where
+        F: Fn(&TlineStateSample) -> Value + Copy,
+    {
+        if let Some((l0, l1)) = Self::linear_interp_coefficients(target, prev.time, next.time) {
+            l0 * selector(prev) + l1 * selector(next)
+        } else {
+            selector(next)
+        }
+    }
+
+    #[inline]
+    fn quadratic_interpolate<F>(
+        prev2: Option<&TlineStateSample>,
+        prev: &TlineStateSample,
+        next: &TlineStateSample,
+        target: Value,
+        selector: F,
+    ) -> Option<Value>
+    where
+        F: Fn(&TlineStateSample) -> Value + Copy,
+    {
+        let sample0 = prev2?;
+        let (q0, q1, q2) =
+            Self::quadratic_interp_coefficients(target, sample0.time, prev.time, next.time)?;
+        let v0 = selector(sample0);
+        let v1 = selector(prev);
+        let v2 = selector(next);
+        Some(q0 * v0 + q1 * v1 + q2 * v2)
+    }
+
+    #[inline]
+    fn delayed_interpolate<F>(
+        mode: DelayedInterpolationMode,
         prev2: Option<&TlineStateSample>,
         prev: &TlineStateSample,
         next: &TlineStateSample,
@@ -136,20 +183,27 @@ impl TransmissionLine {
     where
         F: Fn(&TlineStateSample) -> Value + Copy,
     {
-        if let Some(sample0) = prev2
-            && let Some((q0, q1, q2)) =
-                Self::quadratic_interp_coefficients(target, sample0.time, prev.time, next.time)
-        {
-            let v0 = selector(sample0);
-            let v1 = selector(prev);
-            let v2 = selector(next);
-            return q0 * v0 + q1 * v1 + q2 * v2;
-        }
-
-        if let Some((l0, l1)) = Self::linear_interp_coefficients(target, prev.time, next.time) {
-            l0 * selector(prev) + l1 * selector(next)
-        } else {
-            selector(next)
+        let linear = || Self::linear_interpolate(prev, next, target, selector);
+        match mode {
+            DelayedInterpolationMode::Linear => linear(),
+            DelayedInterpolationMode::Quadratic => {
+                Self::quadratic_interpolate(prev2, prev, next, target, selector)
+                    .unwrap_or_else(linear)
+            }
+            DelayedInterpolationMode::Mixed => {
+                if let Some(quadratic) =
+                    Self::quadratic_interpolate(prev2, prev, next, target, selector)
+                {
+                    let prev_value = selector(prev);
+                    let next_value = selector(next);
+                    if quadratic >= prev_value.min(next_value)
+                        && quadratic <= prev_value.max(next_value)
+                    {
+                        return quadratic;
+                    }
+                }
+                linear()
+            }
         }
     }
 
@@ -187,6 +241,7 @@ impl TransmissionLine {
             state_history: VecDeque::new(),
             distributed_rlc: None,
             distributed_rlc_cache: Cell::new(None),
+            ltra_interpolation_mode: DelayedInterpolationMode::Quadratic,
             ltra_breakpoint_reltol: 1.0,
             ltra_breakpoint_abstol: 1.0,
             txl: None,
@@ -379,6 +434,24 @@ impl TransmissionLine {
     #[inline]
     pub fn has_distributed_rlgc(&self) -> bool {
         self.distributed_rlc.is_some()
+    }
+
+    /// Use ngspice LTRA linear interpolation for delayed port states.
+    pub fn set_ltra_linear_interpolation(&mut self) {
+        self.ltra_interpolation_mode = DelayedInterpolationMode::Linear;
+        self.distributed_rlc_cache.set(None);
+    }
+
+    /// Use ngspice LTRA quadratic interpolation for delayed port states.
+    pub fn set_ltra_quadratic_interpolation(&mut self) {
+        self.ltra_interpolation_mode = DelayedInterpolationMode::Quadratic;
+        self.distributed_rlc_cache.set(None);
+    }
+
+    /// Use ngspice LTRA mixed interpolation for delayed port states.
+    pub fn set_ltra_mixed_interpolation(&mut self) {
+        self.ltra_interpolation_mode = DelayedInterpolationMode::Mixed;
+        self.distributed_rlc_cache.set(None);
     }
 
     /// Configure a distributed-RLC transient kernel for lossy scalar propagation.
@@ -602,6 +675,12 @@ impl TransmissionLine {
             return initial;
         }
 
+        let mode = if self.distributed_rlc.is_some() && self.txl.is_none() {
+            self.ltra_interpolation_mode
+        } else {
+            DelayedInterpolationMode::Quadratic
+        };
+
         let mut prev2: Option<&TlineStateSample> = None;
         let mut prev: Option<&TlineStateSample> = None;
         for sample in &self.state_history {
@@ -612,28 +691,32 @@ impl TransmissionLine {
                     }
                     return TlineStateSample {
                         time: target,
-                        v1: Self::ltra_quadratic_interpolate(
+                        v1: Self::delayed_interpolate(
+                            mode,
                             prev2,
                             prev_sample,
                             sample,
                             target,
                             |s| s.v1,
                         ),
-                        i1: Self::ltra_quadratic_interpolate(
+                        i1: Self::delayed_interpolate(
+                            mode,
                             prev2,
                             prev_sample,
                             sample,
                             target,
                             |s| s.i1,
                         ),
-                        v2: Self::ltra_quadratic_interpolate(
+                        v2: Self::delayed_interpolate(
+                            mode,
                             prev2,
                             prev_sample,
                             sample,
                             target,
                             |s| s.v2,
                         ),
-                        i2: Self::ltra_quadratic_interpolate(
+                        i2: Self::delayed_interpolate(
+                            mode,
                             prev2,
                             prev_sample,
                             sample,
@@ -882,5 +965,74 @@ impl TransmissionLine {
     #[inline]
     pub fn conductance(&self) -> Value {
         1.0 / self.z0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn distributed_line(samples: &[(Value, Value)]) -> TransmissionLine {
+        let mut line = TransmissionLine::new("TLTRA".to_string(), 1, 0, 2, 0, 1.0, 1.0);
+        line.set_distributed_rlgc(1.0, 1.0, 0.0, 1.0, 1.0);
+        for &(time, v1) in samples {
+            line.update_history(time, v1, 0.0, 0.0, 0.0);
+        }
+        line
+    }
+
+    fn lossless_line(samples: &[(Value, Value)]) -> TransmissionLine {
+        let mut line = TransmissionLine::new("TLOSS".to_string(), 1, 0, 2, 0, 1.0, 2.0);
+        for &(time, v1) in samples {
+            line.update_history(time, v1, 0.0, 0.0, 0.0);
+        }
+        line
+    }
+
+    fn assert_close(actual: Value, expected: Value) {
+        assert!(
+            (actual - expected).abs() < 1.0e-12,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    #[test]
+    fn ltra_lininterp_uses_linear_delayed_state() {
+        let mut line = distributed_line(&[(0.0, 0.0), (1.0, 1.0), (2.0, 4.0)]);
+        line.set_ltra_linear_interpolation();
+
+        assert_close(line.delayed_state(2.5).v1, 2.5);
+    }
+
+    #[test]
+    fn ltra_quadinterp_uses_quadratic_when_three_points_are_available() {
+        let mut line = distributed_line(&[(0.0, 0.0), (1.0, 1.0), (2.0, 4.0)]);
+        line.set_ltra_quadratic_interpolation();
+
+        assert_close(line.delayed_state(2.5).v1, 2.25);
+    }
+
+    #[test]
+    fn ltra_quadinterp_uses_linear_when_previous_point_is_missing() {
+        let mut line = distributed_line(&[(1.0, 1.0), (2.0, 4.0)]);
+        line.set_ltra_quadratic_interpolation();
+
+        assert_close(line.delayed_state(2.5).v1, 2.5);
+    }
+
+    #[test]
+    fn ltra_mixedinterp_falls_back_to_linear_on_quadratic_overshoot() {
+        let mut line = distributed_line(&[(0.0, 100.0), (1.0, 1.0), (2.0, 2.0)]);
+        line.set_ltra_mixed_interpolation();
+
+        assert_close(line.delayed_state(2.5).v1, 1.5);
+    }
+
+    #[test]
+    fn non_distributed_lossless_lines_keep_quadratic_delayed_state() {
+        let mut line = lossless_line(&[(0.0, 0.0), (1.0, 1.0), (2.0, 4.0)]);
+        line.set_ltra_linear_interpolation();
+
+        assert_close(line.delayed_state(3.5).v1, 2.25);
     }
 }
