@@ -302,11 +302,15 @@ impl Engine {
         circuit: &crate::circuit::Circuit,
         requires_conservative_nonlinear_limiting: bool,
     ) -> bool {
-        // Native TXL keeps its own accepted-point history and is governed by
-        // transmission-line breakpoints/truncation. Otherwise, keep the nonlinear
-        // source-ramp limiter active, including for distributed-RLGC/LTRA scalar lines.
+        // Native TXL and distributed-RLGC/LTRA scalar lines keep accepted-point
+        // histories that are governed by transmission-line breakpoints/truncation.
+        // Applying the generic nonlinear source-ramp cap to those decks forces
+        // source-edge micro-steps that ngspice LTRA does not take.
         requires_conservative_nonlinear_limiting
-            && !circuit.tlines.iter().any(|tl| tl.has_txl_runtime())
+            && !circuit
+                .tlines
+                .iter()
+                .any(|tl| tl.has_txl_runtime() || tl.has_distributed_rlgc())
     }
 
     fn run_tran_with_abort_resolved(
@@ -2667,7 +2671,7 @@ mod tests {
     }
 
     #[test]
-    fn transmission_source_ramp_cap_is_disabled_only_for_native_txl() {
+    fn transmission_source_ramp_cap_is_disabled_for_native_txl_and_ltra() {
         let circuit = crate::circuit::Circuit::new();
         assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &circuit, false
@@ -2676,11 +2680,18 @@ mod tests {
             &circuit, true
         ));
 
+        let mut lossless_circuit = crate::circuit::Circuit::new();
+        lossless_circuit.tlines.push(scalar_line("TLOSSLESS"));
+        assert!(Engine::should_enable_nonlinear_source_ramp_cap(
+            &lossless_circuit,
+            true
+        ));
+
         let mut ltra_circuit = crate::circuit::Circuit::new();
         let mut ltra_line = scalar_line("TLTRA");
         ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
         ltra_circuit.tlines.push(ltra_line);
-        assert!(Engine::should_enable_nonlinear_source_ramp_cap(
+        assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &ltra_circuit,
             true
         ));

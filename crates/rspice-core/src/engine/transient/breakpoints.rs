@@ -193,9 +193,10 @@ impl Engine {
         let mut delays: Vec<Value> = circuit
             .tlines
             .iter()
-            // Ngspice TXL advances its native history from accepted points and
-            // does not propagate source-edge breakpoints by the scalar line delay.
-            .filter(|tl| !tl.has_txl_runtime())
+            // Ngspice TXL and LTRA advance their native histories from accepted
+            // points and schedule arrival breakpoints dynamically from history
+            // derivative changes, not from statically propagated source edges.
+            .filter(|tl| !tl.has_txl_runtime() && !tl.has_distributed_rlgc())
             .map(crate::device::TransmissionLine::delay)
             .chain(
                 circuit
@@ -377,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn transmission_line_delays_skip_native_txl_scalar_lines() {
+    fn transmission_line_delays_skip_native_txl_and_ltra_scalar_lines() {
         let mut circuit = crate::circuit::Circuit::new();
 
         circuit.tlines.push(crate::device::TransmissionLine::new(
@@ -417,6 +418,34 @@ mod tests {
 
         let delays = Engine::transmission_line_delays(&circuit);
 
-        assert_delays_close(&delays, &[1.0e-9, 2.0e-9, 3.0e-9, 5.0e-9]);
+        assert_delays_close(&delays, &[1.0e-9, 2.0e-9, 3.0e-9]);
+    }
+
+    #[test]
+    fn propagated_tline_breakpoints_skip_ltra_but_keep_lossless_scalar() {
+        let mut circuit = crate::circuit::Circuit::new();
+
+        circuit.tlines.push(crate::device::TransmissionLine::new(
+            "TLOSSLESS".to_string(),
+            1,
+            0,
+            2,
+            0,
+            50.0,
+            1.0e-9,
+        ));
+
+        let mut ltra_line =
+            crate::device::TransmissionLine::new("TLTRA".to_string(), 3, 0, 4, 0, 75.0, 5.0e-9);
+        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
+        circuit.tlines.push(ltra_line);
+
+        let mut breakpoints = BreakpointManager::new();
+        Engine::collect_transient_tline_breakpoints(&circuit, &[1.0e-9], 7.0e-9, &mut breakpoints);
+
+        assert_delays_close(
+            breakpoints.times(),
+            &[2.0e-9, 3.0e-9, 4.0e-9, 5.0e-9, 6.0e-9, 7.0e-9],
+        );
     }
 }
