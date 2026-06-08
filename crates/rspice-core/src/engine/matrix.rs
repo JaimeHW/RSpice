@@ -641,18 +641,39 @@ impl Engine {
             let near = tl.near_nodes[conductor];
             let far = tl.far_nodes[conductor];
 
+            // KCL rows: ngspice CPL setup allocates one branch current per
+            // conductor at each end, connected only to that conductor's node.
             if near > 0 {
                 triplets.push((near - 1, b1 - 1, 0.0));
-                triplets.push((b2 - 1, near - 1, 0.0));
             }
             if far > 0 {
                 triplets.push((far - 1, b2 - 1, 0.0));
-                triplets.push((b2 - 1, far - 1, 0.0));
             }
 
+            // Branch-current equations: reserve the full h1/h2/h3 convolution
+            // row shape from ngspice cplload.c for every conductor pair.
+            for peer in 0..tl.conductors() {
+                let Some((peer_b1_ordinal, peer_b2_ordinal)) = branches.conductor(peer) else {
+                    continue;
+                };
+                let peer_b1 = circuit.get_branch_matrix_index(peer_b1_ordinal);
+                let peer_b2 = circuit.get_branch_matrix_index(peer_b2_ordinal);
+                let peer_near = tl.near_nodes[peer];
+                let peer_far = tl.far_nodes[peer];
+
+                if peer_near > 0 {
+                    triplets.push((b1 - 1, peer_near - 1, 0.0));
+                    triplets.push((b2 - 1, peer_near - 1, 0.0));
+                }
+                if peer_far > 0 {
+                    triplets.push((b1 - 1, peer_far - 1, 0.0));
+                    triplets.push((b2 - 1, peer_far - 1, 0.0));
+                }
+                triplets.push((b1 - 1, peer_b2 - 1, 0.0));
+                triplets.push((b2 - 1, peer_b1 - 1, 0.0));
+            }
             triplets.push((b1 - 1, b1 - 1, 0.0));
-            triplets.push((b1 - 1, b2 - 1, 0.0));
-            triplets.push((b2 - 1, b1 - 1, 0.0));
+            triplets.push((b2 - 1, b2 - 1, 0.0));
         }
     }
 }

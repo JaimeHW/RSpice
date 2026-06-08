@@ -465,6 +465,36 @@ P1 n1 n2 0 f1 f2 0 m
         assert!(matrix.get_index(n2 - 1, b1_2 - 1).is_some());
         assert!(matrix.get_index(f2 - 1, b2_2 - 1).is_some());
         assert!(matrix.get_index(n1 - 1, f1 - 1).is_none());
+        assert!(matrix.get_index(n1 - 1, b1_2 - 1).is_none());
+
+        for &row in &[b1_1, b1_2] {
+            for &col in &[n1, n2, f1, f2] {
+                assert!(
+                    matrix.get_index(row - 1, col - 1).is_some(),
+                    "CPL b1 row {row} should reserve node column {col}"
+                );
+            }
+            for &col in &[b2_1, b2_2] {
+                assert!(
+                    matrix.get_index(row - 1, col - 1).is_some(),
+                    "CPL b1 row {row} should reserve b2 column {col}"
+                );
+            }
+        }
+        for &row in &[b2_1, b2_2] {
+            for &col in &[n1, n2, f1, f2] {
+                assert!(
+                    matrix.get_index(row - 1, col - 1).is_some(),
+                    "CPL b2 row {row} should reserve node column {col}"
+                );
+            }
+            for &col in &[b1_1, b1_2] {
+                assert!(
+                    matrix.get_index(row - 1, col - 1).is_some(),
+                    "CPL b2 row {row} should reserve b1 column {col}"
+                );
+            }
+        }
 
         circuit.link_indices(&matrix);
         let matrix_branches = circuit.coupled_tlines[0]
