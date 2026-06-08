@@ -127,6 +127,8 @@ impl std::error::Error for NativeCplError {}
 pub(crate) struct NativeCplTerm {
     pub(crate) c: f64,
     pub(crate) x: f64,
+    pub(crate) cnv_i: f64,
+    pub(crate) cnv_o: f64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -145,14 +147,20 @@ impl NativeCplTimeSeries {
                 NativeCplTerm {
                     c: pade[0] * atten,
                     x: pade[3],
+                    cnv_i: 0.0,
+                    cnv_o: 0.0,
                 },
                 NativeCplTerm {
                     c: pade[1] * atten,
                     x: pade[4],
+                    cnv_i: 0.0,
+                    cnv_o: 0.0,
                 },
                 NativeCplTerm {
                     c: pade[2] * atten,
                     x: pade[5],
+                    cnv_i: 0.0,
+                    cnv_o: 0.0,
                 },
             ],
         }
@@ -163,6 +171,22 @@ impl NativeCplTimeSeries {
             self.tm[0].c + 2.0 * self.tm[1].c
         } else {
             self.tm.iter().map(|term| term.c).sum()
+        }
+    }
+
+    fn cnv_i_sum(&self) -> f64 {
+        if self.if_img {
+            self.tm[0].cnv_i + 2.0 * self.tm[1].cnv_i
+        } else {
+            self.tm.iter().map(|term| term.cnv_i).sum()
+        }
+    }
+
+    fn cnv_o_sum(&self) -> f64 {
+        if self.if_img {
+            self.tm[0].cnv_o + 2.0 * self.tm[1].cnv_o
+        } else {
+            self.tm.iter().map(|term| term.cnv_o).sum()
         }
     }
 }
@@ -177,6 +201,7 @@ pub(crate) struct NativeCplRuntime {
     pub(crate) h1c: Matrix,
     pub(crate) h2c: Vec<Matrix>,
     pub(crate) h3c: Vec<Matrix>,
+    pub(crate) h1e: Vec<Vec<[f64; 3]>>,
 }
 
 impl NativeCplRuntime {
@@ -191,6 +216,108 @@ impl NativeCplRuntime {
         setup.coupled()?;
         setup.into_runtime()
     }
+
+    fn right_consts(
+        &mut self,
+        h_seconds: f64,
+        h1_seconds: f64,
+        input_voltage: &[f64],
+        output_voltage: &[f64],
+        delayed: &NativeCplDelayedVi,
+    ) -> Result<NativeCplRightConsts, NativeCplError> {
+        validate_history_vector("input voltage", input_voltage, self.no_l)?;
+        validate_history_vector("output voltage", output_voltage, self.no_l)?;
+        validate_delayed_vi(delayed, self.no_l)?;
+
+        let mut ff = vec![0.0; self.no_l];
+        let mut gg = vec![0.0; self.no_l];
+
+        for row in 0..self.no_l {
+            for col in 0..self.no_l {
+                let Some(tms) = self.h1t[row][col].as_ref() else {
+                    continue;
+                };
+
+                if tms.if_img {
+                    let e = (tms.tm[0].x * h_seconds).exp();
+                    let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_seconds);
+                    self.h1e[row][col] = [e, er, ei];
+
+                    let ff1 = tms.tm[0].c * e * h1_seconds;
+                    ff[row] -= tms.tm[0].cnv_i * e;
+                    gg[row] -= tms.tm[0].cnv_o * e;
+                    ff[row] -= ff1 * input_voltage[col];
+                    gg[row] -= ff1 * output_voltage[col];
+
+                    let (a1, _) = mult_complex(tms.tm[1].c, tms.tm[2].c, er, ei);
+                    let (a, _) = mult_complex(tms.tm[1].cnv_i, tms.tm[2].cnv_i, er, ei);
+                    ff[row] -= 2.0 * (a1 * h1_seconds * input_voltage[col] + a);
+                    let (a, _) = mult_complex(tms.tm[1].cnv_o, tms.tm[2].cnv_o, er, ei);
+                    gg[row] -= 2.0 * (a1 * h1_seconds * output_voltage[col] + a);
+                } else {
+                    let mut ff1 = 0.0;
+                    for pole in 0..3 {
+                        let e = (tms.tm[pole].x * h_seconds).exp();
+                        self.h1e[row][col][pole] = e;
+                        ff1 -= tms.tm[pole].c * e;
+                        ff[row] -= tms.tm[pole].cnv_i * e;
+                        gg[row] -= tms.tm[pole].cnv_o * e;
+                    }
+                    ff[row] += ff1 * h1_seconds * input_voltage[col];
+                    gg[row] += ff1 * h1_seconds * output_voltage[col];
+                }
+            }
+        }
+
+        for row in 0..self.no_l {
+            for col in 0..self.no_l {
+                for mode in 0..self.no_l {
+                    if let Some(tms) = self.h3t[row][col][mode].as_mut() {
+                        update_rhs_time_series(
+                            tms,
+                            h_seconds,
+                            h1_seconds,
+                            delayed.v1_i[mode][col],
+                            delayed.v2_i[mode][col],
+                            delayed.v1_o[mode][col],
+                            delayed.v2_o[mode][col],
+                        );
+                        ff[row] += tms.aten * delayed.v2_o[mode][col] + tms.cnv_o_sum();
+                        gg[row] += tms.aten * delayed.v2_i[mode][col] + tms.cnv_i_sum();
+                    }
+
+                    if let Some(tms) = self.h2t[row][col][mode].as_mut() {
+                        update_rhs_time_series(
+                            tms,
+                            h_seconds,
+                            h1_seconds,
+                            delayed.i1_i[mode][col],
+                            delayed.i2_i[mode][col],
+                            delayed.i1_o[mode][col],
+                            delayed.i2_o[mode][col],
+                        );
+                        ff[row] += tms.aten * delayed.i2_o[mode][col] + tms.cnv_o_sum();
+                        gg[row] += tms.aten * delayed.i2_i[mode][col] + tms.cnv_i_sum();
+                    }
+                }
+            }
+        }
+
+        Ok(NativeCplRightConsts {
+            ext: delayed.ext,
+            ratio: delayed.ratio.clone(),
+            ff,
+            gg,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct NativeCplRightConsts {
+    ext: bool,
+    ratio: Vec<f64>,
+    ff: Vec<f64>,
+    gg: Vec<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -671,6 +798,7 @@ impl NativeCplSetup {
             h1c,
             h2c,
             h3c,
+            h1e: vec![vec![[0.0; 3]; dim]; dim],
         })
     }
 
@@ -1165,8 +1293,83 @@ fn validate_history_vector(
     Ok(())
 }
 
+fn validate_delayed_vi(
+    delayed: &NativeCplDelayedVi,
+    expected: usize,
+) -> Result<(), NativeCplError> {
+    validate_history_vector("delay ratio", &delayed.ratio, expected)?;
+    validate_square_matrix("delayed v1_i", &delayed.v1_i, expected)?;
+    validate_square_matrix("delayed v2_i", &delayed.v2_i, expected)?;
+    validate_square_matrix("delayed i1_i", &delayed.i1_i, expected)?;
+    validate_square_matrix("delayed i2_i", &delayed.i2_i, expected)?;
+    validate_square_matrix("delayed v1_o", &delayed.v1_o, expected)?;
+    validate_square_matrix("delayed v2_o", &delayed.v2_o, expected)?;
+    validate_square_matrix("delayed i1_o", &delayed.i1_o, expected)?;
+    validate_square_matrix("delayed i2_o", &delayed.i2_o, expected)?;
+    Ok(())
+}
+
 fn lerp(start: f64, end: f64, fraction: f64) -> f64 {
     start + fraction * (end - start)
+}
+
+fn update_rhs_time_series(
+    tms: &mut NativeCplTimeSeries,
+    h_seconds: f64,
+    h1_seconds: f64,
+    input_previous: f64,
+    input_current: f64,
+    output_previous: f64,
+    output_current: f64,
+) {
+    if tms.if_img {
+        let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_seconds);
+        let a2 = h1_seconds * tms.tm[1].c;
+        let b2 = h1_seconds * tms.tm[2].c;
+
+        let (a, b) = mult_complex(tms.tm[1].cnv_i, tms.tm[2].cnv_i, er, ei);
+        let (a1, b1) = mult_complex(
+            a2,
+            b2,
+            input_previous * er + input_current,
+            input_previous * ei,
+        );
+        tms.tm[1].cnv_i = a + a1;
+        tms.tm[2].cnv_i = b + b1;
+
+        let (a, b) = mult_complex(tms.tm[1].cnv_o, tms.tm[2].cnv_o, er, ei);
+        let (a1, b1) = mult_complex(
+            a2,
+            b2,
+            output_previous * er + output_current,
+            output_previous * ei,
+        );
+        tms.tm[1].cnv_o = a + a1;
+        tms.tm[2].cnv_o = b + b1;
+
+        let e = (tms.tm[0].x * h_seconds).exp();
+        tms.tm[0].cnv_i =
+            tms.tm[0].cnv_i * e + h1_seconds * tms.tm[0].c * (input_previous * e + input_current);
+        tms.tm[0].cnv_o =
+            tms.tm[0].cnv_o * e + h1_seconds * tms.tm[0].c * (output_previous * e + output_current);
+    } else {
+        for term in &mut tms.tm {
+            let e = (term.x * h_seconds).exp();
+            term.cnv_i =
+                term.cnv_i * e + h1_seconds * term.c * (input_previous * e + input_current);
+            term.cnv_o =
+                term.cnv_o * e + h1_seconds * term.c * (output_previous * e + output_current);
+        }
+    }
+}
+
+fn exp_complex(real: f64, imag: f64, h: f64) -> (f64, f64) {
+    let e = (real * h).exp();
+    (e * (imag * h).cos(), e * (imag * h).sin())
+}
+
+fn mult_complex(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
+    (ar * br - ai * bi, ar * bi + ai * br)
 }
 
 fn zero_poly_matrix(dim: usize, poly_len: usize) -> PolyMatrix {
@@ -1679,6 +1882,44 @@ mod tests {
         }
     }
 
+    fn term(c: f64, x: f64, cnv_i: f64, cnv_o: f64) -> NativeCplTerm {
+        NativeCplTerm { c, x, cnv_i, cnv_o }
+    }
+
+    fn tms(if_img: bool, aten: f64, tm: [NativeCplTerm; 3]) -> NativeCplTimeSeries {
+        NativeCplTimeSeries { if_img, aten, tm }
+    }
+
+    fn empty_runtime(no_l: usize) -> NativeCplRuntime {
+        NativeCplRuntime {
+            no_l,
+            taul_ps: vec![0.0; no_l],
+            h1t: vec![vec![None; no_l]; no_l],
+            h2t: vec![vec![vec![None; no_l]; no_l]; no_l],
+            h3t: vec![vec![vec![None; no_l]; no_l]; no_l],
+            h1c: zero_matrix(no_l),
+            h2c: vec![zero_matrix(no_l); no_l],
+            h3c: vec![zero_matrix(no_l); no_l],
+            h1e: vec![vec![[0.0; 3]; no_l]; no_l],
+        }
+    }
+
+    fn delayed_fixture(ext: bool, ratio: &[f64]) -> NativeCplDelayedVi {
+        let no_l = ratio.len();
+        NativeCplDelayedVi {
+            ext,
+            ratio: ratio.to_vec(),
+            v1_i: zero_matrix(no_l),
+            v2_i: zero_matrix(no_l),
+            i1_i: zero_matrix(no_l),
+            i2_i: zero_matrix(no_l),
+            v1_o: zero_matrix(no_l),
+            v2_o: zero_matrix(no_l),
+            i1_o: zero_matrix(no_l),
+            i2_o: zero_matrix(no_l),
+        }
+    }
+
     fn sample(time_ps: i64, base: f64) -> NativeCplViSample {
         NativeCplViSample::new(
             time_ps,
@@ -1751,6 +1992,126 @@ mod tests {
         assert_slice_close(&delayed.i2_o[1], &[215.5, 216.0]);
 
         assert_eq!(history.head_time_ps(), Some(20));
+    }
+
+    #[test]
+    fn cpl_native_right_consts_updates_real_pole_convolutions() {
+        let mut runtime = empty_runtime(2);
+        runtime.h1t[0][0] = Some(tms(
+            false,
+            0.0,
+            [
+                term(2.0, 0.0, 3.0, 5.0),
+                term(-1.0, 0.0, 7.0, 11.0),
+                term(0.5, 0.0, 13.0, 17.0),
+            ],
+        ));
+        runtime.h3t[0][0][0] = Some(tms(
+            false,
+            0.5,
+            [
+                term(1.0, 0.0, 0.1, 1.0),
+                term(2.0, 0.0, 0.2, 2.0),
+                term(4.0, 0.0, 0.4, 4.0),
+            ],
+        ));
+        runtime.h2t[0][0][0] = Some(tms(
+            false,
+            0.25,
+            [
+                term(2.0, 0.0, 1.0, 10.0),
+                term(3.0, 0.0, 2.0, 20.0),
+                term(5.0, 0.0, 4.0, 40.0),
+            ],
+        ));
+
+        let mut delayed = delayed_fixture(true, &[0.25, 0.0]);
+        delayed.v1_i[0][0] = 2.0;
+        delayed.v2_i[0][0] = 3.0;
+        delayed.v1_o[0][0] = 4.0;
+        delayed.v2_o[0][0] = 5.0;
+        delayed.i1_i[0][0] = 7.0;
+        delayed.i2_i[0][0] = 11.0;
+        delayed.i1_o[0][0] = 13.0;
+        delayed.i2_o[0][0] = 17.0;
+
+        let rhs = runtime
+            .right_consts(0.25, 0.5, &[19.0, 0.0], &[23.0, 0.0], &delayed)
+            .expect("right constants");
+
+        assert!(rhs.ext);
+        assert_slice_close(&rhs.ratio, &[0.25, 0.0]);
+        assert_slice_close(&rhs.ff, &[228.0, 0.0]);
+        assert_slice_close(&rhs.gg, &[69.2, 0.0]);
+        assert_eq!(runtime.h1e[0][0], [1.0, 1.0, 1.0]);
+
+        let h3 = runtime.h3t[0][0][0].as_ref().expect("h3");
+        assert_slice_close(
+            &[h3.tm[0].cnv_i, h3.tm[1].cnv_i, h3.tm[2].cnv_i],
+            &[2.6, 5.2, 10.4],
+        );
+        assert_slice_close(
+            &[h3.tm[0].cnv_o, h3.tm[1].cnv_o, h3.tm[2].cnv_o],
+            &[5.5, 11.0, 22.0],
+        );
+
+        let h2 = runtime.h2t[0][0][0].as_ref().expect("h2");
+        assert_slice_close(
+            &[h2.tm[0].cnv_i, h2.tm[1].cnv_i, h2.tm[2].cnv_i],
+            &[19.0, 29.0, 49.0],
+        );
+        assert_slice_close(
+            &[h2.tm[0].cnv_o, h2.tm[1].cnv_o, h2.tm[2].cnv_o],
+            &[40.0, 65.0, 115.0],
+        );
+    }
+
+    #[test]
+    fn cpl_native_right_consts_updates_complex_pair_convolutions() {
+        let mut runtime = empty_runtime(2);
+        runtime.h1t[0][0] = Some(tms(
+            true,
+            0.0,
+            [
+                term(2.0, 0.0, 3.0, 5.0),
+                term(7.0, 0.0, 11.0, 13.0),
+                term(17.0, 4.0, 19.0, 23.0),
+            ],
+        ));
+        runtime.h3t[0][0][0] = Some(tms(
+            true,
+            0.5,
+            [
+                term(2.0, 0.0, 1.0, 2.0),
+                term(3.0, 0.0, 5.0, 7.0),
+                term(11.0, 4.0, 13.0, 17.0),
+            ],
+        ));
+
+        let mut delayed = delayed_fixture(false, &[0.0, 0.0]);
+        delayed.v1_i[0][0] = 2.0;
+        delayed.v2_i[0][0] = 3.0;
+        delayed.v1_o[0][0] = 4.0;
+        delayed.v2_o[0][0] = 5.0;
+
+        let rhs = runtime
+            .right_consts(0.0, 0.5, &[19.0, 0.0], &[23.0, 0.0], &delayed)
+            .expect("right constants");
+
+        assert!(!rhs.ext);
+        assert_slice_close(&rhs.ff, &[-122.5, 0.0]);
+        assert_slice_close(&rhs.gg, &[-182.5, 0.0]);
+        assert_eq!(runtime.h1e[0][0], [1.0, 1.0, 0.0]);
+
+        let h3 = runtime.h3t[0][0][0].as_ref().expect("h3");
+        assert_slice_close(
+            &[h3.tm[0].cnv_i, h3.tm[1].cnv_i, h3.tm[2].cnv_i],
+            &[6.0, 12.5, 40.5],
+        );
+        assert_slice_close(
+            &[h3.tm[0].cnv_o, h3.tm[1].cnv_o, h3.tm[2].cnv_o],
+            &[11.0, 20.5, 66.5],
+        );
     }
 
     #[test]
