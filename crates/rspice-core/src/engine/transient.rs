@@ -74,6 +74,8 @@ const VBIC_STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 const SOURCE_ACTIVE_DELTA: Value = 1e-2;
 /// Largest single source movement to allow on proactive nonlinear ramp tracking.
 const SOURCE_RAMP_TRACKING_DELTA: Value = 5e-2;
+/// Local ngspice `NIiter()` raises any smaller iteration limit to 100.
+const NGSPICE_NIITER_MIN_ITERATIONS: usize = 100;
 /// Safety cap for synthesized transmission-line arrival breakpoints.
 const MAX_PROPAGATED_TLINE_BREAKPOINTS: usize = 200_000;
 /// Safety cap for dynamically scheduled transmission-line arrival breakpoints.
@@ -698,6 +700,8 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let step_time = t + dt;
+            let use_ngspice_floor_budget =
+                Self::should_use_native_txl_ngspice_newton_floor(&circuit);
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
                     &circuit,
@@ -840,6 +844,7 @@ impl Engine {
                 has_vbic_excess_phase,
                 startup_recovery,
                 retry_count,
+                use_ngspice_floor_budget,
             );
             let mut converged = false;
             // Reusing the accepted state is only valid when a full restamp
@@ -2713,6 +2718,45 @@ mod tests {
         assert!(!Engine::should_enable_nonlinear_source_ramp_cap(
             &txl_circuit,
             true
+        ));
+    }
+
+    #[test]
+    fn transient_newton_iteration_budget_uses_ngspice_floor_when_requested() {
+        assert_eq!(
+            Engine::transient_newton_iteration_budget(10, false, false, 0, false),
+            10
+        );
+        assert_eq!(
+            Engine::transient_newton_iteration_budget(10, false, false, 0, true),
+            NGSPICE_NIITER_MIN_ITERATIONS
+        );
+        assert_eq!(
+            Engine::transient_newton_iteration_budget(10, true, false, 0, true),
+            NGSPICE_NIITER_MIN_ITERATIONS
+        );
+        assert_eq!(
+            Engine::transient_newton_iteration_budget(250, false, false, 0, false),
+            250
+        );
+    }
+
+    #[test]
+    fn native_txl_ngspice_floor_excludes_distributed_history_lines() {
+        let mut txl_circuit = crate::circuit::Circuit::new();
+        let mut txl_line = scalar_line("TTXL");
+        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        txl_circuit.tlines.push(txl_line);
+        assert!(Engine::should_use_native_txl_ngspice_newton_floor(
+            &txl_circuit
+        ));
+
+        let mut ltra_circuit = crate::circuit::Circuit::new();
+        let mut ltra_line = scalar_line("TLTRA");
+        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
+        ltra_circuit.tlines.push(ltra_line);
+        assert!(!Engine::should_use_native_txl_ngspice_newton_floor(
+            &ltra_circuit
         ));
     }
 }

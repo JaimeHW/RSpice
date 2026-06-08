@@ -223,17 +223,42 @@ impl Engine {
         has_vbic_excess_phase: bool,
         startup_recovery: bool,
         retry_count: usize,
+        use_ngspice_floor: bool,
     ) -> usize {
-        let standard_budget = transient_max_iterations.max(1);
+        let configured_budget = transient_max_iterations.max(1);
+        let standard_budget = if use_ngspice_floor {
+            configured_budget.max(NGSPICE_NIITER_MIN_ITERATIONS)
+        } else {
+            configured_budget
+        };
         if startup_recovery {
             standard_budget.max(64).min(128)
         } else if !has_vbic_excess_phase {
             standard_budget
         } else if retry_count == 0 {
-            standard_budget.max(64).min(96)
+            let first_try_budget = standard_budget.max(64);
+            if use_ngspice_floor {
+                first_try_budget
+            } else {
+                first_try_budget.min(96)
+            }
         } else {
             standard_budget.max(64)
         }
+    }
+
+    #[inline]
+    pub(super) fn should_use_native_txl_ngspice_newton_floor(
+        circuit: &crate::circuit::Circuit,
+    ) -> bool {
+        // Local ngspice floors NIiter() to 100. Keep that extra budget on the
+        // native TXL runtime that needs it across source-edge relaxation, while
+        // avoiding a global accepted-history change for distributed-RLC/LTRA.
+        let has_native_txl = circuit.tlines.iter().any(|tl| tl.has_txl_runtime());
+        let has_distributed_history_line =
+            circuit.tlines.iter().any(|tl| tl.has_distributed_rlgc());
+
+        has_native_txl && !has_distributed_history_line
     }
 
     #[inline]
