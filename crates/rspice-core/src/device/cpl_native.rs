@@ -51,8 +51,13 @@ pub(crate) enum NativeCplError {
         previous_ps: i64,
         current_ps: i64,
     },
+    InvalidTransientStep(f64),
     InsufficientHistory {
         target_ps: f64,
+    },
+    NonFiniteHistoryValue {
+        label: &'static str,
+        index: usize,
     },
 }
 
@@ -113,9 +118,18 @@ impl fmt::Display for NativeCplError {
                 f,
                 "native CPL history sampling requires current time > previous time ({previous_ps} ps, {current_ps} ps)"
             ),
+            Self::InvalidTransientStep(step) => write!(
+                f,
+                "native CPL transient step must be positive and finite, found {step}"
+            ),
             Self::InsufficientHistory { target_ps } => write!(
                 f,
                 "native CPL VI history does not bracket delayed time {target_ps:.6} ps"
+            ),
+            Self::NonFiniteHistoryValue { label, index } => write!(
+                f,
+                "native CPL {label} history vector entry {} is not finite",
+                index + 1
             ),
         }
     }
@@ -309,6 +323,142 @@ impl NativeCplRuntime {
             ff,
             gg,
         })
+    }
+
+    pub(crate) fn initialize_dc_convolutions(
+        &mut self,
+        input_dc: &[f64],
+        output_dc: &[f64],
+    ) -> Result<(), NativeCplError> {
+        validate_history_vector("input dc voltage", input_dc, self.no_l)?;
+        validate_history_vector("output dc voltage", output_dc, self.no_l)?;
+
+        for row in 0..self.no_l {
+            for col in 0..self.no_l {
+                if let Some(tms) = self.h1t[row][col].as_mut() {
+                    initialize_dc_time_series(tms, input_dc[col], output_dc[col]);
+                }
+
+                for mode in 0..self.no_l {
+                    if let Some(tms) = self.h2t[row][col][mode].as_mut() {
+                        zero_time_series_convolutions(tms);
+                    }
+                    if let Some(tms) = self.h3t[row][col][mode].as_mut() {
+                        initialize_dc_time_series(tms, input_dc[col], output_dc[col]);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn update_accepted_voltage_convolutions(
+        &mut self,
+        h_seconds: f64,
+        previous_input_voltage: &[f64],
+        current_input_voltage: &[f64],
+        previous_output_voltage: &[f64],
+        current_output_voltage: &[f64],
+    ) -> Result<(), NativeCplError> {
+        validate_positive_step(h_seconds)?;
+        validate_history_vector("previous input voltage", previous_input_voltage, self.no_l)?;
+        validate_history_vector("current input voltage", current_input_voltage, self.no_l)?;
+        validate_history_vector(
+            "previous output voltage",
+            previous_output_voltage,
+            self.no_l,
+        )?;
+        validate_history_vector("current output voltage", current_output_voltage, self.no_l)?;
+
+        for row in 0..self.no_l {
+            for col in 0..self.no_l {
+                let Some(tms) = self.h1t[row][col].as_mut() else {
+                    continue;
+                };
+
+                let previous_input = previous_input_voltage[col];
+                let current_input = current_input_voltage[col];
+                let previous_output = previous_output_voltage[col];
+                let current_output = current_output_voltage[col];
+
+                if tms.if_img {
+                    let e = (tms.tm[0].x * h_seconds).exp();
+                    let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_seconds);
+                    update_accepted_complex_time_series(
+                        tms,
+                        h_seconds,
+                        previous_input,
+                        current_input,
+                        previous_output,
+                        current_output,
+                        er,
+                        ei,
+                    );
+                    update_accepted_real_term(
+                        &mut tms.tm[0],
+                        h_seconds,
+                        previous_input,
+                        current_input,
+                        previous_output,
+                        current_output,
+                        e,
+                    );
+                    self.h1e[row][col] = [e, er, ei];
+                } else {
+                    let mut exponentials = [0.0; 3];
+                    let mut input_slope = (current_input - previous_input) / h_seconds;
+                    let mut output_slope = (current_output - previous_output) / h_seconds;
+                    for (pole, term) in tms.tm.iter_mut().enumerate() {
+                        let e = (term.x * h_seconds).exp();
+                        exponentials[pole] = e;
+                        let scale = term.c / term.x;
+                        input_slope *= scale;
+                        output_slope *= scale;
+                        term.cnv_i = (term.cnv_i - input_slope * h_seconds) * e
+                            + (e - 1.0) * (current_input * scale + input_slope / term.x);
+                        term.cnv_o = (term.cnv_o - output_slope * h_seconds) * e
+                            + (e - 1.0) * (current_output * scale + output_slope / term.x);
+                    }
+                    self.h1e[row][col] = exponentials;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) fn update_delayed_convolutions(
+        &mut self,
+        h_seconds: f64,
+        ratio: &[f64],
+        tail: &NativeCplViSample,
+    ) -> Result<(), NativeCplError> {
+        validate_positive_step(h_seconds)?;
+        validate_history_vector("delay ratio", ratio, self.no_l)?;
+        validate_history_vector("tail v_i", &tail.v_i, self.no_l)?;
+        validate_history_vector("tail v_o", &tail.v_o, self.no_l)?;
+        validate_history_vector("tail i_i", &tail.i_i, self.no_l)?;
+        validate_history_vector("tail i_o", &tail.i_o, self.no_l)?;
+
+        let h_half = 0.5 * h_seconds;
+        for (mode, ratio) in ratio.iter().copied().enumerate() {
+            if ratio <= 0.0 {
+                continue;
+            }
+            for row in 0..self.no_l {
+                for col in 0..self.no_l {
+                    if let Some(tms) = self.h3t[row][col][mode].as_mut() {
+                        add_delayed_convolution(tms, h_half * ratio, tail.v_i[col], tail.v_o[col]);
+                    }
+                    if let Some(tms) = self.h2t[row][col][mode].as_mut() {
+                        add_delayed_convolution(tms, h_half * ratio, tail.i_i[col], tail.i_o[col]);
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -1290,7 +1440,20 @@ fn validate_history_vector(
             actual: values.len(),
         });
     }
+    for (index, value) in values.iter().enumerate() {
+        if !value.is_finite() {
+            return Err(NativeCplError::NonFiniteHistoryValue { label, index });
+        }
+    }
     Ok(())
+}
+
+fn validate_positive_step(step: f64) -> Result<(), NativeCplError> {
+    if step.is_finite() && step > 0.0 {
+        Ok(())
+    } else {
+        Err(NativeCplError::InvalidTransientStep(step))
+    }
 }
 
 fn validate_delayed_vi(
@@ -1311,6 +1474,78 @@ fn validate_delayed_vi(
 
 fn lerp(start: f64, end: f64, fraction: f64) -> f64 {
     start + fraction * (end - start)
+}
+
+fn initialize_dc_time_series(tms: &mut NativeCplTimeSeries, input_dc: f64, output_dc: f64) {
+    if tms.if_img {
+        tms.tm[0].cnv_i = -input_dc * tms.tm[0].c / tms.tm[0].x;
+        tms.tm[0].cnv_o = -output_dc * tms.tm[0].c / tms.tm[0].x;
+        let (a, b) = div_complex(tms.tm[1].c, tms.tm[2].c, tms.tm[1].x, tms.tm[2].x);
+        tms.tm[1].cnv_i = -input_dc * a;
+        tms.tm[1].cnv_o = -output_dc * a;
+        tms.tm[2].cnv_i = -input_dc * b;
+        tms.tm[2].cnv_o = -output_dc * b;
+    } else {
+        for term in &mut tms.tm {
+            term.cnv_i = -input_dc * term.c / term.x;
+            term.cnv_o = -output_dc * term.c / term.x;
+        }
+    }
+}
+
+fn zero_time_series_convolutions(tms: &mut NativeCplTimeSeries) {
+    for term in &mut tms.tm {
+        term.cnv_i = 0.0;
+        term.cnv_o = 0.0;
+    }
+}
+
+fn update_accepted_real_term(
+    term: &mut NativeCplTerm,
+    h_seconds: f64,
+    previous_input: f64,
+    current_input: f64,
+    previous_output: f64,
+    current_output: f64,
+    e: f64,
+) {
+    let scale = term.c / term.x;
+    let input_slope = (current_input - previous_input) * scale / h_seconds;
+    let output_slope = (current_output - previous_output) * scale / h_seconds;
+    term.cnv_i = (term.cnv_i - input_slope * h_seconds) * e
+        + (e - 1.0) * (current_input * scale + input_slope / term.x);
+    term.cnv_o = (term.cnv_o - output_slope * h_seconds) * e
+        + (e - 1.0) * (current_output * scale + output_slope / term.x);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn update_accepted_complex_time_series(
+    tms: &mut NativeCplTimeSeries,
+    h_seconds: f64,
+    previous_input: f64,
+    current_input: f64,
+    previous_output: f64,
+    current_output: f64,
+    er: f64,
+    ei: f64,
+) {
+    let h_half = 0.5 * h_seconds;
+    let (a1, b1) = mult_complex(tms.tm[1].c, tms.tm[2].c, er, ei);
+
+    let (a, b) = mult_complex(tms.tm[1].cnv_i, tms.tm[2].cnv_i, er, ei);
+    tms.tm[1].cnv_i = a + h_half * (a1 * previous_input + current_input * tms.tm[1].c);
+    tms.tm[2].cnv_i = b + h_half * (b1 * previous_input + current_input * tms.tm[2].c);
+
+    let (a, b) = mult_complex(tms.tm[1].cnv_o, tms.tm[2].cnv_o, er, ei);
+    tms.tm[1].cnv_o = a + h_half * (a1 * previous_output + current_output * tms.tm[1].c);
+    tms.tm[2].cnv_o = b + h_half * (b1 * previous_output + current_output * tms.tm[2].c);
+}
+
+fn add_delayed_convolution(tms: &mut NativeCplTimeSeries, scale: f64, input: f64, output: f64) {
+    for term in &mut tms.tm {
+        term.cnv_i += scale * input * term.c;
+        term.cnv_o += scale * output * term.c;
+    }
 }
 
 fn update_rhs_time_series(
@@ -1370,6 +1605,11 @@ fn exp_complex(real: f64, imag: f64, h: f64) -> (f64, f64) {
 
 fn mult_complex(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
     (ar * br - ai * bi, ar * bi + ai * br)
+}
+
+fn div_complex(ar: f64, ai: f64, br: f64, bi: f64) -> (f64, f64) {
+    let t = br * br + bi * bi;
+    ((ar * br + ai * bi) / t, (ai * br - ar * bi) / t)
 }
 
 fn zero_poly_matrix(dim: usize, poly_len: usize) -> PolyMatrix {
