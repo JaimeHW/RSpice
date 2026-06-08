@@ -10,6 +10,43 @@ use super::TransmissionLine;
 
 const MODAL_RELATIVE_EIGEN_TOL: Value = 1e-12;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CplBranchCurrents {
+    pub(crate) b1: Vec<NodeId>,
+    pub(crate) b2: Vec<NodeId>,
+}
+
+impl CplBranchCurrents {
+    pub(crate) fn new(b1: Vec<NodeId>, b2: Vec<NodeId>, conductors: usize) -> Result<Self, String> {
+        if b1.len() != conductors || b2.len() != conductors {
+            return Err(format!(
+                "CPL branch-current topology requires {} b1 and b2 entries, found {} and {}",
+                conductors,
+                b1.len(),
+                b2.len()
+            ));
+        }
+        if b1.iter().chain(b2.iter()).any(|branch| *branch == 0) {
+            return Err(
+                "CPL branch-current topology requires non-ground branch ordinals".to_string(),
+            );
+        }
+        Ok(Self { b1, b2 })
+    }
+
+    #[inline]
+    pub(crate) fn conductor(&self, conductor: usize) -> Option<(NodeId, NodeId)> {
+        Some((*self.b1.get(conductor)?, *self.b2.get(conductor)?))
+    }
+
+    pub(crate) fn matrix_indices_from_ordinals(&self, num_nodes: usize) -> Self {
+        Self {
+            b1: self.b1.iter().map(|branch| num_nodes + *branch).collect(),
+            b2: self.b2.iter().map(|branch| num_nodes + *branch).collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct CoupledTransmissionLine {
     pub name: String,
@@ -23,6 +60,8 @@ pub struct CoupledTransmissionLine {
     port_admittance: Vec<Vec<Value>>,
     modal_conductances: Vec<Value>,
     dc_series_resistances: Vec<Value>,
+    native_branch_ordinals: Option<CplBranchCurrents>,
+    native_branch_matrix_indices: Option<CplBranchCurrents>,
     modes: Vec<TransmissionLine>,
 }
 
@@ -161,6 +200,8 @@ impl CoupledTransmissionLine {
             port_admittance,
             modal_conductances,
             dc_series_resistances,
+            native_branch_ordinals: None,
+            native_branch_matrix_indices: None,
             modes,
         })
     }
@@ -202,6 +243,48 @@ impl CoupledTransmissionLine {
     #[inline]
     pub fn dc_series_resistance(&self, conductor: usize) -> Value {
         self.dc_series_resistances[conductor]
+    }
+
+    #[inline]
+    pub(crate) fn has_grounded_references(&self) -> bool {
+        self.near_ref == 0 && self.far_ref == 0
+    }
+
+    pub(crate) fn set_native_branch_ordinals(
+        &mut self,
+        b1: Vec<NodeId>,
+        b2: Vec<NodeId>,
+    ) -> Result<(), String> {
+        if !self.has_grounded_references() {
+            return Err(format!(
+                "Coupled transmission line '{}' native branch-current topology is only supported for grounded references",
+                self.name
+            ));
+        }
+        self.native_branch_ordinals = Some(CplBranchCurrents::new(b1, b2, self.conductors())?);
+        self.native_branch_matrix_indices = None;
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn native_branch_ordinals(&self) -> Option<&CplBranchCurrents> {
+        self.native_branch_ordinals.as_ref()
+    }
+
+    pub(crate) fn set_native_branch_matrix_indices(
+        &mut self,
+        b1: Vec<NodeId>,
+        b2: Vec<NodeId>,
+    ) -> Result<(), String> {
+        self.native_branch_matrix_indices =
+            Some(CplBranchCurrents::new(b1, b2, self.conductors())?);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    #[inline]
+    pub(crate) fn native_branch_matrix_indices(&self) -> Option<&CplBranchCurrents> {
+        self.native_branch_matrix_indices.as_ref()
     }
 
     pub fn reset(&mut self) {

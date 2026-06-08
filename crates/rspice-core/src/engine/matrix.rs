@@ -446,6 +446,11 @@ impl Engine {
         }
 
         for tl in &circuit.coupled_tlines {
+            if tl.native_branch_ordinals().is_some() {
+                Self::stamp_grounded_cpl_branch_topology(&mut triplets, circuit, tl);
+                continue;
+            }
+
             // DC fallback topology: each conductor can short near-to-far in operating point.
             for conductor in 0..tl.conductors() {
                 let near = tl.near_nodes[conductor];
@@ -615,5 +620,39 @@ impl Engine {
         }
 
         StaticMatrix::from_triplets(size, size, &triplets).map_err(SimulationError::Solver)
+    }
+
+    #[inline]
+    fn stamp_grounded_cpl_branch_topology(
+        triplets: &mut Vec<(usize, usize, Value)>,
+        circuit: &CircuitData,
+        tl: &crate::device::CoupledTransmissionLine,
+    ) {
+        let Some(branches) = tl.native_branch_ordinals() else {
+            return;
+        };
+
+        for conductor in 0..tl.conductors() {
+            let Some((b1_ordinal, b2_ordinal)) = branches.conductor(conductor) else {
+                continue;
+            };
+            let b1 = circuit.get_branch_matrix_index(b1_ordinal);
+            let b2 = circuit.get_branch_matrix_index(b2_ordinal);
+            let near = tl.near_nodes[conductor];
+            let far = tl.far_nodes[conductor];
+
+            if near > 0 {
+                triplets.push((near - 1, b1 - 1, 0.0));
+                triplets.push((b2 - 1, near - 1, 0.0));
+            }
+            if far > 0 {
+                triplets.push((far - 1, b2 - 1, 0.0));
+                triplets.push((b2 - 1, far - 1, 0.0));
+            }
+
+            triplets.push((b1 - 1, b1 - 1, 0.0));
+            triplets.push((b1 - 1, b2 - 1, 0.0));
+            triplets.push((b2 - 1, b1 - 1, 0.0));
+        }
     }
 }

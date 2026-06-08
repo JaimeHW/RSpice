@@ -119,5 +119,13 @@ impl CircuitData {
                 tline.set_branches(self.num_nodes + branch1, self.num_nodes + branch2);
             }
         }
+        for tline in &mut self.coupled_tlines {
+            if let Some(branches) = tline.native_branch_ordinals() {
+                let matrix_indices = branches.matrix_indices_from_ordinals(self.num_nodes);
+                tline
+                    .set_native_branch_matrix_indices(matrix_indices.b1, matrix_indices.b2)
+                    .expect("validated CPL native branch ordinals resolve to matrix indices");
+            }
+        }
     }
 }

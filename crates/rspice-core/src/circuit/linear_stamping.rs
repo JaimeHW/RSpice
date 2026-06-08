@@ -66,6 +66,11 @@ impl CircuitData {
     #[inline]
     pub(in crate::circuit) fn stamp_coupled_tlines_dc_direct(&self, matrix: &mut StaticMatrix) {
         for tline in &self.coupled_tlines {
+            if tline.native_branch_ordinals().is_some() {
+                self.stamp_grounded_cpl_branch_dc_direct(matrix, tline);
+                continue;
+            }
+
             for conductor in 0..tline.conductors() {
                 let g_series = 1.0 / tline.dc_series_resistance(conductor);
                 Self::stamp_tline_port_direct(
@@ -75,6 +80,42 @@ impl CircuitData {
                     g_series,
                 );
             }
+        }
+    }
+
+    #[inline]
+    fn stamp_grounded_cpl_branch_dc_direct(
+        &self,
+        matrix: &mut StaticMatrix,
+        tline: &crate::device::CoupledTransmissionLine,
+    ) {
+        let Some(branches) = tline.native_branch_ordinals() else {
+            return;
+        };
+
+        for conductor in 0..tline.conductors() {
+            let Some((b1_ordinal, b2_ordinal)) = branches.conductor(conductor) else {
+                continue;
+            };
+            let b1 = self.get_branch_matrix_index(b1_ordinal);
+            let b2 = self.get_branch_matrix_index(b2_ordinal);
+            let r_series = tline.dc_series_resistance(conductor);
+
+            Self::stamp_branch_kcl_direct(matrix, tline.near_nodes[conductor], 0, b1, 1.0);
+            Self::stamp_branch_kcl_direct(matrix, tline.far_nodes[conductor], 0, b2, 1.0);
+            matrix.add(b1 - 1, b1 - 1, 1.0);
+            matrix.add(b1 - 1, b2 - 1, 1.0);
+            Self::stamp_branch_voltage_row_direct(
+                matrix,
+                b2,
+                tline.near_nodes[conductor],
+                0,
+                tline.far_nodes[conductor],
+                0,
+                1.0,
+                -1.0,
+            );
+            matrix.add(b2 - 1, b1 - 1, -r_series);
         }
     }
 
@@ -292,6 +333,11 @@ impl CircuitData {
     #[inline]
     pub(in crate::circuit) fn stamp_coupled_tlines_dc(&self, matrix: &mut TripletMatrix) {
         for tline in &self.coupled_tlines {
+            if tline.native_branch_ordinals().is_some() {
+                self.stamp_grounded_cpl_branch_dc(matrix, tline);
+                continue;
+            }
+
             for conductor in 0..tline.conductors() {
                 let g_series = 1.0 / tline.dc_series_resistance(conductor);
                 Self::stamp_tline_port_triplet(
@@ -301,6 +347,42 @@ impl CircuitData {
                     g_series,
                 );
             }
+        }
+    }
+
+    #[inline]
+    fn stamp_grounded_cpl_branch_dc(
+        &self,
+        matrix: &mut TripletMatrix,
+        tline: &crate::device::CoupledTransmissionLine,
+    ) {
+        let Some(branches) = tline.native_branch_ordinals() else {
+            return;
+        };
+
+        for conductor in 0..tline.conductors() {
+            let Some((b1_ordinal, b2_ordinal)) = branches.conductor(conductor) else {
+                continue;
+            };
+            let b1 = self.get_branch_matrix_index(b1_ordinal);
+            let b2 = self.get_branch_matrix_index(b2_ordinal);
+            let r_series = tline.dc_series_resistance(conductor);
+
+            Self::stamp_branch_kcl_triplet(matrix, tline.near_nodes[conductor], 0, b1, 1.0);
+            Self::stamp_branch_kcl_triplet(matrix, tline.far_nodes[conductor], 0, b2, 1.0);
+            matrix.push(b1 - 1, b1 - 1, 1.0);
+            matrix.push(b1 - 1, b2 - 1, 1.0);
+            Self::stamp_branch_voltage_row_triplet(
+                matrix,
+                b2,
+                tline.near_nodes[conductor],
+                0,
+                tline.far_nodes[conductor],
+                0,
+                1.0,
+                -1.0,
+            );
+            matrix.push(b2 - 1, b1 - 1, -r_series);
         }
     }
 

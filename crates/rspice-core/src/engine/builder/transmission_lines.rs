@@ -314,9 +314,78 @@ pub(in crate::engine::builder) fn validate_cpl_model_params(
     Ok(())
 }
 
+#[allow(dead_code)]
+pub(in crate::engine::builder) fn allocate_grounded_cpl_native_branch_currents(
+    circuit: &mut CircuitData,
+    coupled_tline_index: usize,
+) -> Result<(), SimulationError> {
+    let (name, conductors) = {
+        let tline = circuit
+            .coupled_tlines
+            .get(coupled_tline_index)
+            .ok_or_else(|| {
+                SimulationError::Circuit(format!(
+                    "CPL native branch-current allocation references missing coupled line index {}",
+                    coupled_tline_index
+                ))
+            })?;
+        if !tline.has_grounded_references() {
+            return Err(SimulationError::Circuit(format!(
+                "CPL native branch-current topology for '{}' is only supported when both references are ground",
+                tline.name
+            )));
+        }
+        if tline.native_branch_ordinals().is_some() {
+            return Ok(());
+        }
+        (tline.name.clone(), tline.conductors())
+    };
+
+    let mut b1 = Vec::with_capacity(conductors);
+    let mut b2 = Vec::with_capacity(conductors);
+    for conductor in 0..conductors {
+        b1.push(circuit.allocate_branch_named(&format!("{}#b1[{}]", name, conductor + 1)));
+        b2.push(circuit.allocate_branch_named(&format!("{}#b2[{}]", name, conductor + 1)));
+    }
+
+    let tline = circuit
+        .coupled_tlines
+        .get_mut(coupled_tline_index)
+        .expect("validated coupled line index remains present");
+    tline
+        .set_native_branch_ordinals(b1, b2)
+        .map_err(SimulationError::Circuit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grounded_cpl_netlist() -> Netlist {
+        Netlist::parse(
+            r#"grounded cpl
+P1 n1 n2 0 f1 f2 0 m
+.model m cpl
++ r = 2 0.5 3
++ l = 1n 0.1n 1.2n
++ c = 1p -0.1p 1.1p
++ g = 0 0 0
++ length = 4
+.end
+"#,
+        )
+        .expect("test netlist parses")
+    }
+
+    fn triplet_value(matrix: &crate::solver::TripletMatrix, row: usize, col: usize) -> f64 {
+        matrix
+            .row_indices
+            .iter()
+            .zip(matrix.col_indices.iter())
+            .zip(matrix.values.iter())
+            .filter_map(|((&r, &c), &value)| (r == row && c == col).then_some(value))
+            .sum()
+    }
 
     fn valid_cpl_params_with_r(r: Vec<Vec<f64>>) -> CplModelParams {
         CplModelParams {
@@ -341,6 +410,110 @@ mod tests {
 
         validate_cpl_model_params("m", &params)
             .expect("finite negative off-diagonal R is accepted");
+    }
+
+    #[test]
+    fn transmission_cpl_native_branch_currents_are_dormant_by_default() {
+        let netlist = grounded_cpl_netlist();
+        let circuit = crate::engine::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+
+        assert_eq!(circuit.num_branches(), 0);
+        assert!(circuit.coupled_tlines[0].native_branch_ordinals().is_none());
+    }
+
+    #[test]
+    fn transmission_cpl_grounded_native_branch_allocation_topology_and_linking() {
+        let netlist = grounded_cpl_netlist();
+        let engine = crate::engine::Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+
+        allocate_grounded_cpl_native_branch_currents(&mut circuit, 0)
+            .expect("grounded CPL native branches allocate");
+
+        assert_eq!(circuit.num_nodes(), 4);
+        assert_eq!(circuit.num_branches(), 4);
+        assert_eq!(
+            circuit.branch_names_sorted(),
+            vec!["P1#b1[1]", "P1#b2[1]", "P1#b1[2]", "P1#b2[2]"]
+        );
+        let branches = circuit.coupled_tlines[0]
+            .native_branch_ordinals()
+            .expect("native branch ordinals are present");
+        assert_eq!(branches.b1, vec![1, 3]);
+        assert_eq!(branches.b2, vec![2, 4]);
+
+        let matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        let n1 = circuit.get_node_by_name("n1").expect("n1 exists");
+        let n2 = circuit.get_node_by_name("n2").expect("n2 exists");
+        let f1 = circuit.get_node_by_name("f1").expect("f1 exists");
+        let f2 = circuit.get_node_by_name("f2").expect("f2 exists");
+        let b1_1 = circuit.get_branch_matrix_index(1);
+        let b2_1 = circuit.get_branch_matrix_index(2);
+        let b1_2 = circuit.get_branch_matrix_index(3);
+        let b2_2 = circuit.get_branch_matrix_index(4);
+
+        assert_eq!(matrix.nrows, 8);
+        assert!(matrix.get_index(n1 - 1, b1_1 - 1).is_some());
+        assert!(matrix.get_index(f1 - 1, b2_1 - 1).is_some());
+        assert!(matrix.get_index(b1_1 - 1, b1_1 - 1).is_some());
+        assert!(matrix.get_index(b1_1 - 1, b2_1 - 1).is_some());
+        assert!(matrix.get_index(b2_1 - 1, n1 - 1).is_some());
+        assert!(matrix.get_index(b2_1 - 1, f1 - 1).is_some());
+        assert!(matrix.get_index(b2_1 - 1, b1_1 - 1).is_some());
+        assert!(matrix.get_index(n2 - 1, b1_2 - 1).is_some());
+        assert!(matrix.get_index(f2 - 1, b2_2 - 1).is_some());
+        assert!(matrix.get_index(n1 - 1, f1 - 1).is_none());
+
+        circuit.link_indices(&matrix);
+        let matrix_branches = circuit.coupled_tlines[0]
+            .native_branch_matrix_indices()
+            .expect("native branch matrix indices are present");
+        assert_eq!(matrix_branches.b1, vec![5, 7]);
+        assert_eq!(matrix_branches.b2, vec![6, 8]);
+    }
+
+    #[test]
+    fn transmission_cpl_grounded_native_dc_stamp_matches_ngspice_shape() {
+        let netlist = grounded_cpl_netlist();
+        let engine = crate::engine::Engine::default();
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+
+        allocate_grounded_cpl_native_branch_currents(&mut circuit, 0)
+            .expect("grounded CPL native branches allocate");
+
+        let mut matrix = circuit.create_matrix();
+        let mut rhs = circuit.create_rhs();
+        circuit.stamp_dc(&mut matrix, &mut rhs);
+
+        let n1 = circuit.get_node_by_name("n1").expect("n1 exists");
+        let n2 = circuit.get_node_by_name("n2").expect("n2 exists");
+        let f1 = circuit.get_node_by_name("f1").expect("f1 exists");
+        let f2 = circuit.get_node_by_name("f2").expect("f2 exists");
+        let b1_1 = circuit.get_branch_matrix_index(1);
+        let b2_1 = circuit.get_branch_matrix_index(2);
+        let b1_2 = circuit.get_branch_matrix_index(3);
+        let b2_2 = circuit.get_branch_matrix_index(4);
+
+        assert_eq!(triplet_value(&matrix, n1 - 1, b1_1 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, f1 - 1, b2_1 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b1_1 - 1, b1_1 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b1_1 - 1, b2_1 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b2_1 - 1, n1 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b2_1 - 1, f1 - 1), -1.0);
+        assert_eq!(triplet_value(&matrix, b2_1 - 1, b1_1 - 1), -8.0);
+        assert_eq!(triplet_value(&matrix, b2_1 - 1, b1_2 - 1), 0.0);
+
+        assert_eq!(triplet_value(&matrix, n2 - 1, b1_2 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, f2 - 1, b2_2 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b1_2 - 1, b1_2 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b1_2 - 1, b2_2 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b2_2 - 1, n2 - 1), 1.0);
+        assert_eq!(triplet_value(&matrix, b2_2 - 1, f2 - 1), -1.0);
+        assert_eq!(triplet_value(&matrix, b2_2 - 1, b1_2 - 1), -12.0);
+
+        assert!(rhs.iter().all(|value| *value == 0.0));
     }
 }
 
@@ -399,6 +572,10 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
     if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
         circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
     }
+    // Keep native branch-current CPL dormant until the matching transient
+    // convolution stamp is ready; the current CPL transient runtime is modal
+    // and nodal, so allocating extra branch rows by default would change the
+    // global matrix/output shape without a complete transient equation set.
     circuit.coupled_tlines.push(coupled_tline);
 
     Ok(())
