@@ -1689,6 +1689,7 @@ impl Engine {
                         tstop,
                         self.voltage_reltol(),
                         self.voltage_abstol(),
+                        self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
@@ -2317,6 +2318,7 @@ impl Engine {
                         tstop,
                         self.voltage_reltol(),
                         self.voltage_abstol(),
+                        self.current_abstol(),
                         &mut dynamic_tline_breakpoints_added,
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
@@ -2478,6 +2480,7 @@ impl Engine {
                 tstop,
                 self.voltage_reltol(),
                 self.voltage_abstol(),
+                self.current_abstol(),
                 &mut dynamic_tline_breakpoints_added,
                 &mut warned_dynamic_tline_breakpoint_cap,
             );

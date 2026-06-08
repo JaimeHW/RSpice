@@ -558,7 +558,7 @@ impl TransmissionLine {
         deriv_reltol: Value,
         deriv_abstol: Value,
         voltage_reltol: Value,
-        voltage_abstol: Value,
+        steady_abstol: Value,
     ) -> bool {
         let dt_curr = t_curr - t_prev;
         if !(dt_curr.is_finite() && dt_curr > 0.0) {
@@ -572,14 +572,14 @@ impl TransmissionLine {
         };
         let threshold = deriv_reltol * d_curr.abs().max(d_prev.abs()) + deriv_abstol;
         (d_curr - d_prev).abs() >= threshold
-            && !Self::ltra_wave_is_steady(v_curr, v_prev, v_prev2, voltage_reltol, voltage_abstol)
+            && !Self::ltra_wave_is_steady(v_curr, v_prev, v_prev2, voltage_reltol, steady_abstol)
     }
 
     /// Return the ngspice LTRA derivative breakpoint arrival time, if needed.
     pub(crate) fn ltra_derivative_breakpoint_arrival(
         &self,
         voltage_reltol: Value,
-        voltage_abstol: Value,
+        steady_abstol: Value,
     ) -> Option<Value> {
         let kernel = self.distributed_rlc.as_ref()?;
         let len = self.state_history.len();
@@ -605,7 +605,7 @@ impl TransmissionLine {
             self.ltra_breakpoint_reltol,
             self.ltra_breakpoint_abstol,
             voltage_reltol,
-            voltage_abstol,
+            steady_abstol,
         );
         let backward_changed = Self::ltra_derivative_changed(
             Self::ltra_wave(curr, self.z0, kernel.attenuation, false),
@@ -617,7 +617,7 @@ impl TransmissionLine {
             self.ltra_breakpoint_reltol,
             self.ltra_breakpoint_abstol,
             voltage_reltol,
-            voltage_abstol,
+            steady_abstol,
         );
 
         if forward_changed || backward_changed {
@@ -1026,6 +1026,29 @@ mod tests {
         line.set_ltra_mixed_interpolation();
 
         assert_close(line.delayed_state(2.5).v1, 1.5);
+    }
+
+    #[test]
+    fn ltra_steady_wave_guard_uses_current_abstol_floor() {
+        let reltol = 0.0;
+        let current_abstol = 1.0e-12;
+        let voltage_abstol = 1.0e-6;
+        let small_wave = 1.0e-9;
+
+        assert!(!TransmissionLine::ltra_wave_is_steady(
+            small_wave,
+            0.0,
+            0.0,
+            reltol,
+            current_abstol,
+        ));
+        assert!(TransmissionLine::ltra_wave_is_steady(
+            small_wave,
+            0.0,
+            0.0,
+            reltol,
+            voltage_abstol,
+        ));
     }
 
     #[test]

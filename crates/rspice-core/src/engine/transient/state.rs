@@ -1204,6 +1204,7 @@ impl Engine {
         tstop: Value,
         voltage_reltol: Value,
         voltage_abstol: Value,
+        current_abstol: Value,
         dynamic_breakpoints_added: &mut usize,
         warned_dynamic_breakpoint_cap: &mut bool,
     ) {
@@ -1268,7 +1269,7 @@ impl Engine {
                 let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
                 tl.update_history(accepted_time, v1, i1, v2, i2);
                 if let Some(arrival) =
-                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, voltage_abstol)
+                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, current_abstol)
                 {
                     Self::schedule_dynamic_tline_breakpoint(
                         breakpoints,
@@ -1286,7 +1287,7 @@ impl Engine {
             tl.update_history(accepted_time, v1, i1_actual, v2, i2_actual);
             if tl.has_distributed_rlgc() {
                 if let Some(arrival) =
-                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, voltage_abstol)
+                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, current_abstol)
                 {
                     Self::schedule_dynamic_tline_breakpoint(
                         breakpoints,
