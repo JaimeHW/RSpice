@@ -193,6 +193,9 @@ impl Engine {
         let mut delays: Vec<Value> = circuit
             .tlines
             .iter()
+            // Ngspice TXL advances its native history from accepted points and
+            // does not propagate source-edge breakpoints by the scalar line delay.
+            .filter(|tl| !tl.has_txl_runtime())
             .map(crate::device::TransmissionLine::delay)
             .chain(
                 circuit
@@ -351,5 +354,69 @@ impl Engine {
                 *warned_dynamic_breakpoint_cap = true;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_delays_close(actual: &[Value], expected: &[Value]) {
+        assert_eq!(
+            actual.len(),
+            expected.len(),
+            "actual={actual:?} expected={expected:?}"
+        );
+        for (&actual, &expected) in actual.iter().zip(expected) {
+            let tolerance = expected.abs().max(1.0) * 1.0e-12;
+            assert!(
+                (actual - expected).abs() <= tolerance,
+                "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
+            );
+        }
+    }
+
+    #[test]
+    fn transmission_line_delays_skip_native_txl_scalar_lines() {
+        let mut circuit = crate::circuit::Circuit::new();
+
+        circuit.tlines.push(crate::device::TransmissionLine::new(
+            "TLOSSLESS".to_string(),
+            1,
+            0,
+            2,
+            0,
+            50.0,
+            1.0e-9,
+        ));
+
+        let mut txl_line =
+            crate::device::TransmissionLine::new("TTXL".to_string(), 3, 0, 4, 0, 50.0, 4.0e-9);
+        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
+        circuit.tlines.push(txl_line);
+
+        let mut ltra_line =
+            crate::device::TransmissionLine::new("TLTRA".to_string(), 5, 0, 6, 0, 75.0, 5.0e-9);
+        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
+        circuit.tlines.push(ltra_line);
+
+        let coupled = crate::device::CoupledTransmissionLine::new(
+            "PCOUPLED".to_string(),
+            vec![7, 8],
+            0,
+            vec![9, 10],
+            0,
+            &[vec![0.0, 0.0], vec![0.0, 0.0]],
+            &[vec![4.0, 0.0], vec![0.0, 9.0]],
+            &[vec![1.0, 0.0], vec![0.0, 1.0]],
+            &[vec![0.0, 0.0], vec![0.0, 0.0]],
+            1.0e-9,
+        )
+        .expect("valid coupled modal line");
+        circuit.coupled_tlines.push(coupled);
+
+        let delays = Engine::transmission_line_delays(&circuit);
+
+        assert_delays_close(&delays, &[1.0e-9, 2.0e-9, 3.0e-9, 5.0e-9]);
     }
 }
