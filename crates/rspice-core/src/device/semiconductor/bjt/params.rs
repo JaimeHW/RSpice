@@ -1289,13 +1289,30 @@ mod tests {
     }
 
     #[test]
-    fn pnp_defaults_to_vertical_substrate_topology() {
-        let default = Bjt::new_pnp("q1".to_string(), 1, 2, 3).with_params(&HashMap::new());
-        let lateral = Bjt::new_pnp("q1".to_string(), 1, 2, 3)
+    fn substrate_topology_defaults_match_ngspice_bjt_setup() {
+        let npn_default = Bjt::new_npn("q1".to_string(), 1, 2, 3).with_params(&HashMap::new());
+        let pnp_default = Bjt::new_pnp("q1".to_string(), 1, 2, 3).with_params(&HashMap::new());
+        let pnp_lateral = Bjt::new_pnp("q1".to_string(), 1, 2, 3)
             .with_params(&HashMap::from([("SUBS".to_string(), -1.0)]));
+        let pnp_vertical = Bjt::new_pnp("q1".to_string(), 1, 2, 3)
+            .with_params(&HashMap::from([("SUBS".to_string(), 1.0)]));
 
-        assert_eq!(default.substrate_topology, BjtSubstrateTopology::Vertical);
-        assert_eq!(lateral.substrate_topology, BjtSubstrateTopology::Lateral);
+        assert_eq!(
+            npn_default.substrate_topology,
+            BjtSubstrateTopology::Vertical
+        );
+        assert_eq!(
+            pnp_default.substrate_topology,
+            BjtSubstrateTopology::Lateral
+        );
+        assert_eq!(
+            pnp_lateral.substrate_topology,
+            BjtSubstrateTopology::Lateral
+        );
+        assert_eq!(
+            pnp_vertical.substrate_topology,
+            BjtSubstrateTopology::Vertical
+        );
     }
 
     #[test]

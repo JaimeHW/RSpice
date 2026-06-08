@@ -29,8 +29,11 @@ pub enum BjtSubstrateTopology {
 
 impl BjtSubstrateTopology {
     #[inline]
-    pub(crate) fn default_for_type(_bjt_type: BjtType) -> Self {
-        Self::Vertical
+    pub(crate) fn default_for_type(bjt_type: BjtType) -> Self {
+        match bjt_type {
+            BjtType::Npn => Self::Vertical,
+            BjtType::Pnp => Self::Lateral,
+        }
     }
 
     #[inline]
