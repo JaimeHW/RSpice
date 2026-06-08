@@ -36,6 +36,11 @@ pub(in crate::engine::builder) struct TransmissionLineModelParams {
 
 impl TransmissionLineModelParams {
     #[inline]
+    pub(in crate::engine::builder) fn is_txl(self) -> bool {
+        self.kind == TransmissionLineModelKind::Txl
+    }
+
+    #[inline]
     pub(in crate::engine::builder) fn uses_txl_lossless_branch(self) -> bool {
         if self.kind != TransmissionLineModelKind::Txl {
             return false;
@@ -360,7 +365,9 @@ fn symmetric_matrix_from_upper_triangle(
                     col + 1
                 )));
             }
-            if row == col && let Some(min_value) = diagonal_clamp_min {
+            if row == col
+                && let Some(min_value) = diagonal_clamp_min
+            {
                 value = value.max(min_value);
             }
             matrix[row][col] = value;
@@ -595,8 +602,7 @@ mod tests {
         )
         .expect("test netlist parses");
 
-        let err =
-            resolve_cpl_model_params(&netlist, "m", 2).expect_err("missing G is rejected");
+        let err = resolve_cpl_model_params(&netlist, "m", 2).expect_err("missing G is rejected");
         assert!(
             err.to_string().contains("has 0 G entries, expected 3"),
             "{err}"

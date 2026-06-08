@@ -1091,9 +1091,16 @@ impl Engine {
                                       p1p: usize,
                                       p1n: usize,
                                       p2p: usize,
-                                      p2n: usize| {
+                                      p2n: usize,
+                                      allow_native_txl: bool| {
                         let mut tline = crate::device::TransmissionLine::new(
-                            name, p1p, p1n, p2p, p2n, z0_eff, delay,
+                            name.clone(),
+                            p1p,
+                            p1n,
+                            p2p,
+                            p2n,
+                            z0_eff,
+                            delay,
                         );
                         tline.freq = freq_eff;
                         tline.nl = nl_eff;
@@ -1104,7 +1111,24 @@ impl Engine {
                                 params.abs.unwrap_or(1.0),
                             );
                         }
-                        if !txl_lossless_branch
+                        let native_txl = if allow_native_txl
+                            && !txl_lossless_branch
+                            && let Some(params) = model_params
+                            && params.is_txl()
+                            && let (Some(r), Some(l), Some(g), Some(c), Some(len)) =
+                                (params.r, params.l, params.g, params.c, params.len)
+                        {
+                            tline.enable_txl_runtime(r, l, g, c, len)
+                        } else {
+                            false
+                        };
+                        if native_txl {
+                            let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
+                            let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
+                            tline.set_txl_branch_ordinals(branch1, branch2);
+                        }
+                        if !native_txl
+                            && !txl_lossless_branch
                             && let Some(params) = model_params
                             && let (Some(l), Some(c), Some(len)) = (params.l, params.c, params.len)
                         {
@@ -1144,7 +1168,15 @@ impl Engine {
                                 model_params.expect("distributed RLGC synthesis requires model"),
                             )?;
                         } else {
-                            push_tline(&mut circuit, element.name.clone(), p1p, p1n, p2p, p2n);
+                            push_tline(
+                                &mut circuit,
+                                element.name.clone(),
+                                p1p,
+                                p1n,
+                                p2p,
+                                p2n,
+                                true,
+                            );
                         }
                     } else {
                         if element.nodes.len() % 2 != 0 {
@@ -1180,7 +1212,7 @@ impl Engine {
                                         .expect("distributed RLGC synthesis requires model"),
                                 )?;
                             } else {
-                                push_tline(&mut circuit, conductor_name, near, 0, far, 0);
+                                push_tline(&mut circuit, conductor_name, near, 0, far, 0, false);
                             }
                         }
                     }

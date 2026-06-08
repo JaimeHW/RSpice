@@ -47,6 +47,7 @@ mod distributed;
 mod line;
 mod lossy;
 mod response;
+mod txl;
 
 use delay::DelayBuffer;
 use distributed::{
@@ -55,3 +56,4 @@ use distributed::{
 pub use line::TransmissionLine;
 pub use lossy::LossyTransmissionLine;
 pub(crate) use response::TlineTransientResponse;
+pub(crate) use txl::TxlTransientStamp;

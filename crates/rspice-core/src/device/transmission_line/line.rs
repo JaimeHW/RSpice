@@ -68,6 +68,10 @@ pub struct TransmissionLine {
     ltra_breakpoint_reltol: Value,
     /// Absolute derivative tolerance for ngspice-style LTRA breakpoints.
     ltra_breakpoint_abstol: Value,
+    /// Optional ngspice TXL branch-current runtime for non-lossless TXL cards.
+    txl: Option<txl::TxlRuntime>,
+    /// TXL branch-current ordinals allocated by the circuit builder.
+    txl_branch_ordinals: Option<(NodeId, NodeId)>,
 
     /// Current simulation time
     current_time: Value,
@@ -183,6 +187,8 @@ impl TransmissionLine {
             distributed_rlc_cache: Cell::new(None),
             ltra_breakpoint_reltol: 1.0,
             ltra_breakpoint_abstol: 1.0,
+            txl: None,
+            txl_branch_ordinals: None,
             current_time: 0.0,
         }
     }
@@ -211,6 +217,83 @@ impl TransmissionLine {
     pub fn set_branches(&mut self, branch1: NodeId, branch2: NodeId) {
         self.branch1 = Some(branch1);
         self.branch2 = Some(branch2);
+    }
+
+    /// Set branch ordinals for the native TXL runtime.
+    pub fn set_txl_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
+        self.txl_branch_ordinals = Some((branch1, branch2));
+    }
+
+    /// Return TXL branch ordinals, if this line uses the native TXL runtime.
+    #[inline]
+    pub fn txl_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
+        self.txl.as_ref()?;
+        self.txl_branch_ordinals
+    }
+
+    /// Return linked TXL branch matrix indices.
+    #[inline]
+    pub fn txl_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
+        self.txl.as_ref()?;
+        Some((self.branch1?, self.branch2?))
+    }
+
+    /// Configure the ngspice-style TXL runtime for a non-lossless scalar line.
+    pub fn enable_txl_runtime(
+        &mut self,
+        r: Value,
+        l: Value,
+        g: Value,
+        c: Value,
+        len: Value,
+    ) -> bool {
+        if let Some(runtime) = txl::TxlRuntime::setup(r, l, g, c, len) {
+            self.txl = Some(runtime);
+            self.distributed_rlc = None;
+            self.distributed_rlc_cache.set(None);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Return whether this line is using the native non-lossless TXL runtime.
+    #[inline]
+    pub fn has_txl_runtime(&self) -> bool {
+        self.txl.is_some()
+    }
+
+    /// Return the current transient TXL branch stamp.
+    pub(crate) fn txl_transient_stamp(&self, time: Value) -> Option<TxlTransientStamp> {
+        self.txl.as_ref()?.transient_stamp(time)
+    }
+
+    /// Seed native TXL history from the operating point.
+    pub(crate) fn initialize_txl_history(
+        &mut self,
+        time: Value,
+        v1: Value,
+        i1: Value,
+        v2: Value,
+        i2: Value,
+    ) {
+        if let Some(txl) = &mut self.txl {
+            txl.initialize(time, v1, i1, v2, i2);
+        }
+    }
+
+    /// Accept a native TXL transient point.
+    pub(crate) fn accept_txl_history(
+        &mut self,
+        time: Value,
+        v1: Value,
+        i1: Value,
+        v2: Value,
+        i2: Value,
+    ) {
+        if let Some(txl) = &mut self.txl {
+            txl.accept(time, v1, i1, v2, i2);
+        }
     }
 
     /// Get characteristic impedance
@@ -764,6 +847,9 @@ impl TransmissionLine {
         self.initial_state = None;
         self.state_history.clear();
         self.distributed_rlc_cache.set(None);
+        if let Some(txl) = &mut self.txl {
+            txl.reset();
+        }
         self.current_time = 0.0;
     }
 

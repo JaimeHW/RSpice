@@ -110,6 +110,83 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn stamp_txl_branch_runtime(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+        stamp: crate::device::TxlTransientStamp,
+    ) {
+        let Some((br1, br2)) = tl.txl_branch_matrix_indices() else {
+            return;
+        };
+
+        Self::stamp_txl_branch_kcl(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_txl_branch_kcl(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+
+        matrix.add(br1 - 1, br1 - 1, -1.0);
+        matrix.add(br2 - 1, br2 - 1, -1.0);
+
+        Self::stamp_txl_voltage_row(matrix, br1, tl.node1_pos, tl.node1_neg, stamp.local_coeff);
+        Self::stamp_txl_voltage_row(matrix, br2, tl.node2_pos, tl.node2_neg, stamp.local_coeff);
+
+        if stamp.delayed_voltage_coeff != 0.0 {
+            Self::stamp_txl_voltage_row(
+                matrix,
+                br1,
+                tl.node2_pos,
+                tl.node2_neg,
+                -stamp.delayed_voltage_coeff,
+            );
+            Self::stamp_txl_voltage_row(
+                matrix,
+                br2,
+                tl.node1_pos,
+                tl.node1_neg,
+                -stamp.delayed_voltage_coeff,
+            );
+        }
+        if stamp.delayed_current_coeff != 0.0 {
+            matrix.add(br1 - 1, br2 - 1, -stamp.delayed_current_coeff);
+            matrix.add(br2 - 1, br1 - 1, -stamp.delayed_current_coeff);
+        }
+
+        rhs[br1 - 1] = stamp.rhs1;
+        rhs[br2 - 1] = stamp.rhs2;
+    }
+
+    #[inline]
+    fn stamp_txl_branch_kcl(
+        matrix: &mut crate::solver::StaticMatrix,
+        node_pos: usize,
+        node_neg: usize,
+        branch: usize,
+        coeff: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.add(node_pos - 1, branch - 1, coeff);
+        }
+        if node_neg > 0 {
+            matrix.add(node_neg - 1, branch - 1, -coeff);
+        }
+    }
+
+    #[inline]
+    fn stamp_txl_voltage_row(
+        matrix: &mut crate::solver::StaticMatrix,
+        row: usize,
+        node_pos: usize,
+        node_neg: usize,
+        coeff: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.add(row - 1, node_pos - 1, coeff);
+        }
+        if node_neg > 0 {
+            matrix.add(row - 1, node_neg - 1, -coeff);
+        }
+    }
+
+    #[inline]
     pub(super) fn stamp_shared_reference_port(
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],

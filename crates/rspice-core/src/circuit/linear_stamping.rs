@@ -46,6 +46,10 @@ impl CircuitData {
     #[inline]
     pub(in crate::circuit) fn stamp_tlines_dc_direct(&self, matrix: &mut StaticMatrix) {
         for tl in &self.tlines {
+            if tl.has_txl_runtime() {
+                self.stamp_txl_dc_direct(matrix, tl);
+                continue;
+            }
             let g_series = tl.dc_series_conductance();
             // DC fallback: couple near/far conductors through equivalent series path.
             // This preserves operating-point continuity across the line and avoids
@@ -73,9 +77,147 @@ impl CircuitData {
     #[inline]
     pub(in crate::circuit) fn stamp_tlines_dc(&self, matrix: &mut TripletMatrix) {
         for tl in &self.tlines {
+            if tl.has_txl_runtime() {
+                self.stamp_txl_dc(matrix, tl);
+                continue;
+            }
             let g_series = tl.dc_series_conductance();
             Self::stamp_tline_port_triplet(matrix, tl.node1_pos, tl.node2_pos, g_series);
             Self::stamp_tline_port_triplet(matrix, tl.node1_neg, tl.node2_neg, g_series);
+        }
+    }
+
+    #[inline]
+    fn stamp_txl_dc_direct(&self, matrix: &mut StaticMatrix, tl: &crate::device::TransmissionLine) {
+        let Some((br1_ordinal, br2_ordinal)) = tl.txl_branch_ordinals() else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+        let r_series = tl.dc_series_resistance();
+
+        Self::stamp_branch_kcl_direct(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_direct(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        matrix.add(br1 - 1, br1 - 1, 1.0);
+        matrix.add(br1 - 1, br2 - 1, 1.0);
+        Self::stamp_branch_voltage_row_direct(
+            matrix,
+            br2,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -1.0,
+        );
+        matrix.add(br2 - 1, br1 - 1, -r_series);
+    }
+
+    #[inline]
+    fn stamp_txl_dc(&self, matrix: &mut TripletMatrix, tl: &crate::device::TransmissionLine) {
+        let Some((br1_ordinal, br2_ordinal)) = tl.txl_branch_ordinals() else {
+            return;
+        };
+        let br1 = self.get_branch_matrix_index(br1_ordinal);
+        let br2 = self.get_branch_matrix_index(br2_ordinal);
+        let r_series = tl.dc_series_resistance();
+
+        Self::stamp_branch_kcl_triplet(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_branch_kcl_triplet(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+        matrix.push(br1 - 1, br1 - 1, 1.0);
+        matrix.push(br1 - 1, br2 - 1, 1.0);
+        Self::stamp_branch_voltage_row_triplet(
+            matrix,
+            br2,
+            tl.node1_pos,
+            tl.node1_neg,
+            tl.node2_pos,
+            tl.node2_neg,
+            1.0,
+            -1.0,
+        );
+        matrix.push(br2 - 1, br1 - 1, -r_series);
+    }
+
+    #[inline]
+    fn stamp_branch_kcl_direct(
+        matrix: &mut StaticMatrix,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch: usize,
+        coeff: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.add(node_pos - 1, branch - 1, coeff);
+        }
+        if node_neg > 0 {
+            matrix.add(node_neg - 1, branch - 1, -coeff);
+        }
+    }
+
+    #[inline]
+    fn stamp_branch_kcl_triplet(
+        matrix: &mut TripletMatrix,
+        node_pos: NodeId,
+        node_neg: NodeId,
+        branch: usize,
+        coeff: Value,
+    ) {
+        if node_pos > 0 {
+            matrix.push(node_pos - 1, branch - 1, coeff);
+        }
+        if node_neg > 0 {
+            matrix.push(node_neg - 1, branch - 1, -coeff);
+        }
+    }
+
+    #[inline]
+    fn stamp_branch_voltage_row_direct(
+        matrix: &mut StaticMatrix,
+        row: usize,
+        p1: NodeId,
+        n1: NodeId,
+        p2: NodeId,
+        n2: NodeId,
+        c1: Value,
+        c2: Value,
+    ) {
+        if p1 > 0 {
+            matrix.add(row - 1, p1 - 1, c1);
+        }
+        if n1 > 0 {
+            matrix.add(row - 1, n1 - 1, -c1);
+        }
+        if p2 > 0 {
+            matrix.add(row - 1, p2 - 1, c2);
+        }
+        if n2 > 0 {
+            matrix.add(row - 1, n2 - 1, -c2);
+        }
+    }
+
+    #[inline]
+    fn stamp_branch_voltage_row_triplet(
+        matrix: &mut TripletMatrix,
+        row: usize,
+        p1: NodeId,
+        n1: NodeId,
+        p2: NodeId,
+        n2: NodeId,
+        c1: Value,
+        c2: Value,
+    ) {
+        if p1 > 0 {
+            matrix.push(row - 1, p1 - 1, c1);
+        }
+        if n1 > 0 {
+            matrix.push(row - 1, n1 - 1, -c1);
+        }
+        if p2 > 0 {
+            matrix.push(row - 1, p2 - 1, c2);
+        }
+        if n2 > 0 {
+            matrix.push(row - 1, n2 - 1, -c2);
         }
     }
 

@@ -565,14 +565,7 @@ impl Engine {
                     history.qds_prev_prev[idx],
                     history.cqds_prev[idx],
                 );
-                Self::stamp_two_terminal_companion(
-                    matrix,
-                    rhs,
-                    jfet.drain,
-                    jfet.source,
-                    geq,
-                    ieq,
-                );
+                Self::stamp_two_terminal_companion(matrix, rhs, jfet.drain, jfet.source, geq, ieq);
             }
         }
     }
@@ -717,8 +710,14 @@ impl Engine {
         _tline_dc_refs: &[(Value, Value)],
     ) {
         for tl in &circuit.tlines {
-            let response = tl.transient_port_response(time);
-            Self::stamp_tline_two_port(matrix, rhs, tl, response);
+            if tl.has_txl_runtime() {
+                if let Some(stamp) = tl.txl_transient_stamp(time) {
+                    Self::stamp_txl_branch_runtime(matrix, rhs, tl, stamp);
+                }
+            } else {
+                let response = tl.transient_port_response(time);
+                Self::stamp_tline_two_port(matrix, rhs, tl, response);
+            }
         }
     }
 
@@ -770,6 +769,12 @@ impl Engine {
             let v1 = Self::differential_voltage(initial_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(initial_solution, tl.node2_pos, tl.node2_neg);
             refs.push((v1, v2));
+            if let Some((br1, br2)) = tl.txl_branch_matrix_indices() {
+                let i1 = initial_solution.get(br1 - 1).copied().unwrap_or(0.0);
+                let i2 = initial_solution.get(br2 - 1).copied().unwrap_or(0.0);
+                tl.initialize_txl_history(initial_time, v1, i1, v2, i2);
+                continue;
+            }
 
             // Seed delayed-wave state from the initial OP so pre-edge steady states
             // are preserved (avoids artificial startup droop/ringing).
@@ -1243,6 +1248,12 @@ impl Engine {
             let previous_backward = tl.launched_backward_wave();
             let v1 = Self::differential_voltage(accepted_solution, tl.node1_pos, tl.node1_neg);
             let v2 = Self::differential_voltage(accepted_solution, tl.node2_pos, tl.node2_neg);
+            if let Some((br1, br2)) = tl.txl_branch_matrix_indices() {
+                let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
+                let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
+                tl.accept_txl_history(accepted_time, v1, i1, v2, i2);
+                continue;
+            }
             let (_v1_ref, _v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));
             let response = tl.transient_port_response(accepted_time);
             let (i1_actual, i2_actual) = response.port_currents(v1, v2);

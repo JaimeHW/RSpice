@@ -111,5 +111,10 @@ impl CircuitData {
             let branch_matrix_index = self.num_nodes + binding.branch_ordinal;
             binding.device.set_branch_index(branch_matrix_index);
         }
+        for tline in &mut self.tlines {
+            if let Some((branch1, branch2)) = tline.txl_branch_ordinals() {
+                tline.set_branches(self.num_nodes + branch1, self.num_nodes + branch2);
+            }
+        }
     }
 }
