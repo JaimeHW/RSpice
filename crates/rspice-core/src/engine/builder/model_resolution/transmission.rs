@@ -1,5 +1,7 @@
 use super::*;
 
+const TXL_MIN_INDUCTANCE: f64 = 1.0e-12;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::engine::builder) enum TransmissionLineModelKind {
     Ltra,
@@ -60,14 +62,19 @@ pub(in crate::engine::builder) struct CplModelParams {
     pub(in crate::engine::builder) length: f64,
 }
 
+pub(in crate::engine::builder) const CPL_MIN_SERIES_RESISTANCE_PER_LENGTH: f64 = 1.0e-4;
+
 pub(in crate::engine::builder) fn resolve_tline_model_params(
     netlist: &Netlist,
     model_name: &str,
-) -> Option<TransmissionLineModelParams> {
+) -> Result<Option<TransmissionLineModelParams>, SimulationError> {
     let model = netlist
         .models
         .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(model_name))?;
+        .find(|m| m.name.eq_ignore_ascii_case(model_name));
+    let Some(model) = model else {
+        return Ok(None);
+    };
 
     let mut params = TransmissionLineModelParams {
         kind: if model.model_type.eq_ignore_ascii_case("TXL") {
@@ -91,6 +98,10 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         compactrel: model_param(&model.params, &["COMPACTREL"]),
         compactabs: model_param(&model.params, &["COMPACTABS"]),
     };
+
+    if params.kind == TransmissionLineModelKind::Txl {
+        params = finalize_txl_model_params(model_name, params)?;
+    }
 
     let l = params.l;
     let c = params.c;
@@ -120,7 +131,66 @@ pub(in crate::engine::builder) fn resolve_tline_model_params(
         params.td = Some(len * (l * c).sqrt());
     }
 
-    Some(params)
+    Ok(Some(params))
+}
+
+fn require_txl_param(
+    model_name: &str,
+    param_name: &str,
+    value: Option<f64>,
+) -> Result<f64, SimulationError> {
+    let value = value.ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "TXL model '{}' is missing required {} parameter",
+            model_name, param_name
+        ))
+    })?;
+    if !value.is_finite() {
+        return Err(SimulationError::Circuit(format!(
+            "TXL model '{}' has non-finite {}={}",
+            model_name, param_name, value
+        )));
+    }
+    Ok(value)
+}
+
+fn finalize_txl_model_params(
+    model_name: &str,
+    mut params: TransmissionLineModelParams,
+) -> Result<TransmissionLineModelParams, SimulationError> {
+    let r = require_txl_param(model_name, "R", params.r)?;
+    let l = require_txl_param(model_name, "L", params.l)?;
+    let g = require_txl_param(model_name, "G", params.g)?;
+    let c = require_txl_param(model_name, "C", params.c)?;
+    let len = require_txl_param(model_name, "LENGTH", params.len)?;
+
+    if r < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "TXL model '{}' has invalid R={} (must be >= 0)",
+            model_name, r
+        )));
+    }
+    if g < 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "TXL model '{}' has invalid G={} (must be >= 0)",
+            model_name, g
+        )));
+    }
+    if c <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "TXL model '{}' has invalid C={} (must be > 0)",
+            model_name, c
+        )));
+    }
+    if len <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "TXL model '{}' has invalid LENGTH={} (must be > 0)",
+            model_name, len
+        )));
+    }
+
+    params.l = Some(l.max(TXL_MIN_INDUCTANCE));
+    Ok(params)
 }
 
 fn strip_netlist_comment(line: &str) -> &str {
@@ -204,17 +274,25 @@ fn parse_cpl_entries(
             (key, trimmed)
         };
 
-        let values = values_str
-            .split_whitespace()
-            .filter_map(|token| token.parse::<f64>().ok())
-            .collect::<Vec<_>>();
+        if !matches!(key.as_str(), "R" | "L" | "C" | "G" | "LEN" | "LENGTH") {
+            continue;
+        }
 
         match key.as_str() {
-            "R" => parsed.r.extend(values),
-            "L" => parsed.l.extend(values),
-            "C" => parsed.c.extend(values),
-            "G" => parsed.g.extend(values),
+            "R" => parsed
+                .r
+                .extend(parse_cpl_value_list(model_name, &key, values_str)?),
+            "L" => parsed
+                .l
+                .extend(parse_cpl_value_list(model_name, &key, values_str)?),
+            "C" => parsed
+                .c
+                .extend(parse_cpl_value_list(model_name, &key, values_str)?),
+            "G" => parsed
+                .g
+                .extend(parse_cpl_value_list(model_name, &key, values_str)?),
             "LEN" | "LENGTH" => {
+                let values = parse_cpl_value_list(model_name, &key, values_str)?;
                 parsed.length = values.first().copied();
             }
             _ => {}
@@ -231,11 +309,30 @@ fn parse_cpl_entries(
     Ok(parsed)
 }
 
+fn parse_cpl_value_list(
+    model_name: &str,
+    key: &str,
+    values_str: &str,
+) -> Result<Vec<f64>, SimulationError> {
+    values_str
+        .split_whitespace()
+        .map(|token| {
+            crate::netlist::lexer::parse_spice_value(token).map_err(|err| {
+                SimulationError::Circuit(format!(
+                    "CPL model '{}' has invalid {} value '{}': {}",
+                    model_name, key, token, err
+                ))
+            })
+        })
+        .collect()
+}
+
 fn symmetric_matrix_from_upper_triangle(
     model_name: &str,
     label: &str,
     values: &[f64],
     dimension: usize,
+    diagonal_clamp_min: Option<f64>,
 ) -> Result<Vec<Vec<f64>>, SimulationError> {
     let expected = dimension * (dimension + 1) / 2;
     if values.len() != expected {
@@ -253,7 +350,19 @@ fn symmetric_matrix_from_upper_triangle(
     let mut idx = 0usize;
     for row in 0..dimension {
         for col in row..dimension {
-            let value = values[idx];
+            let mut value = values[idx];
+            if !value.is_finite() {
+                return Err(SimulationError::Circuit(format!(
+                    "CPL model '{}' has non-finite {}[{},{}]",
+                    model_name,
+                    label,
+                    row + 1,
+                    col + 1
+                )));
+            }
+            if row == col && let Some(min_value) = diagonal_clamp_min {
+                value = value.max(min_value);
+            }
             matrix[row][col] = value;
             matrix[col][row] = value;
             idx += 1;
@@ -291,18 +400,6 @@ pub(in crate::engine::builder) fn resolve_cpl_model_params(
         ))
     })?;
     let parsed = parse_cpl_entries(model_name, &body)?;
-    let expected = conductors * (conductors + 1) / 2;
-
-    let r_entries = if parsed.r.is_empty() {
-        vec![0.0; expected]
-    } else {
-        parsed.r
-    };
-    let g_entries = if parsed.g.is_empty() {
-        vec![0.0; expected]
-    } else {
-        parsed.g
-    };
 
     let length = parsed.length.unwrap_or(0.0);
     if !length.is_finite() || length <= 0.0 {
@@ -313,10 +410,16 @@ pub(in crate::engine::builder) fn resolve_cpl_model_params(
     }
 
     Ok(Some(CplModelParams {
-        r: symmetric_matrix_from_upper_triangle(model_name, "R", &r_entries, conductors)?,
-        l: symmetric_matrix_from_upper_triangle(model_name, "L", &parsed.l, conductors)?,
-        c: symmetric_matrix_from_upper_triangle(model_name, "C", &parsed.c, conductors)?,
-        g: symmetric_matrix_from_upper_triangle(model_name, "G", &g_entries, conductors)?,
+        r: symmetric_matrix_from_upper_triangle(
+            model_name,
+            "R",
+            &parsed.r,
+            conductors,
+            Some(CPL_MIN_SERIES_RESISTANCE_PER_LENGTH),
+        )?,
+        l: symmetric_matrix_from_upper_triangle(model_name, "L", &parsed.l, conductors, None)?,
+        c: symmetric_matrix_from_upper_triangle(model_name, "C", &parsed.c, conductors, None)?,
+        g: symmetric_matrix_from_upper_triangle(model_name, "G", &parsed.g, conductors, None)?,
         length,
     }))
 }
@@ -380,5 +483,123 @@ pub(in crate::engine::builder) fn tline_model_loss_time_constant(
         Some(tau)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve_test_cpl(source: &str, conductors: usize) -> CplModelParams {
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        resolve_cpl_model_params(&netlist, "m", conductors)
+            .expect("CPL model resolves")
+            .expect("CPL model exists")
+    }
+
+    fn resolve_test_txl(source: &str) -> TransmissionLineModelParams {
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        resolve_tline_model_params(&netlist, "y")
+            .expect("TXL model resolves")
+            .expect("TXL model exists")
+    }
+
+    #[test]
+    fn txl_clamps_l_before_derived_delay_and_impedance() {
+        let params = resolve_test_txl(
+            r#"title
+.model y txl r=0 l=1e-15 g=0 c=1e-12 length=2
+.end
+"#,
+        );
+
+        assert_eq!(params.l, Some(TXL_MIN_INDUCTANCE));
+        assert_eq!(params.z0, Some(1.0));
+        assert_eq!(params.td, Some(2.0e-12));
+    }
+
+    #[test]
+    fn txl_requires_primary_rlgc_and_length() {
+        let netlist = crate::netlist::Netlist::parse(
+            r#"title
+.model y txl r=1 l=1n c=1p length=1
+.end
+"#,
+        )
+        .expect("test netlist parses");
+
+        let err = resolve_tline_model_params(&netlist, "y").expect_err("missing G is rejected");
+        assert!(
+            err.to_string().contains("missing required G parameter"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn cpl_r_diagonal_is_clamped_without_manufacturing_off_diagonal_resistance() {
+        let params = resolve_test_cpl(
+            r#"title
+.model m cpl
++ r = 0 0 2e-4
++ l = 1n 0 1n
++ c = 1p -0.1p 1p
++ g = 0 0 0
++ length = 1
+.end
+"#,
+            2,
+        );
+
+        assert_eq!(params.r[0][0], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
+        assert_eq!(params.r[0][1], 0.0);
+        assert_eq!(params.r[1][0], 0.0);
+        assert_eq!(params.r[1][1], 2e-4);
+        assert_eq!(params.c[0][1], -0.1e-12);
+        assert_eq!(params.c[1][0], -0.1e-12);
+    }
+
+    #[test]
+    fn cpl_requires_full_upper_triangle_matrices() {
+        let netlist = crate::netlist::Netlist::parse(
+            r#"title
+.model m cpl
++ r = 0 0 0
++ l = 1n 0
++ c = 1p 0 1p
++ g = 0 0 0
++ length = 1
+.end
+"#,
+        )
+        .expect("test netlist parses");
+
+        let err = resolve_cpl_model_params(&netlist, "m", 2)
+            .expect_err("short upper triangle is rejected");
+        assert!(
+            err.to_string().contains("has 2 L entries, expected 3"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn cpl_requires_g_matrix_like_ngspice_setup() {
+        let netlist = crate::netlist::Netlist::parse(
+            r#"title
+.model m cpl
++ r = 0 0 0
++ l = 1n 0 1n
++ c = 1p 0 1p
++ length = 1
+.end
+"#,
+        )
+        .expect("test netlist parses");
+
+        let err =
+            resolve_cpl_model_params(&netlist, "m", 2).expect_err("missing G is rejected");
+        assert!(
+            err.to_string().contains("has 0 G entries, expected 3"),
+            "{err}"
+        );
     }
 }

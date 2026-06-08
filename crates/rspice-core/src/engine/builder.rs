@@ -1006,9 +1006,11 @@ impl Engine {
                         }
                     }
 
-                    let model_params = model
-                        .as_deref()
-                        .and_then(|name| resolve_tline_model_params(netlist, name));
+                    let model_params = if let Some(name) = model.as_deref() {
+                        resolve_tline_model_params(netlist, name)?
+                    } else {
+                        None
+                    };
 
                     let p1p = circuit.get_or_create_node(&element.nodes[0]);
                     let p1n = circuit.get_or_create_node(&element.nodes[1]);
