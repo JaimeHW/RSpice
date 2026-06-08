@@ -398,37 +398,13 @@ impl Engine {
         // Transmission line ports (companion model uses two shunt conductances per line).
         // Dynamic delayed-wave terms are injected on RHS during transient stamping.
         for tl in &circuit.tlines {
-            if let Some((br1_ordinal, br2_ordinal)) = tl.txl_branch_ordinals() {
+            if let Some((br1_ordinal, br2_ordinal)) = tl
+                .txl_branch_ordinals()
+                .or_else(|| tl.ltra_branch_ordinals())
+            {
                 let br1 = circuit.get_branch_matrix_index(br1_ordinal);
                 let br2 = circuit.get_branch_matrix_index(br2_ordinal);
-                for &(node, br) in &[
-                    (tl.node1_pos, br1),
-                    (tl.node1_neg, br1),
-                    (tl.node2_pos, br2),
-                    (tl.node2_neg, br2),
-                ] {
-                    if node > 0 {
-                        triplets.push((node - 1, br - 1, 0.0));
-                    }
-                }
-                for &(br, node) in &[
-                    (br1, tl.node1_pos),
-                    (br1, tl.node1_neg),
-                    (br1, tl.node2_pos),
-                    (br1, tl.node2_neg),
-                    (br2, tl.node1_pos),
-                    (br2, tl.node1_neg),
-                    (br2, tl.node2_pos),
-                    (br2, tl.node2_neg),
-                ] {
-                    if node > 0 {
-                        triplets.push((br - 1, node - 1, 0.0));
-                    }
-                }
-                triplets.push((br1 - 1, br1 - 1, 0.0));
-                triplets.push((br1 - 1, br2 - 1, 0.0));
-                triplets.push((br2 - 1, br1 - 1, 0.0));
-                triplets.push((br2 - 1, br2 - 1, 0.0));
+                Self::stamp_tline_branch_topology(&mut triplets, tl, br1, br2);
                 continue;
             }
 

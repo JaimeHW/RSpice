@@ -1147,6 +1147,15 @@ impl Engine {
                                 circuit.tighten_transient_max_step_hint(step_hint);
                             }
                         }
+                        if !native_txl
+                            && tline.has_distributed_rlgc()
+                            && let Some(params) = model_params
+                            && !params.is_txl()
+                        {
+                            let branch1 = circuit.allocate_branch_named(&format!("{}#ibr1", name));
+                            let branch2 = circuit.allocate_branch_named(&format!("{}#ibr2", name));
+                            tline.set_ltra_branch_ordinals(branch1, branch2);
+                        }
                         if let Some(att) = attenuation {
                             tline.set_attenuation(att);
                         }

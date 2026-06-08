@@ -155,6 +155,96 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn stamp_ltra_branch_runtime(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::TransmissionLine,
+        response: crate::device::TlineTransientResponse,
+    ) {
+        let Some((br1, br2)) = tl.ltra_branch_matrix_indices() else {
+            return;
+        };
+
+        Self::stamp_txl_branch_kcl(matrix, tl.node1_pos, tl.node1_neg, br1, 1.0);
+        Self::stamp_txl_branch_kcl(matrix, tl.node2_pos, tl.node2_neg, br2, 1.0);
+
+        matrix.add(br1 - 1, br1 - 1, -1.0);
+        matrix.add(br2 - 1, br2 - 1, -1.0);
+
+        Self::stamp_txl_voltage_row(
+            matrix,
+            br1,
+            tl.node1_pos,
+            tl.node1_neg,
+            response.self_conductance(),
+        );
+        Self::stamp_txl_voltage_row(
+            matrix,
+            br2,
+            tl.node2_pos,
+            tl.node2_neg,
+            response.self_conductance(),
+        );
+
+        if response.mutual_conductance() != 0.0 {
+            Self::stamp_txl_voltage_row(
+                matrix,
+                br1,
+                tl.node2_pos,
+                tl.node2_neg,
+                response.mutual_conductance(),
+            );
+            Self::stamp_txl_voltage_row(
+                matrix,
+                br2,
+                tl.node1_pos,
+                tl.node1_neg,
+                response.mutual_conductance(),
+            );
+        }
+
+        rhs[br1 - 1] = response.i_eq_port1();
+        rhs[br2 - 1] = response.i_eq_port2();
+    }
+
+    #[inline]
+    pub(crate) fn stamp_tline_branch_topology(
+        triplets: &mut Vec<(usize, usize, Value)>,
+        tl: &crate::device::TransmissionLine,
+        br1: usize,
+        br2: usize,
+    ) {
+        for &(node, br) in &[
+            (tl.node1_pos, br1),
+            (tl.node1_neg, br1),
+            (tl.node2_pos, br2),
+            (tl.node2_neg, br2),
+        ] {
+            if node > 0 {
+                triplets.push((node - 1, br - 1, 0.0));
+            }
+        }
+        for &(br, node) in &[
+            (br1, tl.node1_pos),
+            (br1, tl.node1_neg),
+            (br1, tl.node2_pos),
+            (br1, tl.node2_neg),
+            (br2, tl.node1_pos),
+            (br2, tl.node1_neg),
+            (br2, tl.node2_pos),
+            (br2, tl.node2_neg),
+        ] {
+            if node > 0 {
+                triplets.push((br - 1, node - 1, 0.0));
+            }
+        }
+        triplets.push((br1 - 1, br1 - 1, 0.0));
+        triplets.push((br1 - 1, br2 - 1, 0.0));
+        triplets.push((br2 - 1, br1 - 1, 0.0));
+        triplets.push((br2 - 1, br2 - 1, 0.0));
+    }
+
+    #[inline]
     fn stamp_txl_branch_kcl(
         matrix: &mut crate::solver::StaticMatrix,
         node_pos: usize,

@@ -714,6 +714,9 @@ impl Engine {
                 if let Some(stamp) = tl.txl_transient_stamp(time) {
                     Self::stamp_txl_branch_runtime(matrix, rhs, tl, stamp);
                 }
+            } else if tl.ltra_branch_matrix_indices().is_some() {
+                let response = tl.transient_port_response(time);
+                Self::stamp_ltra_branch_runtime(matrix, rhs, tl, response);
             } else {
                 let response = tl.transient_port_response(time);
                 Self::stamp_tline_two_port(matrix, rhs, tl, response);
@@ -773,6 +776,12 @@ impl Engine {
                 let i1 = initial_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = initial_solution.get(br2 - 1).copied().unwrap_or(0.0);
                 tl.initialize_txl_history(initial_time, v1, i1, v2, i2);
+                continue;
+            }
+            if let Some((br1, br2)) = tl.ltra_branch_matrix_indices() {
+                let i1 = initial_solution.get(br1 - 1).copied().unwrap_or(0.0);
+                let i2 = initial_solution.get(br2 - 1).copied().unwrap_or(0.0);
+                tl.update_history(initial_time, v1, i1, v2, i2);
                 continue;
             }
 
@@ -1252,6 +1261,23 @@ impl Engine {
                 let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
                 let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
                 tl.accept_txl_history(accepted_time, v1, i1, v2, i2);
+                continue;
+            }
+            if let Some((br1, br2)) = tl.ltra_branch_matrix_indices() {
+                let i1 = accepted_solution.get(br1 - 1).copied().unwrap_or(0.0);
+                let i2 = accepted_solution.get(br2 - 1).copied().unwrap_or(0.0);
+                tl.update_history(accepted_time, v1, i1, v2, i2);
+                if let Some(arrival) =
+                    tl.ltra_derivative_breakpoint_arrival(voltage_reltol, voltage_abstol)
+                {
+                    Self::schedule_dynamic_tline_breakpoint(
+                        breakpoints,
+                        arrival,
+                        tstop,
+                        dynamic_breakpoints_added,
+                        warned_dynamic_breakpoint_cap,
+                    );
+                }
                 continue;
             }
             let (_v1_ref, _v2_ref) = tline_dc_refs.get(idx).copied().unwrap_or((0.0, 0.0));

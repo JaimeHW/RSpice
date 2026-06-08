@@ -72,6 +72,8 @@ pub struct TransmissionLine {
     txl: Option<txl::TxlRuntime>,
     /// TXL branch-current ordinals allocated by the circuit builder.
     txl_branch_ordinals: Option<(NodeId, NodeId)>,
+    /// LTRA RLC branch-current ordinals allocated by the circuit builder.
+    ltra_branch_ordinals: Option<(NodeId, NodeId)>,
 
     /// Current simulation time
     current_time: Value,
@@ -189,6 +191,7 @@ impl TransmissionLine {
             ltra_breakpoint_abstol: 1.0,
             txl: None,
             txl_branch_ordinals: None,
+            ltra_branch_ordinals: None,
             current_time: 0.0,
         }
     }
@@ -224,6 +227,11 @@ impl TransmissionLine {
         self.txl_branch_ordinals = Some((branch1, branch2));
     }
 
+    /// Set branch ordinals for the scalar LTRA RLC runtime.
+    pub fn set_ltra_branch_ordinals(&mut self, branch1: NodeId, branch2: NodeId) {
+        self.ltra_branch_ordinals = Some((branch1, branch2));
+    }
+
     /// Return TXL branch ordinals, if this line uses the native TXL runtime.
     #[inline]
     pub fn txl_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
@@ -231,10 +239,27 @@ impl TransmissionLine {
         self.txl_branch_ordinals
     }
 
+    /// Return LTRA RLC branch ordinals, if this line uses branch-current history.
+    #[inline]
+    pub fn ltra_branch_ordinals(&self) -> Option<(NodeId, NodeId)> {
+        self.distributed_rlc.as_ref()?;
+        self.txl.is_none().then_some(())?;
+        self.ltra_branch_ordinals
+    }
+
     /// Return linked TXL branch matrix indices.
     #[inline]
     pub fn txl_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
         self.txl.as_ref()?;
+        Some((self.branch1?, self.branch2?))
+    }
+
+    /// Return linked LTRA RLC branch matrix indices.
+    #[inline]
+    pub fn ltra_branch_matrix_indices(&self) -> Option<(NodeId, NodeId)> {
+        self.distributed_rlc.as_ref()?;
+        self.txl.is_none().then_some(())?;
+        self.ltra_branch_ordinals?;
         Some((self.branch1?, self.branch2?))
     }
 
