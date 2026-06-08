@@ -337,7 +337,7 @@ fn symmetric_matrix_from_upper_triangle(
     label: &str,
     values: &[f64],
     dimension: usize,
-    diagonal_clamp_min: Option<f64>,
+    floor_abs_below: Option<f64>,
 ) -> Result<Vec<Vec<f64>>, SimulationError> {
     let expected = dimension * (dimension + 1) / 2;
     if values.len() != expected {
@@ -365,10 +365,10 @@ fn symmetric_matrix_from_upper_triangle(
                     col + 1
                 )));
             }
-            if row == col
-                && let Some(min_value) = diagonal_clamp_min
+            if let Some(min_value) = floor_abs_below
+                && value.abs() < min_value
             {
-                value = value.max(min_value);
+                value = min_value;
             }
             matrix[row][col] = value;
             matrix[col][row] = value;
@@ -543,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn cpl_r_diagonal_is_clamped_without_manufacturing_off_diagonal_resistance() {
+    fn cpl_r_entries_below_ngspice_floor_are_mirrored_to_minimum() {
         let params = resolve_test_cpl(
             r#"title
 .model m cpl
@@ -558,11 +558,59 @@ mod tests {
         );
 
         assert_eq!(params.r[0][0], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
-        assert_eq!(params.r[0][1], 0.0);
-        assert_eq!(params.r[1][0], 0.0);
+        assert_eq!(params.r[0][1], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
+        assert_eq!(params.r[1][0], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
         assert_eq!(params.r[1][1], 2e-4);
         assert_eq!(params.c[0][1], -0.1e-12);
         assert_eq!(params.c[1][0], -0.1e-12);
+    }
+
+    #[test]
+    fn cpl_ibm2_r_matches_ngspice_off_diagonal_floor() {
+        let params = resolve_test_cpl(
+            r#"title
+.model m cpl
++ r = 0.5 0 0.5
++ l = 1n 0.1n 1n
++ c = 1p -0.1p 1p
++ g = 0 0 0
++ length = 1
+.end
+"#,
+            2,
+        );
+
+        assert_eq!(params.r[0][0], 0.5);
+        assert_eq!(params.r[0][1], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
+        assert_eq!(params.r[1][0], CPL_MIN_SERIES_RESISTANCE_PER_LENGTH);
+        assert_eq!(params.r[1][1], 0.5);
+    }
+
+    #[test]
+    fn cpl3_4_line_r_matches_ngspice_off_diagonal_floor() {
+        let params = resolve_test_cpl(
+            r#"title
+.model m cpl
++ r = 0.3 0 0 0 0.3 0 0 0.3 0 0.3
++ l = 1n 0.1n 0.1n 0.1n 1n 0.1n 0.1n 1n 0.1n 1n
++ c = 1p -0.1p -0.1p -0.1p 1p -0.1p -0.1p 1p -0.1p 1p
++ g = 0 0 0 0 0 0 0 0 0 0
++ length = 1
+.end
+"#,
+            4,
+        );
+
+        for row in 0..4 {
+            for col in 0..4 {
+                let expected = if row == col {
+                    0.3
+                } else {
+                    CPL_MIN_SERIES_RESISTANCE_PER_LENGTH
+                };
+                assert_eq!(params.r[row][col], expected);
+            }
+        }
     }
 
     #[test]

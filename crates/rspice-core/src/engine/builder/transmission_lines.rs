@@ -250,14 +250,6 @@ pub(in crate::engine::builder) fn validate_cpl_model_params(
                 continue;
             }
 
-            if params.r[i][j].abs() > CPL_REALIZATION_TOL {
-                return Err(SimulationError::Circuit(format!(
-                    "CPL model '{}' uses off-diagonal series resistance R[{},{}], which is not yet realizable",
-                    model_name,
-                    i + 1,
-                    j + 1
-                )));
-            }
             if params.l[i][j] < -CPL_REALIZATION_TOL {
                 return Err(SimulationError::Circuit(format!(
                     "CPL model '{}' uses negative mutual inductance L[{},{}], which is not yet realizable",
@@ -320,6 +312,36 @@ pub(in crate::engine::builder) fn validate_cpl_model_params(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_cpl_params_with_r(r: Vec<Vec<f64>>) -> CplModelParams {
+        CplModelParams {
+            r,
+            l: vec![vec![1.0e-9, 1.0e-10], vec![1.0e-10, 1.0e-9]],
+            c: vec![vec![1.0e-12, -1.0e-13], vec![-1.0e-13, 1.0e-12]],
+            g: vec![vec![0.0, 0.0], vec![0.0, 0.0]],
+            length: 1.0,
+        }
+    }
+
+    #[test]
+    fn cpl_validation_allows_finite_off_diagonal_series_resistance() {
+        let params = valid_cpl_params_with_r(vec![vec![0.5, 1.0e-4], vec![1.0e-4, 0.5]]);
+
+        validate_cpl_model_params("m", &params).expect("finite off-diagonal R is accepted");
+    }
+
+    #[test]
+    fn cpl_validation_preserves_finite_negative_off_diagonal_series_resistance() {
+        let params = valid_cpl_params_with_r(vec![vec![0.5, -1.0e-3], vec![-1.0e-3, 0.5]]);
+
+        validate_cpl_model_params("m", &params)
+            .expect("finite negative off-diagonal R is accepted");
+    }
 }
 
 pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
