@@ -1,12 +1,12 @@
-//! Setup-only native CPL constants.
+//! Native CPL constants and dormant runtime helpers.
 //!
 //! This is a direct, private port of the ngspice CPL setup math that produces
-//! the CPLine constant tables. It intentionally stops before branch stamping,
-//! right-hand-side constants, convergence updates, or VI history.
+//! the CPLine constant tables. Runtime helpers are kept private and dormant
+//! until branch-current transient stamping is complete enough to activate.
 
 #![allow(dead_code)]
 
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 
 const MAX_CP_TX_LINES: usize = 8;
 const MAX_DEG: usize = 8;
@@ -37,6 +37,23 @@ pub(crate) enum NativeCplError {
     SingularMatrix(&'static str),
     InterpolationFailure,
     DiagonalizationDidNotConverge,
+    InvalidHistoryDimension {
+        label: &'static str,
+        expected: usize,
+        actual: usize,
+    },
+    NonMonotonicHistory {
+        previous_ps: i64,
+        next_ps: i64,
+    },
+    EmptyHistory,
+    InvalidHistoryTimeStep {
+        previous_ps: i64,
+        current_ps: i64,
+    },
+    InsufficientHistory {
+        target_ps: f64,
+    },
 }
 
 impl fmt::Display for NativeCplError {
@@ -73,6 +90,33 @@ impl fmt::Display for NativeCplError {
             Self::DiagonalizationDidNotConverge => {
                 write!(f, "native CPL diagonalization did not converge")
             }
+            Self::InvalidHistoryDimension {
+                label,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "native CPL {label} history vector must have {expected} entries, found {actual}"
+            ),
+            Self::NonMonotonicHistory {
+                previous_ps,
+                next_ps,
+            } => write!(
+                f,
+                "native CPL VI history times must increase strictly ({previous_ps} ps then {next_ps} ps)"
+            ),
+            Self::EmptyHistory => write!(f, "native CPL VI history is empty"),
+            Self::InvalidHistoryTimeStep {
+                previous_ps,
+                current_ps,
+            } => write!(
+                f,
+                "native CPL history sampling requires current time > previous time ({previous_ps} ps, {current_ps} ps)"
+            ),
+            Self::InsufficientHistory { target_ps } => write!(
+                f,
+                "native CPL VI history does not bracket delayed time {target_ps:.6} ps"
+            ),
         }
     }
 }
@@ -147,6 +191,255 @@ impl NativeCplRuntime {
         setup.coupled()?;
         setup.into_runtime()
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NativeCplViSample {
+    pub(crate) time_ps: i64,
+    pub(crate) v_i: Vec<f64>,
+    pub(crate) v_o: Vec<f64>,
+    pub(crate) i_i: Vec<f64>,
+    pub(crate) i_o: Vec<f64>,
+}
+
+impl NativeCplViSample {
+    pub(crate) fn new(
+        time_ps: i64,
+        v_i: Vec<f64>,
+        v_o: Vec<f64>,
+        i_i: Vec<f64>,
+        i_o: Vec<f64>,
+    ) -> Self {
+        Self {
+            time_ps,
+            v_i,
+            v_o,
+            i_i,
+            i_o,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NativeCplDelayedVi {
+    pub(crate) ext: bool,
+    pub(crate) ratio: Vec<f64>,
+    pub(crate) v1_i: Matrix,
+    pub(crate) v2_i: Matrix,
+    pub(crate) i1_i: Matrix,
+    pub(crate) i2_i: Matrix,
+    pub(crate) v1_o: Matrix,
+    pub(crate) v2_o: Matrix,
+    pub(crate) i1_o: Matrix,
+    pub(crate) i2_o: Matrix,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NativeCplViHistory {
+    no_l: usize,
+    dc1: Vec<f64>,
+    dc2: Vec<f64>,
+    samples: VecDeque<NativeCplViSample>,
+}
+
+impl NativeCplViHistory {
+    pub(crate) fn new(no_l: usize, dc1: Vec<f64>, dc2: Vec<f64>) -> Result<Self, NativeCplError> {
+        if !(2..=MAX_CP_TX_LINES).contains(&no_l) {
+            return Err(NativeCplError::InvalidDimension(no_l));
+        }
+        validate_history_vector("dc1", &dc1, no_l)?;
+        validate_history_vector("dc2", &dc2, no_l)?;
+        Ok(Self {
+            no_l,
+            dc1,
+            dc2,
+            samples: VecDeque::new(),
+        })
+    }
+
+    pub(crate) fn push_sample(&mut self, sample: NativeCplViSample) -> Result<(), NativeCplError> {
+        validate_history_vector("v_i", &sample.v_i, self.no_l)?;
+        validate_history_vector("v_o", &sample.v_o, self.no_l)?;
+        validate_history_vector("i_i", &sample.i_i, self.no_l)?;
+        validate_history_vector("i_o", &sample.i_o, self.no_l)?;
+        if let Some(previous) = self.samples.back() {
+            if sample.time_ps <= previous.time_ps {
+                return Err(NativeCplError::NonMonotonicHistory {
+                    previous_ps: previous.time_ps,
+                    next_ps: sample.time_ps,
+                });
+            }
+        }
+        self.samples.push_back(sample);
+        Ok(())
+    }
+
+    pub(crate) fn head_time_ps(&self) -> Option<i64> {
+        self.samples.front().map(|sample| sample.time_ps)
+    }
+
+    pub(crate) fn delayed_vi_samples_ps(
+        &mut self,
+        previous_time_ps: i64,
+        current_time_ps: i64,
+        taul_ps: &[f64],
+    ) -> Result<NativeCplDelayedVi, NativeCplError> {
+        if current_time_ps <= previous_time_ps {
+            return Err(NativeCplError::InvalidHistoryTimeStep {
+                previous_ps: previous_time_ps,
+                current_ps: current_time_ps,
+            });
+        }
+        validate_history_vector("taul", taul_ps, self.no_l)?;
+        if self.samples.is_empty() {
+            return Err(NativeCplError::EmptyHistory);
+        }
+
+        let mut result = NativeCplDelayedVi {
+            ext: false,
+            ratio: vec![0.0; self.no_l],
+            v1_i: zero_matrix(self.no_l),
+            v2_i: zero_matrix(self.no_l),
+            i1_i: zero_matrix(self.no_l),
+            i2_i: zero_matrix(self.no_l),
+            v1_o: zero_matrix(self.no_l),
+            v2_o: zero_matrix(self.no_l),
+            i1_o: zero_matrix(self.no_l),
+            i2_o: zero_matrix(self.no_l),
+        };
+
+        let previous_time = previous_time_ps as f64;
+        let current_time = current_time_ps as f64;
+        let step = current_time - previous_time;
+        let mut prune_to = None;
+        let mut min_ta = f64::INFINITY;
+
+        for delay_ps in taul_ps {
+            let ta = previous_time - delay_ps;
+            if ta < min_ta {
+                min_ta = ta;
+                prune_to = if ta > 0.0 {
+                    Some(self.bracket_lower_index(ta)?)
+                } else {
+                    None
+                };
+            }
+        }
+
+        for (mode, delay_ps) in taul_ps.iter().enumerate() {
+            let ta = previous_time - delay_ps;
+            let tb = current_time - delay_ps;
+
+            if tb <= 0.0 {
+                for conductor in 0..self.no_l {
+                    result.v1_i[mode][conductor] = self.dc1[conductor];
+                    result.v2_i[mode][conductor] = self.dc1[conductor];
+                    result.v1_o[mode][conductor] = self.dc2[conductor];
+                    result.v2_o[mode][conductor] = self.dc2[conductor];
+                }
+                continue;
+            }
+
+            if ta <= 0.0 {
+                for conductor in 0..self.no_l {
+                    result.v1_i[mode][conductor] = self.dc1[conductor];
+                    result.v1_o[mode][conductor] = self.dc2[conductor];
+                }
+            } else {
+                let lower = self.bracket_lower_index(ta)?;
+                self.interpolate_sample(lower, ta, |conductor, value| {
+                    result.v1_i[mode][conductor] = value.v_i;
+                    result.v1_o[mode][conductor] = value.v_o;
+                    result.i1_i[mode][conductor] = value.i_i;
+                    result.i1_o[mode][conductor] = value.i_o;
+                })?;
+            }
+
+            if tb > previous_time {
+                result.ext = true;
+                result.ratio[mode] = (tb - previous_time) / step;
+                let scale = 1.0 - result.ratio[mode];
+                let tail = self.samples.back().ok_or(NativeCplError::EmptyHistory)?;
+                for conductor in 0..self.no_l {
+                    result.v2_i[mode][conductor] = tail.v_i[conductor] * scale;
+                    result.v2_o[mode][conductor] = tail.v_o[conductor] * scale;
+                    result.i2_i[mode][conductor] = tail.i_i[conductor] * scale;
+                    result.i2_o[mode][conductor] = tail.i_o[conductor] * scale;
+                }
+            } else {
+                let lower = self.bracket_lower_index(tb)?;
+                self.interpolate_sample(lower, tb, |conductor, value| {
+                    result.v2_i[mode][conductor] = value.v_i;
+                    result.v2_o[mode][conductor] = value.v_o;
+                    result.i2_i[mode][conductor] = value.i_i;
+                    result.i2_o[mode][conductor] = value.i_o;
+                })?;
+            }
+        }
+
+        if let Some(prune_to) = prune_to {
+            for _ in 0..prune_to {
+                self.samples.pop_front();
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn bracket_lower_index(&self, target_ps: f64) -> Result<usize, NativeCplError> {
+        for index in 0..self.samples.len().saturating_sub(1) {
+            let lower = &self.samples[index];
+            let upper = &self.samples[index + 1];
+            if (lower.time_ps as f64) <= target_ps && target_ps <= (upper.time_ps as f64) {
+                return Ok(index);
+            }
+        }
+        Err(NativeCplError::InsufficientHistory { target_ps })
+    }
+
+    fn interpolate_sample(
+        &self,
+        lower_index: usize,
+        target_ps: f64,
+        mut set_value: impl FnMut(usize, InterpolatedViValue),
+    ) -> Result<(), NativeCplError> {
+        let lower = self
+            .samples
+            .get(lower_index)
+            .ok_or(NativeCplError::InsufficientHistory { target_ps })?;
+        let upper = self
+            .samples
+            .get(lower_index + 1)
+            .ok_or(NativeCplError::InsufficientHistory { target_ps })?;
+        let span = (upper.time_ps - lower.time_ps) as f64;
+        if span <= 0.0 {
+            return Err(NativeCplError::NonMonotonicHistory {
+                previous_ps: lower.time_ps,
+                next_ps: upper.time_ps,
+            });
+        }
+        let f = (target_ps - lower.time_ps as f64) / span;
+        for conductor in 0..self.no_l {
+            set_value(
+                conductor,
+                InterpolatedViValue {
+                    v_i: lerp(lower.v_i[conductor], upper.v_i[conductor], f),
+                    v_o: lerp(lower.v_o[conductor], upper.v_o[conductor], f),
+                    i_i: lerp(lower.i_i[conductor], upper.i_i[conductor], f),
+                    i_o: lerp(lower.i_o[conductor], upper.i_o[conductor], f),
+                },
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct InterpolatedViValue {
+    v_i: f64,
+    v_o: f64,
+    i_i: f64,
+    i_o: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -857,6 +1150,25 @@ fn zero_matrix(dim: usize) -> Matrix {
     vec![vec![0.0; dim]; dim]
 }
 
+fn validate_history_vector(
+    label: &'static str,
+    values: &[f64],
+    expected: usize,
+) -> Result<(), NativeCplError> {
+    if values.len() != expected {
+        return Err(NativeCplError::InvalidHistoryDimension {
+            label,
+            expected,
+            actual: values.len(),
+        });
+    }
+    Ok(())
+}
+
+fn lerp(start: f64, end: f64, fraction: f64) -> f64 {
+    start + fraction * (end - start)
+}
+
 fn zero_poly_matrix(dim: usize, poly_len: usize) -> PolyMatrix {
     vec![vec![vec![0.0; poly_len]; dim]; dim]
 }
@@ -1365,6 +1677,80 @@ mod tests {
         for (&actual, &expected) in actual.iter().zip(expected) {
             assert_close(actual, expected);
         }
+    }
+
+    fn sample(time_ps: i64, base: f64) -> NativeCplViSample {
+        NativeCplViSample::new(
+            time_ps,
+            vec![base + 1.0, base + 2.0],
+            vec![base + 11.0, base + 12.0],
+            vec![base + 21.0, base + 22.0],
+            vec![base + 31.0, base + 32.0],
+        )
+    }
+
+    fn history_with_samples() -> NativeCplViHistory {
+        let mut history =
+            NativeCplViHistory::new(2, vec![0.5, 1.5], vec![10.5, 11.5]).expect("history");
+        for (time, base) in [(0, 0.0), (10, 100.0), (20, 200.0), (30, 300.0), (40, 400.0)] {
+            history
+                .push_sample(sample(time, base))
+                .expect("monotonic sample");
+        }
+        history
+    }
+
+    #[test]
+    fn cpl_native_delayed_vi_samples_use_dc_before_delay() {
+        let mut history =
+            NativeCplViHistory::new(2, vec![0.5, 1.5], vec![10.5, 11.5]).expect("history");
+        history.push_sample(sample(0, 0.0)).expect("initial sample");
+
+        let delayed = history
+            .delayed_vi_samples_ps(10, 20, &[40.0, 60.0])
+            .expect("delay samples");
+
+        assert!(!delayed.ext);
+        assert_slice_close(&delayed.ratio, &[0.0, 0.0]);
+        assert_slice_close(&delayed.v1_i[0], &[0.5, 1.5]);
+        assert_slice_close(&delayed.v2_i[0], &[0.5, 1.5]);
+        assert_slice_close(&delayed.v1_o[1], &[10.5, 11.5]);
+        assert_slice_close(&delayed.v2_o[1], &[10.5, 11.5]);
+        assert_slice_close(&delayed.i1_i[0], &[0.0, 0.0]);
+        assert_slice_close(&delayed.i2_o[1], &[0.0, 0.0]);
+        assert_eq!(history.head_time_ps(), Some(0));
+    }
+
+    #[test]
+    fn cpl_native_delayed_vi_samples_interpolate_and_prune_like_ngspice() {
+        let mut history = history_with_samples();
+
+        let delayed = history
+            .delayed_vi_samples_ps(40, 50, &[12.0, 5.0])
+            .expect("delay samples");
+
+        assert!(delayed.ext);
+        assert_slice_close(&delayed.ratio, &[0.0, 0.5]);
+
+        assert_slice_close(&delayed.v1_i[0], &[281.0, 282.0]);
+        assert_slice_close(&delayed.v1_o[0], &[291.0, 292.0]);
+        assert_slice_close(&delayed.i1_i[0], &[301.0, 302.0]);
+        assert_slice_close(&delayed.i1_o[0], &[311.0, 312.0]);
+        assert_slice_close(&delayed.v2_i[0], &[381.0, 382.0]);
+        assert_slice_close(&delayed.v2_o[0], &[391.0, 392.0]);
+        assert_slice_close(&delayed.i2_i[0], &[401.0, 402.0]);
+        assert_slice_close(&delayed.i2_o[0], &[411.0, 412.0]);
+
+        assert_slice_close(&delayed.v1_i[1], &[351.0, 352.0]);
+        assert_slice_close(&delayed.v1_o[1], &[361.0, 362.0]);
+        assert_slice_close(&delayed.i1_i[1], &[371.0, 372.0]);
+        assert_slice_close(&delayed.i1_o[1], &[381.0, 382.0]);
+        assert_slice_close(&delayed.v2_i[1], &[200.5, 201.0]);
+        assert_slice_close(&delayed.v2_o[1], &[205.5, 206.0]);
+        assert_slice_close(&delayed.i2_i[1], &[210.5, 211.0]);
+        assert_slice_close(&delayed.i2_o[1], &[215.5, 216.0]);
+
+        assert_eq!(history.head_time_ps(), Some(20));
     }
 
     #[test]
