@@ -350,12 +350,22 @@ impl VoltageSources {
     }
 
     #[inline]
+    fn sin_frequency_default(context: Option<TransientSourceContext>) -> Value {
+        context
+            .map(|ctx| ctx.tstop)
+            .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
+            .map(|tstop| 1.0 / tstop)
+            .unwrap_or(1e3)
+    }
+
+    #[inline]
     fn resolve_pulse_timing(
         delay: Value,
         rise: Value,
         fall: Value,
         width: Value,
         period: Value,
+        width_defaults_to_zero: bool,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value, Value, Value) {
         let step_default = Self::pulse_step_default(context);
@@ -369,7 +379,13 @@ impl VoltageSources {
         };
         let tr = if rise.is_nan() { step_default } else { rise };
         let tf = if fall.is_nan() { step_default } else { fall };
-        let pw = if width.is_nan() { stop_default } else { width };
+        let pw = if width.is_nan() && width_defaults_to_zero {
+            0.0
+        } else if width.is_nan() {
+            stop_default
+        } else {
+            width
+        };
         let per = if period.is_nan() {
             stop_default
         } else {
@@ -432,9 +448,17 @@ impl VoltageSources {
                 fall,
                 width,
                 period,
+                width_defaults_to_zero,
             } => {
-                let (delay, rise, fall, width, period) =
-                    Self::resolve_pulse_timing(*delay, *rise, *fall, *width, *period, context);
+                let (delay, rise, fall, width, period) = Self::resolve_pulse_timing(
+                    *delay,
+                    *rise,
+                    *fall,
+                    *width,
+                    *period,
+                    *width_defaults_to_zero,
+                    context,
+                );
                 if time < delay {
                     return *v1;
                 }
@@ -462,6 +486,11 @@ impl VoltageSources {
                 damping,
                 phase,
             } => {
+                let frequency = if frequency.is_finite() && *frequency != 0.0 {
+                    *frequency
+                } else {
+                    Self::sin_frequency_default(context)
+                };
                 if time < *delay {
                     *offset
                 } else {
@@ -764,5 +793,85 @@ impl CurrentSources {
                     .abs()
             })
             .fold(0.0, Value::max)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::netlist::SourceSpec;
+
+    fn assert_close(actual: Value, expected: Value) {
+        let tolerance = expected.abs().max(1.0) * 1.0e-12;
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
+        );
+    }
+
+    fn transient_context(tstep: Value, tstop: Value) -> Option<TransientSourceContext> {
+        Some(TransientSourceContext { tstep, tstop })
+    }
+
+    #[test]
+    fn sin_omitted_frequency_defaults_to_inverse_stop_time() {
+        let spec = SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: Value::NAN,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+
+        let value = VoltageSources::evaluate_source_at_time_with_context(
+            &spec,
+            2.5e-9,
+            transient_context(1.0e-9, 10.0e-9),
+        );
+
+        assert_close(value, 1.0);
+    }
+
+    #[test]
+    fn sin_zero_frequency_defaults_to_inverse_stop_time() {
+        let spec = SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: 0.0,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+
+        let value = VoltageSources::evaluate_source_at_time_with_context(
+            &spec,
+            2.5e-9,
+            transient_context(1.0e-9, 10.0e-9),
+        );
+
+        assert_close(value, 1.0);
+    }
+
+    #[test]
+    fn pulse_width_omitted_after_explicit_rise_and_fall_defaults_to_zero() {
+        let spec = SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 1.0e-9,
+            rise: 2.0e-9,
+            fall: 3.0e-9,
+            width: Value::NAN,
+            period: Value::NAN,
+            width_defaults_to_zero: true,
+        };
+
+        let value = VoltageSources::evaluate_source_at_time_with_context(
+            &spec,
+            3.5e-9,
+            transient_context(0.5e-9, 20.0e-9),
+        );
+
+        assert_close(value, 5.0 / 6.0);
     }
 }

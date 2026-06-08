@@ -685,6 +685,20 @@ impl Engine {
 
         preferred_min_timestep.min(ngspice_delmin)
     }
+
+    #[inline]
+    pub(super) fn ngspice_breakpoint_tolerance(hinted_max_step: Value) -> Value {
+        let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
+            hinted_max_step
+        } else {
+            0.0
+        };
+
+        // Local ngspice is built with XSPICE, so dctran.c initializes
+        // CKTminBreak to 10 * CKTdelmin, and traninit.c sets CKTdelmin to
+        // 1e-11 * CKTmaxStep.
+        (hinted_max_step * 1e-10).max(1e-30)
+    }
 }
 
 #[cfg(test)]
@@ -719,5 +733,11 @@ mod tests {
             Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(2e-9)),
             5e-12,
         );
+    }
+
+    #[test]
+    fn breakpoint_tolerance_matches_xspice_minbreak_rule() {
+        assert_close(Engine::ngspice_breakpoint_tolerance(1e-11), 1e-21);
+        assert_close(Engine::ngspice_breakpoint_tolerance(0.5e-9), 5e-20);
     }
 }

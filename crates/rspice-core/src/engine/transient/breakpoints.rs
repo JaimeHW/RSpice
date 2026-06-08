@@ -71,6 +71,7 @@ impl Engine {
                 fall,
                 width,
                 period,
+                width_defaults_to_zero,
                 ..
             } => {
                 let step_default = tstep_hint.max(1e-18);
@@ -82,7 +83,13 @@ impl Engine {
                 };
                 let tr = if rise.is_nan() { step_default } else { *rise };
                 let tf = if fall.is_nan() { step_default } else { *fall };
-                let pw = if width.is_nan() { stop_default } else { *width };
+                let pw = if width.is_nan() && *width_defaults_to_zero {
+                    0.0
+                } else if width.is_nan() {
+                    stop_default
+                } else {
+                    *width
+                };
                 let per = if period.is_nan() {
                     stop_default
                 } else {
@@ -135,9 +142,7 @@ impl Engine {
                     }
                 }
             }
-            SourceSpec::Sin { delay, .. } => {
-                Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
-            }
+            SourceSpec::Sin { .. } => {}
             SourceSpec::Pwl { points } => {
                 for (time, _) in points {
                     Self::add_breakpoint_if_in_range(breakpoints, *time, tstop);
@@ -375,6 +380,42 @@ mod tests {
                 "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
             );
         }
+    }
+
+    #[test]
+    fn sin_sources_do_not_schedule_source_breakpoints() {
+        let mut breakpoints = BreakpointManager::new();
+        let spec = crate::netlist::SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: 1.0e6,
+            delay: 10.0e-9,
+            damping: 0.0,
+            phase: 0.0,
+        };
+
+        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 100.0e-9, 1.0e-9);
+
+        assert!(breakpoints.times().is_empty());
+    }
+
+    #[test]
+    fn pulse_with_only_rise_and_fall_defaults_width_to_zero_for_breakpoints() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
+        let spec = crate::netlist::SourceSpec::Pulse {
+            v1: 0.0,
+            v2: 1.0,
+            delay: 1.0e-9,
+            rise: 2.0e-9,
+            fall: 3.0e-9,
+            width: Value::NAN,
+            period: Value::NAN,
+            width_defaults_to_zero: true,
+        };
+
+        Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 20.0e-9, 0.5e-9);
+
+        assert_delays_close(breakpoints.times(), &[1.0e-9, 3.0e-9, 6.0e-9]);
     }
 
     #[test]

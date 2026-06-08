@@ -533,6 +533,7 @@ pub enum SourceSpec {
         fall: Value,
         width: Value,
         period: Value,
+        width_defaults_to_zero: bool,
     },
 
     /// Sinusoidal source: SIN(vo va freq td theta phase)

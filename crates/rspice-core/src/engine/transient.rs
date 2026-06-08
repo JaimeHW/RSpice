@@ -424,7 +424,9 @@ impl Engine {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
         });
-        let mut breakpoints = BreakpointManager::new();
+        let mut breakpoints = BreakpointManager::new_with_tolerance(
+            Self::ngspice_breakpoint_tolerance(hinted_max_step),
+        );
         Self::collect_transient_source_breakpoints(
             &circuit,
             tstop,

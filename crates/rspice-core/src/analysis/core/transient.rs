@@ -217,8 +217,11 @@ impl TimestepController {
 /// Minimum timestep to use immediately after a breakpoint (for restart behavior)
 const MIN_STEP_AFTER_BREAKPOINT: Value = 1e-12;
 
-/// Tolerance for detecting exact breakpoint landing
-const BREAKPOINT_TOLERANCE: Value = 1e-15;
+/// Fallback tolerance for detecting exact breakpoint landing.
+///
+/// Transient engine paths should prefer an ngspice-style tolerance derived
+/// from `CKTminBreak`; this default keeps standalone manager use conservative.
+const DEFAULT_BREAKPOINT_TOLERANCE: Value = 1e-15;
 
 /// Ngspice `dctran.c` factor for equalizing the last two pre-breakpoint steps.
 const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
@@ -227,7 +230,7 @@ const BREAKPOINT_EQUALIZATION_FACTOR: Value = 1.9;
 ///
 /// Ensures solver lands exactly on breakpoints and restarts from the same
 /// one-tenth saved-delta rule used by ngspice's `dctran.c`.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BreakpointManager {
     /// Sorted list of breakpoint times
     breakpoints: Vec<Value>,
@@ -237,11 +240,33 @@ pub struct BreakpointManager {
     just_passed_breakpoint: bool,
     /// Timestep that was proposed before it was cut/equalized for a breakpoint.
     saved_delta_before_breakpoint: Option<Value>,
+    /// Tolerance for merging and detecting breakpoint times.
+    tolerance: Value,
+}
+
+impl Default for BreakpointManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BreakpointManager {
     pub fn new() -> Self {
-        Self::default()
+        Self::new_with_tolerance(DEFAULT_BREAKPOINT_TOLERANCE)
+    }
+
+    pub fn new_with_tolerance(tolerance: Value) -> Self {
+        Self {
+            breakpoints: Vec::new(),
+            current_index: 0,
+            just_passed_breakpoint: false,
+            saved_delta_before_breakpoint: None,
+            tolerance: if tolerance.is_finite() && tolerance > 0.0 {
+                tolerance
+            } else {
+                DEFAULT_BREAKPOINT_TOLERANCE
+            },
+        }
     }
 
     /// Add a breakpoint time (deduplicates automatically)
@@ -250,7 +275,7 @@ impl BreakpointManager {
         if self
             .breakpoints
             .iter()
-            .any(|&t| (t - time).abs() < BREAKPOINT_TOLERANCE)
+            .any(|&t| (t - time).abs() < self.tolerance)
         {
             return false;
         }
@@ -279,14 +304,14 @@ impl BreakpointManager {
             .iter()
             .skip(self.current_index)
             .copied()
-            .find(|&t| t > time + BREAKPOINT_TOLERANCE)
+            .find(|&t| t > time + self.tolerance)
     }
 
     /// Check if current time is exactly at a breakpoint
     pub fn at_breakpoint(&self, time: Value) -> bool {
         self.breakpoints
             .iter()
-            .any(|&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
+            .any(|&bp| (time - bp).abs() < self.tolerance)
     }
 
     /// Return the exact breakpoint time when `time` is within the breakpoint
@@ -295,7 +320,7 @@ impl BreakpointManager {
     pub fn snap_to_breakpoint(&self, time: Value) -> Value {
         self.breakpoints
             .iter()
-            .find(|&&bp| (time - bp).abs() < BREAKPOINT_TOLERANCE)
+            .find(|&&bp| (time - bp).abs() < self.tolerance)
             .copied()
             .unwrap_or(time)
     }
@@ -336,7 +361,7 @@ impl BreakpointManager {
     pub fn mark_breakpoint_solved(&mut self, time: Value) -> Value {
         // Advance current_index past this breakpoint
         while self.current_index < self.breakpoints.len()
-            && self.breakpoints[self.current_index] <= time + BREAKPOINT_TOLERANCE
+            && self.breakpoints[self.current_index] <= time + self.tolerance
         {
             self.current_index += 1;
         }
@@ -427,6 +452,18 @@ mod breakpoint_manager_tests {
         assert_eq!(dt, 5.0);
         assert!(!lands_on_breakpoint);
         assert!(!breakpoints.should_use_minimal_step());
+    }
+
+    #[test]
+    fn ngspice_sized_tolerance_preserves_near_future_source_corner() {
+        let mut breakpoints = BreakpointManager::new_with_tolerance(1.0e-21);
+        breakpoints.add(1.0e-9);
+
+        let current_time = 1.0e-9 - 5.0e-16;
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(current_time, 1.0e-15);
+
+        assert!((dt - 5.0e-16).abs() <= 1.0e-25, "dt={dt:.17e}");
+        assert!(lands_on_breakpoint);
     }
 
     #[test]

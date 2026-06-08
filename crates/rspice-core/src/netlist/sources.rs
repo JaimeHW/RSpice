@@ -102,9 +102,10 @@ fn parse_pulse_spec(
     let delay = expect_value_default(stream, params, 0.0);
     // Preserve omitted timing arguments as NaN sentinels so runtime can apply
     // context-aware defaults from transient analysis settings.
-    let rise = try_value(stream, params).unwrap_or(Value::NAN);
-    let fall = try_value(stream, params).unwrap_or(Value::NAN);
-    let width = try_value(stream, params).unwrap_or(Value::NAN);
+    let rise = try_value(stream, params);
+    let fall = try_value(stream, params);
+    let width = try_value(stream, params);
+    let width_defaults_to_zero = rise.is_some() && fall.is_some() && width.is_none();
     let period = try_value(stream, params).unwrap_or(Value::NAN);
 
     if has_paren {
@@ -115,10 +116,11 @@ fn parse_pulse_spec(
         v1,
         v2,
         delay,
-        rise,
-        fall,
-        width,
+        rise: rise.unwrap_or(Value::NAN),
+        fall: fall.unwrap_or(Value::NAN),
+        width: width.unwrap_or(Value::NAN),
         period,
+        width_defaults_to_zero,
     })
 }
 
@@ -131,7 +133,7 @@ fn parse_sin_spec(
 
     let offset = expect_value_default(stream, params, 0.0);
     let amplitude = expect_value_default(stream, params, 1.0);
-    let frequency = expect_value_default(stream, params, 1e3);
+    let frequency = try_value(stream, params).unwrap_or(Value::NAN);
     let delay = expect_value_default(stream, params, 0.0);
     let damping = expect_value_default(stream, params, 0.0);
     // SPICE SIN phase is specified in degrees; store radians internally.
