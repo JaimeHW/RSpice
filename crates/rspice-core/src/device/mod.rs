@@ -16,6 +16,7 @@ pub mod semiconductor;
 pub mod behavioral;
 pub mod controlled;
 mod coupled_transmission_line;
+mod cpl_native;
 pub mod ffi;
 pub mod gan_hemt;
 pub mod model_bypass;
