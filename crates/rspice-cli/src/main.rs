@@ -37,8 +37,11 @@ fn main() -> ExitCode {
         match Config::load_file(config_path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Error loading config: {}", e);
-                return ExitCode::from(78); // CONFIG_ERROR
+                let err = cli::CliError::ConfigError {
+                    message: e.to_string(),
+                };
+                eprintln!("Error: {}", err);
+                return err.exit_code().into();
             }
         }
     } else {

@@ -408,22 +408,3 @@ pub enum OutputFormat {
     /// HDF5 format
     Hdf5,
 }
-
-#[allow(dead_code)] // Reserved APIs for output format handling
-impl OutputFormat {
-    /// Get file extension for this format
-    pub fn extension(&self) -> &'static str {
-        match self {
-            OutputFormat::Raw | OutputFormat::RawAscii => "raw",
-            OutputFormat::Csv => "csv",
-            OutputFormat::Json => "json",
-            OutputFormat::Tsv => "tsv",
-            OutputFormat::Hdf5 => "h5",
-        }
-    }
-
-    /// Check if format is binary
-    pub fn is_binary(&self) -> bool {
-        matches!(self, OutputFormat::Raw | OutputFormat::Hdf5)
-    }
-}

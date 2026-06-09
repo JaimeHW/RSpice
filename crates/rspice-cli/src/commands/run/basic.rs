@@ -213,37 +213,52 @@ pub(super) fn run_dc_sweep(
             if let Some(ref output_path) = ctx.args.output {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 let signals = crate::commands::run_signals::dc_sweep_voltage_signals(&results);
-                if matches!(ctx.args.format, OutputFormat::Hdf5) {
-                    let mut data = Hdf5SimulationData::new();
-                    data.title = "DC Sweep".to_string();
+                match ctx.args.format {
+                    OutputFormat::Hdf5 => {
+                        let mut data = Hdf5SimulationData::new();
+                        data.title = "DC Sweep".to_string();
 
-                    let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
-                    for signal in &signals {
-                        dc_sweep.add_signal(signal.display_name.clone(), signal.values.clone());
+                        let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
+                        for signal in &signals {
+                            dc_sweep
+                                .add_signal(signal.display_name.clone(), signal.values.clone());
+                        }
+                        data.dc_sweep = Some(dc_sweep);
+
+                        write_hdf5(output_path, &data)
+                            .map_err(|err| map_hdf5_output_error(output_path, err))?;
                     }
-                    data.dc_sweep = Some(dc_sweep);
-
-                    write_hdf5(output_path, &data)
-                        .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                } else {
-                    let node_names: Vec<String> = signals
-                        .iter()
-                        .map(|signal| signal.raw_name.clone())
-                        .collect();
-                    let node_waveforms: Vec<Vec<f64>> =
-                        signals.iter().map(|signal| signal.values.clone()).collect();
-                    rspice_core::analysis::export_dc_sweep(
-                        output_path,
-                        &sweep_vals,
-                        source,
-                        &node_names,
-                        &node_waveforms,
-                        raw_export_format(ctx.args.format),
-                    )
-                    .map_err(|e| CliError::OutputError {
-                        path: output_path.clone(),
-                        source: e,
-                    })?;
+                    OutputFormat::Raw | OutputFormat::RawAscii => {
+                        let node_names: Vec<String> = signals
+                            .iter()
+                            .map(|signal| signal.raw_name.clone())
+                            .collect();
+                        let node_waveforms: Vec<Vec<f64>> =
+                            signals.iter().map(|signal| signal.values.clone()).collect();
+                        rspice_core::analysis::export_dc_sweep(
+                            output_path,
+                            &sweep_vals,
+                            source,
+                            &node_names,
+                            &node_waveforms,
+                            raw_export_format(ctx.args.format),
+                        )
+                        .map_err(|e| CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
+                        })?;
+                    }
+                    OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Json => {
+                        super::export::scalar_table(
+                            "dc_sweep",
+                            "DC transfer characteristic",
+                            source,
+                            "voltage",
+                            sweep_vals,
+                            &signals,
+                        )
+                        .write(output_path, ctx.args.format)?;
+                    }
                 }
 
                 if !ctx.quiet {
@@ -333,42 +348,64 @@ pub(super) fn run_transient(
                 );
             }
 
-            if ctx.args.meas {
-                run_measurements(ctx.netlist, &result, ctx.quiet);
+            let collect_reports =
+                ctx.args.meas_file.is_some() || ctx.args.report_file.is_some();
+            if ctx.args.meas || collect_reports {
+                // Only print measurement results to stdout when --meas was given.
+                let print_quiet = ctx.quiet || !ctx.args.meas;
+                let reports = run_measurements(ctx.netlist, &result, print_quiet);
+                if collect_reports {
+                    ctx.measurements.borrow_mut().extend(reports);
+                }
             }
 
             if let Some(ref output_path) = ctx.args.output {
                 let signals = transient_voltage_signals(&result);
-                if matches!(ctx.args.format, OutputFormat::Hdf5) {
-                    let mut data = Hdf5SimulationData::new();
-                    data.title = "Transient Analysis".to_string();
+                match ctx.args.format {
+                    OutputFormat::Hdf5 => {
+                        let mut data = Hdf5SimulationData::new();
+                        data.title = "Transient Analysis".to_string();
 
-                    let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
-                    for signal in &signals {
-                        transient.add_signal(signal.display_name.clone(), signal.values.clone());
+                        let mut transient = Hdf5WaveformSection::new("time", result.time.clone());
+                        for signal in &signals {
+                            transient
+                                .add_signal(signal.display_name.clone(), signal.values.clone());
+                        }
+                        data.transient = Some(transient);
+
+                        write_hdf5(output_path, &data)
+                            .map_err(|err| map_hdf5_output_error(output_path, err))?;
                     }
-                    data.transient = Some(transient);
-
-                    write_hdf5(output_path, &data)
-                        .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                } else {
-                    let node_names: Vec<String> = signals
-                        .iter()
-                        .map(|signal| signal.raw_name.clone())
-                        .collect();
-                    let waveforms: Vec<Vec<f64>> =
-                        signals.iter().map(|signal| signal.values.clone()).collect();
-                    rspice_core::analysis::export_transient(
-                        output_path,
-                        &result.time,
-                        &node_names,
-                        &waveforms,
-                        raw_export_format(ctx.args.format),
-                    )
-                    .map_err(|e| CliError::OutputError {
-                        path: output_path.clone(),
-                        source: e,
-                    })?;
+                    OutputFormat::Raw | OutputFormat::RawAscii => {
+                        let node_names: Vec<String> = signals
+                            .iter()
+                            .map(|signal| signal.raw_name.clone())
+                            .collect();
+                        let waveforms: Vec<Vec<f64>> =
+                            signals.iter().map(|signal| signal.values.clone()).collect();
+                        rspice_core::analysis::export_transient(
+                            output_path,
+                            &result.time,
+                            &node_names,
+                            &waveforms,
+                            raw_export_format(ctx.args.format),
+                        )
+                        .map_err(|e| CliError::OutputError {
+                            path: output_path.clone(),
+                            source: e,
+                        })?;
+                    }
+                    OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Json => {
+                        super::export::scalar_table(
+                            "transient",
+                            "Transient Analysis",
+                            "time",
+                            "time",
+                            result.time.clone(),
+                            &signals,
+                        )
+                        .write(output_path, ctx.args.format)?;
+                    }
                 }
 
                 if !ctx.quiet {

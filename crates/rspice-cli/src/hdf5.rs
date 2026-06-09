@@ -150,6 +150,7 @@ pub struct Hdf5SimulationData {
     pub operating_point: Option<Hdf5WaveformSection>,
     pub transient: Option<Hdf5WaveformSection>,
     pub dc_sweep: Option<Hdf5WaveformSection>,
+    pub noise: Option<Hdf5WaveformSection>,
     pub ac: Option<Hdf5AcSection>,
     pub measurements: Vec<Hdf5Measurement>,
 }
@@ -168,6 +169,9 @@ impl Hdf5SimulationData {
         }
         if let Some(dc_sweep) = &self.dc_sweep {
             dc_sweep.validate("dc_sweep")?;
+        }
+        if let Some(noise) = &self.noise {
+            noise.validate("noise")?;
         }
         if let Some(ac) = &self.ac {
             ac.validate()?;
@@ -195,6 +199,9 @@ pub fn write_hdf5(path: &Path, data: &Hdf5SimulationData) -> Result<()> {
     }
     if let Some(dc_sweep) = &data.dc_sweep {
         add_waveform_section(&mut builder, "dc_sweep", dc_sweep)?;
+    }
+    if let Some(noise) = &data.noise {
+        add_waveform_section(&mut builder, "noise", noise)?;
     }
     if let Some(ac) = &data.ac {
         add_ac_section(&mut builder, ac)?;
@@ -230,6 +237,11 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
     } else {
         None
     };
+    let noise = if root_groups.iter().any(|group| group == "noise") {
+        Some(read_waveform_section(&file, "noise")?)
+    } else {
+        None
+    };
     let ac = if root_groups.iter().any(|group| group == "ac") {
         Some(read_ac_section(&file)?)
     } else {
@@ -246,6 +258,7 @@ pub fn read_hdf5(path: &Path) -> Result<Hdf5SimulationData> {
         operating_point,
         transient,
         dc_sweep,
+        noise,
         ac,
         measurements,
     })

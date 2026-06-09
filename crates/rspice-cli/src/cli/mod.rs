@@ -12,5 +12,3 @@ pub mod error;
 pub use args::*;
 pub use config::Config;
 pub use error::CliError;
-#[allow(unused_imports)]
-pub use error::ExitCode;

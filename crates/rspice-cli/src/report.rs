@@ -5,23 +5,10 @@
 //! - TAP (Test Anything Protocol) for streaming output
 //! - JSON/CSV for measurement results
 
-#![allow(dead_code)] // Reserved APIs for future measurement collection
-
 use crate::cli::CliError;
 use std::fmt;
 use std::io::{BufWriter, Write};
 use std::path::Path;
-
-/// Report format enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReportFormat {
-    /// JUnit XML format (compatible with CI systems)
-    JUnit,
-    /// TAP (Test Anything Protocol)
-    Tap,
-    /// JSON format
-    Json,
-}
 
 /// Simulation result for reporting
 #[derive(Debug, Clone)]
@@ -55,57 +42,6 @@ pub struct MeasurementReport {
     pub passed: bool,
     /// Error message if failed
     pub error: Option<String>,
-}
-
-impl MeasurementReport {
-    /// Create a passed measurement
-    pub fn passed(name: impl Into<String>, value: f64) -> Self {
-        Self {
-            name: name.into(),
-            value: Some(value),
-            expected: None,
-            tolerance: None,
-            passed: true,
-            error: None,
-        }
-    }
-
-    /// Create a failed measurement
-    pub fn failed(name: impl Into<String>, error: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            value: None,
-            expected: None,
-            tolerance: None,
-            passed: false,
-            error: Some(error.into()),
-        }
-    }
-
-    /// Create a measurement with expected value comparison
-    pub fn with_expected(
-        name: impl Into<String>,
-        value: f64,
-        expected: f64,
-        tolerance: f64,
-    ) -> Self {
-        let passed = (value - expected).abs() <= tolerance;
-        Self {
-            name: name.into(),
-            value: Some(value),
-            expected: Some(expected),
-            tolerance: Some(tolerance),
-            passed,
-            error: if passed {
-                None
-            } else {
-                Some(format!(
-                    "Value {} differs from expected {} by more than tolerance {}",
-                    value, expected, tolerance
-                ))
-            },
-        }
-    }
 }
 
 /// JUnit XML report writer
@@ -343,6 +279,57 @@ fn write_measurement_json<W: Write>(
         .write_all(b"\n")
         .map_err(|e| CliError::output_error(path, e))?;
     Ok(())
+}
+
+/// CSV report for measurements
+pub struct CsvMeasReporter;
+
+impl CsvMeasReporter {
+    /// Write measurement results to CSV file
+    pub fn write(reports: &[SimulationReport], path: &Path) -> Result<(), CliError> {
+        let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
+        let mut writer = BufWriter::new(file);
+
+        write_line(
+            &mut writer,
+            path,
+            format_args!("netlist,name,value,expected,tolerance,passed,error"),
+        )?;
+
+        for report in reports {
+            for meas in &report.measurements {
+                write_line(
+                    &mut writer,
+                    path,
+                    format_args!(
+                        "{},{},{},{},{},{},{}",
+                        csv_escape(&report.netlist),
+                        csv_escape(&meas.name),
+                        meas.value.map(|v| format!("{:.9e}", v)).unwrap_or_default(),
+                        meas.expected
+                            .map(|v| format!("{:.9e}", v))
+                            .unwrap_or_default(),
+                        meas.tolerance
+                            .map(|v| format!("{:.9e}", v))
+                            .unwrap_or_default(),
+                        meas.passed,
+                        csv_escape(meas.error.as_deref().unwrap_or("")),
+                    ),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Quote a CSV field if it contains separators, quotes, or newlines
+fn csv_escape(field: &str) -> String {
+    if field.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", field.replace('"', "\"\""))
+    } else {
+        field.to_string()
+    }
 }
 
 fn write_line<W: Write>(

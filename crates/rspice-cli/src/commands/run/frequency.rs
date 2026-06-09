@@ -2,7 +2,7 @@ use super::RunContext;
 use super::shared::{NodeResolver, generate_frequency_sweep, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ac_signals, voltage_display_name};
-use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, write_hdf5};
+use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 
 pub(super) fn run_disto(
     ctx: &RunContext<'_>,
@@ -83,12 +83,13 @@ pub(super) fn run_ac(
 
             if let Some(ref output_path) = ctx.args.output {
                 let signals = ac_signals(&results);
+                let frequencies: Vec<f64> =
+                    results.iter().map(|result| result.frequency).collect();
                 if matches!(ctx.args.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
 
-                    let mut ac =
-                        Hdf5AcSection::new(results.iter().map(|result| result.frequency).collect());
+                    let mut ac = Hdf5AcSection::new(frequencies);
                     for signal in &signals {
                         ac.add_signal(
                             signal.display_name.clone(),
@@ -100,35 +101,12 @@ pub(super) fn run_ac(
 
                     write_hdf5(output_path, &data)
                         .map_err(|err| map_hdf5_output_error(output_path, err))?;
-                    if !ctx.quiet {
-                        println!("  AC response exported to: {}", output_path.display());
-                    }
-                } else if matches!(ctx.args.format, OutputFormat::Csv) {
-                    use std::io::Write;
-
-                    let mut file =
-                        std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
-                            path: output_path.clone(),
-                            source: e,
-                        })?;
-                    writeln!(file, "Frequency_Hz,Magnitude_dB,Phase_deg").map_err(|e| {
-                        CliError::OutputError {
-                            path: output_path.clone(),
-                            source: e,
-                        }
-                    })?;
-                    for r in &results {
-                        let mag_db = 20.0 * r.voltage_magnitude(1).log10();
-                        let phase_deg = r.voltage_phase(1) * 180.0 / std::f64::consts::PI;
-                        writeln!(file, "{:e},{:.4},{:.2}", r.frequency, mag_db, phase_deg)
-                            .map_err(|e| CliError::OutputError {
-                                path: output_path.clone(),
-                                source: e,
-                            })?;
-                    }
-                    if !ctx.quiet {
-                        println!("  Bode plot exported to: {}", output_path.display());
-                    }
+                } else {
+                    super::export::complex_table("ac", "AC Analysis", frequencies, &signals)
+                        .write(output_path, ctx.args.format)?;
+                }
+                if !ctx.quiet {
+                    println!("  AC response exported to: {}", output_path.display());
                 }
             }
             Ok(())
@@ -228,6 +206,59 @@ pub(super) fn run_noise(
                         "  @ {:e} Hz: input_referred={:.6e}",
                         last.frequency, last.input_referred_density
                     );
+                }
+            }
+
+            if let Some(ref output_path) = ctx.args.output {
+                let noise_frequencies: Vec<f64> =
+                    results.iter().map(|result| result.frequency).collect();
+                let onoise: Vec<f64> = results
+                    .iter()
+                    .map(|result| result.output_noise_density)
+                    .collect();
+                let inoise: Vec<f64> = results
+                    .iter()
+                    .map(|result| result.input_referred_density)
+                    .collect();
+
+                if matches!(ctx.args.format, OutputFormat::Hdf5) {
+                    let mut data = Hdf5SimulationData::new();
+                    data.title = "Noise Analysis".to_string();
+
+                    let mut noise = Hdf5WaveformSection::new("frequency", noise_frequencies);
+                    noise.add_signal("onoise_spectrum", onoise);
+                    noise.add_signal("inoise_spectrum", inoise);
+                    data.noise = Some(noise);
+
+                    write_hdf5(output_path, &data)
+                        .map_err(|err| map_hdf5_output_error(output_path, err))?;
+                } else {
+                    use super::export::{ColumnData, ExportColumn, ExportTable};
+
+                    ExportTable {
+                        analysis: "noise",
+                        plot_name: "Noise Spectral Density Curves",
+                        scale_name: "frequency".to_string(),
+                        scale_type: "frequency",
+                        scale: noise_frequencies,
+                        columns: vec![
+                            ExportColumn {
+                                name: "onoise_spectrum".to_string(),
+                                var_type: "voltage",
+                                data: ColumnData::Real(onoise),
+                            },
+                            ExportColumn {
+                                name: "inoise_spectrum".to_string(),
+                                var_type: "voltage",
+                                data: ColumnData::Real(inoise),
+                            },
+                        ],
+                    }
+                    .write(output_path, ctx.args.format)?;
+                }
+
+                if !ctx.quiet {
+                    println!("  Noise spectra exported to: {}", output_path.display());
                 }
             }
             Ok(())

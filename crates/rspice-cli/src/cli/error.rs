@@ -84,7 +84,6 @@ pub enum CliError {
         suggestion: Option<String>,
     },
 
-    #[allow(dead_code)] // Reserved for configuration file errors
     #[error("Configuration error: {message}")]
     ConfigError { message: String },
 
@@ -134,18 +133,7 @@ impl CliError {
         }
     }
 
-    /// Create a parse error with line number
-    #[allow(dead_code)] // Reserved API for future diagnostic improvements
-    pub fn parse_error_at_line(message: impl Into<String>, line: usize) -> Self {
-        CliError::ParseError {
-            message: message.into(),
-            line: Some(line),
-            suggestion: None,
-        }
-    }
-
     /// Create a simulation error
-    #[allow(dead_code)] // Reserved API for future use
     pub fn simulation_error(message: impl Into<String>) -> Self {
         CliError::SimulationError {
             message: message.into(),
