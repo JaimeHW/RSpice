@@ -57,6 +57,15 @@ const LEGACY_NGSPICE_BJT_NEWTON_ITER_DELTA_V: Value = 1.5e-2;
 /// this cap only prevents the global MNA node update limiter from turning a
 /// valid large-signal transition into hundreds of identical 10 mV iterations.
 const MAX_ADAPTIVE_NEWTON_ITER_DELTA_V: Value = STARTUP_RECOVERY_DELTA_V;
+/// Number of failed Newton retries at a timepoint before the global node
+/// trust region is re-engaged as a rescue.
+///
+/// ngspice never clamps node updates globally during transient stepping, so
+/// the first attempts at each timepoint run pure Newton (with device-level
+/// junction limiting) to preserve ngspice waveform and timestep parity. Only
+/// when a point has already failed repeatedly does the conservative damping
+/// return as a robustness fallback.
+const CONSERVATIVE_LIMITING_RETRY_THRESHOLD: usize = 2;
 /// Maximum allowed node update when committing force-accepted steps.
 ///
 /// This remains tight to avoid committing nonphysical jumps into reactive history.
@@ -749,6 +758,30 @@ impl Engine {
             ));
             let suppress_gate_charge = false;
 
+            let linearized_startup_recovery_points = matches!(
+                initial_solution_mode,
+                startup::InitialSolutionMode::LinearizedSeed
+            ) && result.time.len()
+                <= LINEARIZED_STARTUP_RECOVERY_POINTS;
+            let startup_recovery = linearized_startup_recovery_points
+                || Self::in_startup_recovery_window(
+                    initial_solution_mode,
+                    step_time,
+                    hinted_max_step,
+                );
+            // ngspice's transient Newton never clamps node updates globally;
+            // per-junction limiting inside the device models is what tames the
+            // exponential nonlinearities, and large-signal switching steps are
+            // expected to converge in a handful of full Newton corrections.
+            // Keep RSpice's global trust region only for startup recovery
+            // (where the linearized seed is too far from a physical state for
+            // raw Newton) and as a rescue once a timepoint has already burned
+            // retries; otherwise it throttles legitimate switching edges into
+            // timestep cuts that ngspice does not perform, skewing waveform
+            // parity at every fast edge.
+            let conservative_limiting_active = requires_conservative_nonlinear_limiting
+                && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
+
             // Prepare for Newton iteration at this timestep by seeding the full
             // algebraic solution vector from accepted history when a predictor
             // state is available. ngspice's `NIpred()` predicts every solver
@@ -792,7 +825,7 @@ impl Engine {
                     };
                 }
             }
-            if requires_conservative_nonlinear_limiting {
+            if conservative_limiting_active {
                 let damped = Self::limit_transient_node_voltage_updates(
                     &mut new_solution,
                     &solution,
@@ -828,17 +861,6 @@ impl Engine {
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
             // budget, not the DC operating-point iteration limit.
-            let linearized_startup_recovery_points = matches!(
-                initial_solution_mode,
-                startup::InitialSolutionMode::LinearizedSeed
-            ) && result.time.len()
-                <= LINEARIZED_STARTUP_RECOVERY_POINTS;
-            let startup_recovery = linearized_startup_recovery_points
-                || Self::in_startup_recovery_window(
-                    initial_solution_mode,
-                    step_time,
-                    hinted_max_step,
-                );
             let tran_max_iterations = Self::transient_newton_iteration_budget(
                 self.config.transient_max_iterations,
                 has_vbic_excess_phase,
@@ -1115,7 +1137,24 @@ impl Engine {
                             }
                         }
 
-                        if requires_conservative_nonlinear_limiting {
+                        // ngspice-style per-junction limiting runs on every
+                        // Newton iterate regardless of the global trust-region
+                        // policy; this is what keeps full node updates safe
+                        // around exponential junctions (pnjlim discipline).
+                        if !circuit.bjts.devices.is_empty() {
+                            let junction_limited = Self::limit_bjt_junction_external_updates(
+                                &circuit,
+                                &mut sol,
+                                &new_solution,
+                                num_nodes,
+                                Some(&force_accept_protected_nodes),
+                            );
+                            if junction_limited {
+                                circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
+                            }
+                        }
+
+                        if conservative_limiting_active {
                             // Trust-region damping is critical for stiff semiconductor
                             // nonlinearities, but it should not throttle linear decks or
                             // break ideal voltage-source equations by independently clipping

@@ -228,6 +228,91 @@ impl Engine {
     }
 
     #[inline]
+    /// Apply ngspice-style per-iteration junction limiting to all BJT
+    /// terminals (VBIC and legacy Gummel-Poon alike).
+    ///
+    /// This is the engine-level analog of ngspice's `pnjlim` discipline: it
+    /// runs on every transient Newton iterate, unconditionally, so that full
+    /// Newton node updates stay safe around exponential junctions without a
+    /// global trust region distorting switching-edge trajectories.
+    pub(crate) fn limit_bjt_junction_external_updates(
+        circuit: &CircuitData,
+        proposal: &mut [Value],
+        previous: &[Value],
+        num_nodes: usize,
+        protected_nodes: Option<&[bool]>,
+    ) -> bool {
+        let mut changed = false;
+        for _ in 0..3 {
+            let mut pass_changed = false;
+            for bjt in &circuit.bjts.devices {
+                let node_voltage = |values: &[Value], node: usize| {
+                    if node == 0 {
+                        0.0
+                    } else {
+                        values.get(node - 1).copied().unwrap_or(0.0)
+                    }
+                };
+                let previous_external = [
+                    node_voltage(previous, bjt.node_collector),
+                    node_voltage(previous, bjt.node_base),
+                    node_voltage(previous, bjt.node_emitter),
+                    node_voltage(previous, bjt.node_substrate),
+                ];
+                let proposed_external = [
+                    node_voltage(proposal, bjt.node_collector),
+                    node_voltage(proposal, bjt.node_base),
+                    node_voltage(proposal, bjt.node_emitter),
+                    node_voltage(proposal, bjt.node_substrate),
+                ];
+                let Some(scale) = bjt
+                    .junction_external_step_limit_scale_against_previous(
+                        previous_external,
+                        proposed_external,
+                    )
+                    .filter(|scale| scale.is_finite() && *scale + 1e-6 < 1.0)
+                else {
+                    continue;
+                };
+
+                for node in [
+                    bjt.node_collector,
+                    bjt.node_base,
+                    bjt.node_emitter,
+                    bjt.node_substrate,
+                ] {
+                    if node == 0 {
+                        continue;
+                    }
+                    let proposal_idx = node - 1;
+                    if proposal_idx >= num_nodes
+                        || protected_nodes
+                            .and_then(|protected| protected.get(proposal_idx))
+                            .copied()
+                            .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    let previous_value = previous[proposal_idx];
+                    let proposal_value = proposal[proposal_idx];
+                    let delta = proposal_value - previous_value;
+                    if !delta.is_finite() || delta.abs() <= 0.0 {
+                        continue;
+                    }
+                    proposal[proposal_idx] = previous_value + scale * delta;
+                    pass_changed = true;
+                }
+            }
+
+            if !pass_changed {
+                break;
+            }
+            changed = true;
+        }
+
+        changed
+    }
+
     pub(crate) fn limit_vbic_external_updates(
         circuit: &CircuitData,
         proposal: &mut [Value],

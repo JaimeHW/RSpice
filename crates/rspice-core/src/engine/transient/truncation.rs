@@ -326,6 +326,14 @@ impl Engine {
                 ) else {
                     continue;
                 };
+                if branch_limit < dt && std::env::var_os("RSPICE_LTE_DEBUG").is_some() {
+                    log::warn!(
+                        "BJT LTE bind: dev={idx} branch={branch_idx} q=[{q_curr:.6e},{q_prev:.6e},{q_prev_prev:.6e},{q_prev_prev_prev:.6e}] cq=[{cq_curr:.4e},{cq_prev:.4e}] dts=[{:.4e},{:.4e},{:.4e}] limit={branch_limit:.4e}",
+                        dt,
+                        history.accepted_dt_prev,
+                        history.accepted_dt_prev_prev,
+                    );
+                }
                 found_branch = true;
                 limit = limit.min(branch_limit);
             }
@@ -436,6 +444,14 @@ impl Engine {
                 ) else {
                     continue;
                 };
+                if branch_limit < dt && std::env::var_os("RSPICE_LTE_DEBUG").is_some() {
+                    log::warn!(
+                        "legacy BJT LTE bind: dev={idx} branch={branch_idx} q=[{q_curr:.6e},{q_prev:.6e},{q_prev_prev:.6e},{q_prev_prev_prev:.6e}] cq=[{cq_curr:.4e},{cq_prev:.4e}] dts=[{:.4e},{:.4e},{:.4e}] limit={branch_limit:.4e}",
+                        dt,
+                        history.accepted_dt_prev,
+                        history.accepted_dt_prev_prev,
+                    );
+                }
                 found_branch = true;
                 limit = limit.min(branch_limit);
             }

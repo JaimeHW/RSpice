@@ -31,8 +31,8 @@ use crate::analysis::AnalysisConfig;
 pub const K_BOLTZMANN: Value = 1.380649e-23;
 /// Electron charge (C)
 pub const Q_ELECTRON: Value = 1.602176634e-19;
-/// Default temperature (K) = 300K = 27°C
-pub const T_NOMINAL: Value = 300.0;
+/// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
+pub const T_NOMINAL: Value = 300.15;
 
 //=============================================================================
 // Noise Source Types

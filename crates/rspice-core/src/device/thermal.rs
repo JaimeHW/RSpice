@@ -45,8 +45,8 @@ use crate::Value;
 // Constants
 //=============================================================================
 
-/// Reference temperature (300K = 27°C)
-pub const TREF: Value = 300.0;
+/// Reference temperature: 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
+pub const TREF: Value = 300.15;
 /// Absolute zero offset (Kelvin to Celsius)
 pub const KELVIN_OFFSET: Value = 273.15;
 /// Default thermal resistance (°C/W) for discrete device

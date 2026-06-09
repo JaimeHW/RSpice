@@ -150,8 +150,13 @@ pub const PSEUDO_TRANSIENT_MAX_STEPS: usize = 50;
 // Temperature Constants
 //=============================================================================
 
-/// Reference temperature in Kelvin (27°C = 300.15K, often approximated as 300K)
-pub const TEMP_REFERENCE: Value = 300.0;
+/// Reference temperature in Kelvin (27°C = 300.15K).
+///
+/// SPICE convention (ngspice `REFTEMP`, const.h) is 27°C exactly. Using
+/// 300.0K here while TNOM defaults to 27°C would impose a spurious −0.15K
+/// offset from nominal on every default-temperature simulation, shifting
+/// every junction by ~0.3mV and skewing regenerative switching thresholds.
+pub const TEMP_REFERENCE: Value = 300.15;
 
 /// Boltzmann constant (J/K)
 pub const K_BOLTZMANN: Value = 1.380649e-23;
