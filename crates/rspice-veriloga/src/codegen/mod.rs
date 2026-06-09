@@ -3,7 +3,6 @@
 //! Generates simulator-ready device models from IR.
 //! Produces bytecode programs for efficient simulation.
 
-use crate::CompilerOptions;
 use crate::ast::BinaryOp;
 use crate::error::{CodeGenError, CodeGenErrorKind, CompileError, CompileResult};
 use crate::ir::{BranchEquation, DerivativeWrt, DeviceIR, IrExpr, IrFunction};

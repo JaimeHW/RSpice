@@ -145,13 +145,13 @@ impl VerilogACompiler {
         let tokens = Lexer::new(source, source_id).collect_tokens()?;
 
         // Phase 2: Parsing
-        let source_file = Parser::new(&tokens, &source_map).parse()?;
+        let source_file = Parser::new(&tokens).parse()?;
 
         // Phase 3: Semantic analysis
-        let analyzed = SemanticAnalyzer::new(&self.options).analyze(&source_file)?;
+        let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
 
         // Phase 4 & 5: IR generation and code generation
-        let model = CodeGenerator::new(&self.options).generate(&analyzed)?;
+        let model = CodeGenerator::new().generate(&analyzed)?;
 
         Ok(model)
     }

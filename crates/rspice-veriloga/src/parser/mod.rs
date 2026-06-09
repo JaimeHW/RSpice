@@ -6,25 +6,19 @@
 use crate::ast::*;
 use crate::error::{ParseError, ParseErrorKind};
 use crate::lexer::{Token, TokenKind};
-use crate::source::{SourceMap, Span};
+use crate::source::Span;
 use smol_str::SmolStr;
 
 /// Parser for Verilog-A/AMS
 pub struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
-    #[allow(dead_code)]
-    source_map: &'a SourceMap,
 }
 
 impl<'a> Parser<'a> {
     /// Create a new parser
-    pub fn new(tokens: &'a [Token], source_map: &'a SourceMap) -> Self {
-        Self {
-            tokens,
-            pos: 0,
-            source_map,
-        }
+    pub fn new(tokens: &'a [Token]) -> Self {
+        Self { tokens, pos: 0 }
     }
 
     /// Parse a complete source file

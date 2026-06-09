@@ -1,9 +1,7 @@
 use super::*;
 
 /// Code generator
-pub struct CodeGenerator<'a> {
-    #[allow(dead_code)]
-    pub(super) options: &'a CompilerOptions,
+pub struct CodeGenerator {
     /// Collected Laplace filters
     pub(super) laplace_filters: std::cell::RefCell<Vec<StateSpaceFilter>>,
     /// Collected lookup tables used by $table_model expressions.

@@ -1,10 +1,15 @@
 use super::*;
 
-impl<'a> CodeGenerator<'a> {
+impl Default for CodeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CodeGenerator {
     /// Create a new code generator
-    pub fn new(options: &'a CompilerOptions) -> Self {
+    pub fn new() -> Self {
         Self {
-            options,
             laplace_filters: std::cell::RefCell::new(Vec::new()),
             lookup_tables: std::cell::RefCell::new(Vec::new()),
             limit_state_count: std::cell::Cell::new(0),

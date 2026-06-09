@@ -7,7 +7,6 @@
 //! - Expression validation
 //! - Parameter range checking
 
-use crate::CompilerOptions;
 use crate::ast::*;
 use crate::disciplines::DisciplineDb;
 use crate::error::{CompileError, CompileResult, SemanticError, SemanticErrorKind};
@@ -36,19 +35,6 @@ struct Scope {
     parent: Option<usize>,
     /// Symbols in this scope
     symbols: HashMap<SmolStr, Symbol>,
-    /// Scope kind for error messages
-    #[allow(dead_code)]
-    kind: ScopeKind,
-}
-
-/// Type of scope
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScopeKind {
-    Module,
-    Block,
-    ForLoop,
-    WhileLoop,
-    Function,
 }
 
 /// A symbol in the symbol table
@@ -92,18 +78,16 @@ impl SymbolTable {
             scopes: vec![Scope {
                 parent: None,
                 symbols: HashMap::new(),
-                kind: ScopeKind::Module,
             }],
             current: 0,
         }
     }
 
-    pub fn enter_scope(&mut self, kind: ScopeKind) {
+    pub fn enter_scope(&mut self) {
         let parent = self.current;
         self.scopes.push(Scope {
             parent: Some(parent),
             symbols: HashMap::new(),
-            kind,
         });
         self.current = self.scopes.len() - 1;
     }
@@ -173,9 +157,7 @@ impl Default for SymbolTable {
 // ============================================================================
 
 /// Semantic analyzer for Verilog-A modules
-pub struct SemanticAnalyzer<'a> {
-    #[allow(dead_code)]
-    options: &'a CompilerOptions,
+pub struct SemanticAnalyzer {
     disciplines: DisciplineDb,
     functions: FunctionRegistry,
     symbols: SymbolTable,
@@ -274,10 +256,15 @@ pub struct AnalyzedAssignment {
     pub span: Span,
 }
 
-impl<'a> SemanticAnalyzer<'a> {
-    pub fn new(options: &'a CompilerOptions) -> Self {
+impl Default for SemanticAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SemanticAnalyzer {
+    pub fn new() -> Self {
         Self {
-            options,
             disciplines: DisciplineDb::with_standard(),
             functions: FunctionRegistry::new(),
             symbols: SymbolTable::new(),
@@ -538,7 +525,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.analyze_assignment(assign, module)?;
             }
             AnalogStatement::Block(block) => {
-                self.symbols.enter_scope(ScopeKind::Block);
+                self.symbols.enter_scope();
                 for s in &block.statements {
                     self.analyze_statement(s, module)?;
                 }
@@ -557,7 +544,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 }
             }
             AnalogStatement::For(for_stmt) => {
-                self.symbols.enter_scope(ScopeKind::ForLoop);
+                self.symbols.enter_scope();
 
                 // Check condition type
                 let cond_type = self.infer_type(&for_stmt.condition)?;
@@ -571,7 +558,7 @@ impl<'a> SemanticAnalyzer<'a> {
                 self.symbols.exit_scope();
             }
             AnalogStatement::While(while_stmt) => {
-                self.symbols.enter_scope(ScopeKind::WhileLoop);
+                self.symbols.enter_scope();
 
                 let cond_type = self.infer_type(&while_stmt.condition)?;
                 if !cond_type.is_condition() {
