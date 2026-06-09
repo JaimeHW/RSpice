@@ -1748,6 +1748,9 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
+                        log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
+                    }
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -2385,6 +2388,9 @@ impl Engine {
                     }
 
                     solution.clone_from(&new_solution);
+                    if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
+                        log::warn!("GRID force-accept t={:.12e} dt={:.6e}", t, dt);
+                    }
                     result.time.push(t);
                     for (i, voltages) in result.voltages.iter_mut().enumerate() {
                         voltages.push(solution.get(i).copied().unwrap_or(0.0));
@@ -2548,6 +2554,16 @@ impl Engine {
             }
 
             solution.clone_from(&new_solution);
+
+            if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
+                log::warn!(
+                    "GRID accept t={:.12e} dt={:.6e} order={} bp={}",
+                    t,
+                    dt,
+                    step_trap_order,
+                    hit_breakpoint
+                );
+            }
 
             // Store results
             result.time.push(t);
