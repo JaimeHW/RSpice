@@ -62,6 +62,10 @@ fn apply_resistor_instance_scaling(
         resistance /= mult;
     }
 
+    if resistance.is_infinite() && resistance.is_sign_positive() {
+        return Ok(resistance);
+    }
+
     if !resistance.is_finite() || resistance <= 0.0 {
         return Err(SimulationError::Circuit(format!(
             "Resistor '{}' resolved to invalid {} {}",
@@ -184,18 +188,26 @@ pub(in crate::engine::builder) fn resolve_resistor_instance_value(
                     })?;
                 let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
                 let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
-                let l_eff = l - short;
-                let w_eff = w - narrow;
-                if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff <= 0.0 {
+                // ngspice RESupdate_conduct subtracts process bias from both
+                // drawn edges: (L - 2*SHORT) / (W - 2*NARROW).
+                let l_eff = l - 2.0 * short;
+                let w_eff = w - 2.0 * narrow;
+                if !l_eff.is_finite() || !w_eff.is_finite() || l_eff <= 0.0 || w_eff < 0.0 {
                     return Err(SimulationError::Circuit(format!(
                         "Resistor '{}' has invalid effective geometry (L={}, W={}, SHORT={}, NARROW={})",
                         element_name, l, w, short, narrow
                     )));
                 }
-                l_eff / w_eff
+                if w_eff == 0.0 {
+                    f64::INFINITY
+                } else {
+                    l_eff / w_eff
+                }
             };
 
-            if !squares.is_finite() || squares <= 0.0 {
+            if !(squares.is_infinite() && squares.is_sign_positive())
+                && (!squares.is_finite() || squares <= 0.0)
+            {
                 return Err(SimulationError::Circuit(format!(
                     "Resistor '{}' has invalid number of squares {}",
                     element_name, squares
@@ -259,6 +271,9 @@ pub(in crate::engine::builder) fn resolve_resistor_small_signal_value(
             instance_params,
         ),
         None => {
+            if dc_resistance.is_infinite() && dc_resistance.is_sign_positive() {
+                return Ok(dc_resistance);
+            }
             if !dc_resistance.is_finite() || dc_resistance <= 0.0 {
                 return Err(SimulationError::Circuit(format!(
                     "Resistor '{}' resolved to invalid small-signal resistance {}",
@@ -267,5 +282,92 @@ pub(in crate::engine::builder) fn resolve_resistor_small_signal_value(
             }
             Ok(dc_resistance)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve_resistor_from_source(source: &str, name: &str) -> (f64, Option<f64>) {
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        let element = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .expect("test resistor exists");
+
+        let crate::netlist::ElementKind::Resistor {
+            value,
+            value_expr,
+            model,
+            instance_params,
+        } = &element.kind
+        else {
+            panic!("test element is not a resistor");
+        };
+
+        let dc = resolve_resistor_instance_value(
+            &netlist,
+            &element.name,
+            *value,
+            value_expr.as_deref(),
+            model.as_deref(),
+            instance_params,
+            crate::constants::TEMP_REFERENCE,
+        )
+        .expect("resistor resolves");
+        let ac = instance_param(instance_params, &["AC"])
+            .map(|_| resolve_resistor_small_signal_value(&element.name, dc, instance_params))
+            .transpose()
+            .expect("resistor AC value resolves");
+
+        (dc, ac)
+    }
+
+    #[test]
+    fn rsh_geometry_subtracts_short_and_narrow_from_both_edges() {
+        let (dc, ac) = resolve_resistor_from_source(
+            r#"finite geometry
+R1 n 0 rmod L=12u W=4u
+.model rmod R RSH=1000 NARROW=1u SHORT=1u
+.end
+"#,
+            "R1",
+        );
+
+        assert!((dc - 5_000.0).abs() < 1e-9, "resolved DC resistance {dc}");
+        assert_eq!(ac, None);
+    }
+
+    #[test]
+    fn rsh_geometry_with_zero_effective_width_is_open_in_dc() {
+        let source = r#"res_array geometry
+R3 4 0 rmodel1 L=11u W=2u ac=2.5k
+.model rmodel1 R RSH=1000 NARROW=1u
+.end
+"#;
+
+        let (dc, ac) = resolve_resistor_from_source(source, "R3");
+
+        assert!(dc.is_infinite() && dc.is_sign_positive());
+        assert_eq!(ac, Some(2_500.0));
+
+        let netlist = crate::netlist::Netlist::parse(source).expect("test netlist parses");
+        let circuit = crate::engine::Engine::default()
+            .build_circuit(&netlist)
+            .expect("circuit builds");
+        let resistor_idx = circuit
+            .resistors
+            .names
+            .iter()
+            .position(|resistor_name| resistor_name.eq_ignore_ascii_case("R3"))
+            .expect("R3 stored");
+
+        assert_eq!(circuit.resistors.conductances[resistor_idx], 0.0);
+        assert_eq!(
+            circuit.resistors.small_signal_conductance(resistor_idx),
+            1.0 / 2_500.0
+        );
     }
 }
