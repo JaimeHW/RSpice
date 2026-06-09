@@ -553,8 +553,14 @@ impl TestRunner {
             let absolute_tolerance =
                 self.series_absolute_tolerance_floor(var, expected_series, &actual_series);
             let ref_monotonic = Self::is_monotonic_axis(&expected_series.x);
+            let time_axis = Self::normalize_variable_name(&reference.x_name) == "time";
             if sim_monotonic && ref_monotonic {
-                for (&x_ref, &expected) in expected_series.x.iter().zip(expected_series.y.iter()) {
+                for (idx, (&x_ref, &expected)) in expected_series
+                    .x
+                    .iter()
+                    .zip(expected_series.y.iter())
+                    .enumerate()
+                {
                     let Some(actual) = Self::interpolate_series(x_sim, &actual_series, x_ref)
                     else {
                         mismatches.push(ValueMismatch {
@@ -580,6 +586,27 @@ impl TestRunner {
                     } else {
                         self.compare_values_with_abs_tol(expected, actual, absolute_tolerance)
                     } {
+                        // Steep transient rows sample one specific run's
+                        // internally chosen timesteps; allow a slope-gated
+                        // one-local-step timing window before flagging.
+                        if time_axis
+                            && !phase_probe
+                            && self.matches_within_time_jitter_window(
+                                x_sim,
+                                &actual_series,
+                                x_ref,
+                                expected,
+                                Self::local_axis_spacing(&expected_series.x, idx),
+                                Self::local_reference_slope(
+                                    &expected_series.x,
+                                    &expected_series.y,
+                                    idx,
+                                ),
+                                absolute_tolerance,
+                            )
+                        {
+                            continue;
+                        }
                         mismatches.push(ValueMismatch {
                             x_value: x_ref,
                             node: var.clone(),

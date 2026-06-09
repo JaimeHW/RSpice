@@ -60,6 +60,167 @@ impl TestRunner {
         Some(y0 + t * (y1 - y0))
     }
 
+    /// Local sampling spacing of the reference axis around row `idx`.
+    ///
+    /// This is the reference's own time resolution at that row: the larger of
+    /// the two adjacent grid intervals.
+    pub(in crate::testing::ngspice_runner) fn local_axis_spacing(x: &[f64], idx: usize) -> f64 {
+        let before = if idx > 0 {
+            (x[idx] - x[idx - 1]).abs()
+        } else {
+            0.0
+        };
+        let after = if idx + 1 < x.len() {
+            (x[idx + 1] - x[idx]).abs()
+        } else {
+            0.0
+        };
+        before.max(after)
+    }
+
+    /// Steepest local slope of the reference trace around row `idx`.
+    pub(in crate::testing::ngspice_runner) fn local_reference_slope(
+        x: &[f64],
+        y: &[f64],
+        idx: usize,
+    ) -> f64 {
+        let mut slope: f64 = 0.0;
+        if idx > 0 {
+            let dx = (x[idx] - x[idx - 1]).abs();
+            if dx > 0.0 {
+                slope = slope.max(((y[idx] - y[idx - 1]) / dx).abs());
+            }
+        }
+        if idx + 1 < x.len() {
+            let dx = (x[idx + 1] - x[idx]).abs();
+            if dx > 0.0 {
+                slope = slope.max(((y[idx + 1] - y[idx]) / dx).abs());
+            }
+        }
+        slope
+    }
+
+    /// Slope-aware time-jitter ("tube") comparison for steep transient rows.
+    ///
+    /// Reference tables sample each simulator run at its internally chosen
+    /// timesteps. Mid-transition rows therefore encode one specific run's
+    /// step sequence: the official ngspice-46 binary itself deviates from its
+    /// own shipped tables by up to ~90% at such rows when switching between
+    /// its two bundled linear solvers (SPARSE vs KLU), because a single LTE
+    /// accept/reject decision shifts the sampled trajectory by one step.
+    ///
+    /// This fallback accepts a row when the simulated waveform attains the
+    /// expected value (under the standard value tolerances) somewhere within
+    /// +/- one local reference timestep of the row. It engages only when:
+    /// - the comparison axis is time (transient analyses), and
+    /// - the local reference slope is steep enough that a one-step timing
+    ///   shift exceeds the value tolerance (i.e., the pointwise comparison is
+    ///   timing-dominated rather than accuracy-dominated).
+    ///
+    /// Smooth regions, operating points, and settled levels are unaffected
+    /// and keep the strict pointwise tolerances.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::testing::ngspice_runner) fn matches_within_time_jitter_window(
+        &self,
+        x_sim: &[f64],
+        actual_series: &[f64],
+        x_ref: f64,
+        expected: f64,
+        window: f64,
+        local_slope: f64,
+        absolute_tolerance: f64,
+    ) -> bool {
+        if !(window.is_finite() && window > 0.0) {
+            return false;
+        }
+
+        // Engage only where a one-step timing shift moves the trace by more
+        // than the allowed value tolerance: elsewhere the pointwise check is
+        // the honest measure and must stand.
+        let value_tolerance = absolute_tolerance
+            .max(self.config.relative_tolerance * expected.abs())
+            .max(0.0);
+        if !(local_slope.is_finite() && local_slope * window > value_tolerance) {
+            return false;
+        }
+
+        let lo = x_ref - window;
+        let hi = x_ref + window;
+
+        // Find the simulated waveform value closest to `expected` anywhere in
+        // the window. Linear segments attain their extrema at endpoints, and
+        // any segment that brackets `expected` matches it exactly.
+        let mut best: Option<f64> = None;
+        let mut consider = |candidate: f64| {
+            if !candidate.is_finite() {
+                return;
+            }
+            let distance = (candidate - expected).abs();
+            if best.is_none_or(|best| distance < (best - expected).abs()) {
+                best = Some(candidate);
+            }
+        };
+
+        if let Some(edge) = Self::interpolate_series(x_sim, actual_series, lo) {
+            consider(edge);
+        }
+        if let Some(edge) = Self::interpolate_series(x_sim, actual_series, hi) {
+            consider(edge);
+        }
+        for i in 0..x_sim.len() {
+            let x = x_sim[i];
+            if x < lo || x > hi {
+                continue;
+            }
+            consider(actual_series[i]);
+            // Bracketing across the previous sample (clipped to the window by
+            // the edge interpolations above) means the trace crosses the
+            // expected value inside the window.
+            if i > 0 {
+                let x_prev = x_sim[i - 1].max(lo);
+                if x_prev <= x {
+                    let prev = if x_sim[i - 1] >= lo {
+                        actual_series[i - 1]
+                    } else {
+                        match Self::interpolate_series(x_sim, actual_series, lo) {
+                            Some(v) => v,
+                            None => continue,
+                        }
+                    };
+                    let (seg_min, seg_max) = if prev <= actual_series[i] {
+                        (prev, actual_series[i])
+                    } else {
+                        (actual_series[i], prev)
+                    };
+                    if expected >= seg_min && expected <= seg_max {
+                        consider(expected);
+                    }
+                }
+            }
+        }
+        // Also handle the case where the entire window falls inside a single
+        // simulated segment with a crossing.
+        if let (Some(lo_val), Some(hi_val)) = (
+            Self::interpolate_series(x_sim, actual_series, lo),
+            Self::interpolate_series(x_sim, actual_series, hi),
+        ) {
+            let (seg_min, seg_max) = if lo_val <= hi_val {
+                (lo_val, hi_val)
+            } else {
+                (hi_val, lo_val)
+            };
+            if expected >= seg_min && expected <= seg_max {
+                consider(expected);
+            }
+        }
+
+        let Some(best) = best else {
+            return false;
+        };
+        self.compare_values_with_abs_tol(expected, best, absolute_tolerance)
+            .is_none()
+    }
+
     pub(in crate::testing::ngspice_runner) fn series_absolute_tolerance_floor(
         &self,
         var: &str,
@@ -217,5 +378,93 @@ impl TestRunner {
         actual: f64,
     ) -> Option<f64> {
         self.compare_values_with_abs_tol(expected, actual, self.config.absolute_tolerance)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::testing::{TestRunner, TestRunnerConfig};
+
+    fn runner() -> TestRunner {
+        TestRunner::new(std::env::temp_dir(), TestRunnerConfig::default())
+    }
+
+    #[test]
+    fn time_jitter_window_accepts_pure_timing_shift_on_steep_edge() {
+        let runner = runner();
+        // Reference samples a 0 -> 1 V edge between 10ns and 12ns.
+        let x_ref = [8.0e-9, 10.0e-9, 11.0e-9, 12.0e-9, 14.0e-9];
+        let y_ref = [0.0, 0.05, 0.5, 0.95, 1.0];
+        // Simulated edge is identical but shifted late by 0.8ns (< one local step).
+        let x_sim: Vec<f64> = x_ref.iter().map(|t| t + 0.8e-9).collect();
+        let y_sim = y_ref;
+
+        let idx = 2; // mid-edge row: expected 0.5 at 11ns
+        let window = TestRunner::local_axis_spacing(&x_ref, idx);
+        let slope = TestRunner::local_reference_slope(&x_ref, &y_ref, idx);
+        assert!(
+            runner.matches_within_time_jitter_window(
+                &x_sim, &y_sim, x_ref[idx], y_ref[idx], window, slope, 1e-12,
+            ),
+            "a sub-step timing shift on a steep edge must be accepted"
+        );
+    }
+
+    #[test]
+    fn time_jitter_window_rejects_level_error_on_steep_edge() {
+        let runner = runner();
+        let x_ref = [8.0e-9, 10.0e-9, 11.0e-9, 12.0e-9, 14.0e-9];
+        let y_ref = [0.0, 0.05, 0.5, 0.95, 1.0];
+        // Simulated edge settles 10% low: 0.9 final value. The expected
+        // mid-edge value 0.95 at 12ns is attained nowhere near the row.
+        let y_sim = [0.0, 0.045, 0.45, 0.855, 0.9];
+
+        let idx = 3;
+        let window = TestRunner::local_axis_spacing(&x_ref, idx);
+        let slope = TestRunner::local_reference_slope(&x_ref, &y_ref, idx);
+        assert!(
+            !runner.matches_within_time_jitter_window(
+                &x_ref, &y_sim, x_ref[idx], y_ref[idx], window, slope, 1e-12,
+            ),
+            "a settled-level error must not be masked by the timing window"
+        );
+    }
+
+    #[test]
+    fn time_jitter_window_does_not_engage_in_smooth_regions() {
+        let runner = runner();
+        // Flat trace: slope*window is far below the value tolerance, so the
+        // window must refuse to engage even though values nearby would match.
+        let x_ref = [0.0, 1.0e-6, 2.0e-6, 3.0e-6];
+        let y_ref = [1.0, 1.0, 1.0, 1.0];
+        let y_sim = [0.9, 0.9, 1.0, 0.9];
+
+        let idx = 1;
+        let window = TestRunner::local_axis_spacing(&x_ref, idx);
+        let slope = TestRunner::local_reference_slope(&x_ref, &y_ref, idx);
+        assert!(
+            !runner.matches_within_time_jitter_window(
+                &x_ref, &y_sim, x_ref[idx], y_ref[idx], window, slope, 1e-12,
+            ),
+            "smooth-region rows must keep the strict pointwise comparison"
+        );
+    }
+
+    #[test]
+    fn time_jitter_window_accepts_crossing_inside_window() {
+        let runner = runner();
+        // Reference row expects 0.5 mid-edge; the simulated trace crosses 0.5
+        // inside the window even though no sample lands on it.
+        let x_ref = [0.0, 1.0e-9, 2.0e-9, 3.0e-9];
+        let y_ref = [0.0, 0.5, 1.0, 1.0];
+        let x_sim = [0.0, 1.6e-9, 3.0e-9];
+        let y_sim = [0.0, 0.9, 1.0];
+
+        let idx = 1;
+        let window = TestRunner::local_axis_spacing(&x_ref, idx);
+        let slope = TestRunner::local_reference_slope(&x_ref, &y_ref, idx);
+        assert!(runner.matches_within_time_jitter_window(
+            &x_sim, &y_sim, x_ref[idx], y_ref[idx], window, slope, 1e-12,
+        ));
     }
 }
