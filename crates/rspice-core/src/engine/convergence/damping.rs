@@ -228,13 +228,20 @@ impl Engine {
     }
 
     #[inline]
-    /// Apply ngspice-style per-iteration junction limiting to all BJT
-    /// terminals (VBIC and legacy Gummel-Poon alike).
+    /// Apply ngspice-style per-iteration junction limiting to legacy
+    /// Gummel-Poon BJT terminals.
     ///
     /// This is the engine-level analog of ngspice's `pnjlim` discipline: it
     /// runs on every transient Newton iterate, unconditionally, so that full
     /// Newton node updates stay safe around exponential junctions without a
     /// global trust region distorting switching-edge trajectories.
+    ///
+    /// VBIC devices are excluded: their excess-phase hidden states and
+    /// charge-history coupling already have a dedicated, conditionally
+    /// engaged limiter (`limit_vbic_transient_external_updates`), and forcing
+    /// the per-iterate scale onto them stalls stiff startup transients
+    /// (vbic/diffamp) by re-limiting external updates the inner solver has
+    /// already reconciled against its dynamic state.
     pub(crate) fn limit_bjt_junction_external_updates(
         circuit: &CircuitData,
         proposal: &mut [Value],
@@ -246,6 +253,9 @@ impl Engine {
         for _ in 0..3 {
             let mut pass_changed = false;
             for bjt in &circuit.bjts.devices {
+                if bjt.uses_vbic_dynamic_charges() {
+                    continue;
+                }
                 let node_voltage = |values: &[Value], node: usize| {
                     if node == 0 {
                         0.0
