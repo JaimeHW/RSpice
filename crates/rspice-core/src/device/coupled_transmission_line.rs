@@ -7,6 +7,9 @@ use crate::{Value, circuit::NodeId};
 use faer::{Mat, Side};
 
 use super::TransmissionLine;
+use super::cpl_native::{
+    NativeCplRuntime, NativeCplStampPlan, NativeCplViHistory, NativeCplViSample,
+};
 
 const MODAL_RELATIVE_EIGEN_TOL: Value = 1e-12;
 
@@ -47,6 +50,26 @@ impl CplBranchCurrents {
     }
 }
 
+/// Native ngspice-faithful convolution runtime state for a coupled line.
+///
+/// `runtime` holds the *accepted* convolution state advanced up to
+/// `last_committed_ps` (ngspice `cp`/cplines). Each step the stamp is computed
+/// against a clone of this state so the accepted state is only mutated when a
+/// step is committed.
+#[derive(Debug, Clone)]
+struct CplNativeState {
+    runtime: NativeCplRuntime,
+    history: NativeCplViHistory,
+    /// Latest accepted near-end port voltages (ngspice `in_node->V`).
+    near_v: Vec<Value>,
+    /// Latest accepted far-end port voltages (ngspice `out_node->V`).
+    far_v: Vec<Value>,
+    /// Integer-picosecond time of the last committed history sample.
+    last_committed_ps: i64,
+    /// Set once the DC operating point has seeded the convolution state.
+    dc_seeded: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CoupledTransmissionLine {
     pub name: String,
@@ -62,6 +85,14 @@ pub struct CoupledTransmissionLine {
     dc_series_resistances: Vec<Value>,
     native_branch_ordinals: Option<CplBranchCurrents>,
     native_branch_matrix_indices: Option<CplBranchCurrents>,
+    /// Pristine ngspice-faithful convolution runtime built from the RLGC
+    /// matrices in [`Self::new`]. `Some` only when the native setup math
+    /// succeeds and the line has grounded references (the ngspice CPL topology
+    /// requires a shared ground reference at both ends).
+    native_runtime_template: Option<NativeCplRuntime>,
+    /// Active convolution state (seeded from the DC operating point). Drives the
+    /// branch-current transient stamp when present.
+    native: Option<CplNativeState>,
     modes: Vec<TransmissionLine>,
 }
 
@@ -188,6 +219,16 @@ impl CoupledTransmissionLine {
             })
             .collect();
 
+        // Build the ngspice-faithful convolution runtime up front. The native
+        // path is only valid for grounded references (the ngspice CPL element
+        // shares a single ground reference at each end); otherwise the line
+        // falls back to the modal Norton transient model.
+        let native_runtime_template = if near_ref == 0 && far_ref == 0 {
+            NativeCplRuntime::setup(r, l, c, g, length).ok()
+        } else {
+            None
+        };
+
         Ok(Self {
             name,
             near_nodes,
@@ -202,6 +243,8 @@ impl CoupledTransmissionLine {
             dc_series_resistances,
             native_branch_ordinals: None,
             native_branch_matrix_indices: None,
+            native_runtime_template,
+            native: None,
             modes,
         })
     }
@@ -261,9 +304,48 @@ impl CoupledTransmissionLine {
                 self.name
             ));
         }
+        if self.native_runtime_template.is_none() {
+            return Err(format!(
+                "Coupled transmission line '{}' native convolution runtime is unavailable; refusing to allocate branch currents",
+                self.name
+            ));
+        }
         self.native_branch_ordinals = Some(CplBranchCurrents::new(b1, b2, self.conductors())?);
         self.native_branch_matrix_indices = None;
         Ok(())
+    }
+
+    /// Whether the ngspice-faithful native convolution runtime is available for
+    /// this line (grounded references and a successful setup).
+    #[inline]
+    pub(crate) fn native_runtime_available(&self) -> bool {
+        self.native_runtime_template.is_some()
+    }
+
+    /// Smallest native mode delay (`taul`) in seconds, or `None` when the native
+    /// runtime is unavailable. ngspice clamps the transient max step to
+    /// `0.9 * min(taul)` so each mode's propagation is resolved by the
+    /// convolution; mirroring that cap keeps the trapezoidal convolution faithful
+    /// to the reference.
+    #[inline]
+    pub(crate) fn native_min_taul_seconds(&self) -> Option<Value> {
+        let runtime = self.native_runtime_template.as_ref()?;
+        runtime
+            .taul_ps
+            .iter()
+            .copied()
+            .filter(|t| t.is_finite() && *t > 0.0)
+            .fold(None, |acc: Option<f64>, t| {
+                Some(acc.map_or(t, |m| m.min(t)))
+            })
+            .map(|ps| ps * 1e-12)
+    }
+
+    /// Whether the active native convolution runtime drives this line's
+    /// transient stamp (branch currents allocated and runtime present).
+    #[inline]
+    pub(crate) fn uses_native_runtime(&self) -> bool {
+        self.native_branch_matrix_indices.is_some() && self.native_runtime_template.is_some()
     }
 
     #[inline]
@@ -281,16 +363,180 @@ impl CoupledTransmissionLine {
         Ok(())
     }
 
-    #[cfg(test)]
     #[inline]
     pub(crate) fn native_branch_matrix_indices(&self) -> Option<&CplBranchCurrents> {
         self.native_branch_matrix_indices.as_ref()
+    }
+
+    /// Seed the native convolution state from the DC operating-point port
+    /// voltages, mirroring ngspice's `CPLdcGiven` initialization in `CPLload`.
+    ///
+    /// Builds the VI history (with the DC sample at t=0), zeroes/initializes the
+    /// per-pole convolution accumulators, and records the DC port voltages as
+    /// the latest accepted state. No-op when the native runtime is inactive.
+    pub(crate) fn native_seed_dc(
+        &mut self,
+        near_dc: &[Value],
+        far_dc: &[Value],
+    ) -> Result<(), String> {
+        if !self.uses_native_runtime() {
+            return Ok(());
+        }
+        let template = self
+            .native_runtime_template
+            .as_ref()
+            .expect("native runtime template present when uses_native_runtime");
+        let mut runtime = template.clone();
+        runtime
+            .initialize_dc_convolutions(near_dc, far_dc)
+            .map_err(|err| format!("CPL '{}' DC convolution seed failed: {err}", self.name))?;
+
+        let conductors = self.conductors();
+        let mut history =
+            NativeCplViHistory::new(conductors, near_dc.to_vec(), far_dc.to_vec())
+                .map_err(|err| format!("CPL '{}' history init failed: {err}", self.name))?;
+        // ngspice seeds the first VI sample at t=0 with the DC port voltages and
+        // zero branch currents.
+        history
+            .push_sample(NativeCplViSample::new(
+                0,
+                near_dc.to_vec(),
+                far_dc.to_vec(),
+                vec![0.0; conductors],
+                vec![0.0; conductors],
+            ))
+            .map_err(|err| format!("CPL '{}' history seed failed: {err}", self.name))?;
+
+        self.native = Some(CplNativeState {
+            runtime,
+            history,
+            near_v: near_dc.to_vec(),
+            far_v: far_dc.to_vec(),
+            last_committed_ps: 0,
+            dc_seeded: true,
+        });
+        Ok(())
+    }
+
+    /// Compute the per-step branch-current stamp for the requested step.
+    ///
+    /// `t2_seconds` is the step end-time (`t + dt`), `dt_seconds` the step size.
+    /// Returns `None` when the native runtime is inactive or not yet seeded, or
+    /// when the step is degenerate (non-positive dt). Errors from the underlying
+    /// convolution math are surfaced so the caller can fall back gracefully.
+    pub(crate) fn native_step_plan(
+        &self,
+        t2_seconds: Value,
+        dt_seconds: Value,
+    ) -> Option<NativeCplStampPlan> {
+        let native = self.native.as_ref()?;
+        if !native.dc_seeded || !(dt_seconds > 0.0) {
+            return None;
+        }
+        let t1_ps = native.last_committed_ps;
+        // ngspice keeps time bookkeeping in integer picoseconds. A step shorter
+        // than 1 ps (e.g. a breakpoint nudge) would otherwise collapse to a zero
+        // interval; clamp to at least 1 ps past the last committed sample so the
+        // delayed-sample interpolation stays well-defined (the convolution math
+        // still uses the true `dt_seconds`).
+        let mut t2_ps = (t2_seconds * 1e12).round() as i64;
+        if t2_ps <= t1_ps {
+            t2_ps = t1_ps + 1;
+        }
+        // The history pruning inside the plan needs a mutable view; clone the
+        // history for this evaluation so the accepted history is untouched until
+        // commit (ngspice prunes only via the accepted `cp->vi_head`).
+        let mut history = native.history.clone();
+        match native.runtime.step_stamp_plan(
+            t1_ps,
+            t2_ps,
+            dt_seconds,
+            &native.near_v,
+            &native.far_v,
+            &mut history,
+        ) {
+            Ok(plan) => Some(plan),
+            Err(err) => {
+                log::warn!("CPL '{}' native step stamp failed: {err}", self.name);
+                None
+            }
+        }
+    }
+
+    /// Commit an accepted transient step into the native convolution state,
+    /// mirroring the first loop of ngspice `CPLload` (add_new_vi + update_cnv +
+    /// update_delayed_cnv) which advances `cp` by the accepted delta.
+    ///
+    /// `near_v`/`far_v`/`near_i`/`far_i` are the accepted near/far port voltages
+    /// and branch currents at `accepted_time_seconds`.
+    pub(crate) fn native_commit_accepted(
+        &mut self,
+        accepted_time_seconds: Value,
+        near_v: &[Value],
+        far_v: &[Value],
+        near_i: &[Value],
+        far_i: &[Value],
+    ) {
+        let name = self.name.clone();
+        let Some(native) = self.native.as_mut() else {
+            return;
+        };
+        if !native.dc_seeded {
+            return;
+        }
+        let time_ps = (accepted_time_seconds * 1e12).round() as i64;
+        if time_ps <= native.last_committed_ps {
+            // Nothing new to commit (e.g. t=0 accept or a repeated time point).
+            return;
+        }
+        let t1_ps = native.last_committed_ps;
+        let delta_seconds = (time_ps - t1_ps) as f64 * 1e-12;
+
+        let start_near = native.near_v.clone();
+        let start_far = native.far_v.clone();
+
+        // Advance the persistent convolution state for the just-completed step,
+        // mirroring ngspice's per-load right_consts/update_cnv/update_delayed_cnv
+        // ordering. The history must NOT yet contain the new (t2) sample when the
+        // delayed samples for [t1, t2] are evaluated (ngspice adds the t2 sample
+        // only at the start of the *next* load).
+        if let Err(err) = native.runtime.commit_step(
+            t1_ps,
+            time_ps,
+            delta_seconds,
+            &start_near,
+            &start_far,
+            near_v,
+            far_v,
+            near_i,
+            far_i,
+            &mut native.history,
+        ) {
+            log::warn!("CPL '{name}' accepted convolution commit failed: {err}");
+            return;
+        }
+
+        // Record the accepted sample and port state for the next step.
+        if let Err(err) = native.history.push_sample(NativeCplViSample::new(
+            time_ps,
+            near_v.to_vec(),
+            far_v.to_vec(),
+            near_i.to_vec(),
+            far_i.to_vec(),
+        )) {
+            log::warn!("CPL '{name}' history push failed: {err}");
+            return;
+        }
+        native.near_v = near_v.to_vec();
+        native.far_v = far_v.to_vec();
+        native.last_committed_ps = time_ps;
     }
 
     pub fn reset(&mut self) {
         for mode in &mut self.modes {
             mode.reset();
         }
+        self.native = None;
     }
 
     pub fn modalize_port_voltage(&self, physical: &[Value]) -> Vec<Value> {

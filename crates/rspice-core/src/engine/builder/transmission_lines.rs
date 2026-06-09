@@ -314,7 +314,6 @@ pub(in crate::engine::builder) fn validate_cpl_model_params(
     Ok(())
 }
 
-#[allow(dead_code)]
 pub(in crate::engine::builder) fn allocate_grounded_cpl_native_branch_currents(
     circuit: &mut CircuitData,
     coupled_tline_index: usize,
@@ -413,14 +412,25 @@ P1 n1 n2 0 f1 f2 0 m
     }
 
     #[test]
-    fn transmission_cpl_native_branch_currents_are_dormant_by_default() {
+    fn transmission_cpl_grounded_native_branch_currents_are_active_by_default() {
+        // The native ngspice-faithful convolution runtime is activated for
+        // grounded coupled lines: building the circuit allocates one branch
+        // current per conductor at each end so the transient solver can stamp
+        // the cplload.c branch equations.
         let netlist = grounded_cpl_netlist();
         let circuit = crate::engine::Engine::default()
             .build_circuit(&netlist)
             .expect("circuit builds");
 
-        assert_eq!(circuit.num_branches(), 0);
-        assert!(circuit.coupled_tlines[0].native_branch_ordinals().is_none());
+        let tline = &circuit.coupled_tlines[0];
+        assert!(tline.native_runtime_available());
+        let branches = tline
+            .native_branch_ordinals()
+            .expect("native branch ordinals are allocated by default");
+        assert_eq!(branches.b1.len(), 2);
+        assert_eq!(branches.b2.len(), 2);
+        // Two conductors * two ends = four branch-current unknowns.
+        assert_eq!(circuit.num_branches(), 4);
     }
 
     #[test]
@@ -598,15 +608,32 @@ pub(in crate::engine::builder) fn build_cpl_multiconductor_line(
         params.length,
     )
     .map_err(SimulationError::Circuit)?;
-    let min_mode_delay = coupled_tline.min_mode_delay();
-    if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
-        circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
+    let native_available = coupled_tline.native_runtime_available();
+    if let Some(min_taul) = coupled_tline.native_min_taul_seconds() {
+        // ngspice caps CKTmaxStep to 0.9*min(taul) for CPL so every mode's
+        // propagation delay is resolved by the convolution recurrence. Match
+        // that cap so the trapezoidal convolution tracks the reference instead
+        // of drifting when the solver would otherwise take larger steps.
+        if min_taul.is_finite() && min_taul > 0.0 {
+            circuit.tighten_transient_max_step_hint(0.9 * min_taul);
+        }
+    } else {
+        let min_mode_delay = coupled_tline.min_mode_delay();
+        if min_mode_delay.is_finite() && min_mode_delay > 0.0 {
+            circuit.tighten_transient_max_step_hint(0.25 * min_mode_delay);
+        }
     }
-    // Keep native branch-current CPL dormant until the matching transient
-    // convolution stamp is ready; the current CPL transient runtime is modal
-    // and nodal, so allocating extra branch rows by default would change the
-    // global matrix/output shape without a complete transient equation set.
+    let coupled_index = circuit.coupled_tlines.len();
     circuit.coupled_tlines.push(coupled_tline);
+
+    // Activate the ngspice-faithful native convolution runtime: allocate the
+    // per-conductor branch-current unknowns at both ends so the transient
+    // solver stamps the cplload.c branch equations. Lines without grounded
+    // references (or where the native setup math could not be realized) keep the
+    // modal Norton transient fallback and allocate no branch rows.
+    if native_available {
+        allocate_grounded_cpl_native_branch_currents(circuit, coupled_index)?;
+    }
 
     Ok(())
 }

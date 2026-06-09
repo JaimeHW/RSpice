@@ -1,10 +1,9 @@
-//! Native CPL constants and dormant runtime helpers.
+//! Native CPL constants and runtime helpers.
 //!
 //! This is a direct, private port of the ngspice CPL setup math that produces
-//! the CPLine constant tables. Runtime helpers are kept private and dormant
-//! until branch-current transient stamping is complete enough to activate.
-
-#![allow(dead_code)]
+//! the CPLine constant tables (cplsetup.c), plus the transient convolution
+//! runtime (cplload.c: right_consts/update_cnv/update_delayed_cnv/get_pvs_vi).
+//! The runtime is driven by [`crate::device::CoupledTransmissionLine`].
 
 use std::{collections::VecDeque, fmt};
 
@@ -325,6 +324,128 @@ impl NativeCplRuntime {
         })
     }
 
+    /// Compute the per-step MNA stamp for the branch-current convolution
+    /// equations, mirroring the second loop of ngspice `CPLload`.
+    ///
+    /// `self` must hold the accepted convolution state advanced up to `t1`
+    /// (the start of the current step). This call clones that state internally
+    /// so the accepted state is not perturbed (ngspice restores `cp2` from `cp`
+    /// before `right_consts`), then evaluates the RHS constants and the matrix
+    /// coefficient matrices used to stamp the branch rows.
+    ///
+    /// - `t1_ps`/`t2_ps` are the integer-picosecond start/end of the step.
+    /// - `dt_seconds` is the step `h` (= CKTdelta).
+    /// - `input_voltage`/`output_voltage` are the latest accepted near/far port
+    ///   voltages (ngspice `in_node->V`/`out_node->V`, the committed t1 values).
+    pub(crate) fn step_stamp_plan(
+        &self,
+        t1_ps: i64,
+        t2_ps: i64,
+        dt_seconds: f64,
+        input_voltage: &[f64],
+        output_voltage: &[f64],
+        history: &mut NativeCplViHistory,
+    ) -> Result<NativeCplStampPlan, NativeCplError> {
+        let h = dt_seconds;
+        let h1 = 0.5 * dt_seconds;
+        let delayed = history.delayed_vi_samples_ps(t1_ps, t2_ps, &self.taul_ps)?;
+
+        // ngspice runs right_consts on the throwaway working copy `cp2`; clone
+        // so the accepted convolution state is preserved for the next commit.
+        let mut working = self.clone();
+        let rc = working.right_consts(h, h1, input_voltage, output_voltage, &delayed)?;
+
+        let n = self.no_l;
+        let mut aten_h1 = zero_matrix(n);
+        let mut f2 = zero_matrix(n);
+        let mut f3 = zero_matrix(n);
+
+        for m in 0..n {
+            for p in 0..n {
+                if let Some(tms) = self.h1t[m][p].as_ref() {
+                    aten_h1[m][p] = tms.aten + h1 * self.h1c[m][p];
+                }
+                if rc.ext {
+                    for q in 0..n {
+                        let ratio = rc.ratio[q];
+                        if ratio <= 0.0 {
+                            continue;
+                        }
+                        if let Some(tms) = self.h3t[m][p][q].as_ref() {
+                            f3[m][p] += ratio * (h1 * self.h3c[m][p][q] + tms.aten);
+                        }
+                        if let Some(tms) = self.h2t[m][p][q].as_ref() {
+                            f2[m][p] += ratio * (h1 * self.h2c[m][p][q] + tms.aten);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(NativeCplStampPlan {
+            ext: rc.ext,
+            ff: rc.ff,
+            gg: rc.gg,
+            aten_h1,
+            f2,
+            f3,
+        })
+    }
+
+    /// Commit an accepted step into the persistent convolution state, mirroring
+    /// the per-load lifecycle of ngspice `CPLload`.
+    ///
+    /// ngspice carries each step's `right_consts` result forward (via the
+    /// `copy_cp(cp, cp2)` round-trip) and then layers the `update_cnv` /
+    /// `update_delayed_cnv` increments on top. This call reproduces that exact
+    /// ordering on `self` (the accepted state):
+    ///   1. `right_consts` advances the `h2`/`h3` delayed-pole convolutions for
+    ///      the just-completed step `[t1, t2]` and records the `h1` exponentials.
+    ///   2. `update_accepted_voltage_convolutions` advances the `h1` poles using
+    ///      the accepted slope across the step.
+    ///   3. `update_delayed_convolutions` adds the extrapolation tail when the
+    ///      step's delayed samples reached past the previous accepted time.
+    ///
+    /// - `t1_ps`/`t2_ps`: integer-picosecond start/end of the accepted step.
+    /// - `dt_seconds`: the accepted step `h`.
+    /// - `start_near`/`start_far`: port voltages at `t1` (ngspice `in_node->V`).
+    /// - `end_near`/`end_far`/`end_near_i`/`end_far_i`: accepted port voltages
+    ///   and branch currents at `t2`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn commit_step(
+        &mut self,
+        t1_ps: i64,
+        t2_ps: i64,
+        dt_seconds: f64,
+        start_near: &[f64],
+        start_far: &[f64],
+        end_near: &[f64],
+        end_far: &[f64],
+        end_near_i: &[f64],
+        end_far_i: &[f64],
+        history: &mut NativeCplViHistory,
+    ) -> Result<(), NativeCplError> {
+        let h = dt_seconds;
+        let h1 = 0.5 * dt_seconds;
+        let delayed = history.delayed_vi_samples_ps(t1_ps, t2_ps, &self.taul_ps)?;
+
+        // (1) Advance h2/h3 (and record h1e) for the just-completed step. This is
+        // the persistent counterpart of the step's right_consts on cp2.
+        let rc = self.right_consts(h, h1, start_near, start_far, &delayed)?;
+
+        // (2) Advance the h1 poles with the accepted slope across the step.
+        self.update_accepted_voltage_convolutions(h, start_near, end_near, start_far, end_far)?;
+
+        // (3) Add the delayed extrapolation tail when the step was external.
+        if rc.ext {
+            let tail =
+                NativeCplViSample::new(t2_ps, end_near.to_vec(), end_far.to_vec(), end_near_i.to_vec(), end_far_i.to_vec());
+            self.update_delayed_convolutions(h, &rc.ratio, &tail)?;
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn initialize_dc_convolutions(
         &mut self,
         input_dc: &[f64],
@@ -470,6 +591,26 @@ struct NativeCplRightConsts {
     gg: Vec<f64>,
 }
 
+/// Per-step branch-current MNA stamp for a coupled line, mirroring the matrix
+/// pointers and RHS constants written by ngspice `CPLload`.
+///
+/// Indices `[m][p]` map to (branch-equation conductor `m`, port conductor `p`).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NativeCplStampPlan {
+    /// Whether the delayed (`h2`/`h3`) terms are active this step.
+    pub(crate) ext: bool,
+    /// RHS for the near-end (`ibr1`) branch rows.
+    pub(crate) ff: Vec<f64>,
+    /// RHS for the far-end (`ibr2`) branch rows.
+    pub(crate) gg: Vec<f64>,
+    /// `h1t.aten + h1*h1C[m][p]`: ibr1->Vpos[p] and ibr2->Vneg[p] coefficient.
+    pub(crate) aten_h1: Matrix,
+    /// `sum_q ratio[q]*(h1*h2C[m][p][q] + h2t.aten)`: ibr1->ibr2[p] / ibr2->ibr1[p].
+    pub(crate) f2: Matrix,
+    /// `sum_q ratio[q]*(h1*h3C[m][p][q] + h3t.aten)`: ibr1->Vneg[p] / ibr2->Vpos[p].
+    pub(crate) f3: Matrix,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct NativeCplViSample {
     pub(crate) time_ps: i64,
@@ -551,6 +692,7 @@ impl NativeCplViHistory {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn head_time_ps(&self) -> Option<i64> {
         self.samples.front().map(|sample| sample.time_ps)
     }

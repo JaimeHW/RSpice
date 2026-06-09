@@ -96,7 +96,7 @@ impl Engine {
             suppress_gate_charge,
         );
         Self::stamp_tline_companions(circuit, matrix, rhs, time, tline_dc_refs);
-        Self::stamp_coupled_tline_companions(circuit, matrix, rhs, time, coupled_tline_refs);
+        Self::stamp_coupled_tline_companions(circuit, matrix, rhs, time, dt, coupled_tline_refs);
 
         if circuit.has_nonlinear_devices() {
             circuit.stamp_nonlinear(matrix, rhs, solution);

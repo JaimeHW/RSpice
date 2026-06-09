@@ -209,6 +209,14 @@ impl Engine {
                 circuit
                     .coupled_tlines
                     .iter()
+                    // Native (ngspice-faithful) CPL lines do NOT use statically
+                    // propagated mode-arrival breakpoints: ngspice controls the
+                    // CPL step purely via tstep/tmax (capped at 0.9*min(taul)).
+                    // Flooding the schedule with per-mode arrival breakpoints
+                    // forces sub-picosecond steps whose over-refined trapezoidal
+                    // convolution diverges from the coarser-step reference. Only
+                    // modal-fallback CPL lines contribute arrival breakpoints.
+                    .filter(|tl| !tl.uses_native_runtime())
                     .flat_map(crate::device::CoupledTransmissionLine::propagation_delays),
             )
             .filter(|delay| delay.is_finite() && *delay > 0.0)

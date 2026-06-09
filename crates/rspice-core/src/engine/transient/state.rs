@@ -730,9 +730,15 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         rhs: &mut [Value],
         time: Value,
+        dt: Value,
         coupled_tline_refs: &[CoupledTlineReferenceState],
     ) {
         for (idx, tl) in circuit.coupled_tlines.iter().enumerate() {
+            if tl.uses_native_runtime() {
+                Self::stamp_native_cpl_branch_companions(matrix, rhs, tl, time, dt);
+                continue;
+            }
+
             let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
             let incoming_near = tl.incoming_near_modal(time, &refs.far_modal);
             let incoming_far = tl.incoming_far_modal(time, &refs.near_modal);
@@ -755,6 +761,96 @@ impl Engine {
                 tl.port_admittance(),
                 &eq_far,
             );
+        }
+    }
+
+    /// Stamp the ngspice-faithful CPL branch-current convolution equations.
+    ///
+    /// Mirrors the matrix pointers written by `CPLload` (cplload.c) for the
+    /// transient (non-MODEDC) path:
+    /// - KCL: `pos[m]` row gets `+Ibr1[m]`, `far[m]` row gets `+Ibr2[m]`.
+    /// - Branch1 row m: `-Ibr1[m] + sum_p aten_h1[m][p] Vpos[p]
+    ///   - sum_p f3[m][p] Vfar[p] - sum_p f2[m][p] Ibr2[p] = ff[m]`.
+    /// - Branch2 row m: `-Ibr2[m] + sum_p aten_h1[m][p] Vfar[p]
+    ///   - sum_p f3[m][p] Vpos[p] - sum_p f2[m][p] Ibr1[p] = gg[m]`.
+    ///
+    /// When the native step plan is unavailable (e.g. degenerate dt before the
+    /// runtime is seeded) the branch rows are anchored with `-Ibr=0` so the
+    /// matrix stays non-singular.
+    #[inline]
+    fn stamp_native_cpl_branch_companions(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        tl: &crate::device::CoupledTransmissionLine,
+        time: Value,
+        dt: Value,
+    ) {
+        let Some(branches) = tl.native_branch_matrix_indices() else {
+            return;
+        };
+        let conductors = tl.conductors();
+
+        // KCL coupling and branch-diagonal anchors are always present.
+        for conductor in 0..conductors {
+            let Some((b1, b2)) = branches.conductor(conductor) else {
+                continue;
+            };
+            let near = tl.near_nodes[conductor];
+            let far = tl.far_nodes[conductor];
+            if near > 0 {
+                matrix.add(near - 1, b1 - 1, 1.0);
+            }
+            if far > 0 {
+                matrix.add(far - 1, b2 - 1, 1.0);
+            }
+            matrix.add(b1 - 1, b1 - 1, -1.0);
+            matrix.add(b2 - 1, b2 - 1, -1.0);
+        }
+
+        let Some(plan) = tl.native_step_plan(time, dt) else {
+            return;
+        };
+
+        for m in 0..conductors {
+            let Some((b1_m, b2_m)) = branches.conductor(m) else {
+                continue;
+            };
+            for p in 0..conductors {
+                let Some((b1_p, b2_p)) = branches.conductor(p) else {
+                    continue;
+                };
+                let near_p = tl.near_nodes[p];
+                let far_p = tl.far_nodes[p];
+
+                let aten_h1 = plan.aten_h1[m][p];
+                if aten_h1 != 0.0 {
+                    if near_p > 0 {
+                        matrix.add(b1_m - 1, near_p - 1, aten_h1);
+                    }
+                    if far_p > 0 {
+                        matrix.add(b2_m - 1, far_p - 1, aten_h1);
+                    }
+                }
+
+                if plan.ext {
+                    let f3 = plan.f3[m][p];
+                    if f3 != 0.0 {
+                        if far_p > 0 {
+                            matrix.add(b1_m - 1, far_p - 1, -f3);
+                        }
+                        if near_p > 0 {
+                            matrix.add(b2_m - 1, near_p - 1, -f3);
+                        }
+                    }
+                    let f2 = plan.f2[m][p];
+                    if f2 != 0.0 {
+                        matrix.add(b1_m - 1, b2_p - 1, -f2);
+                        matrix.add(b2_m - 1, b1_p - 1, -f2);
+                    }
+                }
+            }
+            rhs[b1_m - 1] += plan.ff[m];
+            rhs[b2_m - 1] += plan.gg[m];
         }
     }
 
@@ -816,6 +912,18 @@ impl Engine {
                 Self::differential_port_voltages(initial_solution, &tl.near_nodes, tl.near_ref);
             let far_physical =
                 Self::differential_port_voltages(initial_solution, &tl.far_nodes, tl.far_ref);
+
+            // Seed the ngspice-faithful native convolution runtime from the DC
+            // operating point. When active, the line uses the branch-current
+            // transient stamp instead of the modal Norton path below, but we
+            // still populate the modal reference state to keep the per-line
+            // bookkeeping uniform and harmless for native lines.
+            if tl.uses_native_runtime() {
+                if let Err(err) = tl.native_seed_dc(&near_physical, &far_physical) {
+                    log::warn!("{err}");
+                }
+            }
+
             let near_modal = tl.modalize_port_voltage(&near_physical);
             let far_modal = tl.modalize_port_voltage(&far_physical);
             let near_currents = tl.port_currents(&near_physical, &far_modal);
@@ -1326,6 +1434,42 @@ impl Engine {
         }
 
         for (idx, tl) in circuit.coupled_tlines.iter_mut().enumerate() {
+            // Native (ngspice-faithful) lines advance their convolution state
+            // from the accepted port voltages and branch currents, then skip the
+            // modal Norton bookkeeping entirely (their transient response comes
+            // from the branch-current convolution stamp).
+            if tl.uses_native_runtime() {
+                let near_physical = Self::differential_port_voltages(
+                    accepted_solution,
+                    &tl.near_nodes,
+                    tl.near_ref,
+                );
+                let far_physical = Self::differential_port_voltages(
+                    accepted_solution,
+                    &tl.far_nodes,
+                    tl.far_ref,
+                );
+                let conductors = tl.conductors();
+                let mut near_i = vec![0.0; conductors];
+                let mut far_i = vec![0.0; conductors];
+                if let Some(branches) = tl.native_branch_matrix_indices() {
+                    for c in 0..conductors {
+                        if let Some((b1, b2)) = branches.conductor(c) {
+                            near_i[c] = accepted_solution.get(b1 - 1).copied().unwrap_or(0.0);
+                            far_i[c] = accepted_solution.get(b2 - 1).copied().unwrap_or(0.0);
+                        }
+                    }
+                }
+                tl.native_commit_accepted(
+                    accepted_time,
+                    &near_physical,
+                    &far_physical,
+                    &near_i,
+                    &far_i,
+                );
+                continue;
+            }
+
             let previous_mode_launches = tl.launched_modal_waves().collect::<Vec<_>>();
             let refs = coupled_tline_refs.get(idx).cloned().unwrap_or_default();
             let near_physical =
