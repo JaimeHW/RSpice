@@ -18,18 +18,10 @@ impl TestRunner {
         &self,
         cir_path: &Path,
     ) -> Result<Option<OpReference>, String> {
-        let out_path = cir_path.with_extension("out");
-        if !out_path.exists() {
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
-        }
-
-        let content = fs::read_to_string(&out_path).map_err(|e| {
-            format!(
-                "Failed to read reference output '{}': {e}",
-                out_path.display()
-            )
-        })?;
-        Ok(self.parse_dc_op_reference(&content))
+        };
+        Ok(self.parse_dc_op_reference(&reference_output.content))
     }
 
     pub(in crate::testing::ngspice_runner) fn parse_dc_op_reference(

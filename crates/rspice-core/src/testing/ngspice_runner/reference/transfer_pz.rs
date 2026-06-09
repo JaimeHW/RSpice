@@ -7,21 +7,13 @@ impl TestRunner {
         output: &str,
         input_source: &str,
     ) -> Result<Option<TransferFunctionReference>, String> {
-        let out_path = cir_path.with_extension("out");
-        if !out_path.exists() {
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
-        }
-
-        let content = fs::read_to_string(&out_path).map_err(|e| {
-            format!(
-                "Failed to read reference output '{}': {e}",
-                out_path.display()
-            )
-        })?;
+        };
         let target_output = Self::normalize_variable_name(output);
         let target_input = input_source.trim().to_ascii_lowercase();
         Ok(self
-            .parse_transfer_function_references(&content)
+            .parse_transfer_function_references(&reference_output.content)
             .into_iter()
             .find(|reference| {
                 let input_matches = reference
@@ -98,18 +90,10 @@ impl TestRunner {
         &self,
         cir_path: &Path,
     ) -> Result<Option<PzReference>, String> {
-        let out_path = cir_path.with_extension("out");
-        if !out_path.exists() {
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
-        }
-
-        let content = fs::read_to_string(&out_path).map_err(|e| {
-            format!(
-                "Failed to read reference output '{}': {e}",
-                out_path.display()
-            )
-        })?;
-        Ok(self.parse_pz_reference(&content))
+        };
+        Ok(self.parse_pz_reference(&reference_output.content))
     }
 
     pub(in crate::testing::ngspice_runner) fn parse_pz_reference(

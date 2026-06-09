@@ -2,6 +2,10 @@
 //!
 //! Comprehensive integration tests that run RSpice against the ngspice test suite.
 //! Tests are organized by analysis type and device model category.
+//!
+//! By default these tests compare against checked-in `.out` files. To compare
+//! against the current local ngspice source tree and executable instead, set
+//! `RSPICE_NGSPICE_LIVE_REFERENCES=1`, `NGSPICE_SOURCE_ROOT`, and `NGSPICE_EXE`.
 
 use rspice_core::testing::{
     TestResult, TestRunner as CoreTestRunner, TestRunnerConfig, TestStatistics, decode_test_result,

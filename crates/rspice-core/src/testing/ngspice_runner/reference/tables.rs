@@ -6,18 +6,10 @@ impl TestRunner {
         cir_path: &Path,
         axis_candidates: &[&str],
     ) -> Result<Option<ReferenceTable>, String> {
-        let out_path = cir_path.with_extension("out");
-        if !out_path.exists() {
+        let Some(reference_output) = self.load_reference_output(cir_path)? else {
             return Ok(None);
-        }
-
-        let content = fs::read_to_string(&out_path).map_err(|e| {
-            format!(
-                "Failed to read reference output '{}': {e}",
-                out_path.display()
-            )
-        })?;
-        let Ok(tables) = self.parse_ngspice_output_tables(&content) else {
+        };
+        let Ok(tables) = self.parse_ngspice_output_tables(&reference_output.content) else {
             return Ok(None);
         };
         if tables.is_empty() {
@@ -37,8 +29,8 @@ impl TestRunner {
                     self.reference_table_unknown_voltage_nodes(cir_path, &combined)?;
                 if !unknown_nodes.is_empty() {
                     log::warn!(
-                        "Ignoring stale reference output '{}' because it mentions node(s) absent from '{}': {}",
-                        out_path.display(),
+                        "Ignoring reference output {} because it mentions node(s) absent from '{}': {}",
+                        reference_output.description,
                         cir_path.display(),
                         unknown_nodes.join(", ")
                     );

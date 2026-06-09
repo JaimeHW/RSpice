@@ -33,13 +33,15 @@ impl TestRunner {
         cir_path: &Path,
         table: &ReferenceTable,
     ) -> Result<Vec<String>, String> {
-        let source = fs::read_to_string(cir_path).map_err(|e| {
+        let source_cir_path = self.authoritative_circuit_path(cir_path)?;
+        let source = fs::read_to_string(&source_cir_path).map_err(|e| {
             format!(
                 "Failed to read circuit '{}' while validating reference output: {e}",
-                cir_path.display()
+                source_cir_path.display()
             )
         })?;
-        let preprocessed = Netlist::preprocess_includes(&source, cir_path).unwrap_or(source);
+        let preprocessed =
+            Netlist::preprocess_includes(&source, &source_cir_path).unwrap_or(source);
         let stripped = Netlist::strip_control_blocks(&preprocessed);
         let Ok(netlist) = Netlist::parse(&stripped) else {
             return Ok(Vec::new());

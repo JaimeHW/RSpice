@@ -13,14 +13,32 @@ impl TestRunner {
 
         let start = std::time::Instant::now();
 
+        let source_cir_path = match self.authoritative_circuit_path(cir_path) {
+            Ok(path) => path,
+            Err(e) => {
+                return TestResult {
+                    name,
+                    passed: false,
+                    error: Some(format!("Live ngspice reference setup error: {}", e)),
+                    mismatches: Vec::new(),
+                    duration_ms: start.elapsed().as_millis(),
+                    analysis_type: None,
+                };
+            }
+        };
+
         // Read source file
-        let source = match fs::read_to_string(cir_path) {
+        let source = match fs::read_to_string(&source_cir_path) {
             Ok(s) => s,
             Err(e) => {
                 return TestResult {
                     name,
                     passed: false,
-                    error: Some(format!("Failed to read file: {}", e)),
+                    error: Some(format!(
+                        "Failed to read circuit '{}': {}",
+                        source_cir_path.display(),
+                        e
+                    )),
                     mismatches: Vec::new(),
                     duration_ms: start.elapsed().as_millis(),
                     analysis_type: None,
@@ -29,7 +47,7 @@ impl TestRunner {
         };
 
         // Preprocess includes using file path for relative path resolution
-        let preprocessed_source = match Netlist::preprocess_includes(&source, cir_path) {
+        let preprocessed_source = match Netlist::preprocess_includes(&source, &source_cir_path) {
             Ok(preprocessed) => preprocessed,
             Err(_) => source, // Keep original if preprocessing fails
         };

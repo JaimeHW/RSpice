@@ -23,6 +23,7 @@ use crate::{Complex64, Engine, Netlist, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 mod dc_analyses;
@@ -243,6 +244,18 @@ impl ValidationContract {
     }
 }
 
+#[derive(Debug, Clone)]
+struct LiveNgspiceReferenceConfig {
+    source_root: PathBuf,
+    ngspice_exe: PathBuf,
+    timeout_ms: u128,
+}
+
+struct ReferenceOutput {
+    content: String,
+    description: String,
+}
+
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // Configuration
 // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -287,6 +300,8 @@ pub struct TestRunner {
     test_dir: PathBuf,
     validation_manifest_root: PathBuf,
     validation_manifest: HashMap<String, ValidationContract>,
+    live_reference_config: Result<Option<LiveNgspiceReferenceConfig>, String>,
+    live_reference_cache: Mutex<HashMap<PathBuf, Result<String, String>>>,
 }
 
 impl TestRunner {
@@ -303,6 +318,8 @@ impl TestRunner {
             validation_manifest_root,
             validation_manifest,
             test_dir,
+            live_reference_config: Self::live_ngspice_reference_config_from_env(),
+            live_reference_cache: Mutex::new(HashMap::new()),
         }
     }
 
