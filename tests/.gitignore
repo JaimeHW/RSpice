@@ -1,6 +1,6 @@
 *.test
 *.log
-*.out
+# *.out reference oracles are tracked: they are the regression suite expected outputs
 *.vcd
 
 ngspiceCkt

@@ -327,12 +327,18 @@ fn unique_case_result_path(cir_path: &Path) -> PathBuf {
 fn get_tests_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR points to crates/rspice-core/
     // We need to go up two levels to reach the workspace root
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    PathBuf::from(manifest_dir)
-        .parent() // crates/
-        .and_then(|p| p.parent()) // workspace root
-        .expect("Could not find workspace root")
-        .join("tests")
+    let tests_dir = PathBuf::from(
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"),
+    )
+    .parent() // crates/
+    .and_then(|p| p.parent()) // workspace root
+    .expect("Could not find workspace root")
+    .join("tests");
+
+    // Canonicalize so paths returned by the runner (which canonicalizes its
+    // root, yielding `\\?\`-prefixed paths on Windows) stay prefix-comparable
+    // with paths derived from this directory.
+    tests_dir.canonicalize().unwrap_or(tests_dir)
 }
 
 fn suite_is_cmc_qaspec(subdir: &str) -> bool {
