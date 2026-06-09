@@ -142,7 +142,9 @@ impl Engine {
                     }
                 }
             }
-            SourceSpec::Sin { .. } => {}
+            SourceSpec::Sin { delay, .. } => {
+                Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+            }
             SourceSpec::Pwl { points } => {
                 for (time, _) in points {
                     Self::add_breakpoint_if_in_range(breakpoints, *time, tstop);
@@ -383,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn sin_sources_do_not_schedule_source_breakpoints() {
+    fn sin_sources_schedule_delay_breakpoints() {
         let mut breakpoints = BreakpointManager::new();
         let spec = crate::netlist::SourceSpec::Sin {
             offset: 0.0,
@@ -396,7 +398,7 @@ mod tests {
 
         Engine::add_source_spec_breakpoints(&mut breakpoints, &spec, 100.0e-9, 1.0e-9);
 
-        assert!(breakpoints.times().is_empty());
+        assert_delays_close(breakpoints.times(), &[10.0e-9]);
     }
 
     #[test]

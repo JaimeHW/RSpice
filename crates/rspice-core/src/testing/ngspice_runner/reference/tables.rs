@@ -10,12 +10,31 @@ impl TestRunner {
             return Ok(None);
         };
         let Ok(tables) = self.parse_ngspice_output_tables(&reference_output.content) else {
-            return Ok(None);
+            return self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates);
         };
         if tables.is_empty() {
-            return Ok(None);
+            return self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates);
         }
 
+        if let Some(table) = self.reference_table_for_axis_from_tables(
+            cir_path,
+            axis_candidates,
+            &tables,
+            &reference_output.description,
+        )? {
+            return Ok(Some(table));
+        }
+
+        self.load_live_raw_reference_table_for_axis(cir_path, axis_candidates)
+    }
+
+    fn reference_table_for_axis_from_tables(
+        &self,
+        cir_path: &Path,
+        axis_candidates: &[&str],
+        tables: &[ReferenceTable],
+        description: &str,
+    ) -> Result<Option<ReferenceTable>, String> {
         for candidate in axis_candidates {
             let target = Self::normalize_variable_name(candidate);
             let matching: Vec<ReferenceTable> = tables
@@ -30,7 +49,7 @@ impl TestRunner {
                 if !unknown_nodes.is_empty() {
                     log::warn!(
                         "Ignoring reference output {} because it mentions node(s) absent from '{}': {}",
-                        reference_output.description,
+                        description,
                         cir_path.display(),
                         unknown_nodes.join(", ")
                     );
@@ -41,6 +60,22 @@ impl TestRunner {
         }
 
         Ok(None)
+    }
+
+    fn load_live_raw_reference_table_for_axis(
+        &self,
+        cir_path: &Path,
+        axis_candidates: &[&str],
+    ) -> Result<Option<ReferenceTable>, String> {
+        let Some(tables) = self.load_live_raw_reference_tables(cir_path)? else {
+            return Ok(None);
+        };
+        self.reference_table_for_axis_from_tables(
+            cir_path,
+            axis_candidates,
+            &tables,
+            "live ngspice rawfile output",
+        )
     }
 
     pub(in crate::testing::ngspice_runner) fn parse_ngspice_output_tables(

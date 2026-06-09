@@ -302,6 +302,7 @@ pub struct TestRunner {
     validation_manifest: HashMap<String, ValidationContract>,
     live_reference_config: Result<Option<LiveNgspiceReferenceConfig>, String>,
     live_reference_cache: Mutex<HashMap<PathBuf, Result<String, String>>>,
+    live_raw_reference_cache: Mutex<HashMap<PathBuf, Result<Vec<ReferenceTable>, String>>>,
 }
 
 impl TestRunner {
@@ -320,6 +321,7 @@ impl TestRunner {
             test_dir,
             live_reference_config: Self::live_ngspice_reference_config_from_env(),
             live_reference_cache: Mutex::new(HashMap::new()),
+            live_raw_reference_cache: Mutex::new(HashMap::new()),
         }
     }
 
