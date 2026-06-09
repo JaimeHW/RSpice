@@ -193,6 +193,49 @@ rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6
 
 CLI-specific details are documented in [crates/rspice-cli/README.md](crates/rspice-cli/README.md).
 
+## Testing
+
+RSpice is validated at three levels: unit tests inside each crate, integration
+tests under `crates/rspice-core/tests/`, and an ngspice regression harness that
+runs the official ngspice test suite (vendored under `tests/`, including the
+checked-in reference `.out` oracles) against the RSpice engine.
+
+```bash
+# Unit and integration tests for the core engine
+cargo test --release -p rspice-core
+
+# The ngspice regression suite only
+cargo test --release -p rspice-core --test ngspice_regression
+
+# One suite (e.g. transient decks), with per-deck pass/fail and mismatch detail
+cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_transient_suite
+```
+
+### ngspice regression harness
+
+The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every
+`.cir` deck under `tests/`, executes the analyses each deck requests (`.op`,
+`.dc`, `.tran`, `.ac`, `.pz`, `.noise`, `.sens`, `.tf`), and compares results
+row-by-row against the reference tables with a 2% relative tolerance plus
+probe-aware absolute floors. Every executed analysis must be backed by a
+validation oracle — checked-in reference data, `_t`/`_g` gold-node assertions,
+or an explicit entry in `tests/validation-manifest.tsv` (execution-only
+`smoke` decks and `.control`-scripted upstream decks) — so no deck can pass
+silently. Steep transient edges additionally use a slope-gated time-jitter
+window (one local reference timestep), because reference tables sample each
+binary's internally chosen timesteps and ngspice itself reproduces them only
+to within a step at fast edges.
+
+Each deck runs in an isolated watchdog-supervised process
+(`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
+Useful environment variables:
+
+| Variable | Effect |
+| :--- | :--- |
+| `RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS` | Raise the per-deck hard watchdog (default 30000) for long ring-oscillator decks |
+| `RSPICE_NGSPICE_LIVE_REFERENCES=1` | Compare against a live local ngspice instead of checked-in oracles (requires `NGSPICE_SOURCE_ROOT` and `NGSPICE_EXE`) |
+| `RSPICE_LTE_DEBUG=1` / `RSPICE_GRID_DEBUG=1` | Log binding LTE charge branches and accepted-step decisions for timestep-parity debugging |
+
 ## License
 
 RSpice is source-available software licensed under the **RSpice Personal Use License**.
