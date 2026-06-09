@@ -1,20 +1,6 @@
 use super::*;
 
 impl SimulationController {
-    pub(super) fn update_waveforms(
-        &mut self,
-        state: &mut AppState,
-        result: &crate::simulation::SimulationResult,
-    ) {
-        state
-            .simulation
-            .replace_waveforms(self.waveforms_for_result(result));
-        self.apply_result_side_effects(state, result);
-        if let crate::simulation::SimulationResult::Transient { time, waveforms } = result {
-            self.populate_transient_post_views(state, time, waveforms);
-        }
-    }
-
     pub(super) fn apply_result_side_effects(
         &mut self,
         state: &mut AppState,

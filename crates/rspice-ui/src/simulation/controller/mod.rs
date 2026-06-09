@@ -539,6 +539,11 @@ impl SimulationController {
                     // Display the just-completed analysis without rebuilding waveform buffers.
                     state.simulation.select_latest_analysis();
                     self.apply_result_side_effects(state, &sim_result);
+                    if let crate::simulation::SimulationResult::Transient { time, waveforms } =
+                        &sim_result
+                    {
+                        self.populate_transient_post_views(state, time, waveforms);
+                    }
 
                     // Optional Touchstone export for S-parameter analyses.
                     self.maybe_export_touchstone(state, &sim_result);
