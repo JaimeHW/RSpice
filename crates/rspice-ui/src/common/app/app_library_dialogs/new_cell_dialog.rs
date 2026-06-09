@@ -127,10 +127,10 @@ impl RSpiceApp {
 
     pub(super) fn handle_new_cell_create_action(&mut self) -> DialogActionOutcome {
         let mut outcome = DialogActionOutcome::default();
-        let name = self.state.dialogs.new_cell_name.trim();
+        let name = self.state.dialogs.new_cell_name.trim().to_string();
         let library = self.state.dialogs.new_cell_library.clone();
 
-        if let Some(error) = validate_lcv_name(name, "Cell name") {
+        if let Some(error) = validate_lcv_name(&name, "Cell name") {
             self.state.dialogs.new_cell_error = Some(error);
             return outcome;
         }
@@ -143,7 +143,7 @@ impl RSpiceApp {
             self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
             return outcome;
         };
-        if lib_ro.get_cell(name).is_some() {
+        if lib_ro.get_cell(&name).is_some() {
             self.state.dialogs.new_cell_error = Some(format!(
                 "Cell '{}' already exists in library '{}'",
                 name, library
@@ -153,7 +153,7 @@ impl RSpiceApp {
 
         use crate::state::{Cell, View, ViewType};
 
-        let mut cell = Cell::new(name);
+        let mut cell = Cell::new(&name);
         cell.description = self.state.dialogs.new_cell_description.clone();
 
         if self.state.dialogs.new_cell_create_schematic {
@@ -172,6 +172,14 @@ impl RSpiceApp {
                 "Created cell '{}' in library '{}'",
                 name, library
             )));
+            if self.state.dialogs.new_cell_create_schematic {
+                self.state
+                    .open_workspace_view(crate::state::CellViewRef::new(
+                        library.clone(),
+                        name.clone(),
+                        "schematic",
+                    ));
+            }
             self.state.dialogs.new_cell_error = None;
             outcome.close = true;
             outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;

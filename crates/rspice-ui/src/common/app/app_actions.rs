@@ -185,11 +185,12 @@ impl RSpiceApp {
     }
 
     pub(super) fn toggle_panel_browser(&mut self) {
-        // Close results browser when opening library browser (mutually exclusive)
-        if !self.state.panels.project_browser {
+        // Close other left-side browsers when opening the Library Browser.
+        if !self.state.panels.library_browser {
+            self.state.panels.project_explorer = false;
             self.state.panels.results_browser = false;
         }
-        self.state.panels.project_browser = !self.state.panels.project_browser;
+        self.state.panels.library_browser = !self.state.panels.library_browser;
     }
 
     pub(super) fn toggle_panel_log(&mut self) {

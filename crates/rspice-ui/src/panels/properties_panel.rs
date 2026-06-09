@@ -9,6 +9,8 @@ use egui::Ui;
 
 /// Render the properties panel in the right sidebar
 pub fn render_properties_panel(ui: &mut Ui, state: &mut AppState) {
+    let mut open_master_requested = false;
+
     // Check if we have a selected component
     let selected_comp = state.schematic.selection.components.first().copied();
 
@@ -20,6 +22,22 @@ pub fn render_properties_panel(ui: &mut Ui, state: &mut AppState) {
 
             ui.label(format!("{} ({:?})", component_name, component_type));
             ui.separator();
+
+            if let Some(binding) = &component.library_cell {
+                ui.label(
+                    egui::RichText::new("Library Master")
+                        .strong()
+                        .color(ui.visuals().text_color()),
+                );
+                ui.label(format!(
+                    "{}/{}/{}",
+                    binding.library, binding.cell, binding.view
+                ));
+                if ui.button("Open Master").clicked() {
+                    open_master_requested = true;
+                }
+                ui.separator();
+            }
 
             // If tabbed dialog is open, show instructions
             if state.tabbed_property_dialog.open {
@@ -89,6 +107,10 @@ pub fn render_properties_panel(ui: &mut Ui, state: &mut AppState) {
         ui.separator();
         ui.label("");
         ui.label("Tip: Double-click a component to edit properties.");
+    }
+
+    if open_master_requested {
+        state.open_selected_instance_master();
     }
 }
 

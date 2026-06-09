@@ -1,4 +1,4 @@
-//! Project Browser Panel
+//! Library Browser Panel
 //!
 //! Cadence-style Library/Cell/View hierarchy browser with:
 //! - Dynamic library enumeration from LibraryManager
@@ -15,22 +15,23 @@ use egui::{CollapsingHeader, Ui};
 
 use crate::common::app::AppState;
 use crate::state::{
-    Cell, Component, ComponentType, LibraryCellInstance, LibraryManager, Tool, View, ViewType,
+    Cell, CellViewRef, Component, ComponentType, LibraryCellInstance, LibraryManager, Tool, View,
+    ViewType,
 };
 
 // =============================================================================
 // Public API
 // =============================================================================
 
-/// Render the project browser panel
-pub fn render_project_browser(ui: &mut Ui, state: &mut AppState) {
+/// Render the library browser panel.
+pub fn render_library_browser(ui: &mut Ui, state: &mut AppState) {
     // Search filter
     ui.horizontal(|ui| {
-        ui.label("🔍");
+        ui.label("Filter");
         ui.add(
             egui::TextEdit::singleline(&mut state.library_manager.filter_text)
                 .hint_text("Filter...")
-                .desired_width(ui.available_width() - 20.0),
+                .desired_width((ui.available_width() - 48.0).max(80.0)),
         );
     });
     ui.add_space(4.0);
@@ -64,12 +65,10 @@ fn render_library(ui: &mut Ui, lib_name: &str, filter: &str, state: &mut AppStat
     // Get categories for this library
     let categories = state.library_manager.categories(lib_name);
 
-    // Determine icon based on library type
     let is_primitives = lib_name == LibraryManager::PRIMITIVES_LIBRARY;
-    let icon = if is_primitives { "📚" } else { "📁" };
     let is_expanded = is_primitives; // Primitives library open by default
 
-    CollapsingHeader::new(format!("{} {}", icon, lib_name))
+    CollapsingHeader::new(lib_name)
         .default_open(is_expanded)
         .show(ui, |ui| {
             // For primitives library, show categories as sub-headers
@@ -105,7 +104,7 @@ fn render_category(
         return; // Skip empty categories when filtering
     }
 
-    CollapsingHeader::new(format!("📂 {}", category))
+    CollapsingHeader::new(category)
         .default_open(category == "Passives") // Open passives by default
         .show(ui, |ui| {
             for cell_name in cells {
@@ -141,7 +140,7 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
             let cell_name = &cell.name;
 
             // Render cell as collapsible header
-            CollapsingHeader::new(format!("📄 {}", cell_name))
+            CollapsingHeader::new(cell_name)
                 .default_open(false)
                 .show(ui, |ui| {
                     // Show views within cell
@@ -168,13 +167,30 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                         };
 
                         ui.horizontal(|ui| {
-                            let icon = view_icon(view_name);
+                            let kind = view_kind_label(view.view_type);
+                            let reference = CellViewRef::new(
+                                lib_name.to_string(),
+                                cell_name.clone(),
+                                view_name.clone(),
+                            );
+                            let is_active = state.workspace.active_view == reference;
+                            let view_label = format!("  {:<3} {}", kind, view_name);
+                            let response = ui.selectable_label(is_active, view_label);
+                            if response.double_clicked() {
+                                state.open_workspace_view(reference.clone());
+                            }
+                            response.on_hover_text(
+                                "Double-click to open this view. Use Place to instantiate it.",
+                            );
+
+                            if ui.small_button("Open").clicked() {
+                                state.open_workspace_view(reference.clone());
+                            }
+
                             match placeable_instance_result {
                                 Ok(instance) => {
-                                    let response = ui.selectable_label(
-                                        is_selected,
-                                        format!("  {} {}", icon, view_name),
-                                    );
+                                    let place_label = if is_selected { "Placing" } else { "Place" };
+                                    let response = ui.small_button(place_label);
                                     if response.clicked() {
                                         state.schematic.tool =
                                             Tool::Place(ComponentType::CellInstance);
@@ -191,13 +207,15 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
                                     );
                                 }
                                 Err(reason) => {
-                                    let response = ui.label(format!("  {} {}", icon, view_name));
-                                    response.on_hover_text(format!("Not placeable: {}", reason));
+                                    ui.label(
+                                        egui::RichText::new("Not placeable").weak().size(10.0),
+                                    )
+                                    .on_hover_text(format!("Not placeable: {}", reason));
                                 }
                             }
 
                             // Delete view button (small X)
-                            if ui.small_button("×").on_hover_text("Delete view").clicked() {
+                            if ui.small_button("x").on_hover_text("Delete view").clicked() {
                                 state.pending_delete_view = Some((
                                     lib_name.to_string(),
                                     cell_name.to_string(),
@@ -217,7 +235,7 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
 
                         // Delete cell button
                         if ui
-                            .small_button("🗑 Delete Cell")
+                            .small_button("Delete Cell")
                             .on_hover_text("Delete this cell")
                             .clicked()
                         {
@@ -238,17 +256,21 @@ fn render_user_library_cells(ui: &mut Ui, lib_name: &str, filter: &str, state: &
         state.dialogs.new_cell_library = lib_name.to_string();
     }
 }
-/// Get icon for a view type
-fn view_icon(view_name: &str) -> &'static str {
-    match view_name {
-        "schematic" => "📋",
-        "symbol" => "🔲",
-        "layout" => "🗺️",
-        "testbench" => "🧪",
-        "veriloga" => "📝",
-        "netlist" => "📜",
-        "waveform" => "📈",
-        _ => "📄",
+/// Compact view kind label for dense Library/Cell/View rows.
+fn view_kind_label(view_type: ViewType) -> &'static str {
+    match view_type {
+        ViewType::Schematic => "SCH",
+        ViewType::Symbol => "SYM",
+        ViewType::Layout => "LAY",
+        ViewType::Testbench => "TB",
+        ViewType::Verilog => "V",
+        ViewType::VerilogA => "VA",
+        ViewType::Spice => "SP",
+        ViewType::Document => "DOC",
+        ViewType::Extracted => "EXT",
+        ViewType::Abstract => "ABS",
+        ViewType::Config => "CFG",
+        ViewType::Custom => "USR",
     }
 }
 
@@ -308,7 +330,7 @@ fn render_library_cell(
     // Check if this component type is currently selected for placement
     let is_selected = matches!(&state.schematic.tool, Tool::Place(ct) if *ct == component_type);
 
-    let button = ui.selectable_label(is_selected, format!("📦 {}", cell_name));
+    let button = ui.selectable_label(is_selected, cell_name);
 
     if button.clicked() {
         // Set tool to place this component

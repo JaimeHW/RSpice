@@ -88,6 +88,8 @@ mod app_confirmation_dialog;
 
 mod app_workspace_layout;
 
+mod app_workspace_actions;
+
 mod app_veriloga_workflow;
 
 mod app_pdk_workflow;
@@ -144,6 +146,8 @@ pub struct AppState {
     pub(crate) waveform_viewer: WaveformViewerState,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
+    /// Project/workspace model for active design context and open LCV views.
+    pub(crate) workspace: crate::state::ProjectWorkspace,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -304,6 +308,7 @@ impl RSpiceApp {
 
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager);
+        state.restore_active_schematic_from_workspace();
 
         // Load symbol library
         let symbol_library = match crate::schematic::symbols::SymbolLibrary::load_embedded() {
@@ -342,6 +347,9 @@ impl RSpiceApp {
 
         self.handle_shortcuts(ctx);
         self.simulation_controller.update(&mut self.state);
+        self.state
+            .workspace
+            .set_active_dirty(self.state.schematic.is_dirty);
     }
 
     fn render_frame_chrome(&mut self, ctx: &Context) {
@@ -402,6 +410,7 @@ impl eframe::App for RSpiceApp {
 
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.state.sync_active_schematic_to_workspace();
         if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
             log::warn!(
                 "Failed to persist global Verilog-A library during app save: {}",

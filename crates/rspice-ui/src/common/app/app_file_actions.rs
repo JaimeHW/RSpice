@@ -3,7 +3,7 @@ use super::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
 impl RSpiceApp {
     /// Request a new schematic (prompts to save if dirty)
     pub(super) fn action_file_new(&mut self) {
-        if self.state.schematic.is_dirty {
+        if self.state.schematic.is_dirty || self.state.workspace.any_dirty() {
             // Show save confirmation dialog - don't discard unsaved changes
             self.state
                 .dialogs
@@ -21,7 +21,7 @@ impl RSpiceApp {
 
     /// Request to open a schematic (prompts to save if dirty)
     pub(super) fn action_file_open(&mut self) {
-        if self.state.schematic.is_dirty {
+        if self.state.schematic.is_dirty || self.state.workspace.any_dirty() {
             // Show save confirmation dialog before opening
             self.state
                 .dialogs
@@ -61,9 +61,13 @@ impl RSpiceApp {
             }
             ConfirmationResponse::Yes => {
                 // Save first, then proceed
-                if self.action_file_save()
-                    && let Some(action) = pending
-                {
+                let saved = match pending {
+                    Some(ConfirmationAction::ProjectNew | ConfirmationAction::ProjectOpen) => {
+                        crate::common::project_workflow::save_project(&mut self.state)
+                    }
+                    _ => self.action_file_save(),
+                };
+                if saved && let Some(action) = pending {
                     self.execute_pending_action(action);
                 }
             }
@@ -73,6 +77,13 @@ impl RSpiceApp {
     /// Execute a pending action after confirmation dialog
     pub(super) fn execute_pending_action(&mut self, action: ConfirmationAction) {
         match action {
+            ConfirmationAction::ProjectNew => {
+                crate::common::project_workflow::create_new_project(&mut self.state);
+            }
+            ConfirmationAction::ProjectOpen => {
+                crate::common::project_workflow::open_project(&mut self.state);
+                self.restore_workspace_after_project_load();
+            }
             ConfirmationAction::FileNew => self.do_file_new(),
             ConfirmationAction::FileOpen => self.do_file_open(),
             ConfirmationAction::Exit => {

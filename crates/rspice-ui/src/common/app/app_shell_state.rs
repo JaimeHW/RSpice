@@ -33,8 +33,10 @@ impl BottomPanelTab {
 /// Panel visibility state
 #[derive(Debug, Clone)]
 pub struct PanelVisibility {
-    /// Project browser (Library/Cell/View tree)
-    pub project_browser: bool,
+    /// Project explorer (project state, open views, hierarchy)
+    pub project_explorer: bool,
+    /// Library browser (Library/Cell/View tree and components)
+    pub library_browser: bool,
     /// Results browser (Simulation runs/analyses tree)
     pub results_browser: bool,
     /// Properties panel (right side)
@@ -52,7 +54,8 @@ pub struct PanelVisibility {
 impl Default for PanelVisibility {
     fn default() -> Self {
         Self {
-            project_browser: false,
+            project_explorer: true,
+            library_browser: false,
             results_browser: false,
             properties: true,
             bottom_panel: true, // Visible by default with Log tab
@@ -81,7 +84,7 @@ impl Default for PanelSizes {
         Self {
             waveform_height: 300.0,
             console_height: 120.0,
-            browser_width: 220.0,
+            browser_width: 300.0,
             properties_width: 250.0,
         }
     }
@@ -94,6 +97,10 @@ impl Default for PanelSizes {
 /// be executed after the user responds to the confirmation dialog.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfirmationAction {
+    /// Create new project (discard current workspace)
+    ProjectNew,
+    /// Open another project (discard current workspace)
+    ProjectOpen,
     /// Create new schematic (discard current)
     FileNew,
     /// Open another schematic (discard current)
@@ -106,6 +113,8 @@ impl ConfirmationAction {
     /// Get the dialog title for this action
     pub fn dialog_title(&self) -> &'static str {
         match self {
+            ConfirmationAction::ProjectNew => "Create New Project",
+            ConfirmationAction::ProjectOpen => "Open Project",
             ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
             ConfirmationAction::Exit => "Exit RSpice",
@@ -114,7 +123,16 @@ impl ConfirmationAction {
 
     /// Get the prompt message for this action
     pub fn prompt_message(&self) -> &'static str {
-        "The current schematic has unsaved changes.\nDo you want to save before continuing?"
+        match self {
+            ConfirmationAction::ProjectNew | ConfirmationAction::ProjectOpen => {
+                "The current project has unsaved changes.\nDo you want to save before continuing?"
+            }
+            ConfirmationAction::FileNew
+            | ConfirmationAction::FileOpen
+            | ConfirmationAction::Exit => {
+                "The current schematic has unsaved changes.\nDo you want to save before continuing?"
+            }
+        }
     }
 }
 

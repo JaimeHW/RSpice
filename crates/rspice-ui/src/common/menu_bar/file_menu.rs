@@ -6,6 +6,10 @@ use crate::common::file_workflow::FileWorkflowIo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileMenuAction {
+    NewProject,
+    OpenProject,
+    SaveProject,
+    SaveProjectAs,
     New,
     Open,
     Save,
@@ -24,6 +28,48 @@ pub(super) fn render_file_menu(
     file_workflow_io: &(impl FileWorkflowIo + ?Sized),
     export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
 ) {
+    ui.menu_button("Project", |ui| {
+        if ui.button("New Project...").clicked() {
+            dispatch_file_menu_action(
+                state,
+                FileMenuAction::NewProject,
+                file_workflow_io,
+                export_workflow_io,
+            );
+            ui.close_menu();
+        }
+        if ui.button("Open Project...").clicked() {
+            dispatch_file_menu_action(
+                state,
+                FileMenuAction::OpenProject,
+                file_workflow_io,
+                export_workflow_io,
+            );
+            ui.close_menu();
+        }
+        ui.separator();
+        if ui.button("Save Project").clicked() {
+            dispatch_file_menu_action(
+                state,
+                FileMenuAction::SaveProject,
+                file_workflow_io,
+                export_workflow_io,
+            );
+            ui.close_menu();
+        }
+        if ui.button("Save Project As...").clicked() {
+            dispatch_file_menu_action(
+                state,
+                FileMenuAction::SaveProjectAs,
+                file_workflow_io,
+                export_workflow_io,
+            );
+            ui.close_menu();
+        }
+    });
+
+    ui.separator();
+
     if ui.button("New").clicked() {
         dispatch_file_menu_action(
             state,
@@ -140,6 +186,24 @@ fn dispatch_file_menu_action(
     export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
 ) {
     match action {
+        FileMenuAction::NewProject => {
+            if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectNew) {
+                return;
+            }
+            crate::common::project_workflow::create_new_project(state);
+        }
+        FileMenuAction::OpenProject => {
+            if require_project_save_confirmation_if_dirty(state, ConfirmationAction::ProjectOpen) {
+                return;
+            }
+            crate::common::project_workflow::open_project(state);
+        }
+        FileMenuAction::SaveProject => {
+            crate::common::project_workflow::save_project(state);
+        }
+        FileMenuAction::SaveProjectAs => {
+            crate::common::project_workflow::save_project_as(state);
+        }
         FileMenuAction::New => {
             if require_save_confirmation_if_dirty(state, ConfirmationAction::FileNew) {
                 return;
@@ -173,7 +237,7 @@ fn dispatch_file_menu_action(
 }
 
 fn require_save_confirmation_if_dirty(state: &mut AppState, action: ConfirmationAction) -> bool {
-    if !state.schematic.is_dirty {
+    if !state.schematic.is_dirty && !state.workspace.any_dirty() {
         return false;
     }
 
@@ -197,4 +261,16 @@ fn request_exit(state: &mut AppState) {
     if !require_save_confirmation_if_dirty(state, ConfirmationAction::Exit) {
         state.exit_requested = true;
     }
+}
+
+fn require_project_save_confirmation_if_dirty(
+    state: &mut AppState,
+    action: ConfirmationAction,
+) -> bool {
+    if !state.schematic.is_dirty && !state.workspace.any_dirty() {
+        return false;
+    }
+
+    state.dialogs.confirmation_dialog.show(action);
+    true
 }

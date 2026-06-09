@@ -124,7 +124,9 @@ fn open_veriloga_compile_dialog(state: &mut AppState) {
 
 fn open_veriloga_module_library(state: &mut AppState) {
     state.library_manager.select_library("veriloga");
-    state.panels.project_browser = true;
+    state.panels.project_explorer = false;
+    state.panels.results_browser = false;
+    state.panels.library_browser = true;
 }
 
 fn open_model_browser(state: &mut AppState) {

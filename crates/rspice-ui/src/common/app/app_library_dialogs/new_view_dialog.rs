@@ -99,11 +99,11 @@ impl RSpiceApp {
 
     pub(super) fn handle_new_view_create_action(&mut self) -> DialogActionOutcome {
         let mut outcome = DialogActionOutcome::default();
-        let view_name = self.state.dialogs.new_view_name.trim();
+        let view_name = self.state.dialogs.new_view_name.trim().to_string();
         let library = self.state.dialogs.new_view_library.clone();
         let cell = self.state.dialogs.new_view_cell.clone();
 
-        if let Some(error) = validate_lcv_name(view_name, "View name") {
+        if let Some(error) = validate_lcv_name(&view_name, "View name") {
             self.state.dialogs.new_view_error = Some(error);
             return outcome;
         }
@@ -127,7 +127,7 @@ impl RSpiceApp {
             ));
             return outcome;
         };
-        if cell_ro.get_view(view_name).is_some() {
+        if cell_ro.get_view(&view_name).is_some() {
             self.state.dialogs.new_view_error = Some(format!(
                 "View '{}' already exists in cell '{}'",
                 view_name, cell
@@ -139,11 +139,23 @@ impl RSpiceApp {
 
         if let Some(lib) = self.state.library_manager.get_library_mut(&library) {
             if let Some(cell_ref) = lib.get_cell_mut(&cell) {
-                cell_ref.add_view(View::new(view_name, self.state.dialogs.new_view_type));
+                let view_type = self.state.dialogs.new_view_type;
+                cell_ref.add_view(View::new(&view_name, view_type));
                 self.state.push_user_message(ConsoleMessage::info(format!(
                     "Created view '{}' in cell '{}'",
                     view_name, cell
                 )));
+                if matches!(
+                    view_type,
+                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                ) {
+                    self.state
+                        .open_workspace_view(crate::state::CellViewRef::new(
+                            library.clone(),
+                            cell.clone(),
+                            view_name.clone(),
+                        ));
+                }
                 self.state.dialogs.new_view_error = None;
                 outcome.close = true;
                 outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;

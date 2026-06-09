@@ -33,6 +33,7 @@ pub mod shortcuts;
 mod simulation;
 pub mod spatial_index;
 pub mod viewport;
+pub mod workspace;
 
 pub use dc_annotation::{AnnotationKind, AnnotationMode, DcAnnotationState};
 pub use display_settings::{PinNameVisibility, SchematicDisplaySettings};
@@ -50,3 +51,4 @@ pub use simulation::{
     SimulationRun, SimulationState, WaveformData,
 };
 pub use viewport::{BoundingBox, Viewport, VisibilityFilter};
+pub use workspace::{CellViewRef, OpenCellView, ProjectDescriptor, ProjectWorkspace};

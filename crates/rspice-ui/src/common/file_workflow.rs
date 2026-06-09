@@ -48,6 +48,7 @@ impl FileWorkflowIo for NativeFileWorkflowIo {
 /// Reset the current schematic to a new empty document.
 pub(crate) fn create_new_schematic(state: &mut AppState) {
     state.schematic = crate::state::SchematicState::default();
+    state.sync_active_schematic_to_workspace();
     state.push_user_message(ConsoleMessage::info("Created new schematic"));
 }
 
@@ -59,6 +60,7 @@ pub(crate) fn load_schematic_from_path_with_io(
     match io.load_schematic(path) {
         Ok(schematic) => {
             state.schematic = schematic;
+            state.sync_active_schematic_to_workspace();
             state.push_user_message(ConsoleMessage::info(format!("Opened: {}", path.display())));
             true
         }
@@ -98,6 +100,7 @@ pub(crate) fn save_schematic_to_path_with_io(
                 state.schematic.current_file = Some(path.to_path_buf());
             }
             state.schematic.is_dirty = false;
+            state.sync_active_schematic_to_workspace();
             state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
             true
         }

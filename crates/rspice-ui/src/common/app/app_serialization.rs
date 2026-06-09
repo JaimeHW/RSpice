@@ -7,13 +7,15 @@ impl serde::Serialize for AppState {
     {
         // Serialize minimal state needed for session recovery.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 3)?;
+        let mut state = serializer.serialize_struct("AppState", 5)?;
         state.serialize_field("panels", &PanelVisibilitySer::from(&self.panels))?;
         state.serialize_field("panel_sizes", &PanelSizesSer::from(&self.panel_sizes))?;
         state.serialize_field(
             "viewer_workspace",
             &ViewerWorkspaceSer::from(&self.viewer_workspace),
         )?;
+        state.serialize_field("project_workspace", &self.workspace)?;
+        state.serialize_field("library_manager", &self.library_manager)?;
         state.end()
     }
 }
@@ -29,22 +31,47 @@ impl<'de> serde::Deserialize<'de> for AppState {
             panel_sizes: PanelSizesSer,
             #[serde(default)]
             viewer_workspace: ViewerWorkspaceSer,
+            #[serde(default)]
+            project_workspace: crate::state::ProjectWorkspace,
+            #[serde(default = "default_library_manager")]
+            library_manager: crate::state::LibraryManager,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
         let de = AppStateDe::deserialize(deserializer)?;
-        Ok(Self {
+        let mut library_manager = de.library_manager;
+        let mut project_workspace = de.project_workspace;
+        project_workspace.ensure_library_model(&mut library_manager);
+        let schematic = project_workspace
+            .active_schematic()
+            .cloned()
+            .unwrap_or_default();
+        let mut state = Self {
+            schematic,
             panels: de.panels.into(),
             panel_sizes: de.panel_sizes.into(),
             viewer_workspace: de.viewer_workspace.into(),
+            workspace: project_workspace,
+            library_manager,
             ..Default::default()
-        })
+        };
+        state.workspace.save_active_schematic(&state.schematic);
+        Ok(state)
     }
+}
+
+fn default_library_manager() -> crate::state::LibraryManager {
+    crate::state::LibraryManager::with_primitives()
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(super) struct PanelVisibilitySer {
-    pub(super) project_browser: bool,
+    #[serde(default = "default_project_explorer")]
+    pub(super) project_explorer: bool,
+    #[serde(default)]
+    pub(super) library_browser: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) project_browser: Option<bool>,
     #[serde(default)]
     pub(super) results_browser: bool,
     pub(super) properties: bool,
@@ -62,10 +89,16 @@ fn default_bottom_panel() -> bool {
     true
 }
 
+fn default_project_explorer() -> bool {
+    true
+}
+
 impl From<&PanelVisibility> for PanelVisibilitySer {
     fn from(panels: &PanelVisibility) -> Self {
         Self {
-            project_browser: panels.project_browser,
+            project_explorer: panels.project_explorer,
+            library_browser: panels.library_browser,
+            project_browser: None,
             results_browser: panels.results_browser,
             properties: panels.properties,
             bottom_panel: panels.bottom_panel,
@@ -82,8 +115,16 @@ impl From<&PanelVisibility> for PanelVisibilitySer {
 
 impl From<PanelVisibilitySer> for PanelVisibility {
     fn from(serialized: PanelVisibilitySer) -> Self {
+        let project_explorer = serialized.project_explorer;
+        let mut library_browser =
+            serialized.library_browser || serialized.project_browser.unwrap_or(false);
+        if project_explorer && library_browser {
+            library_browser = false;
+        }
+
         Self {
-            project_browser: serialized.project_browser,
+            project_explorer,
+            library_browser,
             results_browser: serialized.results_browser,
             properties: serialized.properties,
             bottom_panel: serialized.bottom_panel,

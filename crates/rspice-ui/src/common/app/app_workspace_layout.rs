@@ -27,8 +27,12 @@ fn bottom_panel_height_range(screen_height: f32) -> RangeInclusive<f32> {
     min..=max
 }
 
-fn should_show_project_browser(panels: &PanelVisibility) -> bool {
-    panels.project_browser && !panels.results_browser
+fn should_show_project_explorer(panels: &PanelVisibility) -> bool {
+    panels.project_explorer && !panels.results_browser
+}
+
+fn should_show_library_browser(panels: &PanelVisibility) -> bool {
+    panels.library_browser && !panels.project_explorer && !panels.results_browser
 }
 
 fn separator_line_bounds(rect: egui::Rect, margin: f32) -> RangeInclusive<f32> {
@@ -213,8 +217,13 @@ impl RSpiceApp {
     }
 
     fn render_left_browser_panel(&mut self, ctx: &Context) {
-        if should_show_project_browser(&self.state.panels) {
-            self.render_project_browser_panel(ctx);
+        if should_show_project_explorer(&self.state.panels) {
+            self.render_project_explorer_panel(ctx);
+            return;
+        }
+
+        if should_show_library_browser(&self.state.panels) {
+            self.render_library_browser_panel(ctx);
             return;
         }
 
@@ -223,7 +232,36 @@ impl RSpiceApp {
         }
     }
 
-    fn render_project_browser_panel(&mut self, ctx: &Context) {
+    fn render_project_explorer_panel(&mut self, ctx: &Context) {
+        SidePanel::left("left_browser")
+            .resizable(true)
+            .default_width(self.state.panel_sizes.browser_width)
+            .width_range(150.0..=400.0)
+            .frame(
+                Frame::none()
+                    .fill(Color32::from_rgb(30, 33, 40))
+                    .inner_margin(egui::Margin::same(SIDE_PANEL_MARGIN)),
+            )
+            .show(ctx, |ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), SIDE_PANEL_HEADER_HEIGHT),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.label(
+                            egui::RichText::new("Project Explorer")
+                                .size(14.0)
+                                .color(Color32::from_rgb(180, 180, 190)),
+                        );
+                    },
+                );
+
+                draw_side_panel_separator(ui, SIDE_PANEL_MARGIN);
+                ui.add_space(8.0);
+                crate::panels::render_project_explorer(ui, &mut self.state);
+            });
+    }
+
+    fn render_library_browser_panel(&mut self, ctx: &Context) {
         SidePanel::left("left_browser")
             .resizable(true)
             .default_width(self.state.panel_sizes.browser_width)
@@ -248,7 +286,7 @@ impl RSpiceApp {
 
                 draw_side_panel_separator(ui, SIDE_PANEL_MARGIN);
                 ui.add_space(8.0);
-                crate::panels::render_project_browser(ui, &mut self.state);
+                crate::panels::render_library_browser(ui, &mut self.state);
             });
     }
 

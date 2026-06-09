@@ -25,12 +25,31 @@ pub(super) fn render_view_menu(ui: &mut Ui, state: &mut AppState) {
 
     if ui
         .button(checkmark_label(
-            state.panels.project_browser,
+            state.panels.project_explorer,
+            "Project Explorer",
+        ))
+        .clicked()
+    {
+        if !state.panels.project_explorer {
+            state.panels.library_browser = false;
+            state.panels.results_browser = false;
+        }
+        state.panels.project_explorer = !state.panels.project_explorer;
+        ui.close_menu();
+    }
+
+    if ui
+        .button(checkmark_label(
+            state.panels.library_browser,
             "Library Browser",
         ))
         .clicked()
     {
-        state.panels.project_browser = !state.panels.project_browser;
+        if !state.panels.library_browser {
+            state.panels.project_explorer = false;
+            state.panels.results_browser = false;
+        }
+        state.panels.library_browser = !state.panels.library_browser;
         ui.close_menu();
     }
 

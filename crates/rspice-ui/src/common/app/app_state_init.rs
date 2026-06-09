@@ -22,9 +22,16 @@ pub(super) fn default_analysis_viewers() -> AnalysisWorkspaceState {
 
 pub(super) fn default_app_state() -> AppState {
     let analysis = default_analysis_viewers();
+    let mut library_manager = crate::state::LibraryManager::with_primitives();
+    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
+    let schematic = workspace
+        .active_schematic()
+        .cloned()
+        .unwrap_or_else(crate::state::SchematicState::default);
+    workspace.save_active_schematic(&schematic);
 
     AppState {
-        schematic: crate::state::SchematicState::default(),
+        schematic,
         simulation: crate::state::SimulationState::default(),
         panels: PanelVisibility::default(),
         panel_sizes: PanelSizes::default(),
@@ -37,7 +44,8 @@ pub(super) fn default_app_state() -> AppState {
         script_console: crate::panels::ScriptConsoleState::default(),
         viewer_workspace: crate::viewers::ViewerWorkspace::default(),
         waveform_viewer: crate::waveform::WaveformViewerState::default(),
-        library_manager: crate::state::LibraryManager::with_primitives(),
+        library_manager,
+        workspace,
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),

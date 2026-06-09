@@ -105,12 +105,32 @@ impl RSpiceApp {
         ui.vertical(|ui| {
             ui.add_space(4.0);
 
-            // Project browser toggle
-            let browser_active = self.state.panels.project_browser;
+            // Project Explorer toggle
+            let project_active = self.state.panels.project_explorer;
             if rail_icon_button(
                 ui,
                 IconType::Folder,
-                browser_active,
+                project_active,
+                self.state.theme.accent,
+            )
+            .on_hover_text("Project Explorer")
+            .clicked()
+            {
+                if !self.state.panels.project_explorer {
+                    self.state.panels.library_browser = false;
+                    self.state.panels.results_browser = false;
+                }
+                self.state.panels.project_explorer = !self.state.panels.project_explorer;
+            }
+
+            ui.add_space(4.0);
+
+            // Library Browser toggle
+            let library_active = self.state.panels.library_browser;
+            if rail_icon_button(
+                ui,
+                IconType::Component,
+                library_active,
                 self.state.theme.accent,
             )
             .on_hover_text("Library Browser (Ctrl+Shift+L)")
@@ -138,9 +158,10 @@ impl RSpiceApp {
                 })
                 .clicked()
             {
-                // Toggle results browser, and close library browser if opening results
+                // Toggle results browser, and close other left-side browsers if opening results.
                 if !self.state.panels.results_browser {
-                    self.state.panels.project_browser = false;
+                    self.state.panels.project_explorer = false;
+                    self.state.panels.library_browser = false;
                 }
                 self.state.panels.results_browser = !self.state.panels.results_browser;
             }
