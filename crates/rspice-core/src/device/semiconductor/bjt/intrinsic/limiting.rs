@@ -802,7 +802,6 @@ impl Bjt {
                     proposed_external,
                 )
             }
-            _ => None,
         }
     }
 
