@@ -252,6 +252,11 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 1: Extract node connectivity
         self.extract_nets();
 
+        // Phase 1b: Fold user net labels into the nets (names + same-name
+        // connections). Runs before ground identification so the ground
+        // symbol always wins the node-0 assignment.
+        self.apply_net_labels();
+
         // Phase 2: Identify ground
         self.identify_ground();
 
@@ -321,3 +326,101 @@ fn chrono_lite_timestamp() -> String {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::NetLabel;
+
+    /// A label sitting on a wire names that net in the netlist.
+    #[test]
+    fn net_label_names_the_node() {
+        let mut state = SchematicState::default();
+        crate::common::examples::load_example("RC Lowpass Filter", &mut state);
+
+        let result = generate_netlist(&state);
+        assert!(
+            result.nets.contains_key("out"),
+            "the \"out\" label should name its net; got nets {:?}",
+            result.nets.keys().collect::<Vec<_>>()
+        );
+        // The named node appears in instance lines (R1 ... out ...).
+        assert!(
+            result.netlist.lines().any(|l| {
+                l.starts_with('R') && l.split_whitespace().any(|tok| tok == "out")
+            }),
+            "instance lines should reference the labeled node:\n{}",
+            result.netlist
+        );
+    }
+
+    /// Labels sharing a name connect otherwise-disjoint nets.
+    #[test]
+    fn same_name_labels_merge_nets() {
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state
+            .wires
+            .push(Wire::new(2, vec![Point::new(0, 100), Point::new(40, 100)]));
+        state.net_labels.push(NetLabel::new(1, Point::new(20, 0), "bus"));
+        state
+            .net_labels
+            .push(NetLabel::new(2, Point::new(20, 100), "bus"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+        let bus_nets = generator
+            .nets()
+            .iter()
+            .filter(|n| n.spice_name() == "bus")
+            .count();
+        assert_eq!(bus_nets, 1, "same-name labels should fuse into one net");
+        assert_eq!(
+            generator.net_at(Point::new(0, 0)).map(|n| n.id),
+            generator.net_at(Point::new(40, 100)).map(|n| n.id),
+            "both wires should resolve to the same net id"
+        );
+    }
+
+    /// A label naming a net "gnd" maps to SPICE node 0.
+    #[test]
+    fn gnd_label_maps_to_node_zero() {
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state.net_labels.push(NetLabel::new(1, Point::new(20, 0), "GND"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+        assert_eq!(
+            generator.net_at(Point::new(20, 0)).map(|n| n.spice_name()),
+            Some("0".to_string())
+        );
+    }
+
+    /// A floating label warns instead of silently vanishing.
+    #[test]
+    fn floating_label_warns() {
+        let mut state = SchematicState::default();
+        state
+            .wires
+            .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
+        state
+            .net_labels
+            .push(NetLabel::new(1, Point::new(500, 500), "lost"));
+
+        let mut generator = NetlistGenerator::new(&state);
+        generator.generate();
+        assert!(
+            generator
+                .warnings()
+                .iter()
+                .any(|w| w.contains("lost") && w.contains("not on a wire")),
+            "expected a floating-label warning; got {:?}",
+            generator.warnings()
+        );
+    }
+}
