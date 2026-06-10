@@ -3,7 +3,7 @@ use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 use crate::common::app::AppState;
 use crate::state::{Component, ComponentType, Point, Wire};
 
-use super::super::symbols::{SymbolLibrary, draw_symbol};
+use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
     draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
@@ -67,24 +67,22 @@ pub(super) fn draw_component(
     let rotation_degrees = component.rotation.degrees();
     let rotation_index = rotation_to_index(component.rotation);
 
-    // Try to use SVG symbol if available
+    // Try to use SVG symbol if available — via the library's baked
+    // (pre-flattened, pre-transformed) geometry: per frame this is one
+    // multiply-add per vertex instead of bezier + trig per vertex.
     let svg_rendered = if let Some(library) = symbol_library {
         if let Some((symbol, adjusted_rotation)) = library.get_with_rotation_variant(
             component.kind,
             rotation_degrees,
             component.symbol_variant.as_deref(),
         ) {
-            // Note: SVG symbol is being used (removed per-frame logging)
-            draw_symbol(
-                painter,
+            let baked = library.baked(
                 symbol,
-                pos,
-                scale,
                 adjusted_rotation,
                 component.mirror_h,
                 component.mirror_v,
-                stroke,
             );
+            draw_baked(painter, &baked, pos, scale, stroke);
             true
         } else {
             // No SVG available for this component type, will use procedural fallback
@@ -182,10 +180,13 @@ struct LabelLayout {
 }
 
 /// Infer the dominant terminal direction after mirror/rotation transforms.
-/// This is more robust than width/height heuristics for square symbols (e.g. capacitor).
+/// This is more robust than width/height heuristics for square symbols
+/// (e.g. capacitor). Works on the static offsets — mirroring never changes
+/// an axis span and 90°/270° rotation just swaps the spans — so this runs
+/// allocation-free every frame.
 fn infer_terminal_axis(component: &Component) -> TerminalAxis {
-    let terminals = component.terminal_positions();
-    if terminals.len() < 2 {
+    let offsets = component.kind.terminal_offsets();
+    if offsets.len() < 2 {
         return TerminalAxis::Mixed;
     }
 
@@ -194,15 +195,18 @@ fn infer_terminal_axis(component: &Component) -> TerminalAxis {
     let mut min_y = i32::MAX;
     let mut max_y = i32::MIN;
 
-    for (_, p) in terminals {
+    for (_, p) in offsets {
         min_x = min_x.min(p.x);
         max_x = max_x.max(p.x);
         min_y = min_y.min(p.y);
         max_y = max_y.max(p.y);
     }
 
-    let span_x = max_x - min_x;
-    let span_y = max_y - min_y;
+    let mut span_x = max_x - min_x;
+    let mut span_y = max_y - min_y;
+    if component.rotation.is_vertical() {
+        std::mem::swap(&mut span_x, &mut span_y);
+    }
 
     // One-grid hysteresis to avoid ambiguous axis flapping near equal spans.
     const AXIS_HYSTERESIS: i32 = 10;
@@ -278,6 +282,13 @@ fn compute_label_layout(pos: Pos2, scale: f32, component: &Component) -> LabelLa
     }
 }
 
+/// Quantize a zoom-scaled font size to quarter points: consecutive zoom
+/// frames then reuse egui's cached galleys instead of re-shaping every
+/// label on screen each frame (the dominant zoom-gesture cost).
+fn quantize_font_size(size: f32) -> f32 {
+    ((size * 4.0).round() * 0.25).max(1.0)
+}
+
 fn draw_component_labels(
     painter: &Painter,
     pos: Pos2,
@@ -290,8 +301,14 @@ fn draw_component_labels(
         return;
     }
 
-    let name_font = egui::FontId::proportional(10.0 * scale);
-    let value_font = egui::FontId::proportional(9.0 * scale);
+    // Below this size labels are unreadable smudge — commercial EDA tools
+    // hide them; so do we, and zoomed-out paint cost drops with them.
+    let name_size = quantize_font_size(10.0 * scale);
+    if name_size < 4.0 {
+        return;
+    }
+    let name_font = egui::FontId::proportional(name_size);
+    let value_font = egui::FontId::proportional(quantize_font_size(9.0 * scale));
 
     let layout = compute_label_layout(pos, scale, component);
 
@@ -307,7 +324,7 @@ fn draw_component_labels(
     }
 
     // Draw component value
-    let value_text = super::super::source_labels::component_value_label(component);
+    let value_text = super::super::source_labels::component_value_label_cached(component);
     if !value_text.is_empty() {
         painter.text(
             layout.value_pos,

@@ -1,7 +1,151 @@
-use egui::{Painter, Pos2, Stroke};
+use egui::{Painter, Pos2, Shape, Stroke, Vec2};
 use std::f32::consts::PI;
 
 use super::types::{PathCommand, Symbol};
+
+// =============================================================================
+// Baked symbols — flattened once, painted with one multiply-add per point
+// =============================================================================
+
+/// A symbol flattened for fast painting: beziers subdivided, view scaling,
+/// mirroring and rotation applied, and corner-fill dots precomputed.
+/// Coordinates are in schematic units relative to the component center, so
+/// painting is `center + point * zoom` per vertex — no trig, no bezier
+/// evaluation, no per-path Vec rebuilds.
+#[derive(Debug, Clone, Default)]
+pub struct BakedSymbol {
+    polylines: Vec<Vec<Vec2>>,
+    corner_dots: Vec<Vec2>,
+}
+
+/// Flatten `symbol` under the given orientation. Called once per
+/// (symbol, rotation, mirror) and cached by the symbol library.
+pub fn bake_symbol(
+    symbol: &Symbol,
+    rotation_degrees: i32,
+    mirror_h: bool,
+    mirror_v: bool,
+) -> BakedSymbol {
+    let rotation_rad = (rotation_degrees as f32) * PI / 180.0;
+    let cos_r = rotation_rad.cos();
+    let sin_r = rotation_rad.sin();
+    let (cx, cy) = symbol.center();
+    let view_scale_x = symbol.target_width / symbol.width().max(0.001);
+    let view_scale_y = symbol.target_height / symbol.height().max(0.001);
+
+    let mut baked = BakedSymbol::default();
+
+    for path in &symbol.paths {
+        let mut points: Vec<Vec2> = Vec::new();
+        let mut current_pos = (0.0f32, 0.0f32);
+
+        let mut flush =
+            |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
+                if points.len() >= 2 {
+                    collect_corner_dots(points, &mut baked.corner_dots);
+                    baked.polylines.push(std::mem::take(points));
+                } else {
+                    points.clear();
+                }
+            };
+
+        for cmd in &path.commands {
+            match cmd {
+                PathCommand::MoveTo(x, y) => {
+                    flush(&mut points, &mut baked);
+                    let (tx, ty) = transform_point_nonuniform(
+                        *x, *y, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
+                        mirror_h, mirror_v, Pos2::ZERO,
+                    );
+                    points.push(Vec2::new(tx, ty));
+                    current_pos = (*x, *y);
+                }
+                PathCommand::LineTo(x, y) => {
+                    let (tx, ty) = transform_point_nonuniform(
+                        *x, *y, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
+                        mirror_h, mirror_v, Pos2::ZERO,
+                    );
+                    points.push(Vec2::new(tx, ty));
+                    current_pos = (*x, *y);
+                }
+                PathCommand::CurveTo { ctrl1, ctrl2, end } => {
+                    let segments = 16;
+                    for i in 0..=segments {
+                        let t = i as f32 / segments as f32;
+                        let (bx, by) = cubic_bezier(current_pos, *ctrl1, *ctrl2, *end, t);
+                        let (tx, ty) = transform_point_nonuniform(
+                            bx, by, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
+                            mirror_h, mirror_v, Pos2::ZERO,
+                        );
+                        // Skip a t=0 point that duplicates the previous vertex.
+                        if i == 0 && !points.is_empty() {
+                            let last = points.last().unwrap();
+                            if (last.x - tx).abs() < 0.1 && (last.y - ty).abs() < 0.1 {
+                                continue;
+                            }
+                        }
+                        points.push(Vec2::new(tx, ty));
+                    }
+                    current_pos = *end;
+                }
+                PathCommand::Close => {
+                    if let Some(first) = points.first() {
+                        points.push(*first);
+                    }
+                }
+            }
+        }
+        flush(&mut points, &mut baked);
+    }
+
+    baked
+}
+
+/// Record corner-fill dot positions at sharp direction changes — these fill
+/// the joint gaps that separate line segments would otherwise show.
+fn collect_corner_dots(points: &[Vec2], dots: &mut Vec<Vec2>) {
+    for i in 1..points.len().saturating_sub(1) {
+        let prev = points[i - 1];
+        let curr = points[i];
+        let next = points[i + 1];
+        let d1 = curr - prev;
+        let d2 = next - curr;
+        let len1 = d1.length();
+        let len2 = d2.length();
+        if len1 > 0.001 && len2 > 0.001 {
+            let dot = (d1 / len1).dot(d2 / len2);
+            if dot.abs() < 0.87 {
+                dots.push(curr);
+            }
+        }
+    }
+}
+
+/// Paint a baked symbol: one multiply-add per vertex, one shape per polyline.
+pub fn draw_baked(
+    painter: &Painter,
+    baked: &BakedSymbol,
+    center: Pos2,
+    scale: f32,
+    stroke: Stroke,
+) {
+    let radius = stroke.width / 2.0;
+    for dot in &baked.corner_dots {
+        painter.circle_filled(center + *dot * scale, radius, stroke.color);
+    }
+    for line in &baked.polylines {
+        if line.len() == 2 {
+            painter.line_segment([center + line[0] * scale, center + line[1] * scale], stroke);
+        } else {
+            let points: Vec<Pos2> = line.iter().map(|p| center + *p * scale).collect();
+            painter.add(Shape::line(points, stroke));
+        }
+    }
+}
+
+// =============================================================================
+// Direct (unbaked) rendering — used by one-off previews
+// =============================================================================
 
 /// Render a symbol to an egui painter with position, scale, rotation, mirroring, and stroke
 pub fn draw_symbol(
@@ -14,15 +158,6 @@ pub fn draw_symbol(
     mirror_v: bool,
     stroke: Stroke,
 ) {
-    // Debug: log when drawing
-    log::trace!(
-        "Drawing SVG symbol '{}' at {:?}, {} paths, scale={}",
-        symbol.name,
-        center,
-        symbol.paths.len(),
-        scale
-    );
-
     let rotation_rad = (rotation_degrees as f32) * PI / 180.0;
     let cos_r = rotation_rad.cos();
     let sin_r = rotation_rad.sin();
@@ -38,22 +173,6 @@ pub fn draw_symbol(
     let total_scale_x = scale * view_scale_x;
     let total_scale_y = scale * view_scale_y;
 
-    // Debug: log symbol dimensions
-    log::debug!(
-        "Symbol '{}' bounds=({:.1},{:.1},{:.1},{:.1}), target=({:.1}x{:.1}), scale=({:.2},{:.2})",
-        symbol.name,
-        symbol.bounds.0,
-        symbol.bounds.1,
-        symbol.bounds.2,
-        symbol.bounds.3,
-        symbol.target_width,
-        symbol.target_height,
-        total_scale_x,
-        total_scale_y
-    );
-
-    let mut total_points_drawn = 0;
-
     for path in &symbol.paths {
         let mut points: Vec<Pos2> = Vec::new();
         let mut current_pos = (0.0f32, 0.0f32);
@@ -64,7 +183,6 @@ pub fn draw_symbol(
                     // Draw accumulated points first
                     if points.len() >= 2 {
                         draw_path_segment(painter, &points, stroke);
-                        total_points_drawn += points.len();
                     }
                     points.clear();
 
@@ -148,13 +266,7 @@ pub fn draw_symbol(
         // Draw remaining points
         if points.len() >= 2 {
             draw_path_segment(painter, &points, stroke);
-            total_points_drawn += points.len();
         }
-    }
-
-    // Debug: if no points were drawn, log a warning
-    if total_points_drawn == 0 {
-        log::warn!("SVG symbol '{}' had 0 points to draw!", symbol.name);
     }
 
     // Note: Lead lines are handled by the SVG artwork itself.

@@ -218,8 +218,8 @@ impl Component {
         // Terminal offsets are component-type specific and defined in ComponentType
         self.kind
             .terminal_offsets()
-            .into_iter()
-            .map(|(name, offset)| {
+            .iter()
+            .map(|&(name, offset)| {
                 let transformed = self.transform_point(offset);
                 (
                     name,

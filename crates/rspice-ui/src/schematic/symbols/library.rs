@@ -1,10 +1,13 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::state::ComponentType;
 
 use super::error::SymbolError;
 use super::parser::parse_svg;
 use super::pins::add_default_pins;
+use super::render::{BakedSymbol, bake_symbol};
 use super::types::Symbol;
 
 mod embedded_symbols {
@@ -20,12 +23,16 @@ pub struct SymbolLibrary {
     symbols: HashMap<ComponentType, Symbol>,
     /// Horizontal variants for components that have separate horizontal SVGs
     horizontal_symbols: HashMap<ComponentType, Symbol>,
-    /// Non-default symbol variants keyed by component type and variant id
-    variant_symbols: HashMap<(ComponentType, String), Symbol>,
-    /// Horizontal symbol variants keyed by component type and variant id
-    horizontal_variant_symbols: HashMap<(ComponentType, String), Symbol>,
+    /// Non-default symbol variants, by component type then variant id
+    variant_symbols: HashMap<ComponentType, HashMap<String, Symbol>>,
+    /// Horizontal symbol variants, by component type then variant id
+    horizontal_variant_symbols: HashMap<ComponentType, HashMap<String, Symbol>>,
     /// All embedded asset files parsed successfully and keyed by filename
     embedded_assets: HashMap<String, Symbol>,
+    /// Flattened symbol geometry per (symbol address, rotation, mirror).
+    /// The library is immutable after load, so symbol addresses are stable
+    /// keys for the process lifetime. RefCell: painting is single-threaded.
+    baked: RefCell<HashMap<(usize, i32, bool, bool), Rc<BakedSymbol>>>,
 }
 
 impl Default for SymbolLibrary {
@@ -43,7 +50,31 @@ impl SymbolLibrary {
             variant_symbols: HashMap::new(),
             horizontal_variant_symbols: HashMap::new(),
             embedded_assets: HashMap::new(),
+            baked: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Flattened (baked) geometry for a symbol under the given orientation,
+    /// cached for the process lifetime.
+    pub fn baked(
+        &self,
+        symbol: &Symbol,
+        rotation_degrees: i32,
+        mirror_h: bool,
+        mirror_v: bool,
+    ) -> Rc<BakedSymbol> {
+        let key = (
+            symbol as *const Symbol as usize,
+            rotation_degrees.rem_euclid(360),
+            mirror_h,
+            mirror_v,
+        );
+        if let Some(hit) = self.baked.borrow().get(&key) {
+            return Rc::clone(hit);
+        }
+        let baked = Rc::new(bake_symbol(symbol, rotation_degrees, mirror_h, mirror_v));
+        self.baked.borrow_mut().insert(key, Rc::clone(&baked));
+        baked
     }
 
     /// Load all embedded SVG symbols from the assets directory.
@@ -238,7 +269,9 @@ impl SymbolLibrary {
             let symbol = library.prepare_symbol(*component_type, filename, name, false)?;
             library
                 .variant_symbols
-                .insert((*component_type, (*variant_id).to_string()), symbol);
+                .entry(*component_type)
+                .or_default()
+                .insert((*variant_id).to_string(), symbol);
         }
 
         // Load horizontal variants for components that have separate horizontal SVGs
@@ -370,16 +403,21 @@ impl SymbolLibrary {
         let normalized = rotation_degrees.rem_euclid(360);
 
         if let Some(variant_id) = variant.filter(|variant_id| !variant_id.is_empty()) {
-            let variant_key = (component_type, variant_id.to_string());
-
             if (normalized == 90 || normalized == 270)
-                && let Some(symbol) = self.horizontal_variant_symbols.get(&variant_key)
+                && let Some(symbol) = self
+                    .horizontal_variant_symbols
+                    .get(&component_type)
+                    .and_then(|variants| variants.get(variant_id))
             {
                 let adjusted = if normalized == 90 { 0 } else { 180 };
                 return Some((symbol, adjusted));
             }
 
-            if let Some(symbol) = self.variant_symbols.get(&variant_key) {
+            if let Some(symbol) = self
+                .variant_symbols
+                .get(&component_type)
+                .and_then(|variants| variants.get(variant_id))
+            {
                 return Some((symbol, rotation_degrees));
             }
         }

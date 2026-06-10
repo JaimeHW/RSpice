@@ -1,4 +1,4 @@
-use super::super::point::Point;
+﻿use super::super::point::Point;
 use super::ComponentType;
 
 impl ComponentType {
@@ -35,25 +35,27 @@ impl ComponentType {
     }
 
     /// Get terminal offsets relative to component position.
-    pub fn terminal_offsets(&self) -> Vec<(&'static str, Point)> {
-        let (w, h) = self.symbol_dimensions();
-        let hw = w / 2;
-        let hh = h / 2;
-
+    ///
+    /// Static per type â€” the coordinates are the `symbol_dimensions`
+    /// half-extents (the unit test below keeps the tables honest), and
+    /// returning `&'static` keeps per-frame and hit-test paths
+    /// allocation-free.
+    pub fn terminal_offsets(&self) -> &'static [(&'static str, Point)] {
         match self {
+            // (40, 20) / (40, 40): hw 20
             ComponentType::Resistor | ComponentType::Capacitor | ComponentType::Inductor => {
-                vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
+                &[("+", Point { x: -20, y: 0 }), ("-", Point { x: 20, y: 0 })]
             }
-            ComponentType::Transformer => {
-                let pin_inset = 10;
-                vec![
-                    ("P1", Point::new(-hw + pin_inset, -hh)),
-                    ("P2", Point::new(-hw + pin_inset, hh)),
-                    ("S1", Point::new(hw - pin_inset, -hh)),
-                    ("S2", Point::new(hw - pin_inset, hh)),
-                ]
-            }
-            ComponentType::Diode => vec![("A", Point::new(-hw, 0)), ("K", Point::new(hw, 0))],
+            // (60, 80): hw 30, hh 40, pins inset 10 from the sides
+            ComponentType::Transformer => &[
+                ("P1", Point { x: -20, y: -40 }),
+                ("P2", Point { x: -20, y: 40 }),
+                ("S1", Point { x: 20, y: -40 }),
+                ("S2", Point { x: 20, y: 40 }),
+            ],
+            // (40, 20): hw 20
+            ComponentType::Diode => &[("A", Point { x: -20, y: 0 }), ("K", Point { x: 20, y: 0 })],
+            // (28, 40): hh 20, vertical at R0
             ComponentType::VoltageSource
             | ComponentType::VoltageSourceAc
             | ComponentType::VoltageSourcePulse
@@ -68,115 +70,112 @@ impl ComponentType {
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceNoise => {
-                vec![("+", Point::new(0, -hh)), ("-", Point::new(0, hh))]
+                &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
             }
-            ComponentType::NpnBjt => vec![
-                ("C", Point::new(hw, -hh)),
-                ("B", Point::new(-hw, 0)),
-                ("E", Point::new(hw, hh)),
+            // (40, 80): hw 20, hh 40
+            ComponentType::NpnBjt => &[
+                ("C", Point { x: 20, y: -40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: 40 }),
             ],
-            ComponentType::PnpBjt => vec![
-                ("C", Point::new(hw, hh)),
-                ("B", Point::new(-hw, 0)),
-                ("E", Point::new(hw, -hh)),
+            ComponentType::PnpBjt => &[
+                ("C", Point { x: 20, y: 40 }),
+                ("B", Point { x: -20, y: 0 }),
+                ("E", Point { x: 20, y: -40 }),
             ],
-            ComponentType::Nmos | ComponentType::Pmos => vec![
-                ("D", Point::new(hw, -hh)),
-                ("G", Point::new(-hw, 0)),
-                ("S", Point::new(hw, hh)),
-                ("B", Point::new(hw, 0)),
+            ComponentType::Nmos
+            | ComponentType::Pmos
+            | ComponentType::NVdmos
+            | ComponentType::PVdmos => &[
+                ("D", Point { x: 20, y: -40 }),
+                ("G", Point { x: -20, y: 0 }),
+                ("S", Point { x: 20, y: 40 }),
+                ("B", Point { x: 20, y: 0 }),
             ],
-            ComponentType::Njfet | ComponentType::Pjfet => vec![
-                ("D", Point::new(hw, -hh)),
-                ("G", Point::new(-hw, 0)),
-                ("S", Point::new(hw, hh)),
+            ComponentType::Njfet | ComponentType::Pjfet => &[
+                ("D", Point { x: 20, y: -40 }),
+                ("G", Point { x: -20, y: 0 }),
+                ("S", Point { x: 20, y: 40 }),
             ],
-            ComponentType::NVdmos | ComponentType::PVdmos => vec![
-                ("D", Point::new(hw, -hh)),
-                ("G", Point::new(-hw, 0)),
-                ("S", Point::new(hw, hh)),
-                ("B", Point::new(hw, 0)),
-            ],
+            // (40, 20): hw 20
             ComponentType::SaturableInductor => {
-                vec![("+", Point::new(-hw, 0)), ("-", Point::new(hw, 0))]
+                &[("+", Point { x: -20, y: 0 }), ("-", Point { x: 20, y: 0 })]
             }
+            // (40, 40): hw 20, hh/2 10
             ComponentType::Vcvs
             | ComponentType::Vccs
             | ComponentType::Ccvs
-            | ComponentType::Cccs => vec![
-                ("O+", Point::new(-hw, -hh / 2)),
-                ("O-", Point::new(-hw, hh / 2)),
-                ("C+", Point::new(hw, -hh / 2)),
-                ("C-", Point::new(hw, hh / 2)),
+            | ComponentType::Cccs => &[
+                ("O+", Point { x: -20, y: -10 }),
+                ("O-", Point { x: -20, y: 10 }),
+                ("C+", Point { x: 20, y: -10 }),
+                ("C-", Point { x: 20, y: 10 }),
             ],
-            ComponentType::CoupledInductor => vec![],
+            ComponentType::CoupledInductor => &[],
+            // (60, 40): hw 30
             ComponentType::CellInstance => {
-                vec![("1", Point::new(-hw, 0)), ("2", Point::new(hw, 0))]
+                &[("1", Point { x: -30, y: 0 }), ("2", Point { x: 30, y: 0 })]
             }
-            ComponentType::Ground => vec![("GND", Point::new(0, -hh))],
+            // (20, 20): hh 10
+            ComponentType::Ground => &[("GND", Point { x: 0, y: -10 })],
+            // (40, 20): hw 20
             ComponentType::XspiceGain
             | ComponentType::XspiceLimiter
             | ComponentType::XspiceIntegrator
-            | ComponentType::XspiceDifferentiator => {
-                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
+            | ComponentType::XspiceDifferentiator
+            | ComponentType::XspiceInverter
+            | ComponentType::XspiceBuffer
+            | ComponentType::XspiceAdcBridge
+            | ComponentType::XspiceDacBridge => {
+                &[("in", Point { x: -20, y: 0 }), ("out", Point { x: 20, y: 0 })]
             }
-            ComponentType::XspiceSummer => vec![
-                ("in1", Point::new(-hw, -hh / 2)),
-                ("in2", Point::new(-hw, hh / 2)),
-                ("out", Point::new(hw, 0)),
+            // (40, 20): hw 20, hh/2 5
+            ComponentType::XspiceSummer
+            | ComponentType::XspiceMultiplier
+            | ComponentType::XspiceDivider => &[
+                ("in1", Point { x: -20, y: -5 }),
+                ("in2", Point { x: -20, y: 5 }),
+                ("out", Point { x: 20, y: 0 }),
             ],
-            ComponentType::XspiceMultiplier | ComponentType::XspiceDivider => vec![
-                ("in1", Point::new(-hw, -hh / 2)),
-                ("in2", Point::new(-hw, hh / 2)),
-                ("out", Point::new(hw, 0)),
-            ],
-            ComponentType::XspiceInverter | ComponentType::XspiceBuffer => {
-                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
-            }
             ComponentType::XspiceAndGate
             | ComponentType::XspiceOrGate
             | ComponentType::XspiceNandGate
             | ComponentType::XspiceNorGate
-            | ComponentType::XspiceXorGate => vec![
-                ("a", Point::new(-hw, -hh / 2)),
-                ("b", Point::new(-hw, hh / 2)),
-                ("out", Point::new(hw, 0)),
+            | ComponentType::XspiceXorGate => &[
+                ("a", Point { x: -20, y: -5 }),
+                ("b", Point { x: -20, y: 5 }),
+                ("out", Point { x: 20, y: 0 }),
             ],
-            ComponentType::XspiceTristate => vec![
-                ("in", Point::new(-hw, 0)),
-                ("en", Point::new(0, -hh)),
-                ("out", Point::new(hw, 0)),
+            ComponentType::XspiceTristate => &[
+                ("in", Point { x: -20, y: 0 }),
+                ("en", Point { x: 0, y: -10 }),
+                ("out", Point { x: 20, y: 0 }),
             ],
-            ComponentType::XspiceDFlipFlop => vec![
-                ("d", Point::new(-hw, -hh / 2)),
-                ("clk", Point::new(-hw, hh / 2)),
-                ("q", Point::new(hw, -hh / 2)),
-                ("qbar", Point::new(hw, hh / 2)),
+            // (40, 40): hw 20, hh/2 10
+            ComponentType::XspiceDFlipFlop => &[
+                ("d", Point { x: -20, y: -10 }),
+                ("clk", Point { x: -20, y: 10 }),
+                ("q", Point { x: 20, y: -10 }),
+                ("qbar", Point { x: 20, y: 10 }),
             ],
-            ComponentType::XspiceJkFlipFlop => vec![
-                ("j", Point::new(-hw, -hh / 2)),
-                ("k", Point::new(-hw, hh / 2)),
-                ("clk", Point::new(-hw, 0)),
-                ("q", Point::new(hw, -hh / 2)),
-                ("qbar", Point::new(hw, hh / 2)),
+            ComponentType::XspiceJkFlipFlop => &[
+                ("j", Point { x: -20, y: -10 }),
+                ("k", Point { x: -20, y: 10 }),
+                ("clk", Point { x: -20, y: 0 }),
+                ("q", Point { x: 20, y: -10 }),
+                ("qbar", Point { x: 20, y: 10 }),
             ],
-            ComponentType::XspiceSrLatch => vec![
-                ("s", Point::new(-hw, -hh / 2)),
-                ("r", Point::new(-hw, hh / 2)),
-                ("q", Point::new(hw, -hh / 2)),
-                ("qbar", Point::new(hw, hh / 2)),
+            ComponentType::XspiceSrLatch => &[
+                ("s", Point { x: -20, y: -10 }),
+                ("r", Point { x: -20, y: 10 }),
+                ("q", Point { x: 20, y: -10 }),
+                ("qbar", Point { x: 20, y: 10 }),
             ],
-            ComponentType::XspiceAdcBridge => {
-                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
-            }
-            ComponentType::XspiceDacBridge => {
-                vec![("in", Point::new(-hw, 0)), ("out", Point::new(hw, 0))]
-            }
         }
     }
 
     /// Get symbol dimensions in grid units (width, height).
-    pub fn symbol_dimensions(&self) -> (i32, i32) {
+    pub const fn symbol_dimensions(&self) -> (i32, i32) {
         match self {
             ComponentType::Resistor | ComponentType::Inductor => (40, 20),
             ComponentType::Transformer => (60, 80),
@@ -230,6 +229,97 @@ impl ComponentType {
             | ComponentType::XspiceJkFlipFlop
             | ComponentType::XspiceSrLatch => (40, 40),
             ComponentType::XspiceAdcBridge | ComponentType::XspiceDacBridge => (40, 20),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL_TYPES: &[ComponentType] = &[
+        ComponentType::Resistor,
+        ComponentType::Capacitor,
+        ComponentType::Inductor,
+        ComponentType::Transformer,
+        ComponentType::SaturableInductor,
+        ComponentType::Diode,
+        ComponentType::VoltageSource,
+        ComponentType::VoltageSourceAc,
+        ComponentType::VoltageSourcePulse,
+        ComponentType::VoltageSourceSin,
+        ComponentType::VoltageSourcePwl,
+        ComponentType::VoltageSourceExp,
+        ComponentType::VoltageSourceSffm,
+        ComponentType::CurrentSource,
+        ComponentType::CurrentSourceAc,
+        ComponentType::CurrentSourcePulse,
+        ComponentType::CurrentSourceSin,
+        ComponentType::CurrentSourcePwl,
+        ComponentType::CurrentSourceExp,
+        ComponentType::CurrentSourceNoise,
+        ComponentType::NpnBjt,
+        ComponentType::PnpBjt,
+        ComponentType::Nmos,
+        ComponentType::Pmos,
+        ComponentType::Njfet,
+        ComponentType::Pjfet,
+        ComponentType::NVdmos,
+        ComponentType::PVdmos,
+        ComponentType::Vcvs,
+        ComponentType::Vccs,
+        ComponentType::Ccvs,
+        ComponentType::Cccs,
+        ComponentType::CoupledInductor,
+        ComponentType::CellInstance,
+        ComponentType::Ground,
+        ComponentType::XspiceGain,
+        ComponentType::XspiceLimiter,
+        ComponentType::XspiceIntegrator,
+        ComponentType::XspiceDifferentiator,
+        ComponentType::XspiceInverter,
+        ComponentType::XspiceBuffer,
+        ComponentType::XspiceAndGate,
+        ComponentType::XspiceOrGate,
+        ComponentType::XspiceNandGate,
+        ComponentType::XspiceNorGate,
+        ComponentType::XspiceXorGate,
+        ComponentType::XspiceTristate,
+        ComponentType::XspiceSummer,
+        ComponentType::XspiceMultiplier,
+        ComponentType::XspiceDivider,
+        ComponentType::XspiceDFlipFlop,
+        ComponentType::XspiceJkFlipFlop,
+        ComponentType::XspiceSrLatch,
+        ComponentType::XspiceAdcBridge,
+        ComponentType::XspiceDacBridge,
+    ];
+
+    /// The static terminal tables must stay consistent with the declared
+    /// symbol dimensions and terminal counts.
+    #[test]
+    fn terminal_tables_match_symbol_dimensions() {
+        for kind in ALL_TYPES {
+            let offsets = kind.terminal_offsets();
+            assert_eq!(
+                offsets.len(),
+                kind.terminal_count(),
+                "{kind:?}: table length vs terminal_count"
+            );
+
+            let (w, h) = kind.symbol_dimensions();
+            let (hw, hh) = (w / 2, h / 2);
+            for (name, offset) in offsets {
+                assert!(
+                    offset.x.abs() <= hw && offset.y.abs() <= hh,
+                    "{kind:?} terminal {name}: offset {offset:?} outside (Â±{hw}, Â±{hh})"
+                );
+                // Terminals sit on the symbol boundary, never inside corners.
+                assert!(
+                    offset.x.abs() == hw || offset.y.abs() == hh || offset.x.abs() == hw - 10,
+                    "{kind:?} terminal {name}: offset {offset:?} floats inside the symbol"
+                );
+            }
         }
     }
 }
