@@ -205,7 +205,7 @@ impl CircuitData {
         self.b3soi_fd.update_all(voltages);
         self.b3soi_pd.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
-        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), idx));
+        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
         let mut hfet_inverse_latched = false;
         for idx in order {
             let jfet = &mut self.jfets[idx];
@@ -236,7 +236,7 @@ impl CircuitData {
     /// they can measure the actual operating-point equation error.
     pub(crate) fn update_jfet_static_linearizations(&mut self, voltages: &[Value]) {
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
-        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), idx));
+        order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
         let mut hfet_inverse_latched = false;
         for idx in order {
             let jfet = &mut self.jfets[idx];
