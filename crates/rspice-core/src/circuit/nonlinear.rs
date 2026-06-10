@@ -43,6 +43,16 @@ impl CircuitData {
             }
     }
 
+    /// Check if circuit has any BSIM3SOI device (DD, FD, or PD variant).
+    ///
+    /// The three variants share one transient charge-history pipeline
+    /// (companion stamping, history commit, and charge LTE), indexed DD
+    /// devices first, then FD, then PD.
+    #[inline]
+    pub fn has_b3soi_devices(&self) -> bool {
+        !self.b3soi.is_empty() || !self.b3soi_fd.is_empty() || !self.b3soi_pd.is_empty()
+    }
+
     /// Check whether circuit contains strongly-coupled physical nonlinearities
     /// that benefit from conservative Newton damping (e.g., voltage limiting).
     #[inline]

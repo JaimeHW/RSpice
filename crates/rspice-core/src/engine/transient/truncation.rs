@@ -759,32 +759,51 @@ impl Engine {
         let mut limit = 2.0 * dt;
         let mut found_branch = false;
 
-        for (idx, dev) in circuit.b3soi.devices.iter().enumerate() {
-            let charge = dev.charge_at(candidate_solution);
+        // The history is indexed DD devices first, then FD, then PD,
+        // matching the companion stamp/commit walks.
+        let mut device_charges: Vec<(Value, Value, Value, Value)> = Vec::with_capacity(
+            circuit.b3soi.devices.len()
+                + circuit.b3soi_fd.devices.len()
+                + circuit.b3soi_pd.devices.len(),
+        );
+        for dev in &circuit.b3soi.devices {
+            let c = dev.charge_at(candidate_solution);
+            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            let c = dev.charge_at(candidate_solution);
+            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            let c = dev.charge_at(candidate_solution);
+            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+        }
+
+        for (idx, (qg, qb, qd, qe)) in device_charges.into_iter().enumerate() {
             for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
                 (
-                    charge.qg,
+                    qg,
                     history.qg_prev[idx],
                     history.qg_prev_prev[idx],
                     history.qg_prev_prev_prev[idx],
                     history.cqg_prev[idx],
                 ),
                 (
-                    charge.qb,
+                    qb,
                     history.qb_prev[idx],
                     history.qb_prev_prev[idx],
                     history.qb_prev_prev_prev[idx],
                     history.cqb_prev[idx],
                 ),
                 (
-                    charge.qd,
+                    qd,
                     history.qd_prev[idx],
                     history.qd_prev_prev[idx],
                     history.qd_prev_prev_prev[idx],
                     history.cqd_prev[idx],
                 ),
                 (
-                    charge.qe,
+                    qe,
                     history.qe_prev[idx],
                     history.qe_prev_prev[idx],
                     history.qe_prev_prev_prev[idx],

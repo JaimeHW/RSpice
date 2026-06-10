@@ -103,6 +103,18 @@ pub struct B3SoiFd {
     /// DC/operating-point flag (kept for parity with DD; FD has no body-node
     /// convergence aids, so it only gates nothing today).
     dc_mode: std::cell::Cell<bool>,
+    /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
+    /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
+    /// disables bypass (DC operating point never bypasses).
+    bypass_tolerances: std::cell::Cell<Option<(Value, Value, Value)>>,
+    /// Bypass engaged for the current Newton iterate (ngspice `ByPass`): the
+    /// device state (`bias`, `op`, mode, charge partition) is frozen and the
+    /// stamps reuse the previous evaluation.
+    bypass_active: std::cell::Cell<bool>,
+    /// Set at the start of every timestep attempt (ngspice `MODEINITPRED`):
+    /// the next `update` must perform a full evaluation so the bypass anchor
+    /// always belongs to the current timestep.
+    force_full_eval: std::cell::Cell<bool>,
 }
 
 impl B3SoiFd {
@@ -166,6 +178,9 @@ impl B3SoiFd {
             converged_ref: B3SoiFdBias::default(),
             has_history: false,
             dc_mode: std::cell::Cell::new(true),
+            bypass_tolerances: std::cell::Cell::new(None),
+            bypass_active: std::cell::Cell::new(false),
+            force_full_eval: std::cell::Cell::new(true),
         })
     }
 
@@ -173,6 +188,83 @@ impl B3SoiFd {
     /// body-node convergence aids to toggle).
     pub fn set_dc_mode(&self, dc: bool) {
         self.dc_mode.set(dc);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+    }
+
+    /// Enable the ngspice-style transient device bypass with the engine's
+    /// `(reltol, current abstol, vntol)` triple, or disable it with `None`.
+    ///
+    /// Bypass is more than a speed optimization: the B3SOIFD mode select is
+    /// discontinuous at `vds = 0`, so a device parked at that boundary injects
+    /// a charge-current jump on every re-evaluation and Newton limit-cycles at
+    /// any timestep. Freezing the evaluation once the branch voltages and
+    /// predicted currents are stationary (b3soifdld.c:512-560) is how ngspice
+    /// converges there.
+    pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
+        self.bypass_tolerances.set(tolerances);
+        self.bypass_active.set(false);
+    }
+
+    /// Mark the start of a new timestep attempt (ngspice `MODEINITPRED`): the
+    /// next `update` must fully re-evaluate so bypass deltas are always
+    /// measured against a state from the current timestep.
+    pub fn begin_timestep_iteration(&self) {
+        self.force_full_eval.set(true);
+        self.bypass_active.set(false);
+    }
+
+    /// ngspice bypass predicate (b3soifdld.c:512-560): every branch-voltage
+    /// delta against the previous iterate's state is inside the Newton
+    /// tolerances and the linear current predictions `cdhat`/`cbhat` match the
+    /// stored device currents. FD has no `vps` branch (`vps == 0` always).
+    fn bypass_check(
+        &self,
+        raw: B3SoiFdBias,
+        reltol: Value,
+        abstol: Value,
+        vntol: Value,
+    ) -> bool {
+        let vtol = |new: Value, old: Value| reltol * new.abs().max(old.abs()) + vntol;
+        let old = &self.bias;
+        let delvbs = raw.vbs - old.vbs;
+        let delvds = raw.vds - old.vds;
+        let delvgs = raw.vgs - old.vgs;
+        let delves = raw.ves - old.ves;
+        let vbd_new = raw.vbs - raw.vds;
+        let vbd_old = old.vbs - old.vds;
+        let delvbd = vbd_new - vbd_old;
+        if delvbs.abs() >= vtol(raw.vbs, old.vbs)
+            || delvbd.abs() >= vtol(vbd_new, vbd_old)
+            || delvgs.abs() >= vtol(raw.vgs, old.vgs)
+            || delves.abs() >= vtol(raw.ves, old.ves)
+            || delvds.abs() >= vtol(raw.vds, old.vds)
+        {
+            return false;
+        }
+
+        // Linear predictions with the stored linearization (b3soifdld.c:512-532).
+        let op = &self.op;
+        let cdhat = if op.mode >= 0 {
+            op.cd
+                + (op.gm - op.gjdg) * delvgs
+                + (op.gds - op.gjdd) * delvds
+                + (op.gmbs - op.gjdb) * delvbs
+                + (op.gme - op.gjde) * delves
+        } else {
+            let delvgd = (raw.vgs - raw.vds) - (old.vgs - old.vds);
+            let delved = (raw.ves - raw.vds) - (old.ves - old.vds);
+            op.cd + (op.gm - op.gjdg) * delvgd - (op.gds - op.gjdd) * delvds
+                + (op.gmbs - op.gjdb) * delvbd
+                + (op.gme - op.gjde) * delved
+        };
+        let cbhat = op.cb
+            + op.gbgs * delvgs
+            + op.gbbs * delvbs
+            + op.gbds * delvds
+            + op.gbes * delves;
+        (cdhat - op.cd).abs() < reltol * cdhat.abs().max(op.cd.abs()) + abstol
+            && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
 
     /// Body node (0 when floating). Used by the harness `@m1[vbs]` probe.
@@ -192,9 +284,23 @@ impl B3SoiFd {
         )
     }
 
+    /// The bias the transient charge evaluation and its companion stamp use:
+    /// the frozen iterate under bypass, otherwise the branch voltages. The
+    /// companion's `ceqq*` linearization corrections must be formed from this
+    /// same bias.
+    fn charge_bias(&self, voltages: &[Value]) -> B3SoiFdBias {
+        if self.bypass_active.get() {
+            self.bias
+        } else {
+            self.branch_voltages(voltages)
+        }
+    }
+
     /// Evaluate the CAPMOD=3 charge state at the given solution vector.
     pub fn charge_at(&self, voltages: &[Value]) -> eval::B3SoiFdCharge {
-        let bias = self.branch_voltages(voltages);
+        // A bypassed iterate freezes the whole evaluation, charges included
+        // (ngspice reuses the CKTstate charges verbatim under ByPass).
+        let bias = self.charge_bias(voltages);
         eval::eval(&self.sized, &self.consts, bias, self.mtype, true)
             .charge
             .expect("compute_charges=true yields a charge state")
@@ -218,20 +324,19 @@ impl B3SoiFd {
         matrix: &mut impl MatrixStamper,
     ) {
         let (dp, g, sp, e, _b) = self.charge_nodes();
-        let node = |n: NodeId| if n == 0 { 0.0 } else { voltages[n - 1] };
-        let vg = node(g);
-        let vd = node(dp);
-        let vs = node(sp);
-        let ve = node(e);
         // FD pins the body to its equilibrium value; the charge model evaluates
         // the `gc**` derivatives in the source-referenced body frame exactly as
         // DD, but with the body voltage taken from the device's pinned `vbs`.
-        let bias = self.branch_voltages(voltages);
-        let vb = self.mtype * bias.vbs + vs; // node-frame body potential
-        let vgb = vg - vb;
-        let vbd = vb - vd;
-        let vbs = vb - vs;
-        let veb = ve - vb;
+        // Branch voltages are device-polarity (type-folded), exactly as ngspice
+        // forms them from the folded vgs/vbs/vds/ves state before the type<0
+        // sign flip of the ceqq* terms (b3soifdld.c). Raw node differences here
+        // would flip the sign of the G*v linearization correction for every
+        // p-channel device. Under bypass the frozen iterate is reused.
+        let bias = self.charge_bias(voltages);
+        let vgb = bias.vgs - bias.vbs;
+        let vbd = bias.vbs - bias.vds;
+        let vbs = bias.vbs;
+        let veb = bias.ves - bias.vbs;
 
         let c = charge;
         let gcggb = c.gcggb * ag0;
@@ -322,6 +427,23 @@ impl B3SoiFd {
 impl NonlinearDevice for B3SoiFd {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
+        // ngspice transient bypass (b3soifdld.c:512-560): when the new branch
+        // voltages plus predicted currents are stationary within tolerances,
+        // freeze the evaluation (bias, op, mode). This is what lets Newton
+        // contract on a device parked at the discontinuous vds = 0 mode
+        // boundary.
+        if let Some((reltol, abstol, vntol)) = self.bypass_tolerances.get()
+            && !self.force_full_eval.get()
+            && self.has_history
+        {
+            let raw = self.branch_voltages(voltages);
+            if self.bypass_check(raw, reltol, abstol, vntol) {
+                self.bypass_active.set(true);
+                return;
+            }
+        }
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
         let bias = self.branch_voltages(voltages);
         self.bias = bias;
         self.op = eval::eval_dc(&self.sized, &self.consts, bias, self.mtype);
@@ -334,6 +456,11 @@ impl NonlinearDevice for B3SoiFd {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
+        if self.bypass_active.get() {
+            // Bypassed iterate: restamp the frozen linearization unchanged.
+            self.stamp_op(&self.op, self.bias, matrix);
+            return;
+        }
         let bias = self.branch_voltages(voltages);
         let op = if biases_match(bias, self.bias) {
             self.op.clone()

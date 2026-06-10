@@ -37,10 +37,10 @@
 //!   `build_b3soi_dd`); levels 55/57 still fall through to the generic MOSFET.
 //!
 //! Verified: the DC sweeps (`t3`/`t4`/`t5`/`inv2`) match the checked-in ngspice
-//! references; the `RampVg2` floating-body `@m1[vbs]` trace matches at the DC
+//! references; `ring51` (the 51-stage SOI ring oscillator) runs its full 50 ns
+//! transient. The `RampVg2` floating-body `@m1[vbs]` trace matches at the DC
 //! anchor (t=0, ~0.0917 V) and tracks the transient (the fast-edge body
-//! amplitude is still being calibrated against ngspice's body LTE). `ring51`
-//! (51-stage SOI ring oscillator) does not yet reach a DC operating point.
+//! amplitude is still being calibrated against ngspice's body LTE).
 
 pub use super::common;
 pub use params::B3SoiDdModel;
@@ -110,6 +110,21 @@ pub struct B3SoiDd {
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
+    /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
+    /// disables bypass (DC operating point never bypasses).
+    bypass_tolerances: std::cell::Cell<Option<(Value, Value, Value)>>,
+    /// Bypass engaged for the current Newton iterate (ngspice `ByPass`): the
+    /// device state (`bias`, `op`, mode, charge partition) is frozen and the
+    /// stamps reuse the previous evaluation.
+    bypass_active: std::cell::Cell<bool>,
+    /// Set at the start of every timestep attempt (ngspice `MODEINITPRED`):
+    /// the next `update` must perform a full evaluation so the bypass anchor
+    /// always belongs to the current timestep.
+    force_full_eval: std::cell::Cell<bool>,
+    /// The previous full evaluation engaged the body limiter (ngspice
+    /// `Check != 0`), which disqualifies the next iterate from bypassing.
+    last_limited: std::cell::Cell<bool>,
 }
 
 impl B3SoiDd {
@@ -190,6 +205,10 @@ impl B3SoiDd {
             vbd_limit_anchor: 0.0,
             dc_mode: std::cell::Cell::new(true),
             limit_anchor_valid: std::cell::Cell::new(false),
+            bypass_tolerances: std::cell::Cell::new(None),
+            bypass_active: std::cell::Cell::new(false),
+            force_full_eval: std::cell::Cell::new(true),
+            last_limited: std::cell::Cell::new(false),
         })
     }
 
@@ -203,6 +222,86 @@ impl B3SoiDd {
         self.dc_mode.set(dc);
         // A mode switch invalidates the limiter anchor (different state vector).
         self.limit_anchor_valid.set(false);
+        self.bypass_active.set(false);
+        self.force_full_eval.set(true);
+    }
+
+    /// Enable the ngspice-style transient device bypass with the engine's
+    /// `(reltol, current abstol, vntol)` triple, or disable it with `None`.
+    ///
+    /// Bypass is more than a speed optimization: the B3SOIDD charge partition
+    /// (`dxpart` 0.4/0.6) and mode select are discontinuous at `vds = 0`, so a
+    /// device parked at that boundary injects an `ag0`-amplified charge-current
+    /// jump on every re-evaluation and Newton limit-cycles at any timestep.
+    /// Freezing the evaluation once the branch voltages and predicted currents
+    /// are stationary (b3soiddld.c:589-643) is how ngspice converges there.
+    pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
+        self.bypass_tolerances.set(tolerances);
+        self.bypass_active.set(false);
+    }
+
+    /// Mark the start of a new timestep attempt (ngspice `MODEINITPRED`): the
+    /// next `update` must fully re-evaluate so bypass deltas are always
+    /// measured against a state from the current timestep.
+    pub fn begin_timestep_iteration(&self) {
+        self.force_full_eval.set(true);
+        self.bypass_active.set(false);
+    }
+
+    /// ngspice bypass predicate (b3soiddld.c:589-643): every branch-voltage
+    /// delta against the previous iterate's state is inside the Newton
+    /// tolerances and the linear current predictions `cdhat`/`cbhat` match the
+    /// stored device currents. `bodyMod` 0/2 skips the `vps` voltage test
+    /// exactly as ngspice does.
+    fn bypass_check(
+        &self,
+        raw: B3SoiDdBias,
+        reltol: Value,
+        abstol: Value,
+        vntol: Value,
+    ) -> bool {
+        let vtol = |new: Value, old: Value| reltol * new.abs().max(old.abs()) + vntol;
+        let old = &self.bias;
+        let delvbs = raw.vbs - old.vbs;
+        let delvds = raw.vds - old.vds;
+        let delvgs = raw.vgs - old.vgs;
+        let delves = raw.ves - old.ves;
+        let delvps = raw.vps - old.vps;
+        let vbd_new = raw.vbs - raw.vds;
+        let vbd_old = old.vbs - old.vds;
+        let delvbd = vbd_new - vbd_old;
+        if delvbs.abs() >= vtol(raw.vbs, old.vbs)
+            || delvbd.abs() >= vtol(vbd_new, vbd_old)
+            || delvgs.abs() >= vtol(raw.vgs, old.vgs)
+            || delves.abs() >= vtol(raw.ves, old.ves)
+            || delvds.abs() >= vtol(raw.vds, old.vds)
+        {
+            return false;
+        }
+
+        // Linear predictions with the stored linearization (b3soiddld.c:542-563).
+        let op = &self.op;
+        let cdhat = if op.mode >= 0 {
+            op.cd
+                + (op.gm - op.gjdg) * delvgs
+                + (op.gds - op.gjdd) * delvds
+                + (op.gmbs - op.gjdb) * delvbs
+                + (op.gme - op.gjde) * delves
+        } else {
+            let delvgd = (raw.vgs - raw.vds) - (old.vgs - old.vds);
+            let delved = (raw.ves - raw.vds) - (old.ves - old.vds);
+            op.cd + (op.gm - op.gjdg) * delvgd - (op.gds - op.gjdd) * delvds
+                + (op.gmbs - op.gjdb) * delvbd
+                + (op.gme - op.gjde) * delved
+        };
+        let cbhat = op.cb
+            + op.gbgs * delvgs
+            + op.gbbs * delvbs
+            + op.gbds * delvds
+            + op.gbes * delves
+            + op.gbps * delvps;
+        (cdhat - op.cd).abs() < reltol * cdhat.abs().max(op.cd.abs()) + abstol
+            && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
 
     /// Internal body node (used by the harness `@m1[vbs]` probe resolution).
@@ -225,8 +324,25 @@ impl B3SoiDd {
     ///
     /// Returns the four node charges and the intrinsic+overlap capacitance
     /// matrix (pre-`ag0`). Used by the engine's transient charge companion.
+    /// The bias the transient charge evaluation and its companion stamp use:
+    /// the frozen iterate under bypass, otherwise the limited branch voltages.
+    /// The companion's `ceqq*` linearization corrections must be formed from
+    /// this same bias (ngspice rebuilds `vb` from the limited `vbs`,
+    /// b3soiddld.c:676-688) - mixing raw node voltages with limited-bias
+    /// charges injects `ag0`-amplified phantom currents whenever the body
+    /// limiter engages.
+    fn charge_bias(&self, voltages: &[Value]) -> B3SoiDdBias {
+        if self.bypass_active.get() {
+            self.bias
+        } else {
+            self.branch_voltages(voltages)
+        }
+    }
+
     pub fn charge_at(&self, voltages: &[Value]) -> eval::B3SoiDdCharge {
-        let bias = self.branch_voltages(voltages);
+        // A bypassed iterate freezes the whole evaluation, charges included
+        // (ngspice reuses the CKTstate charges verbatim under ByPass).
+        let bias = self.charge_bias(voltages);
         eval::eval(&self.sized, &self.consts, bias, self.mtype, true)
             .charge
             .expect("compute_charges=true yields a charge state")
@@ -252,16 +368,18 @@ impl B3SoiDd {
         matrix: &mut impl MatrixStamper,
     ) {
         let (dp, g, sp, e, b) = self.charge_nodes();
-        let node = |n: NodeId| if n == 0 { 0.0 } else { voltages[n - 1] };
-        let vg = node(g);
-        let vd = node(dp);
-        let vs = node(sp);
-        let ve = node(e);
-        let vb = node(b);
-        let vgb = vg - vb;
-        let vbd = vb - vd;
-        let vbs = vb - vs;
-        let veb = ve - vb;
+        // Branch voltages are device-polarity (type-folded) and LIMITED,
+        // exactly as ngspice forms them from the folded vgs/vbs/vds/ves state
+        // (with `vb` rebuilt from the limited `vbs`) before the type<0 sign
+        // flip of the ceqq* terms (b3soiddld.c:495-500, 676-688, 834-836,
+        // 4000-4009). Raw node differences here would flip the sign of the
+        // G*v linearization correction for every p-channel device and inject
+        // ag0-amplified phantom currents whenever the body limiter engages.
+        let bias = self.charge_bias(voltages);
+        let vgb = bias.vgs - bias.vbs;
+        let vbd = bias.vbs - bias.vds;
+        let vbs = bias.vbs;
+        let veb = bias.ves - bias.vbs;
 
         // gc** are multiplied by ag0 (b3soiddld.c:3680-3766).
         let c = charge;
@@ -343,7 +461,7 @@ impl B3SoiDd {
     ///
     /// The solution vector is 0-indexed (node 1 -> `v[0]`); ground (NodeId 0)
     /// reads as 0.0.
-    fn branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
+    fn raw_branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
         let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
         let vd = node(self.node_drain);
         let vg = node(self.node_gate);
@@ -351,14 +469,18 @@ impl B3SoiDd {
         let ve = node(self.node_e);
         let vb = node(self.node_body);
         let vp = node(self.node_p);
-        let mut bias = B3SoiDdBias {
+        B3SoiDdBias {
             vbs: self.mtype * (vb - vs),
             vgs: self.mtype * (vg - vs),
             vds: self.mtype * (vd - vs),
             ves: self.mtype * (ve - vs),
             vps: self.mtype * (vp - vs),
-        };
-        self.apply_body_limiting(&mut bias);
+        }
+    }
+
+    fn branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
+        let mut bias = self.raw_branch_voltages(v);
+        let _ = self.apply_body_limiting(&mut bias);
         bias
     }
 
@@ -369,7 +491,10 @@ impl B3SoiDd {
     /// body-drain) voltage is clamped to move at most 0.2 V from the previous
     /// iterate's value and, in DC, floored at 0 for a floating body. This only
     /// reshapes the Newton path; the converged solution still satisfies KCL.
-    fn apply_body_limiting(&self, bias: &mut B3SoiDdBias) {
+    /// Returns whether the per-iteration change cap actually engaged (the
+    /// ngspice `Check` flag; the SmartVbs DC floor intentionally does not set
+    /// it, matching `B3SOIDDSmartVbs`'s `NG_IGNORE(check)`).
+    fn apply_body_limiting(&self, bias: &mut B3SoiDdBias) -> bool {
         if !self.limit_anchor_valid.get() {
             // First iterate of a phase: accept the raw bias, but still apply the
             // DC SmartVbs floor so a floating body never starts negative.
@@ -386,7 +511,7 @@ impl B3SoiDd {
                     }
                 }
             }
-            return;
+            return false;
         }
         let mut check = false;
         let smart = self.dc_mode.get() && self.body_mode == BodyMode::Floating;
@@ -404,13 +529,35 @@ impl B3SoiDd {
             }
             bias.vbs = vbd + bias.vds;
         }
+        check
     }
 }
 
 impl NonlinearDevice for B3SoiDd {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
-        let bias = self.branch_voltages(voltages);
+        // ngspice transient bypass (b3soiddld.c:589-643): when the previous
+        // iterate evaluated without limiting and the new branch voltages plus
+        // predicted currents are stationary within tolerances, freeze the
+        // evaluation (bias, op, mode, charge partition). This is what lets
+        // Newton contract on a device parked at the discontinuous vds = 0
+        // mode/charge-partition boundary.
+        if let Some((reltol, abstol, vntol)) = self.bypass_tolerances.get()
+            && !self.force_full_eval.get()
+            && !self.last_limited.get()
+            && self.has_history
+        {
+            let raw = self.raw_branch_voltages(voltages);
+            if self.bypass_check(raw, reltol, abstol, vntol) {
+                self.bypass_active.set(true);
+                return;
+            }
+        }
+        self.bypass_active.set(false);
+        self.force_full_eval.set(false);
+        let mut bias = self.raw_branch_voltages(voltages);
+        let limited = self.apply_body_limiting(&mut bias);
+        self.last_limited.set(limited);
         self.bias = bias;
         self.op = eval::eval_dc(&self.sized, &self.consts, bias, self.mtype);
         self.has_history = true;
@@ -427,6 +574,11 @@ impl NonlinearDevice for B3SoiDd {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
+        if self.bypass_active.get() {
+            // Bypassed iterate: restamp the frozen linearization unchanged.
+            self.stamp_op(&self.op, self.bias, matrix);
+            return;
+        }
         let bias = self.branch_voltages(voltages);
         let op = if biases_match(bias, self.bias) {
             self.op.clone()
@@ -801,12 +953,6 @@ mod tests {
         assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
     }
 
-    /// End-to-end check: a tied-body NMOS at the t4 first operating point
-    /// (Vg=0, Vd=0.05, Vb=-0.3) must reproduce the checked-in ngspice reference
-    /// drain current to within 0.1%. Exercises the builder dispatch, the SOI
-    /// stamping consistency (cdreq vs. linearized conductances), and the
-    /// `VOFF=-.14` model-card sign parsing all at once.
-    #[test]
     /// The floating-body DC equilibrium must rise into forward bias as the gate
     /// turns the device on with the drain at 1.5 V (the RampVg2 bias), driven by
     /// impact ionization charging the body until the source diode clamps it.
@@ -832,6 +978,11 @@ mod tests {
         assert!(vb1 > 0.4 && vb1 < 0.7, "Vb(Vg=1)={vb1:.4e}");
     }
 
+    /// End-to-end check: a tied-body NMOS at the t4 first operating point
+    /// (Vg=0, Vd=0.05, Vb=-0.3) must reproduce the checked-in ngspice reference
+    /// drain current to within 0.1%. Exercises the builder dispatch, the SOI
+    /// stamping consistency (cdreq vs. linearized conductances), and the
+    /// `VOFF=-.14` model-card sign parsing all at once.
     #[test]
     fn t4_first_point_matches_ngspice_reference() {
         use crate::{Engine, Netlist};

@@ -736,26 +736,128 @@ impl Engine {
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
+        let mut seed = |qg: Value, qb: Value, qd: Value, qe: Value| {
+            h.qg_prev.push(qg);
+            h.qg_prev_prev.push(qg);
+            h.qg_prev_prev_prev.push(qg);
+            h.cqg_prev.push(0.0);
+            h.qb_prev.push(qb);
+            h.qb_prev_prev.push(qb);
+            h.qb_prev_prev_prev.push(qb);
+            h.cqb_prev.push(0.0);
+            h.qd_prev.push(qd);
+            h.qd_prev_prev.push(qd);
+            h.qd_prev_prev_prev.push(qd);
+            h.cqd_prev.push(0.0);
+            h.qe_prev.push(qe);
+            h.qe_prev_prev.push(qe);
+            h.qe_prev_prev_prev.push(qe);
+            h.cqe_prev.push(0.0);
+        };
+        // The history is indexed DD devices first, then FD, then PD; the
+        // stamp/commit/truncation walks use the same concatenated order.
         for dev in &circuit.b3soi.devices {
             let c = dev.charge_at(solution);
-            h.qg_prev.push(c.qg);
-            h.qg_prev_prev.push(c.qg);
-            h.qg_prev_prev_prev.push(c.qg);
-            h.cqg_prev.push(0.0);
-            h.qb_prev.push(c.qb);
-            h.qb_prev_prev.push(c.qb);
-            h.qb_prev_prev_prev.push(c.qb);
-            h.cqb_prev.push(0.0);
-            h.qd_prev.push(c.qd);
-            h.qd_prev_prev.push(c.qd);
-            h.qd_prev_prev_prev.push(c.qd);
-            h.cqd_prev.push(0.0);
-            h.qe_prev.push(c.qe);
-            h.qe_prev_prev.push(c.qe);
-            h.qe_prev_prev_prev.push(c.qe);
-            h.cqe_prev.push(0.0);
+            seed(c.qg, c.qb, c.qd, c.qe);
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            let c = dev.charge_at(solution);
+            seed(c.qg, c.qb, c.qd, c.qe);
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            let c = dev.charge_at(solution);
+            seed(c.qg, c.qb, c.qd, c.qe);
         }
         h
+    }
+
+    /// Integrate one SOI device's four node charges with the engine
+    /// coefficient and its per-charge history slot, yielding the equivalent
+    /// charge currents `(cqg, cqb, cqd, cqe)`.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn b3soi_companion_currents(
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &B3SoiTransientHistory,
+        idx: usize,
+        qg: Value,
+        qb: Value,
+        qd: Value,
+        qe: Value,
+    ) -> (Value, Value, Value, Value) {
+        let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
+            Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                q,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            )
+        };
+        (
+            cq(
+                qg,
+                history.qg_prev[idx],
+                history.qg_prev_prev[idx],
+                history.cqg_prev[idx],
+            ),
+            cq(
+                qb,
+                history.qb_prev[idx],
+                history.qb_prev_prev[idx],
+                history.cqb_prev[idx],
+            ),
+            cq(
+                qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            ),
+            cq(
+                qe,
+                history.qe_prev[idx],
+                history.qe_prev_prev[idx],
+                history.cqe_prev[idx],
+            ),
+        )
+    }
+
+    /// Commit one SOI device's accepted charges and integrated currents into
+    /// its history slot.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn b3soi_commit_history_slot(
+        history: &mut B3SoiTransientHistory,
+        idx: usize,
+        qg: Value,
+        qb: Value,
+        qd: Value,
+        qe: Value,
+        cqg: Value,
+        cqb: Value,
+        cqd: Value,
+        cqe: Value,
+    ) {
+        history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
+        history.qg_prev_prev[idx] = history.qg_prev[idx];
+        history.qg_prev[idx] = qg;
+        history.cqg_prev[idx] = cqg;
+        history.qb_prev_prev_prev[idx] = history.qb_prev_prev[idx];
+        history.qb_prev_prev[idx] = history.qb_prev[idx];
+        history.qb_prev[idx] = qb;
+        history.cqb_prev[idx] = cqb;
+        history.qd_prev_prev_prev[idx] = history.qd_prev_prev[idx];
+        history.qd_prev_prev[idx] = history.qd_prev[idx];
+        history.qd_prev[idx] = qd;
+        history.cqd_prev[idx] = cqd;
+        history.qe_prev_prev_prev[idx] = history.qe_prev_prev[idx];
+        history.qe_prev_prev[idx] = history.qe_prev[idx];
+        history.qe_prev[idx] = qe;
+        history.cqe_prev[idx] = cqe;
     }
 
     /// Stamp the B3SOIDD transient charge companion for every SOI instance.
@@ -776,7 +878,7 @@ impl Engine {
         dt: Value,
         history: &B3SoiTransientHistory,
     ) {
-        if circuit.b3soi.is_empty() {
+        if !circuit.has_b3soi_devices() {
             return;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
@@ -786,51 +888,64 @@ impl Engine {
             return;
         }
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
-        for (idx, dev) in circuit.b3soi.devices.iter().enumerate() {
+        let mut idx = 0;
+        for dev in &circuit.b3soi.devices {
             let charge = dev.charge_at(voltages);
-            let cqg = Self::jfet_companion_ccap(
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
+                history,
+                idx,
                 charge.qg,
-                history.qg_prev[idx],
-                history.qg_prev_prev[idx],
-                history.cqg_prev[idx],
-            );
-            let cqb = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
                 charge.qb,
-                history.qb_prev[idx],
-                history.qb_prev_prev[idx],
-                history.cqb_prev[idx],
-            );
-            let cqd = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
                 charge.qd,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.cqd_prev[idx],
-            );
-            let cqe = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
                 charge.qe,
-                history.qe_prev[idx],
-                history.qe_prev_prev[idx],
-                history.cqe_prev[idx],
             );
             dev.stamp_charge_companion(
                 &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
             );
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            let charge = dev.charge_at(voltages);
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                charge.qg,
+                charge.qb,
+                charge.qd,
+                charge.qe,
+            );
+            dev.stamp_charge_companion(
+                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
+            );
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            let charge = dev.charge_at(voltages);
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                charge.qg,
+                charge.qb,
+                charge.qd,
+                charge.qe,
+            );
+            dev.stamp_charge_companion(
+                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
+            );
+            idx += 1;
         }
     }
 
-    /// Commit the B3SOIDD charge history after an accepted timestep.
+    /// Commit the SOI (DD/FD/PD) charge history after an accepted timestep.
     #[inline]
     pub(super) fn update_b3soi_history(
         circuit: &crate::circuit::Circuit,
@@ -840,64 +955,64 @@ impl Engine {
         dt: Value,
         history: &mut B3SoiTransientHistory,
     ) {
-        if circuit.b3soi.is_empty() {
+        if !circuit.has_b3soi_devices() {
             return;
         }
         let effective_method = Self::effective_companion_method(method, trap_order);
-        for (idx, dev) in circuit.b3soi.devices.iter().enumerate() {
+        let mut idx = 0;
+        for dev in &circuit.b3soi.devices {
             let charge = dev.charge_at(voltages);
-            let cqg = Self::jfet_companion_ccap(
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
+                history,
+                idx,
                 charge.qg,
-                history.qg_prev[idx],
-                history.qg_prev_prev[idx],
-                history.cqg_prev[idx],
-            );
-            let cqb = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
                 charge.qb,
-                history.qb_prev[idx],
-                history.qb_prev_prev[idx],
-                history.cqb_prev[idx],
-            );
-            let cqd = Self::jfet_companion_ccap(
-                effective_method,
-                trap_order,
-                dt,
                 charge.qd,
-                history.qd_prev[idx],
-                history.qd_prev_prev[idx],
-                history.cqd_prev[idx],
+                charge.qe,
             );
-            let cqe = Self::jfet_companion_ccap(
+            Self::b3soi_commit_history_slot(
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+            );
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            let charge = dev.charge_at(voltages);
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
+                history,
+                idx,
+                charge.qg,
+                charge.qb,
+                charge.qd,
                 charge.qe,
-                history.qe_prev[idx],
-                history.qe_prev_prev[idx],
-                history.cqe_prev[idx],
             );
-            history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
-            history.qg_prev_prev[idx] = history.qg_prev[idx];
-            history.qg_prev[idx] = charge.qg;
-            history.cqg_prev[idx] = cqg;
-            history.qb_prev_prev_prev[idx] = history.qb_prev_prev[idx];
-            history.qb_prev_prev[idx] = history.qb_prev[idx];
-            history.qb_prev[idx] = charge.qb;
-            history.cqb_prev[idx] = cqb;
-            history.qd_prev_prev_prev[idx] = history.qd_prev_prev[idx];
-            history.qd_prev_prev[idx] = history.qd_prev[idx];
-            history.qd_prev[idx] = charge.qd;
-            history.cqd_prev[idx] = cqd;
-            history.qe_prev_prev_prev[idx] = history.qe_prev_prev[idx];
-            history.qe_prev_prev[idx] = history.qe_prev[idx];
-            history.qe_prev[idx] = charge.qe;
-            history.cqe_prev[idx] = cqe;
+            Self::b3soi_commit_history_slot(
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+            );
+            idx += 1;
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            let charge = dev.charge_at(voltages);
+            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                charge.qg,
+                charge.qb,
+                charge.qd,
+                charge.qe,
+            );
+            Self::b3soi_commit_history_slot(
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+            );
+            idx += 1;
         }
         history.accepted_dt_prev_prev = history.accepted_dt_prev;
         history.accepted_dt_prev = dt;

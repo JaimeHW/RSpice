@@ -390,9 +390,27 @@ impl Engine {
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
         // The SOI floating-body SmartVbs clamp (Vbs >= 0) belongs to the DC/OP
         // phase only; during time-stepping the body may legitimately swing below
-        // the source, so disable it for the transient sweep.
+        // the source, so disable it for the transient sweep. Transient also
+        // arms the ngspice-style device bypass: the B3SOI mode select and
+        // charge partition are discontinuous at vds = 0, and freezing a
+        // stationary device's evaluation (as ngspice's ByPass does) is what
+        // lets Newton contract on devices parked at that boundary.
+        let bypass_tolerances = Some((
+            self.voltage_reltol(),
+            self.current_abstol(),
+            self.voltage_abstol(),
+        ));
         for dev in &circuit.b3soi.devices {
             dev.set_dc_mode(false);
+            dev.set_bypass_tolerances(bypass_tolerances);
+        }
+        for dev in &circuit.b3soi_fd.devices {
+            dev.set_dc_mode(false);
+            dev.set_bypass_tolerances(bypass_tolerances);
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            dev.set_dc_mode(false);
+            dev.set_bypass_tolerances(bypass_tolerances);
         }
         let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
         if circuit.has_nonlinear_devices() {
@@ -819,6 +837,20 @@ impl Engine {
             // parity at every fast edge.
             let conservative_limiting_active = requires_conservative_nonlinear_limiting
                 && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
+
+            // A new timestep attempt begins: the first Newton iterate must
+            // fully re-evaluate every bypass-capable device (ngspice's
+            // MODEINITPRED discipline), so bypass deltas are always measured
+            // against a linearization from the current attempt.
+            for dev in &circuit.b3soi.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                dev.begin_timestep_iteration();
+            }
 
             // Prepare for Newton iteration at this timestep by seeding the full
             // algebraic solution vector from accepted history when a predictor
@@ -1759,7 +1791,7 @@ impl Engine {
                         } else {
                             None
                         };
-                    let force_accept_b3soi_truncation_limit = if !circuit.b3soi.is_empty() {
+                    let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
@@ -1997,7 +2029,7 @@ impl Engine {
                 None
             };
             let b3soi_truncation_limit =
-                if !first_accepted_transient_step && !circuit.b3soi.is_empty() {
+                if !first_accepted_transient_step && circuit.has_b3soi_devices() {
                     Self::b3soi_ngspice_truncation_limit(
                         &circuit,
                         &new_solution,
@@ -2454,7 +2486,7 @@ impl Engine {
                         } else {
                             None
                         };
-                    let force_accept_b3soi_truncation_limit = if !circuit.b3soi.is_empty() {
+                    let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
                             &new_solution,
