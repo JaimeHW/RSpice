@@ -31,13 +31,12 @@ impl LibraryManager {
 
     /// Remove the legacy seeded "primitives" library from persisted
     /// sessions: its empty placeholder cells shadow the component palette
-    /// in the browser. User-authored cells are never touched (the seeded
-    /// library was read-only).
+    /// in the browser. Callers migrate any workspace content out of it
+    /// first (`AppState::migrate_legacy_primitives`), so removal is
+    /// unconditional — old sessions may carry it without the read-only
+    /// flag.
     pub fn purge_legacy_primitives(&mut self) {
-        let is_seeded = self
-            .get_library(Self::PRIMITIVES_LIBRARY)
-            .is_some_and(|lib| lib.read_only);
-        if is_seeded {
+        if self.get_library(Self::PRIMITIVES_LIBRARY).is_some() {
             self.remove_library(Self::PRIMITIVES_LIBRARY);
         }
     }

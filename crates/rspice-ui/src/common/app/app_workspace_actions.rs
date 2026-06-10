@@ -26,6 +26,72 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
 }
 
 impl AppState {
+    /// Migrate persisted sessions away from the legacy seeded "primitives"
+    /// library: any workspace tab or schematic buffer pointing into it is
+    /// moved to the user library (preserving drawn content), then the
+    /// placeholder library is dropped. Without the workspace scrub,
+    /// `ensure_library_model` would faithfully re-create the legacy cell
+    /// the active tab points at on every launch.
+    pub(crate) fn migrate_legacy_primitives(&mut self) {
+        const LEGACY: &str = crate::state::LibraryManager::PRIMITIVES_LIBRARY;
+        let user = crate::state::LibraryManager::USER_LIBRARY;
+        let legacy_prefix = format!("{LEGACY}/");
+
+        // Move schematic buffers (the actual drawn content) to user keys.
+        let legacy_keys: Vec<String> = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .filter(|key| key.starts_with(&legacy_prefix))
+            .cloned()
+            .collect();
+        for key in legacy_keys {
+            let Some(buffer) = self.workspace.schematic_buffers.remove(&key) else {
+                continue;
+            };
+            let tail = &key[legacy_prefix.len()..];
+            let new_key = format!("{user}/{tail}");
+            self.workspace
+                .schematic_buffers
+                .entry(new_key)
+                .or_insert(buffer);
+
+            // Make the migrated cell/view exist in the user library so the
+            // browser lists it and tabs resolve.
+            if let Some((cell_name, view_name)) = tail.split_once('/')
+                && let Some(library) = self.library_manager.get_library_mut(user)
+            {
+                if library.get_cell(cell_name).is_none() {
+                    library.add_cell(crate::state::Cell::new(cell_name));
+                }
+                if let Some(cell) = library.get_cell_mut(cell_name)
+                    && cell.get_view(view_name).is_none()
+                {
+                    cell.add_view(crate::state::View::new(
+                        view_name,
+                        crate::state::ViewType::Schematic,
+                    ));
+                }
+            }
+        }
+
+        // Repoint tabs, breadcrumbs, and the active view.
+        let remap = |reference: &mut CellViewRef| {
+            if reference.library == LEGACY {
+                reference.library = user.to_string();
+            }
+        };
+        remap(&mut self.workspace.active_view);
+        for open in &mut self.workspace.open_views {
+            remap(&mut open.reference);
+        }
+        for entry in &mut self.workspace.hierarchy_stack {
+            remap(entry);
+        }
+
+        self.library_manager.purge_legacy_primitives();
+    }
+
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         self.workspace.save_active_schematic(&self.schematic);
     }
@@ -124,5 +190,59 @@ impl RSpiceApp {
     pub(crate) fn restore_workspace_after_project_load(&mut self) {
         self.state.restore_active_schematic_from_workspace();
         self.state.clear_transient_specialized_viewer_data();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::app::AppState;
+    use crate::state::{Cell, ComponentType, Library, Point, View, ViewType};
+
+    /// A persisted session whose active tab points into the legacy seeded
+    /// "primitives" library must come back with the drawn content moved to
+    /// the user library and the placeholder library gone — otherwise
+    /// `ensure_library_model` resurrects the placeholder cell every launch.
+    #[test]
+    fn legacy_primitives_content_migrates_to_user_library() {
+        let mut state = AppState::default();
+
+        // Simulate the legacy session: seeded library + an open tab with
+        // a drawn schematic inside it.
+        let mut legacy = Library::new("primitives");
+        let mut cell = Cell::new("ISource AC");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        legacy.add_cell(cell);
+        state.library_manager.add_library(legacy);
+
+        let mut drawn = crate::state::SchematicState::default();
+        drawn.add_component(ComponentType::Njfet, Point::new(0, 0));
+        state
+            .workspace
+            .schematic_buffers
+            .insert("primitives/ISource AC/schematic".to_owned(), drawn);
+        state.workspace.active_view =
+            crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
+
+        state.migrate_legacy_primitives();
+
+        assert!(
+            state.library_manager.get_library("primitives").is_none(),
+            "legacy library must be gone"
+        );
+        assert_eq!(state.workspace.active_view.library, "user");
+        let migrated = state
+            .workspace
+            .schematic_buffers
+            .get("user/ISource AC/schematic")
+            .expect("buffer migrated to the user library");
+        assert_eq!(migrated.components.len(), 1, "drawn content preserved");
+        assert!(
+            state
+                .library_manager
+                .get_library("user")
+                .and_then(|lib| lib.get_cell("ISource AC"))
+                .is_some(),
+            "migrated cell exists in the user library"
+        );
     }
 }

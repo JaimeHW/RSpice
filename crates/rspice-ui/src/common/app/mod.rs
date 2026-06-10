@@ -228,8 +228,9 @@ impl RSpiceApp {
         state.shell.theme.apply(&cc.egui_ctx);
 
         // Persisted sessions may still carry the legacy seeded
-        // "primitives" library; its placeholder cells shadow the palette.
-        state.library_manager.purge_legacy_primitives();
+        // "primitives" library (and tabs pointing into it); migrate any
+        // drawn content to the user library and drop the placeholders.
+        state.migrate_legacy_primitives();
 
         // Ctrl+± / Ctrl+0 zoom the *schematic*, not the UI — disable egui's
         // built-in keyboard zoom so the shortcuts don't double-fire.
