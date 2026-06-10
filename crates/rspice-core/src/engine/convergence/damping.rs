@@ -236,12 +236,14 @@ impl Engine {
     /// Newton node updates stay safe around exponential junctions without a
     /// global trust region distorting switching-edge trajectories.
     ///
-    /// VBIC devices are excluded: their excess-phase hidden states and
-    /// charge-history coupling already have a dedicated, conditionally
-    /// engaged limiter (`limit_vbic_transient_external_updates`), and forcing
-    /// the per-iterate scale onto them stalls stiff startup transients
-    /// (vbic/diffamp) by re-limiting external updates the inner solver has
-    /// already reconciled against its dynamic state.
+    /// Applies to every BJT charge model: the dispatching scale function uses
+    /// the VBIC or legacy Gummel-Poon junction set as appropriate. Without
+    /// the per-iterate discipline a Newton iterate can move a VBIC terminal
+    /// by over a volt in one correction, driving the nested continuation
+    /// solver at an unreachable bias for seconds per rescue (observed on
+    /// vbic/diffamp at t=20ps: max_dv=1.04V with 6.9s failed continuations).
+    /// The hidden excess-phase convergence check compares iterate-to-iterate,
+    /// so limited steps remain consistent with the device-local state.
     pub(crate) fn limit_bjt_junction_external_updates(
         circuit: &CircuitData,
         proposal: &mut [Value],
@@ -253,9 +255,6 @@ impl Engine {
         for _ in 0..3 {
             let mut pass_changed = false;
             for bjt in &circuit.bjts.devices {
-                if bjt.uses_vbic_dynamic_charges() {
-                    continue;
-                }
                 let node_voltage = |values: &[Value], node: usize| {
                     if node == 0 {
                         0.0

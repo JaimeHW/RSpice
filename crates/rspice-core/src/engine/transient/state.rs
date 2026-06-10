@@ -322,27 +322,36 @@ impl Engine {
                     Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
                 let cached_snapshot = vbic_snapshot_cache.get(idx).copied().flatten();
                 let snapshot_start = std::time::Instant::now();
-                let Some(snapshot) =
-                    Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                        bjt,
-                        [vc, vb, ve, vs],
-                        method,
-                        trap_order,
-                        dt,
-                        &history.charge_q_prev[idx],
-                        &history.charge_q_prev_prev[idx],
-                        &history.charge_cq_prev[idx],
-                        history.dynamic_internal_prev.get(idx),
-                        history.dynamic_internal_prev_prev.get(idx),
-                        history.dynamic_linear_prev.get(idx),
-                        history.dynamic_linear_prev_prev.get(idx),
-                        history.accepted_dt_prev,
-                        cached_snapshot,
-                        cache_reuse,
-                        snapshot_reuse_abstol,
-                        snapshot_reuse_reltol,
-                    )
-                else {
+                // Stamping-time snapshot resolves run under the same
+                // deterministic evaluation budget as continuation solves: a
+                // mid-Newton iterate can request a wildly off-bias snapshot
+                // (multi-volt forward junctions), and an unbounded inner solve
+                // there burns >10s per device before the outer loop gets a
+                // chance to reject the iterate and cut dt.
+                let Some(snapshot) = Self::with_vbic_best_effort_eval_budget(
+                    Self::VBIC_CONTINUATION_EVAL_BUDGET,
+                    || {
+                        Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
+                            bjt,
+                            [vc, vb, ve, vs],
+                            method,
+                            trap_order,
+                            dt,
+                            &history.charge_q_prev[idx],
+                            &history.charge_q_prev_prev[idx],
+                            &history.charge_cq_prev[idx],
+                            history.dynamic_internal_prev.get(idx),
+                            history.dynamic_internal_prev_prev.get(idx),
+                            history.dynamic_linear_prev.get(idx),
+                            history.dynamic_linear_prev_prev.get(idx),
+                            history.accepted_dt_prev,
+                            cached_snapshot,
+                            cache_reuse,
+                            snapshot_reuse_abstol,
+                            snapshot_reuse_reltol,
+                        )
+                    },
+                ) else {
                     vbic_snapshot_cache[idx] = None;
                     continue;
                 };
