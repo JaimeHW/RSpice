@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- P-channel JFET, discrete (package circle). Box 40x80, pins D(40,0), G(0,40), S(40,80). -->
 <svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
-  <path d="M 0,40 H 15.9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 8.6,40 L 15.4,37.7 L 15.4,42.3 Z" fill="#000000" stroke="none"/>
-  <path d="M 15.9,22 H 18.1 V 58 H 15.9 Z" fill="#000000" stroke="none"/>
+  <path d="M 0,40 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8.8,40 L 15.6,37.7 L 15.6,42.3 Z" fill="#000000" stroke="none"/>
+  <path d="M 17,22 V 58" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 40,0 V 22 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M 40,80 V 58 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M 21.5,22 A 18,18 0 0 1 21.5,58 A 18,18 0 0 1 21.5,22" fill="none" stroke="#000000" stroke-width="1"/>
