@@ -50,7 +50,11 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 panel_rect.top() + HEADER_HEIGHT - 0.5,
                 egui::Stroke::new(1.0, c.border),
             );
-            log_body(ui, state);
+            if state.shell.console.filter == ConsoleFilter::Script {
+                script_body(ui, state);
+            } else {
+                log_body(ui, state);
+            }
         }
     });
 }
@@ -86,6 +90,9 @@ fn header(ui: &mut Ui, state: &mut AppState) {
             ) {
                 *filter = ConsoleFilter::Warnings;
             }
+            if console_tab(ui, "Automation", None, *filter == ConsoleFilter::Script) {
+                *filter = ConsoleFilter::Script;
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
@@ -114,7 +121,11 @@ fn header(ui: &mut Ui, state: &mut AppState) {
                     .show(ui)
                     .clicked()
                 {
-                    state.clear_primary_log();
+                    if state.shell.console.filter == ConsoleFilter::Script {
+                        state.script_console.history.clear();
+                    } else {
+                        state.clear_primary_log();
+                    }
                 }
             });
         },
@@ -203,6 +214,87 @@ fn level_style(
     }
 }
 
+/// The interactive automation console: mono history above, a command
+/// input pinned at the bottom.
+fn script_body(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_font = theme::mono(11.5, FontWeight::Regular);
+
+    let input_height = 30.0;
+    let history_height = (ui.available_height() - input_height).max(0.0);
+
+    ui.spacing_mut().item_spacing.y = 0.0;
+    ScrollArea::vertical()
+        .id_salt("volta.console.script")
+        .auto_shrink([false, false])
+        .max_height(history_height)
+        .stick_to_bottom(true)
+        .show(ui, |ui| {
+            if state.script_console.history.is_empty() {
+                let (rect, _) = ui.allocate_exact_size(
+                    vec2(ui.available_width(), 20.0),
+                    Sense::hover(),
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 12.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    "Type a command — 'help' lists the automation verbs",
+                    row_font.clone(),
+                    c.text_faint,
+                );
+            }
+            for item in &state.script_console.history {
+                let width = ui.available_width();
+                let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+                let painter = ui.painter();
+                painter.text(
+                    egui::pos2(rect.left() + 12.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("> {}", item.command),
+                    row_font.clone(),
+                    c.text,
+                );
+                let color = if item.output.success { c.ok } else { c.err };
+                for line in item.output.message.lines() {
+                    let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+                    ui.painter().text(
+                        egui::pos2(rect.left() + 24.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        line,
+                        row_font.clone(),
+                        color,
+                    );
+                }
+            }
+        });
+
+    // Command input.
+    let response = ui.add_sized(
+        vec2(ui.available_width() - 16.0, t.metrics.ctl_h),
+        egui::TextEdit::singleline(&mut state.script_console.input_buffer)
+            .font(egui::TextStyle::Monospace)
+            .hint_text("run tran · plot v(out) · help")
+            .margin(egui::Margin::symmetric(8.0, 4.0))
+            .lock_focus(true),
+    );
+    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        let command = state.script_console.input_buffer.trim().to_string();
+        if !command.is_empty() {
+            let output = state
+                .script_console
+                .executor
+                .execute_command(&command, &mut state.simulation);
+            state
+                .script_console
+                .history
+                .push(crate::panels::ConsoleHistoryItem { command, output });
+            state.script_console.input_buffer.clear();
+            response.request_focus();
+        }
+    }
+}
+
 fn log_body(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -217,7 +309,7 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
             .entries()
             .enumerate()
             .filter(|(_, entry)| match filter {
-                ConsoleFilter::All => true,
+                ConsoleFilter::All | ConsoleFilter::Script => true,
                 ConsoleFilter::Errors => entry.severity == LogSeverity::Error,
                 ConsoleFilter::Warnings => entry.severity == LogSeverity::Warning,
             })

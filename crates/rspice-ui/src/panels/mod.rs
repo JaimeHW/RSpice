@@ -15,7 +15,7 @@ pub use log_panel::{LogBuffer, LogEntry, LogSeverity, LogSource};pub use pdk_set
     PdkSettingsDialogResult, PdkSettingsDialogState, PdkSettingsTab, render_pdk_settings_dialog,
 };
 pub use properties_panel::render_property_dialog;
-pub use script_console::{ScriptConsoleState, render_script_console};
+pub use script_console::{ConsoleHistoryItem, ScriptConsoleState};
 pub use veriloga_dialog::{
     CompilationState, CompileErrorDisplay, CompiledModuleInfo, ParameterInfo,
     VerilogADialogOptions, VerilogADialogResult, VerilogALoadDialogState,

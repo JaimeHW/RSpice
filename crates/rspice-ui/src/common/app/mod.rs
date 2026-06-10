@@ -118,8 +118,6 @@ pub struct AppState {
     pub(crate) log_buffer: crate::panels::LogBuffer,
     /// Scripting/Automation console state
     pub(crate) script_console: crate::panels::ScriptConsoleState,
-    /// Whether the automation console window is open.
-    pub(crate) script_console_open: bool,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Project/workspace model for active design context and open LCV views.
@@ -295,7 +293,6 @@ impl RSpiceApp {
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
-        self.render_script_console_window(ctx);
         self.render_confirmation_dialog(ctx);
         self.process_veriloga_load_dialog(ctx);
         crate::panels::render_property_dialog(ctx, &mut self.state);
@@ -358,26 +355,6 @@ impl RSpiceApp {
         self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
     }
 
-    /// Floating automation/scripting console window (Tools menu).
-    fn render_script_console_window(&mut self, ctx: &Context) {
-        if !self.state.script_console_open {
-            return;
-        }
-        let mut open = true;
-        egui::Window::new("Automation console")
-            .open(&mut open)
-            .default_size([580.0, 380.0])
-            .show(ctx, |ui| {
-                crate::panels::render_script_console(
-                    ui,
-                    &mut self.state.script_console,
-                    &mut self.state.simulation,
-                );
-            });
-        if !open {
-            self.state.script_console_open = false;
-        }
-    }
 }
 
 // =============================================================================

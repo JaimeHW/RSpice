@@ -65,6 +65,8 @@ pub enum ConsoleFilter {
     Errors,
     /// Warnings only.
     Warnings,
+    /// The interactive automation console.
+    Script,
 }
 
 /// Console chrome state.

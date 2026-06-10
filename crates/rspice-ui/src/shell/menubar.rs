@@ -524,7 +524,8 @@ fn tools_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         state.pdk_settings_dialog.open(state.pdk_config.clone());
     }
     if item(ui, "Automation console", None) {
-        state.script_console_open = true;
+        state.shell.console.collapsed = false;
+        state.shell.console.filter = crate::shell::state::ConsoleFilter::Script;
     }
     separator(ui);
     if item(ui, "Compile Verilog-A…", None) {
