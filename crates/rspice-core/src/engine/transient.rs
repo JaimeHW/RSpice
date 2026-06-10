@@ -1221,6 +1221,24 @@ impl Engine {
                             );
                         let linearized_residual_converged =
                             self.residual_convergence_met(&matrix, &sol, &rhs);
+                        // The hidden VBIC excess-phase convergence check measures
+                        // whether the device-local hidden state stopped changing
+                        // BETWEEN successive Newton iterates (ngspice convTest
+                        // semantics), not whether it moved across the whole
+                        // timestep. Capture the previous Newton iterate before
+                        // `new_solution` is advanced so the check compares
+                        // iterate-to-iterate. Comparing against the frozen
+                        // previous-timestep `solution` makes the delta span the
+                        // entire step; the VBIC intrinsic resistor branch
+                        // voltages (vcx-vci, vbx-vbi, ...) on the hidden internal
+                        // nodes are amplified ~4x relative to the external delta
+                        // by the nested reduced solve, so that whole-step delta
+                        // can never fall below vntol once the external nodes have
+                        // settled, producing a microvolt limit cycle. The cached
+                        // snapshot from this iterate's stamping is the actual
+                        // linearization point at `previous_iterate`'s bias, so the
+                        // hidden check reuses it directly (exact external match).
+                        let previous_iterate = new_solution.clone();
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -1248,7 +1266,7 @@ impl Engine {
                                 // candidates are retried instead of being accepted stale.
                                 self.vbic_excess_phase_device_convergence_met(
                                     &circuit,
-                                    &solution,
+                                    &previous_iterate,
                                     &new_solution,
                                     current_method,
                                     step_trap_order,

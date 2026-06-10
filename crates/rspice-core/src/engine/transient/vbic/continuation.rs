@@ -230,7 +230,48 @@ impl Engine {
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
     ) -> Option<BjtChargeSnapshot> {
+        // Bound the total nested device-evaluation work for this one continuation
+        // with a DETERMINISTIC iteration budget (not wall-clock). When the
+        // requested target bias is genuinely unreachable for this device/timestep
+        // (a diverging outer Newton iterate during a steep turn-on), the homotopy
+        // and best-effort stacks below would otherwise spend tens of seconds per
+        // attempt exhausting their full iteration budgets. Stopping at a fixed
+        // evaluation count returns `None` so the outer Newton rejects the step and
+        // reduces dt, which is the correct recovery for an unreachable bias, while
+        // keeping output bit-for-bit deterministic across machines.
+        Self::with_vbic_best_effort_eval_budget(Self::VBIC_CONTINUATION_EVAL_BUDGET, || {
+            Self::continue_vbic_snapshot_to_external_bias_from_snapshot_inner(
+                bjt,
+                current_snapshot,
+                target_external,
+                method,
+                trap_order,
+                dt,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            )
+        })
+    }
+
+    fn continue_vbic_snapshot_to_external_bias_from_snapshot_inner(
+        bjt: &crate::device::Bjt,
+        current_snapshot: BjtChargeSnapshot,
+        target_external: [Value; BJT_EXTERNAL_STATE_DIM],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        q_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+        cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
+    ) -> Option<BjtChargeSnapshot> {
         let continuation_started_at = std::time::Instant::now();
+        // Stop expanding continuation micro-steps once the shared deterministic
+        // evaluation budget for this continuation is spent: the remaining nested
+        // best-effort solves would all bail immediately anyway, so further
+        // step-halving is wasted work. Bailing here returns `None` and lets the
+        // outer Newton reduce dt.
+        let budget_exhausted = Self::vbic_best_effort_eval_budget_exhausted;
         let previous_external = current_snapshot.reduction.external_voltages;
         let mut current_external = previous_external;
         let mut current_snapshot = current_snapshot;
@@ -259,6 +300,12 @@ impl Engine {
         let mut rejected_steps = 0usize;
 
         while lambda < 1.0 - 1e-15 {
+            if budget_exhausted() {
+                // Deterministic evaluation budget for this continuation is spent;
+                // abandon so the outer Newton can reduce dt rather than spinning
+                // on step-halving with already-saturated nested solves.
+                return None;
+            }
             let next_external = [
                 current_external[BJT_EXT_C_INDEX]
                     + (target_external[BJT_EXT_C_INDEX] - current_external[BJT_EXT_C_INDEX]) * step,

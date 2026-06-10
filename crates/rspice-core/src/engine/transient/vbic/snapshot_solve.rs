@@ -1,8 +1,75 @@
 //! VBIC dynamic snapshot solve paths and homotopy fallbacks.
 
 use super::*;
+use std::cell::Cell;
+
+thread_local! {
+    /// Optional DETERMINISTIC iteration budget for nested best-effort device
+    /// solves. When a bounded caller (the continuation loop) sets a budget, the
+    /// expensive refinement / Levenberg-Marquardt loops stop early once the
+    /// shared device-evaluation count is exhausted and return their best state
+    /// so far, rather than burning many seconds exhausting full iteration budgets
+    /// on a target the outer Newton will reject anyway. The budget is a pure
+    /// evaluation COUNT (not wall-clock), so simulation output stays bit-for-bit
+    /// deterministic across machines and runs. `None` (the default) preserves the
+    /// original unbounded behavior for direct per-timepoint solves.
+    static VBIC_BEST_EFFORT_EVAL_BUDGET: Cell<Option<u32>> = const { Cell::new(None) };
+}
 
 impl Engine {
+    /// Total device-state evaluations a single bounded continuation to an
+    /// external bias may spend across all its nested best-effort solves and
+    /// homotopy fallbacks. A healthy 10-state reduced solve converges in well
+    /// under a hundred evaluations; this generous ceiling only trips for
+    /// genuinely unreachable targets (a diverging outer Newton iterate during a
+    /// violent turn-on), where stopping promptly lets the outer loop reject the
+    /// step and reduce dt instead of stalling for tens of seconds. Chosen by
+    /// measurement: see the `measure_vbic_*` harness — passing decks
+    /// (FO/CEamp/temp/diffamp healthy steps) stay far below this; the diffamp
+    /// turn-on previously consumed >100k evaluations per continuation (~18s).
+    pub(in crate::engine::transient) const VBIC_CONTINUATION_EVAL_BUDGET: u32 = 20_000;
+
+    /// Run `body` with a deterministic device-evaluation budget applied to any
+    /// nested best-effort device solve, restoring the previous budget afterward.
+    #[inline]
+    pub(in crate::engine::transient) fn with_vbic_best_effort_eval_budget<T>(
+        budget: u32,
+        body: impl FnOnce() -> T,
+    ) -> T {
+        let previous = VBIC_BEST_EFFORT_EVAL_BUDGET.with(|cell| {
+            let previous = cell.get();
+            // Nest conservatively: never raise an outer (smaller) budget.
+            let effective = match previous {
+                Some(existing) if existing < budget => existing,
+                _ => budget,
+            };
+            cell.set(Some(effective));
+            previous
+        });
+        let result = body();
+        VBIC_BEST_EFFORT_EVAL_BUDGET.with(|cell| cell.set(previous));
+        result
+    }
+
+    /// Charge one device-state evaluation against the active budget (if any) and
+    /// report whether the budget has been exhausted. Always returns `false` when
+    /// no budget is active (unbounded direct solves).
+    #[inline]
+    pub(in crate::engine::transient) fn vbic_best_effort_eval_budget_exhausted() -> bool {
+        VBIC_BEST_EFFORT_EVAL_BUDGET.with(|cell| match cell.get() {
+            Some(remaining) => {
+                if remaining == 0 {
+                    true
+                } else {
+                    cell.set(Some(remaining - 1));
+                    false
+                }
+            }
+            None => false,
+        })
+    }
+
+
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot(
         bjt: &crate::device::Bjt,
@@ -581,6 +648,9 @@ impl Engine {
             if current_residual_norm < 1e-14 {
                 break;
             }
+            if Self::vbic_best_effort_eval_budget_exhausted() {
+                break;
+            }
             let current_internal = seeded_snapshot.reduction.internal_voltages;
             let solved_internal = Self::solve_vbic_internal_state_from_linearization(
                 &transient_linearization,
@@ -716,6 +786,9 @@ impl Engine {
                 Self::vbic_dynamic_state_evaluation_residual_objective(&current_state);
             for iteration in 0..16 {
                 if current_state.4 < 1e-10 {
+                    break;
+                }
+                if Self::vbic_best_effort_eval_budget_exhausted() {
                     break;
                 }
 
