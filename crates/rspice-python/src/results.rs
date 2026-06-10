@@ -483,21 +483,41 @@ impl PyAcResult {
     ///     node: Node index
     ///
     /// Returns:
-    ///     list[complex]: Complex voltage values at each frequency
-    fn voltage_complex(&self, node: usize) -> Vec<(f64, f64)> {
-        self.results
+    ///     numpy.ndarray: complex128 phasor values at each frequency
+    ///
+    /// Example:
+    ///     >>> h = ac.voltage_complex(2) / ac.voltage_complex(1)  # transfer fn
+    fn voltage_complex<'py>(
+        &self,
+        py: Python<'py>,
+        node: usize,
+    ) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        let zero = rspice_core::Complex64::new(0.0, 0.0);
+        let values: Vec<rspice_core::Complex64> = self
+            .results
             .iter()
             .map(|r| {
                 // Node 0 is ground, so voltages are 0-indexed for node-1
                 if node == 0 {
-                    (0.0, 0.0)
+                    zero
                 } else {
-                    r.voltages
-                        .get(node - 1)
-                        .map_or((0.0, 0.0), |v| (v.re, v.im))
+                    r.voltages.get(node - 1).copied().unwrap_or(zero)
                 }
             })
-            .collect()
+            .collect();
+        values.to_pyarray(py)
+    }
+
+    /// Get voltage magnitude in dB (20·log10 |V|) at a node across all frequencies
+    ///
+    /// Args:
+    ///     node: Node index
+    ///
+    /// Returns:
+    ///     numpy.ndarray: Magnitude in dB at each frequency
+    fn voltage_db<'py>(&self, py: Python<'py>, node: usize) -> Bound<'py, PyArray1<f64>> {
+        let db: Vec<f64> = self.results.iter().map(|r| r.voltage_db(node)).collect();
+        db.to_pyarray(py)
     }
 
     /// Get voltage magnitude at a specific frequency and node
@@ -894,15 +914,22 @@ impl PyVariableStatistics {
         self.bin_edges.to_pyarray(py)
     }
 
-    /// Get a specific percentile value (0-100)
+    /// Get a specific percentile value (0-100, linear interpolation)
     fn percentile(&self, pct: f64) -> f64 {
         if self.samples.is_empty() {
             return 0.0;
         }
         let mut sorted = self.samples.clone();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let idx = ((pct / 100.0) * (sorted.len() - 1) as f64).floor() as usize;
-        sorted[idx.min(sorted.len() - 1)]
+        let rank = (pct.clamp(0.0, 100.0) / 100.0) * (sorted.len() - 1) as f64;
+        let lo = rank.floor() as usize;
+        let hi = rank.ceil() as usize;
+        if lo == hi {
+            sorted[lo]
+        } else {
+            let frac = rank - lo as f64;
+            sorted[lo] * (1.0 - frac) + sorted[hi] * frac
+        }
     }
 
     /// Get 3-sigma range (mean ± 3*std_dev) as tuple
