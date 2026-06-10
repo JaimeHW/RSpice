@@ -81,7 +81,7 @@ pub(super) fn run_ac(
                 }
             }
 
-            if let Some(ref output_path) = ctx.output {
+            if let Some(ref output_path) = ctx.output_path_for("ac") {
                 let signals = ac_signals(&results);
                 let frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
@@ -209,7 +209,7 @@ pub(super) fn run_noise(
                 }
             }
 
-            if let Some(ref output_path) = ctx.output {
+            if let Some(ref output_path) = ctx.output_path_for("noise") {
                 let noise_frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
                 let onoise: Vec<f64> = results

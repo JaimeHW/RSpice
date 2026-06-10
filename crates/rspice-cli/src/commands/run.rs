@@ -43,6 +43,8 @@ struct RunContext<'a> {
     compress: bool,
     /// CLI `--compress-tol`, else config `simulation.compression_tolerance`.
     compress_tol: f64,
+    /// More than one analysis card runs; output files get per-analysis tags.
+    multi_analysis: bool,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -75,10 +77,34 @@ impl<'a> RunContext<'a> {
             compress_tol: args
                 .compress_tol
                 .unwrap_or(config.simulation.compression_tolerance),
+            multi_analysis: netlist.analyses.len() > 1,
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
         })
+    }
+
+    /// Output path for one analysis.
+    ///
+    /// When the deck runs several analyses, each gets its own file so later
+    /// analyses cannot silently overwrite earlier results:
+    /// `out.csv` becomes `out.op.csv`, `out.tran.csv`, ...
+    fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
+        let path = self.output.clone()?;
+        if !self.multi_analysis {
+            return Some(path);
+        }
+
+        let mut file_name = path
+            .file_stem()
+            .map(|stem| stem.to_os_string())
+            .unwrap_or_default();
+        file_name.push(format!(".{tag}"));
+        if let Some(ext) = path.extension() {
+            file_name.push(".");
+            file_name.push(ext);
+        }
+        Some(path.with_file_name(file_name))
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {

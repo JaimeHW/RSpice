@@ -35,7 +35,7 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                 }
             }
 
-            if let Some(ref output_path) = ctx.output {
+            if let Some(ref output_path) = ctx.output_path_for("op") {
                 write_dc_op_output(output_path, &result, ctx.format)?;
                 if !ctx.quiet {
                     println!("Results exported to: {}", output_path.display());
@@ -210,7 +210,7 @@ pub(super) fn run_dc_sweep(
                 println!("DC Sweep: {} points computed", results.len());
             }
 
-            if let Some(ref output_path) = ctx.output {
+            if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 let signals = crate::commands::run_signals::dc_sweep_voltage_signals(&results);
                 match ctx.format {
@@ -359,7 +359,7 @@ pub(super) fn run_transient(
                 }
             }
 
-            if let Some(ref output_path) = ctx.output {
+            if let Some(ref output_path) = ctx.output_path_for("tran") {
                 let signals = transient_voltage_signals(&result);
                 match ctx.format {
                     OutputFormat::Hdf5 => {
@@ -566,7 +566,7 @@ pub(super) fn run_fourier(
         }
     }
 
-    if let Some(ref output_path) = ctx.output
+    if let Some(ref output_path) = ctx.output_path_for("four")
         && matches!(ctx.format, OutputFormat::Json)
     {
         use std::io::Write;
@@ -659,7 +659,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         println!("└─────────────────────────────────────┘");
     }
 
-    if let Some(ref output_path) = ctx.output {
+    if let Some(ref output_path) = ctx.output_path_for("temp") {
         use std::io::Write;
 
         let mut file = std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
