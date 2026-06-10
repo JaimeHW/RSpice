@@ -1,85 +1,65 @@
-use egui::{Painter, Pos2, Rect, Stroke};
+//! Canvas dot grid.
+//!
+//! The schematic well uses a dot grid (one dot per snap point), batched into
+//! a single mesh so even dense views cost one draw call. At low zoom the dot
+//! pitch steps up ×10 / ×100 to stay legible, and below that the grid fades
+//! out entirely.
+
+use egui::{Painter, Rect, Shape, pos2, vec2};
 
 use crate::common::app::AppState;
 
-/// Draw the schematic grid
+/// Minimum on-screen dot pitch before stepping up to a coarser grid.
+const MIN_PITCH: f32 = 9.0;
+/// Dot half-extent in points (dots render as 2 × 2 quads, ≈ the design's
+/// 0.9 px-radius circles, at a fraction of the tessellation cost).
+const DOT_HALF: f32 = 1.0;
+
+/// Draw the schematic grid as dots.
 pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
+    if !state.shell.show_grid {
+        return;
+    }
+
     let grid_size = state.schematic.grid_size as f32;
     let zoom = state.schematic.zoom as f32;
     let pan_x = state.schematic.pan.0 as f32;
     let pan_y = state.schematic.pan.1 as f32;
 
-    let base_grid_spacing = grid_size * zoom;
-
-    // Dynamically adjust grid step to ensure reasonable visual spacing
-    // At very low zoom, show fewer grid lines (every 10th or 100th)
-    let (grid_step, is_all_major) = if base_grid_spacing >= 5.0 {
-        // Normal: draw every grid line, with every 10th as major
-        (1, false)
-    } else if base_grid_spacing * 10.0 >= 5.0 {
-        // Medium zoom out: draw every 10th grid line (all appear as major)
-        (10, true)
-    } else if base_grid_spacing * 100.0 >= 5.0 {
-        // Very zoomed out: draw every 100th grid line
-        (100, true)
+    let base_pitch = grid_size * zoom;
+    let pitch = if base_pitch >= MIN_PITCH {
+        base_pitch
+    } else if base_pitch * 10.0 >= MIN_PITCH {
+        base_pitch * 10.0
+    } else if base_pitch * 100.0 >= MIN_PITCH {
+        base_pitch * 100.0
     } else {
-        // Extremely zoomed out: skip grid entirely
         return;
     };
 
-    let grid_spacing = base_grid_spacing * grid_step as f32;
+    let color = state.theme.grid_minor;
 
-    let minor_color = state.theme.grid_minor;
-    let major_color = state.theme.grid_major;
+    let left = ((0.0 - pan_x) / pitch).floor() as i32;
+    let right = ((bounds.width() - pan_x) / pitch).ceil() as i32;
+    let top = ((0.0 - pan_y) / pitch).floor() as i32;
+    let bottom = ((bounds.height() - pan_y) / pitch).ceil() as i32;
 
-    // Grid lines are at schematic coordinates that are multiples of grid_size.
-    // In screen space: screen_x = bounds.min.x + pan_x + (schematic_x * zoom)
-    // For grid line at schematic_x = gx * grid_size:
-    //   screen_x = bounds.min.x + pan_x + gx * grid_size * zoom
-    //            = bounds.min.x + pan_x + gx * grid_spacing
-
-    // Calculate visible grid index range (now in terms of grid_step multiples)
-    let left_grid = ((0.0 - pan_x) / grid_spacing).floor() as i32 - 1;
-    let right_grid = ((bounds.width() - pan_x) / grid_spacing).ceil() as i32 + 1;
-    let top_grid = ((0.0 - pan_y) / grid_spacing).floor() as i32 - 1;
-    let bottom_grid = ((bounds.height() - pan_y) / grid_spacing).ceil() as i32 + 1;
-
-    // Draw vertical lines (for each visible grid x-coordinate)
-    for gx in left_grid..=right_grid {
-        // Convert grid index to screen coordinate (include bounds.min.x offset)
-        let screen_x = bounds.min.x + pan_x + (gx as f32) * grid_spacing;
-        if screen_x < bounds.min.x || screen_x > bounds.max.x {
+    let mut mesh = egui::Mesh::default();
+    for gx in left..=right {
+        let x = bounds.min.x + pan_x + gx as f32 * pitch;
+        if x < bounds.min.x || x > bounds.max.x {
             continue;
         }
-        // In stepped mode, determine if this is a "super major" line
-        let actual_gx = gx * grid_step;
-        let is_major = is_all_major || (actual_gx % 10 == 0);
-        let color = if is_major { major_color } else { minor_color };
-        painter.line_segment(
-            [
-                Pos2::new(screen_x, bounds.min.y),
-                Pos2::new(screen_x, bounds.max.y),
-            ],
-            Stroke::new(if is_major { 1.0 } else { 0.5 }, color),
-        );
-    }
-
-    // Draw horizontal lines (for each visible grid y-coordinate)
-    for gy in top_grid..=bottom_grid {
-        // Convert grid index to screen coordinate (include bounds.min.y offset)
-        let screen_y = bounds.min.y + pan_y + (gy as f32) * grid_spacing;
-        if screen_y < bounds.min.y || screen_y > bounds.max.y {
-            continue;
+        for gy in top..=bottom {
+            let y = bounds.min.y + pan_y + gy as f32 * pitch;
+            if y < bounds.min.y || y > bounds.max.y {
+                continue;
+            }
+            mesh.add_colored_rect(
+                Rect::from_center_size(pos2(x, y), vec2(DOT_HALF * 2.0, DOT_HALF * 2.0)),
+                color,
+            );
         }
-        let actual_gy = gy * grid_step;
-        let is_major = is_all_major || (actual_gy % 10 == 0);
-        let color = if is_major { major_color } else { minor_color };
-        painter.line_segment(
-            [
-                Pos2::new(bounds.min.x, screen_y),
-                Pos2::new(bounds.max.x, screen_y),
-            ],
-            Stroke::new(if is_major { 1.0 } else { 0.5 }, color),
-        );
     }
+    painter.add(Shape::mesh(mesh));
 }

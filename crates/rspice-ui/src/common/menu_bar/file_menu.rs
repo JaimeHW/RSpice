@@ -1,11 +1,13 @@
-use egui::Ui;
+//! File action layer: dirty-state confirmations, project/file IO dispatch,
+//! exports and application exit. Rendering lives in `crate::shell::menubar`.
 
 use crate::common::app::{AppState, ConfirmationAction};
 use crate::common::export_workflow::ExportWorkflowIo;
 use crate::common::file_workflow::FileWorkflowIo;
 
+/// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FileMenuAction {
+pub(crate) enum FileMenuAction {
     NewProject,
     OpenProject,
     SaveProject,
@@ -22,164 +24,7 @@ enum FileMenuAction {
     Exit,
 }
 
-pub(super) fn render_file_menu(
-    ui: &mut Ui,
-    state: &mut AppState,
-    file_workflow_io: &(impl FileWorkflowIo + ?Sized),
-    export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
-) {
-    ui.menu_button("Project", |ui| {
-        if ui.button("New Project...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::NewProject,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-        if ui.button("Open Project...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::OpenProject,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-        ui.separator();
-        if ui.button("Save Project").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::SaveProject,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-        if ui.button("Save Project As...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::SaveProjectAs,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-    });
-
-    ui.separator();
-
-    if ui.button("New").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::New,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-    if ui.button("Open...").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::Open,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-
-    ui.separator();
-
-    if ui.button("Save").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::Save,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-    if ui.button("Save As...").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::SaveAs,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-
-    ui.separator();
-
-    ui.menu_button("Export", |ui| {
-        if ui.button("SVG...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::ExportSvg,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-        if ui.button("PDF...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::ExportPdf,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-        if ui.button("CSV (Waveforms)...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::ExportCsvWaveforms,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-    });
-
-    ui.menu_button("Import", |ui| {
-        if ui.button("Verilog-A Model...").clicked() {
-            dispatch_file_menu_action(
-                state,
-                FileMenuAction::ImportVerilogA,
-                file_workflow_io,
-                export_workflow_io,
-            );
-            ui.close_menu();
-        }
-    });
-
-    ui.separator();
-
-    if ui.button("Preferences...").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::OpenPreferences,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-
-    ui.separator();
-
-    if ui.button("Exit").clicked() {
-        dispatch_file_menu_action(
-            state,
-            FileMenuAction::Exit,
-            file_workflow_io,
-            export_workflow_io,
-        );
-        ui.close_menu();
-    }
-}
-
-fn dispatch_file_menu_action(
+pub(crate) fn dispatch_file_menu_action(
     state: &mut AppState,
     action: FileMenuAction,
     file_workflow_io: &(impl FileWorkflowIo + ?Sized),

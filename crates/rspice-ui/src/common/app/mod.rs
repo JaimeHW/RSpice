@@ -1,37 +1,27 @@
 //! RSpice Application Core
 //!
-//! The main eframe/egui application that provides commercial-grade
-//! GPU-accelerated rendering for schematic capture and waveform viewing.
+//! The main eframe/egui application. Each frame:
 //!
-//! # Layout Architecture
-//!
-//! The layout mirrors the Dioxus version for consistency:
-//!
-//! ```text
-//! +------------------------------------------------------------------+
-//! | Menu Bar (File, Edit, View, Simulate, Tools, Help)              |
-//! +------------------------------------------------------------------+
-//! | Toolbar (simulation controls, zoom, etc.)                        |
-//! +------------------------------------------------------------------+
-//! | Icon Rail | Project Browser | Schematic Editor | Properties      |
-//! |           |                 | + Waveform Viewer  |               |
-//! |           |                 | + Log Panel        |               |
-//! +------------------------------------------------------------------+
-//! ```
+//! 1. [`RSpiceApp::prepare_frame`] applies the active theme (on change),
+//!    resolves keyboard shortcuts, and pumps the simulation controller.
+//! 2. [`crate::shell::show`] renders the IDE chrome — menu bar, toolbar,
+//!    workspace tabs, contextual side panels, the active center view,
+//!    console, status bar, and toasts (see `crate::shell` for the layout).
+//! 3. [`RSpiceApp::render_frame_dialogs`] renders modal dialogs.
 //!
 //! # State Management
 //!
 //! Application state is managed in a centralized `AppState` struct:
 //! - SchematicState: circuit topology, components, wires
-//! - SimulationState: simulation results, waveforms
-//! - ViewState: pan, zoom, selection, tool mode
+//! - SimulationState: simulation results, waveforms, run history
+//! - ShellState: workspace view, theme selection, console, toasts
 //!
 //! This follows the commercial EDA pattern where state is:
 //! 1. Centralized for consistency
 //! 2. Observable for efficient updates
 //! 3. Serializable for session recovery
 
-use egui::{Context, Frame, TopBottomPanel};
+use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
 use crate::waveform::WaveformViewerState;
@@ -71,11 +61,8 @@ mod app_actions;
 
 mod app_file_actions;
 
-mod app_icon_rail;
-
 mod app_simulation_analysis_options;
 mod app_viewer_capabilities;
-mod app_viewer_panels;
 pub use app_viewer_capabilities::ViewerCapability;
 
 mod app_simulation_dialogs;
@@ -85,8 +72,6 @@ mod app_library_dialogs;
 mod app_help_dialogs;
 
 mod app_confirmation_dialog;
-
-mod app_workspace_layout;
 
 mod app_workspace_actions;
 
@@ -134,8 +119,6 @@ pub struct AppState {
     pub(crate) console_messages: Vec<ConsoleMessage>,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::panels::LogBuffer,
-    /// UI state for the structured log panel.
-    pub(crate) log_panel_state: crate::panels::LogPanelState,
     /// Component property editor state
     pub(crate) property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
@@ -170,6 +153,8 @@ pub struct AppState {
     pub(crate) exit_requested: bool,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: AnalysisWorkspaceState,
+    /// IDE shell state (workspace view, theme, console, toasts).
+    pub(crate) shell: crate::shell::ShellState,
 }
 
 /// Errors returned when applying a waveform-view range from external callers.
@@ -282,29 +267,39 @@ pub struct RSpiceApp {
     pub(crate) state: AppState,
     /// First frame flag (for initialization)
     first_frame: bool,
+    /// Theme last applied to the egui context (re-applied when the user
+    /// changes the shell theme).
+    applied_theme: Option<crate::ui::Theme>,
     /// SVG symbol library for component rendering
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
-    simulation_controller: crate::simulation::SimulationController,
+    pub(crate) simulation_controller: crate::simulation::SimulationController,
     /// File workflow IO backend (native in production, injectable in tests).
-    file_workflow_io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
+    pub(crate) file_workflow_io: Box<dyn crate::common::file_workflow::FileWorkflowIo>,
     /// Export workflow IO backend (native in production, injectable in tests).
-    export_workflow_io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
+    pub(crate) export_workflow_io: Box<dyn crate::common::export_workflow::ExportWorkflowIo>,
 }
 
 impl RSpiceApp {
     /// Create a new application instance
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        // Apply theme to egui context
-        let theme = RSpiceTheme::dark();
-        theme.apply_to_egui(&cc.egui_ctx);
-
         // Load persisted state if available
-        let mut state = if let Some(storage) = cc.storage {
+        let mut state: AppState = if let Some(storage) = cc.storage {
             eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
         } else {
             AppState::default()
         };
+
+        // Apply the design-system theme and derive the canvas color bridge.
+        state.shell.theme.apply(&cc.egui_ctx);
+        state.theme = RSpiceTheme::from_tokens(&state.shell.theme.tokens());
+
+        // Ctrl+± / Ctrl+0 zoom the *schematic*, not the UI — disable egui's
+        // built-in keyboard zoom so the shortcuts don't double-fire.
+        cc.egui_ctx.options_mut(|options| {
+            options.zoom_with_keyboard = false;
+        });
+        cc.egui_ctx.set_zoom_factor(1.0);
 
         // Restore global user Verilog-A library (commercial-style user library).
         restore_global_veriloga_library(&mut state.library_manager);
@@ -332,6 +327,7 @@ impl RSpiceApp {
         Self {
             state,
             first_frame: true,
+            applied_theme: None,
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
             file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
@@ -340,8 +336,12 @@ impl RSpiceApp {
     }
 
     fn prepare_frame(&mut self, ctx: &Context) {
-        if self.first_frame {
-            self.state.theme.apply_to_egui(ctx);
+        // (Re)apply the theme when it changes — this maps the design tokens
+        // onto the egui style and refreshes the canvas color bridge.
+        if self.first_frame || self.applied_theme != Some(self.state.shell.theme) {
+            self.state.shell.theme.apply(ctx);
+            self.state.theme = RSpiceTheme::from_tokens(&self.state.shell.theme.tokens());
+            self.applied_theme = Some(self.state.shell.theme);
             self.first_frame = false;
         }
 
@@ -353,35 +353,11 @@ impl RSpiceApp {
     }
 
     fn render_frame_chrome(&mut self, ctx: &Context) {
-        TopBottomPanel::top("menu_bar")
-            .frame(
-                Frame::none()
-                    .fill(egui::Color32::from_rgb(38, 42, 52))
-                    .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
-            )
-            .show(ctx, |ui| {
-                let (state, file_workflow_io, export_workflow_io) = (
-                    &mut self.state,
-                    self.file_workflow_io.as_ref(),
-                    self.export_workflow_io.as_ref(),
-                );
-                super::menu_bar::render_menu_bar(ui, state, file_workflow_io, export_workflow_io);
-            });
-
-        TopBottomPanel::top("toolbar")
-            .frame(
-                Frame::none()
-                    .fill(egui::Color32::from_rgb(35, 38, 48))
-                    .inner_margin(egui::Margin::symmetric(8.0, 4.0)),
-            )
-            .show(ctx, |ui| {
-                crate::schematic::toolbar::render_toolbar(ui, &mut self.state);
-            });
-
-        self.render_workspace_layout(ctx);
+        crate::shell::show(ctx, self);
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
+        self.render_script_console_window(ctx);
         self.render_confirmation_dialog(ctx);
         self.process_component_properties_dialog(ctx);
         self.process_veriloga_load_dialog(ctx);
@@ -408,16 +384,25 @@ impl eframe::App for RSpiceApp {
         self.render_frame_dialogs(ctx);
     }
 
+    /// Called by eframe when the application is shutting down.
+    fn on_exit(&mut self) {
+        log::info!("eframe on_exit — application shutting down");
+    }
+
     /// Save state on exit
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        log::debug!("save: sync schematic");
         self.state.sync_active_schematic_to_workspace();
+        log::debug!("save: veriloga library");
         if let Err(err) = save_global_veriloga_library(&self.state.library_manager) {
             log::warn!(
                 "Failed to persist global Verilog-A library during app save: {}",
                 err
             );
         }
+        log::debug!("save: serialize app state");
         eframe::set_value(storage, eframe::APP_KEY, &self.state);
+        log::debug!("save: done");
     }
 }
 
@@ -427,13 +412,35 @@ impl RSpiceApp {
             return;
         }
 
+        log::info!("application exit requested — closing viewport");
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         self.state.exit_requested = false;
     }
 
-    /// Toggle the bottom panel visibility
-    pub fn toggle_bottom_panel(&mut self) {
-        self.state.panels.bottom_panel = !self.state.panels.bottom_panel;
+    /// Toggle the console panel between expanded and collapsed.
+    pub fn toggle_console(&mut self) {
+        self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
+    }
+
+    /// Floating automation/scripting console window (Tools menu).
+    fn render_script_console_window(&mut self, ctx: &Context) {
+        if !self.state.panels.script_console {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Automation console")
+            .open(&mut open)
+            .default_size([580.0, 380.0])
+            .show(ctx, |ui| {
+                crate::panels::render_script_console(
+                    ui,
+                    &mut self.state.script_console,
+                    &mut self.state.simulation,
+                );
+            });
+        if !open {
+            self.state.panels.script_console = false;
+        }
     }
 }
 

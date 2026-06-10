@@ -1,4 +1,4 @@
-use egui::{Color32, Painter, Rect, Stroke};
+use egui::{Painter, Rect, Stroke};
 
 use crate::common::app::AppState;
 use crate::state::Point;
@@ -72,7 +72,7 @@ pub(super) fn draw_scene(
             painter.circle_stroke(
                 pos,
                 radius,
-                Stroke::new(1.0 * viewport.zoom, Color32::from_rgb(100, 200, 255)),
+                Stroke::new(1.0 * viewport.zoom, state.theme.accent),
             );
         }
     }

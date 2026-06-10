@@ -44,7 +44,14 @@ pub(super) fn handle_tool_interactions(
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 handle_probe_click(state, grid_pos);
             }
-            _ => {}
+            Tool::Label => {
+                let grid_pos = screen_to_grid(viewport, grid_size, pos);
+                let name = format!("net{}", state.schematic.net_labels.len() + 1);
+                state.schematic.with_undo("place net label", |schematic| {
+                    schematic.add_net_label(grid_pos, name);
+                });
+                state.schematic.is_dirty = true;
+            }
         }
     }
 

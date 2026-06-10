@@ -19,7 +19,6 @@
 pub mod compute;
 pub mod data;
 pub mod pipeline;
-pub mod rendering;
 pub mod state;
 pub mod window;
 
@@ -30,17 +29,9 @@ pub use pipeline::{
     MAX_REFERENCE_RESAMPLE_POINTS, MIN_FFT_SAMPLES, PreparedFftInput, prepare_fft_input,
     prepare_fft_input_with_options, prepare_fft_input_with_policy,
 };
-pub use rendering::render_fft_plot;
 pub use state::{FftState, InputFidelity};
 pub use window::WindowFunction;
 
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Render the FFT viewer panel
-pub fn render_fft_panel(ui: &mut Ui, app_state: &mut AppState) {
-    rendering::render_fft_viewer(ui, app_state);
-}
 
 // =============================================================================
 // Tests

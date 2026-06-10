@@ -1,14 +1,18 @@
+//! Shared viewer surface colors, derived from the active design tokens so
+//! every analysis viewer follows the selected theme.
+
 use egui::Color32;
+
+use crate::ui::tokens::active_palette;
 
 /// Shared background fill for viewer control header bars.
 ///
-/// Keep this aligned with the viewer workspace strip/chip surface so control
-/// bars blend with the surrounding panel frame.
+/// Matches the panel chrome so control bars blend with the shell.
 pub fn viewer_header_bg_color() -> Color32 {
-    Color32::from_rgb(23, 26, 32)
+    active_palette().bg_panel
 }
 
-/// Shared chart plotting surface fill for viewer graphs.
+/// Shared chart plotting surface fill for viewer graphs (document well).
 pub fn viewer_chart_bg_color() -> Color32 {
-    Color32::from_rgb(15, 17, 21)
+    active_palette().canvas_bg
 }

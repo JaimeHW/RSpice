@@ -39,7 +39,6 @@ pub(super) fn default_app_state() -> AppState {
         theme: RSpiceTheme::dark(),
         console_messages: Vec::new(),
         log_buffer: crate::panels::LogBuffer::default(),
-        log_panel_state: crate::panels::LogPanelState::default(),
         property_editor: crate::properties::dialog::PropertyEditorState::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
         viewer_workspace: crate::viewers::ViewerWorkspace::default(),
@@ -57,5 +56,6 @@ pub(super) fn default_app_state() -> AppState {
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
         analysis,
+        shell: crate::shell::ShellState::new(),
     }
 }

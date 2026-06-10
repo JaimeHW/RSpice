@@ -136,7 +136,7 @@ fn draw_component_preview(
     }
 }
 
-fn draw_procedural_component_preview(
+pub(super) fn draw_procedural_component_preview(
     painter: &Painter,
     component_type: ComponentType,
     preview_pos: egui::Pos2,

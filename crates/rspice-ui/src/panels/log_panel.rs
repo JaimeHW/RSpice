@@ -22,7 +22,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use egui::{Color32, RichText, ScrollArea, Ui};
+use egui::Color32;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -423,119 +423,6 @@ impl LogPanelState {
         // Text filter
         entry.matches_filter(&self.filter_text)
     }
-}
-
-// =============================================================================
-// Log Panel Rendering
-// =============================================================================
-
-/// Render the log panel UI.
-///
-/// Returns `true` if the user cleared the log during this frame.
-pub fn render_log_panel(ui: &mut Ui, buffer: &mut LogBuffer, state: &mut LogPanelState) -> bool {
-    let mut clear_requested = false;
-
-    // Toolbar
-    ui.horizontal(|ui| {
-        // Filter text
-        ui.label("Filter:");
-        ui.add(
-            egui::TextEdit::singleline(&mut state.filter_text)
-                .hint_text("Search logs...")
-                .desired_width(150.0),
-        );
-
-        ui.separator();
-
-        // Severity dropdown
-        ui.label("Level:");
-        egui::ComboBox::from_id_salt("log_severity")
-            .selected_text(state.filter_severity.name())
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut state.filter_severity, LogSeverity::Error, "Error");
-                ui.selectable_value(&mut state.filter_severity, LogSeverity::Warning, "Warning");
-                ui.selectable_value(&mut state.filter_severity, LogSeverity::Info, "Info");
-                ui.selectable_value(&mut state.filter_severity, LogSeverity::Debug, "Debug");
-                ui.selectable_value(&mut state.filter_severity, LogSeverity::Trace, "Trace");
-            });
-
-        ui.separator();
-
-        // Auto-scroll toggle
-        ui.checkbox(&mut state.auto_scroll, "Auto-scroll");
-
-        if ui.small_button("Clear").clicked() {
-            clear_requested = true;
-        }
-
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Error/warning counts
-            let errors = buffer.error_count();
-            let warnings = buffer.warning_count();
-
-            if errors > 0 {
-                ui.label(RichText::new(format!("{}E", errors)).color(LogSeverity::Error.color()));
-            }
-            if warnings > 0 {
-                ui.label(
-                    RichText::new(format!("{}W", warnings)).color(LogSeverity::Warning.color()),
-                );
-            }
-            ui.label(format!("{} entries", buffer.len()));
-        });
-    });
-
-    if clear_requested {
-        buffer.clear();
-    }
-
-    ui.separator();
-
-    // Log entries
-    let scroll = ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .stick_to_bottom(state.auto_scroll);
-
-    scroll.show(ui, |ui| {
-        for entry in buffer.entries() {
-            if !state.passes_filter(entry) {
-                continue;
-            }
-
-            ui.horizontal(|ui| {
-                // Timestamp
-                if state.show_timestamps {
-                    ui.label(RichText::new(entry.format_timestamp()).weak().monospace());
-                }
-
-                // Severity badge
-                ui.label(
-                    RichText::new(format!("[{}]", entry.severity.prefix()))
-                        .color(entry.severity.color())
-                        .monospace(),
-                );
-
-                // Source badge
-                if state.show_source {
-                    ui.label(
-                        RichText::new(format!("[{}]", entry.source.name()))
-                            .color(entry.source.color())
-                            .monospace(),
-                    );
-                }
-
-                // Message
-                ui.label(&entry.message);
-
-                // Context (if present)
-                if let Some(ctx) = &entry.context {
-                    ui.label(RichText::new(format!("({})", ctx)).weak());
-                }
-            });
-        }
-    });
-
-    clear_requested
 }
 
 // =============================================================================

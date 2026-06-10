@@ -48,7 +48,7 @@ pub(super) fn action_export_svg_with_io(
     }
 }
 
-pub(super) fn action_export_netlist_with_io(
+pub(crate) fn action_export_netlist_with_io(
     state: &mut AppState,
     format: crate::io::NetlistFormat,
     io: &(impl ExportWorkflowIo + ?Sized),
@@ -112,7 +112,7 @@ pub(super) fn action_export_netlist_with_io(
     }
 }
 
-pub(super) fn action_view_netlist(state: &mut AppState) {
+pub(crate) fn action_view_netlist(state: &mut AppState) {
     if state.schematic.components.is_empty() {
         state.push_user_message(crate::common::app::ConsoleMessage::warning(
             "No circuit to generate netlist. Add components first.",

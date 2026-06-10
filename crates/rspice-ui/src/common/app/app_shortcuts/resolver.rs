@@ -44,7 +44,7 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 14] = [
+const GLOBAL_RULES: [ShortcutRule; 25] = [
     ShortcutRule::new(ShortcutCommand::FileNew, Key::N, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileOpen, Key::O, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileSave, Key::S, Some(true), None),
@@ -62,18 +62,37 @@ const GLOBAL_RULES: [ShortcutRule; 14] = [
         Some(true),
         Some(true),
     ),
+    ShortcutRule::new(ShortcutCommand::ToggleBrowserPanel, Key::B, Some(true), None),
     ShortcutRule::new(
         ShortcutCommand::ToggleLogPanel,
         Key::Backtick,
         Some(true),
         None,
     ),
+    ShortcutRule::new(ShortcutCommand::ToggleLogPanel, Key::J, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ShowShortcutsHelp, Key::F1, None, None),
+    ShortcutRule::new(ShortcutCommand::RunSimulation, Key::F5, None, Some(false)),
+    ShortcutRule::new(ShortcutCommand::StopSimulation, Key::F5, None, Some(true)),
+    ShortcutRule::new(ShortcutCommand::RunChecks, Key::E, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::NextWorkspaceTab, Key::Tab, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Plus, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Equals, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::ZoomOut, Key::Minus, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::Zoom100, Key::Num0, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::OpenPreferences, Key::Comma, Some(true), None),
 ];
 
-const FOCUS_FREE_RULES: [ShortcutRule; 17] = [
+const FOCUS_FREE_RULES: [ShortcutRule; 20] = [
     ShortcutRule::new(ShortcutCommand::ToolSelect, Key::S, Some(false), None),
     ShortcutRule::new(ShortcutCommand::ToolWire, Key::W, Some(false), None),
+    ShortcutRule::new(ShortcutCommand::ToolLabel, Key::N, Some(false), None),
+    ShortcutRule::new(ShortcutCommand::ZoomFit, Key::F, Some(false), None),
+    ShortcutRule::new(
+        ShortcutCommand::FocusCellSearch,
+        Key::I,
+        Some(false),
+        Some(true),
+    ),
     ShortcutRule::new(ShortcutCommand::PlaceGround, Key::G, Some(false), None),
     ShortcutRule::new(
         ShortcutCommand::PlaceVoltageSource,
@@ -85,7 +104,7 @@ const FOCUS_FREE_RULES: [ShortcutRule; 17] = [
         ShortcutCommand::PlaceCurrentSource,
         Key::I,
         Some(false),
-        None,
+        Some(false),
     ),
     ShortcutRule::new(ShortcutCommand::PlaceCapacitor, Key::C, Some(false), None),
     ShortcutRule::new(

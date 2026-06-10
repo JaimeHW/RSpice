@@ -18,21 +18,12 @@
 
 pub mod data;
 pub mod measurements;
-pub mod rendering;
 pub mod state;
 
 pub use data::{EyeData, EyeTrace};
 pub use measurements::EyeMeasurements;
-pub use rendering::render_eye_diagram;
 pub use state::{EyeDiagramState, EyeDisplayMode};
 
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Render the eye diagram panel
-pub fn render_eye_diagram_panel(ui: &mut Ui, app_state: &mut AppState) {
-    rendering::render_eye_diagram_viewer(ui, app_state);
-}
 
 // =============================================================================
 // Tests

@@ -30,6 +30,17 @@ pub(crate) enum ShortcutCommand {
     MirrorSelectionVertical,
     OpenPropertiesEditor,
     EscapeCancel,
+    RunSimulation,
+    StopSimulation,
+    RunChecks,
+    NextWorkspaceTab,
+    ZoomIn,
+    ZoomOut,
+    ZoomFit,
+    Zoom100,
+    ToolLabel,
+    FocusCellSearch,
+    OpenPreferences,
 }
 
 impl ShortcutCommand {
@@ -65,6 +76,17 @@ impl ShortcutCommand {
             ShortcutCommand::MirrorSelectionVertical => "Mirror Vertical",
             ShortcutCommand::OpenPropertiesEditor => "Edit Properties",
             ShortcutCommand::EscapeCancel => "Cancel",
+            ShortcutCommand::RunSimulation => "Run Simulation",
+            ShortcutCommand::StopSimulation => "Stop Simulation",
+            ShortcutCommand::RunChecks => "Run Design Checks",
+            ShortcutCommand::NextWorkspaceTab => "Next Workspace Tab",
+            ShortcutCommand::ZoomIn => "Zoom In",
+            ShortcutCommand::ZoomOut => "Zoom Out",
+            ShortcutCommand::ZoomFit => "Zoom to Fit",
+            ShortcutCommand::Zoom100 => "Zoom 100 %",
+            ShortcutCommand::ToolLabel => "Net Label Tool",
+            ShortcutCommand::FocusCellSearch => "Find Instance",
+            ShortcutCommand::OpenPreferences => "Preferences",
         }
     }
 
@@ -100,6 +122,17 @@ impl ShortcutCommand {
             ShortcutCommand::MirrorSelectionVertical => "Y",
             ShortcutCommand::OpenPropertiesEditor => "E",
             ShortcutCommand::EscapeCancel => "Escape",
+            ShortcutCommand::RunSimulation => "F5",
+            ShortcutCommand::StopSimulation => "Shift+F5",
+            ShortcutCommand::RunChecks => "Ctrl+E",
+            ShortcutCommand::NextWorkspaceTab => "Ctrl+Tab",
+            ShortcutCommand::ZoomIn => "Ctrl++",
+            ShortcutCommand::ZoomOut => "Ctrl+-",
+            ShortcutCommand::ZoomFit => "F",
+            ShortcutCommand::Zoom100 => "Ctrl+0",
+            ShortcutCommand::ToolLabel => "N",
+            ShortcutCommand::FocusCellSearch => "Shift+I",
+            ShortcutCommand::OpenPreferences => "Ctrl+,",
         }
     }
 }

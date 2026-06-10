@@ -1,4 +1,4 @@
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Painter, Pos2, Rect, Stroke, Vec2};
 
 use crate::common::app::AppState;
 use crate::state::{Component, ComponentType, Point, Wire};
@@ -24,9 +24,9 @@ pub(super) fn draw_wire(
     // Wire is a polyline - draw all segments
     // Priority: selected > highlighted > default
     let (color, width) = if selected {
-        (Color32::from_rgb(0, 255, 255), 2.0) // Cyan for selected
+        (state.theme.accent, 2.0) // Accent for selected
     } else if highlighted {
-        (Color32::from_rgb(255, 165, 0), 2.0) // Orange for net highlight (Cadence Virtuoso style)
+        (crate::ui::tokens::active_palette().warn, 2.0) // Net highlight (cross-probe)
     } else {
         (state.theme.wire_default, 1.0)
     };
@@ -55,7 +55,7 @@ pub(super) fn draw_component(
     // Grid lines now visible through components (no opaque background)
 
     let outline_color = if selected {
-        Color32::from_rgb(0, 255, 255) // Cyan for selected
+        state.theme.accent // Accent for selected
     } else {
         state.theme.component_outline
     };
@@ -343,7 +343,7 @@ pub(super) fn draw_junction(
         painter.circle_stroke(
             pos,
             highlight_radius,
-            Stroke::new(1.0 * viewport.zoom, Color32::from_rgb(100, 200, 255)),
+            Stroke::new(1.0 * viewport.zoom, state.theme.accent),
         );
     }
 

@@ -17,7 +17,7 @@ pub(super) fn format_cache_bytes(bytes: u64) -> String {
     }
 }
 
-pub(super) fn action_veriloga_cache_status(state: &mut AppState) {
+pub(crate) fn action_veriloga_cache_status(state: &mut AppState) {
     match rspice_core::veriloga_cache_stats() {
         Ok(stats) => {
             state.push_user_message(ConsoleMessage::info(format!(
@@ -38,7 +38,7 @@ pub(super) fn action_veriloga_cache_status(state: &mut AppState) {
     }
 }
 
-pub(super) fn action_veriloga_cache_list_entries(state: &mut AppState) {
+pub(crate) fn action_veriloga_cache_list_entries(state: &mut AppState) {
     match rspice_core::veriloga_cache_entries() {
         Ok(entries) => {
             if entries.is_empty() {
@@ -83,7 +83,7 @@ pub(super) fn action_veriloga_cache_list_entries(state: &mut AppState) {
     }
 }
 
-pub(super) fn action_veriloga_cache_prune(state: &mut AppState) {
+pub(crate) fn action_veriloga_cache_prune(state: &mut AppState) {
     match rspice_core::prune_veriloga_cache() {
         Ok(report) => {
             state.push_user_message(ConsoleMessage::info(format!(
@@ -103,7 +103,7 @@ pub(super) fn action_veriloga_cache_prune(state: &mut AppState) {
     }
 }
 
-pub(super) fn action_veriloga_cache_clear(state: &mut AppState) {
+pub(crate) fn action_veriloga_cache_clear(state: &mut AppState) {
     match rspice_core::clear_veriloga_cache() {
         Ok(report) => {
             state.push_user_message(ConsoleMessage::info(format!(
@@ -121,7 +121,7 @@ pub(super) fn action_veriloga_cache_clear(state: &mut AppState) {
     }
 }
 
-pub(super) fn action_veriloga_recompile_library(state: &mut AppState) {
+pub(crate) fn action_veriloga_recompile_library(state: &mut AppState) {
     #[derive(Clone)]
     struct Candidate {
         library: String,

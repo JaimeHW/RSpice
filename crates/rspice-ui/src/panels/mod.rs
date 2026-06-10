@@ -1,26 +1,22 @@
 //! Panel Components for egui Application
 //!
-//! Side panels: Project Explorer, Library Browser, Results Browser, and Properties Panel.
+//! Dialog-hosted panels (PDK settings, Verilog-A, property dialog, script
+//! console, calculator) and the structured log model consumed by the shell
+//! console.
 
 pub mod calculator;
 pub mod log_panel;
 pub mod pdk_settings_dialog;
-pub mod project_browser;
-pub mod project_explorer;
 pub mod properties_panel;
-pub mod results_browser;
 pub mod script_console;
 pub mod veriloga_dialog;
 pub mod yield_panel;
 
-pub use log_panel::{LogBuffer, LogEntry, LogPanelState, LogSeverity, LogSource, render_log_panel};
+pub use log_panel::{LogBuffer, LogEntry, LogPanelState, LogSeverity, LogSource};
 pub use pdk_settings_dialog::{
     PdkSettingsDialogResult, PdkSettingsDialogState, PdkSettingsTab, render_pdk_settings_dialog,
 };
-pub use project_browser::render_library_browser;
-pub use project_explorer::render_project_explorer;
-pub use properties_panel::{render_properties_panel, render_property_dialog};
-pub use results_browser::render_results_browser;
+pub use properties_panel::render_property_dialog;
 pub use script_console::{ScriptConsoleState, render_script_console};
 pub use veriloga_dialog::{
     CompilationState, CompileErrorDisplay, CompiledModuleInfo, ParameterInfo,

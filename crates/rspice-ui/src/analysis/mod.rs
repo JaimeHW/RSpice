@@ -37,13 +37,12 @@ pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse, rend
 
 // FFT
 pub use fft::{
-    FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction, render_fft_plot,
+    FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction,
 };
 
 // Histogram
 pub use histogram::{
     Histogram, HistogramBuilder, HistogramDisplayMode, HistogramState, HistogramStats,
-    render_histogram,
 };
 
 // Nyquist
@@ -59,5 +58,5 @@ pub use smith_chart::{
 
 // Eye Diagram
 pub use eye_diagram::{
-    EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace, render_eye_diagram,
+    EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace,
 };

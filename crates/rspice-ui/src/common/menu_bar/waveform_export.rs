@@ -4,7 +4,7 @@ use crate::common::export_workflow::{ExportWorkflowIo, SaveDialogConfig};
 const NO_RESULTS_MESSAGE: &str = "No simulation results to export. Run a simulation first.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
 
-pub(super) fn action_export_csv_with_io(
+pub(crate) fn action_export_csv_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {

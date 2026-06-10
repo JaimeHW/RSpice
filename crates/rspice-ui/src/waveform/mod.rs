@@ -41,34 +41,20 @@
 
 pub mod axis;
 pub mod cursors;
-pub mod digital;
 pub mod export;
-pub mod interactions;
 pub mod legend;
 pub mod math;
 pub mod measurements;
-pub mod rendering;
 pub mod spec_overlay;
 pub mod state;
 
 // Re-exports for convenient access
-pub use rendering::render_waveform_viewer;
 pub use spec_overlay::SpecOverlay;
 pub use state::{
     BoxSelection, CursorMode, CursorState, DataBounds, TraceData, TraceStyle, ViewTransform,
     WaveformPanel, WaveformViewerState,
 };
 
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Main entry point for rendering the waveform viewer panel
-///
-/// This function orchestrates all waveform rendering, handling the header,
-/// axes, plot canvas, cursors, legend, and any overlay panels.
-pub fn render_waveform_panel(ui: &mut Ui, state: &mut AppState) {
-    rendering::render_waveform_viewer(ui, state);
-}
 
 // =============================================================================
 // Tests

@@ -71,6 +71,12 @@ pub mod properties;
 /// Common UI components - Menu bar, status bar, theme, main app
 pub mod common;
 
+/// The VOLTA design system - tokens, palettes, fonts, icons, widgets
+pub mod ui;
+
+/// The IDE shell - menubar, toolbar, workspace tabs, panels, console, status bar
+pub mod shell;
+
 /// Integrated viewers - Multi-view synchronized displays
 pub mod viewers;
 

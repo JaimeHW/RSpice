@@ -16,7 +16,6 @@ mod interaction;
 mod navigation;
 mod preview;
 mod scene;
-mod status_bar;
 mod symbol_primitives;
 mod viewport;
 
@@ -25,7 +24,6 @@ use self::interaction::handle_tool_interactions;
 use self::navigation::handle_viewport_navigation;
 use self::preview::draw_interaction_previews;
 use self::scene::draw_scene;
-use self::status_bar::draw_canvas_status_bar;
 
 /// Render the schematic view (central canvas)
 pub fn render_schematic_view(
@@ -60,5 +58,27 @@ pub fn render_schematic_view(
         symbol_library,
     );
 
-    draw_canvas_status_bar(&painter, available, state, response.hover_pos());
+    // Report the cursor position in grid units; the shell status bar shows it.
+    state.shell.canvas_hover = response.hover_pos().map(|cursor| {
+        let grid = f64::from(state.schematic.grid_size.max(1));
+        let x = ((f64::from(cursor.x - available.min.x)) - state.schematic.pan.0)
+            / state.schematic.zoom
+            / grid;
+        let y = ((f64::from(cursor.y - available.min.y)) - state.schematic.pan.1)
+            / state.schematic.zoom
+            / grid;
+        (x, y)
+    });
+}
+
+/// Paint a component symbol centered in `rect` — used by the component
+/// browser's preview pane. Pure presentation: no state access.
+pub fn draw_symbol_preview(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    kind: crate::state::ComponentType,
+    color: egui::Color32,
+) {
+    let stroke = egui::Stroke::new(1.6, color);
+    preview::draw_procedural_component_preview(painter, kind, rect.center(), 0.9, 0, stroke);
 }

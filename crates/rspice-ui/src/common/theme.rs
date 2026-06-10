@@ -134,6 +134,30 @@ impl Default for RSpiceTheme {
 }
 
 impl RSpiceTheme {
+    /// Derive the canvas color bridge from the active design tokens.
+    ///
+    /// Canvas/document rendering (schematic scene, grid, wires, symbols) was
+    /// historically styled from `RSpiceTheme` fields. The design system is now
+    /// the single source of truth: this constructor projects the active
+    /// [`crate::ui::tokens::Tokens`] onto the legacy fields so every canvas
+    /// renderer follows the selected direction/mode without further changes.
+    pub fn from_tokens(tokens: &crate::ui::tokens::Tokens) -> Self {
+        let c = &tokens.color;
+        Self {
+            name: format!("{} {}", tokens.direction.label(), tokens.mode.label()),
+            is_dark: tokens.mode == crate::ui::tokens::Mode::Dark,
+            canvas_bg: c.canvas_bg,
+            panel_bg: c.bg_panel,
+            text_primary: c.text,
+            text_secondary: c.text_dim,
+            accent: c.accent,
+            grid_minor: c.canvas_grid,
+            grid_major: c.canvas_grid,
+            wire_default: c.wire,
+            component_outline: c.symbol,
+        }
+    }
+
     /// Create the default dark theme (professional EDA style)
     pub fn dark() -> Self {
         Self {

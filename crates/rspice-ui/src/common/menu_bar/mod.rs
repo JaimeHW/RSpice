@@ -1,15 +1,11 @@
-//! Menu Bar for egui Application
+//! Menu action layer.
 //!
-//! Provides a professional menu bar matching the Dioxus version
-//! with File, Edit, View, Simulate, Tools, and Help menus.
+//! These modules implement the *behavior* behind the application menus —
+//! file/project workflows with dirty-state confirmation, exports, simulation
+//! control, design checks, Verilog-A cache management, examples and help.
+//! Rendering lives in [`crate::shell::menubar`], which dispatches into the
+//! functions re-exported here.
 
-use egui::{Ui, menu};
-
-use crate::common::app::AppState;
-use crate::common::export_workflow::ExportWorkflowIo;
-use crate::common::file_workflow::FileWorkflowIo;
-
-mod edit_menu;
 mod examples_menu;
 mod export_actions;
 mod file_menu;
@@ -18,63 +14,16 @@ mod netlist_compat;
 mod simulate_menu;
 mod tools_menu;
 mod veriloga_cache;
-mod view_menu;
 mod waveform_export;
 
-/// Render the menu bar
-pub(crate) fn render_menu_bar(
-    ui: &mut Ui,
-    state: &mut AppState,
-    file_workflow_io: &(impl FileWorkflowIo + ?Sized),
-    export_workflow_io: &(impl ExportWorkflowIo + ?Sized),
-) {
-    // Add spacing between menu items for a cleaner look
-    ui.spacing_mut().item_spacing.x = 8.0;
-
-    menu::bar(ui, |ui| {
-        // =====================================================================
-        // FILE MENU
-        // =====================================================================
-        ui.menu_button("File", |ui| {
-            file_menu::render_file_menu(ui, state, file_workflow_io, export_workflow_io);
-        });
-
-        // =====================================================================
-        // EDIT MENU
-        // =====================================================================
-        ui.menu_button("Edit", |ui| {
-            edit_menu::render_edit_menu(ui, state);
-        });
-        // =====================================================================
-        // VIEW MENU
-        // =====================================================================
-        ui.menu_button("View", |ui| {
-            view_menu::render_view_menu(ui, state);
-        });
-        // =====================================================================
-        // SIMULATE MENU
-        // =====================================================================
-        ui.menu_button("Simulate", |ui| {
-            simulate_menu::render_simulate_menu(ui, state, export_workflow_io);
-        });
-        // =====================================================================
-        // TOOLS MENU
-        // =====================================================================
-        ui.menu_button("Tools", |ui| {
-            tools_menu::render_tools_menu(ui, state);
-        });
-        // =====================================================================
-        // EXAMPLES MENU
-        // =====================================================================
-        ui.menu_button("Examples", |ui| {
-            examples_menu::render_examples_menu(ui, state);
-        });
-
-        // =====================================================================
-        // HELP MENU
-        // =====================================================================
-        ui.menu_button("Help", |ui| {
-            help_menu::render_help_menu(ui, state);
-        });
-    });
-}
+pub(crate) use examples_menu::load_named_example;
+pub(crate) use export_actions::{action_export_netlist_with_io, action_view_netlist};
+pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
+pub(crate) use help_menu::{DOC_REFERENCES, open_documentation_reference};
+pub(crate) use simulate_menu::open_simulation_options;
+pub(crate) use tools_menu::run_design_rule_check;
+pub(crate) use veriloga_cache::{
+    action_veriloga_cache_clear, action_veriloga_cache_list_entries, action_veriloga_cache_prune,
+    action_veriloga_cache_status, action_veriloga_recompile_library,
+};
+pub(crate) use waveform_export::action_export_csv_with_io;

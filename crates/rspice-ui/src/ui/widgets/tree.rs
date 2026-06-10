@@ -1,0 +1,240 @@
+//! Tree rows — the list/tree row used across hierarchy trees, cell lists,
+//! signal browsers and run history.
+
+use egui::{Rect, Response, Sense, Stroke, Ui, vec2};
+
+use crate::ui::theme::{self, FontWeight, mix};
+use crate::ui::tokens::{self, Tokens};
+
+/// What happened to a [`TreeRow`] this frame.
+pub struct TreeRowResult {
+    /// The row's interaction response (click, double-click, context menu).
+    pub response: Response,
+    /// `true` if an embedded checkbox changed value this frame.
+    pub checkbox_changed: bool,
+}
+
+/// A full-width interactive row with optional twist (expand) arrow, leading
+/// color dot or checkbox, and right-aligned mono metadata.
+pub struct TreeRow<'a> {
+    label: &'a str,
+    meta: Option<&'a str>,
+    /// `Some(expanded)` shows a twist arrow.
+    twist: Option<bool>,
+    chip_dot: Option<egui::Color32>,
+    checkbox: Option<&'a mut bool>,
+    indent: u8,
+    selected: bool,
+    mono_label: bool,
+    height: Option<f32>,
+}
+
+impl<'a> TreeRow<'a> {
+    /// A row with the given primary label.
+    pub fn new(label: &'a str) -> Self {
+        Self {
+            label,
+            meta: None,
+            twist: None,
+            chip_dot: None,
+            checkbox: None,
+            indent: 0,
+            selected: false,
+            mono_label: false,
+            height: None,
+        }
+    }
+
+    /// Right-aligned faint mono metadata text.
+    pub fn meta(mut self, meta: &'a str) -> Self {
+        self.meta = Some(meta);
+        self
+    }
+
+    /// Show a twist (expand/collapse) arrow; `expanded` selects ▾ vs ▸.
+    pub fn twist(mut self, expanded: bool) -> Self {
+        self.twist = Some(expanded);
+        self
+    }
+
+    /// Leading 8 × 8 color dot (trace color, run status).
+    pub fn chip_dot(mut self, color: egui::Color32) -> Self {
+        self.chip_dot = Some(color);
+        self
+    }
+
+    /// Embed a checkbox; clicking the row toggles it.
+    pub fn checkbox(mut self, value: &'a mut bool) -> Self {
+        self.checkbox = Some(value);
+        self
+    }
+
+    /// Indent level (0, 1, 2 → 0 / 16 / 32 px).
+    pub fn indent(mut self, level: u8) -> Self {
+        self.indent = level;
+        self
+    }
+
+    /// Render in the selected state (accent wash).
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    /// Render the primary label in the mono face (cell names, signals).
+    pub fn mono(mut self) -> Self {
+        self.mono_label = true;
+        self
+    }
+
+    /// Override the row height (defaults to the density row height).
+    pub fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
+        self
+    }
+
+    /// Show the row, filling the available width.
+    pub fn show(self, ui: &mut Ui) -> TreeRowResult {
+        let t = Tokens::get(ui.ctx());
+        let c = &t.color;
+        let row_h = self.height.unwrap_or(t.metrics.row_h);
+
+        let width = ui.available_width();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, row_h), Sense::click());
+
+        let mut checkbox_changed = false;
+        let mut checkbox_value_after = self.checkbox.as_ref().map(|v| **v);
+        if let Some(value) = self.checkbox {
+            if response.clicked() {
+                *value = !*value;
+                checkbox_changed = true;
+            }
+            checkbox_value_after = Some(*value);
+        }
+
+        if !ui.is_rect_visible(rect) {
+            return TreeRowResult {
+                response,
+                checkbox_changed,
+            };
+        }
+
+        let hover = ui
+            .ctx()
+            .animate_bool_with_time(response.id, response.hovered(), 0.16);
+
+        let painter = ui.painter();
+        if self.selected {
+            painter.rect_filled(rect, t.radius, c.accent_dim);
+        } else if hover > 0.0 {
+            painter.rect_filled(
+                rect,
+                t.radius,
+                mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+            );
+        }
+
+        let text_color = if self.selected {
+            c.text
+        } else {
+            mix(c.text_dim, c.text, hover)
+        };
+
+        let mut x = rect.left() + 6.0 + f32::from(self.indent) * 16.0;
+        let cy = rect.center().y;
+
+        if let Some(expanded) = self.twist {
+            let glyph = if expanded { "▾" } else { "▸" };
+            let galley = ui.fonts(|f| {
+                f.layout_no_wrap(
+                    glyph.to_owned(),
+                    theme::sans(9.0, FontWeight::Regular),
+                    c.text_faint,
+                )
+            });
+            painter.galley(
+                egui::pos2(x, cy - galley.size().y * 0.5),
+                galley,
+                c.text_faint,
+            );
+            x += 12.0;
+        }
+
+        if let Some(value) = checkbox_value_after {
+            let box_rect = Rect::from_center_size(egui::pos2(x + 6.5, cy), vec2(13.0, 13.0));
+            if value {
+                painter.rect_filled(box_rect, t.radius.min(2.0), c.accent);
+                // Check mark.
+                let s = box_rect.width();
+                painter.add(egui::Shape::line(
+                    vec![
+                        box_rect.left_top() + vec2(0.25 * s, 0.55 * s),
+                        box_rect.left_top() + vec2(0.42 * s, 0.72 * s),
+                        box_rect.left_top() + vec2(0.78 * s, 0.30 * s),
+                    ],
+                    Stroke::new(1.6, c.accent_ink),
+                ));
+            } else {
+                painter.rect(
+                    box_rect,
+                    t.radius.min(2.0),
+                    c.bg_inset,
+                    Stroke::new(1.0, c.border_strong),
+                );
+            }
+            x += 13.0 + 6.0;
+        }
+
+        if let Some(dot) = self.chip_dot {
+            let dot_rect = Rect::from_center_size(egui::pos2(x + 4.0, cy), vec2(8.0, 8.0));
+            painter.rect_filled(dot_rect, 2.0, dot);
+            x += 8.0 + 6.0;
+        }
+
+        let label_font = if self.mono_label {
+            theme::mono(tokens::FS_1, FontWeight::Regular)
+        } else {
+            theme::sans(tokens::FS_1, FontWeight::Regular)
+        };
+        let meta_galley = self.meta.map(|m| {
+            ui.fonts(|f| {
+                f.layout_no_wrap(
+                    m.to_owned(),
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    c.text_faint,
+                )
+            })
+        });
+        let meta_w = meta_galley.as_ref().map_or(0.0, |g| g.size().x + 8.0);
+
+        let label_galley = ui.fonts(|f| {
+            f.layout(
+                self.label.to_owned(),
+                label_font,
+                text_color,
+                (rect.right() - 6.0 - meta_w - x).max(8.0),
+            )
+        });
+        painter.galley(
+            egui::pos2(x, cy - label_galley.size().y * 0.5),
+            label_galley,
+            text_color,
+        );
+
+        if let Some(galley) = meta_galley {
+            painter.galley(
+                egui::pos2(
+                    rect.right() - 6.0 - galley.size().x,
+                    cy - galley.size().y * 0.5,
+                ),
+                galley,
+                c.text_faint,
+            );
+        }
+
+        TreeRowResult {
+            response: response.on_hover_cursor(egui::CursorIcon::PointingHand),
+            checkbox_changed,
+        }
+    }
+}

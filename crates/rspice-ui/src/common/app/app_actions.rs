@@ -1,7 +1,7 @@
 use egui::Context;
 
 use super::{
-    BottomPanelTab, ConsoleMessage, RSpiceApp,
+    ConsoleMessage, RSpiceApp,
     app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
 };
 
@@ -110,12 +110,57 @@ impl RSpiceApp {
             ShortcutCommand::EscapeCancel => {
                 if self.state.property_editor.open {
                     self.state.property_editor.cancel();
+                } else if self.state.shell.view == crate::shell::WorkspaceView::Results
+                    && self.state.shell.results.cursors.any()
+                {
+                    self.state.shell.results.clear_cursors();
                 } else {
                     self.state.schematic.tool = Tool::Select;
                     self.state.schematic.cancel_wire();
                     self.state.schematic.selection.clear();
                     self.state.schematic.selection_rect.cancel();
                 }
+            }
+            ShortcutCommand::RunSimulation => {
+                if !self.state.schematic.components.is_empty()
+                    && !self.state.simulation.is_running
+                {
+                    self.state.simulation.trigger_simulation = true;
+                    self.state.shell.view = crate::shell::WorkspaceView::Simulate;
+                }
+            }
+            ShortcutCommand::StopSimulation => {
+                if self.state.simulation.is_running {
+                    self.state.simulation.trigger_abort = true;
+                }
+            }
+            ShortcutCommand::RunChecks => {
+                crate::common::menu_bar::run_design_rule_check(&mut self.state);
+            }
+            ShortcutCommand::NextWorkspaceTab => {
+                self.state.shell.cycle_view();
+            }
+            ShortcutCommand::ZoomIn => {
+                self.state.schematic.zoom = (self.state.schematic.zoom * 1.25).min(4.0);
+            }
+            ShortcutCommand::ZoomOut => {
+                self.state.schematic.zoom = (self.state.schematic.zoom / 1.25).max(0.25);
+            }
+            ShortcutCommand::ZoomFit => {
+                self.state.schematic.needs_fit = true;
+            }
+            ShortcutCommand::Zoom100 => {
+                self.state.schematic.zoom = 1.0;
+            }
+            ShortcutCommand::ToolLabel => {
+                self.state.schematic.tool = Tool::Label;
+            }
+            ShortcutCommand::FocusCellSearch => {
+                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                self.state.shell.focus_cell_search = true;
+            }
+            ShortcutCommand::OpenPreferences => {
+                self.state.dialogs.preferences = true;
             }
         }
     }
@@ -185,23 +230,12 @@ impl RSpiceApp {
     }
 
     pub(super) fn toggle_panel_browser(&mut self) {
-        // Close other left-side browsers when opening the Library Browser.
-        if !self.state.panels.library_browser {
-            self.state.panels.project_explorer = false;
-            self.state.panels.results_browser = false;
-        }
-        self.state.panels.library_browser = !self.state.panels.library_browser;
+        // Toggle the contextual side panels (focus mode).
+        self.state.shell.panels_hidden = !self.state.shell.panels_hidden;
     }
 
     pub(super) fn toggle_panel_log(&mut self) {
-        // Show bottom panel and switch to Log tab
-        if self.state.panels.bottom_panel
-            && self.state.panels.active_bottom_tab == BottomPanelTab::Log
-        {
-            self.state.panels.bottom_panel = false;
-        } else {
-            self.state.panels.bottom_panel = true;
-            self.state.panels.active_bottom_tab = BottomPanelTab::Log;
-        }
+        // Toggle the console between expanded and collapsed.
+        self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
     }
 }

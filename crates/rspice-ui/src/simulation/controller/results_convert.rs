@@ -20,9 +20,20 @@ impl SimulationController {
                 waveforms,
             } => self.build_waveforms_with_shared_x(
                 frequencies,
-                waveforms.iter().enumerate().map(|(idx, (name, waveform))| {
-                    (idx, format!("|{}|", name), waveform.magnitude())
-                }),
+                waveforms
+                    .iter()
+                    .flat_map(|(name, waveform)| {
+                        // Magnitude (linear) plus phase in degrees when the
+                        // result is complex — the Bode viewer and the AC
+                        // strip's right axis consume the phase trace.
+                        let mut pair = vec![(format!("|{}|", name), waveform.magnitude())];
+                        if let Some(phase) = waveform.phase_deg() {
+                            pair.push((format!("phase({})", name), phase));
+                        }
+                        pair
+                    })
+                    .enumerate()
+                    .map(|(idx, (name, values))| (idx, name, values)),
             ),
 
             SimulationResult::DcSweep {

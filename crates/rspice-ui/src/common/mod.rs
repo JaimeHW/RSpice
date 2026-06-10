@@ -5,7 +5,6 @@
 //!
 //! - `app` - Main RSpiceApp application struct (egui::App implementation)
 //! - `menu_bar` - Application menu bar
-//! - `status_bar` - Status bar with simulation state and metrics
 //! - `theme` - Application theming and colors
 //!
 //! # Architecture
@@ -25,7 +24,6 @@ pub(crate) mod file_workflow;
 pub mod menu_bar;
 pub(crate) mod project_workflow;
 pub mod simulation_analysis_tabs;
-pub mod status_bar;
 pub mod theme;
 pub mod viewer_style;
 

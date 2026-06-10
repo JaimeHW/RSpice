@@ -1,0 +1,605 @@
+//! The Results workspace.
+//!
+//! Ports `design/volta-results-workspace.html`: a docbar with run context,
+//! viewer tabs and viewer-local controls; a document well carrying the
+//! active viewer (waveform strips, Bode, FFT, eye, histogram — plus the
+//! legacy Nyquist/Smith/pole-zero surfaces); and a right panel that swaps to
+//! the active viewer's instrument readout (cursors, margins, harmonics, eye
+//! metrics, distribution stats).
+
+mod bode;
+mod eye;
+mod fft;
+mod hist;
+mod strip;
+mod waves;
+
+pub(crate) use waves::toggle_visibility;
+
+use std::collections::HashSet;
+
+use egui::Ui;
+use serde::{Deserialize, Serialize};
+
+use crate::common::{AppState, RSpiceApp};
+use crate::simulation::SimulationController;
+use crate::simulation::controller::DerivedViewerLoadState;
+use crate::state::WaveformData;
+use crate::ui::plot::{CursorPair, DecimationCache};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Button, chip, docbar};
+use crate::viewers::ActiveViewer;
+
+/// The result viewers, in tab order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ResultViewer {
+    /// Stacked waveform strips, one per analysis.
+    #[default]
+    Waves,
+    /// Loop-gain stability view with margin markers.
+    Bode,
+    /// Spectrum with harmonic markers.
+    Fft,
+    /// Eye diagram with compliance mask.
+    Eye,
+    /// Monte-Carlo distribution.
+    Hist,
+    /// Legacy Nyquist surface (pre-redesign chrome).
+    Nyquist,
+    /// Legacy Smith chart surface.
+    Smith,
+    /// Legacy pole-zero surface.
+    PoleZero,
+}
+
+impl ResultViewer {
+    /// Tab label (mono, uppercase by design).
+    pub fn label(self) -> &'static str {
+        match self {
+            ResultViewer::Waves => "WAVES",
+            ResultViewer::Bode => "BODE",
+            ResultViewer::Fft => "FFT",
+            ResultViewer::Eye => "EYE",
+            ResultViewer::Hist => "HIST",
+            ResultViewer::Nyquist => "NYQ",
+            ResultViewer::Smith => "SMITH",
+            ResultViewer::PoleZero => "PZ",
+        }
+    }
+
+    /// Status-bar summary fragment.
+    fn status(self) -> &'static str {
+        match self {
+            ResultViewer::Waves => "waves",
+            ResultViewer::Bode => "bode",
+            ResultViewer::Fft => "fft",
+            ResultViewer::Eye => "eye",
+            ResultViewer::Hist => "mc",
+            ResultViewer::Nyquist => "nyquist",
+            ResultViewer::Smith => "smith",
+            ResultViewer::PoleZero => "pole-zero",
+        }
+    }
+
+    /// The legacy viewer this tab corresponds to, for capability checks and
+    /// the derived-data loader.
+    fn legacy(self) -> Option<ActiveViewer> {
+        match self {
+            ResultViewer::Fft => Some(ActiveViewer::Fft),
+            ResultViewer::Eye => Some(ActiveViewer::EyeDiagram),
+            ResultViewer::Hist => Some(ActiveViewer::Histogram),
+            ResultViewer::Nyquist => Some(ActiveViewer::Nyquist),
+            ResultViewer::Smith => Some(ActiveViewer::SmithChart),
+            ResultViewer::PoleZero => Some(ActiveViewer::PoleZero),
+            ResultViewer::Waves | ResultViewer::Bode => None,
+        }
+    }
+
+    const PRIMARY: [ResultViewer; 5] = [
+        ResultViewer::Waves,
+        ResultViewer::Bode,
+        ResultViewer::Fft,
+        ResultViewer::Eye,
+        ResultViewer::Hist,
+    ];
+    const LEGACY: [ResultViewer; 3] = [
+        ResultViewer::Nyquist,
+        ResultViewer::Smith,
+        ResultViewer::PoleZero,
+    ];
+}
+
+/// Per-session results-workspace state. Only the viewer selection persists;
+/// caches and cursors are transient.
+#[derive(Debug, Clone, Default)]
+pub struct ResultsState {
+    /// Active viewer tab.
+    pub viewer: ResultViewer,
+    /// A/B cursors (data-space X of the strip they live on).
+    pub cursors: CursorPair,
+    /// Which strip (analysis index) the cursors were placed on.
+    pub cursor_strip: Option<usize>,
+    /// Decimation envelope cache.
+    pub cache: DecimationCache,
+    /// Derived dB/phase series cache.
+    pub derived: DerivedSeries,
+    /// Strips hidden via the strip-close action.
+    pub hidden_strips: HashSet<usize>,
+    /// Strip currently maximized via the strip action, if any.
+    pub maximized_strip: Option<usize>,
+    /// `simulation.data_version` last seen by the workspace; when it
+    /// advances, cursors are cleared so they never report stale data.
+    seen_version: u64,
+}
+
+impl ResultsState {
+    /// Clear cursors (Esc, Clear action).
+    pub fn clear_cursors(&mut self) {
+        self.cursors.clear();
+        self.cursor_strip = None;
+    }
+}
+
+/// Cache of series derived from waveform data (dB conversions), cleared when
+/// the simulation data version changes.
+#[derive(Debug, Clone, Default)]
+pub struct DerivedSeries {
+    version: u64,
+    map: std::collections::HashMap<u64, std::sync::Arc<[f64]>>,
+}
+
+impl DerivedSeries {
+    fn ensure_version(&mut self, version: u64) {
+        if self.version != version {
+            self.map.clear();
+            self.version = version;
+        }
+    }
+
+    /// Fetch or build a derived series under `key`.
+    pub fn get_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> std::sync::Arc<[f64]>,
+    ) -> std::sync::Arc<[f64]> {
+        if let Some(hit) = self.map.get(&key) {
+            return std::sync::Arc::clone(hit);
+        }
+        let series = build();
+        self.map.insert(key, std::sync::Arc::clone(&series));
+        series
+    }
+
+    /// 20·log₁₀ of a linear-magnitude series, cached under `key`.
+    pub fn db(&mut self, key: u64, magnitude: &[f64]) -> std::sync::Arc<[f64]> {
+        self.get_or(key, || {
+            magnitude
+                .iter()
+                .map(|&m| 20.0 * m.max(1e-30).log10())
+                .collect()
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// shared right-panel furniture
+// ---------------------------------------------------------------------------
+
+/// A results stat table: dimmed names left, mono values right, key rows
+/// accent-highlighted (at most one or two per table, by design).
+pub(super) fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let width = ui.available_width();
+    for (i, (name, value, highlight)) in rows.iter().enumerate() {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 25.0), egui::Sense::hover());
+        if !ui.is_rect_visible(rect) {
+            continue;
+        }
+        let painter = ui.painter();
+        painter.text(
+            egui::pos2(rect.left() + 12.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            *name,
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            if *highlight { c.text } else { c.text_dim },
+        );
+        painter.text(
+            egui::pos2(rect.right() - 12.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            value,
+            theme::mono(tokens::FS_1, FontWeight::Regular),
+            if *highlight { c.accent } else { c.text },
+        );
+        if i + 1 < rows.len() {
+            painter.hline(
+                rect.x_range(),
+                rect.bottom() - 0.5,
+                egui::Stroke::new(1.0, c.border),
+            );
+        }
+    }
+}
+
+/// A faint explanatory note under a right-panel section.
+pub(super) fn panel_note(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::none()
+        .inner_margin(egui::Margin {
+            left: 12.0,
+            right: 12.0,
+            top: 4.0,
+            bottom: 10.0,
+        })
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+        });
+}
+
+/// Parse a `#rrggbb` trace color, falling back to the palette cycle.
+pub fn trace_color(hex: &str, fallback: egui::Color32) -> egui::Color32 {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() == 6 {
+        if let Ok(value) = u32::from_str_radix(hex, 16) {
+            return egui::Color32::from_rgb(
+                ((value >> 16) & 0xff) as u8,
+                ((value >> 8) & 0xff) as u8,
+                (value & 0xff) as u8,
+            );
+        }
+    }
+    fallback
+}
+
+/// Resolve a waveform's display color from its stored hex + palette fallback.
+pub fn waveform_color(waveform: &WaveformData, index: usize, t: &Tokens) -> egui::Color32 {
+    trace_color(&waveform.color, t.color.traces[index % t.color.traces.len()])
+}
+
+/// Centered faint hint on an empty document well.
+pub fn well_hint(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let rect = ui.available_rect_before_wrap();
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        theme::sans(tokens::FS_2, FontWeight::Regular),
+        t.color.text_faint,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// center view
+// ---------------------------------------------------------------------------
+
+/// Render the Results workspace center view (docbar + active viewer).
+pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+    let data_version = app.state.simulation.data_version;
+    let results = &mut app.state.shell.results;
+    if results.seen_version != data_version {
+        results.seen_version = data_version;
+        results.clear_cursors();
+    }
+    results.cache.ensure_version(data_version);
+    results.derived.ensure_version(data_version);
+
+    show_docbar(ui, &mut app.state);
+
+    let t = Tokens::get(ui.ctx());
+    // The document well backdrop; viewers paint on top.
+    let well = ui.available_rect_before_wrap();
+    ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
+
+    if !app.state.simulation.has_results() {
+        well_hint(ui, "No results yet — run a simulation (F5)");
+        return;
+    }
+
+    let viewer = app.state.shell.results.viewer;
+    match viewer {
+        ResultViewer::Waves => waves::show(ui, &mut app.state),
+        ResultViewer::Bode => bode::show(ui, &mut app.state),
+        ResultViewer::Fft => {
+            if ensure_derived(ui, app, ActiveViewer::Fft) {
+                fft::show(ui, &mut app.state);
+            }
+        }
+        ResultViewer::Eye => {
+            if ensure_derived(ui, app, ActiveViewer::EyeDiagram) {
+                eye::show(ui, &mut app.state);
+            }
+        }
+        ResultViewer::Hist => hist::show(ui, &mut app.state),
+        ResultViewer::Nyquist => crate::analysis::nyquist::render_nyquist_panel(ui, &mut app.state),
+        ResultViewer::Smith => {
+            crate::analysis::smith_chart::render_smith_chart_panel(ui, &mut app.state)
+        }
+        ResultViewer::PoleZero => crate::analysis::pole_zero::render_pz_panel(ui, &mut app.state),
+    }
+}
+
+fn show_docbar(ui: &mut Ui, state: &mut AppState) {
+    docbar(ui, |ui| {
+        run_selector(ui, state);
+        viewer_tabs(ui, state);
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if Button::new("Export…").show(ui).clicked() {
+                state.shell.export_csv_requested = true;
+            }
+            // Viewer-local controls.
+            match state.shell.results.viewer {
+                ResultViewer::Waves => {
+                    let results = &mut state.shell.results;
+                    if !results.hidden_strips.is_empty() {
+                        let n = results.hidden_strips.len();
+                        if chip(ui, &format!("{n} hidden"), true)
+                            .on_hover_text("Restore closed strips")
+                            .clicked()
+                        {
+                            results.hidden_strips.clear();
+                        }
+                    }
+                    let on = results.cursors.any();
+                    if chip(ui, "cursors A/B", on)
+                        .on_hover_text("Click a plot to place A, click again for B; Esc clears")
+                        .clicked()
+                    {
+                        results.clear_cursors();
+                    }
+                }
+                ResultViewer::Fft => {
+                    let label = state
+                        .analysis
+                        .fft_state
+                        .data
+                        .as_ref()
+                        .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size));
+                    if let Some(label) = label {
+                        ui.label(
+                            egui::RichText::new(label)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(Tokens::get(ui.ctx()).color.text_faint),
+                        );
+                    }
+                }
+                ResultViewer::Eye => {
+                    let mask_on = state.analysis.eye_diagram_state.show_mask;
+                    if chip(ui, "mask", mask_on).clicked() {
+                        state.analysis.eye_diagram_state.show_mask = !mask_on;
+                    }
+                }
+                _ => {}
+            }
+        });
+    });
+}
+
+fn run_selector(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let label = state
+        .simulation
+        .active_run()
+        .map_or_else(|| "no runs".to_owned(), |run| format!("run #{}", run.id));
+
+    let runs: Vec<(usize, String)> = state
+        .simulation
+        .runs
+        .iter()
+        .enumerate()
+        .map(|(idx, run)| {
+            (
+                idx,
+                format!(
+                    "run #{} · {} · {:.1} s",
+                    run.id,
+                    if run.success { "ok" } else { "failed" },
+                    run.elapsed_time
+                ),
+            )
+        })
+        .collect();
+
+    egui::ComboBox::from_id_salt("volta.results.run")
+        .selected_text(
+            egui::RichText::new(label)
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(t.color.text),
+        )
+        .width(150.0)
+        .show_ui(ui, |ui| {
+            for (idx, run_label) in runs {
+                if ui
+                    .selectable_label(state.simulation.active_run_idx == Some(idx), run_label)
+                    .clicked()
+                {
+                    state.simulation.select_run(idx);
+                    state.shell.results.clear_cursors();
+                }
+            }
+        });
+}
+
+fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(6.0);
+    ui.spacing_mut().item_spacing.x = 2.0;
+
+    let current = state.shell.results.viewer;
+    let mut clicked: Option<ResultViewer> = None;
+
+    for viewer in ResultViewer::PRIMARY {
+        if viewer_tab(ui, viewer, current == viewer, true) {
+            clicked = Some(viewer);
+        }
+    }
+    // Legacy surfaces, gated on data availability and visually set apart.
+    let (sep, _) = ui.allocate_exact_size(egui::vec2(13.0, 24.0), egui::Sense::hover());
+    ui.painter().vline(
+        sep.center().x,
+        egui::Rangef::new(sep.center().y - 7.0, sep.center().y + 7.0),
+        egui::Stroke::new(1.0, t.color.border),
+    );
+    for viewer in ResultViewer::LEGACY {
+        let available = viewer
+            .legacy()
+            .is_some_and(|legacy| state.viewer_is_available(legacy));
+        if viewer_tab(ui, viewer, current == viewer, available) {
+            clicked = Some(viewer);
+        }
+    }
+    if let Some(viewer) = clicked {
+        state.shell.results.viewer = viewer;
+    }
+}
+
+/// One viewer tab, per the design: a 24 px chip with 11 px side padding,
+/// letterspaced mono label, hover fill, and an accent wash when active
+/// (inverted in the Graphite direction).
+fn viewer_tab(ui: &mut Ui, viewer: ResultViewer, active: bool, enabled: bool) -> bool {
+    use crate::ui::theme::mix;
+
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        viewer.label(),
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+            color: egui::Color32::PLACEHOLDER,
+            extra_letter_spacing: 0.05 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts(|f| f.layout_job(job));
+
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 22.0, 24.0),
+        if enabled {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    if !ui.is_rect_visible(rect) {
+        return false;
+    }
+
+    let hover = ui.ctx().animate_bool_with_time(
+        response.id,
+        enabled && !active && response.hovered(),
+        0.16,
+    );
+    let graphite = t.direction == crate::ui::Direction::Graphite;
+    let (fill, text_color) = if active {
+        if graphite {
+            (c.text, c.bg_panel)
+        } else {
+            (c.accent_dim, c.accent)
+        }
+    } else if !enabled {
+        (egui::Color32::TRANSPARENT, c.text_faint)
+    } else {
+        (
+            mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+            mix(c.text_dim, c.text, hover),
+        )
+    };
+
+    let painter = ui.painter();
+    if fill != egui::Color32::TRANSPARENT {
+        painter.rect_filled(rect, t.radius, fill);
+    }
+    painter.galley(
+        egui::pos2(rect.left() + 11.0, rect.center().y - galley.size().y * 0.5),
+        galley,
+        text_color,
+    );
+
+    if !enabled {
+        response.on_hover_text("No data for this viewer in the active run");
+        return false;
+    }
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+        && !active
+}
+
+/// Gate FFT/eye rendering on the controller's derived-data loader. Returns
+/// `true` when the viewer can render.
+fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> bool {
+    let Some(analysis_type) = app
+        .state
+        .simulation
+        .active_analysis()
+        .map(|analysis| analysis.analysis_type)
+    else {
+        well_hint(ui, "Select an analysis with transient data");
+        return false;
+    };
+    if !SimulationController::analysis_supports_transient_derivation(analysis_type) {
+        well_hint(ui, "The active analysis has no usable time-domain source");
+        return false;
+    }
+    match app
+        .simulation_controller
+        .ensure_transient_viewer_data(&mut app.state, viewer)
+    {
+        DerivedViewerLoadState::Ready => true,
+        DerivedViewerLoadState::Loading => {
+            well_hint(ui, "Preparing derived data from the active transient…");
+            ui.ctx().request_repaint();
+            false
+        }
+        DerivedViewerLoadState::Unavailable => {
+            well_hint(ui, "The active analysis does not contain a usable source");
+            false
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// right panel
+// ---------------------------------------------------------------------------
+
+/// Render the Results context right panel for the active viewer.
+pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    match state.shell.results.viewer {
+        ResultViewer::Waves => waves::right_panel(ui, state),
+        ResultViewer::Bode => bode::right_panel(ui, state),
+        ResultViewer::Fft => fft::right_panel(ui, state),
+        ResultViewer::Eye => eye::right_panel(ui, state),
+        ResultViewer::Hist => hist::right_panel(ui, state),
+        ResultViewer::Nyquist | ResultViewer::Smith | ResultViewer::PoleZero => {
+            crate::ui::widgets::section_header(ui, "Viewer", None);
+            ui.add_space(4.0);
+            ui.vertical_centered(|ui| {
+                let t = Tokens::get(ui.ctx());
+                ui.label(
+                    egui::RichText::new("Controls are on the plot surface")
+                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                );
+            });
+        }
+    }
+}
+
+/// Status-bar summary for the results workspace.
+pub fn status_summary(state: &AppState) -> String {
+    let viewer = state.shell.results.viewer;
+    match state.simulation.active_run() {
+        Some(run) => format!("{} · run #{}", viewer.status(), run.id),
+        None => viewer.status().to_owned(),
+    }
+}

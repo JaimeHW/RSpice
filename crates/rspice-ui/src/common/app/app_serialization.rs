@@ -7,7 +7,7 @@ impl serde::Serialize for AppState {
     {
         // Serialize minimal state needed for session recovery.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 5)?;
+        let mut state = serializer.serialize_struct("AppState", 6)?;
         state.serialize_field("panels", &PanelVisibilitySer::from(&self.panels))?;
         state.serialize_field("panel_sizes", &PanelSizesSer::from(&self.panel_sizes))?;
         state.serialize_field(
@@ -16,6 +16,7 @@ impl serde::Serialize for AppState {
         )?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
+        state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
         state.end()
     }
 }
@@ -35,6 +36,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             project_workspace: crate::state::ProjectWorkspace,
             #[serde(default = "default_library_manager")]
             library_manager: crate::state::LibraryManager,
+            #[serde(default)]
+            shell: crate::shell::ShellStateSer,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -53,6 +56,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             viewer_workspace: de.viewer_workspace.into(),
             workspace: project_workspace,
             library_manager,
+            shell: de.shell.into(),
             ..Default::default()
         };
         state.workspace.save_active_schematic(&state.schematic);
