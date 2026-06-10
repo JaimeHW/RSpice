@@ -63,7 +63,11 @@ impl<'a> Pill<'a> {
             let phase = (ui.input(|i| i.time) % 1.0) as f32;
             let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5; // 1→0→1
             dot_color = dot_color.gamma_multiply(0.35 + 0.65 * wave);
-            ui.ctx().request_repaint();
+            // Throttled: an uncapped request_repaint() here would re-render
+            // the whole IDE at vsync rate for the entire simulation. 10 Hz
+            // keeps the pulse smooth and bounds completion-poll latency.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         let painter = ui.painter();
