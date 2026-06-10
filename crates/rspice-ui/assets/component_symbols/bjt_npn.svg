@@ -4,7 +4,7 @@
 <svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
   <path d="M 0,40 H 15.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 15.4,25 H 18.2 V 55 H 15.4 Z" fill="#000000" stroke="none"/>
-  <path d="M 18.2,33.5 L 40,20 V 0" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 18.2,46.5 L 40,60 V 80" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 30.2,53.9 L 22.7,52.3 L 25.5,47.9 Z" fill="#000000" stroke="none"/>
+  <path d="M 18.2,33.5 L 40,10 V 0" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 18.2,46.5 L 40,70 V 80" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 31.3,60.6 L 24.1,56.8 L 27.9,53.2 Z" fill="#000000" stroke="none"/>
 </svg>

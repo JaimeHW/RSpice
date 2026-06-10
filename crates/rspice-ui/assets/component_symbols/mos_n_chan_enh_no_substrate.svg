@@ -4,12 +4,12 @@
      Broken channel (enhancement); body arrow points into the channel. -->
 <svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
   <path d="M 0,40 H 13" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 13,27 V 53" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 17,25 V 35" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 17,37.5 V 42.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 17,45 V 55" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 40,0 V 30 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M 40,80 V 50 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 13,12 V 68" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,12 V 30" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,36 V 44" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,50 V 68" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 40,0 V 12 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,80 V 68 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M 40,40 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 17.6,40 L 25,37.6 L 25,42.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 17.6,40 L 25.4,37.4 L 25.4,42.6 Z" fill="#000000" stroke="none"/>
 </svg>
