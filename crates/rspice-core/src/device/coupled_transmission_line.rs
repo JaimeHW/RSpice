@@ -66,6 +66,11 @@ struct CplNativeState {
     far_v: Vec<Value>,
     /// Integer-picosecond time of the last committed history sample.
     last_committed_ps: i64,
+    /// Last accepted solver time before picosecond truncation. ngspice's CPL
+    /// keeps the same mixed clock as TXL (cplload.c): convolution
+    /// exponentials advance by the fractional `CKTdelta` while the history
+    /// grid and slopes run on truncated integer picoseconds.
+    last_real_seconds: Value,
     /// Set once the DC operating point has seeded the convolution state.
     dc_seeded: bool,
 }
@@ -413,6 +418,7 @@ impl CoupledTransmissionLine {
             near_v: near_dc.to_vec(),
             far_v: far_dc.to_vec(),
             last_committed_ps: 0,
+            last_real_seconds: 0.0,
             dc_seeded: true,
         });
         Ok(())
@@ -434,12 +440,13 @@ impl CoupledTransmissionLine {
             return None;
         }
         let t1_ps = native.last_committed_ps;
-        // ngspice keeps time bookkeeping in integer picoseconds. A step shorter
-        // than 1 ps (e.g. a breakpoint nudge) would otherwise collapse to a zero
-        // interval; clamp to at least 1 ps past the last committed sample so the
-        // delayed-sample interpolation stays well-defined (the convolution math
-        // still uses the true `dt_seconds`).
-        let mut t2_ps = (t2_seconds * 1e12).round() as i64;
+        // ngspice keeps time bookkeeping in truncated integer picoseconds. A
+        // step shorter than 1 ps (e.g. a breakpoint nudge) would otherwise
+        // collapse to a zero interval; clamp to at least 1 ps past the last
+        // committed sample so the delayed-sample interpolation stays
+        // well-defined (the convolution math still uses the true
+        // `dt_seconds`).
+        let mut t2_ps = (t2_seconds * 1e12).trunc() as i64;
         if t2_ps <= t1_ps {
             t2_ps = t1_ps + 1;
         }
@@ -484,13 +491,21 @@ impl CoupledTransmissionLine {
         if !native.dc_seeded {
             return;
         }
-        let time_ps = (accepted_time_seconds * 1e12).round() as i64;
+        let h_exp_seconds = accepted_time_seconds - native.last_real_seconds;
+        if !(h_exp_seconds.is_finite() && h_exp_seconds > 0.0) {
+            return;
+        }
+        let time_ps = (accepted_time_seconds * 1e12).trunc() as i64;
         if time_ps <= native.last_committed_ps {
-            // Nothing new to commit (e.g. t=0 accept or a repeated time point).
+            // ngspice merges accepted points whose truncated-picosecond label
+            // does not advance: no history commit and no convolution update,
+            // but the fractional clock still moves so the next step's
+            // exponentials only span the remaining sub-interval.
+            native.last_real_seconds = accepted_time_seconds;
             return;
         }
         let t1_ps = native.last_committed_ps;
-        let delta_seconds = (time_ps - t1_ps) as f64 * 1e-12;
+        let h_grid_seconds = (time_ps - t1_ps) as f64 * 1e-12;
 
         let start_near = native.near_v.clone();
         let start_far = native.far_v.clone();
@@ -499,11 +514,14 @@ impl CoupledTransmissionLine {
         // mirroring ngspice's per-load right_consts/update_cnv/update_delayed_cnv
         // ordering. The history must NOT yet contain the new (t2) sample when the
         // delayed samples for [t1, t2] are evaluated (ngspice adds the t2 sample
-        // only at the start of the *next* load).
+        // only at the start of the *next* load). The exponentials advance by the
+        // solver's fractional step; the slope spans run on the integer grid
+        // (ngspice's mixed clock).
         if let Err(err) = native.runtime.commit_step(
             t1_ps,
             time_ps,
-            delta_seconds,
+            h_exp_seconds,
+            h_grid_seconds,
             &start_near,
             &start_far,
             near_v,
@@ -530,6 +548,7 @@ impl CoupledTransmissionLine {
         native.near_v = near_v.to_vec();
         native.far_v = far_v.to_vec();
         native.last_committed_ps = time_ps;
+        native.last_real_seconds = accepted_time_seconds;
     }
 
     pub fn reset(&mut self) {

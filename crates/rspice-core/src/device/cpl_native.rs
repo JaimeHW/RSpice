@@ -778,11 +778,13 @@ impl NativeCplRuntime {
     /// - `end_near`/`end_far`/`end_near_i`/`end_far_i`: accepted port voltages
     ///   and branch currents at `t2`.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn commit_step(
         &mut self,
         t1_ps: i64,
         t2_ps: i64,
-        dt_seconds: f64,
+        h_exp_seconds: f64,
+        h_grid_seconds: f64,
         start_near: &[f64],
         start_far: &[f64],
         end_near: &[f64],
@@ -791,22 +793,43 @@ impl NativeCplRuntime {
         end_far_i: &[f64],
         history: &mut NativeCplViHistory,
     ) -> Result<(), NativeCplError> {
-        let h = dt_seconds;
-        let h1 = 0.5 * dt_seconds;
         let delayed = history.delayed_vi_samples_ps(t1_ps, t2_ps, &self.taul_ps)?;
 
-        // (1) Advance h2/h3 (and record h1e) for the just-completed step. This is
-        // the persistent counterpart of the step's right_consts on cp2.
-        let rc = self.right_consts(h, h1, start_near, start_far, &delayed)?;
+        // (1) Advance h2/h3 (and record h1e) for the just-completed step. This
+        // is the persistent counterpart of the step's right_consts on cp2 and
+        // runs entirely on the solver's fractional step (cplload.c keeps the
+        // exponentials on CKTdelta while the grid spans are integer
+        // picoseconds).
+        let rc = self.right_consts(
+            h_exp_seconds,
+            0.5 * h_exp_seconds,
+            start_near,
+            start_far,
+            &delayed,
+        )?;
 
-        // (2) Advance the h1 poles with the accepted slope across the step.
-        self.update_accepted_voltage_convolutions(h, start_near, end_near, start_far, end_far)?;
+        // (2) Advance the h1 poles: exponentials on the fractional step, the
+        // accepted slope across the integer-picosecond span.
+        self.update_accepted_voltage_convolutions(
+            h_exp_seconds,
+            h_grid_seconds,
+            start_near,
+            end_near,
+            start_far,
+            end_far,
+        )?;
 
-        // (3) Add the delayed extrapolation tail when the step was external.
+        // (3) Add the delayed extrapolation tail when the step was external
+        // (grid span, matching ngspice's `h *= 0.5e-12` on the integer delta).
         if rc.ext {
-            let tail =
-                NativeCplViSample::new(t2_ps, end_near.to_vec(), end_far.to_vec(), end_near_i.to_vec(), end_far_i.to_vec());
-            self.update_delayed_convolutions(h, &rc.ratio, &tail)?;
+            let tail = NativeCplViSample::new(
+                t2_ps,
+                end_near.to_vec(),
+                end_far.to_vec(),
+                end_near_i.to_vec(),
+                end_far_i.to_vec(),
+            );
+            self.update_delayed_convolutions(h_grid_seconds, &rc.ratio, &tail)?;
         }
 
         Ok(())
@@ -842,13 +865,15 @@ impl NativeCplRuntime {
 
     pub(crate) fn update_accepted_voltage_convolutions(
         &mut self,
-        h_seconds: f64,
+        h_exp_seconds: f64,
+        h_grid_seconds: f64,
         previous_input_voltage: &[f64],
         current_input_voltage: &[f64],
         previous_output_voltage: &[f64],
         current_output_voltage: &[f64],
     ) -> Result<(), NativeCplError> {
-        validate_positive_step(h_seconds)?;
+        validate_positive_step(h_exp_seconds)?;
+        validate_positive_step(h_grid_seconds)?;
         validate_history_vector("previous input voltage", previous_input_voltage, self.no_l)?;
         validate_history_vector("current input voltage", current_input_voltage, self.no_l)?;
         validate_history_vector(
@@ -870,11 +895,11 @@ impl NativeCplRuntime {
                 let current_output = current_output_voltage[col];
 
                 if tms.if_img {
-                    let e = (tms.tm[0].x * h_seconds).exp();
-                    let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_seconds);
+                    let e = (tms.tm[0].x * h_exp_seconds).exp();
+                    let (er, ei) = exp_complex(tms.tm[1].x, tms.tm[2].x, h_exp_seconds);
                     update_accepted_complex_time_series(
                         tms,
-                        h_seconds,
+                        h_grid_seconds,
                         previous_input,
                         current_input,
                         previous_output,
@@ -884,7 +909,7 @@ impl NativeCplRuntime {
                     );
                     update_accepted_real_term(
                         &mut tms.tm[0],
-                        h_seconds,
+                        h_grid_seconds,
                         previous_input,
                         current_input,
                         previous_output,
@@ -894,17 +919,17 @@ impl NativeCplRuntime {
                     self.h1e[row][col] = [e, er, ei];
                 } else {
                     let mut exponentials = [0.0; 3];
-                    let mut input_slope = (current_input - previous_input) / h_seconds;
-                    let mut output_slope = (current_output - previous_output) / h_seconds;
+                    let mut input_slope = (current_input - previous_input) / h_grid_seconds;
+                    let mut output_slope = (current_output - previous_output) / h_grid_seconds;
                     for (pole, term) in tms.tm.iter_mut().enumerate() {
-                        let e = (term.x * h_seconds).exp();
+                        let e = (term.x * h_exp_seconds).exp();
                         exponentials[pole] = e;
                         let scale = term.c / term.x;
                         input_slope *= scale;
                         output_slope *= scale;
-                        term.cnv_i = (term.cnv_i - input_slope * h_seconds) * e
+                        term.cnv_i = (term.cnv_i - input_slope * h_grid_seconds) * e
                             + (e - 1.0) * (current_input * scale + input_slope / term.x);
-                        term.cnv_o = (term.cnv_o - output_slope * h_seconds) * e
+                        term.cnv_o = (term.cnv_o - output_slope * h_grid_seconds) * e
                             + (e - 1.0) * (current_output * scale + output_slope / term.x);
                     }
                     self.h1e[row][col] = exponentials;
