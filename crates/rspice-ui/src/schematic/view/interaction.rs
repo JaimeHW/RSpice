@@ -93,6 +93,7 @@ fn handle_select_dragging(
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
 
         if state.schematic.is_draggable_wire_point(wire_grid_pos) {
+            state.schematic.begin_operation("drag wire vertex");
             state.dialogs.interaction.vertex_drag_pos = Some((wire_grid_pos.x, wire_grid_pos.y));
             state
                 .dialogs
@@ -104,6 +105,7 @@ fn handle_select_dragging(
                 state.schematic.selection.clear();
                 state.schematic.selection.select_component(comp_id);
             }
+            state.schematic.begin_operation("move selection");
             state.dialogs.drag_start = Some((grid_pos.x, grid_pos.y));
             state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
         } else {
@@ -143,10 +145,13 @@ fn handle_select_dragging(
     if response.drag_stopped_by(egui::PointerButton::Primary) {
         if state.dialogs.interaction.vertex_drag_pos.is_some() {
             state.schematic.cleanup_wire_topology();
+            // One undo entry for the whole gesture (no-ops deduplicate).
+            state.schematic.end_operation();
             state.dialogs.interaction.vertex_drag_pos = None;
             state.dialogs.interaction.drag.cancel();
         } else if state.dialogs.last_drag_pos.is_some() {
             state.schematic.cleanup_wire_topology();
+            state.schematic.end_operation();
             state.dialogs.drag_start = None;
             state.dialogs.last_drag_pos = None;
         } else if let Some((min_x, min_y, max_x, max_y)) = state.schematic.selection_rect.finish() {

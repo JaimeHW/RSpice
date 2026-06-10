@@ -136,26 +136,63 @@ impl DrcChecker {
             segments.push((start, end));
         }
 
-        // Merge touching/crossing segments so T-junctions and wire intersections
-        // become a single electrical net.
-        for i in 0..segments.len() {
-            for j in (i + 1)..segments.len() {
-                if let Some(intersection) = segment_intersection_point(segments[i], segments[j]) {
-                    let p_id =
-                        ensure_point_id(intersection, &mut point_ids, &mut points_by_id, &mut dsu);
-                    let (a0, a1) = segments[i];
-                    let (b0, b1) = segments[j];
-                    let a0_id = point_ids[&a0];
-                    let a1_id = point_ids[&a1];
-                    let b0_id = point_ids[&b0];
-                    let b1_id = point_ids[&b1];
-                    dsu.union(a0_id, p_id);
-                    dsu.union(a1_id, p_id);
-                    dsu.union(b0_id, p_id);
-                    dsu.union(b1_id, p_id);
+        // Coarse spatial hash over segment bounding boxes: intersection and
+        // point-on-segment sweeps consider only segments sharing a cell,
+        // replacing all-pairs scans that froze the UI on large designs.
+        const CELL: i64 = 256;
+        let mut cells: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+        for (index, &(start, end)) in segments.iter().enumerate() {
+            let (x0, x1) = (start.x().min(end.x()), start.x().max(end.x()));
+            let (y0, y1) = (start.y().min(end.y()), start.y().max(end.y()));
+            for cx in x0.div_euclid(CELL)..=x1.div_euclid(CELL) {
+                for cy in y0.div_euclid(CELL)..=y1.div_euclid(CELL) {
+                    cells.entry((cx, cy)).or_default().push(index);
                 }
             }
         }
+
+        // Merge touching/crossing segments so T-junctions and wire intersections
+        // become a single electrical net.
+        let mut tested: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        for bucket in cells.values() {
+            for (slot, &i) in bucket.iter().enumerate() {
+                for &j in &bucket[slot + 1..] {
+                    let pair = (i.min(j), i.max(j));
+                    if !tested.insert(pair) {
+                        continue;
+                    }
+                    if let Some(intersection) =
+                        segment_intersection_point(segments[pair.0], segments[pair.1])
+                    {
+                        let p_id = ensure_point_id(
+                            intersection,
+                            &mut point_ids,
+                            &mut points_by_id,
+                            &mut dsu,
+                        );
+                        let (a0, a1) = segments[pair.0];
+                        let (b0, b1) = segments[pair.1];
+                        let a0_id = point_ids[&a0];
+                        let a1_id = point_ids[&a1];
+                        let b0_id = point_ids[&b0];
+                        let b1_id = point_ids[&b1];
+                        dsu.union(a0_id, p_id);
+                        dsu.union(a1_id, p_id);
+                        dsu.union(b0_id, p_id);
+                        dsu.union(b1_id, p_id);
+                    }
+                }
+            }
+        }
+
+        // A point on a segment is inside that segment's bounding box, so
+        // the point's cell already lists every candidate.
+        let segments_near = |point: PointKey| -> &[usize] {
+            cells
+                .get(&(point.x().div_euclid(CELL), point.y().div_euclid(CELL)))
+                .map(|bucket| bucket.as_slice())
+                .unwrap_or(&[])
+        };
 
         // Attach component pins to any segment they lie on.
         for comp in components {
@@ -165,7 +202,8 @@ impl DrcChecker {
                 };
                 let point = PointKey::from_f64(x, y);
                 let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
-                for &(start, end) in &segments {
+                for &seg_index in segments_near(point) {
+                    let (start, end) = segments[seg_index];
                     if point_on_segment(point, start, end) {
                         dsu.union(point_id, point_ids[&start]);
                         dsu.union(point_id, point_ids[&end]);
@@ -178,7 +216,8 @@ impl DrcChecker {
         for label in net_labels {
             let point = PointKey::from_f64(label.x, label.y);
             let point_id = ensure_point_id(point, &mut point_ids, &mut points_by_id, &mut dsu);
-            for &(start, end) in &segments {
+            for &seg_index in segments_near(point) {
+                let (start, end) = segments[seg_index];
                 if point_on_segment(point, start, end) {
                     dsu.union(point_id, point_ids[&start]);
                     dsu.union(point_id, point_ids[&end]);

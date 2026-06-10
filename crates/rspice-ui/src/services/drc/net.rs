@@ -27,6 +27,14 @@ impl PointKey {
     pub(super) fn as_auto_name(self) -> String {
         format!("net_{}_{}", self.x, self.y)
     }
+
+    pub(super) fn x(self) -> i64 {
+        self.x
+    }
+
+    pub(super) fn y(self) -> i64 {
+        self.y
+    }
 }
 
 #[derive(Debug, Clone, Default)]
