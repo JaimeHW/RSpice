@@ -166,7 +166,8 @@ impl PyEngine {
     /// Args:
     ///     netlist: Parsed netlist to simulate
     ///     stop_time: Simulation end time in seconds
-    ///     max_step: Maximum timestep in seconds (controls accuracy)
+    ///     max_step: Maximum timestep in seconds (controls accuracy).
+    ///               Defaults to stop_time / 50, matching SPICE convention.
     ///
     /// Returns:
     ///     TransientResult: Time-domain waveforms for all nodes
@@ -180,14 +181,17 @@ impl PyEngine {
     ///     >>> import matplotlib.pyplot as plt
     ///     >>> plt.plot(result.time, result.voltage_waveform(2))
     ///     >>> plt.show()
-    #[pyo3(signature = (netlist, stop_time, max_step))]
+    #[pyo3(signature = (netlist, stop_time, max_step=None))]
     pub fn run_tran(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
         stop_time: f64,
-        max_step: f64,
+        max_step: Option<f64>,
     ) -> PyResult<PyTransientResult> {
+        let max_step = max_step
+            .filter(|step| step.is_finite() && *step > 0.0)
+            .unwrap_or(stop_time / 50.0);
         let engine = self.engine_for_netlist(&netlist.inner);
         let result = py
             .allow_threads(|| engine.run_tran(&netlist.inner, stop_time, max_step))

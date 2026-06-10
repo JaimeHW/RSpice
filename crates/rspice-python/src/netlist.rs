@@ -127,7 +127,7 @@ impl PyNetlist {
     /// .include and .lib directives relative to the file's location.
     ///
     /// Args:
-    ///     path: Path to the netlist file
+    ///     path: Path to the netlist file (str or os.PathLike)
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -137,10 +137,10 @@ impl PyNetlist {
     ///
     /// Example:
     ///     >>> netlist = Netlist.parse_file("circuits/amplifier.sp")
+    ///     >>> netlist = Netlist.parse_file(pathlib.Path("circuits") / "amplifier.sp")
     #[staticmethod]
-    pub fn parse_file(path: &str) -> PyResult<Self> {
-        let path = Path::new(path);
-        let inner = Netlist::parse_file(path).map_err(crate::errors::parse_error_to_pyerr)?;
+    pub fn parse_file(path: std::path::PathBuf) -> PyResult<Self> {
+        let inner = Netlist::parse_file(&path).map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
@@ -151,7 +151,7 @@ impl PyNetlist {
     ///
     /// Args:
     ///     content: SPICE netlist content as a string
-    ///     base_path: Base path for resolving include directives
+    ///     base_path: Base path for resolving include directives (str or os.PathLike)
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -162,9 +162,8 @@ impl PyNetlist {
     /// Example:
     ///     >>> netlist = Netlist.parse_with_includes(content, "circuits/")
     #[staticmethod]
-    pub fn parse_with_includes(content: &str, base_path: &str) -> PyResult<Self> {
-        let path = Path::new(base_path);
-        let inner = Self::parse_content_with_includes(content, path)
+    pub fn parse_with_includes(content: &str, base_path: std::path::PathBuf) -> PyResult<Self> {
+        let inner = Self::parse_content_with_includes(content, &base_path)
             .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }

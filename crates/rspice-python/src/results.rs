@@ -592,6 +592,37 @@ impl PyDcSweepResult {
         self.results.len()
     }
 
+    /// Get all sweep points as (value, result) pairs
+    ///
+    /// Returns:
+    ///     list[tuple[float, SimulationResult]]: One entry per sweep point
+    ///
+    /// Example:
+    ///     >>> for v_in, sol in result.points():
+    ///     ...     print(f"V1={v_in:.1f}V -> V(out)={sol.voltage('out'):.3f}V")
+    pub fn points(&self) -> Vec<(f64, PySimulationResult)> {
+        self.results
+            .iter()
+            .map(|(value, result)| (*value, PySimulationResult::new(result.clone())))
+            .collect()
+    }
+
+    /// Index into the sweep: `result[i]` -> (value, SimulationResult)
+    ///
+    /// Supports negative indices and the Python iteration protocol, so
+    /// `for value, solution in result:` just works.
+    fn __getitem__(&self, index: isize) -> PyResult<(f64, PySimulationResult)> {
+        let len = self.results.len() as isize;
+        let idx = if index < 0 { index + len } else { index };
+        if idx < 0 || idx >= len {
+            return Err(
+                invalid_sweep_index_error(index.unsigned_abs(), self.results.len()).into(),
+            );
+        }
+        let (value, result) = &self.results[idx as usize];
+        Ok((*value, PySimulationResult::new(result.clone())))
+    }
+
     /// Get the result at a specific sweep index (as Py wrapper)
     ///
     /// Args:
