@@ -8,6 +8,8 @@
 //! - Vertex selection (for corner manipulation)
 //! - Rubber-band box selection (drag to select multiple items)
 
+use std::collections::HashSet;
+
 use super::Point;
 use serde::{Deserialize, Serialize};
 
@@ -217,11 +219,12 @@ impl JunctionSelection {
 /// are currently selected. Supports multi-selection for batch operations.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Selection {
-    /// Selected component IDs
-    pub components: Vec<u64>,
+    /// Selected component IDs. A set: membership is queried per element
+    /// per frame by the paint loop, so lookups must be O(1).
+    pub components: HashSet<u64>,
 
-    /// Selected wire IDs (whole wire selection)
-    pub wires: Vec<u64>,
+    /// Selected wire IDs (whole wire selection); a set for the same reason.
+    pub wires: HashSet<u64>,
 
     /// Selected wire segments (for segment-level manipulation)
     pub wire_segments: Vec<WireSegmentSelection>,
@@ -277,14 +280,12 @@ impl Selection {
 
     /// Select a component (if not already selected)
     pub fn select_component(&mut self, id: u64) {
-        if !self.has_component(id) {
-            self.components.push(id);
-        }
+        self.components.insert(id);
     }
 
     /// Deselect a component
     pub fn deselect_component(&mut self, id: u64) {
-        self.components.retain(|&c| c != id);
+        self.components.remove(&id);
     }
 
     /// Toggle component selection
@@ -299,7 +300,7 @@ impl Selection {
     /// Select only a single component (clears other selections)
     pub fn select_only_component(&mut self, id: u64) {
         self.clear();
-        self.components.push(id);
+        self.components.insert(id);
     }
 
     /// Get the single selected component ID (if exactly one is selected)
@@ -310,7 +311,7 @@ impl Selection {
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
         {
-            Some(self.components[0])
+            self.components.iter().next().copied()
         } else {
             None
         }
@@ -327,14 +328,12 @@ impl Selection {
 
     /// Select a wire (if not already selected)
     pub fn select_wire(&mut self, id: u64) {
-        if !self.has_wire(id) {
-            self.wires.push(id);
-        }
+        self.wires.insert(id);
     }
 
     /// Deselect a wire
     pub fn deselect_wire(&mut self, id: u64) {
-        self.wires.retain(|&w| w != id);
+        self.wires.remove(&id);
     }
 
     /// Toggle wire selection
@@ -349,7 +348,7 @@ impl Selection {
     /// Select only a single wire (clears other selections)
     pub fn select_only_wire(&mut self, id: u64) {
         self.clear();
-        self.wires.push(id);
+        self.wires.insert(id);
     }
 
     /// Get the single selected wire ID (if exactly one is selected)
@@ -360,7 +359,7 @@ impl Selection {
             && self.wire_vertices.is_empty()
             && self.junctions.is_empty()
         {
-            Some(self.wires[0])
+            self.wires.iter().next().copied()
         } else {
             None
         }
@@ -519,18 +518,10 @@ impl Selection {
 
     /// Get all selected wire IDs (including from segments and vertices)
     pub fn all_selected_wire_ids(&self) -> Vec<u64> {
-        let mut ids: Vec<u64> = self.wires.clone();
-        for seg in &self.wire_segments {
-            if !ids.contains(&seg.wire_id) {
-                ids.push(seg.wire_id);
-            }
-        }
-        for vtx in &self.wire_vertices {
-            if !ids.contains(&vtx.wire_id) {
-                ids.push(vtx.wire_id);
-            }
-        }
-        ids
+        let mut ids = self.wires.clone();
+        ids.extend(self.wire_segments.iter().map(|s| s.wire_id));
+        ids.extend(self.wire_vertices.iter().map(|v| v.wire_id));
+        ids.into_iter().collect()
     }
 }
 

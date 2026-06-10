@@ -56,7 +56,7 @@ impl SchematicState {
     /// the connection. Wires that connect two selected components are
     /// moved entirely (not stretched).
     pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
-        let selected_components: Vec<u64> = self.selection.components.to_vec();
+        let selected_components: Vec<u64> = self.selection.components.iter().copied().collect();
         if selected_components.is_empty() && self.selection.wires.is_empty() {
             return;
         }

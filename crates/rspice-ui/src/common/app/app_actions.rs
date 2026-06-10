@@ -220,13 +220,10 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_edit_select_all(&mut self) {
-        self.state.schematic.selection.clear();
-        for comp in &self.state.schematic.components {
-            self.state.schematic.selection.select_component(comp.id);
-        }
-        for wire in &self.state.schematic.wires {
-            self.state.schematic.selection.select_wire(wire.id);
-        }
+        let schematic = &mut self.state.schematic;
+        schematic.selection.clear();
+        schematic.selection.components = schematic.components.iter().map(|c| c.id).collect();
+        schematic.selection.wires = schematic.wires.iter().map(|w| w.id).collect();
     }
 
     pub(super) fn toggle_panel_browser(&mut self) {
