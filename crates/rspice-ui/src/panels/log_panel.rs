@@ -220,6 +220,20 @@ pub struct LogBuffer {
     session_start: Instant,
     /// Minimum severity level to store
     min_severity: LogSeverity,
+    /// Running per-severity counts — the console header reads these every
+    /// frame, so they must not be O(buffer) scans.
+    severity_counts: [usize; 5],
+}
+
+/// Index into `severity_counts`.
+fn severity_index(severity: LogSeverity) -> usize {
+    match severity {
+        LogSeverity::Error => 0,
+        LogSeverity::Warning => 1,
+        LogSeverity::Info => 2,
+        LogSeverity::Debug => 3,
+        LogSeverity::Trace => 4,
+    }
 }
 
 impl Default for LogBuffer {
@@ -237,6 +251,7 @@ impl LogBuffer {
             next_id: 0,
             session_start: Instant::now(),
             min_severity: LogSeverity::Trace, // Store all by default
+            severity_counts: [0; 5],
         }
     }
 
@@ -270,9 +285,12 @@ impl LogBuffer {
 
         // Remove oldest if at capacity
         if self.entries.len() >= self.capacity {
-            self.entries.pop_front();
+            if let Some(evicted) = self.entries.pop_front() {
+                self.severity_counts[severity_index(evicted.severity)] -= 1;
+            }
         }
 
+        self.severity_counts[severity_index(entry.severity)] += 1;
         self.entries.push_back(entry);
     }
 
@@ -311,6 +329,17 @@ impl LogBuffer {
         self.entries.iter()
     }
 
+    /// Get an entry by position (oldest = 0), for virtualized rendering.
+    pub fn entry(&self, index: usize) -> Option<&LogEntry> {
+        self.entries.get(index)
+    }
+
+    /// Monotonic revision: changes whenever the buffer contents change
+    /// (paired with `len()` to also detect `clear`).
+    pub fn revision(&self) -> u64 {
+        self.next_id
+    }
+
     /// Get entries filtered by severity
     pub fn entries_by_severity(
         &self,
@@ -339,14 +368,12 @@ impl LogBuffer {
     /// Clear all entries
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.severity_counts = [0; 5];
     }
 
-    /// Count entries by severity
+    /// Count entries by severity (O(1) — maintained on log/evict/clear)
     pub fn count_by_severity(&self, severity: LogSeverity) -> usize {
-        self.entries
-            .iter()
-            .filter(|e| e.severity == severity)
-            .count()
+        self.severity_counts[severity_index(severity)]
     }
 
     /// Get error count (useful for status bar)

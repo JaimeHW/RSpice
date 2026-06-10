@@ -203,8 +203,13 @@ fn check_controls(ui: &mut Ui, state: &mut AppState) {
 /// Process corner + temperature selector. The selected corner also feeds the
 /// model library's corner selection.
 fn corner_select(ui: &mut Ui, state: &mut AppState) {
+    // The standard corner table is immutable; building it allocated ~40
+    // Strings per frame for a closed combo.
+    static CORNERS: std::sync::LazyLock<Vec<crate::state::model_library::ProcessCorner>> =
+        std::sync::LazyLock::new(crate::state::model_library::ProcessCorner::standard_corners);
+
     let t = Tokens::get(ui.ctx());
-    let corners = crate::state::model_library::ProcessCorner::standard_corners();
+    let corners = &*CORNERS;
     let current_label = corners
         .iter()
         .find(|corner| corner.name == state.shell.corner)
@@ -222,7 +227,7 @@ fn corner_select(ui: &mut Ui, state: &mut AppState) {
         )
         .width(120.0)
         .show_ui(ui, |ui| {
-            for corner in &corners {
+            for corner in corners {
                 let label = format!("{} · {:.0} °C", corner.name, corner.temperature);
                 if ui
                     .selectable_label(state.shell.corner == corner.name, label)

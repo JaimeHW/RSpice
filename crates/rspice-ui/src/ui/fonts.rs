@@ -29,19 +29,29 @@ pub fn mono() -> FontFamily {
     FontFamily::Monospace
 }
 
+// The named families are constructed once: `FontFamily::Name` holds an
+// `Arc<str>`, and these getters run for nearly every widget every frame —
+// cloning the Arc beats re-allocating the name each call.
+static SANS_MEDIUM_FAMILY: std::sync::LazyLock<FontFamily> =
+    std::sync::LazyLock::new(|| FontFamily::Name(SANS_MEDIUM.into()));
+static SANS_SEMIBOLD_FAMILY: std::sync::LazyLock<FontFamily> =
+    std::sync::LazyLock::new(|| FontFamily::Name(SANS_SEMIBOLD.into()));
+static MONO_MEDIUM_FAMILY: std::sync::LazyLock<FontFamily> =
+    std::sync::LazyLock::new(|| FontFamily::Name(MONO_MEDIUM.into()));
+
 /// Medium-weight (500) UI family — labels, buttons, emphasized values.
 pub fn sans_medium() -> FontFamily {
-    FontFamily::Name(SANS_MEDIUM.into())
+    SANS_MEDIUM_FAMILY.clone()
 }
 
 /// SemiBold (600) UI family — section headers, brand, headings.
 pub fn sans_semibold() -> FontFamily {
-    FontFamily::Name(SANS_SEMIBOLD.into())
+    SANS_SEMIBOLD_FAMILY.clone()
 }
 
 /// Medium-weight (500) mono family — emphasized data values.
 pub fn mono_medium() -> FontFamily {
-    FontFamily::Name(MONO_MEDIUM.into())
+    MONO_MEDIUM_FAMILY.clone()
 }
 
 /// Build the application font definitions: IBM Plex first, egui's bundled

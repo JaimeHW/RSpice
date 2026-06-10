@@ -4,8 +4,15 @@
 //! a single mesh so even dense views cost one draw call. At low zoom the dot
 //! pitch steps up ×10 / ×100 to stay legible, and below that the grid fades
 //! out entirely.
+//!
+//! The lattice is built once in grid-local space and cached; the dot
+//! pattern repeats with period `pitch`, so pans and idle frames reuse the
+//! mesh (a vertex memcpy + translate) instead of re-emitting tens of
+//! thousands of quads. Only zoom (pitch) and resize rebuild it.
 
-use egui::{Painter, Rect, Shape, pos2, vec2};
+use std::cell::RefCell;
+
+use egui::{Color32, Mesh, Painter, Rect, Shape, pos2, vec2};
 
 use crate::common::app::AppState;
 
@@ -14,6 +21,20 @@ const MIN_PITCH: f32 = 9.0;
 /// Dot half-extent in points (dots render as 2 × 2 quads, ≈ the design's
 /// 0.9 px-radius circles, at a fraction of the tessellation cost).
 const DOT_HALF: f32 = 1.0;
+
+struct CachedGrid {
+    pitch_bits: u32,
+    color: Color32,
+    cols: i32,
+    rows: i32,
+    /// Dots at `(i · pitch, j · pitch)` with origin (0, 0).
+    mesh: Mesh,
+}
+
+thread_local! {
+    /// Painting is single-threaded; one canvas grid is live at a time.
+    static GRID_MESH: RefCell<Option<CachedGrid>> = const { RefCell::new(None) };
+}
 
 /// Draw the schematic grid as dots.
 pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
@@ -39,27 +60,56 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
 
     let color = state.theme.grid_minor;
 
-    let left = ((0.0 - pan_x) / pitch).floor() as i32;
-    let right = ((bounds.width() - pan_x) / pitch).ceil() as i32;
-    let top = ((0.0 - pan_y) / pitch).floor() as i32;
-    let bottom = ((bounds.height() - pan_y) / pitch).ceil() as i32;
+    // Lattice extent: cover the bounds plus one period on each side; the
+    // painter's clip rect trims the overhang.
+    let cols = (bounds.width() / pitch).ceil() as i32 + 2;
+    let rows = (bounds.height() / pitch).ceil() as i32 + 2;
 
-    let mut mesh = egui::Mesh::default();
-    for gx in left..=right {
-        let x = bounds.min.x + pan_x + gx as f32 * pitch;
-        if x < bounds.min.x || x > bounds.max.x {
-            continue;
-        }
-        for gy in top..=bottom {
-            let y = bounds.min.y + pan_y + gy as f32 * pitch;
-            if y < bounds.min.y || y > bounds.max.y {
-                continue;
+    // Phase: the lattice column/row at or before the top-left corner.
+    let origin = bounds.min
+        + vec2(
+            pan_x.rem_euclid(pitch) - pitch,
+            pan_y.rem_euclid(pitch) - pitch,
+        );
+
+    GRID_MESH.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let stale = match cache.as_ref() {
+            Some(c) => {
+                c.pitch_bits != pitch.to_bits()
+                    || c.color != color
+                    || c.cols != cols
+                    || c.rows != rows
             }
-            mesh.add_colored_rect(
-                Rect::from_center_size(pos2(x, y), vec2(DOT_HALF * 2.0, DOT_HALF * 2.0)),
+            None => true,
+        };
+        if stale {
+            let quads = (cols as usize) * (rows as usize);
+            let mut mesh = Mesh::default();
+            mesh.reserve_vertices(quads * 4);
+            mesh.reserve_triangles(quads * 2);
+            for gx in 0..cols {
+                let x = gx as f32 * pitch;
+                for gy in 0..rows {
+                    let y = gy as f32 * pitch;
+                    mesh.add_colored_rect(
+                        Rect::from_center_size(pos2(x, y), vec2(DOT_HALF * 2.0, DOT_HALF * 2.0)),
+                        color,
+                    );
+                }
+            }
+            *cache = Some(CachedGrid {
+                pitch_bits: pitch.to_bits(),
                 color,
-            );
+                cols,
+                rows,
+                mesh,
+            });
         }
-    }
-    painter.add(Shape::mesh(mesh));
+
+        let cached = cache.as_ref().expect("grid mesh built above");
+        let mut mesh = cached.mesh.clone();
+        mesh.translate(origin.to_vec2());
+        painter.add(Shape::mesh(mesh));
+    });
 }

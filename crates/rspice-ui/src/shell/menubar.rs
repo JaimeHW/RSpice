@@ -106,26 +106,52 @@ fn brand(ui: &mut Ui) {
 }
 
 /// A top-level menu button with flat, square, full-height styling.
+///
+/// The derived `Style` is cached per theme: `style_mut` would deep-clone
+/// the whole style per menu per frame (×9 menus), so the override is built
+/// once and shared as an `Arc`.
 fn top_menu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.scope(|ui| {
-        let style = ui.style_mut();
-        for w in [
-            &mut style.visuals.widgets.inactive,
-            &mut style.visuals.widgets.hovered,
-            &mut style.visuals.widgets.active,
-            &mut style.visuals.widgets.open,
-        ] {
-            w.rounding = egui::Rounding::ZERO;
-            w.bg_stroke = egui::Stroke::NONE;
-        }
-        style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-        style.visuals.widgets.inactive.fg_stroke.color = c.text_dim;
-        style.visuals.widgets.hovered.weak_bg_fill = c.bg_hover;
-        style.visuals.widgets.open.weak_bg_fill = c.bg_active;
-        style.spacing.button_padding = vec2(10.0, (MENUBAR_HEIGHT - 18.0) * 0.5);
+    use std::sync::Arc;
 
+    thread_local! {
+        static MENU_STYLE: std::cell::RefCell<Option<(usize, Arc<egui::Style>)>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    let t = Tokens::get(ui.ctx());
+    // The token Arc is replaced on theme change, so its address keys the
+    // derived style.
+    let theme_key = Arc::as_ptr(&t) as usize;
+    let style = MENU_STYLE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        match cache.as_ref() {
+            Some((key, style)) if *key == theme_key => Arc::clone(style),
+            _ => {
+                let c = t.color;
+                let mut style: egui::Style = (*ui.ctx().style()).clone();
+                for w in [
+                    &mut style.visuals.widgets.inactive,
+                    &mut style.visuals.widgets.hovered,
+                    &mut style.visuals.widgets.active,
+                    &mut style.visuals.widgets.open,
+                ] {
+                    w.rounding = egui::Rounding::ZERO;
+                    w.bg_stroke = egui::Stroke::NONE;
+                }
+                style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                style.visuals.widgets.inactive.fg_stroke.color = c.text_dim;
+                style.visuals.widgets.hovered.weak_bg_fill = c.bg_hover;
+                style.visuals.widgets.open.weak_bg_fill = c.bg_active;
+                style.spacing.button_padding = vec2(10.0, (MENUBAR_HEIGHT - 18.0) * 0.5);
+                let style = Arc::new(style);
+                *cache = Some((theme_key, Arc::clone(&style)));
+                style
+            }
+        }
+    });
+
+    ui.scope(|ui| {
+        ui.set_style(style);
         ui.menu_button(title, |ui| {
             ui.set_min_width(230.0);
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);

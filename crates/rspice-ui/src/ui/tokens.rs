@@ -248,7 +248,14 @@ impl Tokens {
 
     /// Read the active token set. Falls back to the default theme's tokens if
     /// the theme has not been applied yet (never panics).
+    ///
+    /// This is the most-called function in the design system (every widget,
+    /// every frame), so it takes only the context's read lock; the write
+    /// path runs at most once, before the theme is first applied.
     pub fn get(ctx: &Context) -> Arc<Tokens> {
+        if let Some(tokens) = ctx.data(|d| d.get_temp::<Arc<Tokens>>(Self::ctx_key())) {
+            return tokens;
+        }
         ctx.data_mut(|d| {
             d.get_temp_mut_or_insert_with(Self::ctx_key(), || Arc::new(Tokens::default()))
                 .clone()

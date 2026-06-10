@@ -208,33 +208,49 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
     let filter = state.shell.console.filter;
 
+    // Row → entry map for the active filter, rebuilt only when the buffer
+    // or the filter changes — never per frame.
+    let key = (filter, state.log_buffer.revision(), state.log_buffer.len());
+    if state.shell.console.rows_key != Some(key) {
+        let rows: Vec<u32> = state
+            .log_buffer
+            .entries()
+            .enumerate()
+            .filter(|(_, entry)| match filter {
+                ConsoleFilter::All => true,
+                ConsoleFilter::Errors => entry.severity == LogSeverity::Error,
+                ConsoleFilter::Warnings => entry.severity == LogSeverity::Warning,
+            })
+            .map(|(index, _)| index as u32)
+            .collect();
+        state.shell.console.rows = rows;
+        state.shell.console.rows_key = Some(key);
+    }
+
+    let row_height = 20.0;
+    let total_rows = state.shell.console.rows.len();
+    let row_font = theme::mono(11.5, FontWeight::Regular);
+
+    // Virtualized: only the rows in view are laid out and painted, so a
+    // full 10k-entry buffer costs the same as thirty rows.
+    ui.spacing_mut().item_spacing.y = 0.0;
     ScrollArea::vertical()
         .id_salt("volta.console.scroll")
         .auto_shrink([false, false])
         .stick_to_bottom(true)
-        .show(ui, |ui| {
-            ui.add_space(6.0);
-            ui.spacing_mut().item_spacing.y = 0.0;
-
-            let row_font = theme::mono(11.5, FontWeight::Regular);
-            for entry in state.log_buffer.entries() {
-                let visible = match filter {
-                    ConsoleFilter::All => true,
-                    ConsoleFilter::Errors => entry.severity == LogSeverity::Error,
-                    ConsoleFilter::Warnings => entry.severity == LogSeverity::Warning,
-                };
-                if !visible {
+        .show_rows(ui, row_height, total_rows, |ui, range| {
+            for row in range {
+                let Some(&entry_index) = state.shell.console.rows.get(row) else {
                     continue;
-                }
+                };
+                let Some(entry) = state.log_buffer.entry(entry_index as usize) else {
+                    continue;
+                };
                 let (level_label, level_color) = level_style(entry.severity, entry.source, &c);
 
                 let width = ui.available_width();
-                let row_height = 20.0;
                 let (rect, _) =
                     ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
-                if !ui.is_rect_visible(rect) {
-                    continue;
-                }
                 let painter = ui.painter();
                 let cy = rect.center().y;
                 painter.text(
@@ -259,6 +275,5 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                     c.text,
                 );
             }
-            ui.add_space(6.0);
         });
 }

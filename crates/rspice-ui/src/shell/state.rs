@@ -77,6 +77,13 @@ pub struct ConsoleUiState {
     /// Active severity filter tab.
     #[serde(skip)]
     pub filter: ConsoleFilter,
+    /// Entry indices matching the active filter — the virtualized log's
+    /// row → entry map, rebuilt only when the buffer or filter changes.
+    #[serde(skip)]
+    pub(crate) rows: Vec<u32>,
+    /// (filter, buffer revision, buffer length) the row map was built for.
+    #[serde(skip)]
+    pub(crate) rows_key: Option<(ConsoleFilter, u64, usize)>,
 }
 
 impl Default for ConsoleUiState {
@@ -85,6 +92,8 @@ impl Default for ConsoleUiState {
             collapsed: false,
             height: 176.0,
             filter: ConsoleFilter::All,
+            rows: Vec::new(),
+            rows_key: None,
         }
     }
 }
