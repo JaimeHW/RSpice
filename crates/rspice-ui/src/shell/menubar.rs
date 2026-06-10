@@ -495,7 +495,6 @@ fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     separator(ui);
     if item(ui, "Edit analyses…", None) {
         state.shell.view = WorkspaceView::Simulate;
-        state.dialogs.simulation_dialog = true;
     }
     if item(ui, "Simulation options…", None) {
         crate::common::menu_bar::open_simulation_options(state);

@@ -32,7 +32,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_monte_carlo_command(&self, state: &AppState) -> Result<String, String> {
-        let mut mc_state = state.dialogs.mc_state.clone();
+        let mut mc_state = state.sim_setup.mc.clone();
         mc_state.ensure_initialized();
         let mc_cfg = mc_state
             .to_config()
@@ -58,7 +58,7 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<String, String> {
-        let mut temp_state = state.dialogs.temp_state.clone();
+        let mut temp_state = state.sim_setup.temp.clone();
         temp_state.ensure_initialized();
         let temp_cfg = temp_state
             .to_config()
@@ -80,7 +80,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_corner_temp_command(&self, state: &AppState) -> Result<String, String> {
-        let mut corner_state = state.dialogs.corner_state.clone();
+        let mut corner_state = state.sim_setup.corner.clone();
         corner_state.ensure_initialized();
         let corner_cfg = corner_state
             .to_config()
@@ -98,7 +98,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pss_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -107,7 +107,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_stb_command(&self, state: &AppState) -> Result<String, String> {
-        let mut stb_state = state.dialogs.stb_state.clone();
+        let mut stb_state = state.sim_setup.stb.clone();
         stb_state.ensure_initialized();
         let stb_cfg = stb_state
             .to_config()
@@ -119,7 +119,7 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<String, String> {
-        let mut hb_state = state.dialogs.hb_state.clone();
+        let mut hb_state = state.sim_setup.hb.clone();
         hb_state.ensure_initialized();
         let hb_cfg = hb_state
             .to_config()
@@ -128,7 +128,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_sp_command(&self, state: &AppState) -> Result<String, String> {
-        let mut sp_state = state.dialogs.sp_state.clone();
+        let mut sp_state = state.sim_setup.sp.clone();
         sp_state.ensure_initialized();
         let sp_cfg = sp_state
             .to_config()
@@ -137,7 +137,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_envelope_command(&self, state: &AppState) -> Result<String, String> {
-        let mut envelope_state = state.dialogs.envelope_state.clone();
+        let mut envelope_state = state.sim_setup.envelope.clone();
         envelope_state.ensure_initialized();
         let envelope_cfg = envelope_state
             .to_config()
@@ -146,7 +146,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_fourier_command(&self, state: &AppState) -> Result<String, String> {
-        let mut fourier_state = state.dialogs.fourier_state.clone();
+        let mut fourier_state = state.sim_setup.fourier.clone();
         fourier_state.ensure_initialized();
         let fourier_cfg = fourier_state
             .to_config()
@@ -155,7 +155,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_reliability_command(&self, state: &AppState) -> Result<String, String> {
-        let mut reliability_state = state.dialogs.reliability_state.clone();
+        let mut reliability_state = state.sim_setup.reliability.clone();
         reliability_state.ensure_initialized();
         let reliability_cfg = reliability_state
             .to_config()
@@ -164,7 +164,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_optimization_command(&self, state: &AppState) -> Result<String, String> {
-        let mut optimization_state = state.dialogs.optimization_state.clone();
+        let mut optimization_state = state.sim_setup.optimization.clone();
         optimization_state.ensure_initialized();
         let optimization_cfg = optimization_state
             .to_config()
@@ -173,7 +173,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_soa_command(&self, state: &AppState) -> Result<String, String> {
-        let mut soa_state = state.dialogs.soa_state.clone();
+        let mut soa_state = state.sim_setup.soa.clone();
         soa_state.ensure_initialized();
         let soa_cfg = soa_state
             .to_config()
@@ -182,7 +182,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pac_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pac_state = state.dialogs.pac_state.clone();
+        let mut pac_state = state.sim_setup.pac.clone();
         pac_state.ensure_initialized();
         let pac_cfg = pac_state
             .to_config()
@@ -191,7 +191,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pnoise_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        let mut pnoise_state = state.sim_setup.pnoise.clone();
         pnoise_state.ensure_initialized();
         let pnoise_cfg = pnoise_state
             .to_config()
@@ -200,7 +200,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pxf_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pxf_state = state.dialogs.pxf_state.clone();
+        let mut pxf_state = state.sim_setup.pxf.clone();
         pxf_state.ensure_initialized();
         let pxf_cfg = pxf_state
             .to_config()
@@ -209,7 +209,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pstb_command(&self, state: &AppState) -> Result<String, String> {
-        let mut pstb_state = state.dialogs.pstb_state.clone();
+        let mut pstb_state = state.sim_setup.pstb.clone();
         pstb_state.ensure_initialized();
         let pstb_cfg = pstb_state
             .to_config()
@@ -218,7 +218,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_tf_command(&self, state: &AppState) -> Result<String, String> {
-        let mut xf_state = state.dialogs.xf_state.clone();
+        let mut xf_state = state.sim_setup.xf.clone();
         xf_state.ensure_initialized();
         let xf_cfg = xf_state
             .to_config()

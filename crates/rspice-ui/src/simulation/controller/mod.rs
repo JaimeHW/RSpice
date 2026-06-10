@@ -116,7 +116,10 @@ impl SimulationController {
     pub fn update(&mut self, state: &mut AppState) {
         // Handle simulation trigger
         if state.simulation.trigger_simulation {
-            log::info!("Simulation triggered! Tab={}", state.dialogs.sim_active_tab);
+            log::info!(
+                "Simulation triggered ({} analyses enabled)",
+                state.sim_setup.enabled.len()
+            );
             state.simulation.trigger_simulation = false;
             self.start_simulation(state);
         }
@@ -211,7 +214,7 @@ impl SimulationController {
 
         netlist = Self::apply_simulation_options_to_netlist(
             &netlist,
-            &state.dialogs.simulation_options_config,
+            &state.sim_setup.options,
         );
 
         log::info!(

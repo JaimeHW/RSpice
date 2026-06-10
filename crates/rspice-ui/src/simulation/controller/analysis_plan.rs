@@ -2,10 +2,11 @@ use super::*;
 
 impl SimulationController {
     pub(super) fn enabled_analysis_indices(state: &AppState) -> Vec<usize> {
-        let mut indices: Vec<usize> = state.dialogs.enabled_analyses.iter().copied().collect();
+        let mut indices: Vec<usize> = state.sim_setup.enabled.iter().copied().collect();
         indices.sort_unstable();
         if indices.is_empty() {
-            indices.push(state.dialogs.sim_active_tab.min(24));
+            // Nothing enabled: run the analysis selected in the Simulate view.
+            indices.push(state.shell.selected_analysis.unwrap_or(1).min(24));
         }
         indices
     }
@@ -156,7 +157,7 @@ impl SimulationController {
     ) -> Result<SpecExecutionOptions, String> {
         match spec {
             AnalysisSpec::Parametric => {
-                let mut temp_state = state.dialogs.temp_state.clone();
+                let mut temp_state = state.sim_setup.temp.clone();
                 temp_state.ensure_initialized();
                 let temp_cfg = temp_state
                     .to_config()
@@ -172,7 +173,7 @@ impl SimulationController {
                 })
             }
             AnalysisSpec::Corner => {
-                let mut corner_state = state.dialogs.corner_state.clone();
+                let mut corner_state = state.sim_setup.corner.clone();
                 corner_state.ensure_initialized();
                 let corner_cfg = corner_state
                     .to_config()

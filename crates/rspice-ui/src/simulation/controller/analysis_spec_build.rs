@@ -9,31 +9,31 @@ impl SimulationController {
         match idx {
             0 => Ok(AnalysisSpec::DcOp),
             1 => Ok(AnalysisSpec::Transient {
-                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
                     .map_err(|e| format!("invalid stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
                     .map_err(|e| format!("invalid step time: {}", e))?,
-                start_time: parse_spice_value_checked(&state.dialogs.tran_start)
+                start_time: parse_spice_value_checked(&state.sim_setup.tran.start)
                     .map_err(|e| format!("invalid start time: {}", e))?,
-                max_timestep: Self::parse_optional_spice_value(&state.dialogs.tran_maxstep)
+                max_timestep: Self::parse_optional_spice_value(&state.sim_setup.tran.max_step)
                     .map_err(|e| format!("invalid max step: {}", e))?,
-                uic: state.dialogs.tran_uic,
+                uic: state.sim_setup.tran.uic,
             }),
             2 => Ok(AnalysisSpec::Ac {
-                start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
                     .map_err(|e| format!("invalid start frequency: {}", e))?,
-                stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
                     .map_err(|e| format!("invalid stop frequency: {}", e))?,
                 points_per_unit: Self::parse_positive_points(
-                    &state.dialogs.ac_points,
+                    &state.sim_setup.ac.points,
                     "ac_points",
                 )?,
-                sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
+                sweep: Self::map_frequency_sweep(state.sim_setup.ac.sweep),
             }),
             24 => self.build_disto_spec(state),
             3 => {
-                let (source2, start2, stop2, step2) = if state.dialogs.dc_nested {
-                    let source2 = state.dialogs.dc_source2.trim();
+                let (source2, start2, stop2, step2) = if state.sim_setup.dc.nested {
+                    let source2 = state.sim_setup.dc.source2.trim();
                     if source2.is_empty() {
                         return Err(
                             "nested DC sweep requires a non-empty secondary sweep source"
@@ -43,15 +43,15 @@ impl SimulationController {
                     (
                         Some(source2.to_string()),
                         Some(
-                            parse_spice_value_checked(&state.dialogs.dc_start2)
+                            parse_spice_value_checked(&state.sim_setup.dc.start2)
                                 .map_err(|e| format!("invalid secondary start value: {}", e))?,
                         ),
                         Some(
-                            parse_spice_value_checked(&state.dialogs.dc_stop2)
+                            parse_spice_value_checked(&state.sim_setup.dc.stop2)
                                 .map_err(|e| format!("invalid secondary stop value: {}", e))?,
                         ),
                         Some(
-                            parse_spice_value_checked(&state.dialogs.dc_step2)
+                            parse_spice_value_checked(&state.sim_setup.dc.step2)
                                 .map_err(|e| format!("invalid secondary step value: {}", e))?,
                         ),
                     )
@@ -59,12 +59,12 @@ impl SimulationController {
                     (None, None, None, None)
                 };
                 Ok(AnalysisSpec::DcSweep {
-                    source_name: state.dialogs.dc_source.trim().to_string(),
-                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                    source_name: state.sim_setup.dc.source.trim().to_string(),
+                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
                         .map_err(|e| format!("invalid start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
                         .map_err(|e| format!("invalid stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
                         .map_err(|e| format!("invalid step value: {}", e))?,
                     source2,
                     start2,
@@ -73,13 +73,13 @@ impl SimulationController {
                 })
             }
             4 => Ok(AnalysisSpec::Noise {
-                output_node: state.dialogs.noise_output.trim().to_string(),
-                start_freq: parse_spice_value_checked(&state.dialogs.noise_fstart)
+                output_node: state.sim_setup.noise.output.trim().to_string(),
+                start_freq: parse_spice_value_checked(&state.sim_setup.noise.fstart)
                     .map_err(|e| format!("invalid start frequency: {}", e))?,
-                stop_freq: parse_spice_value_checked(&state.dialogs.noise_fstop)
+                stop_freq: parse_spice_value_checked(&state.sim_setup.noise.fstop)
                     .map_err(|e| format!("invalid stop frequency: {}", e))?,
                 points_per_decade: Self::parse_positive_points(
-                    &state.dialogs.ac_points,
+                    &state.sim_setup.ac.points,
                     "ac_points",
                 )?,
                 temperature: 300.0,
@@ -167,10 +167,10 @@ impl SimulationController {
                 ..
             } => Ok(AnalysisConfig::Noise(NoiseAnalysisConfig {
                 output_node: output_node.clone(),
-                reference_node: state.dialogs.noise_ref.trim().to_string(),
-                input_source: state.dialogs.noise_input.trim().to_string(),
+                reference_node: state.sim_setup.noise.reference.trim().to_string(),
+                input_source: state.sim_setup.noise.input.trim().to_string(),
                 sweep_type: Self::map_ac_sweep(Self::map_frequency_sweep(
-                    state.dialogs.ac_sweep_type,
+                    state.sim_setup.ac.sweep,
                 )),
                 num_points: *points_per_decade,
                 start_freq: *start_freq,
@@ -228,7 +228,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_monte_carlo_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut mc_state = state.dialogs.mc_state.clone();
+        let mut mc_state = state.sim_setup.mc.clone();
         mc_state.ensure_initialized();
         mc_state
             .to_config()
@@ -240,7 +240,7 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<AnalysisSpec, String> {
-        let mut temp_state = state.dialogs.temp_state.clone();
+        let mut temp_state = state.sim_setup.temp.clone();
         temp_state.ensure_initialized();
         temp_state
             .to_config()
@@ -249,7 +249,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_corner_sweep_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut corner_state = state.dialogs.corner_state.clone();
+        let mut corner_state = state.sim_setup.corner.clone();
         corner_state.ensure_initialized();
         corner_state
             .to_config()
@@ -258,7 +258,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pss_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -271,7 +271,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_stb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut stb_state = state.dialogs.stb_state.clone();
+        let mut stb_state = state.sim_setup.stb.clone();
         stb_state.ensure_initialized();
         let stb_cfg = stb_state
             .to_config()
@@ -288,7 +288,7 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Result<AnalysisSpec, String> {
-        let mut hb_state = state.dialogs.hb_state.clone();
+        let mut hb_state = state.sim_setup.hb.clone();
         hb_state.ensure_initialized();
         let hb_cfg = hb_state
             .to_config()
@@ -348,7 +348,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_sp_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut sp_state = state.dialogs.sp_state.clone();
+        let mut sp_state = state.sim_setup.sp.clone();
         sp_state.ensure_initialized();
         let sp_cfg = sp_state
             .to_config()
@@ -377,7 +377,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_envelope_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut envelope_state = state.dialogs.envelope_state.clone();
+        let mut envelope_state = state.sim_setup.envelope.clone();
         envelope_state.ensure_initialized();
         let envelope_cfg = envelope_state
             .to_config()
@@ -392,7 +392,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_fourier_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut fourier_state = state.dialogs.fourier_state.clone();
+        let mut fourier_state = state.sim_setup.fourier.clone();
         fourier_state.ensure_initialized();
         let fourier_cfg = fourier_state
             .to_config()
@@ -408,7 +408,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_reliability_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut reliability_state = state.dialogs.reliability_state.clone();
+        let mut reliability_state = state.sim_setup.reliability.clone();
         reliability_state.ensure_initialized();
         let reliability_cfg = reliability_state
             .to_config()
@@ -423,7 +423,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_optimization_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut optimization_state = state.dialogs.optimization_state.clone();
+        let mut optimization_state = state.sim_setup.optimization.clone();
         optimization_state.ensure_initialized();
         let cfg = optimization_state
             .to_config()
@@ -474,7 +474,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_soa_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut soa_state = state.dialogs.soa_state.clone();
+        let mut soa_state = state.sim_setup.soa.clone();
         soa_state.ensure_initialized();
         let cfg = soa_state
             .to_config()
@@ -494,7 +494,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pac_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pac_state = state.dialogs.pac_state.clone();
+        let mut pac_state = state.sim_setup.pac.clone();
         pac_state.ensure_initialized();
         pac_state
             .to_config()
@@ -503,7 +503,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pnoise_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        let mut pnoise_state = state.sim_setup.pnoise.clone();
         pnoise_state.ensure_initialized();
         pnoise_state
             .to_config()
@@ -512,7 +512,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pxf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pxf_state = state.dialogs.pxf_state.clone();
+        let mut pxf_state = state.sim_setup.pxf.clone();
         pxf_state.ensure_initialized();
         pxf_state
             .to_config()
@@ -521,7 +521,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_pstb_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pstb_state = state.dialogs.pstb_state.clone();
+        let mut pstb_state = state.sim_setup.pstb.clone();
         pstb_state.ensure_initialized();
         pstb_state
             .to_config()
@@ -530,7 +530,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_tf_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut xf_state = state.dialogs.xf_state.clone();
+        let mut xf_state = state.sim_setup.xf.clone();
         xf_state.ensure_initialized();
         xf_state
             .to_config()
@@ -540,19 +540,19 @@ impl SimulationController {
 
     pub(super) fn build_disto_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
         Ok(AnalysisSpec::Disto {
-            start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+            start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
                 .map_err(|e| format!("invalid DISTO start frequency: {}", e))?,
-            stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+            stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
                 .map_err(|e| format!("invalid DISTO stop frequency: {}", e))?,
-            points_per_unit: Self::parse_positive_points(&state.dialogs.ac_points, "ac_points")?,
-            sweep: Self::map_frequency_sweep(state.dialogs.ac_sweep_type),
-            f2_over_f1: Self::parse_optional_spice_value(&state.dialogs.disto_f2_over_f1)
+            points_per_unit: Self::parse_positive_points(&state.sim_setup.ac.points, "ac_points")?,
+            sweep: Self::map_frequency_sweep(state.sim_setup.ac.sweep),
+            f2_over_f1: Self::parse_optional_spice_value(&state.sim_setup.disto_f2_over_f1)
                 .map_err(|e| format!("invalid DISTO f2/f1 ratio: {}", e))?,
         })
     }
 
     pub(super) fn build_pole_zero_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut pz_state = state.dialogs.pz_state.clone();
+        let mut pz_state = state.sim_setup.pz.clone();
         pz_state.ensure_initialized();
         let pz_cfg = pz_state
             .to_config()
@@ -586,7 +586,7 @@ impl SimulationController {
     }
 
     pub(super) fn build_sensitivity_spec(&self, state: &AppState) -> Result<AnalysisSpec, String> {
-        let mut sens_state = state.dialogs.sens_state.clone();
+        let mut sens_state = state.sim_setup.sens.clone();
         sens_state.ensure_initialized();
         let sens_cfg = sens_state
             .to_config()

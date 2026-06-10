@@ -1,6 +1,6 @@
 use egui::Ui;
 
-use super::super::DialogState;
+use super::super::SimSetupState;
 use super::{Color32, ConsoleMessage, Context, RSpiceApp};
 
 const OPTIONS_TABS: [&str; 5] = [
@@ -30,28 +30,28 @@ impl SimulationOptionsPreset {
     }
 }
 
-pub(super) fn apply_options_preset(dialogs: &mut DialogState, preset: SimulationOptionsPreset) {
-    dialogs.simulation_options_state =
+pub(super) fn apply_options_preset(dialogs: &mut SimSetupState, preset: SimulationOptionsPreset) {
+    dialogs.options_draft =
         crate::simulation::dialog::OptionsDialogState::from_options(&preset.to_options());
-    dialogs.simulation_options_errors.clear();
+    dialogs.options_errors.clear();
 }
 
-pub(super) fn revert_options_dialog_state(dialogs: &mut DialogState) {
-    let current = dialogs.simulation_options_config.clone();
-    dialogs.simulation_options_state =
+pub(super) fn revert_options_dialog_state(dialogs: &mut SimSetupState) {
+    let current = dialogs.options.clone();
+    dialogs.options_draft =
         crate::simulation::dialog::OptionsDialogState::from_options(&current);
-    dialogs.simulation_options_errors.clear();
+    dialogs.options_errors.clear();
 }
 
 pub(super) fn parse_and_validate_options(
-    dialogs: &mut DialogState,
+    dialogs: &mut SimSetupState,
 ) -> Option<crate::simulation::dialog::SimulationOptions> {
-    let parsed = dialogs.simulation_options_state.to_options();
+    let parsed = dialogs.options_draft.to_options();
     match parsed {
         Ok(options) => match options.validate() {
             Ok(()) => Some(options),
             Err(validation_errors) => {
-                dialogs.simulation_options_errors = validation_errors
+                dialogs.options_errors = validation_errors
                     .into_iter()
                     .map(|err| err.to_string())
                     .collect();
@@ -59,20 +59,20 @@ pub(super) fn parse_and_validate_options(
             }
         },
         Err(parse_errors) => {
-            dialogs.simulation_options_errors = parse_errors;
+            dialogs.options_errors = parse_errors;
             None
         }
     }
 }
 
 pub(super) fn commit_validated_options(
-    dialogs: &mut DialogState,
+    dialogs: &mut SimSetupState,
     options: &crate::simulation::dialog::SimulationOptions,
 ) {
-    dialogs.simulation_options_config = options.clone();
-    dialogs.simulation_options_state =
+    dialogs.options = options.clone();
+    dialogs.options_draft =
         crate::simulation::dialog::OptionsDialogState::from_options(options);
-    dialogs.simulation_options_errors.clear();
+    dialogs.options_errors.clear();
 }
 
 fn render_tab_selector(ui: &mut Ui, active_tab: &mut usize) {
@@ -253,8 +253,8 @@ fn render_temperature_tab(ui: &mut Ui, opts: &mut crate::simulation::dialog::Opt
     );
 }
 
-fn render_validation_errors(ui: &mut Ui, dialogs: &DialogState) {
-    if dialogs.simulation_options_errors.is_empty() {
+fn render_validation_errors(ui: &mut Ui, dialogs: &SimSetupState) {
+    if dialogs.options_errors.is_empty() {
         return;
     }
 
@@ -265,7 +265,7 @@ fn render_validation_errors(ui: &mut Ui, dialogs: &DialogState) {
                 .color(Color32::from_rgb(255, 120, 120))
                 .strong(),
         );
-        for error in &dialogs.simulation_options_errors {
+        for error in &dialogs.options_errors {
             ui.label(
                 egui::RichText::new(format!("- {}", error)).color(Color32::from_rgb(255, 120, 120)),
             );
@@ -273,33 +273,33 @@ fn render_validation_errors(ui: &mut Ui, dialogs: &DialogState) {
     });
 }
 
-fn render_active_tab(ui: &mut Ui, dialogs: &mut DialogState) {
-    match dialogs.simulation_options_state.active_tab {
-        0 => render_accuracy_tab(ui, &mut dialogs.simulation_options_state),
-        1 => render_convergence_tab(ui, &mut dialogs.simulation_options_state),
-        2 => render_algorithm_tab(ui, &mut dialogs.simulation_options_state),
-        3 => render_limits_tab(ui, &mut dialogs.simulation_options_state),
-        4 => render_temperature_tab(ui, &mut dialogs.simulation_options_state),
+fn render_active_tab(ui: &mut Ui, dialogs: &mut SimSetupState) {
+    match dialogs.options_draft.active_tab {
+        0 => render_accuracy_tab(ui, &mut dialogs.options_draft),
+        1 => render_convergence_tab(ui, &mut dialogs.options_draft),
+        2 => render_algorithm_tab(ui, &mut dialogs.options_draft),
+        3 => render_limits_tab(ui, &mut dialogs.options_draft),
+        4 => render_temperature_tab(ui, &mut dialogs.options_draft),
         _ => {}
     }
 
     render_validation_errors(ui, dialogs);
 }
 
-fn options_preview_text(dialogs: &DialogState) -> String {
-    match dialogs.simulation_options_state.to_options() {
+fn options_preview_text(dialogs: &SimSetupState) -> String {
+    match dialogs.options_draft.to_options() {
         Ok(options) => options.to_spice_options(),
-        Err(_) => dialogs.simulation_options_config.to_spice_options(),
+        Err(_) => dialogs.options.to_spice_options(),
     }
 }
 
 impl RSpiceApp {
     pub(in crate::common::app) fn render_simulation_options_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.simulation_options {
+        if !self.state.sim_setup.options_open {
             return;
         }
 
-        let mut dialog_open = self.state.dialogs.simulation_options;
+        let mut dialog_open = self.state.sim_setup.options_open;
         let mut close_requested = false;
 
         egui::Window::new("Simulation Options")
@@ -317,13 +317,13 @@ impl RSpiceApp {
 
                 render_tab_selector(
                     ui,
-                    &mut self.state.dialogs.simulation_options_state.active_tab,
+                    &mut self.state.sim_setup.options_draft.active_tab,
                 );
 
                 ui.separator();
                 ui.add_space(4.0);
 
-                let preview_text = options_preview_text(&self.state.dialogs);
+                let preview_text = options_preview_text(&self.state.sim_setup);
                 let preview_height = 170.0;
                 let footer_height = 60.0;
                 let content_height =
@@ -336,7 +336,7 @@ impl RSpiceApp {
                             .id_salt("sim_options_scroll")
                             .auto_shrink([false, false])
                             .show(ui, |ui| {
-                                render_active_tab(ui, &mut self.state.dialogs);
+                                render_active_tab(ui, &mut self.state.sim_setup);
                             });
                     },
                 );
@@ -362,30 +362,30 @@ impl RSpiceApp {
                 ui.horizontal(|ui| {
                     if ui.button("Default").clicked() {
                         apply_options_preset(
-                            &mut self.state.dialogs,
+                            &mut self.state.sim_setup,
                             SimulationOptionsPreset::Default,
                         );
                     }
                     if ui.button("Fast").clicked() {
                         apply_options_preset(
-                            &mut self.state.dialogs,
+                            &mut self.state.sim_setup,
                             SimulationOptionsPreset::Fast,
                         );
                     }
                     if ui.button("Accurate").clicked() {
                         apply_options_preset(
-                            &mut self.state.dialogs,
+                            &mut self.state.sim_setup,
                             SimulationOptionsPreset::Accurate,
                         );
                     }
                     if ui.button("Robust").clicked() {
                         apply_options_preset(
-                            &mut self.state.dialogs,
+                            &mut self.state.sim_setup,
                             SimulationOptionsPreset::Robust,
                         );
                     }
                     if ui.button("Revert").clicked() {
-                        revert_options_dialog_state(&mut self.state.dialogs);
+                        revert_options_dialog_state(&mut self.state.sim_setup);
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -397,9 +397,9 @@ impl RSpiceApp {
 
                         if (apply_clicked || ok_clicked)
                             && let Some(options) =
-                                parse_and_validate_options(&mut self.state.dialogs)
+                                parse_and_validate_options(&mut self.state.sim_setup)
                         {
-                            commit_validated_options(&mut self.state.dialogs, &options);
+                            commit_validated_options(&mut self.state.sim_setup, &options);
                             self.state.push_user_message(ConsoleMessage::info(
                                 "Simulation options updated",
                             ));
@@ -411,6 +411,6 @@ impl RSpiceApp {
                 });
             });
 
-        self.state.dialogs.simulation_options = dialog_open && !close_requested;
+        self.state.sim_setup.options_open = dialog_open && !close_requested;
     }
 }

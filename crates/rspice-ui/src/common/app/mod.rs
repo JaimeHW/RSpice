@@ -60,9 +60,11 @@ mod app_actions;
 
 mod app_file_actions;
 
-mod app_simulation_analysis_options;
 mod app_viewer_capabilities;
 pub use app_viewer_capabilities::ViewerCapability;
+
+mod sim_setup_state;
+pub use sim_setup_state::{AcSetup, DcSetup, NoiseSetup, SimSetupState, TranSetup};
 
 mod app_simulation_dialogs;
 
@@ -108,6 +110,8 @@ pub struct AppState {
     pub(crate) simulation: SimulationState,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
+    /// Typed analysis configuration behind the Simulate view.
+    pub(crate) sim_setup: SimSetupState,
     /// Current theme
     pub(crate) theme: RSpiceTheme,
     /// Structured log history buffer (ring-buffer, filterable).
@@ -299,7 +303,6 @@ impl RSpiceApp {
         self.process_veriloga_load_dialog(ctx);
         crate::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
-        self.render_simulation_setup_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);

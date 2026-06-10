@@ -105,9 +105,9 @@ fn engine_section(ui: &mut Ui, state: &mut AppState) {
 // Right panel — analysis detail
 // ---------------------------------------------------------------------------
 
-/// Analysis rows shown in the Simulate view, in run order.
-/// `(dialog tab index, name, description)` — the tab index matches
-/// `DialogState::sim_active_tab` / `enabled_analyses` semantics.
+/// Every analysis the runner knows, in run order. `(analysis index, mono
+/// id, description)` — the index matches `SimSetupState::enabled`
+/// semantics and the controller's analysis dispatch.
 pub const ANALYSES: &[(usize, &str, &str)] = &[
     (0, "op", "DC operating point"),
     (1, "tran", "time-domain transient"),
@@ -120,7 +120,29 @@ pub const ANALYSES: &[(usize, &str, &str)] = &[
     (8, "pss", "periodic steady state"),
     (9, "stb", "loop stability"),
     (10, "temp", "temperature sweep"),
+    (11, "hb", "harmonic balance"),
+    (12, "sp", "S-parameters"),
+    (13, "pac", "periodic AC"),
+    (14, "pnoise", "periodic noise"),
+    (15, "pxf", "periodic transfer"),
+    (16, "pstb", "periodic stability"),
+    (17, "xf", "transfer function"),
+    (18, "corner", "process corners"),
+    (19, "env", "envelope transient"),
+    (20, "four", "Fourier components"),
+    (21, "rel", "reliability / aging"),
+    (22, "opt", "optimization"),
+    (23, "soa", "safe operating area"),
+    (24, "disto", "harmonic distortion"),
 ];
+
+/// Mono id + description for an analysis index.
+pub fn analysis_meta(index: usize) -> (&'static str, &'static str) {
+    ANALYSES
+        .iter()
+        .find(|(idx, _, _)| *idx == index)
+        .map_or(("?", ""), |(_, name, description)| (*name, *description))
+}
 
 /// Render the simulate context's right panel (selected analysis detail).
 pub fn right(ui: &mut Ui, state: &mut AppState) {
@@ -144,7 +166,8 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
         })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            let dialogs = &mut state.dialogs;
+            let setup = &mut state.sim_setup;
+            setup.ensure_initialized();
             let note: &str = match selected_tab {
                 0 => {
                     kv_row(ui, "Run before", "every analysis");
@@ -152,66 +175,66 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
                     "Solves the DC operating point and annotates the schematic."
                 }
                 1 => {
-                    input_row(ui, "Stop time", &mut dialogs.tran_stop);
-                    input_row(ui, "Max step", &mut dialogs.tran_maxstep);
-                    input_row(ui, "Step time", &mut dialogs.tran_step);
-                    input_row(ui, "Start time", &mut dialogs.tran_start);
-                    check_row(ui, "Use initial conditions", &mut dialogs.tran_uic);
+                    input_row(ui, "Stop time", &mut setup.tran.stop);
+                    input_row(ui, "Max step", &mut setup.tran.max_step);
+                    input_row(ui, "Step time", &mut setup.tran.step);
+                    input_row(ui, "Start time", &mut setup.tran.start);
+                    check_row(ui, "Use initial conditions", &mut setup.tran.uic);
                     "Local truncation error controls step size between limits."
                 }
                 2 => {
-                    input_row(ui, "Start", &mut dialogs.ac_fstart);
-                    input_row(ui, "Stop", &mut dialogs.ac_fstop);
-                    input_row(ui, "Points", &mut dialogs.ac_points);
+                    input_row(ui, "Start", &mut setup.ac.fstart);
+                    input_row(ui, "Stop", &mut setup.ac.fstop);
+                    input_row(ui, "Points", &mut setup.ac.points);
                     let sweep = ["dec", "oct", "lin"];
-                    kv_row(ui, "Sweep", sweep[dialogs.ac_sweep_type.min(2)]);
+                    kv_row(ui, "Sweep", sweep[setup.ac.sweep.min(2)]);
                     "Small-signal sweep around the operating point."
                 }
                 3 => {
-                    input_row(ui, "Source", &mut dialogs.dc_source);
-                    input_row(ui, "Start", &mut dialogs.dc_start);
-                    input_row(ui, "Stop", &mut dialogs.dc_stop);
-                    input_row(ui, "Step", &mut dialogs.dc_step);
+                    input_row(ui, "Source", &mut setup.dc.source);
+                    input_row(ui, "Start", &mut setup.dc.start);
+                    input_row(ui, "Stop", &mut setup.dc.stop);
+                    input_row(ui, "Step", &mut setup.dc.step);
                     "Sweeps a source over the operating range."
                 }
                 4 => {
-                    input_row(ui, "Output", &mut dialogs.noise_output);
-                    input_row(ui, "Input ref", &mut dialogs.noise_input);
-                    input_row(ui, "Start", &mut dialogs.noise_fstart);
-                    input_row(ui, "Stop", &mut dialogs.noise_fstop);
+                    input_row(ui, "Output", &mut setup.noise.output);
+                    input_row(ui, "Input ref", &mut setup.noise.input);
+                    input_row(ui, "Start", &mut setup.noise.fstart);
+                    input_row(ui, "Stop", &mut setup.noise.fstop);
                     "Integrated and spot noise at the chosen output."
                 }
                 5 => {
-                    input_row(ui, "Input", &mut dialogs.pz_input);
-                    input_row(ui, "Output", &mut dialogs.pz_output);
+                    input_row(ui, "Input", &mut setup.pz.input_pos);
+                    input_row(ui, "Output", &mut setup.pz.output_pos);
                     "Extracts poles and zeros of the small-signal transfer."
                 }
                 6 => {
-                    input_row(ui, "Output", &mut dialogs.sens_output);
+                    input_row(ui, "Output", &mut setup.sens.output_expr);
                     "DC or AC sensitivity of the output to every parameter."
                 }
                 7 => {
-                    input_row(ui, "Samples", &mut dialogs.mc_runs);
-                    input_row(ui, "Seed", &mut dialogs.mc_seed);
-                    let vary = ["uniform", "gaussian"];
-                    kv_row(ui, "Vary", vary[dialogs.mc_variation.min(1)]);
+                    input_row(ui, "Samples", &mut setup.mc.num_runs);
+                    input_row(ui, "Seed", &mut setup.mc.seed);
+                    let vary = ["gaussian", "uniform", "worst-case"];
+                    kv_row(ui, "Vary", vary[setup.mc.distribution_idx.min(2)]);
                     "Statistical runs share the analysis list above."
                 }
                 8 => {
-                    input_row(ui, "Fundamental", &mut dialogs.pss_fund);
-                    input_row(ui, "Harmonics", &mut dialogs.pss_harmonics);
+                    input_row(ui, "Fundamental", &mut setup.pss.fund_freq);
+                    input_row(ui, "Harmonics", &mut setup.pss.num_harmonics);
                     "Shooting-method periodic steady state."
                 }
                 9 => {
-                    input_row(ui, "Probe", &mut dialogs.stb_probe);
-                    input_row(ui, "Start", &mut dialogs.stb_fstart);
-                    input_row(ui, "Stop", &mut dialogs.stb_fstop);
+                    input_row(ui, "Probe", &mut setup.stb.probe_source);
+                    input_row(ui, "Start", &mut setup.stb.start_freq);
+                    input_row(ui, "Stop", &mut setup.stb.stop_freq);
                     "Loop gain and phase margin via the probe source."
                 }
                 10 => {
-                    input_row(ui, "Start", &mut dialogs.temp_start);
-                    input_row(ui, "Stop", &mut dialogs.temp_stop);
-                    input_row(ui, "Step", &mut dialogs.temp_step);
+                    input_row(ui, "Start", &mut setup.temp.temp_start);
+                    input_row(ui, "Stop", &mut setup.temp.temp_stop);
+                    input_row(ui, "Step", &mut setup.temp.temp_step);
                     "Repeats the selected analysis across temperature."
                 }
                 _ => "",
@@ -224,15 +247,6 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(c.text_faint),
                 );
-            }
-            ui.add_space(8.0);
-            if crate::ui::widgets::Button::new("All options…")
-                .min_width(ui.available_width())
-                .show(ui)
-                .clicked()
-            {
-                state.dialogs.sim_active_tab = selected_tab;
-                state.dialogs.simulation_dialog = true;
             }
         });
 }

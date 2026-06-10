@@ -12,7 +12,7 @@ impl SimulationController {
             return;
         };
 
-        let mut sp_state = state.dialogs.sp_state.clone();
+        let mut sp_state = state.sim_setup.sp.clone();
         sp_state.ensure_initialized();
         let sp_cfg = match sp_state.to_config() {
             Ok(cfg) => cfg,

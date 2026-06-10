@@ -1,20 +1,24 @@
 //! Simulate view — a centered card stack: analyses in run order, saved
-//! outputs, corner selection, and the run bar with live progress.
+//! outputs, corner selection, and the run bar with live progress. The
+//! add-analysis picker rides on the modal primitive.
 
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::shell::panels::simulate::ANALYSES;
+use crate::common::simulation_analysis_tabs::SIMULATION_ANALYSIS_CATEGORIES;
+use crate::shell::panels::simulate::{ANALYSES, analysis_meta};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, chip};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, chip};
 
 /// Card stack max width (centered in the view).
 const CARD_WIDTH: f32 = 880.0;
 
 /// Render the simulate view.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    state.sim_setup.ensure_initialized();
+    analysis_picker(ui.ctx(), state);
     egui::ScrollArea::vertical()
         .id_salt("volta.simulate.scroll")
         .auto_shrink([false, false])
@@ -141,12 +145,12 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
     card(ui, |ui| {
         if let Some(action) = card_header(ui, "Analyses", "run in listed order", Some("＋ Add analysis")) {
             if action.clicked() {
-                state.dialogs.simulation_dialog = true;
+                state.sim_setup.picker_open = true;
             }
         }
 
         for (tab_idx, name, description) in ANALYSES {
-            let enabled = state.dialogs.enabled_analyses.contains(tab_idx);
+            let enabled = state.sim_setup.enabled.contains(tab_idx);
             let selected = state.shell.selected_analysis == Some(*tab_idx);
             // Only show disabled exotic analyses when enabled — the core five
             // stay visible like the design.
@@ -202,9 +206,9 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
             }
             if box_response.clicked() {
                 if enabled {
-                    state.dialogs.enabled_analyses.remove(tab_idx);
+                    state.sim_setup.enabled.remove(tab_idx);
                 } else {
-                    state.dialogs.enabled_analyses.insert(*tab_idx);
+                    state.sim_setup.enabled.insert(*tab_idx);
                 }
             }
 
@@ -352,6 +356,116 @@ fn corners_card(ui: &mut Ui, state: &mut AppState) {
         });
         ui.add_space(12.0);
     });
+}
+
+/// The add-analysis picker: searchable, grouped by category, on the modal
+/// primitive. Clicking a row toggles it in the run set and selects it so
+/// the right panel shows its form.
+fn analysis_picker(ctx: &egui::Context, state: &mut AppState) {
+    if !state.sim_setup.picker_open {
+        return;
+    }
+    let t = Tokens::get(ctx);
+    let c = t.color;
+
+    let shell = &mut state.shell;
+    let setup = &mut state.sim_setup;
+    let hint = format!("{} enabled", setup.enabled.len());
+
+    let choice = Dialog::new("Simulate", "Add analysis", "Done")
+        .size(DialogSize::Md)
+        .hint(&hint)
+        .show(ctx, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut setup.picker_query)
+                    .hint_text("Filter analyses…")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(6.0);
+
+            let query = setup.picker_query.trim().to_lowercase();
+            for (category, items) in SIMULATION_ANALYSIS_CATEGORIES {
+                let visible: Vec<(usize, &str)> = items
+                    .iter()
+                    .filter(|(index, label)| {
+                        query.is_empty()
+                            || label.to_lowercase().contains(&query)
+                            || analysis_meta(*index).0.contains(query.as_str())
+                    })
+                    .copied()
+                    .collect();
+                if visible.is_empty() {
+                    continue;
+                }
+
+                ui.add_space(8.0);
+                let mut header = egui::text::LayoutJob::default();
+                header.append(
+                    &category.to_uppercase(),
+                    0.0,
+                    egui::TextFormat {
+                        font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+                        color: c.text_faint,
+                        extra_letter_spacing: 0.08 * tokens::FS_0,
+                        ..Default::default()
+                    },
+                );
+                ui.label(header);
+                ui.add_space(2.0);
+
+                for (index, label) in visible {
+                    let enabled = setup.enabled.contains(&index);
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 28.0),
+                        egui::Sense::click(),
+                    );
+                    let painter = ui.painter();
+                    if response.hovered() {
+                        painter.rect_filled(rect, t.radius, c.bg_hover);
+                    }
+                    let (id, _) = analysis_meta(index);
+                    painter.text(
+                        egui::pos2(rect.left() + 8.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        id,
+                        theme::mono(tokens::FS_1, FontWeight::Medium),
+                        if enabled { c.accent } else { c.text_dim },
+                    );
+                    painter.text(
+                        egui::pos2(rect.left() + 76.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        label,
+                        theme::sans(tokens::FS_1, FontWeight::Regular),
+                        c.text,
+                    );
+                    if enabled {
+                        painter.text(
+                            egui::pos2(rect.right() - 8.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            "✓ added",
+                            theme::mono(tokens::FS_0, FontWeight::Regular),
+                            c.accent,
+                        );
+                    }
+                    if response.clicked() {
+                        if enabled {
+                            setup.enabled.remove(&index);
+                        } else {
+                            setup.enabled.insert(index);
+                            shell.selected_analysis = Some(index);
+                        }
+                    }
+                    if response.hovered() {
+                        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    }
+                }
+            }
+        });
+
+    if choice != DialogChoice::None {
+        setup.picker_open = false;
+        setup.picker_query.clear();
+    }
 }
 
 fn run_bar(ui: &mut Ui, state: &mut AppState) {

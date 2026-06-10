@@ -6,13 +6,13 @@ impl SimulationController {
     ) -> Result<crate::services::simulation_runner::PacRunConfig, String> {
         use crate::services::simulation_runner::{PacFrequencySweep, PacRunConfig};
 
-        let mut pac_state = state.dialogs.pac_state.clone();
+        let mut pac_state = state.sim_setup.pac.clone();
         pac_state.ensure_initialized();
         let pac_cfg = pac_state
             .to_config()
             .map_err(|e| format!("invalid PAC settings: {}", e))?;
 
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -52,7 +52,7 @@ impl SimulationController {
     ) -> Result<crate::services::simulation_runner::TfRunConfig, String> {
         use crate::services::simulation_runner::{TfFrequencySweep, TfRunConfig};
 
-        let mut xf_state = state.dialogs.xf_state.clone();
+        let mut xf_state = state.sim_setup.xf.clone();
         xf_state.ensure_initialized();
         let xf_cfg = xf_state
             .to_config()
@@ -87,13 +87,13 @@ impl SimulationController {
             PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig,
         };
 
-        let mut pnoise_state = state.dialogs.pnoise_state.clone();
+        let mut pnoise_state = state.sim_setup.pnoise.clone();
         pnoise_state.ensure_initialized();
         let pnoise_cfg = pnoise_state
             .to_config()
             .map_err(|e| format!("invalid PNOISE settings: {}", e))?;
 
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -148,13 +148,13 @@ impl SimulationController {
     ) -> Result<crate::services::simulation_runner::PxfRunConfig, String> {
         use crate::services::simulation_runner::{PxfFrequencySweep, PxfRunConfig};
 
-        let mut pxf_state = state.dialogs.pxf_state.clone();
+        let mut pxf_state = state.sim_setup.pxf.clone();
         pxf_state.ensure_initialized();
         let pxf_cfg = pxf_state
             .to_config()
             .map_err(|e| format!("invalid PXF settings: {}", e))?;
 
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -194,13 +194,13 @@ impl SimulationController {
     ) -> Result<crate::services::simulation_runner::PstbRunConfig, String> {
         use crate::services::simulation_runner::PstbRunConfig;
 
-        let mut pstb_state = state.dialogs.pstb_state.clone();
+        let mut pstb_state = state.sim_setup.pstb.clone();
         pstb_state.ensure_initialized();
         let pstb_cfg = pstb_state
             .to_config()
             .map_err(|e| format!("invalid PSTB settings: {}", e))?;
 
-        let mut pss_state = state.dialogs.pss_state.clone();
+        let mut pss_state = state.sim_setup.pss.clone();
         pss_state.ensure_initialized();
         let pss_cfg = pss_state
             .to_config()
@@ -241,7 +241,7 @@ impl SimulationController {
         let base_mode = match temp_cfg.base_analysis {
             TempBaseAnalysis::Op => CornerBaseMode::Op,
             TempBaseAnalysis::Dc => {
-                let source_name = state.dialogs.dc_source.trim();
+                let source_name = state.sim_setup.dc.source.trim();
                 if source_name.is_empty() {
                     return Err(
                         "temperature sweep DC base analysis requires a non-empty sweep source"
@@ -250,33 +250,33 @@ impl SimulationController {
                 }
                 CornerBaseMode::DcSweep {
                     source_name: source_name.to_string(),
-                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
                         .map_err(|e| format!("invalid temperature DC start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
                         .map_err(|e| format!("invalid temperature DC stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
                         .map_err(|e| format!("invalid temperature DC step value: {}", e))?,
                 }
             }
             TempBaseAnalysis::Transient => CornerBaseMode::Transient {
-                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
                     .map_err(|e| format!("invalid temperature transient stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
                     .map_err(|e| format!("invalid temperature transient step time: {}", e))?,
             },
             TempBaseAnalysis::Ac => {
-                let sweep = match Self::map_frequency_sweep(state.dialogs.ac_sweep_type) {
+                let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
                     FrequencySweep::Octave => CornerFrequencySweep::Octave,
                     FrequencySweep::Linear => CornerFrequencySweep::Linear,
                 };
                 CornerBaseMode::Ac {
-                    start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                    start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
                         .map_err(|e| format!("invalid temperature AC start frequency: {}", e))?,
-                    stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                    stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
                         .map_err(|e| format!("invalid temperature AC stop frequency: {}", e))?,
                     points_per_unit: Self::parse_positive_points(
-                        &state.dialogs.ac_points,
+                        &state.sim_setup.ac.points,
                         "ac_points",
                     )
                     .map_err(|e| format!("invalid temperature AC points: {}", e))?,
@@ -321,7 +321,7 @@ impl SimulationController {
         let base_mode = match corner_cfg.base_analysis {
             CornerBaseAnalysis::Op => CornerBaseMode::Op,
             CornerBaseAnalysis::Dc => {
-                let source_name = state.dialogs.dc_source.trim();
+                let source_name = state.sim_setup.dc.source.trim();
                 if source_name.is_empty() {
                     return Err(
                         "corner DC base analysis requires a non-empty sweep source".to_string()
@@ -329,33 +329,33 @@ impl SimulationController {
                 }
                 CornerBaseMode::DcSweep {
                     source_name: source_name.to_string(),
-                    start: parse_spice_value_checked(&state.dialogs.dc_start)
+                    start: parse_spice_value_checked(&state.sim_setup.dc.start)
                         .map_err(|e| format!("invalid corner DC start value: {}", e))?,
-                    stop: parse_spice_value_checked(&state.dialogs.dc_stop)
+                    stop: parse_spice_value_checked(&state.sim_setup.dc.stop)
                         .map_err(|e| format!("invalid corner DC stop value: {}", e))?,
-                    step: parse_spice_value_checked(&state.dialogs.dc_step)
+                    step: parse_spice_value_checked(&state.sim_setup.dc.step)
                         .map_err(|e| format!("invalid corner DC step value: {}", e))?,
                 }
             }
             CornerBaseAnalysis::Transient => CornerBaseMode::Transient {
-                stop_time: parse_spice_value_checked(&state.dialogs.tran_stop)
+                stop_time: parse_spice_value_checked(&state.sim_setup.tran.stop)
                     .map_err(|e| format!("invalid corner transient stop time: {}", e))?,
-                step_time: parse_spice_value_checked(&state.dialogs.tran_step)
+                step_time: parse_spice_value_checked(&state.sim_setup.tran.step)
                     .map_err(|e| format!("invalid corner transient step time: {}", e))?,
             },
             CornerBaseAnalysis::Ac => {
-                let sweep = match Self::map_frequency_sweep(state.dialogs.ac_sweep_type) {
+                let sweep = match Self::map_frequency_sweep(state.sim_setup.ac.sweep) {
                     FrequencySweep::Decade => CornerFrequencySweep::Decade,
                     FrequencySweep::Octave => CornerFrequencySweep::Octave,
                     FrequencySweep::Linear => CornerFrequencySweep::Linear,
                 };
                 CornerBaseMode::Ac {
-                    start_freq: parse_spice_value_checked(&state.dialogs.ac_fstart)
+                    start_freq: parse_spice_value_checked(&state.sim_setup.ac.fstart)
                         .map_err(|e| format!("invalid corner AC start frequency: {}", e))?,
-                    stop_freq: parse_spice_value_checked(&state.dialogs.ac_fstop)
+                    stop_freq: parse_spice_value_checked(&state.sim_setup.ac.fstop)
                         .map_err(|e| format!("invalid corner AC stop frequency: {}", e))?,
                     points_per_unit: Self::parse_positive_points(
-                        &state.dialogs.ac_points,
+                        &state.sim_setup.ac.points,
                         "ac_points",
                     )
                     .map_err(|e| format!("invalid corner AC points: {}", e))?,
@@ -375,7 +375,7 @@ impl SimulationController {
     }
 
     pub(super) fn periodic_solver_tolerances(state: &AppState) -> (f64, f64) {
-        let opts = &state.dialogs.simulation_options_config;
+        let opts = &state.sim_setup.options;
         (opts.reltol, opts.abstol)
     }
 }
