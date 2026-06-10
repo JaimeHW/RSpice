@@ -515,12 +515,7 @@ pub(super) fn run_fourier(
     let fourier = FourierAnalysis::new(config);
     let resolver = NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
 
-    if !ctx.quiet {
-        println!("\n┌────────────────────────────────────────────────────────────────┐");
-        println!("│                    FOURIER ANALYSIS RESULTS                    │");
-        println!("├────────────────────────────────────────────────────────────────┤");
-    }
-
+    let mut analyzed: Vec<(String, rspice_core::analysis::FourierResult)> = Vec::new();
     for output in outputs {
         if let Some((node_idx, reference_idx)) = resolver.parse_voltage_probe(output) {
             let result = if reference_idx == 0 {
@@ -536,66 +531,138 @@ pub(super) fn run_fourier(
                     .collect();
                 fourier.analyze(&tran_result.time, &diff_waveform)
             };
-
-            if !ctx.quiet {
-                println!("│ Output: {:54} │", output);
-                println!("├────────────────────────────────────────────────────────────────┤");
-                println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)       │");
-                println!("├────────────────────────────────────────────────────────────────┤");
-
-                for (i, harmonic) in result.harmonics.iter().enumerate() {
-                    let freq = fundamental * (i + 1) as f64;
-                    println!(
-                        "│  {:3}        {:12.4e}      {:10.6}   {:10.2}         │",
-                        i + 1,
-                        freq,
-                        harmonic.magnitude,
-                        harmonic.phase.to_degrees()
-                    );
-                }
-
-                println!("├────────────────────────────────────────────────────────────────┤");
-                println!(
-                    "│  DC Component:   {:10.6}                                    │",
-                    result.dc_component
-                );
-                println!(
-                    "│  THD:            {:10.4} %                                   │",
-                    result.thd * 100.0
-                );
-                println!("└────────────────────────────────────────────────────────────────┘");
-            }
+            analyzed.push((output.clone(), result));
         } else if !ctx.quiet {
-            println!("│ Warning: Could not find node for output '{}'", output);
+            println!("Warning: Could not find node for output '{}'", output);
         }
     }
 
-    if let Some(ref output_path) = ctx.output_path_for("four")
-        && matches!(ctx.format, OutputFormat::Json)
-    {
-        use std::io::Write;
+    if !ctx.quiet {
+        println!("\n┌────────────────────────────────────────────────────────────────┐");
+        println!("│                    FOURIER ANALYSIS RESULTS                    │");
+        println!("├────────────────────────────────────────────────────────────────┤");
 
-        let mut file = std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
-            path: output_path.clone(),
-            source: e,
-        })?;
+        for (output, result) in &analyzed {
+            println!("│ Output: {:54} │", output);
+            println!("├────────────────────────────────────────────────────────────────┤");
+            println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)       │");
+            println!("├────────────────────────────────────────────────────────────────┤");
 
-        let json = serde_json::json!({
-            "analysis": "fourier",
-            "fundamental_hz": fundamental,
-            "num_harmonics": num_harmonics,
-            "outputs": outputs,
-        });
-
-        writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(|e| {
-            CliError::OutputError {
-                path: output_path.clone(),
-                source: e,
+            for (i, harmonic) in result.harmonics.iter().enumerate() {
+                let freq = fundamental * (i + 1) as f64;
+                println!(
+                    "│  {:3}        {:12.4e}      {:10.6}   {:10.2}         │",
+                    i + 1,
+                    freq,
+                    harmonic.magnitude,
+                    harmonic.phase.to_degrees()
+                );
             }
-        })?;
 
+            println!("├────────────────────────────────────────────────────────────────┤");
+            println!(
+                "│  DC Component:   {:10.6}                                    │",
+                result.dc_component
+            );
+            println!(
+                "│  THD:            {:10.4} %                                   │",
+                result.thd * 100.0
+            );
+            println!("└────────────────────────────────────────────────────────────────┘");
+        }
+    }
+
+    if let Some(ref output_path) = ctx.output_path_for("four") {
+        write_fourier_output(
+            output_path,
+            ctx.format,
+            fundamental,
+            num_harmonics,
+            &analyzed,
+        )?;
         if !ctx.quiet {
             println!("\nResults written to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Export Fourier results with full harmonic data (JSON or CSV).
+fn write_fourier_output(
+    path: &Path,
+    format: OutputFormat,
+    fundamental: f64,
+    num_harmonics: usize,
+    analyzed: &[(String, rspice_core::analysis::FourierResult)],
+) -> Result<(), CliError> {
+    use std::io::Write;
+
+    let io_err = |e: std::io::Error| CliError::output_error(path, e);
+    let mut file = std::fs::File::create(path).map_err(io_err)?;
+
+    match format {
+        OutputFormat::Csv | OutputFormat::Tsv => {
+            let sep = if matches!(format, OutputFormat::Tsv) { '\t' } else { ',' };
+            writeln!(
+                file,
+                "output{0}harmonic{0}frequency_hz{0}magnitude{0}phase_deg{0}dc_component{0}thd_percent",
+                sep
+            )
+            .map_err(io_err)?;
+            for (output, result) in analyzed {
+                for (i, harmonic) in result.harmonics.iter().enumerate() {
+                    writeln!(
+                        file,
+                        "{1}{0}{2}{0}{3:.9e}{0}{4:.9e}{0}{5:.6}{0}{6:.9e}{0}{7:.6}",
+                        sep,
+                        output,
+                        i + 1,
+                        fundamental * (i + 1) as f64,
+                        harmonic.magnitude,
+                        harmonic.phase.to_degrees(),
+                        result.dc_component,
+                        result.thd * 100.0,
+                    )
+                    .map_err(io_err)?;
+                }
+            }
+        }
+        _ => {
+            // Fourier results are tables of harmonics, not waveforms; JSON is
+            // the structured default for every other requested format.
+            let results: Vec<serde_json::Value> = analyzed
+                .iter()
+                .map(|(output, result)| {
+                    serde_json::json!({
+                        "output": output,
+                        "dc_component": result.dc_component,
+                        "thd": result.thd,
+                        "thd_percent": result.thd * 100.0,
+                        "harmonics": result
+                            .harmonics
+                            .iter()
+                            .enumerate()
+                            .map(|(i, harmonic)| {
+                                serde_json::json!({
+                                    "n": i + 1,
+                                    "frequency_hz": fundamental * (i + 1) as f64,
+                                    "magnitude": harmonic.magnitude,
+                                    "phase_deg": harmonic.phase.to_degrees(),
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    })
+                })
+                .collect();
+
+            let json = serde_json::json!({
+                "analysis": "fourier",
+                "fundamental_hz": fundamental,
+                "num_harmonics": num_harmonics,
+                "results": results,
+            });
+            writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(io_err)?;
         }
     }
 
@@ -611,6 +678,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     }
 
     let mut results: Vec<(f64, Vec<f64>)> = Vec::new();
+    let mut node_names: Vec<String> = Vec::new();
 
     for (i, temp_c) in temperatures.iter().enumerate() {
         let temp_k = temp_c + 273.15;
@@ -635,6 +703,9 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                     for j in 1..=result.node_voltages.len().min(5) {
                         println!("  V({}) = {:.6} V", j, result.voltage(j));
                     }
+                }
+                if node_names.is_empty() {
+                    node_names = result.node_names.clone();
                 }
                 results.push((*temp_c, result.node_voltages.clone()));
             }
@@ -674,14 +745,27 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         match ctx.format {
             OutputFormat::Csv => {
                 let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
-                let header: String = (1..=num_nodes).map(|i| format!(",V({})", i)).collect();
+                let header: String = (1..num_nodes)
+                    .map(|i| {
+                        let name = node_names
+                            .get(i)
+                            .cloned()
+                            .unwrap_or_else(|| i.to_string());
+                        format!(",V({})", name)
+                    })
+                    .collect();
                 writeln!(file, "Temperature_C{}", header).map_err(|e| CliError::OutputError {
                     path: output_path.clone(),
                     source: e,
                 })?;
 
                 for (temp, voltages) in &results {
-                    let values: String = voltages.iter().map(|v| format!(",{:.9e}", v)).collect();
+                    // Skip index 0: ground is not a column
+                    let values: String = voltages
+                        .iter()
+                        .skip(1)
+                        .map(|v| format!(",{:.9e}", v))
+                        .collect();
                     writeln!(file, "{:.2}{}", temp, values).map_err(|e| CliError::OutputError {
                         path: output_path.clone(),
                         source: e,
