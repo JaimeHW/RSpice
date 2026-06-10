@@ -137,6 +137,9 @@ pub(super) fn parse_command(
             // Parse user-defined function: .FUNC name(arg1, arg2, ...) = expression
             parse_func_statement(stream, line_num, params)?;
         }
+        ".TF" => {
+            analyses.push(parse_tf_command(stream, line_num)?);
+        }
         ".OPTIONS" | ".OPTION" | ".OPT" => {
             parse_options_command(stream, line_num, params, options)?;
         }

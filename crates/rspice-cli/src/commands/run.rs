@@ -170,6 +170,18 @@ impl<'a> RunContext<'a> {
                 reference_node.as_deref(),
                 *ac_sweep,
             )?,
+            AnalysisCommand::Tf {
+                output_node,
+                reference_node,
+                output_is_current,
+                input_source,
+            } => frequency::run_tf_from_command(
+                self,
+                output_node,
+                reference_node.as_deref(),
+                *output_is_current,
+                input_source,
+            )?,
             AnalysisCommand::PoleZero {
                 input_pos,
                 input_neg,

@@ -261,6 +261,66 @@ pub(super) fn parse_noise_command(
     })
 }
 
+/// Parse .TF command: .TF V(out[,ref]) insrc  |  .TF I(element) insrc
+pub(super) fn parse_tf_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<AnalysisCommand, ParseError> {
+    let is_current_probe = matches!(&stream.peek().kind, TokenKind::Ident(s) if {
+        let upper = s.to_uppercase();
+        upper == "I" || upper.starts_with("I(")
+    });
+
+    let (output_node, reference_node, output_is_current) = if is_current_probe {
+        let ident = expect_ident(stream, line_num)?;
+        let element = if ident.len() > 1 {
+            // Merged token form `I(ELEM)`.
+            parse_inline_current_probe(&ident, line_num)?
+        } else {
+            if !stream.consume(&TokenKind::LParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected '(' after I in .TF current probe".to_string(),
+                });
+            }
+            let element = expect_ident(stream, line_num)?;
+            if !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected ')' in I(element) specification".to_string(),
+                });
+            }
+            element
+        };
+        (element.to_uppercase(), None, true)
+    } else {
+        let (node, reference) = parse_voltage_output_reference(stream, line_num)?;
+        (node, reference, false)
+    };
+
+    let input_source = expect_ident(stream, line_num)?.to_uppercase();
+
+    Ok(AnalysisCommand::Tf {
+        output_node,
+        reference_node,
+        output_is_current,
+        input_source,
+    })
+}
+
+/// Extract the element name from a merged `I(ELEM)` token.
+fn parse_inline_current_probe(token: &str, line_num: usize) -> Result<String, ParseError> {
+    let inner = token[1..]
+        .strip_prefix('(')
+        .and_then(|s| s.strip_suffix(')'))
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ParseError::Syntax {
+            line: line_num,
+            message: format!("Invalid current probe `{token}` in .TF (expected I(element))"),
+        })?;
+    Ok(inner.to_uppercase())
+}
+
 /// Parse .SENS command: .SENS V(out[,ref]) [AC DEC|LIN|OCT np fstart fstop]
 pub(super) fn parse_sens_command(
     stream: &mut TokenStream,

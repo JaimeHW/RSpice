@@ -4,6 +4,67 @@ use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ac_signals, voltage_display_name};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 
+/// Run `.TF`: DC small-signal transfer function, input impedance, and
+/// output impedance, reported in ngspice's format.
+pub(super) fn run_tf_from_command(
+    ctx: &RunContext<'_>,
+    output_node: &str,
+    reference_node: Option<&str>,
+    output_is_current: bool,
+    input_source: &str,
+) -> Result<(), CliError> {
+    if !ctx.quiet {
+        println!("Running DC transfer function analysis...");
+    }
+
+    let result = ctx
+        .engine
+        .run_transfer_function(
+            ctx.netlist,
+            output_node,
+            reference_node,
+            output_is_current,
+            input_source,
+        )
+        .map_err(|e| CliError::simulation_error_in(e.to_string(), "Transfer Function"))?;
+
+    // ngspice's exact labels, per-form ordering, and C-style %e exponent
+    // formatting, so scripts written against ngspice's .TF output parse
+    // RSpice's unchanged.
+    let probe = result.output.to_lowercase();
+    let source = result.input.to_lowercase();
+    let gain = format_spice_exponent(result.gain);
+    let zin = format_spice_exponent(result.input_impedance);
+    let zout = format_spice_exponent(result.output_impedance);
+    println!("Transfer function information:");
+    println!("transfer_function = {gain}");
+    if output_is_current {
+        println!("{source}#input_impedance = {zin}");
+        println!("{}#output_impedance = {zout}", output_node.to_lowercase());
+    } else {
+        println!("output_impedance_at_{probe} = {zout}");
+        println!("{source}#input_impedance = {zin}");
+    }
+
+    Ok(())
+}
+
+/// Format like C's `%e` (ngspice's style): six fractional digits and a
+/// signed, zero-padded, at-least-two-digit exponent.
+fn format_spice_exponent(value: f64) -> String {
+    let formatted = format!("{value:.6e}");
+    match formatted.split_once('e') {
+        Some((mantissa, exponent)) => {
+            let (sign, digits) = match exponent.strip_prefix('-') {
+                Some(rest) => ('-', rest),
+                None => ('+', exponent),
+            };
+            format!("{mantissa}e{sign}{digits:0>2}")
+        }
+        None => formatted,
+    }
+}
+
 pub(super) fn run_disto(
     ctx: &RunContext<'_>,
     variation: rspice_core::netlist::FreqVariation,

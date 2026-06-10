@@ -34,6 +34,7 @@ mod pss;
 mod result;
 mod source_values;
 mod stamping;
+mod transfer;
 mod transient;
 
 // Re-export CompressionConfig for public API
