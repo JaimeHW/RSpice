@@ -372,11 +372,32 @@ fn quick_place_section(ui: &mut Ui, state: &mut AppState) {
 // Right panel — inspector
 // ---------------------------------------------------------------------------
 
+/// Commit the in-flight inspector edit session as one undo entry.
+fn commit_inspector_edit(state: &mut AppState) {
+    if let Some(edit) = state.shell.inspector_edit.take() {
+        state
+            .schematic
+            .commit_undo_from(edit.before, "edit properties");
+    }
+}
+
 /// Render the schematic context's right panel (instance inspector).
 pub fn right(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Inspector", None);
 
-    let Some(component_id) = state.schematic.selection.single_component() else {
+    let single = state.schematic.selection.single_component();
+
+    // The edit session ends when the inspected component changes.
+    if state
+        .shell
+        .inspector_edit
+        .as_ref()
+        .is_some_and(|edit| Some(edit.component_id) != single)
+    {
+        commit_inspector_edit(state);
+    }
+
+    let Some(component_id) = single else {
         ui.add_space(8.0);
         ui.vertical_centered(|ui| {
             let t = Tokens::get(ui.ctx());
@@ -410,6 +431,7 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
     let mut params = snapshot.params.clone();
 
     ui.add_space(2.0);
+    let mut fields_focused = false;
     egui::Frame::none()
         .inner_margin(egui::Margin {
             left: 12.0,
@@ -420,12 +442,12 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
 
-            input_row(ui, "Instance", &mut name);
+            fields_focused |= input_row(ui, "Instance", &mut name).has_focus();
             input_row_readonly(ui, "Type", snapshot.kind.display_name());
             let value_label =
                 crate::properties::property_bridge::get_value_display_name(snapshot.kind);
-            input_row(ui, value_label, &mut value);
-            input_row(ui, "Params", &mut params);
+            fields_focused |= input_row(ui, value_label, &mut value).has_focus();
+            fields_focused |= input_row(ui, "Params", &mut params).has_focus();
 
             // Terminal connectivity.
             let terminals = snapshot.terminal_positions();
@@ -443,15 +465,28 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
             }
         });
 
+    // Apply edits live so typing reflects immediately, but capture the
+    // pre-edit snapshot once per session — every keystroke used to deep-
+    // clone the whole design twice and mint its own undo entry.
     let changed =
         name != snapshot.name || value != snapshot.value || params != snapshot.params;
     if changed {
-        state.schematic.with_undo("edit properties", |schematic| {
-            let component = &mut schematic.components[component_idx];
-            component.name = name;
-            component.value = value;
-            component.params = params;
-        });
+        if state.shell.inspector_edit.is_none() {
+            state.shell.inspector_edit = Some(crate::shell::state::InspectorEdit {
+                component_id,
+                before: crate::state::SchematicSnapshot::capture(&state.schematic),
+            });
+        }
+        let component = &mut state.schematic.components[component_idx];
+        component.name = name;
+        component.value = value;
+        component.params = params;
         state.schematic.is_dirty = true;
+    }
+
+    // The session also ends when focus leaves the fields (click away,
+    // Enter, Tab out of the panel).
+    if !fields_focused && state.shell.inspector_edit.is_some() {
+        commit_inspector_edit(state);
     }
 }

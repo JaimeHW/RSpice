@@ -86,6 +86,17 @@ pub struct ConsoleUiState {
     pub(crate) rows_key: Option<(ConsoleFilter, u64, usize)>,
 }
 
+/// An in-flight inspector edit session: the inspected component and the
+/// pre-edit snapshot. One undo entry commits when the session ends (focus
+/// leaves the fields or the selection moves) — not per keystroke.
+#[derive(Debug, Clone)]
+pub struct InspectorEdit {
+    /// Component being edited.
+    pub component_id: u64,
+    /// Design state captured when the first keystroke landed.
+    pub before: crate::state::SchematicSnapshot,
+}
+
 impl Default for ConsoleUiState {
     fn default() -> Self {
         Self {
@@ -140,6 +151,8 @@ pub struct ShellState {
     pub export_csv_requested: bool,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: super::results::ResultsState,
+    /// In-flight inspector edit session, if any.
+    pub inspector_edit: Option<InspectorEdit>,
 }
 
 impl ShellState {

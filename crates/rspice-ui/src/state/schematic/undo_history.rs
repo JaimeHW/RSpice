@@ -31,6 +31,7 @@
 //! - Caches (net_mapping, topology_version)
 
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use super::component::Component;
 use super::net_label::{Junction, NetLabel};
@@ -153,11 +154,15 @@ impl SchematicSnapshot {
 // UndoEntry
 // =============================================================================
 
-/// A single entry in the undo/redo stack
+/// A single entry in the undo/redo stack.
+///
+/// Snapshots are `Arc`-shared: cloning the history (workspace buffering,
+/// autosave) bumps refcounts instead of deep-copying up to `MAX_UNDO_STEPS`
+/// full copies of the design.
 #[derive(Debug, Clone)]
 pub struct UndoEntry {
     /// Snapshot of state BEFORE the operation
-    pub before: SchematicSnapshot,
+    pub before: Arc<SchematicSnapshot>,
     /// Human-readable description of the operation
     pub description: String,
 }
@@ -289,7 +294,7 @@ impl UndoHistory {
 
         // Create undo entry with the "before" snapshot
         let entry = UndoEntry {
-            before: pending.before_snapshot,
+            before: Arc::new(pending.before_snapshot),
             description: pending.description,
         };
 
@@ -326,11 +331,11 @@ impl UndoHistory {
 
         // Save current state for redo
         self.redo_stack.push(UndoEntry {
-            before: current_snapshot,
+            before: Arc::new(current_snapshot),
             description: entry.description.clone(),
         });
 
-        Some((entry.before, entry.description))
+        Some((unwrap_snapshot(entry.before), entry.description))
     }
 
     /// Redo the last undone operation
@@ -348,11 +353,11 @@ impl UndoHistory {
 
         // Save current state for undo
         self.undo_stack.push_back(UndoEntry {
-            before: current_snapshot,
+            before: Arc::new(current_snapshot),
             description: entry.description.clone(),
         });
 
-        Some((entry.before, entry.description))
+        Some((unwrap_snapshot(entry.before), entry.description))
     }
 
     /// Check if undo is available
@@ -397,6 +402,13 @@ impl UndoHistory {
     pub fn has_pending_operation(&self) -> bool {
         self.pending.is_some()
     }
+}
+
+/// Take the snapshot out of its `Arc` — zero-copy when this history holds
+/// the only reference (the common case; clones exist only in workspace
+/// buffers).
+fn unwrap_snapshot(snapshot: Arc<SchematicSnapshot>) -> SchematicSnapshot {
+    Arc::try_unwrap(snapshot).unwrap_or_else(|shared| (*shared).clone())
 }
 
 // =============================================================================

@@ -1,4 +1,92 @@
+use std::collections::HashSet;
+
 use super::*;
+
+/// Row/column interval index over orthogonal wire segments. Built once per
+/// topology pass; point queries scan only the point's row and column
+/// buckets instead of every wire — junction maintenance drops from
+/// O(wires² · points) to O(segments + vertices · bucket).
+///
+/// Diagonal segments are deliberately absent: `Wire::contains_point` only
+/// recognizes orthogonal segments, and this index mirrors its semantics.
+struct SegmentIndex {
+    /// Horizontal segments: y → (x0, x1, wire id) with x0 ≤ x1.
+    rows: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
+    /// Vertical segments: x → (y0, y1, wire id) with y0 ≤ y1.
+    cols: std::collections::HashMap<i32, Vec<(i32, i32, u64)>>,
+    /// (wire id, vertex) pairs — distinguishes interiors from vertices.
+    vertices: HashSet<(u64, Point)>,
+    /// Every vertex position (covers degenerate single-point wires).
+    vertex_points: HashSet<Point>,
+}
+
+impl SegmentIndex {
+    fn build(wires: &[Wire]) -> Self {
+        let mut index = Self {
+            rows: std::collections::HashMap::new(),
+            cols: std::collections::HashMap::new(),
+            vertices: HashSet::new(),
+            vertex_points: HashSet::new(),
+        };
+        for wire in wires {
+            for point in &wire.points {
+                index.vertices.insert((wire.id, *point));
+                index.vertex_points.insert(*point);
+            }
+            for seg in wire.points.windows(2) {
+                let (a, b) = (seg[0], seg[1]);
+                if a.y == b.y {
+                    let (x0, x1) = if a.x <= b.x { (a.x, b.x) } else { (b.x, a.x) };
+                    index.rows.entry(a.y).or_default().push((x0, x1, wire.id));
+                } else if a.x == b.x {
+                    let (y0, y1) = if a.y <= b.y { (a.y, b.y) } else { (b.y, a.y) };
+                    index.cols.entry(a.x).or_default().push((y0, y1, wire.id));
+                }
+            }
+        }
+        index
+    }
+
+    /// Wire ids with a segment through `v` (inclusive), deduplicated into
+    /// the reused `out` buffer.
+    fn wires_through(&self, v: Point, out: &mut Vec<u64>) {
+        out.clear();
+        if let Some(row) = self.rows.get(&v.y) {
+            out.extend(
+                row.iter()
+                    .filter(|&&(x0, x1, _)| x0 <= v.x && v.x <= x1)
+                    .map(|&(_, _, id)| id),
+            );
+        }
+        if let Some(col) = self.cols.get(&v.x) {
+            out.extend(
+                col.iter()
+                    .filter(|&&(y0, y1, _)| y0 <= v.y && v.y <= y1)
+                    .map(|&(_, _, id)| id),
+            );
+        }
+        out.sort_unstable();
+        out.dedup();
+    }
+
+    /// Does any wire (segment or vertex) touch `v`?
+    fn any_wire_at(&self, v: Point) -> bool {
+        if self.vertex_points.contains(&v) {
+            return true;
+        }
+        if let Some(row) = self.rows.get(&v.y)
+            && row.iter().any(|&(x0, x1, _)| x0 <= v.x && v.x <= x1)
+        {
+            return true;
+        }
+        if let Some(col) = self.cols.get(&v.x)
+            && col.iter().any(|&(y0, y1, _)| y0 <= v.y && v.y <= y1)
+        {
+            return true;
+        }
+        false
+    }
+}
 
 impl SchematicState {
     // =========================================================================
@@ -93,29 +181,25 @@ impl SchematicState {
 
         let mut segment_counts: HashMap<Point, usize> = HashMap::new();
 
+        // Vertex contributions: endpoints are one segment, interior
+        // vertices join two.
         for wire in &self.wires {
-            // Check each point on the wire
             for (i, point) in wire.points.iter().enumerate() {
                 let is_endpoint = i == 0 || i == wire.points.len() - 1;
-                let count = if is_endpoint { 1 } else { 2 }; // Mid-point = 2 segments
+                let count = if is_endpoint { 1 } else { 2 };
                 *segment_counts.entry(*point).or_insert(0) += count;
             }
+        }
 
-            // Also check if wire passes through any point on another wire
-            for other_wire in &self.wires {
-                if wire.id == other_wire.id {
-                    continue;
-                }
-                // Check if other_wire vertices lie on this wire's segments
-                for vertex in &other_wire.points {
-                    if wire.contains_point(*vertex) {
-                        // Check if this is already counted as a wire vertex
-                        let is_vertex_of_wire = wire.points.contains(vertex);
-                        if !is_vertex_of_wire {
-                            // Wire passes through this point mid-segment = 2 segments
-                            *segment_counts.entry(*vertex).or_insert(0) += 2;
-                        }
-                    }
+        // A wire whose segment interior passes through a counted vertex
+        // contributes two more segments there (it runs straight through).
+        let index = SegmentIndex::build(&self.wires);
+        let mut through: Vec<u64> = Vec::new();
+        for (point, count) in segment_counts.iter_mut() {
+            index.wires_through(*point, &mut through);
+            for &wire_id in &*through {
+                if !index.vertices.contains(&(wire_id, *point)) {
+                    *count += 2;
                 }
             }
         }
@@ -139,13 +223,13 @@ impl SchematicState {
     /// This is the main entry point for automatic junction management.
     /// Call this after wire operations to maintain junction consistency.
     pub fn auto_place_junctions(&mut self) {
-        let junction_points = self.detect_junction_points();
+        let junction_points: HashSet<Point> = self.detect_junction_points().into_iter().collect();
+        let existing: HashSet<Point> = self.junctions.iter().map(|j| j.pos).collect();
         let mut changes = false;
 
         // Add junctions at detected points that don't have one
         for point in &junction_points {
-            let has_junction = self.junctions.iter().any(|j| j.pos == *point);
-            if !has_junction {
+            if !existing.contains(point) {
                 self.add_junction(*point);
                 changes = true;
             }
@@ -167,11 +251,11 @@ impl SchematicState {
     /// Remove orphaned junctions that no longer have wire connections
     pub fn remove_orphan_junctions(&mut self) -> usize {
         let initial_count = self.junctions.len();
-
-        self.junctions.retain(|junction| {
-            // Keep junction if any wire passes through it
-            self.wires.iter().any(|w| w.contains_point(junction.pos))
-        });
+        if initial_count > 0 {
+            let index = SegmentIndex::build(&self.wires);
+            self.junctions
+                .retain(|junction| index.any_wire_at(junction.pos));
+        }
 
         let removed = initial_count - self.junctions.len();
         if removed > 0 {
@@ -226,22 +310,18 @@ impl SchematicState {
     /// this will split the second wire and create proper junction.
     pub fn create_t_junctions_from_endpoints(&mut self) {
         // Find all points where one wire ends on another wire's segment
+        // interior — via the interval index, not a wire × wire scan.
+        let index = SegmentIndex::build(&self.wires);
         let mut splits_needed: Vec<(u64, Point)> = Vec::new();
+        let mut through: Vec<u64> = Vec::new();
 
         for wire in &self.wires {
             let endpoints = [wire.start(), wire.end()];
             for endpoint in endpoints.into_iter().flatten() {
-                for other_wire in &self.wires {
-                    if other_wire.id == wire.id {
-                        continue;
-                    }
-
-                    // Check if endpoint is on other_wire but not at a vertex
-                    if other_wire.contains_point(endpoint) {
-                        let is_at_vertex = other_wire.points.contains(&endpoint);
-                        if !is_at_vertex {
-                            splits_needed.push((other_wire.id, endpoint));
-                        }
+                index.wires_through(endpoint, &mut through);
+                for &other_id in &*through {
+                    if other_id != wire.id && !index.vertices.contains(&(other_id, endpoint)) {
+                        splits_needed.push((other_id, endpoint));
                     }
                 }
             }

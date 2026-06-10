@@ -139,6 +139,15 @@ impl SchematicState {
     }
 
     /// Simplify wire path by removing intermediate points on straight segments
+    /// Does `points` contain any collinear interior vertex that
+    /// `simplify_wire_path` would remove? Cheap pre-check so cleanup passes
+    /// don't clone paths that are already minimal.
+    pub(crate) fn has_collinear_vertices(points: &[Point]) -> bool {
+        points.windows(3).any(|w| {
+            (w[0].x == w[1].x && w[1].x == w[2].x) || (w[0].y == w[1].y && w[1].y == w[2].y)
+        })
+    }
+
     pub(crate) fn simplify_wire_path(points: Vec<Point>) -> Vec<Point> {
         if points.len() <= 2 {
             return points;

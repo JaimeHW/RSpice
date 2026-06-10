@@ -73,6 +73,24 @@ impl SchematicState {
         self.end_operation()
     }
 
+    /// Commit an undo entry whose "before" snapshot was captured earlier —
+    /// used by editing sessions (inspector text fields) that apply changes
+    /// live but record one entry when the session ends, instead of two
+    /// full-design snapshots per keystroke.
+    ///
+    /// Creates an entry only if state changed since the snapshot.
+    pub fn commit_undo_from(
+        &mut self,
+        before: super::super::undo_history::SchematicSnapshot,
+        description: impl Into<String>,
+    ) -> bool {
+        if !self.undo_history.is_initialized() {
+            self.init_undo_history();
+        }
+        self.undo_history.begin_operation(before, description);
+        self.end_operation()
+    }
+
     /// Undo the last operation
     ///
     /// Returns `true` if undo was successful, `false` if nothing to undo.

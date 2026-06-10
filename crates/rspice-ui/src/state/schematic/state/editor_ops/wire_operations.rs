@@ -215,11 +215,13 @@ impl SchematicState {
     pub fn optimize_all_wires(&mut self) {
         let mut changed = false;
         for wire in &mut self.wires {
-            let simplified = Self::simplify_wire_path(wire.points.clone());
-            if simplified != wire.points {
-                wire.points = simplified;
-                changed = true;
+            // Most wires are already minimal — don't clone their paths.
+            if !Self::has_collinear_vertices(&wire.points) {
+                continue;
             }
+            let simplified = Self::simplify_wire_path(std::mem::take(&mut wire.points));
+            wire.points = simplified;
+            changed = true;
         }
         if changed {
             self.is_dirty = true;

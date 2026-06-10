@@ -7,10 +7,18 @@ pub(super) const VERILOGA_LIBRARY_NAME: &str = "veriloga";
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
 const VERILOGA_LIBRARY_FORMAT_VERSION: u32 = 1;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 struct PersistedVerilogALibrary {
     version: u32,
     library: Library,
+}
+
+/// Borrowed twin of [`PersistedVerilogALibrary`] so saving never clones
+/// the library.
+#[derive(serde::Serialize)]
+struct PersistedVerilogALibraryRef<'a> {
+    version: u32,
+    library: &'a Library,
 }
 
 pub(super) fn restore_global_veriloga_library(library_manager: &mut LibraryManager) {
@@ -65,13 +73,32 @@ fn save_global_veriloga_library_to_path(path: &Path, library: &Library) -> Resul
         })?;
     }
 
-    let persisted = PersistedVerilogALibrary {
+    let persisted = PersistedVerilogALibraryRef {
         version: VERILOGA_LIBRARY_FORMAT_VERSION,
-        library: library.clone(),
+        library,
     };
     let json = serde_json::to_string_pretty(&persisted)
         .map_err(|e| format!("failed to serialize Verilog-A library: {}", e))?;
-    write_file_atomically(path, json.as_bytes())
+
+    // The periodic autosave calls this every ~30 s; skip the disk write
+    // when nothing changed since the last save on this thread.
+    thread_local! {
+        static LAST_SAVED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+    let hash = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        json.hash(&mut hasher);
+        path.hash(&mut hasher);
+        hasher.finish()
+    };
+    if LAST_SAVED.with(|last| last.get()) == hash {
+        return Ok(());
+    }
+
+    write_file_atomically(path, json.as_bytes())?;
+    LAST_SAVED.with(|last| last.set(hash));
+    Ok(())
 }
 
 fn install_loaded_veriloga_library(library_manager: &mut LibraryManager, mut library: Library) {
