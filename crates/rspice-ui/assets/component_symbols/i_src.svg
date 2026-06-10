@@ -1,63 +1,9 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="1.3779526in"
-   height="2.0275536in"
-   viewBox="0 0 34.999995 51.499862"
-   version="1.1"
-   id="svg5"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs2">
-    <marker
-       orient="auto"
-       refY="0"
-       refX="0"
-       id="TriangleInM"
-       style="overflow:visible">
-      <path
-         id="path9189"
-         d="M 5.77,0 -2.88,5 V -5 Z"
-         style="fill:#000000;fill-opacity:1;fill-rule:evenodd;stroke:#000000;stroke-width:1pt;stroke-opacity:1"
-         transform="scale(-0.4)" />
-    </marker>
-  </defs>
-  <g
-     id="layer1"
-     transform="translate(-172.56085,80.62014)"
-     style="display:inline">
-    <circle
-       r="16.999998"
-       cy="-55.120277"
-       cx="190.06084"
-       id="path4758-1-7"
-       style="color:#000000;clip-rule:nonzero;display:inline;overflow:visible;visibility:visible;isolation:auto;mix-blend-mode:normal;color-interpolation:auto;color-interpolation-filters:linearRGB;solid-color:#000000;solid-opacity:1;fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-linecap:square;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;filter:url(#filter5647);color-rendering:auto;image-rendering:auto;shape-rendering:auto;text-rendering:auto;enable-background:accumulate" />
-    <path
-       id="path11273-48"
-       d="m 190.06083,-72.120144 v -8"
-       style="mix-blend-mode:normal;fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
-    <path
-       id="path11275-9"
-       d="m 190.12756,-37.620278 v 8.000001"
-       style="mix-blend-mode:normal;fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1" />
-    <path
-       id="path9671"
-       d="m 190.06083,-65.087828 v 22.467616"
-       style="mix-blend-mode:normal;fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#TriangleInM)" />
-  </g>
-  <g
-     id="layer2"
-     style="display:inline"
-     transform="translate(-187.50002,145.49986)">
-    <path
-       style="display:inline;mix-blend-mode:normal;fill:none;stroke:#fc0000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m 203,-120 h 4"
-       id="path5" />
-    <path
-       style="display:inline;mix-blend-mode:normal;fill:none;stroke:#fc0000;stroke-width:0.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m 205,-118 v -4"
-       id="path6" />
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DC current source: arrow toward the - terminal. Box 28x40, pins +(14,0), -(14,40). -->
+<svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 14,13.5 V 23" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,26.5 L 11.5,21.6 H 16.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
 </svg>

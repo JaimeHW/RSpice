@@ -96,7 +96,7 @@ impl SymbolLibrary {
             ),
             (
                 ComponentType::SaturableInductor,
-                "inductor.svg",
+                "inductor_saturable.svg",
                 "Saturable Inductor",
             ),
             (
@@ -116,53 +116,53 @@ impl SymbolLibrary {
             ),
             (
                 ComponentType::VoltageSourcePulse,
-                "v_src_dc.svg",
+                "v_src_pulse.svg",
                 "Pulse Voltage Source",
             ),
             (
                 ComponentType::VoltageSourcePwl,
-                "v_src_dc.svg",
+                "v_src_pwl.svg",
                 "PWL Voltage Source",
             ),
             (
                 ComponentType::VoltageSourceExp,
-                "v_src_dc.svg",
+                "v_src_exp.svg",
                 "Exponential Voltage Source",
             ),
             (
                 ComponentType::VoltageSourceSffm,
-                "v_src_dc.svg",
+                "v_src_sffm.svg",
                 "SFFM Voltage Source",
             ),
             (ComponentType::CurrentSource, "i_src.svg", "Current Source"),
             (
                 ComponentType::CurrentSourceAc,
-                "i_src.svg",
+                "i_src_ac.svg",
                 "AC Current Source",
             ),
             (
                 ComponentType::CurrentSourcePulse,
-                "i_src.svg",
+                "i_src_pulse.svg",
                 "Pulse Current Source",
             ),
             (
                 ComponentType::CurrentSourceSin,
-                "i_src.svg",
+                "i_src_ac.svg",
                 "Sinusoidal Current Source",
             ),
             (
                 ComponentType::CurrentSourcePwl,
-                "i_src.svg",
+                "i_src_pwl.svg",
                 "PWL Current Source",
             ),
             (
                 ComponentType::CurrentSourceExp,
-                "i_src.svg",
+                "i_src_exp.svg",
                 "Exponential Current Source",
             ),
             (
                 ComponentType::CurrentSourceNoise,
-                "i_src.svg",
+                "i_src_noise.svg",
                 "Noise Current Source",
             ),
             (ComponentType::Ground, "ground_signal.svg", "Ground"),
@@ -191,6 +191,66 @@ impl SymbolLibrary {
             ),
             (ComponentType::NpnBjt, "bjt_npn.svg", "NPN BJT"),
             (ComponentType::PnpBjt, "bjt_pnp.svg", "PNP BJT"),
+            (ComponentType::Vcvs, "vcvs.svg", "VCVS (E)"),
+            (ComponentType::Vccs, "vccs.svg", "VCCS (G)"),
+            (ComponentType::Ccvs, "ccvs.svg", "CCVS (H)"),
+            (ComponentType::Cccs, "cccs.svg", "CCCS (F)"),
+            (ComponentType::XspiceGain, "xspice_gain.svg", "Gain"),
+            (ComponentType::XspiceSummer, "xspice_summer.svg", "Summer"),
+            (
+                ComponentType::XspiceMultiplier,
+                "xspice_multiplier.svg",
+                "Multiplier",
+            ),
+            (ComponentType::XspiceDivider, "xspice_divider.svg", "Divider"),
+            (ComponentType::XspiceLimiter, "xspice_limiter.svg", "Limiter"),
+            (
+                ComponentType::XspiceIntegrator,
+                "xspice_integrator.svg",
+                "Integrator",
+            ),
+            (
+                ComponentType::XspiceDifferentiator,
+                "xspice_differentiator.svg",
+                "Differentiator",
+            ),
+            (
+                ComponentType::XspiceInverter,
+                "xspice_inverter.svg",
+                "Inverter",
+            ),
+            (ComponentType::XspiceBuffer, "xspice_buffer.svg", "Buffer"),
+            (ComponentType::XspiceAndGate, "xspice_and.svg", "AND Gate"),
+            (ComponentType::XspiceOrGate, "xspice_or.svg", "OR Gate"),
+            (ComponentType::XspiceNandGate, "xspice_nand.svg", "NAND Gate"),
+            (ComponentType::XspiceNorGate, "xspice_nor.svg", "NOR Gate"),
+            (ComponentType::XspiceXorGate, "xspice_xor.svg", "XOR Gate"),
+            (
+                ComponentType::XspiceTristate,
+                "xspice_tristate.svg",
+                "Tri-State Buffer",
+            ),
+            (ComponentType::XspiceDFlipFlop, "xspice_dff.svg", "D Flip-Flop"),
+            (
+                ComponentType::XspiceJkFlipFlop,
+                "xspice_jkff.svg",
+                "JK Flip-Flop",
+            ),
+            (
+                ComponentType::XspiceSrLatch,
+                "xspice_sr_latch.svg",
+                "SR Latch",
+            ),
+            (
+                ComponentType::XspiceAdcBridge,
+                "xspice_adc_bridge.svg",
+                "ADC Bridge",
+            ),
+            (
+                ComponentType::XspiceDacBridge,
+                "xspice_dac_bridge.svg",
+                "DAC Bridge",
+            ),
         ];
 
         for (component_type, filename, name) in default_mappings {
@@ -212,6 +272,12 @@ impl SymbolLibrary {
                 "battery_multi_cell",
                 "battery_multi_cell.svg",
                 "Battery",
+            ),
+            (
+                ComponentType::Capacitor,
+                "polarized",
+                "cap_polarized.svg",
+                "Polarized Capacitor",
             ),
             (ComponentType::Ground, "earth", "ground_earth.svg", "Ground"),
             (
@@ -453,5 +519,86 @@ impl SymbolLibrary {
     /// Check if library is empty
     pub fn is_empty(&self) -> bool {
         self.symbols.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every embedded asset must parse and every mapped component type must
+    /// resolve to a symbol — a bad asset would otherwise silently drop the
+    /// whole library back to procedural fallbacks at startup.
+    #[test]
+    fn embedded_library_loads_and_covers_mapped_types() {
+        let library = SymbolLibrary::load_embedded().expect("embedded symbol assets must parse");
+
+        let must_have = [
+            ComponentType::Resistor,
+            ComponentType::Capacitor,
+            ComponentType::Inductor,
+            ComponentType::SaturableInductor,
+            ComponentType::Transformer,
+            ComponentType::Diode,
+            ComponentType::NpnBjt,
+            ComponentType::PnpBjt,
+            ComponentType::Nmos,
+            ComponentType::Pmos,
+            ComponentType::Njfet,
+            ComponentType::Pjfet,
+            ComponentType::NVdmos,
+            ComponentType::PVdmos,
+            ComponentType::VoltageSource,
+            ComponentType::VoltageSourceAc,
+            ComponentType::VoltageSourcePulse,
+            ComponentType::VoltageSourcePwl,
+            ComponentType::VoltageSourceExp,
+            ComponentType::VoltageSourceSffm,
+            ComponentType::CurrentSource,
+            ComponentType::CurrentSourceAc,
+            ComponentType::CurrentSourcePulse,
+            ComponentType::CurrentSourcePwl,
+            ComponentType::CurrentSourceExp,
+            ComponentType::CurrentSourceNoise,
+            ComponentType::Vcvs,
+            ComponentType::Vccs,
+            ComponentType::Ccvs,
+            ComponentType::Cccs,
+            ComponentType::Ground,
+            ComponentType::XspiceGain,
+            ComponentType::XspiceSummer,
+            ComponentType::XspiceMultiplier,
+            ComponentType::XspiceDivider,
+            ComponentType::XspiceLimiter,
+            ComponentType::XspiceIntegrator,
+            ComponentType::XspiceDifferentiator,
+            ComponentType::XspiceInverter,
+            ComponentType::XspiceBuffer,
+            ComponentType::XspiceAndGate,
+            ComponentType::XspiceOrGate,
+            ComponentType::XspiceNandGate,
+            ComponentType::XspiceNorGate,
+            ComponentType::XspiceXorGate,
+            ComponentType::XspiceTristate,
+            ComponentType::XspiceDFlipFlop,
+            ComponentType::XspiceJkFlipFlop,
+            ComponentType::XspiceSrLatch,
+            ComponentType::XspiceAdcBridge,
+            ComponentType::XspiceDacBridge,
+        ];
+        for kind in must_have {
+            assert!(library.get(kind).is_some(), "{kind:?} has no symbol mapping");
+        }
+    }
+
+    /// New-style assets are authored in viewBox coordinates: the parser must
+    /// keep them verbatim so pin leads land exactly on the terminal grid.
+    #[test]
+    fn viewbox_authored_assets_keep_exact_coordinates() {
+        let library = SymbolLibrary::load_embedded().expect("library loads");
+        let resistor = library.get(ComponentType::Resistor).expect("resistor");
+        // The resistor is authored on a 40x20 viewBox with pins at the box
+        // edge midpoints; the parsed bounds must be exactly the viewBox.
+        assert_eq!(resistor.bounds, (0.0, 0.0, 40.0, 20.0));
     }
 }

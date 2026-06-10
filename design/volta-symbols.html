@@ -56,6 +56,18 @@
     background: var(--canvas-bg); border: 1px solid var(--border); border-radius: 8px;
     display: flex; align-items: center; justify-content: space-around; padding: 18px 10px;
   }
+  .gallery { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .tile {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 6px 8px;
+  }
+  .tile .box {
+    background: var(--canvas-bg); border-radius: 4px; width: 100%;
+    display: flex; align-items: center; justify-content: center; min-height: 110px;
+  }
+  /* The shipped assets are black-on-transparent; invert for the dark canvas. */
+  .tile img { filter: invert(0.86); }
+  .tile .lbl { font-family: var(--mono); font-size: 10px; color: var(--text-faint); text-align: center; word-break: break-all; }
 </style>
 </head>
 <body>
@@ -227,6 +239,56 @@ points &nbsp;·&nbsp; <i>red rings</i> mark the exact terminal coordinates from 
   </svg>
 </div>
 </section>
+
+<section>
+<h2>Full shipped set — live from assets/component_symbols</h2>
+<div class="gallery" id="gallery"></div>
+</section>
+
+<script>
+// Tiles load the actual shipped asset files, so this page is always in
+// sync with what the simulator embeds.
+const FILES = [
+  "resistor", "cap_unpolarized", "cap_polarized", "inductor", "inductor_saturable",
+  "diode", "diode_schottky", "diode_zener", "diode_tunnel", "led",
+  "bjt_npn", "bjt_pnp", "bjt_npn_descrete", "bjt_pnp_discrete", "transformer_symmetrical",
+  "mos_n_chan_enh_no_substrate", "mos_p_chan_enh_no_substrate",
+  "mos_n_chan_enh_body_diode_discrete", "mos_p_chan_enh_body_diode_discrete",
+  "jfet_n_chan", "jfet_p_chan", "jfet_n_chan_discrete", "jfet_p_chan_discrete",
+  "v_src_dc", "v_src_ac_vertical", "v_src_ac_horizontal", "v_src_pulse", "v_src_pwl",
+  "v_src_exp", "v_src_sffm", "battery", "battery_multi_cell",
+  "i_src", "i_src_ac", "i_src_pulse", "i_src_pwl", "i_src_exp", "i_src_noise",
+  "vcvs", "vccs", "ccvs", "cccs",
+  "ground_signal", "ground_earth", "ground_chassis",
+  "xspice_gain", "xspice_buffer", "xspice_inverter", "xspice_summer",
+  "xspice_multiplier", "xspice_divider", "xspice_limiter", "xspice_integrator",
+  "xspice_differentiator", "xspice_adc_bridge", "xspice_dac_bridge", "xspice_tristate",
+  "xspice_and", "xspice_or", "xspice_nand", "xspice_nor", "xspice_xor",
+  "xspice_dff", "xspice_jkff", "xspice_sr_latch",
+];
+const gallery = document.getElementById("gallery");
+for (const name of FILES) {
+  const tile = document.createElement("div");
+  tile.className = "tile";
+  const box = document.createElement("div");
+  box.className = "box";
+  const img = document.createElement("img");
+  img.src = "../crates/rspice-ui/assets/component_symbols/" + name + ".svg";
+  img.alt = name;
+  // Render near canvas scale x2 based on intrinsic size.
+  img.addEventListener("load", () => {
+    img.width = img.naturalWidth * 2;
+    img.height = img.naturalHeight * 2;
+  });
+  box.appendChild(img);
+  const label = document.createElement("div");
+  label.className = "lbl";
+  label.textContent = name;
+  tile.appendChild(box);
+  tile.appendChild(label);
+  gallery.appendChild(tile);
+}
+</script>
 
 </body>
 </html>

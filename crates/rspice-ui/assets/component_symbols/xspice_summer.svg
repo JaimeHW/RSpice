@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Summer: circle with plus. Box 40x20, pins in1(0,5), in2(0,15), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,5 H 14.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,15 H 14.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,10 A 8,8 0 0 1 29,10 A 8,8 0 0 1 13,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 18,10 H 24 M 21,7 V 13" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 29,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Divider: circle with division mark. Box 40x20, pins in1(0,5), in2(0,15), out(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,5 H 14.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,15 H 14.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,10 A 8,8 0 0 1 29,10 A 8,8 0 0 1 13,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 18,10 H 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20.5,6.6 H 21.5 V 7.6 H 20.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 20.5,12.4 H 21.5 V 13.4 H 20.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 29,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

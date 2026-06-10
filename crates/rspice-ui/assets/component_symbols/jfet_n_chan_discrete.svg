@@ -1,59 +1,10 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="63.999996mm"
-   height="60.999992mm"
-   viewBox="0 0 63.999996 60.999992"
-   version="1.1"
-   id="svg17030"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs17027">
-    <marker
-       style="overflow:visible"
-       id="TriangleOutM"
-       refX="0"
-       refY="0"
-       orient="auto"
-       viewBox="0 0 4.2595265 4.9243081"
-       markerWidth="4.2595263"
-       markerHeight="4.9243083"
-       preserveAspectRatio="xMidYMid">
-      <path
-         transform="scale(0.4)"
-         style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt"
-         d="M 5.77,0 -2.88,5 V -5 Z"
-         id="path1510" />
-    </marker>
-  </defs>
-  <g
-     id="layer1"
-     style="display:inline"
-     transform="translate(90.499994,505.5)">
-    <circle
-       style="display:inline;fill:none;stroke:#040000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none"
-       id="circle61"
-       cx="-54.999992"
-       cy="-475"
-       r="28" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:3;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -64.999983,-495 v 40.5"
-       id="path61" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -64.999993,-489.49999 20,-10e-6 v -15.49999"
-       id="path62" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -64.999993,-460.49999 20,-10e-6 v 15.50001"
-       id="path63" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#TriangleOutM)"
-       d="m -89.999993,-474.99999 h 21"
-       id="path64" />
-  </g>
-
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- N-channel JFET, discrete (package circle). Box 40x80, pins D(40,0), G(0,40), S(40,80). -->
+<svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,40 H 9.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 16.6,40 L 9.4,37.6 L 9.4,42.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 17,14 V 66" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 40,0 V 14 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,80 V 66 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 22,23 A 17,17 0 0 1 22,57 A 17,17 0 0 1 22,23" fill="none" stroke="#000000" stroke-width="1"/>
 </svg>

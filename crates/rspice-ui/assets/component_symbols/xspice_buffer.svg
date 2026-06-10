@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Buffer: plain triangle. Box 40x20, pins (0,10), (40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 13" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,2.5 L 28,10 L 13,17.5 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 28,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

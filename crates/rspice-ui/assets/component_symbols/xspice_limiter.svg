@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Limiter: box with saturation curve. Box 40x20, pins (0,10), (40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 11,14.5 H 15.5 L 24.5,5.5 H 29" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

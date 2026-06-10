@@ -1,32 +1,8 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="0.98425227in"
-   height="0.59055108in"
-   viewBox="0 0 25.000008 14.999998"
-   version="1.1"
-   id="svg5"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs2" />
-  <g
-     id="layer1"
-     transform="translate(141.43917,-134.37972)"
-     style="display:inline">
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -140.93917,141.87972 h 6 v -7 l 12.00001,7 -12.00001,7 v -7"
-       id="path3828" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -118.93917,137.27972 v -2.4 h -4 v 14 h -4 v -2.4"
-       id="path3830" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -122.93916,141.87972 h 6"
-       id="path3832" />
-
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Schottky diode: S-hooked cathode bar. Box 40x20, pins A(0,10), K(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 14.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14.5,4.5 L 25,10 L 14.5,15.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 22.6,6.6 V 4.5 H 25 V 15.5 H 27.4 V 13.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 25,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
 </svg>

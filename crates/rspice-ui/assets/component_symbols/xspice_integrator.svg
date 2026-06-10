@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Integrator: box with integral glyph. Box 40x20, pins (0,10), (40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8,2 H 32 V 18 H 8 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 22.4,5.2 C 20.2,4.2 19.9,6.6 19.9,10 C 19.9,13.4 19.6,15.8 17.4,14.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 32,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

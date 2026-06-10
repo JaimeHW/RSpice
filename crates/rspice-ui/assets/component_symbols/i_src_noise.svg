@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Noise current source. Box 28x40, pins +(14,0), -(14,40). -->
+<svg viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 14,0 V 10" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,10 A 10,10 0 0 1 14,30 A 10,10 0 0 1 14,10" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M 9.5,15.4 L 10.8,12.8 L 12.1,16.2 L 13.4,12 L 14.7,15.6 L 16,13.2 L 17.2,14.9 L 18.5,13.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 14,19 V 24" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14,27.2 L 11.6,22.6 H 16.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 14,30 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

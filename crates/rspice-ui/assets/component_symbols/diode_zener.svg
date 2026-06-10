@@ -1,32 +1,8 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="0.98425227in"
-   height="0.55117977in"
-   viewBox="0 0 25.000008 13.999967"
-   version="1.1"
-   id="svg5"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs2" />
-  <g
-     id="layer1"
-     transform="translate(141.43917,-108.37972)"
-     style="display:inline">
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -140.93917,114.87972 h 6 v -6 l 12.00001,6 -12.00001,7 v -7"
-       id="path3200" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -120.53917,108.87972 h -2.4 v 12 h -2.4"
-       id="path3202" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -122.93916,114.87972 h 6"
-       id="path3204" />
-
-  </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Zener diode: bent cathode bar. Box 40x20, pins A(0,10), K(40,10). -->
+<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 14.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 14.5,4.5 L 25,10 L 14.5,15.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 27.6,2.9 L 25,4.5 V 15.5 L 22.4,17.1" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 25,10 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
 </svg>
