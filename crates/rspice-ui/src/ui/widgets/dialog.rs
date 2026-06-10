@@ -162,10 +162,10 @@ impl<'a> Dialog<'a> {
                     screen.top() + screen.height() * 0.18,
                 );
 
-                let mut surface = ui.child_ui(
-                    Rect::from_min_size(top_left, vec2(width, max_height)),
-                    egui::Layout::top_down(egui::Align::Min),
-                    None,
+                let mut surface = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(Rect::from_min_size(top_left, vec2(width, max_height)))
+                        .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 surface.set_width(width);
 
