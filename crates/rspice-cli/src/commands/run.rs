@@ -25,7 +25,7 @@ use rspice_core::{
     ConvergenceConfig, ConvergencePreset, Engine, Netlist, SimulationConfig,
     SimulationConfigOverrides, resolve_simulation_config,
 };
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 
 struct RunContext<'a> {
@@ -161,7 +161,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     log::info!("Loading netlist: {}", args.input.display());
-    let netlist = load_netlist(&args.input)?;
+    let netlist = load_netlist(&args, config)?;
 
     if verbose {
         println!("Title: {}", netlist.title);
@@ -265,12 +265,182 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     Ok(())
 }
 
-fn load_netlist(path: &Path) -> Result<Netlist, CliError> {
-    Netlist::parse_file(path).map_err(|e| CliError::ParseError {
+fn load_netlist(args: &RunArgs, config: &Config) -> Result<Netlist, CliError> {
+    let mut search_paths: Vec<PathBuf> = args.includes.clone();
+    search_paths.extend(config.paths.include_paths.iter().cloned());
+    search_paths.extend(config.paths.library_paths.iter().cloned());
+
+    let parsed = if search_paths.is_empty() {
+        Netlist::parse_file(&args.input)
+    } else {
+        Netlist::parse_file_with_search_paths(&args.input, &search_paths)
+    };
+    let map_parse_error = |e: rspice_core::error::ParseError| CliError::ParseError {
         message: e.to_string(),
         line: None,
         suggestion: None,
-    })
+    };
+    let mut netlist = parsed.map_err(map_parse_error)?;
+
+    if !args.defines.is_empty() {
+        let defines: Vec<(String, f64)> = args
+            .defines
+            .iter()
+            .map(|define| parse_define(define))
+            .collect::<Result<_, _>>()?;
+
+        // Parameter overrides must win over the deck's own .PARAM assignments
+        // and must be visible at parse time (simple `{param}` references are
+        // resolved while parsing). Rewrite the include-expanded source so the
+        // override is indistinguishable from a deck edit, then re-parse.
+        let source = netlist.source_text.clone().ok_or_else(|| CliError::InternalError {
+            message: "netlist source unavailable for --define substitution".to_string(),
+        })?;
+        let rewritten = apply_defines_to_source(&source, &defines);
+        netlist = Netlist::parse_with_path(&rewritten, &args.input).map_err(map_parse_error)?;
+        for (name, value) in &defines {
+            netlist.params.set(name, *value);
+        }
+    }
+
+    Ok(netlist)
+}
+
+/// Parse a `-D NAME=VALUE` override; the value accepts SPICE suffixes (4.7k, 1u, ...).
+fn parse_define(define: &str) -> Result<(String, f64), CliError> {
+    let invalid = |message: String| CliError::InvalidArgument {
+        message,
+        suggestion: Some("use -D NAME=VALUE, e.g. -D RLOAD=4.7k".to_string()),
+    };
+
+    let (name, value) = define
+        .split_once('=')
+        .ok_or_else(|| invalid(format!("malformed --define '{}'", define)))?;
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(invalid(format!("missing parameter name in --define '{}'", define)));
+    }
+
+    let value = rspice_core::netlist::lexer::parse_spice_value(value.trim())
+        .map_err(|e| invalid(format!("invalid value in --define '{}': {}", define, e)))?;
+    Ok((name.to_string(), value))
+}
+
+/// Apply `-D` overrides to include-expanded netlist source.
+///
+/// Each override is injected as a `.param` right after the title so it exists
+/// before first use, and every top-level `.param` assignment of the same name
+/// is rewritten in place so the deck cannot re-assign it. Assignments inside
+/// `.subckt` bodies are left alone — overrides target global parameters only.
+fn apply_defines_to_source(source: &str, defines: &[(String, f64)]) -> String {
+    let mut out = String::with_capacity(source.len() + defines.len() * 32);
+    let mut lines = source.lines();
+
+    if let Some(title) = lines.next() {
+        out.push_str(title);
+        out.push('\n');
+    }
+    for (name, value) in defines {
+        out.push_str(&format!(".param {}={:e}\n", name, value));
+    }
+
+    let mut subckt_depth = 0usize;
+    let mut in_param_statement = false;
+    for line in lines {
+        let trimmed = line.trim_start();
+        let keyword = trimmed
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+
+        if keyword == ".subckt" {
+            subckt_depth += 1;
+        } else if keyword == ".ends" {
+            subckt_depth = subckt_depth.saturating_sub(1);
+        }
+
+        let continues_param = in_param_statement && trimmed.starts_with('+');
+        if keyword == ".param" || continues_param {
+            in_param_statement = true;
+            if subckt_depth == 0 {
+                out.push_str(&rewrite_param_assignments(line, defines));
+            } else {
+                out.push_str(line);
+            }
+        } else {
+            if !trimmed.is_empty() && !trimmed.starts_with('*') {
+                in_param_statement = false;
+            }
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+
+    out
+}
+
+/// Rewrite `name=value` assignments in a `.param` line for overridden names.
+///
+/// Values are scanned with brace/paren depth tracking so expressions like
+/// `{a + b}` or `max(1, 2)` stay intact.
+fn rewrite_param_assignments(text: &str, defines: &[(String, f64)]) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c.is_alphabetic() || c == '_' {
+            let start = i;
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
+                i += 1;
+            }
+            let ident: String = chars[start..i].iter().collect();
+
+            let mut j = i;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] == '=' {
+                j += 1;
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                let value_start = j;
+                let mut depth = 0i32;
+                while j < chars.len() {
+                    match chars[j] {
+                        '(' | '{' | '[' => depth += 1,
+                        ')' | '}' | ']' => depth -= 1,
+                        ch if depth == 0 && (ch.is_whitespace() || ch == ',') => break,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+
+                out.push_str(&ident);
+                out.push('=');
+                match defines
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(&ident))
+                {
+                    Some((_, value)) => out.push_str(&format!("{:e}", value)),
+                    None => out.extend(&chars[value_start..j]),
+                }
+                i = j;
+                continue;
+            }
+
+            out.push_str(&ident);
+            continue;
+        }
+
+        out.push(c);
+        i += 1;
+    }
+
+    out
 }
 
 fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> SimulationConfig {

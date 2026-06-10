@@ -60,7 +60,6 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 | :--- | :--- |
 | `-o, --output <FILE>` | Output file for results |
 | `-f, --format <FORMAT>` | Output format: `raw` (default), `ascii`, `csv`, `json`, `tsv`, `hdf5` |
-| `--node-names` | Use original netlist node names in output |
 | `--meas` | Print `.MEAS` measurement results |
 | `--progress` | Show a progress bar with ETA for transient analysis |
 | `--compress` | Enable waveform compression for long simulations |
@@ -78,9 +77,8 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 | `--min-step <TIME>` | Minimum transient timestep |
 | `--max-step <TIME>` | Maximum transient timestep |
 | `--convergence <MODE>` | DC convergence preset: `fast`, `default`, `robust` |
-| `-I, --include <DIR>` | Add an include path for `.include` directives (repeatable) |
-| `-D, --define <NAME=VALUE>` | Define a parameter (repeatable) |
-| `-b, --batch` | Batch mode (no interactive prompts) |
+| `-I, --include <DIR>` | Add a search directory for `.include`/`.lib` references (repeatable) |
+| `-D, --define <NAME=VALUE>` | Override or define a netlist parameter; values accept SPICE suffixes, e.g. `-D RLOAD=4.7k` (repeatable) |
 
 **Analysis-mode options** (see [How Analyses Are Selected](#how-analyses-are-selected)):
 

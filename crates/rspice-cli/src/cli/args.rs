@@ -70,10 +70,6 @@ pub struct RunArgs {
     #[arg(short, long, default_value = "raw", value_name = "FORMAT")]
     pub format: OutputFormat,
 
-    /// Run in batch mode (no interactive prompts)
-    #[arg(short, long)]
-    pub batch: bool,
-
     /// Override simulation temperature (Celsius)
     #[arg(long, value_name = "TEMP")]
     pub temp: Option<f64>,
@@ -85,10 +81,6 @@ pub struct RunArgs {
     /// Show progress bar with ETA for transient simulation
     #[arg(long)]
     pub progress: bool,
-
-    /// Print node names in output (use original netlist names)
-    #[arg(long)]
-    pub node_names: bool,
 
     /// Enable waveform compression for long simulations
     #[arg(long)]
@@ -126,11 +118,11 @@ pub struct RunArgs {
     #[arg(long, value_name = "MODE", value_parser = ["fast", "default", "robust"])]
     pub convergence: Option<String>,
 
-    /// Additional include paths for .include directives
+    /// Additional search directories for .include/.lib directives (repeatable)
     #[arg(short = 'I', long = "include", value_name = "DIR")]
     pub includes: Vec<PathBuf>,
 
-    /// Define a parameter (can be used multiple times)
+    /// Override or define a netlist parameter (repeatable)
     #[arg(short = 'D', long = "define", value_name = "NAME=VALUE")]
     pub defines: Vec<String>,
 
