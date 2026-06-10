@@ -1,10 +1,25 @@
+//! The tabbed property editor on the modal primitive.
+//!
+//! Categories from the registry become underline tabs; each property is a
+//! registry row — dimmed label, typed editor, unit, accent dot when
+//! modified — with inline validation under the row. PWL sources gain a
+//! waveform tab; semiconductors a model Browse action. Footer follows the
+//! dialog grammar: Revert (ghost) · Apply (secondary) · OK (primary).
+
+use egui::Ui;
+
 use crate::state::property_types::{
     DisplayMode, PropertyDefinition, PropertyRegistry, PropertyValue,
 };
-use egui::{Color32, RichText, Ui, Window};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, dialog_tabs};
 
 use super::editors::render_value_editor;
-use super::state::{TabInfo, TabbedDialogResult, TabbedPropertyDialogState};
+use super::state::{TabbedDialogResult, TabbedPropertyDialogState};
+
+/// Label column width, matching the inspector form grid.
+const LABEL_COL: f32 = 110.0;
 
 /// Render the tabbed property dialog.
 ///
@@ -31,50 +46,69 @@ pub fn render_tabbed_property_dialog(
         None => return result,
     };
 
-    let active_tab = state.active_tab.clone();
     state.update_tab_modified_counts(sheet);
 
-    let title = format!(
-        "Edit Properties - {}",
-        match (&state.component_name, &state.component_type) {
-            (Some(name), Some(kind)) => format!("{} ({:?})", name, kind),
-            (Some(name), None) => name.clone(),
-            (None, Some(kind)) => format!("{:?}", kind),
-            (None, None) => "Component".to_string(),
-        }
-    );
+    let title = state
+        .component_name
+        .clone()
+        .unwrap_or_else(|| "Component".to_owned());
+    let error_count = state.validation_errors.len();
+    let hint = if error_count > 0 {
+        format!(
+            "{error_count} invalid value{}",
+            if error_count == 1 { "" } else { "s" }
+        )
+    } else if state.has_modifications() {
+        format!("{} modified", state.modified.len())
+    } else {
+        component_type.display_name().to_owned()
+    };
 
-    let mut should_close = false;
-    let mut open = true;
+    // Tab labels: registry categories plus the PWL waveform tab; a dot
+    // marks tabs holding modified values.
+    let mut labels: Vec<String> = Vec::with_capacity(state.tabs.len() + 1);
+    let mut names: Vec<String> = Vec::with_capacity(state.tabs.len() + 1);
+    for tab in &state.tabs {
+        labels.push(if tab.modified_count > 0 {
+            format!("{} •", tab.display_name)
+        } else {
+            tab.display_name.clone()
+        });
+        names.push(tab.name.clone());
+    }
+    if component_type.is_pwl_source() {
+        labels.push(if state.pwl_editor.is_modified {
+            "PWL •".to_owned()
+        } else {
+            "PWL".to_owned()
+        });
+        names.push("PWL Data".to_owned());
+    }
+    let mut active_index = names
+        .iter()
+        .position(|name| *name == state.active_tab)
+        .unwrap_or(0);
 
-    Window::new(&title)
-        .id(egui::Id::new("rspice_property_dialog"))
-        .open(&mut open)
-        .resizable(true)
-        .collapsible(false)
-        .scroll(false)
-        .default_size([450.0, 400.0])
-        .min_width(350.0)
-        .min_height(200.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+    let choice = Dialog::new("Schematic", &title, "OK")
+        .size(DialogSize::Md)
+        .secondary("Apply")
+        .ghost("Revert")
+        .hint(&hint)
         .show(ctx, |ui| {
-            render_tab_bar(ui, state, component_type, &active_tab);
+            ui.spacing_mut().item_spacing.y = 2.0;
 
-            ui.separator();
+            let label_refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            dialog_tabs(ui, &label_refs, &mut active_index);
+            if let Some(name) = names.get(active_index) {
+                state.active_tab = name.clone();
+            }
 
-            if active_tab == "PWL Data" && component_type.is_pwl_source() {
-                use crate::properties::pwl_editor::render_pwl_editor;
-                egui::ScrollArea::vertical()
-                    .id_salt("tabbed_dialog_pwl_content")
-                    .max_height(280.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        render_pwl_editor(ui, &mut state.pwl_editor);
-                    });
+            if state.active_tab == "PWL Data" && component_type.is_pwl_source() {
+                crate::properties::pwl_editor::render_pwl_editor(ui, &mut state.pwl_editor);
             } else {
                 let props: Vec<PropertyDefinition> = sheet
                     .iter()
-                    .filter(|def| def.category == active_tab)
+                    .filter(|def| def.category == state.active_tab)
                     .filter(|def| match def.display_mode {
                         DisplayMode::Hidden => false,
                         DisplayMode::Advanced if !state.show_advanced => false,
@@ -82,109 +116,60 @@ pub fn render_tabbed_property_dialog(
                     })
                     .cloned()
                     .collect();
+                for def in &props {
+                    render_property_row(ui, def, state);
+                }
 
-                egui::ScrollArea::vertical()
-                    .id_salt("tabbed_dialog_props_content")
-                    .max_height(280.0)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for def in &props {
-                            render_property_row(ui, def, state);
-                        }
-                    });
-            }
-
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut state.show_advanced, "Show Advanced");
-
-                if state.has_modifications() {
-                    ui.label(
-                        RichText::new(format!("{} modified", state.modified.len()))
-                            .color(Color32::YELLOW),
+                let has_advanced = sheet
+                    .iter()
+                    .any(|def| def.display_mode == DisplayMode::Advanced);
+                if has_advanced {
+                    ui.add_space(6.0);
+                    crate::ui::widgets::check_row(
+                        ui,
+                        "Show advanced properties",
+                        &mut state.show_advanced,
                     );
                 }
-            });
-
-            if let Some(error) = &state.global_error.clone() {
-                ui.colored_label(Color32::RED, error);
             }
 
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                if ui.button("Apply").clicked() && state.validate_all(sheet) {
-                    result = TabbedDialogResult::Applied;
-                    should_close = true;
-                }
-
-                if ui.button("Cancel").clicked() {
-                    result = TabbedDialogResult::Cancelled;
-                    should_close = true;
-                }
-
-                let has_mods = state.has_modifications();
-                if ui
-                    .add_enabled(has_mods, egui::Button::new("Revert"))
-                    .clicked()
-                {
-                    state.revert();
-                    result = TabbedDialogResult::Reverted;
-                }
-            });
+            if let Some(error) = state.global_error.clone() {
+                let t = Tokens::get(ui.ctx());
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.err),
+                );
+            }
         });
 
-    if !open {
-        should_close = true;
-        result = TabbedDialogResult::Cancelled;
-    }
-
-    if should_close {
-        match result {
-            TabbedDialogResult::Applied => state.close_visual(),
-            _ => state.close(),
+    match choice {
+        DialogChoice::Primary => {
+            if state.validate_all(sheet) {
+                result = TabbedDialogResult::Applied;
+                state.close_visual();
+            }
         }
+        DialogChoice::Secondary => {
+            if state.validate_all(sheet) {
+                result = TabbedDialogResult::Applied;
+            }
+        }
+        DialogChoice::Ghost => {
+            state.revert();
+            result = TabbedDialogResult::Reverted;
+        }
+        DialogChoice::Cancelled => {
+            state.close();
+            result = TabbedDialogResult::Cancelled;
+        }
+        DialogChoice::None => {}
     }
 
     render_model_browser(ctx, state, model_library_manager);
 
     result
-}
-
-fn render_tab_bar(
-    ui: &mut Ui,
-    state: &mut TabbedPropertyDialogState,
-    component_type: crate::state::ComponentType,
-    active_tab: &str,
-) {
-    ui.horizontal(|ui| {
-        let tabs: Vec<TabInfo> = state.tabs.clone();
-        for tab in tabs {
-            let is_active = active_tab == tab.name;
-            let label = if tab.modified_count > 0 {
-                format!("{}*", tab.display_name)
-            } else {
-                tab.display_name.clone()
-            };
-
-            if ui.selectable_label(is_active, &label).clicked() {
-                state.active_tab = tab.name.clone();
-            }
-        }
-
-        if component_type.is_pwl_source() {
-            let is_pwl_active = active_tab == "PWL Data";
-            let pwl_label = if state.pwl_editor.is_modified {
-                "PWL Data*"
-            } else {
-                "PWL Data"
-            };
-            if ui.selectable_label(is_pwl_active, pwl_label).clicked() {
-                state.active_tab = "PWL Data".to_string();
-            }
-        }
-    });
 }
 
 fn render_model_browser(
@@ -208,69 +193,114 @@ fn render_model_browser(
     }
 }
 
-/// Render a single property row
+/// One registry row: dimmed label, typed editor, unit, modified dot.
 fn render_property_row(
     ui: &mut Ui,
     def: &PropertyDefinition,
     state: &mut TabbedPropertyDialogState,
 ) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_h = t.metrics.row_h;
+
     let is_modified = state.is_modified(&def.name);
-    let is_non_default = state.is_non_default(def);
     let has_error = state.validation_errors.contains_key(&def.name);
+    let current_value = state
+        .get_value(&def.name)
+        .cloned()
+        .unwrap_or_else(|| def.default_value.clone());
 
-    ui.horizontal(|ui| {
-        let name_text = if def.required {
-            format!("{}*", def.display_name)
-        } else {
-            def.display_name.clone()
-        };
+    let browse = def.name == "model"
+        && state
+            .component_type
+            .is_some_and(|kind| kind.is_semiconductor());
 
-        let name_color = if has_error {
-            Color32::RED
-        } else if is_modified {
-            Color32::YELLOW
-        } else {
-            ui.visuals().text_color()
-        };
+    let mut new_value: Option<PropertyValue> = None;
+    let mut browse_clicked = false;
 
-        let name_richtext = if is_non_default {
-            RichText::new(&name_text).color(name_color).strong()
-        } else {
-            RichText::new(&name_text).color(name_color)
-        };
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), row_h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
 
-        ui.label(name_richtext);
+            // Label — err when invalid, full text when modified, dim otherwise.
+            let (label_rect, _) =
+                ui.allocate_exact_size(egui::vec2(LABEL_COL, row_h), egui::Sense::hover());
+            let label_color = if has_error {
+                c.err
+            } else if is_modified {
+                c.text
+            } else {
+                c.text_dim
+            };
+            let label_text = if def.required {
+                format!("{} *", def.display_name)
+            } else {
+                def.display_name.clone()
+            };
+            ui.painter().text(
+                egui::pos2(label_rect.left(), label_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label_text,
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                label_color,
+            );
+            if !def.description.is_empty() {
+                ui.interact(label_rect, ui.id().with(("prop-label", &def.name)), egui::Sense::hover())
+                    .on_hover_text(&def.description);
+            }
 
-        let current_value = state
-            .get_value(&def.name)
-            .cloned()
-            .unwrap_or_else(|| def.default_value.clone());
-        if let Some(new_value) = render_value_editor(ui, def, &current_value) {
-            state.set_value(&def.name, new_value);
-        }
+            // Right-side reserve: modified dot, unit, browse.
+            let mut reserve = 0.0;
+            if is_modified {
+                reserve += 14.0;
+            }
+            if let Some(unit) = &def.unit {
+                reserve += 8.0 + 7.0 * unit.len() as f32;
+            }
+            if browse {
+                reserve += 58.0;
+            }
 
-        if let Some(unit) = &def.unit {
-            ui.label(RichText::new(unit).weak());
-        }
+            let editor_width = (ui.available_width() - reserve).max(60.0);
+            new_value = render_value_editor(ui, def, &current_value, editor_width);
 
-        if def.name == "model"
-            && let Some(comp_type) = state.component_type
-            && comp_type.is_semiconductor()
-            && ui.small_button("📖 Browse...").clicked()
-        {
-            state.model_browser.open = true;
-        }
+            if let Some(unit) = &def.unit {
+                ui.label(
+                    egui::RichText::new(unit)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(c.text_faint),
+                );
+            }
+            if browse
+                && crate::ui::widgets::Button::new("Browse")
+                    .ghost()
+                    .show(ui)
+                    .clicked()
+            {
+                browse_clicked = true;
+            }
+            if is_modified {
+                let (dot_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(8.0, row_h), egui::Sense::hover());
+                ui.painter().circle_filled(dot_rect.center(), 2.5, c.accent);
+            }
+        },
+    );
 
-        if current_value.is_expression() {
-            ui.label(RichText::new("{E}").color(Color32::LIGHT_BLUE).small());
-        }
-    });
-
-    if let Some(error) = state.validation_errors.get(&def.name) {
-        ui.colored_label(Color32::RED, format!("  ↳ {}", error));
+    if let Some(value) = new_value {
+        state.set_value(&def.name, value);
+    }
+    if browse_clicked {
+        state.model_browser.open = true;
     }
 
-    if !def.description.is_empty() {
-        ui.label(RichText::new(&def.description).weak().small());
+    if let Some(error) = state.validation_errors.get(&def.name) {
+        ui.label(
+            egui::RichText::new(error.as_str())
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(c.err),
+        );
     }
 }

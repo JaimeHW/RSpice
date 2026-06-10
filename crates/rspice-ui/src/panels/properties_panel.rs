@@ -42,8 +42,13 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             state.schematic.commit_undo_from(before, "edit properties");
         }
 
-        // Clear dialog state AFTER applying (values were preserved for this)
-        state.tabbed_property_dialog.clear_after_apply();
+        // OK closes (clear everything); Apply keeps editing with the
+        // committed values as the new baseline.
+        if state.tabbed_property_dialog.open {
+            state.tabbed_property_dialog.mark_applied();
+        } else {
+            state.tabbed_property_dialog.clear_after_apply();
+        }
     }
 
     result

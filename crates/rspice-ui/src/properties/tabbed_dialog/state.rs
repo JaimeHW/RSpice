@@ -177,6 +177,15 @@ impl TabbedPropertyDialogState {
         self.close();
     }
 
+    /// Mark the current values as applied while staying open: the draft
+    /// becomes the new baseline.
+    pub fn mark_applied(&mut self) {
+        self.original_values = self.values.clone();
+        self.modified.clear();
+        self.validation_errors.clear();
+        self.global_error = None;
+    }
+
     /// Revert all changes to original values
     pub fn revert(&mut self) {
         self.values = self.original_values.clone();
