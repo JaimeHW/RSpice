@@ -3,37 +3,100 @@ use super::*;
 impl<'a> NetlistGenerator<'a> {
     //-------------------------------------------------------------------------
 
-    /// Extract electrical nets from wire connectivity
+    /// Extract electrical nets from wire connectivity.
+    ///
+    /// The graph holds only meaningful nodes — wire vertices, component
+    /// terminals, junctions, and net-label anchors — and chains each wire
+    /// segment through the candidates that lie on it. Connectivity is
+    /// identical to enumerating every coordinate along every segment (a
+    /// point matters only if some other geometry references it), at a
+    /// fraction of the cost and memory.
     pub(super) fn extract_nets(&mut self) {
-        // Build point graph from wires
+        // Seeded nodes: always nets, even when isolated (a floating
+        // terminal must still get its own SPICE node).
         let mut point_graph: HashMap<Point, HashSet<Point>> = HashMap::new();
-
-        // Add all wire segments to the graph
         for wire in &self.schematic.wires {
-            self.add_wire_to_graph(wire, &mut point_graph);
+            for point in &wire.points {
+                point_graph.entry(*point).or_default();
+            }
         }
-
-        // Add component terminals to graph
         for component in &self.schematic.components {
             for (_, terminal_pos) in component.terminal_positions() {
                 point_graph.entry(terminal_pos).or_default();
             }
         }
 
-        // Connect terminals to wires at matching points
-        for component in &self.schematic.components {
-            for (_, terminal_pos) in component.terminal_positions() {
-                // Check if any wire passes through this terminal
-                for wire in &self.schematic.wires {
-                    if wire.contains_point(terminal_pos) {
-                        // Connect terminal to wire endpoints
-                        for point in &wire.points {
-                            if *point != terminal_pos {
-                                point_graph.entry(terminal_pos).or_default().insert(*point);
-                                point_graph.entry(*point).or_default().insert(terminal_pos);
-                            }
+        // Chain candidates: points that join a segment when they lie on
+        // it. Labels and junctions are candidates but not seeds — a label
+        // floating in empty space must NOT mint a net (it warns instead).
+        let mut by_row: HashMap<i32, Vec<i32>> = HashMap::new();
+        let mut by_col: HashMap<i32, Vec<i32>> = HashMap::new();
+        {
+            let mut add_candidate = |p: Point| {
+                by_row.entry(p.y).or_default().push(p.x);
+                by_col.entry(p.x).or_default().push(p.y);
+            };
+            for point in point_graph.keys() {
+                add_candidate(*point);
+            }
+            for junction in &self.schematic.junctions {
+                add_candidate(junction.pos);
+            }
+            for label in &self.schematic.net_labels {
+                add_candidate(label.pos);
+            }
+        }
+        for xs in by_row.values_mut() {
+            xs.sort_unstable();
+            xs.dedup();
+        }
+        for ys in by_col.values_mut() {
+            ys.sort_unstable();
+            ys.dedup();
+        }
+
+        fn link(graph: &mut HashMap<Point, HashSet<Point>>, a: Point, b: Point) {
+            if a != b {
+                graph.entry(a).or_default().insert(b);
+                graph.entry(b).or_default().insert(a);
+            }
+        }
+
+        for wire in &self.schematic.wires {
+            for seg in wire.points.windows(2) {
+                let (a, b) = (seg[0], seg[1]);
+                if a.y == b.y {
+                    // Horizontal: chain through candidates on this row.
+                    let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
+                    let mut prev = Point::new(x0, a.y);
+                    if let Some(xs) = by_row.get(&a.y) {
+                        let lo = xs.partition_point(|&x| x < x0);
+                        let hi = xs.partition_point(|&x| x <= x1);
+                        for &x in &xs[lo..hi] {
+                            let p = Point::new(x, a.y);
+                            link(&mut point_graph, prev, p);
+                            prev = p;
                         }
                     }
+                    link(&mut point_graph, prev, Point::new(x1, a.y));
+                } else if a.x == b.x {
+                    // Vertical: chain through candidates on this column.
+                    let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
+                    let mut prev = Point::new(a.x, y0);
+                    if let Some(ys) = by_col.get(&a.x) {
+                        let lo = ys.partition_point(|&y| y < y0);
+                        let hi = ys.partition_point(|&y| y <= y1);
+                        for &y in &ys[lo..hi] {
+                            let p = Point::new(a.x, y);
+                            link(&mut point_graph, prev, p);
+                            prev = p;
+                        }
+                    }
+                    link(&mut point_graph, prev, Point::new(a.x, y1));
+                } else {
+                    // Diagonal segments connect only at their endpoints,
+                    // matching `Wire::contains_point` semantics.
+                    link(&mut point_graph, a, b);
                 }
             }
         }
@@ -75,76 +138,6 @@ impl<'a> NetlistGenerator<'a> {
             if !net.points.is_empty() {
                 self.nets.push(net);
                 net_id += 1;
-            }
-        }
-    }
-
-    /// Add wire points and connections to the graph
-    fn add_wire_to_graph(&self, wire: &Wire, graph: &mut HashMap<Point, HashSet<Point>>) {
-        // Connect consecutive points
-        for i in 0..wire.points.len() {
-            let point = wire.points[i];
-            graph.entry(point).or_default();
-
-            // Connect to previous point
-            if i > 0 {
-                let prev = wire.points[i - 1];
-                graph.entry(point).or_default().insert(prev);
-                graph.entry(prev).or_default().insert(point);
-
-                // Also add all points along the segment (for T-junctions)
-                self.add_segment_points(prev, point, graph);
-            }
-        }
-    }
-
-    /// Add intermediate points along a wire segment for T-junction detection
-    fn add_segment_points(
-        &self,
-        start: Point,
-        end: Point,
-        graph: &mut HashMap<Point, HashSet<Point>>,
-    ) {
-        // Only handle orthogonal segments
-        if start.x == end.x {
-            // Vertical segment
-            let (min_y, max_y) = if start.y < end.y {
-                (start.y, end.y)
-            } else {
-                (end.y, start.y)
-            };
-            for y in min_y..=max_y {
-                let p = Point::new(start.x, y);
-                graph.entry(p).or_default();
-                // Connect to segment endpoints
-                if p != start {
-                    graph.entry(p).or_default().insert(start);
-                    graph.entry(start).or_default().insert(p);
-                }
-                if p != end {
-                    graph.entry(p).or_default().insert(end);
-                    graph.entry(end).or_default().insert(p);
-                }
-            }
-        } else if start.y == end.y {
-            // Horizontal segment
-            let (min_x, max_x) = if start.x < end.x {
-                (start.x, end.x)
-            } else {
-                (end.x, start.x)
-            };
-            for x in min_x..=max_x {
-                let p = Point::new(x, start.y);
-                graph.entry(p).or_default();
-                // Connect to segment endpoints
-                if p != start {
-                    graph.entry(p).or_default().insert(start);
-                    graph.entry(start).or_default().insert(p);
-                }
-                if p != end {
-                    graph.entry(p).or_default().insert(end);
-                    graph.entry(end).or_default().insert(p);
-                }
             }
         }
     }

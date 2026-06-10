@@ -221,10 +221,11 @@ impl SimulationController {
         );
 
         // Populate cross-probe mapping for probe mode
-        state
-            .simulation
-            .cross_probe
-            .update(result.point_to_net, result.nets);
+        state.simulation.cross_probe.update(
+            result.point_to_net,
+            result.nets,
+            result.net_segments,
+        );
         log::info!(
             "Cross-probe mapping populated: {} points, {} nets",
             state.simulation.cross_probe.point_to_net.len(),

@@ -50,11 +50,17 @@ pub struct NetlistResult {
     /// The generated SPICE netlist text
     pub netlist: String,
 
-    /// Net name assignments for cross-probing: net_name -> [points]
+    /// Net name assignments for cross-probing: net_name -> [node points]
     pub nets: HashMap<String, Vec<Point>>,
 
-    /// Point to net name mapping for probe lookup: grid_point -> net_name
+    /// Node point to net name mapping for probe lookup. Holds the nets'
+    /// node points (vertices, terminals, junctions, labels); probes
+    /// between nodes resolve through `net_segments`.
     pub point_to_net: HashMap<Point, String>,
+
+    /// Wire segments per net, for resolving probe points that fall on a
+    /// segment between nodes.
+    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
 
     /// Any warnings during generation
     pub warnings: Vec<String>,
@@ -92,10 +98,28 @@ pub fn generate_netlist_with_analysis(
         nets.insert(name, points);
     }
 
+    // A wire belongs to exactly one net; index its segments under that
+    // net's name so probes between nodes resolve.
+    let mut net_segments: HashMap<String, Vec<(Point, Point)>> = HashMap::new();
+    for wire in &schematic.wires {
+        let Some(name) = wire
+            .points
+            .first()
+            .and_then(|first| point_to_net.get(first))
+        else {
+            continue;
+        };
+        net_segments
+            .entry(name.clone())
+            .or_default()
+            .extend(wire.points.windows(2).map(|w| (w[0], w[1])));
+    }
+
     NetlistResult {
         netlist,
         nets,
         point_to_net,
+        net_segments,
         warnings: generator.warnings().to_vec(),
         errors: generator.errors().to_vec(),
     }
@@ -299,9 +323,20 @@ impl<'a> NetlistGenerator<'a> {
         self.nets.iter().find(|n| n.id == id)
     }
 
-    /// Get net for a point
+    /// Get net for a point. Node points resolve directly; points between
+    /// nodes resolve through the wire segment they lie on.
     pub fn net_at(&self, point: Point) -> Option<&Net> {
-        self.point_to_net.get(&point).and_then(|&id| self.net(id))
+        if let Some(&id) = self.point_to_net.get(&point) {
+            return self.net(id);
+        }
+        for wire in &self.schematic.wires {
+            if wire.contains_point(point) {
+                let first = wire.points.first()?;
+                let id = *self.point_to_net.get(first)?;
+                return self.net(id);
+            }
+        }
+        None
     }
 
     /// Get ground net ID

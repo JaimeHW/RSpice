@@ -10,17 +10,34 @@ use super::*;
 /// simulation run or schematic modification.
 #[derive(Debug, Clone, Default)]
 pub struct CrossProbeMapping {
-    /// Grid point to net name lookup (e.g., Point(280, 200) → "NET3")
-    /// Enables: click on wire → find net name → find waveform
+    /// Node point to net name lookup (e.g., Point(280, 200) → "NET3").
+    /// Holds net node points (vertices, terminals, junctions, labels);
+    /// probes between nodes resolve through `net_segments`.
     pub point_to_net: HashMap<Point, String>,
 
-    /// Net name to grid points lookup (e.g., "NET3" → [Point(280, 200), ...])
+    /// Net name to node points lookup (e.g., "NET3" → [Point(280, 200), ...])
     /// Enables: select waveform → highlight all connected wire segments
     pub net_to_points: HashMap<String, Vec<Point>>,
+
+    /// Wire segments per net, for resolving probes between nodes.
+    pub net_segments: HashMap<String, Vec<(Point, Point)>>,
 
     /// Version counter - incremented when mapping is updated
     /// Used to detect when probe cache needs refresh
     pub version: u64,
+}
+
+/// Does `p` lie on the orthogonal segment `(a, b)` (inclusive)?
+fn on_segment(p: Point, a: Point, b: Point) -> bool {
+    if a.y == b.y && p.y == a.y {
+        let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
+        return p.x >= x0 && p.x <= x1;
+    }
+    if a.x == b.x && p.x == a.x {
+        let (y0, y1) = (a.y.min(b.y), a.y.max(b.y));
+        return p.y >= y0 && p.y <= y1;
+    }
+    false
 }
 
 impl CrossProbeMapping {
@@ -34,9 +51,11 @@ impl CrossProbeMapping {
         &mut self,
         point_to_net: HashMap<Point, String>,
         net_to_points: HashMap<String, Vec<Point>>,
+        net_segments: HashMap<String, Vec<(Point, Point)>>,
     ) {
         self.point_to_net = point_to_net;
         self.net_to_points = net_to_points;
+        self.net_segments = net_segments;
         self.version += 1;
     }
 
@@ -44,14 +63,25 @@ impl CrossProbeMapping {
     pub fn clear(&mut self) {
         self.point_to_net.clear();
         self.net_to_points.clear();
+        self.net_segments.clear();
         self.version += 1;
     }
 
     /// Look up net name for a grid point
     ///
-    /// Returns None if the point is not on a net (e.g., empty space)
+    /// Node points answer from the hash; anything else scans the net
+    /// segment lists (probe clicks are rare — this is not a frame path).
+    /// Returns None if the point is not on a net (e.g., empty space).
     pub fn net_at(&self, point: Point) -> Option<&String> {
-        self.point_to_net.get(&point)
+        if let Some(name) = self.point_to_net.get(&point) {
+            return Some(name);
+        }
+        self.net_segments.iter().find_map(|(name, segments)| {
+            segments
+                .iter()
+                .any(|&(a, b)| on_segment(point, a, b))
+                .then_some(name)
+        })
     }
 
     /// Look up all grid points for a net name

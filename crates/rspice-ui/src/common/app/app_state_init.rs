@@ -37,7 +37,6 @@ pub(super) fn default_app_state() -> AppState {
         panel_sizes: PanelSizes::default(),
         dialogs: DialogState::default(),
         theme: RSpiceTheme::dark(),
-        console_messages: Vec::new(),
         log_buffer: crate::panels::LogBuffer::default(),
         property_editor: crate::properties::dialog::PropertyEditorState::default(),
         script_console: crate::panels::ScriptConsoleState::default(),

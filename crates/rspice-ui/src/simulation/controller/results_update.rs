@@ -17,12 +17,16 @@ impl SimulationController {
                     "DC OP result has {} node voltages",
                     dc_result.node_voltages.len()
                 );
-                for (node, voltage) in &dc_result.node_voltages {
-                    log::info!("  V({}) = {:.6} V", node, voltage);
-                    state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
-                        "V({}) = {:.6} V",
-                        node, voltage
-                    )));
+                // Node voltages live in the DC-OP results view; echo them
+                // to the console only for small circuits so one large run
+                // doesn't flood the whole log buffer.
+                const DC_OP_CONSOLE_ECHO_LIMIT: usize = 24;
+                if dc_result.node_voltages.len() <= DC_OP_CONSOLE_ECHO_LIMIT {
+                    for (node, voltage) in &dc_result.node_voltages {
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(
+                            format!("V({}) = {:.6} V", node, voltage),
+                        ));
+                    }
                 }
 
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(

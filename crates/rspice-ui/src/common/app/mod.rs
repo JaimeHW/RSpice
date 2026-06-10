@@ -115,8 +115,6 @@ pub struct AppState {
     pub(crate) dialogs: DialogState,
     /// Current theme
     pub(crate) theme: RSpiceTheme,
-    /// Console messages
-    pub(crate) console_messages: Vec<ConsoleMessage>,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::panels::LogBuffer,
     /// Component property editor state
@@ -206,9 +204,7 @@ impl AppState {
         message: ConsoleMessage,
     ) {
         let severity = Self::log_severity_for_console(message.level);
-        self.log_buffer
-            .log(severity, source, message.message.clone(), None);
-        self.console_messages.push(message);
+        self.log_buffer.log(severity, source, message.message, None);
     }
 
     pub fn push_user_message(&mut self, message: ConsoleMessage) {
@@ -220,7 +216,6 @@ impl AppState {
     }
 
     pub fn clear_primary_log(&mut self) {
-        self.console_messages.clear();
         self.log_buffer.clear();
     }
 
