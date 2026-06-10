@@ -1,9 +1,12 @@
 //! Compare Command - Golden file regression testing
 //!
 //! Compares simulation results against reference files for CI/CD testing.
-//! Supports configurable tolerances (absolute and relative).
+//! Both files may be in any supported result format (rawfile, CSV, TSV,
+//! JSON, HDF5 — auto-detected by extension), with configurable absolute
+//! and relative tolerances.
 
 use crate::cli::{CliError, OutputFormat};
+use crate::commands::waveform_io::{detect_format, load_table};
 use std::path::PathBuf;
 
 /// Arguments for the compare command
@@ -136,35 +139,13 @@ struct WaveformData {
     values: Vec<Vec<f64>>,
 }
 
-/// Load waveform data from file
+/// Load waveform data from a result file in any supported format.
+///
+/// The scale becomes the first compared series; complex signals expand to
+/// `Re(name)` / `Im(name)` so AC results compare value-for-value.
 fn load_waveform_data(path: &std::path::Path) -> Result<WaveformData, CliError> {
-    let content = std::fs::read_to_string(path).map_err(|e| CliError::InputReadError {
-        path: path.to_path_buf(),
-        source: e,
-    })?;
-
-    // Simple CSV parser
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.is_empty() {
-        return Err(CliError::ConversionError {
-            message: "Empty file".to_string(),
-        });
-    }
-
-    let variables: Vec<String> = lines[0].split(',').map(|s| s.trim().to_string()).collect();
-    let mut values: Vec<Vec<f64>> = vec![Vec::new(); variables.len()];
-
-    for line in lines.iter().skip(1) {
-        let vals: Vec<&str> = line.split(',').collect();
-        for (i, val) in vals.iter().enumerate() {
-            if i < values.len()
-                && let Ok(v) = val.trim().parse::<f64>()
-            {
-                values[i].push(v);
-            }
-        }
-    }
-
+    let table = load_table(path, detect_format(path))?;
+    let (variables, values) = table.to_real_series().into_iter().unzip();
     Ok(WaveformData { variables, values })
 }
 
