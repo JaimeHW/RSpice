@@ -767,14 +767,26 @@ impl Engine {
                 + circuit.b3soi_pd.devices.len(),
         );
         for dev in &circuit.b3soi.devices {
+            if dev.charges_suppressed() {
+                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                continue;
+            }
             let c = dev.charge_at(candidate_solution);
             device_charges.push((c.qg, c.qb, c.qd, c.qe));
         }
         for dev in &circuit.b3soi_fd.devices {
+            if dev.charges_suppressed() {
+                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                continue;
+            }
             let c = dev.charge_at(candidate_solution);
             device_charges.push((c.qg, c.qb, c.qd, c.qe));
         }
         for dev in &circuit.b3soi_pd.devices {
+            if dev.charges_suppressed() {
+                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                continue;
+            }
             let c = dev.charge_at(candidate_solution);
             device_charges.push((c.qg, c.qb, c.qd, c.qe));
         }

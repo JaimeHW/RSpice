@@ -756,15 +756,29 @@ impl Engine {
         };
         // The history is indexed DD devices first, then FD, then PD; the
         // stamp/commit/truncation walks use the same concatenated order.
+        // `DEBUG=-1` devices keep an (all-zero) slot so the indexing stays
+        // aligned, but contribute no charges.
         for dev in &circuit.b3soi.devices {
+            if dev.charges_suppressed() {
+                seed(0.0, 0.0, 0.0, 0.0);
+                continue;
+            }
             let c = dev.charge_at(solution);
             seed(c.qg, c.qb, c.qd, c.qe);
         }
         for dev in &circuit.b3soi_fd.devices {
+            if dev.charges_suppressed() {
+                seed(0.0, 0.0, 0.0, 0.0);
+                continue;
+            }
             let c = dev.charge_at(solution);
             seed(c.qg, c.qb, c.qd, c.qe);
         }
         for dev in &circuit.b3soi_pd.devices {
+            if dev.charges_suppressed() {
+                seed(0.0, 0.0, 0.0, 0.0);
+                continue;
+            }
             let c = dev.charge_at(solution);
             seed(c.qg, c.qb, c.qd, c.qe);
         }
@@ -890,6 +904,10 @@ impl Engine {
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         let mut idx = 0;
         for dev in &circuit.b3soi.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
@@ -908,6 +926,10 @@ impl Engine {
             idx += 1;
         }
         for dev in &circuit.b3soi_fd.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
@@ -926,6 +948,10 @@ impl Engine {
             idx += 1;
         }
         for dev in &circuit.b3soi_pd.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
@@ -961,6 +987,10 @@ impl Engine {
         let effective_method = Self::effective_companion_method(method, trap_order);
         let mut idx = 0;
         for dev in &circuit.b3soi.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
@@ -979,6 +1009,10 @@ impl Engine {
             idx += 1;
         }
         for dev in &circuit.b3soi_fd.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,
@@ -997,6 +1031,10 @@ impl Engine {
             idx += 1;
         }
         for dev in &circuit.b3soi_pd.devices {
+            if dev.charges_suppressed() {
+                idx += 1;
+                continue;
+            }
             let charge = dev.charge_at(voltages);
             let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
                 effective_method,

@@ -129,6 +129,12 @@ pub struct B3SoiPd {
     /// The previous full evaluation engaged the body limiter (ngspice
     /// `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
+    /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
+    /// zero before the companion assembly, so the device contributes no
+    /// dynamic charges to the matrix, RHS, or LTE - the transient runs
+    /// quasi-statically.
+    charges_suppressed: bool,
 }
 
 impl B3SoiPd {
@@ -222,6 +228,7 @@ impl B3SoiPd {
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
+            charges_suppressed: false,
         })
     }
 
@@ -251,6 +258,17 @@ impl B3SoiPd {
     pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
         self.bypass_tolerances.set(tolerances);
         self.bypass_active.set(false);
+    }
+
+    /// `DEBUG=-1` (ngspice `debugMod < 0`): evaluate charges for probes but
+    /// contribute no dynamic charges to the matrix, RHS, or LTE.
+    pub fn set_debug_mod(&mut self, debug_mod: i32) {
+        self.charges_suppressed = debug_mod < 0;
+    }
+
+    /// Whether `DEBUG=-1` suppresses this device's charge contributions.
+    pub fn charges_suppressed(&self) -> bool {
+        self.charges_suppressed
     }
 
     /// Mark the start of a new timestep attempt (ngspice `MODEINITPRED`): the

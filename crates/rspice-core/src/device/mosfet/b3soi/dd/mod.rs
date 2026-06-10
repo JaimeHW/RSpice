@@ -125,6 +125,12 @@ pub struct B3SoiDd {
     /// The previous full evaluation engaged the body limiter (ngspice
     /// `Check != 0`), which disqualifies the next iterate from bypassing.
     last_limited: std::cell::Cell<bool>,
+    /// `DEBUG=-1` instance flag (ngspice `debugMod`): the charge state is
+    /// still evaluated for probes, but `ChargeComputationNeeded` is forced to
+    /// zero before the companion assembly, so the device contributes no
+    /// dynamic charges to the matrix, RHS, or LTE - the transient runs
+    /// quasi-statically.
+    charges_suppressed: bool,
 }
 
 impl B3SoiDd {
@@ -209,6 +215,7 @@ impl B3SoiDd {
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
             last_limited: std::cell::Cell::new(false),
+            charges_suppressed: false,
         })
     }
 
@@ -238,6 +245,17 @@ impl B3SoiDd {
     pub fn set_bypass_tolerances(&self, tolerances: Option<(Value, Value, Value)>) {
         self.bypass_tolerances.set(tolerances);
         self.bypass_active.set(false);
+    }
+
+    /// `DEBUG=-1` (ngspice `debugMod == -1`): evaluate charges for probes but
+    /// contribute no dynamic charges to the matrix, RHS, or LTE.
+    pub fn set_debug_mod(&mut self, debug_mod: i32) {
+        self.charges_suppressed = debug_mod == -1;
+    }
+
+    /// Whether `DEBUG=-1` suppresses this device's charge contributions.
+    pub fn charges_suppressed(&self) -> bool {
+        self.charges_suppressed
     }
 
     /// Mark the start of a new timestep attempt (ngspice `MODEINITPRED`): the
@@ -1203,5 +1221,33 @@ mod tests {
         assert!(ok(charge.gcbdb, -1.482516887e-15), "gcbdb={:.9e}", charge.gcbdb);
         assert!(ok(charge.gcbsb, -8.674246038e-15), "gcbsb={:.9e}", charge.gcbsb);
         assert!(ok(charge.gcbeb, -2.308017492e-15), "gcbeb={:.9e}", charge.gcbeb);
+    }
+
+    #[test]
+    fn probe_body_ratio_at_ramp_start() {
+        let model = B3SoiDdModel::from_params(&n1_params(), false, 300.15);
+        let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
+        let mc = model_consts(&model);
+        let qb = |vg: Value, vb: Value| {
+            eval::eval(
+                &sized,
+                &mc,
+                B3SoiDdBias { vbs: vb, vgs: vg, vds: 1.5, ves: 0.0, vps: 0.0 },
+                1.0,
+                true,
+            )
+            .charge
+            .unwrap()
+            .qb
+        };
+        let h = 1e-6;
+        for (vg, vb) in [(0.0_f64, 0.09166_f64), (0.025, 0.13), (0.05, 0.1635)] {
+            let dqb_dvg = (qb(vg + h, vb) - qb(vg - h, vb)) / (2.0 * h);
+            let dqb_dvb = (qb(vg, vb + h) - qb(vg, vb - h)) / (2.0 * h);
+            println!(
+                "vg={vg} vb={vb} dqb_dvg={dqb_dvg:.6e} dqb_dvb={dqb_dvb:.6e} ratio={:.4}",
+                -dqb_dvg / dqb_dvb
+            );
+        }
     }
 }

@@ -1493,7 +1493,7 @@ impl Engine {
             cth0: params_map.get("CTH0").copied().unwrap_or(0.0),
         };
 
-        let device = B3SoiDd::new(
+        let mut device = B3SoiDd::new(
             element.name.clone(),
             node_drain,
             node_gate,
@@ -1508,6 +1508,10 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
 
+        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
+        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
+            device.set_debug_mod(debug.round() as i32);
+        }
         circuit.b3soi.add(device);
         Ok(())
     }
@@ -1572,7 +1576,7 @@ impl Engine {
             cth0: params_map.get("CTH0").copied().unwrap_or(0.0),
         };
 
-        let device = B3SoiFd::new(
+        let mut device = B3SoiFd::new(
             element.name.clone(),
             node_drain,
             node_gate,
@@ -1586,6 +1590,10 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
 
+        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
+        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
+            device.set_debug_mod(debug.round() as i32);
+        }
         circuit.b3soi_fd.add(device);
         Ok(())
     }
@@ -1663,7 +1671,7 @@ impl Engine {
             cth0: params_map.get("CTH0").copied().unwrap_or(0.0),
         };
 
-        let device = B3SoiPd::new(
+        let mut device = B3SoiPd::new(
             element.name.clone(),
             node_drain,
             node_gate,
@@ -1678,6 +1686,10 @@ impl Engine {
         )
         .map_err(SimulationError::Circuit)?;
 
+        // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
+        if let Some(debug) = instance_param(instance_params, &["DEBUG"]) {
+            device.set_debug_mod(debug.round() as i32);
+        }
         circuit.b3soi_pd.add(device);
         Ok(())
     }
