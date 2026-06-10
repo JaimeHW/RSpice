@@ -712,8 +712,6 @@ impl Engine {
                 trapgear.force_method(method);
             }
             let step_time = t + dt;
-            let use_ngspice_floor_budget =
-                Self::should_use_native_txl_ngspice_newton_floor(&circuit);
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
                     &circuit,
@@ -864,7 +862,6 @@ impl Engine {
             let tran_max_iterations = Self::transient_newton_iteration_budget(
                 self.config.transient_max_iterations,
                 startup_recovery,
-                use_ngspice_floor_budget,
             );
             let mut converged = false;
             // Reusing the accepted state is only valid when a full restamp
@@ -2616,18 +2613,13 @@ mod tests {
     }
 
     #[test]
-    fn transient_newton_iteration_budget_uses_ngspice_floor_when_requested() {
+    fn transient_newton_iteration_budget_uses_ngspice_floor() {
+        // ngspice NIiter floors every Newton call to 100 iterations.
         assert_eq!(
-            Engine::transient_newton_iteration_budget(10, false, false),
-            10
-        );
-        assert_eq!(
-            Engine::transient_newton_iteration_budget(10, false, true),
+            Engine::transient_newton_iteration_budget(10, false),
             NGSPICE_NIITER_MIN_ITERATIONS
         );
-        assert_eq!(
-            Engine::transient_newton_iteration_budget(250, false, false),
-            250
-        );
+        assert_eq!(Engine::transient_newton_iteration_budget(250, false), 250);
+        assert_eq!(Engine::transient_newton_iteration_budget(250, true), 128);
     }
 }

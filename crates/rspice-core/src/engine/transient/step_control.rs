@@ -195,33 +195,17 @@ impl Engine {
     pub(super) fn transient_newton_iteration_budget(
         transient_max_iterations: usize,
         startup_recovery: bool,
-        use_ngspice_floor: bool,
     ) -> usize {
-        let configured_budget = transient_max_iterations.max(1);
-        let standard_budget = if use_ngspice_floor {
-            configured_budget.max(NGSPICE_NIITER_MIN_ITERATIONS)
-        } else {
-            configured_budget
-        };
+        // ngspice's NIiter() raises any smaller iteration limit to 100
+        // (niiter.c) for every Newton solve, transient timepoints included.
+        let standard_budget = transient_max_iterations
+            .max(1)
+            .max(NGSPICE_NIITER_MIN_ITERATIONS);
         if startup_recovery {
-            standard_budget.max(64).min(128)
+            standard_budget.min(128)
         } else {
             standard_budget
         }
-    }
-
-    #[inline]
-    pub(super) fn should_use_native_txl_ngspice_newton_floor(
-        circuit: &crate::circuit::Circuit,
-    ) -> bool {
-        // Local ngspice floors NIiter() to 100. Keep that extra budget on the
-        // native TXL runtime that needs it across source-edge relaxation, while
-        // avoiding a global accepted-history change for distributed-RLC/LTRA.
-        let has_native_txl = circuit.tlines.iter().any(|tl| tl.has_txl_runtime());
-        let has_distributed_history_line =
-            circuit.tlines.iter().any(|tl| tl.has_distributed_rlgc());
-
-        has_native_txl && !has_distributed_history_line
     }
 
     #[inline]
