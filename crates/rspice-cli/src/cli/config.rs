@@ -215,6 +215,19 @@ impl Config {
         if other.simulation.residual_reltol != SimulationConfig::default().residual_reltol {
             self.simulation.residual_reltol = other.simulation.residual_reltol;
         }
+        if other.simulation.min_timestep != SimulationConfig::default().min_timestep {
+            self.simulation.min_timestep = other.simulation.min_timestep;
+        }
+        if other.simulation.max_timestep != SimulationConfig::default().max_timestep {
+            self.simulation.max_timestep = other.simulation.max_timestep;
+        }
+        self.simulation.compress_waveforms |= other.simulation.compress_waveforms;
+        if other.simulation.compression_tolerance != SimulationConfig::default().compression_tolerance {
+            self.simulation.compression_tolerance = other.simulation.compression_tolerance;
+        }
+        if other.simulation.convergence_mode != SimulationConfig::default().convergence_mode {
+            self.simulation.convergence_mode = other.simulation.convergence_mode.clone();
+        }
 
         // Output settings
         if other.output.format != OutputConfig::default().format {
@@ -248,16 +261,13 @@ impl Config {
             self.output.format = format;
         }
 
-        if let Ok(includes) = std::env::var("RSPICE_INCLUDE_PATH") {
-            for path in includes.split(';') {
-                self.paths.include_paths.push(PathBuf::from(path));
-            }
+        // Path lists use the platform separator (';' on Windows, ':' elsewhere)
+        if let Some(includes) = std::env::var_os("RSPICE_INCLUDE_PATH") {
+            self.paths.include_paths.extend(std::env::split_paths(&includes));
         }
 
-        if let Ok(libs) = std::env::var("RSPICE_LIBRARY_PATH") {
-            for path in libs.split(';') {
-                self.paths.library_paths.push(PathBuf::from(path));
-            }
+        if let Some(libs) = std::env::var_os("RSPICE_LIBRARY_PATH") {
+            self.paths.library_paths.extend(std::env::split_paths(&libs));
         }
     }
 }
