@@ -40,31 +40,41 @@ fn hierarchy_section(ui: &mut Ui, state: &mut AppState) {
             .meta("sheet 1/1")
             .show(ui);
 
-        // Instances of the active schematic, selection-synced.
-        let rows: Vec<(u64, String, String)> = state
-            .schematic
-            .components
-            .iter()
-            .map(|component| {
-                let meta = if component.value.is_empty() {
-                    component.kind.display_name().to_owned()
-                } else {
-                    component.value.clone()
-                };
-                (component.id, component.name.clone(), meta)
-            })
-            .collect();
-        for (id, name, meta) in rows {
-            let selected = state.schematic.selection.has_component(id);
-            let row = TreeRow::new(&name)
-                .meta(&meta)
-                .indent(1)
-                .mono()
-                .selected(selected)
-                .show(ui);
-            if row.response.clicked() {
-                state.schematic.selection.select_only_component(id);
-            }
+        // Instances of the active schematic, selection-synced. Virtualized
+        // and borrow-only: large designs cost the rows in view, and no
+        // names are cloned per frame.
+        let t = Tokens::get(ui.ctx());
+        let row_h = t.metrics.row_h;
+        let total = state.schematic.components.len();
+        let mut clicked: Option<u64> = None;
+        egui::ScrollArea::vertical()
+            .id_salt("volta.hierarchy")
+            .max_height(row_h * 8.5)
+            .auto_shrink([false, true])
+            .show_rows(ui, row_h, total, |ui, range| {
+                for index in range {
+                    let Some(component) = state.schematic.components.get(index) else {
+                        continue;
+                    };
+                    let meta = if component.value.is_empty() {
+                        component.kind.display_name()
+                    } else {
+                        component.value.as_str()
+                    };
+                    let selected = state.schematic.selection.has_component(component.id);
+                    let row = TreeRow::new(&component.name)
+                        .meta(meta)
+                        .indent(1)
+                        .mono()
+                        .selected(selected)
+                        .show(ui);
+                    if row.response.clicked() {
+                        clicked = Some(component.id);
+                    }
+                }
+            });
+        if let Some(id) = clicked {
+            state.schematic.selection.select_only_component(id);
         }
     });
 }
@@ -91,37 +101,74 @@ enum CellEntry {
     LibraryCell(String, String),
 }
 
-fn matching_cells(state: &AppState) -> Vec<CellEntry> {
-    let query = state.shell.cell_search.to_lowercase();
-    let lib_filter = &state.shell.cell_lib_filter;
-    let mut entries = Vec::new();
+thread_local! {
+    /// Browser list cache, keyed by (search, filter, library revision,
+    /// show_read_only): the filter/sort over the whole library otherwise
+    /// reruns every frame the panel is visible.
+    #[allow(clippy::type_complexity)]
+    static CELL_CACHE: std::cell::RefCell<
+        Option<((String, String, u64, bool), std::rc::Rc<Vec<CellEntry>>)>,
+    > = const { std::cell::RefCell::new(None) };
+}
 
-    if lib_filter == "All libs" || lib_filter == "primitives" {
-        for section in crate::schematic::component_palette() {
-            for entry in section.entries {
-                if query.is_empty() || entry.label.to_lowercase().contains(&query) {
-                    entries.push(CellEntry::Primitive(entry.kind, entry.label));
+fn matching_cells(state: &AppState) -> std::rc::Rc<Vec<CellEntry>> {
+    let revision = state.library_manager.revision();
+    let show_read_only = state.library_manager.show_read_only;
+
+    CELL_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some((key, entries)) = cache.as_ref() {
+            if key.0 == state.shell.cell_search
+                && key.1 == state.shell.cell_lib_filter
+                && key.2 == revision
+                && key.3 == show_read_only
+            {
+                return std::rc::Rc::clone(entries);
+            }
+        }
+
+        let query = state.shell.cell_search.to_lowercase();
+        let lib_filter = &state.shell.cell_lib_filter;
+        let mut entries = Vec::new();
+
+        if lib_filter == "All libs" || lib_filter == "primitives" {
+            for section in crate::schematic::component_palette() {
+                for entry in section.entries {
+                    if query.is_empty() || entry.label.to_lowercase().contains(&query) {
+                        entries.push(CellEntry::Primitive(entry.kind, entry.label));
+                    }
                 }
             }
         }
-    }
-    for library in state.library_manager.libraries_sorted() {
-        if lib_filter != "All libs" && *lib_filter != library.name {
-            continue;
-        }
-        for cell in library.cells_sorted() {
-            if query.is_empty()
-                || cell.name.to_lowercase().contains(&query)
-                || library.name.to_lowercase().contains(&query)
-            {
-                entries.push(CellEntry::LibraryCell(
-                    library.name.clone(),
-                    cell.name.clone(),
-                ));
+        for library in state.library_manager.libraries_sorted() {
+            if lib_filter != "All libs" && *lib_filter != library.name {
+                continue;
+            }
+            for cell in library.cells_sorted() {
+                if query.is_empty()
+                    || cell.name.to_lowercase().contains(&query)
+                    || library.name.to_lowercase().contains(&query)
+                {
+                    entries.push(CellEntry::LibraryCell(
+                        library.name.clone(),
+                        cell.name.clone(),
+                    ));
+                }
             }
         }
-    }
-    entries
+
+        let entries = std::rc::Rc::new(entries);
+        *cache = Some((
+            (
+                state.shell.cell_search.clone(),
+                state.shell.cell_lib_filter.clone(),
+                revision,
+                show_read_only,
+            ),
+            std::rc::Rc::clone(&entries),
+        ));
+        entries
+    })
 }
 
 fn components_section(ui: &mut Ui, state: &mut AppState) {

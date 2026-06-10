@@ -50,16 +50,20 @@ fn text_color() -> Color32 {
 // =============================================================================
 
 /// Render the pole-zero viewer panel
-pub fn render_pz_viewer(ui: &mut Ui, _app_state: &mut AppState) {
-    let mut state = PoleZeroState::new();
-    load_demo_data(&mut state);
+pub fn render_pz_viewer(ui: &mut Ui, app_state: &mut AppState) {
+    // Persisted viewer state: rebuilding it per frame wasted the work and
+    // reset every toggle and marker each frame.
+    let state = &mut app_state.analysis.pole_zero_state;
+    if state.datasets.is_empty() {
+        load_demo_data(state);
+    }
 
     let available_rect = ui.available_rect_before_wrap();
     let layout = calculate_layout(available_rect);
 
-    render_header(ui, &layout, &mut state);
-    render_plot(ui, &layout, &state);
-    render_info_panel(ui, &layout, &state);
+    render_header(ui, &layout, state);
+    render_plot(ui, &layout, state);
+    render_info_panel(ui, &layout, state);
 }
 
 /// Public render function

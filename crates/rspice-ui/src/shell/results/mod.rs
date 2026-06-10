@@ -493,24 +493,6 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
         .active_run()
         .map_or_else(|| "no runs".to_owned(), |run| format!("run #{}", run.id));
 
-    let runs: Vec<(usize, String)> = state
-        .simulation
-        .runs
-        .iter()
-        .enumerate()
-        .map(|(idx, run)| {
-            (
-                idx,
-                format!(
-                    "run #{} · {} · {:.1} s",
-                    run.id,
-                    if run.success { "ok" } else { "failed" },
-                    run.elapsed_time
-                ),
-            )
-        })
-        .collect();
-
     egui::ComboBox::from_id_salt("volta.results.run")
         .selected_text(
             egui::RichText::new(label)
@@ -519,6 +501,24 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
         )
         .width(150.0)
         .show_ui(ui, |ui| {
+            // Built only while the popup is open — not per frame.
+            let runs: Vec<(usize, String)> = state
+                .simulation
+                .runs
+                .iter()
+                .enumerate()
+                .map(|(idx, run)| {
+                    (
+                        idx,
+                        format!(
+                            "run #{} · {} · {:.1} s",
+                            run.id,
+                            if run.success { "ok" } else { "failed" },
+                            run.elapsed_time
+                        ),
+                    )
+                })
+                .collect();
             for (idx, run_label) in runs {
                 if ui
                     .selectable_label(state.simulation.active_run_idx == Some(idx), run_label)

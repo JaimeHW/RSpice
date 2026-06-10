@@ -21,6 +21,10 @@ pub struct LibraryManager {
     pub filter_text: String,
     /// Whether to show read-only libraries
     pub show_read_only: bool,
+    /// Content revision for display caches — bumped on every mutation
+    /// (including pessimistically on `get_library_mut`).
+    #[serde(skip)]
+    revision: u64,
 }
 
 impl LibraryManager {
@@ -32,13 +36,20 @@ impl LibraryManager {
         }
     }
 
+    /// Content revision, for caches over library listings.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// Add a library
     pub fn add_library(&mut self, library: Library) {
         self.libraries.insert(library.name.clone(), library);
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Remove a library
     pub fn remove_library(&mut self, name: &str) -> Option<Library> {
+        self.revision = self.revision.wrapping_add(1);
         self.libraries.remove(name)
     }
 
@@ -47,8 +58,9 @@ impl LibraryManager {
         self.libraries.get(name)
     }
 
-    /// Get mutable library by name
+    /// Get mutable library by name (assumes mutation: bumps the revision)
     pub fn get_library_mut(&mut self, name: &str) -> Option<&mut Library> {
+        self.revision = self.revision.wrapping_add(1);
         self.libraries.get_mut(name)
     }
 
@@ -152,6 +164,7 @@ impl LibraryManager {
             }
             if !lib.cells.contains_key(cell_name) {
                 lib.add_cell(Cell::new(cell_name));
+                self.revision = self.revision.wrapping_add(1);
                 return true;
             }
         }
@@ -174,6 +187,7 @@ impl LibraryManager {
                 && !c.views.contains_key(view_name)
             {
                 c.add_view(View::new(view_name, view_type));
+                self.revision = self.revision.wrapping_add(1);
                 return true;
             }
         }
@@ -236,5 +250,6 @@ impl LibraryManager {
         self.selected_library = None;
         self.selected_cell = None;
         self.selected_view = None;
+        self.revision = self.revision.wrapping_add(1);
     }
 }

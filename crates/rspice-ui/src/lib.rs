@@ -11,7 +11,6 @@
 //! - `schematic/` - Schematic editor (canvas, export, toolbar, symbols)
 //! - `waveform/` - Waveform viewer with cursors and measurements
 //! - `simulation/` - Simulation controller and dialogs
-//! - `cross_probing/` - Cross-probing between views
 //! - `panels/` - Side panels (project browser, properties)
 //! - `properties/` - Property editing and design variables
 //! - `common/` - Shared components (menu bar, status bar, theme)
@@ -59,9 +58,6 @@ pub mod waveform;
 /// Simulation management - Controller, dialogs, netlist generation
 pub mod simulation;
 
-/// Cross-probing - Synchronized selection between schematic and waveform
-pub mod cross_probing;
-
 /// Side panels - Project browser and properties panel
 pub mod panels;
 
@@ -89,9 +85,6 @@ pub mod services;
 
 /// File I/O (library parser, session, netlist, waveform)
 pub mod io;
-
-/// Integration (event bus, manager, state sync)
-pub mod integration;
 
 /// Application state management
 pub mod state;

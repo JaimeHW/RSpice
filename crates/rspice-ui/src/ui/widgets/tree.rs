@@ -207,11 +207,14 @@ impl<'a> TreeRow<'a> {
         });
         let meta_w = meta_galley.as_ref().map_or(0.0, |g| g.size().x + 8.0);
 
+        // Lay out with the placeholder color and tint at paint time: the
+        // hover animation sweeps `text_color` through ten shades, and a
+        // color-keyed galley would miss egui's cache on every one.
         let label_galley = ui.fonts(|f| {
             f.layout(
                 self.label.to_owned(),
                 label_font,
-                text_color,
+                egui::Color32::PLACEHOLDER,
                 (rect.right() - 6.0 - meta_w - x).max(8.0),
             )
         });

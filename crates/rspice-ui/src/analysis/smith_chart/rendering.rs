@@ -76,12 +76,16 @@ fn trace_colors() -> &'static [Color32] {
 
 /// Render the Smith chart viewer panel
 pub fn render_smith_chart_viewer(ui: &mut Ui, app_state: &mut AppState) {
-    // Get or create Smith chart state
-    // For now we create a demo state
-    let mut state = SmithChartState::new();
-
-    // Load demo data if available from simulation
-    load_demo_data(&mut state);
+    // Persisted viewer state: rebuilding it per frame wasted the work and
+    // reset every toggle and marker each frame. Taken out for the duration
+    // of the pass because the header borrows `app_state` too.
+    let mut state = std::mem::replace(
+        &mut app_state.analysis.smith_chart_state,
+        SmithChartState::new(),
+    );
+    if state.traces.is_empty() {
+        load_demo_data(&mut state);
+    }
 
     // Calculate layout
     let available_rect = ui.available_rect_before_wrap();
@@ -91,6 +95,8 @@ pub fn render_smith_chart_viewer(ui: &mut Ui, app_state: &mut AppState) {
     render_header(ui, &layout, &mut state, app_state);
     render_chart_area(ui, &layout, &mut state);
     render_readout_panel(ui, &layout, &state);
+
+    app_state.analysis.smith_chart_state = state;
 }
 
 /// Public render function for external use

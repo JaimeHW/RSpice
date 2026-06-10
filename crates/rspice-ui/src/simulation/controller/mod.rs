@@ -220,7 +220,11 @@ impl SimulationController {
             &netlist[..netlist.len().min(500)]
         );
 
-        // Populate cross-probe mapping for probe mode
+        // Populate cross-probe mapping for probe mode. The schematic keeps
+        // its own copy so the inspector's terminal-net rows and the
+        // simulate panel's net count resolve without reaching simulation
+        // state (the node map is small — nodes only, not pixels).
+        state.schematic.net_mapping = result.point_to_net.clone();
         state.simulation.cross_probe.update(
             result.point_to_net,
             result.nets,
