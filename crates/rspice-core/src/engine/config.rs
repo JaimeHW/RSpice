@@ -26,6 +26,10 @@ pub struct SimulationConfig {
     pub integration_method: crate::analysis::IntegrationMethod,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
+    /// Largest nonlinear-device terminal-voltage change allowed per accepted
+    /// transient step (volts). Signal-activity step control complementing the
+    /// polynomial charge LTE; see `constants::DEVICE_ACTIVITY_STEP_BOUND`.
+    pub transient_node_activity_bound: Value,
     /// Model evaluation bypass configuration for latent device optimization
     pub bypass_config: BypassConfig,
     /// Convergence configuration for DC operating point
@@ -225,6 +229,7 @@ impl Default for SimulationConfig {
             temperature: crate::constants::TEMP_REFERENCE,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
             transient_trtol: crate::constants::TRTOL,
+            transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),
         }

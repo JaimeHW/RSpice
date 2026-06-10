@@ -35,6 +35,23 @@ pub const CHGTOL: Value = 1e-14;
 /// Similar to SPICE TRTOL parameter.
 pub const TRTOL: Value = 7.0;
 
+/// Largest nonlinear-device terminal-voltage change allowed per accepted
+/// transient step (volts).
+///
+/// Polynomial charge LTE estimates truncation error from divided differences
+/// of sampled charges, so it is blind to waveform curvature that lies entirely
+/// between samples: once the grid coarsens across a multi-volt excursion, the
+/// lagged samples look smooth, the LTE stays loose, and the coarsening is
+/// self-reinforcing (observed on the mosamp slew, where a single 100 ns
+/// trapezoidal step accumulated a 1.25% solution error that the LTE accepted
+/// — ngspice avoids this only by accident, through MOS2 Newton failures that
+/// force sub-ns steps). Production simulators bound timesteps by signal
+/// activity for exactly this reason (HSPICE's DVDT step algorithm, Spectre's
+/// activity-based step selection). When any MOSFET/BJT/JFET terminal voltage
+/// moves more than this bound across a candidate step, the step is rescaled
+/// proportionally so per-step device excursions stay resolved.
+pub const DEVICE_ACTIVITY_STEP_BOUND: Value = 0.4;
+
 /// Default voltage tolerance (volts)
 ///
 /// Similar to SPICE VNTOL parameter.

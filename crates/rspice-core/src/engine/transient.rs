@@ -1921,8 +1921,21 @@ impl Engine {
             } else {
                 None
             };
-            let candidate_truncation_limit =
-                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit);
+            let activity_limit = if !first_accepted_transient_step {
+                Self::nonlinear_terminal_activity_limit(
+                    &circuit,
+                    &solution,
+                    &new_solution,
+                    dt,
+                    self.config.transient_node_activity_bound,
+                )
+            } else {
+                None
+            };
+            let candidate_truncation_limit = Self::min_truncation_limit(
+                Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
+                activity_limit,
+            );
 
             if let Some(limit) = candidate_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)

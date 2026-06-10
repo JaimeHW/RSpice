@@ -733,6 +733,61 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// Signal-activity step limit: rescale the candidate step so that no
+    /// nonlinear-device terminal voltage moves more than `bound` volts in one
+    /// step.
+    ///
+    /// Complements the polynomial charge LTE, which estimates error from
+    /// divided differences of sampled charges and is therefore blind to
+    /// curvature lying entirely between samples (see
+    /// [`crate::constants::DEVICE_ACTIVITY_STEP_BOUND`]). Returns the
+    /// proportionally reduced step when the bound is exceeded, `None` when
+    /// the candidate respects it.
+    pub(super) fn nonlinear_terminal_activity_limit(
+        circuit: &crate::circuit::Circuit,
+        accepted_solution: &[Value],
+        candidate_solution: &[Value],
+        dt: Value,
+        bound: Value,
+    ) -> Option<Value> {
+        if !(bound.is_finite() && bound > 0.0 && dt.is_finite() && dt > 0.0) {
+            return None;
+        }
+
+        let mut max_delta: Value = 0.0;
+        let mut consider = |node: usize| {
+            if node == 0 {
+                return;
+            }
+            let accepted = accepted_solution.get(node - 1).copied().unwrap_or(0.0);
+            let candidate = candidate_solution.get(node - 1).copied().unwrap_or(0.0);
+            let delta = (candidate - accepted).abs();
+            if delta.is_finite() && delta > max_delta {
+                max_delta = delta;
+            }
+        };
+
+        for mos in &circuit.mosfets.devices {
+            consider(mos.node_drain);
+            consider(mos.node_gate);
+            consider(mos.node_source);
+            consider(mos.node_bulk);
+        }
+        for bjt in &circuit.bjts.devices {
+            consider(bjt.node_collector);
+            consider(bjt.node_base);
+            consider(bjt.node_emitter);
+            consider(bjt.node_substrate);
+        }
+        for jfet in &circuit.jfets {
+            consider(jfet.drain);
+            consider(jfet.gate);
+            consider(jfet.source);
+        }
+
+        (max_delta > bound).then(|| dt * bound / max_delta)
+    }
+
     #[inline]
     pub(super) fn min_truncation_limit(
         first: Option<Value>,
