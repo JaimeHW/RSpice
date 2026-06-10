@@ -15,7 +15,10 @@
 //! device models from loaded PDK libraries.
 
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelLibraryManager, ModelType};
-use egui::{Context, RichText, ScrollArea, Ui};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, TreeRow, chip, kv_row};
+use egui::{Context, ScrollArea, Ui};
 use std::collections::HashSet;
 
 // =============================================================================
@@ -178,6 +181,9 @@ pub enum ModelBrowserResult {
 // Model Browser Rendering
 // =============================================================================
 
+/// Pane content height inside the dialog body.
+const PANE_HEIGHT: f32 = 380.0;
+
 /// Render the model browser dialog.
 ///
 /// Returns `ModelBrowserResult::Selected` when user confirms selection.
@@ -192,386 +198,328 @@ pub fn render_model_browser(
         return result;
     }
 
-    // Modal window
-    egui::Window::new("Model Browser")
-        .collapsible(false)
-        .resizable(true)
-        .default_size([800.0, 600.0])
-        .min_width(700.0)
-        .min_height(400.0)
-        .show(ctx, |ui| {
-            // Top toolbar
-            ui.horizontal(|ui| {
-                // Search box
-                ui.label("🔍");
-                let search_response = ui.add(
-                    egui::TextEdit::singleline(&mut state.search_text)
-                        .desired_width(200.0)
-                        .hint_text("Search models..."),
-                );
-                if search_response.changed() {
-                    // Real-time search
+    let hint = format!(
+        "{} libraries · {} models",
+        manager.library_count(),
+        manager.total_model_count()
+    );
+
+    let mut dialog = Dialog::new(
+        "Library",
+        "Model browser",
+        if state.browse_only { "Close" } else { "Apply" },
+    )
+    .size(DialogSize::Lg)
+    .hint(&hint);
+    if !state.browse_only {
+        dialog = dialog
+            .ghost("Cancel")
+            .primary_enabled(state.selected_model.is_some());
+    }
+
+    let choice = dialog.show(ctx, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+
+        // Search + type filter chips.
+        ui.add(
+            egui::TextEdit::singleline(&mut state.search_text)
+                .hint_text("Search models…")
+                .desired_width(f32::INFINITY),
+        );
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if chip(ui, "all", state.type_filter.is_none()).clicked() {
+                state.type_filter = None;
+            }
+            for model_type in [
+                ModelType::Nmos,
+                ModelType::Pmos,
+                ModelType::Npn,
+                ModelType::Pnp,
+                ModelType::Resistor,
+                ModelType::Capacitor,
+                ModelType::Diode,
+            ] {
+                if chip(
+                    ui,
+                    model_type.display_name(),
+                    state.type_filter == Some(model_type),
+                )
+                .clicked()
+                {
+                    state.type_filter = Some(model_type);
                 }
+            }
+        });
+        ui.add_space(4.0);
 
-                ui.separator();
-
-                // Type filter
-                ui.label("Type:");
-                egui::ComboBox::from_id_salt("type_filter")
-                    .selected_text(match state.type_filter {
-                        None => "All",
-                        Some(t) => t.display_name(),
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(state.type_filter.is_none(), "All")
-                            .clicked()
-                        {
-                            state.type_filter = None;
-                        }
-                        for model_type in &[
-                            ModelType::Nmos,
-                            ModelType::Pmos,
-                            ModelType::Npn,
-                            ModelType::Pnp,
-                            ModelType::Resistor,
-                            ModelType::Capacitor,
-                            ModelType::Diode,
-                        ] {
-                            if ui
-                                .selectable_label(
-                                    state.type_filter == Some(*model_type),
-                                    model_type.display_name(),
-                                )
-                                .clicked()
-                            {
-                                state.type_filter = Some(*model_type);
-                            }
-                        }
-                    });
-
-                ui.separator();
-
-                // Summary
-                let total_models = manager.total_model_count();
-                ui.label(
-                    RichText::new(format!(
-                        "{} libraries, {} models",
-                        manager.library_count(),
-                        total_models
-                    ))
-                    .weak(),
+        // Tree · list · detail panes.
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let pane = |ui: &mut Ui, width: f32, id: &str, body: &mut dyn FnMut(&mut Ui)| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, PANE_HEIGHT),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ScrollArea::vertical()
+                            .id_salt(id.to_owned())
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| body(ui));
+                    },
                 );
+            };
+
+            pane(ui, 190.0, "model_browser_libraries", &mut |ui| {
+                render_library_tree(ui, state, manager);
             });
-
-            ui.separator();
-
-            // Three-pane layout using allocate_ui_with_layout pattern (same as Simulation Setup)
-            // This ensures proper resizing without feedback loops
-            let content_height = (ui.available_height() - 60.0).max(200.0);
-
-            ui.horizontal(|ui| {
-                // Left pane: Library tree
-                ui.allocate_ui_with_layout(
-                    egui::vec2(200.0, content_height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.label(RichText::new("Libraries").strong());
-                        ui.separator();
-
-                        ScrollArea::vertical()
-                            .id_salt("model_browser_libraries")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                render_library_tree(ui, state, manager);
-                            });
-                    },
-                );
-
-                ui.separator();
-
-                // Center pane: Model list
-                ui.allocate_ui_with_layout(
-                    egui::vec2(280.0, content_height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.label(RichText::new("Models").strong());
-                        ui.separator();
-
-                        ScrollArea::vertical()
-                            .id_salt("model_browser_models")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                render_model_list(ui, state, manager);
-                            });
-                    },
-                );
-
-                ui.separator();
-
-                // Right pane: Model details
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width().max(200.0), content_height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        ui.label(RichText::new("Details").strong());
-                        ui.separator();
-
-                        ScrollArea::vertical()
-                            .id_salt("model_browser_details")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                render_model_details(ui, state, manager);
-                            });
-                    },
-                );
+            let line_x = ui.cursor().left() + 4.0;
+            ui.painter().vline(
+                line_x,
+                egui::Rangef::new(ui.cursor().top(), ui.cursor().top() + PANE_HEIGHT),
+                egui::Stroke::new(1.0, c.border),
+            );
+            ui.add_space(9.0);
+            pane(ui, 220.0, "model_browser_models", &mut |ui| {
+                render_model_list(ui, state, manager);
             });
-
-            ui.separator();
-
-            // Bottom buttons
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Close/Cancel button
-                    let button_text = if state.browse_only { "Close" } else { "Cancel" };
-                    if ui.button(button_text).clicked() {
-                        state.close();
-                        result = ModelBrowserResult::Cancelled;
-                    }
-
-                    // Apply button (only shown if not in browse-only mode)
-                    if !state.browse_only {
-                        let can_apply = state.selected_model.is_some();
-                        if ui
-                            .add_enabled(can_apply, egui::Button::new("Apply"))
-                            .clicked()
-                            && let (Some(library), Some(model)) =
-                                (&state.selected_library, &state.selected_model)
-                        {
-                            result = ModelBrowserResult::Selected {
-                                library: library.clone(),
-                                model: model.clone(),
-                                corner: state.selected_corner.clone(),
-                            };
-                            state.close();
-                        }
-                    }
-                });
+            let line_x = ui.cursor().left() + 4.0;
+            ui.painter().vline(
+                line_x,
+                egui::Rangef::new(ui.cursor().top(), ui.cursor().top() + PANE_HEIGHT),
+                egui::Stroke::new(1.0, c.border),
+            );
+            ui.add_space(9.0);
+            let detail_width = ui.available_width().max(180.0);
+            pane(ui, detail_width, "model_browser_details", &mut |ui| {
+                render_model_details(ui, state, manager);
             });
         });
+    });
+
+    match choice {
+        DialogChoice::Primary => {
+            if state.browse_only {
+                state.close();
+                result = ModelBrowserResult::Cancelled;
+            } else if let (Some(library), Some(model)) =
+                (&state.selected_library, &state.selected_model)
+            {
+                result = ModelBrowserResult::Selected {
+                    library: library.clone(),
+                    model: model.clone(),
+                    corner: state.selected_corner.clone(),
+                };
+                state.close();
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            state.close();
+            result = ModelBrowserResult::Cancelled;
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
 
     result
 }
 
+/// Faint mono pane caption.
+fn pane_caption(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        text,
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+            color: t.color.text_faint,
+            extra_letter_spacing: 0.08 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    ui.label(job);
+    ui.add_space(2.0);
+}
+
+/// Faint placeholder line.
+fn pane_note(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(t.color.text_faint),
+    );
+}
+
 /// Render the library tree in the left pane.
 fn render_library_tree(ui: &mut Ui, state: &mut ModelBrowserState, manager: &ModelLibraryManager) {
+    pane_caption(ui, "LIBRARIES");
     if manager.library_count() == 0 {
-        ui.label(RichText::new("No libraries loaded").weak().italics());
+        pane_note(ui, "No libraries loaded");
         return;
     }
 
+    ui.spacing_mut().item_spacing.y = 0.0;
     for lib in manager.libraries_sorted() {
         let is_selected = state.selected_library.as_deref() == Some(&lib.name);
         let matching_count = state.count_matching_models(lib);
-        let corner_count = lib.corner_count();
-
-        // Professional library display - clean vertical layout
-        let response = ui.vertical(|ui| {
-            // Library header with selection highlight
-            let response = ui.selectable_label(
-                is_selected,
-                RichText::new(format!("📚 {}", lib.name)).strong(),
-            );
-
-            // Subtext: model count • corner count
-            let subtext = if corner_count > 0 {
-                format!("{} models • {} corners", matching_count, corner_count)
-            } else {
-                format!("{} models", matching_count)
-            };
-            ui.label(RichText::new(subtext).small().weak());
-
-            response
-        });
-
-        // Click anywhere in the vertical group to select
-        if response.inner.clicked() {
+        let row = TreeRow::new(&lib.name)
+            .meta(&matching_count.to_string())
+            .selected(is_selected)
+            .show(ui);
+        if row.response.clicked() {
             state.select_library(&lib.name);
         }
-
-        ui.add_space(4.0);
     }
 }
 
 /// Render the model list in the center pane.
 fn render_model_list(ui: &mut Ui, state: &mut ModelBrowserState, manager: &ModelLibraryManager) {
-    // If a library is selected, show its models
+    pane_caption(ui, "MODELS");
+    ui.spacing_mut().item_spacing.y = 0.0;
+
     if let Some(ref lib_name) = state.selected_library.clone() {
         if let Some(lib) = manager.get_library(lib_name) {
-            let models = state.get_compatible_models(lib);
-
+            let mut models = state.get_compatible_models(lib);
             if models.is_empty() {
-                ui.label(RichText::new("No matching models").weak().italics());
+                pane_note(ui, "No matching models");
                 return;
             }
+            models.sort_by(|a, b| a.name.cmp(&b.name));
 
-            // Sort models by name
-            let mut sorted: Vec<_> = models;
-            sorted.sort_by(|a, b| a.name.cmp(&b.name));
-
-            for model in sorted {
+            for model in models {
                 let is_selected = state.selected_model.as_deref() == Some(&model.name);
-                let icon = model.model_type.icon();
-                let label = format!("{} {}", icon, model.name);
-
-                let response = ui.selectable_label(is_selected, label);
-                if response.clicked() {
+                let row = TreeRow::new(&model.name)
+                    .meta(model.level.display_name())
+                    .selected(is_selected)
+                    .show(ui);
+                if row.response.clicked() {
                     state.select_model(lib_name, &model.name);
                 }
-
-                // Show level as subtext
-                response.on_hover_text(format!(
-                    "{} - {}",
-                    model.model_type.display_name(),
-                    model.level.display_name()
-                ));
+            }
+        }
+    } else if !state.search_text.is_empty() {
+        let results = manager.search_models(&state.search_text);
+        if results.is_empty() {
+            pane_note(ui, "No results found");
+            return;
+        }
+        let pairs: Vec<(String, String)> = results
+            .iter()
+            .filter(|(_, model)| state.matches_filter(model))
+            .take(50)
+            .map(|(lib, model)| (lib.name.clone(), model.name.clone()))
+            .collect();
+        for (lib_name, model_name) in pairs {
+            let is_selected = state.selected_library.as_deref() == Some(lib_name.as_str())
+                && state.selected_model.as_deref() == Some(model_name.as_str());
+            let row = TreeRow::new(&model_name)
+                .meta(&lib_name)
+                .selected(is_selected)
+                .show(ui);
+            if row.response.clicked() {
+                state.select_model(&lib_name, &model_name);
             }
         }
     } else {
-        // No library selected - show search results across all libraries
-        if !state.search_text.is_empty() {
-            let results = manager.search_models(&state.search_text);
-            if results.is_empty() {
-                ui.label(RichText::new("No results found").weak().italics());
-            } else {
-                for (lib, model) in results.iter().take(50) {
-                    if !state.matches_filter(model) {
-                        continue;
-                    }
-
-                    let is_selected = state.selected_library.as_deref() == Some(&lib.name)
-                        && state.selected_model.as_deref() == Some(&model.name);
-
-                    let icon = model.model_type.icon();
-                    let label = format!("{} {}", icon, model.name);
-
-                    let response = ui.selectable_label(is_selected, label);
-                    if response.clicked() {
-                        state.select_model(&lib.name, &model.name);
-                    }
-
-                    response.on_hover_text(format!("Library: {}", lib.name));
-                }
-            }
-        } else {
-            ui.label(RichText::new("Select a library or search").weak().italics());
-        }
+        pane_note(ui, "Select a library or search");
     }
 }
 
 /// Render model details in the right pane.
-fn render_model_details(ui: &mut Ui, state: &ModelBrowserState, manager: &ModelLibraryManager) {
-    if let (Some(lib_name), Some(model_name)) = (&state.selected_library, &state.selected_model)
-        && let Some(lib) = manager.get_library(lib_name)
-        && let Some(model) = lib.get_model(model_name)
-    {
-        // Model name header
-        ui.label(RichText::new(&model.name).heading());
-        ui.add_space(4.0);
+fn render_model_details(ui: &mut Ui, state: &mut ModelBrowserState, manager: &ModelLibraryManager) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    pane_caption(ui, "DETAILS");
 
-        // Type and level
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
-                    "{} {}",
-                    model.model_type.icon(),
-                    model.model_type.display_name()
-                ))
-                .strong(),
-            );
-            ui.separator();
-            ui.label(format!("Level: {}", model.level.display_name()));
-        });
-
-        ui.add_space(8.0);
-
-        // Description
-        if !model.description.is_empty() {
-            ui.label(&model.description);
-            ui.add_space(8.0);
-        }
-
-        // Geometry limits (for transistors)
-        if model.l_min.is_some() || model.w_min.is_some() {
-            ui.separator();
-            ui.label(RichText::new("Geometry Limits").strong());
-
-            egui::Grid::new("geometry_grid")
-                .num_columns(2)
-                .spacing([20.0, 4.0])
-                .show(ui, |ui| {
-                    if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
-                        ui.label("Length:");
-                        ui.label(format!(
-                            "{} - {}",
-                            format_si_value(l_min),
-                            format_si_value(l_max)
-                        ));
-                        ui.end_row();
-                    }
-
-                    if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
-                        ui.label("Width:");
-                        ui.label(format!(
-                            "{} - {}",
-                            format_si_value(w_min),
-                            format_si_value(w_max)
-                        ));
-                        ui.end_row();
-                    }
-                });
-        }
-
-        // Operating voltage
-        if let Some(vdd) = model.vdd {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label("Vdd:");
-                ui.label(format!("{:.2} V", vdd));
-            });
-        }
-
-        // Threshold voltage
-        if let Some(vth0) = model.vth0 {
-            ui.horizontal(|ui| {
-                ui.label("Vth0:");
-                ui.label(format!("{:.3} V", vth0));
-            });
-        }
-
-        // File path
-        if let Some(ref path) = model.file_path {
-            ui.add_space(8.0);
-            ui.separator();
-            ui.label(RichText::new("File").strong());
-            ui.label(RichText::new(path.display().to_string()).small().weak());
-        }
-
-        // Parameters summary
-        if !model.parameters.is_empty() {
-            ui.add_space(8.0);
-            ui.separator();
-            ui.label(RichText::new(format!("Parameters ({})", model.parameters.len())).strong());
-        }
-
+    let (Some(lib_name), Some(model_name)) =
+        (state.selected_library.clone(), state.selected_model.clone())
+    else {
+        pane_note(ui, "Select a model to view details");
         return;
-    }
+    };
+    let Some(lib) = manager.get_library(&lib_name) else {
+        return;
+    };
+    let Some(model) = lib.get_model(&model_name) else {
+        return;
+    };
 
     ui.label(
-        RichText::new("Select a model to view details")
-            .weak()
-            .italics(),
+        egui::RichText::new(&model.name)
+            .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
+            .color(c.text),
     );
+    ui.label(
+        egui::RichText::new(format!(
+            "{} · {}",
+            model.model_type.display_name(),
+            model.level.display_name()
+        ))
+        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+        .color(c.text_dim),
+    );
+    if !model.description.is_empty() {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(&model.description)
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(c.text_dim),
+        );
+    }
+
+    ui.add_space(6.0);
+    ui.spacing_mut().item_spacing.y = 0.0;
+    if let (Some(l_min), Some(l_max)) = (model.l_min, model.l_max) {
+        kv_row(
+            ui,
+            "Length",
+            &format!("{} – {}", format_si_value(l_min), format_si_value(l_max)),
+        );
+    }
+    if let (Some(w_min), Some(w_max)) = (model.w_min, model.w_max) {
+        kv_row(
+            ui,
+            "Width",
+            &format!("{} – {}", format_si_value(w_min), format_si_value(w_max)),
+        );
+    }
+    if let Some(vdd) = model.vdd {
+        kv_row(ui, "Vdd", &format!("{vdd:.2} V"));
+    }
+    if let Some(vth0) = model.vth0 {
+        kv_row(ui, "Vth0", &format!("{vth0:.3} V"));
+    }
+    if !model.parameters.is_empty() {
+        kv_row(ui, "Parameters", &model.parameters.len().to_string());
+    }
+
+    // Process corners as chips — the selection rides into the result.
+    if !lib.corners.is_empty() {
+        ui.add_space(8.0);
+        pane_caption(ui, "CORNER");
+        let mut corners: Vec<&String> = lib.corners.keys().collect();
+        corners.sort();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+            for corner in corners {
+                let on = state.selected_corner.as_deref() == Some(corner.as_str());
+                if chip(ui, corner, on).clicked() {
+                    state.selected_corner = if on { None } else { Some(corner.clone()) };
+                }
+            }
+        });
+    }
+
+    if let Some(ref path) = model.file_path {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new(path.display().to_string())
+                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .color(c.text_faint),
+        );
+    }
 }
 
 /// Format a value with SI prefixes.
