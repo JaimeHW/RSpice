@@ -25,7 +25,6 @@ use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
 
-use super::theme::RSpiceTheme;
 
 mod active_viewer;
 pub use active_viewer::ActiveViewer;
@@ -112,8 +111,6 @@ pub struct AppState {
     pub(crate) dialogs: DialogState,
     /// Typed analysis configuration behind the Simulate view.
     pub(crate) sim_setup: SimSetupState,
-    /// Current theme
-    pub(crate) theme: RSpiceTheme,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::panels::LogBuffer,
     /// Scripting/Automation console state
@@ -226,9 +223,9 @@ impl RSpiceApp {
             AppState::default()
         };
 
-        // Apply the design-system theme and derive the canvas color bridge.
+        // Apply the design-system theme (canvas painters read the active
+        // palette directly).
         state.shell.theme.apply(&cc.egui_ctx);
-        state.theme = RSpiceTheme::from_tokens(&state.shell.theme.tokens());
 
         // Ctrl+± / Ctrl+0 zoom the *schematic*, not the UI — disable egui's
         // built-in keyboard zoom so the shortcuts don't double-fire.
@@ -273,10 +270,9 @@ impl RSpiceApp {
 
     fn prepare_frame(&mut self, ctx: &Context) {
         // (Re)apply the theme when it changes — this maps the design tokens
-        // onto the egui style and refreshes the canvas color bridge.
+        // onto the egui style and republishes the active palette.
         if self.first_frame || self.applied_theme != Some(self.state.shell.theme) {
             self.state.shell.theme.apply(ctx);
-            self.state.theme = RSpiceTheme::from_tokens(&self.state.shell.theme.tokens());
             self.applied_theme = Some(self.state.shell.theme);
             self.first_frame = false;
         }

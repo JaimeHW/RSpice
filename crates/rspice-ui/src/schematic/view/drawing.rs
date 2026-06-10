@@ -19,16 +19,16 @@ pub(super) fn draw_wire(
     wire: &Wire,
     selected: bool,
     highlighted: bool, // Net highlighting - orange color for connected net
-    state: &AppState,
 ) {
     // Wire is a polyline - draw all segments
     // Priority: selected > highlighted > default
+    let palette = crate::ui::tokens::active_palette();
     let (color, width) = if selected {
-        (state.theme.accent, 2.0) // Accent for selected
+        (palette.accent, 2.0) // Accent for selected
     } else if highlighted {
-        (crate::ui::tokens::active_palette().warn, 2.0) // Net highlight (cross-probe)
+        (palette.warn, 2.0) // Net highlight (cross-probe)
     } else {
-        (state.theme.wire_default, 1.0)
+        (palette.wire, 1.0)
     };
 
     // Draw each segment of the wire polyline
@@ -45,7 +45,6 @@ pub(super) fn draw_component(
     viewport: &Viewport,
     component: &Component,
     selected: bool,
-    state: &AppState,
     symbol_library: Option<&SymbolLibrary>,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
@@ -54,10 +53,11 @@ pub(super) fn draw_component(
 
     // Grid lines now visible through components (no opaque background)
 
+    let palette = crate::ui::tokens::active_palette();
     let outline_color = if selected {
-        state.theme.accent // Accent for selected
+        palette.accent // Accent for selected
     } else {
-        state.theme.component_outline
+        palette.symbol
     };
 
     let stroke = Stroke::new(if selected { 1.5 } else { 1.0 } * scale, outline_color);
@@ -153,7 +153,7 @@ pub(super) fn draw_component(
     // Smart label placement based on component type, rotation, and dimensions
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
-    draw_component_labels(painter, pos, scale, component, state);
+    draw_component_labels(painter, pos, scale, component);
 }
 
 /// Smart label placement for components
@@ -294,7 +294,6 @@ fn draw_component_labels(
     pos: Pos2,
     scale: f32,
     component: &Component,
-    state: &AppState,
 ) {
     // Skip labels for Ground (too small, clutters schematic)
     if matches!(component.kind, crate::state::ComponentType::Ground) {
@@ -311,6 +310,7 @@ fn draw_component_labels(
     let value_font = egui::FontId::proportional(quantize_font_size(9.0 * scale));
 
     let layout = compute_label_layout(pos, scale, component);
+    let palette = crate::ui::tokens::active_palette();
 
     // Draw component name (reference designator)
     if !component.name.is_empty() {
@@ -319,7 +319,7 @@ fn draw_component_labels(
             layout.name_align,
             &component.name,
             name_font,
-            state.theme.text_primary,
+            palette.text,
         );
     }
 
@@ -331,7 +331,7 @@ fn draw_component_labels(
             layout.value_align,
             value_text.as_ref(),
             value_font,
-            state.theme.text_secondary,
+            palette.text_dim,
         );
     }
 }
@@ -354,17 +354,18 @@ pub(super) fn draw_junction(
         .map(|(x, y)| x == position.x && y == position.y)
         .unwrap_or(false);
 
+    let palette = crate::ui::tokens::active_palette();
     if is_hovered {
         // Draw larger highlight ring when hovered
         let highlight_radius = radius * 2.5;
         painter.circle_stroke(
             pos,
             highlight_radius,
-            Stroke::new(1.0 * viewport.zoom, state.theme.accent),
+            Stroke::new(1.0 * viewport.zoom, palette.accent),
         );
     }
 
-    painter.circle_filled(pos, radius, state.theme.wire_default);
+    painter.circle_filled(pos, radius, palette.wire);
 }
 
 fn manhattan_distance(a: Point, b: Point) -> i32 {

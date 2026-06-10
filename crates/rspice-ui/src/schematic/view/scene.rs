@@ -20,7 +20,7 @@ pub(super) fn draw_scene(
     state: &AppState,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    painter.rect_filled(available, 0.0, state.theme.canvas_bg);
+    painter.rect_filled(available, 0.0, crate::ui::tokens::active_palette().canvas_bg);
     draw_grid(painter, available, state);
 
     let preview_bounds = if state.schematic.selection_rect.is_active() {
@@ -55,7 +55,7 @@ pub(super) fn draw_scene(
         }
 
         let is_highlighted = state.schematic.net_highlight.is_wire_highlighted(wire.id);
-        draw_wire(painter, viewport, wire, is_selected, is_highlighted, state);
+        draw_wire(painter, viewport, wire, is_selected, is_highlighted);
     }
 
     for component in &state.schematic.components {
@@ -72,14 +72,7 @@ pub(super) fn draw_scene(
                 && component.pos.y <= max_y;
         }
 
-        draw_component(
-            painter,
-            viewport,
-            component,
-            is_selected,
-            state,
-            symbol_library,
-        );
+        draw_component(painter, viewport, component, is_selected, symbol_library);
     }
 
     for junction in &state.schematic.junctions {
@@ -102,7 +95,7 @@ pub(super) fn draw_scene(
             painter.circle_stroke(
                 pos,
                 radius,
-                Stroke::new(1.0 * viewport.zoom, state.theme.accent),
+                Stroke::new(1.0 * viewport.zoom, crate::ui::tokens::active_palette().accent),
             );
         }
     }

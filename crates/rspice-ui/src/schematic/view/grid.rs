@@ -58,7 +58,7 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
         return;
     };
 
-    let color = state.theme.grid_minor;
+    let color = crate::ui::tokens::active_palette().canvas_grid;
 
     // Lattice extent: cover the bounds plus one period on each side; the
     // painter's clip rect trims the overhang.

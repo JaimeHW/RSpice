@@ -1,4 +1,4 @@
-use super::{AnalysisWorkspaceState, AppState, DialogState, RSpiceTheme};
+use super::{AnalysisWorkspaceState, AppState, DialogState};
 
 pub(super) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
@@ -33,7 +33,6 @@ pub(super) fn default_app_state() -> AppState {
         simulation: crate::state::SimulationState::default(),
         dialogs: DialogState::default(),
         sim_setup: super::SimSetupState::default(),
-        theme: RSpiceTheme::default(),
         log_buffer: crate::panels::LogBuffer::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
         library_manager,
