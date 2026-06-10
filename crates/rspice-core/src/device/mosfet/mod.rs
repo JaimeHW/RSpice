@@ -23,6 +23,6 @@ pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
 pub use mosfet::{MosRegion, MosType, Mosfet, MosfetIndices};
 pub use smooth::{
-    SMOOTH_VOLTAGE, smooth_clamp, smooth_max, smooth_min, smooth_positive, smooth_step,
+    SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step,
 };
 pub use vdmos::{Vdmos, VdmosRegion, VdmosType};

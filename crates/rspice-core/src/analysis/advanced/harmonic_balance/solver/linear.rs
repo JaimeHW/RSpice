@@ -289,59 +289,6 @@ impl HbSolver {
         state.compute_residual_norm();
     }
 
-    /// Compute Jacobian for linear circuit (block diagonal)
-    ///
-    /// J[node_i, k][node_j, l] = Î´_{kl} * (G_{ij} + jÏ‰_k * C_{ij} + 1/(jÏ‰_k * L_{ij}))
-    #[allow(dead_code)]
-    fn compute_linear_jacobian(&self) -> Vec<Vec<Vec<Vec<Complex64>>>> {
-        let omega0 = 2.0 * PI * self.config.fundamental_freq;
-        let n = self.num_nodes;
-        let h = self.num_harmonics + 1;
-
-        // Full Jacobian: [node_i][harmonic_k][node_j][harmonic_l]
-        let mut jac = vec![vec![vec![vec![Complex64::new(0.0, 0.0); h]; n]; h]; n];
-
-        // G contribution (diagonal in harmonics)
-        for &(i, j, g) in &self.g_matrix {
-            if i < n && j < n {
-                for k in 0..h {
-                    jac[i][k][j][k] += g;
-                }
-            }
-        }
-
-        // jÏ‰*C contribution (diagonal in harmonics)
-        for &(i, j, c) in &self.c_matrix {
-            if i < n && j < n {
-                for k in 0..h {
-                    let omega_k = (k as f64) * omega0;
-                    let j_omega = Complex64::new(0.0, omega_k);
-                    jac[i][k][j][k] += j_omega * c;
-                }
-            }
-        }
-
-        // 1/(jÏ‰L) contribution (diagonal in harmonics)
-        for &(i, j, l) in &self.l_matrix {
-            if i < n && j < n && l.abs() > 1e-30 {
-                for k in 0..h {
-                    let omega_k = (k as f64) * omega0;
-                    if k == 0 {
-                        // DC: short circuit (large conductance)
-                        const DC_SHORT_CONDUCTANCE: Value = 1e6;
-                        jac[i][k][j][k] += DC_SHORT_CONDUCTANCE;
-                    } else {
-                        // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
-                        let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
-                        jac[i][k][j][k] += y_l;
-                    }
-                }
-            }
-        }
-
-        jac
-    }
-
     fn voltage_source_value_at_harmonic(
         branch: &VoltageSourceBranch,
         harmonic: usize,

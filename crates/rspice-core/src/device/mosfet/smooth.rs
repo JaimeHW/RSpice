@@ -74,15 +74,6 @@ pub fn smooth_min(a: Value, b: Value, smoothing: Value) -> Value {
     -smooth_max(-a, -b, smoothing)
 }
 
-/// Smooth clamp: clamps x to [min_val, max_val] with C1 continuity
-///
-/// Equivalent to `min(max(x, min_val), max_val)` but with smooth transitions.
-#[inline]
-#[allow(dead_code)]
-pub fn smooth_clamp(x: Value, min_val: Value, max_val: Value, smoothing: Value) -> Value {
-    smooth_min(smooth_max(x, min_val, smoothing), max_val, smoothing)
-}
-
 /// Smooth positive part: returns approximately max(x, 0) but C1 continuous
 ///
 /// This is crucial for the cutoff→on transition in MOSFETs where the

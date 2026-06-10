@@ -513,26 +513,6 @@ impl Bsim4 {
         (p.vth0 + body_effect - dibl - dvth_sce + dvth_temp).max(0.05)
     }
 
-    /// Calculate effective mobility (kept for future advanced BSIM4 features)
-    #[allow(dead_code)]
-    fn mobility(&self, vgs: Value, vth: Value, temp: Value) -> Value {
-        let p = &self.params;
-        let cox = self.cox();
-
-        // Effective vertical field
-        let vgst = (vgs - vth).max(0.01);
-        let eeff = cox * vgst / (EPSILON_SI * 3.0);
-
-        // Temperature-dependent low-field mobility
-        let t_factor = ((temp + 273.15) / (p.tnom + 273.15)).powf(p.ute);
-        let u0_t = p.u0 * t_factor * 1e-4; // Convert to m^2/V·s
-
-        // Mobility degradation
-        let denominator = 1.0 + (p.ua + p.uc * self.vbs) * eeff.powf(p.eu) + p.ub * eeff * eeff;
-
-        (u0_t / denominator).max(p.umin * 1e-4)
-    }
-
     /// Calculate drain current with all effects
     pub fn calculate_id(&mut self, vgs: Value, vds: Value, vbs: Value, temp: Value) -> Value {
         let p = &self.params;

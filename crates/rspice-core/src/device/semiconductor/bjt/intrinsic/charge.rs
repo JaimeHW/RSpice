@@ -430,11 +430,4 @@ impl Bjt {
         )
     }
 
-    pub(in crate::device::semiconductor::bjt) fn linearize_currents(
-        &self,
-        vbe: Value,
-        vbc: Value,
-    ) -> BjtLinearization {
-        self.linearize_currents_with_branches(vbe, vbc).0
-    }
 }

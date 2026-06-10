@@ -957,27 +957,6 @@ impl Bjt {
         }
     }
 
-    /// Calculate BJT currents using Ebers-Moll with Gummel-Poon enhancements
-    ///
-    /// Base model is Ebers-Moll for stability. Early voltage and high-injection
-    /// effects are applied via go() output conductance and base charge modulation.
-    #[allow(dead_code)]
-    pub(super) fn calculate_currents(&self, vbe: Value, vbc: Value) -> (Value, Value, Value) {
-        let linearized = self.linearize_currents(vbe, vbc);
-        let ie = -(linearized.ic + linearized.ib);
-        (linearized.ic, linearized.ib, ie)
-    }
-
-    /// Get output conductance go = dIc/dVce (Early effect)
-    #[allow(dead_code)]
-    pub(super) fn go(&self, ic: Value) -> Value {
-        if self.vaf.is_finite() {
-            ic.abs() / self.vaf
-        } else {
-            1e-12 // Minimum conductance
-        }
-    }
-
     /// Get base-emitter junction conductance
     /// Includes minimum conductance floor for numerical stability
     pub(super) fn gbe(&self, vbe: Value) -> Value {

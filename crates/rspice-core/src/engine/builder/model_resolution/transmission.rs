@@ -509,7 +509,6 @@ pub(in crate::engine::builder) fn tline_model_attenuation(
     None
 }
 
-#[allow(dead_code)]
 pub(in crate::engine::builder) fn tline_model_loss_time_constant(
     params: TransmissionLineModelParams,
 ) -> Option<f64> {

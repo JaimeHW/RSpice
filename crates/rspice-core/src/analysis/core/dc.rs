@@ -28,7 +28,7 @@ impl Default for DcAnalysis {
 
 /// DC sweep parameters
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Reserved for DC sweep analysis
+
 pub struct DcSweep {
     /// Source to sweep
     pub source_name: String,
@@ -40,7 +40,7 @@ pub struct DcSweep {
     pub step: Value,
 }
 
-#[allow(dead_code)] // Reserved for DC sweep analysis
+
 impl DcSweep {
     pub fn new(source_name: String, start: Value, stop: Value, step: Value) -> Self {
         Self {

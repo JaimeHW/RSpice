@@ -245,12 +245,6 @@ pub(super) fn cache_record_path_with_root(source_path: &Path, cache_root: &Path)
 }
 
 #[cfg(feature = "veriloga")]
-#[allow(dead_code)]
-pub(super) fn cache_record_path(source_path: &Path) -> PathBuf {
-    cache_record_path_with_root(source_path, &veriloga_cache_root())
-}
-
-#[cfg(feature = "veriloga")]
 #[derive(Debug, Clone)]
 pub(super) struct VerilogACacheFileInfo {
     path: PathBuf,
