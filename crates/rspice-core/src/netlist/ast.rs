@@ -575,6 +575,49 @@ pub enum SourceSpec {
     },
 }
 
+impl SourceSpec {
+    /// Return this specification with its AC excitation replaced by the
+    /// given magnitude and phase, preserving DC and transient content.
+    ///
+    /// Pure waveform specs gain a `DcAcTransient` wrapper with a zero DC
+    /// value, matching how SPICE treats `AC` annotations on such sources.
+    pub fn with_ac(self, magnitude: Value, phase: Value) -> Self {
+        match self {
+            SourceSpec::Dc(dc_value) => SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+            },
+            SourceSpec::Ac { .. } => SourceSpec::Ac { magnitude, phase },
+            SourceSpec::DcAc { dc_value, .. } => SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+            },
+            SourceSpec::DcTransient {
+                dc_value,
+                transient,
+            }
+            | SourceSpec::DcAcTransient {
+                dc_value,
+                transient,
+                ..
+            } => SourceSpec::DcAcTransient {
+                dc_value,
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+                transient,
+            },
+            transient => SourceSpec::DcAcTransient {
+                dc_value: 0.0,
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+                transient: Box::new(transient),
+            },
+        }
+    }
+}
+
 //=============================================================================
 // Analysis Commands
 //=============================================================================
@@ -644,6 +687,19 @@ pub enum AnalysisCommand {
         output_node: String,
         reference_node: Option<String>,
         ac_sweep: Option<SensitivityAcSweep>,
+    },
+
+    /// DC small-signal transfer function: .TF V(out[,ref]) insrc
+    /// or .TF I(element) insrc — gain, input resistance, output resistance.
+    Tf {
+        /// Output node for `V(...)` probes, element name for `I(...)`.
+        output_node: String,
+        /// Reference node of a differential `V(out,ref)` probe.
+        reference_node: Option<String>,
+        /// True when the probe is a branch current `I(element)`.
+        output_is_current: bool,
+        /// Independent source the transfer function is taken from.
+        input_source: String,
     },
 
     /// Fourier analysis: .FOUR freq output1 [output2...]

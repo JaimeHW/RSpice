@@ -350,46 +350,7 @@ impl TestRunner {
         magnitude: Value,
         phase: Value,
     ) {
-        *spec = match spec.clone() {
-            crate::netlist::SourceSpec::Dc(dc_value) => crate::netlist::SourceSpec::DcAc {
-                dc_value,
-                ac_magnitude: magnitude,
-                ac_phase: phase,
-            },
-            crate::netlist::SourceSpec::Ac { .. } => {
-                crate::netlist::SourceSpec::Ac { magnitude, phase }
-            }
-            crate::netlist::SourceSpec::DcAc { dc_value, .. } => crate::netlist::SourceSpec::DcAc {
-                dc_value,
-                ac_magnitude: magnitude,
-                ac_phase: phase,
-            },
-            crate::netlist::SourceSpec::DcTransient {
-                dc_value,
-                transient,
-            } => crate::netlist::SourceSpec::DcAcTransient {
-                dc_value,
-                ac_magnitude: magnitude,
-                ac_phase: phase,
-                transient,
-            },
-            crate::netlist::SourceSpec::DcAcTransient {
-                dc_value,
-                transient,
-                ..
-            } => crate::netlist::SourceSpec::DcAcTransient {
-                dc_value,
-                ac_magnitude: magnitude,
-                ac_phase: phase,
-                transient,
-            },
-            transient => crate::netlist::SourceSpec::DcAcTransient {
-                dc_value: 0.0,
-                ac_magnitude: magnitude,
-                ac_phase: phase,
-                transient: Box::new(transient),
-            },
-        };
+        *spec = spec.clone().with_ac(magnitude, phase);
     }
 
     pub(super) fn set_source_ac_value(
