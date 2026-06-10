@@ -64,9 +64,6 @@ pub struct SimulationRunner {
 
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
-
-    /// Cached results from last successful simulation
-    last_result: Option<SimulationResult>,
 }
 
 impl Default for SimulationRunner {
@@ -82,7 +79,6 @@ impl SimulationRunner {
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
             abort_flag: Arc::new(AtomicBool::new(false)),
             thread_handle: None,
-            last_result: None,
         }
     }
 
@@ -114,11 +110,6 @@ impl SimulationRunner {
         lock_progress(&self.progress, "SimulationRunner::progress").clone()
     }
 
-    /// Get last successful result
-    pub fn last_result(&self) -> Option<&SimulationResult> {
-        self.last_result.as_ref()
-    }
-
     /// Abort current simulation
     pub fn abort(&self) {
         self.abort_flag.store(true, Ordering::SeqCst);
@@ -141,10 +132,6 @@ impl SimulationRunner {
             if let Some(handle) = self.thread_handle.take() {
                 match handle.join() {
                     Ok(result) => {
-                        // Cache successful result
-                        if let Ok(ref sim_result) = result {
-                            self.last_result = Some(sim_result.clone());
-                        }
                         return Some(result);
                     }
                     Err(_) => {
@@ -272,10 +259,6 @@ impl SimulationRunner {
         self.start_with_source_path(AnalysisConfig::DcOp, netlist, source_path)
     }
 
-    /// Clear cached results
-    pub fn clear_results(&mut self) {
-        self.last_result = None;
-    }
 }
 
 fn lock_progress<'a>(
