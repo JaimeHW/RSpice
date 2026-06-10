@@ -130,6 +130,8 @@ pub struct ResultsState {
     pub maximized_strip: Option<usize>,
     /// Cached FFT display arrays for the active spectrum revision.
     pub fft_series: Option<FftSeries>,
+    /// Cached Bode margins + extremes for the active data version.
+    pub bode: Option<BodeDerived>,
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
@@ -152,6 +154,47 @@ pub struct FftSeries {
     pub(crate) revision: u64,
     pub(crate) frequency: std::sync::Arc<[f64]>,
     pub(crate) magnitude_db: std::sync::Arc<[f64]>,
+    /// Cached finite (lo, hi) of the magnitude within view: (x1 bits, lo, hi).
+    pub(crate) y_extremes: Option<(u64, f64, f64)>,
+}
+
+/// Stability numbers and axis extremes computed from the active AC curves.
+/// BODE's center view and right panel share one cached compute, keyed on
+/// the data version and the resolved magnitude waveform.
+#[derive(Debug, Clone, Copy)]
+pub struct BodeDerived {
+    pub(crate) version: u64,
+    pub(crate) analysis_index: usize,
+    pub(crate) mag_index: usize,
+    /// DC (lowest-frequency) gain in dB.
+    pub(crate) adc_db: Option<f64>,
+    /// Unity-gain frequency (Hz).
+    pub(crate) ugf: Option<f64>,
+    /// Phase margin (deg) at the UGF.
+    pub(crate) pm_deg: Option<f64>,
+    /// Frequency where phase crosses −180° (Hz).
+    pub(crate) f180: Option<f64>,
+    /// Gain margin (dB) at f180.
+    pub(crate) gm_db: Option<f64>,
+    /// −3 dB bandwidth (Hz).
+    pub(crate) f3db: Option<f64>,
+    /// Finite (min, max) of the gain curve.
+    pub(crate) gain_extremes: (f64, f64),
+    /// Finite (min, max) of the phase curve, when phase data exists.
+    pub(crate) phase_extremes: Option<(f64, f64)>,
+}
+
+/// Finite (min, max) of a slice, if any finite values exist.
+pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
+    let mut lo = f64::INFINITY;
+    let mut hi = f64::NEG_INFINITY;
+    for &v in values {
+        if v.is_finite() {
+            lo = lo.min(v);
+            hi = hi.max(v);
+        }
+    }
+    (lo <= hi).then_some((lo, hi))
 }
 
 /// Cache of series derived from waveform data (dB conversions), cleared when
@@ -160,14 +203,40 @@ pub struct FftSeries {
 pub struct DerivedSeries {
     version: u64,
     map: std::collections::HashMap<u64, std::sync::Arc<[f64]>>,
+    /// Cached finite (min, max) per series key — axis autoranges must not
+    /// rescan millions of samples per frame.
+    ranges: std::collections::HashMap<u64, Option<(f64, f64)>>,
+    /// Cached windowed (min, max, rms) measurements, keyed by
+    /// (series key, window-start bits, window-end bits).
+    stats: std::collections::HashMap<(u64, u64, u64), Option<(f64, f64, f64)>>,
 }
 
 impl DerivedSeries {
     fn ensure_version(&mut self, version: u64) {
         if self.version != version {
             self.map.clear();
+            self.ranges.clear();
+            self.stats.clear();
             self.version = version;
         }
+    }
+
+    /// Fetch or compute the cached finite (min, max) of a series.
+    pub fn range_or(
+        &mut self,
+        key: u64,
+        build: impl FnOnce() -> Option<(f64, f64)>,
+    ) -> Option<(f64, f64)> {
+        *self.ranges.entry(key).or_insert_with(build)
+    }
+
+    /// Fetch or compute cached windowed (min, max, rms) measurements.
+    pub fn stats_or(
+        &mut self,
+        key: (u64, u64, u64),
+        build: impl FnOnce() -> Option<(f64, f64, f64)>,
+    ) -> Option<(f64, f64, f64)> {
+        *self.stats.entry(key).or_insert_with(build)
     }
 
     /// Fetch or build a derived series under `key`.

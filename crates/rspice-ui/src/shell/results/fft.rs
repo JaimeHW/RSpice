@@ -41,6 +41,7 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
             revision,
             frequency: data.points.iter().map(|p| p.frequency).collect(),
             magnitude_db: data.points.iter().map(|p| p.magnitude_db()).collect(),
+            y_extremes: None,
         }),
     };
     let frequency = Arc::clone(&series.frequency);
@@ -107,19 +108,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    // Y: from the data within view, floored sensibly.
-    let end = model.frequency.partition_point(|&f| f <= x1);
-    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for &v in model.magnitude_db[..end.max(1)].iter() {
-        if v.is_finite() {
-            lo = lo.min(v);
-            hi = hi.max(v);
-        }
-    }
-    if !lo.is_finite() {
+    // Y: from the data within view, floored sensibly; the scan is cached on
+    // (spectrum revision, x1) so it never repeats per frame.
+    let x1_bits = x1.to_bits();
+    let extremes = match state.shell.results.fft_series.as_mut() {
+        Some(series) => match series.y_extremes {
+            Some((bits, lo, hi)) if bits == x1_bits => Some((lo, hi)),
+            _ => {
+                let end = model.frequency.partition_point(|&f| f <= x1).max(1);
+                let computed = super::finite_extremes(&model.magnitude_db[..end]);
+                if let Some((lo, hi)) = computed {
+                    series.y_extremes = Some((x1_bits, lo, hi));
+                }
+                computed
+            }
+        },
+        None => None,
+    };
+    let Some((lo, hi)) = extremes else {
         well_hint(ui, "Degenerate spectrum");
         return;
-    }
+    };
     let y = Axis::linear_with((lo - 8.0).max(-200.0), hi + 12.0, "dBV", 7);
 
     let mut spec = PlotSpec::new(Axis::linear(0.0, x1, "Hz"), XScale::Linear, y);

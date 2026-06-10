@@ -23,7 +23,8 @@ mod types;
 pub use aggregate::{calculate_all_measurements, calculate_measurements_in_range};
 pub use annotations::{AnnotationSet, AnnotationType, CalloutPosition, MeasurementAnnotation};
 pub use basic::{
-    calculate_max, calculate_mean, calculate_min, calculate_pk_pk, calculate_rms, calculate_std_dev,
+    calculate_max, calculate_mean, calculate_min, calculate_min_max_rms, calculate_pk_pk,
+    calculate_rms, calculate_std_dev,
 };
 pub use cache::MeasurementCache;
 pub use integral::calculate_integral;

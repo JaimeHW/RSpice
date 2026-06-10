@@ -10,13 +10,13 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::state::{AnalysisType, SimulationState};
+use crate::state::AnalysisType;
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::section_header;
 
 use super::strip::{self, LegendChip};
-use super::{DerivedSeries, well_hint};
+use super::{BodeDerived, well_hint};
 
 /// The AC signal pair and its computed stability numbers.
 struct BodeModel {
@@ -24,23 +24,7 @@ struct BodeModel {
     frequency: Arc<[f64]>,
     gain_db: Arc<[f64]>,
     phase_deg: Option<Arc<[f64]>>,
-    margins: Margins,
-}
-
-#[derive(Default, Clone, Copy)]
-struct Margins {
-    /// DC (lowest-frequency) gain in dB.
-    adc_db: Option<f64>,
-    /// Unity-gain frequency (Hz).
-    ugf: Option<f64>,
-    /// Phase margin (deg) at the UGF.
-    pm_deg: Option<f64>,
-    /// Frequency where phase crosses −180° (Hz).
-    f180: Option<f64>,
-    /// Gain margin (dB) at f180.
-    gm_db: Option<f64>,
-    /// −3 dB bandwidth (Hz).
-    f3db: Option<f64>,
+    margins: BodeDerived,
 }
 
 /// Find the first crossing of `series` through `level`, interpolated in
@@ -61,7 +45,8 @@ fn crossing(frequency: &[f64], series: &[f64], level: f64) -> Option<f64> {
     None
 }
 
-fn build_model(simulation: &SimulationState, derived: &mut DerivedSeries) -> Option<BodeModel> {
+fn build_model(state: &mut AppState) -> Option<BodeModel> {
+    let simulation = &state.simulation;
     let run = simulation.active_run()?;
     let (analysis_index, analysis) = run
         .analyses
@@ -83,30 +68,54 @@ fn build_model(simulation: &SimulationState, derived: &mut DerivedSeries) -> Opt
         .find(|w| w.name == format!("phase({base})"))
         .map(|w| Arc::clone(&w.y));
 
-    let gain_db = derived.db(
+    let gain_db = state.shell.results.derived.db(
         (analysis_index as u64) << 32 | mag_index as u64,
         &mag.y,
     );
     let frequency = Arc::clone(&mag.x);
 
-    // Margins from the curves.
-    let mut margins = Margins {
-        adc_db: gain_db.first().copied(),
-        ..Margins::default()
+    // Margins + extremes from the curves, cached on (data version, resolved
+    // magnitude waveform) — the crossings and folds are O(points) and both
+    // panels read them every frame.
+    let version = simulation.data_version;
+    let margins = match state.shell.results.bode {
+        Some(d)
+            if d.version == version
+                && d.analysis_index == analysis_index
+                && d.mag_index == mag_index =>
+        {
+            d
+        }
+        _ => {
+            let mut d = BodeDerived {
+                version,
+                analysis_index,
+                mag_index,
+                adc_db: gain_db.first().copied(),
+                ugf: crossing(&frequency, &gain_db, 0.0),
+                pm_deg: None,
+                f180: None,
+                gm_db: None,
+                f3db: None,
+                gain_extremes: super::finite_extremes(&gain_db).unwrap_or((0.0, 0.0)),
+                phase_extremes: phase.as_deref().and_then(super::finite_extremes),
+            };
+            if let Some(adc) = d.adc_db {
+                d.f3db = crossing(&frequency, &gain_db, adc - 3.0);
+            }
+            if let Some(phase) = &phase {
+                if let Some(ugf) = d.ugf {
+                    d.pm_deg = Some(180.0 + sample_at(&frequency, phase, ugf));
+                }
+                d.f180 = crossing(&frequency, phase, -180.0);
+                if let Some(f180) = d.f180 {
+                    d.gm_db = Some(-sample_at(&frequency, &gain_db, f180));
+                }
+            }
+            state.shell.results.bode = Some(d);
+            d
+        }
     };
-    margins.ugf = crossing(&frequency, &gain_db, 0.0);
-    if let Some(adc) = margins.adc_db {
-        margins.f3db = crossing(&frequency, &gain_db, adc - 3.0);
-    }
-    if let Some(phase) = &phase {
-        if let Some(ugf) = margins.ugf {
-            margins.pm_deg = Some(180.0 + sample_at(&frequency, phase, ugf));
-        }
-        margins.f180 = crossing(&frequency, phase, -180.0);
-        if let Some(f180) = margins.f180 {
-            margins.gm_db = Some(-sample_at(&frequency, &gain_db, f180));
-        }
-    }
 
     Some(BodeModel {
         signal: base.to_owned(),
@@ -125,7 +134,7 @@ fn build_model(simulation: &SimulationState, derived: &mut DerivedSeries) -> Opt
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let Some(model) = build_model(&state.simulation, &mut state.shell.results.derived) else {
+    let Some(model) = build_model(state) else {
         well_hint(ui, "No AC analysis in the active run — enable ac and re-run");
         return;
     };
@@ -163,12 +172,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let (g_min, g_max) = model
-        .gain_db
-        .iter()
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-            (lo.min(v), hi.max(v))
-        });
+    let (g_min, g_max) = model.margins.gain_extremes;
     let pad = ((g_max - g_min) * 0.1).max(3.0);
     let y = Axis::linear((g_min - pad).min(-10.0), (g_max + pad).max(10.0), "dB");
 
@@ -176,11 +180,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
     if let Some(phase) = &model.phase_deg {
-        let (p_min, p_max) = phase
-            .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-                (lo.min(v), hi.max(v))
-            });
+        let (p_min, p_max) = model.margins.phase_extremes.unwrap_or((-180.0, 0.0));
         let p0 = ((p_min.min(-180.0)) / 45.0).floor() * 45.0;
         let p1 = (p_max.max(0.0) / 45.0).ceil() * 45.0;
         let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
@@ -267,7 +267,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// The stability readout.
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
-    let Some(model) = build_model(&state.simulation, &mut state.shell.results.derived) else {
+    let Some(model) = build_model(state) else {
         super::panel_note(ui, "No AC analysis in the active run.");
         return;
     };

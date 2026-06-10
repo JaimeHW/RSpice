@@ -81,6 +81,11 @@ pub fn calculate_rms(y_data: &[f64]) -> Option<f64> {
     BasicStats::from_samples(y_data).map(BasicStats::rms)
 }
 
+/// Calculate minimum, maximum, and RMS in a single pass
+pub fn calculate_min_max_rms(y_data: &[f64]) -> Option<(f64, f64, f64)> {
+    BasicStats::from_samples(y_data).map(|stats| (stats.min, stats.max, stats.rms()))
+}
+
 /// Calculate standard deviation
 pub fn calculate_std_dev(y_data: &[f64]) -> Option<f64> {
     BasicStats::from_samples(y_data).and_then(BasicStats::std_dev)

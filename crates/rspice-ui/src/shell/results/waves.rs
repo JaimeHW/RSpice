@@ -147,20 +147,28 @@ pub(super) fn build_models(
     models
 }
 
-/// Y range of the visible traces on one axis side, padded 8 %.
-fn y_range(traces: &[StripTrace], phase: bool) -> Option<(f64, f64)> {
+/// Stable per-trace identity shared by the decimation, range, and
+/// measurement caches.
+fn trace_key(analysis_index: usize, trace: &StripTrace) -> u64 {
+    (analysis_index as u64) << 40 | (trace.waveform_index as u64) << 2 | trace.kind as u64
+}
+
+/// Y range of the visible traces on one axis side, padded 8 %. Per-trace
+/// extremes are cached on the data version — never rescanned per frame.
+fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Option<(f64, f64)> {
     let mut min = f64::INFINITY;
     let mut max = f64::NEG_INFINITY;
-    for trace in traces {
+    for trace in &model.traces {
         let is_phase = trace.kind == TraceKind::PhaseDeg;
         if is_phase != phase || !trace.visible {
             continue;
         }
-        for &v in trace.y.iter() {
-            if v.is_finite() {
-                min = min.min(v);
-                max = max.max(v);
-            }
+        let extremes = derived.range_or(trace_key(model.analysis_index, trace), || {
+            super::finite_extremes(&trace.y)
+        });
+        if let Some((lo, hi)) = extremes {
+            min = min.min(lo);
+            max = max.max(hi);
         }
     }
     if !min.is_finite() {
@@ -343,7 +351,7 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         well_hint(ui, "No data");
         return;
     };
-    let Some((y0, y1)) = y_range(&model.traces, false) else {
+    let Some((y0, y1)) = y_range(&mut state.shell.results.derived, model, false) else {
         well_hint(ui, "No visible traces — enable one in the legend");
         return;
     };
@@ -360,7 +368,7 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         .iter()
         .any(|trace| trace.kind == TraceKind::PhaseDeg && trace.visible);
     if has_phase {
-        if let Some((p0, p1)) = y_range(&model.traces, true) {
+        if let Some((p0, p1)) = y_range(&mut state.shell.results.derived, model, true) {
             // Round phase bounds to 45° so ticks land on familiar angles.
             let p0 = (p0 / 45.0).floor() * 45.0;
             let p1 = (p1 / 45.0).ceil() * 45.0;
@@ -382,12 +390,8 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         if !trace.visible {
             continue;
         }
-        // Trace identity: analysis, waveform, and derived kind — never the
-        // visible position, so legend toggles don't shift keys.
-        let cache_key = (model.analysis_index as u64) << 40
-            | (trace.waveform_index as u64) << 2
-            | trace.kind as u64;
-        let mut plot_trace = Trace::new(&trace.x, &trace.y, trace.color).cache_key(cache_key);
+        let mut plot_trace = Trace::new(&trace.x, &trace.y, trace.color)
+            .cache_key(trace_key(model.analysis_index, trace));
         if trace.kind == TraceKind::PhaseDeg {
             plot_trace = plot_trace.right().dashed();
         }
@@ -487,7 +491,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             "Measurements"
         };
         section_header(ui, title, None);
-        measurement_rows(ui, model, window);
+        measurement_rows(ui, &mut state.shell.results.derived, model, window);
     }
 }
 
@@ -623,34 +627,51 @@ fn cursor_block(
 }
 
 /// min / max / rms rows per visible trace, optionally windowed to [a, b].
-fn measurement_rows(ui: &mut Ui, model: &StripModel, window: Option<(f64, f64)>) {
+/// The single-pass stats are cached per (trace, window, data version), so
+/// no samples are rescanned until the cursors or the data move.
+fn measurement_rows(
+    ui: &mut Ui,
+    derived: &mut DerivedSeries,
+    model: &StripModel,
+    window: Option<(f64, f64)>,
+) {
     use crate::waveform::measurements as basic;
+
+    // Window identity for the cache key; u64::MAX is a NaN bit pattern no
+    // finite cursor can produce, marking the full-range case.
+    let (a_bits, b_bits) = match window {
+        Some((a, b)) => (a.to_bits(), b.to_bits()),
+        None => (u64::MAX, u64::MAX),
+    };
 
     let mut rows: Vec<(String, String)> = Vec::new();
     for trace in model.traces.iter().filter(|t| t.visible).take(4) {
-        let (start, end) = match window {
-            Some((a, b)) => {
-                let start = trace.x.partition_point(|&v| v < a);
-                let end = trace.x.partition_point(|&v| v <= b);
-                (start, end.max(start))
-            }
-            None => (0, trace.y.len()),
-        };
-        let slice = &trace.y[start..end];
-        if slice.is_empty() {
+        let key = (trace_key(model.analysis_index, trace), a_bits, b_bits);
+        let stats = derived.stats_or(key, || {
+            let (start, end) = match window {
+                Some((a, b)) => {
+                    let start = trace.x.partition_point(|&v| v < a);
+                    let end = trace.x.partition_point(|&v| v <= b);
+                    (start, end.max(start))
+                }
+                None => (0, trace.y.len()),
+            };
+            basic::calculate_min_max_rms(&trace.y[start..end])
+        });
+        let Some((min, max, rms)) = stats else {
             continue;
-        }
-        let fmt = |v: Option<f64>| -> String {
-            v.map_or("—".to_owned(), |v| match trace.kind {
+        };
+        let fmt = |v: f64| -> String {
+            match trace.kind {
                 TraceKind::Value => fmt_si(v, model.y_unit, 3),
                 TraceKind::MagnitudeDb => format!("{v:.1} dB"),
                 TraceKind::PhaseDeg => format!("{v:.1} °"),
-            })
+            }
         };
-        rows.push((format!("{} min", trace.name), fmt(basic::calculate_min(slice))));
-        rows.push((format!("{} max", trace.name), fmt(basic::calculate_max(slice))));
+        rows.push((format!("{} min", trace.name), fmt(min)));
+        rows.push((format!("{} max", trace.name), fmt(max)));
         if trace.kind == TraceKind::Value {
-            rows.push((format!("{} rms", trace.name), fmt(basic::calculate_rms(slice))));
+            rows.push((format!("{} rms", trace.name), fmt(rms)));
         }
     }
     let refs: Vec<(&str, &str)> = rows
