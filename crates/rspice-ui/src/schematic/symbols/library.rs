@@ -602,3 +602,36 @@ mod tests {
         assert_eq!(resistor.bounds, (0.0, 0.0, 40.0, 20.0));
     }
 }
+
+#[cfg(test)]
+mod parse_sanity {
+    use super::*;
+
+    /// Every embedded asset must keep all of its SVG paths through the
+    /// parse (none dropped, none collapsed), and stroked outlines must
+    /// never be classified as filled.
+    #[test]
+    fn every_asset_keeps_its_paths() {
+        let library = SymbolLibrary::load_embedded().expect("library loads");
+        for name in library.asset_names() {
+            let symbol = library.get_asset(&name).expect("asset");
+            assert!(
+                !symbol.paths.is_empty(),
+                "{name}: parsed to zero paths"
+            );
+            for (index, path) in symbol.paths.iter().enumerate() {
+                assert!(
+                    !path.commands.is_empty(),
+                    "{name}: path {index} has no commands"
+                );
+            }
+            // New-style assets are authored inside their viewBox; their
+            // bounds must equal the viewBox (no legacy re-fit).
+            let vb = symbol.view_box;
+            assert_eq!(
+                symbol.bounds, vb,
+                "{name}: bounds were re-fit (art escapes the viewBox?)"
+            );
+        }
+    }
+}
