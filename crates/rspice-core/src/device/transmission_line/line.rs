@@ -1155,3 +1155,104 @@ mod tests {
         assert_close(line.delayed_state(3.5).v1, 2.25);
     }
 }
+
+#[cfg(test)]
+mod ltra_oracle_replay {
+    use super::*;
+
+    /// Replay ngspice's committed LTRA history for ltra1_1_line's o1 line and
+    /// compare the delayed-history rhs terms point by point.
+    ///
+    /// The fixtures were extracted with gdb from the vendored ngspice debug
+    /// build running tests/transmission/ltra1_1_line.cir: committed history
+    /// samples at ltraacct.c:84 (index, fractional time, v1, v2, i1, i2) and
+    /// per-load branch rhs at ltraload.c:853 (fractional time and CKTdelta,
+    /// LTRAinput1, LTRAinput2; last record per time is the accepted iterate).
+    /// Driving the kernel with the oracle's own history isolates the
+    /// convolution coefficients and delayed interpolation from solver grid
+    /// differences. Unlike TXL/CPL, LTRA's clock is fully fractional.
+    #[test]
+    fn replay_oracle_ltra1_o1() {
+        let hv_text = include_str!("testdata/ltra1_o1_hv.dat");
+        let in_text = include_str!("testdata/ltra1_o1_in.dat");
+
+        struct Hv {
+            t: Value,
+            v1: Value,
+            v2: Value,
+            i1: Value,
+            i2: Value,
+        }
+        let hv: Vec<Hv> = hv_text
+            .lines()
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                Hv {
+                    t: f[1].parse().unwrap(),
+                    v1: f[2].parse().unwrap(),
+                    v2: f[3].parse().unwrap(),
+                    i1: f[4].parse().unwrap(),
+                    i2: f[5].parse().unwrap(),
+                }
+            })
+            .collect();
+        let inputs: std::collections::HashMap<u64, (Value, Value)> = in_text
+            .lines()
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                let t: Value = f[0].parse().unwrap();
+                (
+                    t.to_bits(),
+                    (f[2].parse().unwrap(), f[3].parse().unwrap()),
+                )
+            })
+            .collect();
+
+        // .model lline ltra r=12.45 g=0 l=8.972e-9 c=0.468e-12 len=16
+        let (r, l, c, len): (Value, Value, Value, Value) = (12.45, 8.972e-9, 0.468e-12, 16.0);
+        let z0 = (l / c).sqrt();
+        let td = (l * c).sqrt() * len;
+        let mut line = TransmissionLine::new("o1".to_string(), 1, 0, 2, 0, z0, td);
+        line.set_distributed_rlgc_with_compaction(r, l, 0.0, c, len, 1.0e-3, 1.0e-14);
+
+        let mut compared = 0usize;
+        let mut worst: (Value, Value) = (0.0, 0.0);
+        let mut first_bad: Option<Value> = None;
+        for sample in &hv {
+            if let Some(&(in1_oracle, in2_oracle)) = inputs.get(&sample.t.to_bits()) {
+                let response = line.transient_port_response(sample.t);
+                let scale = in1_oracle.abs().max(in2_oracle.abs()).max(1.0e-9);
+                let err1 = (response.i_eq_port1() - in1_oracle).abs() / scale;
+                let err2 = (response.i_eq_port2() - in2_oracle).abs() / scale;
+                let err = err1.max(err2);
+                compared += 1;
+                if err > worst.0 {
+                    worst = (err, sample.t);
+                }
+                if err > 1.0e-6 && first_bad.is_none() {
+                    first_bad = Some(sample.t);
+                    println!(
+                        "first divergence at t={:.6e}: ours=({:.12e},{:.12e}) oracle=({:.12e},{:.12e})",
+                        sample.t,
+                        response.i_eq_port1(),
+                        response.i_eq_port2(),
+                        in1_oracle,
+                        in2_oracle
+                    );
+                }
+            }
+            line.update_history(sample.t, sample.v1, sample.i1, sample.v2, sample.i2);
+        }
+        assert!(
+            compared > 450,
+            "expected to replay the full accepted sequence, compared {compared}"
+        );
+        assert!(
+            first_bad.is_none() && worst.0 < 1.0e-6,
+            "LTRA rhs fidelity regressed: worst rel err {:.3e} at t={:.6e}, first>1e-6 at {:?}",
+            worst.0,
+            worst.1,
+            first_bad
+        );
+    }
+}
