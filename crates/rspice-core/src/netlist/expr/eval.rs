@@ -141,12 +141,56 @@ fn eval_function(name: &str, args: &[Expr], ctx: &ParamContext) -> Result<Value,
         "MIN" => Ok(get_arg(0)?.min(get_arg(1)?)),
         "MAX" => Ok(get_arg(0)?.max(get_arg(1)?)),
         "POW" | "PWR" => Ok(get_arg(0)?.powf(get_arg(1)?)),
-        "LIMIT" => {
-            // LIMIT(x, min, max)
-            let x = get_arg(0)?;
-            let min = get_arg(1)?;
-            let max = get_arg(2)?;
-            Ok(x.clamp(min, max))
+        "LIMIT" => match args.len() {
+            // LIMIT(nom, avar): worst-case two-point draw, nom ± avar with a
+            // random sign (ngspice/HSPICE .param semantics).
+            2 => {
+                let nom = get_arg(0)?;
+                let avar = get_arg(1)?;
+                let sign = if ctx.random().next_symmetric() >= 0.0 {
+                    1.0
+                } else {
+                    -1.0
+                };
+                Ok(nom + avar * sign)
+            }
+            // LIMIT(x, min, max): clamp.
+            3 => {
+                let x = get_arg(0)?;
+                let min = get_arg(1)?;
+                let max = get_arg(2)?;
+                Ok(x.clamp(min, max))
+            }
+            _ => Err(ExprError::WrongArgCount("LIMIT".to_string())),
+        },
+        // Statistical distribution functions (ngspice/HSPICE .param
+        // semantics). Draws come from the context's seeded deterministic
+        // stream, so identical seeds reproduce identical values.
+        "GAUSS" | "AGAUSS" => {
+            if args.len() != 3 {
+                return Err(ExprError::WrongArgCount(name.to_string()));
+            }
+            let nom = get_arg(0)?;
+            let var = get_arg(1)?;
+            let sigma = get_arg(2)?;
+            if sigma == 0.0 {
+                return Err(ExprError::InvalidArgument(format!(
+                    "{name}: sigma must be non-zero"
+                )));
+            }
+            // gauss: variation is relative to nom; agauss: absolute.
+            let deviation = if name == "GAUSS" { nom * var } else { var };
+            Ok(nom + deviation / sigma * ctx.random().next_standard_normal())
+        }
+        "UNIF" | "AUNIF" => {
+            if args.len() != 2 {
+                return Err(ExprError::WrongArgCount(name.to_string()));
+            }
+            let nom = get_arg(0)?;
+            let var = get_arg(1)?;
+            // unif: variation is relative to nom; aunif: absolute.
+            let deviation = if name == "UNIF" { nom * var } else { var };
+            Ok(nom + deviation * ctx.random().next_symmetric())
         }
         "IF" => {
             // IF(cond, then, else)

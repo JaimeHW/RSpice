@@ -17,10 +17,13 @@ mod eval;
 mod parser;
 mod types;
 
+#[cfg(test)]
+mod tests;
+
 use parser::ExprParser;
 
 pub use api::{eval_expression, eval_simple, parse_expression};
-pub use context::{FunctionDef, ParamContext};
+pub use context::{DEFAULT_RANDOM_SEED, FunctionDef, ParamContext, RandomState};
 pub use error::ExprError;
 pub use eval::evaluate;
 pub use types::{BinOpKind, Expr, UnaryOpKind};

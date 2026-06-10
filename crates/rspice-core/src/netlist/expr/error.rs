@@ -12,6 +12,7 @@ pub enum ExprError {
     UndefinedParam(String),
     UnknownFunction(String),
     WrongArgCount(String),
+    InvalidArgument(String),
     DivisionByZero,
 }
 
@@ -25,6 +26,7 @@ impl std::fmt::Display for ExprError {
             ExprError::UndefinedParam(s) => write!(f, "Undefined parameter: {}", s),
             ExprError::UnknownFunction(s) => write!(f, "Unknown function: {}", s),
             ExprError::WrongArgCount(s) => write!(f, "Wrong argument count for function: {}", s),
+            ExprError::InvalidArgument(s) => write!(f, "Invalid argument: {}", s),
             ExprError::DivisionByZero => write!(f, "Division by zero"),
         }
     }

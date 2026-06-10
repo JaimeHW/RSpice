@@ -23,7 +23,7 @@ mod parser;
 mod xspice_parser;
 
 pub use ast::*;
-pub use expr::ParamContext;
+pub use expr::{ParamContext, RandomState};
 pub use flattener::{Flattener, FlattenerConfig, InstanceMetadata, flatten_netlist};
 pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};
