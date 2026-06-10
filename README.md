@@ -160,7 +160,7 @@ Full command and option reference: [crates/rspice-cli/README.md](crates/rspice-c
 
 ## Testing
 
-RSpice is validated at three levels: unit tests inside each crate, integration tests under `crates/rspice-core/tests/`, and an ngspice regression harness that runs the official ngspice test suite (vendored under `tests/`, including the checked-in reference `.out` oracles) against the RSpice engine.
+RSpice is validated at four levels: unit tests inside each crate, oracle-replay fixture tests for history-coupled device runtimes, integration tests under `crates/rspice-core/tests/`, and an ngspice regression harness that runs the official ngspice test suite (vendored under `tests/`, including the checked-in reference `.out` oracles) against the RSpice engine.
 
 ```bash
 # Unit and integration tests for the core engine
@@ -172,6 +172,10 @@ cargo test --release -p rspice-core --test ngspice_regression
 # One suite (e.g. transient decks), with per-deck pass/fail and mismatch detail
 cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_transient_suite
 ```
+
+### Oracle-Replay Fixture Tests
+
+Convolution-based transmission-line runtimes integrate their own discrete solution history, so an end-to-end waveform comparison cannot separate device-model fidelity from solver-timestep differences. Replay fixtures close that gap: ngspice's committed history samples and per-iteration branch right-hand sides are extracted from an instrumented oracle run (gdb on the vendored ngspice source) and checked into the repo (for example `device/transmission_line/testdata/`), and the test drives the RSpice runtime with the oracle's own inputs, asserting the produced stamps match the oracle's point-by-point. This pins the recursion — including ngspice's mixed integer-picosecond/fractional-delta clock — independently of any timestep-control differences.
 
 ### ngspice Regression Harness
 
