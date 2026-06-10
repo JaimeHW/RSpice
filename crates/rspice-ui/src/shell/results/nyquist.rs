@@ -1,0 +1,212 @@
+//! NYQUIST — the loop-gain locus on the complex plane, with the unit
+//! circle, the −1 critical point, and stability numbers in the right panel.
+//!
+//! Built on the plot grammar like every other viewer: token grid and frame,
+//! decimated token traces, bordered marker tags — no private palette.
+
+use egui::Ui;
+
+use crate::analysis::nyquist::NyquistData;
+use crate::common::AppState;
+use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
+use crate::ui::tokens::Tokens;
+use crate::ui::widgets::section_header;
+
+use super::strip::{self, LegendChip};
+use super::well_hint;
+
+/// The active curve, if any (prefer the selected one).
+fn active_curve(state: &AppState) -> Option<&NyquistData> {
+    let nyquist = &state.analysis.nyquist_state;
+    nyquist
+        .curves
+        .get(nyquist.selected)
+        .or_else(|| nyquist.curves.first())
+        .filter(|curve| !curve.is_empty())
+}
+
+/// Stability numbers, cached on the data version (the scans are O(points)).
+#[derive(Debug, Clone, Copy)]
+pub struct NyquistDerived {
+    pub(crate) version: u64,
+    pub(crate) encirclements: i32,
+    pub(crate) min_distance: Option<f64>,
+    pub(crate) gain_margin: Option<f64>,
+    pub(crate) phase_margin: Option<f64>,
+}
+
+fn derived(state: &mut AppState) -> Option<NyquistDerived> {
+    let version = state.simulation.data_version;
+    if let Some(cached) = state.shell.results.nyquist {
+        if cached.version == version {
+            return Some(cached);
+        }
+    }
+    let curve = active_curve(state)?;
+    let computed = NyquistDerived {
+        version,
+        encirclements: curve.count_encirclements(),
+        min_distance: curve.min_distance_from_critical(),
+        gain_margin: curve.gain_margin(),
+        phase_margin: curve.phase_margin(),
+    };
+    state.shell.results.nyquist = Some(computed);
+    Some(computed)
+}
+
+// ---------------------------------------------------------------------------
+// center view
+// ---------------------------------------------------------------------------
+
+/// Render the Nyquist locus.
+pub fn show(ui: &mut Ui, state: &mut AppState) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    let Some(curve) = active_curve(state) else {
+        well_hint(ui, "No loop-gain data — run an AC analysis");
+        return;
+    };
+    let name = curve.name.clone();
+    let point_count = curve.len();
+
+    // Component arrays for the plot engine, cached per data version.
+    let (re, im) = {
+        let points: Vec<_> = curve.points.clone();
+        let derived = &mut state.shell.results.derived;
+        let re = derived.get_or(0x917_0001, || points.iter().map(|p| p.real).collect());
+        let im = derived.get_or(0x917_0002, || points.iter().map(|p| p.imag).collect());
+        (re, im)
+    };
+
+    let stats = derived(state);
+
+    let legend = [LegendChip {
+        name: "loop gain",
+        color: c.traces[0],
+        on: true,
+    }];
+    strip::header(
+        ui,
+        "NYQ",
+        &format!("{name} · {point_count} pts"),
+        &legend,
+        false,
+        false,
+    );
+
+    // Equal-aspect ranges around the locus and the critical point.
+    let mut extent = 1.3f64;
+    for (&r, &i) in re.iter().zip(im.iter()) {
+        if r.is_finite() && i.is_finite() {
+            extent = extent.max(r.abs()).max(i.abs());
+        }
+    }
+    let extent = (extent * 1.1).min(50.0);
+
+    let mut spec = PlotSpec::new(
+        Axis::linear(-extent, extent, "Re"),
+        XScale::Linear,
+        Axis::linear(-extent, extent, "Im"),
+    );
+    spec.ref_lines.push(plot::RefLine { y: 0.0 });
+    spec.traces.push(
+        Trace::new(&re, &im, c.traces[0]).cache_key(0x917_00FF),
+    );
+
+    // Critical point.
+    spec.markers.push(plot::Marker {
+        x: -1.0,
+        y: 0.0,
+        side: plot::YSide::Left,
+        color: c.err,
+        label: "−1 + j0".to_owned(),
+        drop_line: false,
+        label_dy: 0.0,
+    });
+
+    // Unit circle + vertical axis underlay.
+    let grid = c.canvas_grid;
+    spec.underlay = Some(Box::new(move |painter, mapper| {
+        let center = egui::pos2(mapper.x(0.0), mapper.y(0.0));
+        let radius = (mapper.x(1.0) - mapper.x(0.0)).abs();
+        painter.circle_stroke(center, radius, egui::Stroke::new(1.0, grid));
+        painter.vline(
+            center.x,
+            egui::Rangef::new(mapper.rect.top(), mapper.rect.bottom()),
+            egui::Stroke::new(1.0, grid),
+        );
+    }));
+
+    // Square plot region, centered: stability reading needs equal aspect.
+    let avail = ui.available_rect_before_wrap();
+    let side = avail.width().min(avail.height());
+    let rect = egui::Rect::from_center_size(avail.center(), egui::vec2(side, side));
+    let mut plot_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::top_down(egui::Align::Min)),
+    );
+
+    let stats_for_readout = stats;
+    let readout = move |_x: f64| -> Vec<(String, String)> {
+        let mut rows = Vec::new();
+        if let Some(s) = stats_for_readout {
+            rows.push(("N".to_owned(), s.encirclements.to_string()));
+            if let Some(d) = s.min_distance {
+                rows.push(("min |1+L|".to_owned(), fmt_si(d, "", 2)));
+            }
+        }
+        rows
+    };
+
+    plot::show(
+        &mut plot_ui,
+        &spec,
+        &mut state.shell.results.cache,
+        None,
+        Some(&readout),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// right panel
+// ---------------------------------------------------------------------------
+
+/// Stability readout.
+pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
+    section_header(ui, "Stability", None);
+    let Some(s) = derived(state) else {
+        super::panel_note(ui, "Stability numbers appear once AC loop-gain data is loaded.");
+        return;
+    };
+
+    let verdict = if s.encirclements == 0 { "stable" } else { "unstable" };
+    let fmt_opt = |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String {
+        v.map_or("—".to_owned(), f)
+    };
+    let rows = [
+        ("Encirclements", s.encirclements.to_string(), true),
+        ("Verdict", verdict.to_owned(), true),
+        (
+            "Min distance to −1",
+            fmt_opt(s.min_distance, &|v| fmt_si(v, "", 3)),
+            false,
+        ),
+        (
+            "Gain margin",
+            fmt_opt(s.gain_margin, &|v| format!("{:.1} dB", 20.0 * v.log10())),
+            false,
+        ),
+        (
+            "Phase margin",
+            fmt_opt(s.phase_margin, &|v| format!("{v:.1}°")),
+            false,
+        ),
+    ];
+    super::stat_table(ui, &rows);
+    super::panel_note(
+        ui,
+        "Counted around −1 + j0 on the mapped AC loop gain; margins read off the same locus.",
+    );
+}

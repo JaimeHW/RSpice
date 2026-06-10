@@ -20,22 +20,11 @@
 
 pub mod complex;
 pub mod impedance;
-pub mod rendering;
 pub mod state;
 
 pub use complex::Complex;
 pub use impedance::{Admittance, Impedance};
-pub use rendering::render_smith_chart;
 pub use state::{SmithChartMode, SmithChartState};
-
-// Re-export for convenient access
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Render the Smith chart panel
-pub fn render_smith_chart_panel(ui: &mut Ui, app_state: &mut AppState) {
-    rendering::render_smith_chart_viewer(ui, app_state);
-}
 
 // =============================================================================
 // Tests

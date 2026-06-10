@@ -13,11 +13,9 @@
 //!
 //! # Architecture
 //!
-//! Each analysis viewer follows a consistent pattern:
-//! - `mod.rs` - Public API and viewer struct
-//! - `rendering.rs` - GPU-optimized egui rendering
-//! - `state.rs` - Viewer-specific state management
-//! - `data.rs` - Data structures for analysis results
+//! These modules hold analysis *data and state* (`data.rs`, `state.rs`,
+//! compute pipelines). Rendering lives in `crate::shell::results`, built on
+//! the `crate::ui::plot` engine.
 
 pub mod bode;
 pub mod calculator;
@@ -45,15 +43,13 @@ pub use histogram::{
 };
 
 // Nyquist
-pub use nyquist::{NyquistData, NyquistState, render_nyquist_plot};
+pub use nyquist::{NyquistData, NyquistState};
 
 // Pole-Zero
-pub use pole_zero::{ComplexRoot, PoleZeroData, PoleZeroState, RootType, render_pz_plot};
+pub use pole_zero::{ComplexRoot, PoleZeroData, PoleZeroState, RootType};
 
 // Smith Chart
-pub use smith_chart::{
-    Admittance, Complex, Impedance, SmithChartMode, SmithChartState, render_smith_chart,
-};
+pub use smith_chart::{Admittance, Complex, Impedance, SmithChartMode, SmithChartState};
 
 // Eye Diagram
 pub use eye_diagram::{

@@ -2,8 +2,8 @@
 //!
 //! Ports `design/volta-results-workspace.html`: a docbar with run context,
 //! viewer tabs and viewer-local controls; a document well carrying the
-//! active viewer (waveform strips, Bode, FFT, eye, histogram — plus the
-//! legacy Nyquist/Smith/pole-zero surfaces); and a right panel that swaps to
+//! active viewer (waveform strips, Bode, FFT, eye, histogram, and the
+//! Nyquist/Smith/pole-zero diagnostics); and a right panel that swaps to
 //! the active viewer's instrument readout (cursors, margins, harmonics, eye
 //! metrics, distribution stats).
 
@@ -11,6 +11,9 @@ mod bode;
 mod eye;
 mod fft;
 mod hist;
+mod nyquist;
+mod pz;
+mod smith;
 mod strip;
 mod waves;
 
@@ -132,6 +135,8 @@ pub struct ResultsState {
     pub fft_series: Option<FftSeries>,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
+    /// Cached Nyquist stability numbers for the active data version.
+    pub nyquist: Option<nyquist::NyquistDerived>,
     /// Baked EYE density texture for the active eye revision and size.
     pub eye_texture: Option<EyeTexture>,
     /// `simulation.data_version` last seen by the workspace; when it
@@ -420,11 +425,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         ResultViewer::Hist => hist::show(ui, &mut app.state),
-        ResultViewer::Nyquist => crate::analysis::nyquist::render_nyquist_panel(ui, &mut app.state),
-        ResultViewer::Smith => {
-            crate::analysis::smith_chart::render_smith_chart_panel(ui, &mut app.state)
-        }
-        ResultViewer::PoleZero => crate::analysis::pole_zero::render_pz_panel(ui, &mut app.state),
+        ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
+        ResultViewer::Smith => smith::show(ui, &mut app.state),
+        ResultViewer::PoleZero => pz::show(ui, &mut app.state),
     }
 }
 
@@ -684,18 +687,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Fft => fft::right_panel(ui, state),
         ResultViewer::Eye => eye::right_panel(ui, state),
         ResultViewer::Hist => hist::right_panel(ui, state),
-        ResultViewer::Nyquist | ResultViewer::Smith | ResultViewer::PoleZero => {
-            crate::ui::widgets::section_header(ui, "Viewer", None);
-            ui.add_space(4.0);
-            ui.vertical_centered(|ui| {
-                let t = Tokens::get(ui.ctx());
-                ui.label(
-                    egui::RichText::new("Controls are on the plot surface")
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                );
-            });
-        }
+        ResultViewer::Nyquist => nyquist::right_panel(ui, state),
+        ResultViewer::Smith => smith::right_panel(ui, state),
+        ResultViewer::PoleZero => pz::right_panel(ui, state),
     }
 }
 

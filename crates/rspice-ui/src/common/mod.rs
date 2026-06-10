@@ -24,7 +24,6 @@ pub mod menu_bar;
 pub(crate) mod project_workflow;
 pub mod simulation_analysis_tabs;
 pub mod theme;
-pub mod viewer_style;
 
 // Re-export main application type
 pub use app::{AppState, ConsoleMessage, RSpiceApp};

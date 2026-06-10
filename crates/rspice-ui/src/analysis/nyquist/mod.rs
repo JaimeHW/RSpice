@@ -15,20 +15,10 @@
 //! Integrates with Bode data for AC/STB analysis.
 
 pub mod data;
-pub mod rendering;
 pub mod state;
 
 pub use data::NyquistData;
-pub use rendering::render_nyquist_plot;
 pub use state::NyquistState;
-
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Render the Nyquist plot panel
-pub fn render_nyquist_panel(ui: &mut Ui, app_state: &mut AppState) {
-    rendering::render_nyquist_viewer(ui, app_state);
-}
 
 // =============================================================================
 // Tests

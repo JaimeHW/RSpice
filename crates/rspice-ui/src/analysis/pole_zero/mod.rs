@@ -16,20 +16,10 @@
 //! Follows Cadence Spectre's pole-zero analysis visualization.
 
 pub mod data;
-pub mod rendering;
 pub mod state;
 
 pub use data::{ComplexRoot, PoleZeroData, RootType};
-pub use rendering::render_pz_plot;
 pub use state::PoleZeroState;
-
-use crate::common::app::AppState;
-use egui::Ui;
-
-/// Render the pole-zero plot panel
-pub fn render_pz_panel(ui: &mut Ui, app_state: &mut AppState) {
-    rendering::render_pz_viewer(ui, app_state);
-}
 
 // =============================================================================
 // Tests
