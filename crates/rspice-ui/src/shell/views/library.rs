@@ -27,6 +27,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }
             if Button::new("New view").show(ui).clicked() {
                 state.dialogs.new_view_dialog = true;
+                // Prefill the target from the browser selection — the
+                // dialog shows these as fixed context.
+                if let Some(library) = &state.library_manager.selected_library {
+                    state.dialogs.new_view_library = library.clone();
+                }
+                if let Some(cell) = &state.library_manager.selected_cell {
+                    state.dialogs.new_view_cell = cell.clone();
+                }
             }
         });
     });

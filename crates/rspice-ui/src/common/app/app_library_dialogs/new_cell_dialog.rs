@@ -1,5 +1,11 @@
+//! New Cell — small modal on the dialog primitive: target library, name,
+//! description, and the views to seed the cell with.
+
 use super::shared::{DialogActionOutcome, validate_lcv_name};
 use super::{ConsoleMessage, Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, check_row, input_row};
 
 impl RSpiceApp {
     pub(in crate::common::app) fn process_new_cell_dialog(&mut self, ctx: &Context) {
@@ -11,98 +17,95 @@ impl RSpiceApp {
         let mut should_create = false;
         let mut persist_global_veriloga = false;
 
-        egui::Window::new("Create New Cell")
-            .collapsible(false)
-            .resizable(false)
-            .default_width(400.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        let lib_names: Vec<String> = self
+            .state
+            .library_manager
+            .libraries_sorted()
+            .iter()
+            .filter(|lib| !lib.read_only)
+            .map(|lib| lib.name.clone())
+            .collect();
+        if self.state.dialogs.new_cell_library.is_empty() && !lib_names.is_empty() {
+            self.state.dialogs.new_cell_library = lib_names[0].clone();
+        }
+
+        let dialogs = &mut self.state.dialogs;
+        let choice = Dialog::new("Library", "New cell", "Create")
+            .size(DialogSize::Sm)
+            .ghost("Cancel")
+            .primary_enabled(!dialogs.new_cell_name.trim().is_empty())
             .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
+                ui.spacing_mut().item_spacing.y = 2.0;
+                let t = Tokens::get(ui.ctx());
+                let c = t.color;
 
-                ui.horizontal(|ui| {
-                    ui.label("Library:");
-                    ui.add_space(20.0);
+                // Target library.
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), t.metrics.row_h),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let (label_rect, _) = ui.allocate_exact_size(
+                            egui::vec2(92.0, t.metrics.row_h),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().text(
+                            egui::pos2(label_rect.left(), label_rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            "Library",
+                            theme::sans(tokens::FS_1, FontWeight::Regular),
+                            c.text_dim,
+                        );
+                        egui::ComboBox::from_id_salt("cell_library_combo")
+                            .selected_text(&dialogs.new_cell_library)
+                            .width(ui.available_width())
+                            .show_ui(ui, |ui| {
+                                for name in &lib_names {
+                                    ui.selectable_value(
+                                        &mut dialogs.new_cell_library,
+                                        name.clone(),
+                                        name,
+                                    );
+                                }
+                            });
+                    },
+                );
 
-                    let lib_names: Vec<String> = self
-                        .state
-                        .library_manager
-                        .libraries_sorted()
-                        .iter()
-                        .filter(|lib| !lib.read_only)
-                        .map(|lib| lib.name.clone())
-                        .collect();
+                input_row(ui, "Cell name", &mut dialogs.new_cell_name);
+                input_row(ui, "Description", &mut dialogs.new_cell_description);
 
-                    if self.state.dialogs.new_cell_library.is_empty() && !lib_names.is_empty() {
-                        self.state.dialogs.new_cell_library = lib_names[0].clone();
-                    }
+                ui.add_space(8.0);
+                let mut kicker = egui::text::LayoutJob::default();
+                kicker.append(
+                    "VIEWS TO CREATE",
+                    0.0,
+                    egui::TextFormat {
+                        font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+                        color: c.text_faint,
+                        extra_letter_spacing: 0.08 * tokens::FS_0,
+                        ..Default::default()
+                    },
+                );
+                ui.label(kicker);
+                check_row(ui, "Schematic", &mut dialogs.new_cell_create_schematic);
+                check_row(ui, "Symbol", &mut dialogs.new_cell_create_symbol);
+                check_row(ui, "Testbench", &mut dialogs.new_cell_create_testbench);
 
-                    egui::ComboBox::from_id_salt("cell_library_combo")
-                        .selected_text(&self.state.dialogs.new_cell_library)
-                        .width(200.0)
-                        .show_ui(ui, |ui| {
-                            for name in &lib_names {
-                                ui.selectable_value(
-                                    &mut self.state.dialogs.new_cell_library,
-                                    name.clone(),
-                                    name,
-                                );
-                            }
-                        });
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Cell Name:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.state.dialogs.new_cell_name)
-                            .hint_text("e.g., my_opamp")
-                            .desired_width(200.0),
+                if let Some(error) = dialogs.new_cell_error.clone() {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(error)
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.err),
                     );
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Description:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.state.dialogs.new_cell_description)
-                            .hint_text("Optional description")
-                            .desired_width(200.0),
-                    );
-                });
-
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
-
-                ui.label("Views to Create:");
-                ui.indent("views_indent", |ui| {
-                    ui.checkbox(
-                        &mut self.state.dialogs.new_cell_create_schematic,
-                        "Schematic",
-                    );
-                    ui.checkbox(&mut self.state.dialogs.new_cell_create_symbol, "Symbol");
-                    ui.checkbox(
-                        &mut self.state.dialogs.new_cell_create_testbench,
-                        "Testbench",
-                    );
-                });
-
-                if let Some(ref error) = self.state.dialogs.new_cell_error {
-                    ui.add_space(4.0);
-                    ui.colored_label(egui::Color32::RED, format!("Error: {}", error));
                 }
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-
-                ui.horizontal(|ui| {
-                    if ui.button("Create").clicked() {
-                        should_create = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        should_close = true;
-                    }
-                });
             });
+
+        match choice {
+            DialogChoice::Primary => should_create = true,
+            DialogChoice::Ghost | DialogChoice::Cancelled => should_close = true,
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
 
         if should_create {
             let outcome = self.handle_new_cell_create_action();
