@@ -2,8 +2,6 @@
 //!
 //! Configuration for time-domain transient analysis (.tran).
 
-use super::framework::{DialogTab, labeled_checkbox, numeric_input};
-use egui::Ui;
 
 // =============================================================================
 // Integration Method
@@ -184,62 +182,6 @@ impl TransientConfig {
     }
 }
 
-impl DialogTab for TransientConfig {
-    fn name(&self) -> &str {
-        "Transient"
-    }
-
-    fn description(&self) -> &str {
-        "Time-domain analysis"
-    }
-
-    fn render(&mut self, ui: &mut Ui) {
-        ui.heading("Transient Analysis");
-        ui.add_space(8.0);
-
-        // Time parameters
-        ui.label("Time Parameters");
-        ui.group(|ui| {
-            numeric_input(ui, "Stop Time", &mut self.stop_time, "s");
-            numeric_input(ui, "Start Time", &mut self.start_time, "s");
-
-            let mut step = self.max_step.unwrap_or(0.0);
-            if numeric_input(ui, "Max Step", &mut step, "s") {
-                self.max_step = if step > 0.0 { Some(step) } else { None };
-            }
-        });
-
-        ui.add_space(8.0);
-
-        // Method selection
-        ui.label("Integration Method");
-        egui::ComboBox::from_id_salt("method")
-            .selected_text(self.method.display_name())
-            .show_ui(ui, |ui| {
-                for m in IntegrationMethod::all() {
-                    ui.selectable_value(&mut self.method, *m, m.display_name());
-                }
-            });
-
-        ui.add_space(8.0);
-
-        // Options
-        ui.label("Options");
-        ui.group(|ui| {
-            labeled_checkbox(ui, "Use Initial Conditions (UIC)", &mut self.uic);
-            labeled_checkbox(ui, "Skip Operating Point", &mut self.skip_op);
-            labeled_checkbox(ui, "Save All Nodes", &mut self.save_all);
-        });
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        TransientConfig::validate(self)
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
 
 fn format_time(time: f64) -> String {
     let abs = time.abs();

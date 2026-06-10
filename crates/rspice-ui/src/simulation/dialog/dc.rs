@@ -2,8 +2,6 @@
 //!
 //! Configuration for DC sweep analysis (.dc).
 
-use super::framework::{DialogTab, labeled_input, numeric_input};
-use egui::Ui;
 
 // =============================================================================
 // DC Sweep Source
@@ -146,71 +144,6 @@ impl DcConfig {
     }
 }
 
-impl DialogTab for DcConfig {
-    fn name(&self) -> &str {
-        "DC"
-    }
-
-    fn description(&self) -> &str {
-        "DC sweep analysis"
-    }
-
-    fn render(&mut self, ui: &mut Ui) {
-        ui.heading("DC Analysis");
-        ui.add_space(8.0);
-
-        // Primary source
-        ui.label("Primary Sweep");
-        ui.group(|ui| {
-            labeled_input(ui, "Source", &mut self.source1.name, "VIN, R1, etc.");
-            numeric_input(ui, "Start", &mut self.source1.start, "V");
-            numeric_input(ui, "Stop", &mut self.source1.stop, "V");
-            numeric_input(ui, "Step", &mut self.source1.step, "V");
-        });
-
-        ui.add_space(8.0);
-
-        // Secondary source (nested sweep)
-        let has_second = self.source2.is_some();
-        let mut enable_second = has_second;
-
-        ui.checkbox(&mut enable_second, "Enable Nested Sweep");
-
-        if enable_second != has_second {
-            if enable_second {
-                self.source2 = Some(DcSweepSource::default());
-            } else {
-                self.source2 = None;
-            }
-        }
-
-        if let Some(ref mut src2) = self.source2 {
-            ui.group(|ui| {
-                labeled_input(ui, "Source 2", &mut src2.name, "VIN2, etc.");
-                numeric_input(ui, "Start", &mut src2.start, "V");
-                numeric_input(ui, "Stop", &mut src2.stop, "V");
-                numeric_input(ui, "Step", &mut src2.step, "V");
-            });
-        }
-
-        ui.add_space(8.0);
-
-        // Info
-        ui.label(
-            egui::RichText::new(format!("Total points: {}", self.total_points()))
-                .size(10.0)
-                .color(egui::Color32::from_rgb(120, 125, 135)),
-        );
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        DcConfig::validate(self)
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
 
 // =============================================================================
 // Tests

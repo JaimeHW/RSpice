@@ -5,7 +5,6 @@
 //! to any output in the circuit.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Transfer function sweep type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -251,38 +250,6 @@ impl XfDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Transfer Function Analysis");
-        ui.label(egui::RichText::new("Small-signal transfer from input to output").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("xf_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Start Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.start_freq).desired_width(100.0));
-                ui.end_row();
-                ui.label("Stop Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.stop_freq).desired_width(100.0));
-                ui.end_row();
-                ui.label("Points:");
-                ui.add(egui::TextEdit::singleline(&mut self.num_points).desired_width(60.0));
-                ui.end_row();
-                ui.label("Input Source:");
-                ui.add(egui::TextEdit::singleline(&mut self.input_source).desired_width(100.0));
-                ui.end_row();
-                ui.label("Output Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.output_node).desired_width(100.0));
-                ui.end_row();
-            });
-
-        ui.add_space(8.0);
-        ui.checkbox(&mut self.group_delay, "Compute Group Delay");
-        ui.checkbox(&mut self.input_impedance, "Compute Input Impedance");
-        ui.checkbox(&mut self.output_impedance, "Compute Output Impedance");
-    }
 }
 
 fn format_freq(f: f64) -> String {

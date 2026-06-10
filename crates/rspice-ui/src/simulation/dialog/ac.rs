@@ -2,8 +2,6 @@
 //!
 //! Configuration for small-signal AC analysis (.ac).
 
-use super::framework::{DialogTab, labeled_checkbox, numeric_input};
-use egui::Ui;
 
 // =============================================================================
 // Frequency Sweep Type
@@ -142,73 +140,6 @@ impl AcConfig {
     }
 }
 
-impl DialogTab for AcConfig {
-    fn name(&self) -> &str {
-        "AC"
-    }
-
-    fn description(&self) -> &str {
-        "Small-signal frequency analysis"
-    }
-
-    fn render(&mut self, ui: &mut Ui) {
-        ui.heading("AC Analysis");
-        ui.add_space(8.0);
-
-        // Sweep type
-        ui.label("Sweep Type");
-        egui::ComboBox::from_id_salt("sweep_type")
-            .selected_text(self.sweep_type.display_name())
-            .show_ui(ui, |ui| {
-                for s in FrequencySweep::all() {
-                    ui.selectable_value(&mut self.sweep_type, *s, s.display_name());
-                }
-            });
-
-        ui.add_space(8.0);
-
-        // Frequency range
-        ui.label("Frequency Range");
-        ui.group(|ui| {
-            numeric_input(ui, "Start", &mut self.start_freq, "Hz");
-            numeric_input(ui, "Stop", &mut self.stop_freq, "Hz");
-
-            let mut points = self.num_points as f64;
-            if numeric_input(
-                ui,
-                "Points",
-                &mut points,
-                match self.sweep_type {
-                    FrequencySweep::Decade => "/decade",
-                    FrequencySweep::Octave => "/octave",
-                    FrequencySweep::Linear => "total",
-                },
-            ) {
-                self.num_points = points.max(1.0) as u32;
-            }
-        });
-
-        ui.add_space(8.0);
-
-        // Info
-        ui.label(
-            egui::RichText::new(format!("Total points: ~{}", self.total_points()))
-                .size(10.0)
-                .color(egui::Color32::from_rgb(120, 125, 135)),
-        );
-
-        ui.add_space(8.0);
-        labeled_checkbox(ui, "Save All Nodes", &mut self.save_all);
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        AcConfig::validate(self)
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
 
 fn format_freq(freq: f64) -> String {
     if freq >= 1e9 {

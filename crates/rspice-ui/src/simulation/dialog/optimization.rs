@@ -3,7 +3,6 @@
 //! Provides a typed UI surface for closed-loop parameter optimization.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Optimization objective strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,115 +365,6 @@ impl OptimizationDialogState {
         }
     }
 
-    /// Render optimization options.
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Optimization");
-        ui.label(
-            egui::RichText::new("Closed-loop parameter tuning using design-variable constraints")
-                .weak(),
-        );
-        ui.add_space(8.0);
-
-        egui::Grid::new("optimization_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Objective Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.objective_node).desired_width(140.0));
-                ui.end_row();
-
-                ui.label("Objective Ref:");
-                ui.add(egui::TextEdit::singleline(&mut self.objective_ref).desired_width(140.0));
-                ui.end_row();
-
-                ui.label("Goal:");
-                egui::ComboBox::from_id_salt("opt_goal_mode")
-                    .selected_text(match self.goal_mode {
-                        0 => "Minimize",
-                        1 => "Maximize",
-                        _ => "Target",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.goal_mode, 0, "Minimize");
-                        ui.selectable_value(&mut self.goal_mode, 1, "Maximize");
-                        ui.selectable_value(&mut self.goal_mode, 2, "Target");
-                    });
-                ui.end_row();
-
-                ui.label("Target:");
-                let target_enabled = self.goal_mode == 2;
-                ui.add_enabled(
-                    target_enabled,
-                    egui::TextEdit::singleline(&mut self.target_value)
-                        .desired_width(140.0)
-                        .hint_text("e.g. 1.2"),
-                );
-                ui.end_row();
-
-                ui.label("Algorithm:");
-                egui::ComboBox::from_id_salt("opt_algo")
-                    .selected_text(match self.algorithm {
-                        0 => "Gradient Descent",
-                        1 => "Pattern Search",
-                        _ => "Simulated Annealing",
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.algorithm, 0, "Gradient Descent");
-                        ui.selectable_value(&mut self.algorithm, 1, "Pattern Search");
-                        ui.selectable_value(&mut self.algorithm, 2, "Simulated Annealing");
-                    });
-                ui.end_row();
-
-                ui.label("Max Iterations:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.max_iterations)
-                        .desired_width(100.0)
-                        .hint_text("100"),
-                );
-                ui.end_row();
-
-                ui.label("Cost Tolerance:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.cost_tolerance)
-                        .desired_width(120.0)
-                        .hint_text("1e-8"),
-                );
-                ui.end_row();
-
-                ui.label("FD Step:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.fd_step)
-                        .desired_width(120.0)
-                        .hint_text("1e-4"),
-                );
-                ui.end_row();
-
-                ui.label("Initial Step:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.initial_step)
-                        .desired_width(120.0)
-                        .hint_text("0.1"),
-                );
-                ui.end_row();
-
-                ui.label("Minimum Step:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.min_step)
-                        .desired_width(120.0)
-                        .hint_text("1e-8"),
-                );
-                ui.end_row();
-            });
-
-        ui.add_space(6.0);
-        ui.label("Variables (one per line: name:min:max[:initial])");
-        ui.add(
-            egui::TextEdit::multiline(&mut self.variables_text)
-                .desired_rows(6)
-                .desired_width(f32::INFINITY),
-        );
-    }
 }
 
 fn format_scalar(v: f64) -> String {

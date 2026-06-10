@@ -3,7 +3,6 @@
 //! Configuration for temperature sweep analysis.
 //! Runs a base analysis across a range of temperatures.
 
-use egui::Ui;
 
 /// Base analysis for temperature sweep
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -188,31 +187,4 @@ impl TempDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Temperature Sweep");
-        ui.label(egui::RichText::new("Sweep temperature across a range").weak());
-        ui.add_space(8.0);
-
-        ui.checkbox(
-            &mut self.corner_temps,
-            "Use Standard Corner Temps (-40, 25, 85, 125°C)",
-        );
-        if !self.corner_temps {
-            egui::Grid::new("temp_grid")
-                .num_columns(2)
-                .spacing([20.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Start (°C):");
-                    ui.add(egui::TextEdit::singleline(&mut self.temp_start).desired_width(80.0));
-                    ui.end_row();
-                    ui.label("Stop (°C):");
-                    ui.add(egui::TextEdit::singleline(&mut self.temp_stop).desired_width(80.0));
-                    ui.end_row();
-                    ui.label("Step (°C):");
-                    ui.add(egui::TextEdit::singleline(&mut self.temp_step).desired_width(80.0));
-                    ui.end_row();
-                });
-        }
-    }
 }

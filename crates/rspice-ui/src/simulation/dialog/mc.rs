@@ -3,7 +3,6 @@
 //! Configuration for Monte Carlo statistical analysis.
 //! Runs multiple iterations with random parameter variations.
 
-use egui::Ui;
 
 /// Random distribution type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -225,31 +224,4 @@ impl McDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Monte Carlo Analysis");
-        ui.label(
-            egui::RichText::new("Statistical analysis with random parameter variations").weak(),
-        );
-        ui.add_space(8.0);
-
-        egui::Grid::new("mc_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Number of Runs:");
-                ui.add(egui::TextEdit::singleline(&mut self.num_runs).desired_width(80.0));
-                ui.end_row();
-                ui.label("Random Seed:");
-                ui.add(egui::TextEdit::singleline(&mut self.seed).desired_width(80.0));
-                ui.end_row();
-                ui.label("Variation (%):");
-                ui.add(egui::TextEdit::singleline(&mut self.variation_pct).desired_width(60.0));
-                ui.end_row();
-            });
-        ui.add_space(8.0);
-        ui.checkbox(&mut self.process_variations, "Include Process Variations");
-        ui.checkbox(&mut self.mismatch_variations, "Include Mismatch Variations");
-        ui.checkbox(&mut self.save_all_runs, "Save All Run Data");
-    }
 }

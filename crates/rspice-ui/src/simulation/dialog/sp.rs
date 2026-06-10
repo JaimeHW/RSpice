@@ -6,7 +6,6 @@
 
 mod config;
 mod format;
-mod render;
 mod state;
 
 pub use config::{SpConfig, SpPortConfig, SpSweepType};

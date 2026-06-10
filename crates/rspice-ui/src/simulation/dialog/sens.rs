@@ -3,7 +3,6 @@
 //! Configuration for sensitivity analysis (.sens).
 //! Computes the sensitivity of an output to all circuit parameters.
 
-use egui::Ui;
 
 /// Sensitivity analysis type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -156,37 +155,6 @@ impl SensDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Sensitivity Analysis");
-        ui.label(egui::RichText::new("Compute output sensitivity to all parameters").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("sens_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Output:");
-                ui.add(egui::TextEdit::singleline(&mut self.output_expr).desired_width(120.0));
-                ui.end_row();
-            });
-        ui.add_space(4.0);
-
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.sens_type_idx, 0, "DC Sensitivity");
-            ui.selectable_value(&mut self.sens_type_idx, 1, "AC Sensitivity");
-        });
-
-        if self.sens_type_idx == 1 {
-            ui.horizontal(|ui| {
-                ui.label("AC Frequency:");
-                ui.add(egui::TextEdit::singleline(&mut self.ac_freq).desired_width(100.0));
-            });
-        }
-        ui.add_space(4.0);
-        ui.checkbox(&mut self.include_params, "Include Parameter Sensitivities");
-        ui.checkbox(&mut self.include_devices, "Include Device Sensitivities");
-    }
 }
 
 fn format_freq(f: f64) -> String {

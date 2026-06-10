@@ -4,7 +4,6 @@
 //! instead of every carrier cycle.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Modulation type for envelope analysis
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -177,27 +176,6 @@ impl EnvelopeDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Envelope Transient");
-        ui.label(egui::RichText::new("Efficient modulated signal simulation").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("env_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Carrier Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.fundamental).desired_width(100.0));
-                ui.end_row();
-                ui.label("Stop Time:");
-                ui.add(egui::TextEdit::singleline(&mut self.stop_time).desired_width(100.0));
-                ui.end_row();
-                ui.label("Harmonics:");
-                ui.add(egui::TextEdit::singleline(&mut self.harmonics).desired_width(60.0));
-                ui.end_row();
-            });
-    }
 }
 
 fn format_freq(f: f64) -> String {

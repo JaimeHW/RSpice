@@ -3,7 +3,6 @@
 //! Defines transient-window SOA checks against per-device voltage limits.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Typed SOA analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
@@ -176,75 +175,6 @@ impl SoaDialogState {
         }
     }
 
-    /// Render SOA controls.
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Safety (SOA)");
-        ui.label(
-            egui::RichText::new("Transient safe-operating-area checks for semiconductor devices")
-                .weak(),
-        );
-        ui.add_space(8.0);
-
-        egui::Grid::new("soa_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Stop Time:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.stop_time)
-                        .desired_width(120.0)
-                        .hint_text("1u"),
-                );
-                ui.end_row();
-
-                ui.label("Step Time:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.step_time)
-                        .desired_width(120.0)
-                        .hint_text("1n"),
-                );
-                ui.end_row();
-            });
-
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.check_vgs_max, "Check Vgs max");
-            ui.add_enabled(
-                self.check_vgs_max,
-                egui::TextEdit::singleline(&mut self.max_vgs)
-                    .desired_width(100.0)
-                    .hint_text("1.8"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.check_vds_max, "Check Vds max");
-            ui.add_enabled(
-                self.check_vds_max,
-                egui::TextEdit::singleline(&mut self.max_vds)
-                    .desired_width(100.0)
-                    .hint_text("3.3"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.check_vbe_max, "Check Vbe max");
-            ui.add_enabled(
-                self.check_vbe_max,
-                egui::TextEdit::singleline(&mut self.max_vbe)
-                    .desired_width(100.0)
-                    .hint_text("0.9"),
-            );
-        });
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.check_vce_max, "Check Vce max");
-            ui.add_enabled(
-                self.check_vce_max,
-                egui::TextEdit::singleline(&mut self.max_vce)
-                    .desired_width(100.0)
-                    .hint_text("5.0"),
-            );
-        });
-    }
 }
 
 fn format_scalar(v: f64) -> String {

@@ -18,7 +18,6 @@
 //! ```
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 // =============================================================================
 // PXF Sweep Type
@@ -308,62 +307,6 @@ impl PxfDialogState {
         }
     }
 
-    /// Render dialog content
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-
-        ui.heading("Periodic Transfer Function");
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new("Transfer function around PSS with frequency conversion").weak(),
-        );
-        ui.add_space(12.0);
-
-        // Frequency Sweep
-        ui.group(|ui| {
-            ui.label(egui::RichText::new("Frequency Sweep").strong());
-            egui::Grid::new("pxf_freq_grid")
-                .num_columns(2)
-                .spacing([20.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Start:");
-                    ui.add(egui::TextEdit::singleline(&mut self.start_freq).desired_width(120.0));
-                    ui.end_row();
-                    ui.label("Stop:");
-                    ui.add(egui::TextEdit::singleline(&mut self.stop_freq).desired_width(120.0));
-                    ui.end_row();
-                    ui.label("Points:");
-                    ui.add(egui::TextEdit::singleline(&mut self.num_points).desired_width(120.0));
-                    ui.end_row();
-                });
-        });
-
-        ui.add_space(8.0);
-
-        // I/O Configuration
-        ui.group(|ui| {
-            ui.label(egui::RichText::new("Input/Output").strong());
-            egui::Grid::new("pxf_io_grid")
-                .num_columns(2)
-                .spacing([20.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Input Source:");
-                    ui.add(egui::TextEdit::singleline(&mut self.input_source).desired_width(120.0));
-                    ui.end_row();
-                    ui.label("Output Node:");
-                    ui.add(egui::TextEdit::singleline(&mut self.output_node).desired_width(120.0));
-                    ui.end_row();
-                    ui.label("Out Sideband:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.output_sideband).desired_width(60.0),
-                    );
-                    ui.end_row();
-                    ui.label("Max Sideband:");
-                    ui.add(egui::TextEdit::singleline(&mut self.max_sideband).desired_width(60.0));
-                    ui.end_row();
-                });
-        });
-    }
 }
 
 // =============================================================================

@@ -17,7 +17,6 @@
 //! + maxharm=10 annotate=yes
 //! ```
 
-use egui::Ui;
 
 // =============================================================================
 // PSTB Configuration
@@ -186,58 +185,6 @@ impl PstbDialogState {
         }
     }
 
-    /// Render dialog content
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-
-        ui.heading("Periodic Stability Analysis");
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new("Floquet stability analysis around PSS (requires PSS)").weak(),
-        );
-        ui.add_space(12.0);
-
-        // Probe Configuration
-        ui.group(|ui| {
-            ui.label(egui::RichText::new("Loop Probe").strong());
-            egui::Grid::new("pstb_probe_grid")
-                .num_columns(2)
-                .spacing([20.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label("Probe Instance:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.probe)
-                            .desired_width(120.0)
-                            .hint_text("LPROBE"),
-                    );
-                    ui.end_row();
-                    ui.label("Max Harmonics:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.max_harmonics)
-                            .desired_width(60.0)
-                            .hint_text("10"),
-                    );
-                    ui.end_row();
-                    ui.label("Multipliers:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.num_multipliers)
-                            .desired_width(60.0)
-                            .hint_text("10"),
-                    );
-                    ui.end_row();
-                });
-        });
-
-        ui.add_space(8.0);
-
-        // Options
-        ui.group(|ui| {
-            ui.label(egui::RichText::new("Results").strong());
-            ui.checkbox(&mut self.annotate, "Annotate schematic");
-            ui.checkbox(&mut self.phase_margin, "Compute phase margin");
-            ui.checkbox(&mut self.gain_margin, "Compute gain margin");
-        });
-    }
 }
 
 // =============================================================================

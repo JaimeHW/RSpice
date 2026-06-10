@@ -4,7 +4,6 @@
 //! Computes loop gain, phase margin, and gain margin.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Stability analysis configuration
 #[derive(Debug, Clone)]
@@ -151,34 +150,6 @@ impl StbDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Stability Analysis (STB)");
-        ui.label(egui::RichText::new("Compute loop gain and stability margins").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("stb_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Probe Source:");
-                ui.add(egui::TextEdit::singleline(&mut self.probe_source).desired_width(100.0));
-                ui.end_row();
-                ui.label("Start Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.start_freq).desired_width(100.0));
-                ui.end_row();
-                ui.label("Stop Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.stop_freq).desired_width(100.0));
-                ui.end_row();
-                ui.label("Points/Decade:");
-                ui.add(egui::TextEdit::singleline(&mut self.points_per_decade).desired_width(60.0));
-                ui.end_row();
-            });
-        ui.add_space(4.0);
-        ui.checkbox(&mut self.gain_margin, "Compute Gain Margin");
-        ui.checkbox(&mut self.phase_margin, "Compute Phase Margin");
-        ui.checkbox(&mut self.crossover_freq, "Compute Unity-Gain Crossover");
-    }
 }
 
 fn format_freq(f: f64) -> String {

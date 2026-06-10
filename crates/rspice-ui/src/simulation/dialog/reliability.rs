@@ -3,7 +3,6 @@
 //! Provides a typed configuration surface for long-term degradation analysis.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Reliability analysis configuration.
 #[derive(Debug, Clone, PartialEq)]
@@ -148,40 +147,6 @@ impl ReliabilityDialogState {
         }
     }
 
-    /// Render reliability options.
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Reliability Analysis (Aging)");
-        ui.label(
-            egui::RichText::new("Predict long-term parametric shift from stress conditions").weak(),
-        );
-        ui.add_space(8.0);
-
-        egui::Grid::new("reliability_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Lifetime Points:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.years_csv)
-                        .desired_width(180.0)
-                        .hint_text("e.g. 1, 5, 10"),
-                );
-                ui.end_row();
-
-                ui.label("Min Stress |V|:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.min_stress_voltage)
-                        .desired_width(120.0)
-                        .hint_text("e.g. 100m"),
-                );
-                ui.end_row();
-            });
-        ui.add_space(6.0);
-        ui.checkbox(&mut self.enable_hci, "Enable HCI");
-        ui.checkbox(&mut self.enable_nbti, "Enable NBTI");
-        ui.checkbox(&mut self.enable_em, "Enable Electromigration");
-    }
 }
 
 fn parse_years_list(input: &str) -> Result<Vec<f64>, String> {

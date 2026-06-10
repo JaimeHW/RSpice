@@ -3,7 +3,6 @@
 //! Configuration for DC operating point analysis (.op).
 //! The simplest analysis - computes the DC bias point with all AC sources zeroed.
 
-use egui::Ui;
 
 /// DC operating point analysis configuration
 #[derive(Debug, Clone)]
@@ -122,26 +121,4 @@ impl OpDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("DC Operating Point");
-        ui.label(egui::RichText::new("Computes DC bias point with AC sources zeroed").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("op_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Temperature (°C):");
-                ui.add(egui::TextEdit::singleline(&mut self.temperature).desired_width(80.0));
-                ui.end_row();
-                ui.label("Gmin Steps:");
-                ui.add(egui::TextEdit::singleline(&mut self.gmin_steps).desired_width(60.0));
-                ui.end_row();
-            });
-        ui.add_space(4.0);
-        ui.checkbox(&mut self.save_all, "Save All Nodes");
-        ui.checkbox(&mut self.save_op_info, "Save Device Operating Points");
-        ui.checkbox(&mut self.source_stepping, "Enable Source Stepping");
-    }
 }

@@ -4,7 +4,6 @@
 //! Finds the periodic steady-state solution for circuits with periodic behavior.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// PSS solver method
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -191,39 +190,6 @@ impl PssDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Periodic Steady State (PSS)");
-        ui.label(egui::RichText::new("Find periodic steady-state solution").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("pss_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Fundamental Freq:");
-                ui.add(egui::TextEdit::singleline(&mut self.fund_freq).desired_width(100.0));
-                ui.end_row();
-                ui.label("Harmonics:");
-                ui.add(egui::TextEdit::singleline(&mut self.num_harmonics).desired_width(60.0));
-                ui.end_row();
-                ui.label("Max Iterations:");
-                ui.add(egui::TextEdit::singleline(&mut self.max_iter).desired_width(60.0));
-                ui.end_row();
-            });
-        ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.osc_mode,
-            "Oscillator Mode (auto-detect frequency)",
-        );
-        if self.osc_mode {
-            ui.horizontal(|ui| {
-                ui.label("Osc Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.osc_node).desired_width(80.0));
-            });
-        }
-        ui.checkbox(&mut self.save_harmonics, "Save All Harmonics");
-    }
 }
 
 fn format_freq(f: f64) -> String {

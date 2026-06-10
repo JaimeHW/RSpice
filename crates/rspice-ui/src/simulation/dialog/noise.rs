@@ -3,8 +3,6 @@
 //! Configuration for noise analysis (.noise).
 
 use super::ac::FrequencySweep;
-use super::framework::{DialogTab, labeled_checkbox, labeled_input, numeric_input};
-use egui::Ui;
 
 // =============================================================================
 // Noise Source Type
@@ -151,79 +149,6 @@ impl NoiseConfig {
     }
 }
 
-impl DialogTab for NoiseConfig {
-    fn name(&self) -> &str {
-        "Noise"
-    }
-
-    fn description(&self) -> &str {
-        "Small-signal noise analysis"
-    }
-
-    fn render(&mut self, ui: &mut Ui) {
-        ui.heading("Noise Analysis");
-        ui.add_space(8.0);
-
-        // Output specification
-        ui.label("Output");
-        ui.group(|ui| {
-            labeled_input(ui, "Output Node", &mut self.output_node, "out, vout, etc.");
-            labeled_input(ui, "Reference", &mut self.reference_node, "(optional)");
-        });
-
-        ui.add_space(8.0);
-
-        // Input source
-        ui.label("Input Source");
-        labeled_input(ui, "Source", &mut self.input_source, "VIN, etc.");
-
-        ui.add_space(8.0);
-
-        // Frequency sweep
-        ui.label("Frequency Sweep");
-        ui.group(|ui| {
-            egui::ComboBox::from_id_salt("noise_sweep")
-                .selected_text(self.sweep_type.display_name())
-                .show_ui(ui, |ui| {
-                    for s in FrequencySweep::all() {
-                        ui.selectable_value(&mut self.sweep_type, *s, s.display_name());
-                    }
-                });
-
-            numeric_input(ui, "Start", &mut self.start_freq, "Hz");
-            numeric_input(ui, "Stop", &mut self.stop_freq, "Hz");
-
-            let mut points = self.num_points as f64;
-            if numeric_input(ui, "Points", &mut points, "/decade") {
-                self.num_points = points.max(1.0) as u32;
-            }
-        });
-
-        ui.add_space(8.0);
-
-        // Options
-        ui.label("Options");
-        ui.group(|ui| {
-            egui::ComboBox::from_id_salt("noise_filter")
-                .selected_text(self.source_filter.display_name())
-                .show_ui(ui, |ui| {
-                    for t in NoiseSourceType::all() {
-                        ui.selectable_value(&mut self.source_filter, *t, t.display_name());
-                    }
-                });
-
-            labeled_checkbox(ui, "Save Contributions", &mut self.save_contributions);
-        });
-    }
-
-    fn validate(&self) -> Result<(), String> {
-        NoiseConfig::validate(self)
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
-    }
-}
 
 // =============================================================================
 // Tests

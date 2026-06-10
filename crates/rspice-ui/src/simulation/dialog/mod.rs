@@ -55,8 +55,7 @@ pub mod optimization;
 pub mod reliability;
 pub mod soa;
 
-// Framework
-pub mod framework;
+// Options
 pub mod options;
 
 // Re-exports - Core
@@ -105,7 +104,6 @@ pub use reliability::{ReliabilityConfig, ReliabilityDialogState};
 pub use soa::{SoaConfig, SoaDialogState};
 
 // Re-exports - Framework
-pub use framework::{DialogResult, DialogTab, SimulationDialog};
 pub use options::{
     DampingStrategy, IntegrationMethod, MatrixSolver, OptionsDialogState, SimulationOptions,
 };

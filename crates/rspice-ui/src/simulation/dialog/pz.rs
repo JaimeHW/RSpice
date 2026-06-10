@@ -4,7 +4,6 @@
 //! Computes poles and zeros of a network transfer function.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Pole-Zero analysis type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -212,31 +211,4 @@ impl PzDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Pole-Zero Analysis");
-        ui.label(egui::RichText::new("Compute poles and zeros of transfer function").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("pz_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Input + Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.input_pos).desired_width(100.0));
-                ui.end_row();
-                ui.label("Input - Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.input_neg).desired_width(100.0));
-                ui.end_row();
-                ui.label("Output + Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.output_pos).desired_width(100.0));
-                ui.end_row();
-                ui.label("Output - Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.output_neg).desired_width(100.0));
-                ui.end_row();
-                ui.label("Tolerance:");
-                ui.add(egui::TextEdit::singleline(&mut self.tolerance).desired_width(80.0));
-                ui.end_row();
-            });
-    }
 }

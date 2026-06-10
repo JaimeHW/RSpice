@@ -4,7 +4,6 @@
 //! Computes harmonic distortion (THD), spectral content, and fundamental metrics.
 
 use super::options::parse_si_value;
-use egui::Ui;
 
 /// Fourier analysis configuration
 #[derive(Debug, Clone)]
@@ -159,36 +158,6 @@ impl FourierDialogState {
         }
     }
 
-    pub fn render(&mut self, ui: &mut Ui) {
-        self.ensure_initialized();
-        ui.heading("Fourier Analysis");
-        ui.label(egui::RichText::new("Spectral analysis and harmonic distortion").weak());
-        ui.add_space(8.0);
-
-        egui::Grid::new("four_grid")
-            .num_columns(2)
-            .spacing([20.0, 6.0])
-            .show(ui, |ui| {
-                ui.label("Fundamental:");
-                ui.add(egui::TextEdit::singleline(&mut self.fundamental).desired_width(100.0));
-                ui.end_row();
-                ui.label("Harmonics:");
-                ui.add(egui::TextEdit::singleline(&mut self.harmonics).desired_width(60.0));
-                ui.end_row();
-                ui.label("Output Node:");
-                ui.add(egui::TextEdit::singleline(&mut self.output_node).desired_width(100.0));
-                ui.end_row();
-                ui.label("Start Time:");
-                ui.add(egui::TextEdit::singleline(&mut self.start_time).desired_width(100.0));
-                ui.end_row();
-                ui.label("Stop Time:");
-                ui.add(egui::TextEdit::singleline(&mut self.stop_time).desired_width(100.0));
-                ui.end_row();
-            });
-        ui.add_space(4.0);
-        ui.checkbox(&mut self.compute_thd, "Compute THD");
-        ui.checkbox(&mut self.normalize, "Normalize to Fundamental");
-    }
 }
 
 fn format_freq(f: f64) -> String {
