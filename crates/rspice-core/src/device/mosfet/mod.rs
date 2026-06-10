@@ -4,6 +4,7 @@
 //! Also contains shared utilities for smooth region transitions.
 
 #![allow(clippy::module_inception)]
+pub mod b3soi;
 mod bsim3;
 mod bsim4;
 mod ekv;
