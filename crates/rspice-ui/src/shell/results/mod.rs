@@ -490,48 +490,30 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn run_selector(ui: &mut Ui, state: &mut AppState) {
-    let t = Tokens::get(ui.ctx());
     let label = state
         .simulation
         .active_run()
         .map_or_else(|| "no runs".to_owned(), |run| format!("run #{}", run.id));
+    let runs: Vec<String> = state
+        .simulation
+        .runs
+        .iter()
+        .map(|run| {
+            format!(
+                "run #{} · {} · {:.1} s",
+                run.id,
+                if run.success { "ok" } else { "failed" },
+                run.elapsed_time
+            )
+        })
+        .collect();
 
-    egui::ComboBox::from_id_salt("volta.results.run")
-        .selected_text(
-            egui::RichText::new(label)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text),
-        )
-        .width(150.0)
-        .show_ui(ui, |ui| {
-            // Built only while the popup is open — not per frame.
-            let runs: Vec<(usize, String)> = state
-                .simulation
-                .runs
-                .iter()
-                .enumerate()
-                .map(|(idx, run)| {
-                    (
-                        idx,
-                        format!(
-                            "run #{} · {} · {:.1} s",
-                            run.id,
-                            if run.success { "ok" } else { "failed" },
-                            run.elapsed_time
-                        ),
-                    )
-                })
-                .collect();
-            for (idx, run_label) in runs {
-                if ui
-                    .selectable_label(state.simulation.active_run_idx == Some(idx), run_label)
-                    .clicked()
-                {
-                    state.simulation.select_run(idx);
-                    state.shell.results.clear_cursors();
-                }
-            }
-        });
+    if let Some(index) =
+        crate::ui::widgets::select(ui, "volta.results.run", &label, &runs, 150.0)
+    {
+        state.simulation.select_run(index);
+        state.shell.results.clear_cursors();
+    }
 }
 
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {

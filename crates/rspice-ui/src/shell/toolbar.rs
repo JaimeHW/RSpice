@@ -203,38 +203,26 @@ fn check_controls(ui: &mut Ui, state: &mut AppState) {
 /// Process corner + temperature selector. The selected corner also feeds the
 /// model library's corner selection.
 fn corner_select(ui: &mut Ui, state: &mut AppState) {
-    // The standard corner table is immutable; building it allocated ~40
-    // Strings per frame for a closed combo.
+    // The standard corner table is immutable; the labels bake once.
     static CORNERS: std::sync::LazyLock<Vec<crate::state::model_library::ProcessCorner>> =
         std::sync::LazyLock::new(crate::state::model_library::ProcessCorner::standard_corners);
+    static LABELS: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        CORNERS
+            .iter()
+            .map(|corner| format!("{} · {:.0} °C", corner.name, corner.temperature))
+            .collect()
+    });
 
-    let t = Tokens::get(ui.ctx());
     let corners = &*CORNERS;
     let current_label = corners
         .iter()
-        .find(|corner| corner.name == state.shell.corner)
-        .map(|corner| format!("{} · {:.0} °C", corner.name, corner.temperature))
+        .position(|corner| corner.name == state.shell.corner)
+        .map(|index| LABELS[index].clone())
         .unwrap_or_else(|| state.shell.corner.clone());
 
-    egui::ComboBox::from_id_salt("volta.corner")
-        .selected_text(
-            egui::RichText::new(current_label)
-                .font(crate::ui::theme::mono(
-                    crate::ui::tokens::FS_0,
-                    crate::ui::theme::FontWeight::Regular,
-                ))
-                .color(t.color.text),
-        )
-        .width(120.0)
-        .show_ui(ui, |ui| {
-            for corner in corners {
-                let label = format!("{} · {:.0} °C", corner.name, corner.temperature);
-                if ui
-                    .selectable_label(state.shell.corner == corner.name, label)
-                    .clicked()
-                {
-                    state.shell.corner = corner.name.clone();
-                }
-            }
-        });
+    if let Some(index) =
+        crate::ui::widgets::select(ui, "volta.corner", &current_label, &LABELS, 120.0)
+    {
+        state.shell.corner = corners[index].name.clone();
+    }
 }

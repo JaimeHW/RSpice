@@ -195,22 +195,12 @@ fn components_section(ui: &mut Ui, state: &mut AppState) {
                 state.shell.focus_cell_search = false;
             }
             let libs = cell_sources(state);
-            egui::ComboBox::from_id_salt("volta.cell.lib")
-                .selected_text(
-                    egui::RichText::new(&state.shell.cell_lib_filter)
-                        .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
-                )
-                .width(90.0)
-                .show_ui(ui, |ui| {
-                    for lib in libs {
-                        if ui
-                            .selectable_label(state.shell.cell_lib_filter == lib, &lib)
-                            .clicked()
-                        {
-                            state.shell.cell_lib_filter = lib;
-                        }
-                    }
-                });
+            let current = state.shell.cell_lib_filter.clone();
+            if let Some(index) =
+                crate::ui::widgets::select(ui, "volta.cell.lib", &current, &libs, 90.0)
+            {
+                state.shell.cell_lib_filter = libs[index].clone();
+            }
         },
     );
     ui.add_space(4.0);
