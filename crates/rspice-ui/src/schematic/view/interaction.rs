@@ -42,7 +42,7 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_probe_click(state, grid_pos);
+                handle_probe_click(ui, state, grid_pos);
             }
             Tool::Label => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -225,36 +225,50 @@ fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
     }
 }
 
-fn handle_probe_click(state: &mut AppState, grid_pos: Point) {
+/// Whether the named waveform is currently plotted.
+fn waveform_visible(state: &AppState, name: &str) -> bool {
+    state
+        .simulation
+        .waveforms
+        .iter()
+        .find(|waveform| waveform.name == name)
+        .map(|waveform| waveform.visible)
+        .unwrap_or(false)
+}
+
+/// Toggle a probed waveform and confirm via toast: plotted / hidden / not
+/// available yet. The console gets the same line for the record.
+fn toggle_probe_with_feedback(ui: &Ui, state: &mut AppState, name: &str, display: &str) {
+    let toggled = state.simulation.toggle_waveform_visibility(name);
+    if toggled {
+        let message = if waveform_visible(state, name) {
+            format!("{display} added to plot")
+        } else {
+            format!("{display} removed from plot")
+        };
+        state.shell.toasts.info(ui.ctx(), &message);
+        state.push_user_message(ConsoleMessage::info(message));
+    } else {
+        let message = format!("No waveform for {display} — run the simulation first");
+        state.shell.toasts.warn(ui.ctx(), &message);
+        state.push_user_message(ConsoleMessage::warning(message));
+    }
+}
+
+fn handle_probe_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
     if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
         if let Some(net_name) = state.simulation.cross_probe.net_at(grid_pos) {
             let net_name = net_name.clone();
             log::info!("Probe: clicked net '{}' at {:?}", net_name, grid_pos);
 
             if net_name == "0" {
-                log::info!("Probe: ground net (0V reference)");
+                state.shell.toasts.info(ui.ctx(), "Ground — 0 V reference");
                 state.push_user_message(ConsoleMessage::info(
                     "Ground node: 0V reference".to_string(),
                 ));
             } else {
-                let toggled = state.simulation.toggle_waveform_visibility(&net_name);
-
-                if toggled {
-                    log::info!("Probe: toggled waveform for net '{}'", net_name);
-                    state.push_user_message(ConsoleMessage::info(format!(
-                        "Toggled waveform: V({})",
-                        net_name
-                    )));
-                } else {
-                    log::info!(
-                        "Probe: no waveform found for net '{}' (run simulation first?)",
-                        net_name
-                    );
-                    state.push_user_message(ConsoleMessage::warning(format!(
-                        "No waveform for {}: run simulation first",
-                        net_name
-                    )));
-                }
+                let display = format!("V({net_name})");
+                toggle_probe_with_feedback(ui, state, &net_name, &display);
 
                 let net_graph = NetGraph::build_from_wires(&state.schematic.wires);
                 state
@@ -267,19 +281,23 @@ fn handle_probe_click(state: &mut AppState, grid_pos: Point) {
                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                 grid_pos
             );
+            state
+                .shell
+                .toasts
+                .warn(ui.ctx(), "Wire not in the netlist — run the simulation to update");
             state.push_user_message(ConsoleMessage::warning(
                 "Wire not in netlist. Run simulation to update.".to_string(),
             ));
         }
     } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-        handle_component_probe(state, comp_id, grid_pos);
+        handle_component_probe(ui, state, comp_id, grid_pos);
     } else {
         state.schematic.net_highlight.clear();
         log::debug!("Probe: clicked empty space at {:?}", grid_pos);
     }
 }
 
-fn handle_component_probe(state: &mut AppState, comp_id: u64, grid_pos: Point) {
+fn handle_component_probe(ui: &Ui, state: &mut AppState, comp_id: u64, grid_pos: Point) {
     if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id) {
         let comp_name = component.name.clone();
         log::info!(
@@ -303,18 +321,8 @@ fn handle_component_probe(state: &mut AppState, comp_id: u64, grid_pos: Point) {
             }
         };
 
-        let toggled = state.simulation.toggle_waveform_visibility(&probe_name);
-        if toggled {
-            state.push_user_message(ConsoleMessage::info(format!(
-                "Toggled waveform: {}",
-                probe_name
-            )));
-        } else {
-            state.push_user_message(ConsoleMessage::warning(format!(
-                "No waveform for {}",
-                probe_name
-            )));
-        }
+        let display = probe_name.clone();
+        toggle_probe_with_feedback(ui, state, &probe_name, &display);
     }
 }
 

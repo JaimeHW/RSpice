@@ -12,6 +12,8 @@ pub enum ToastKind {
     /// Accent-edged informational toast.
     #[default]
     Info,
+    /// Warning-edged toast.
+    Warn,
     /// Error-edged toast.
     Error,
 }
@@ -41,6 +43,11 @@ impl Toasts {
     /// Queue an informational toast.
     pub fn info(&mut self, ctx: &Context, message: impl Into<String>) {
         self.push(ctx, message, ToastKind::Info);
+    }
+
+    /// Queue a warning toast.
+    pub fn warn(&mut self, ctx: &Context, message: impl Into<String>) {
+        self.push(ctx, message, ToastKind::Warn);
     }
 
     /// Queue an error toast.
@@ -89,6 +96,7 @@ impl Toasts {
                     };
                     let edge = match toast.kind {
                         ToastKind::Info => c.accent,
+                        ToastKind::Warn => c.warn,
                         ToastKind::Error => c.err,
                     };
                     Frame::none()

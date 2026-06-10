@@ -1,4 +1,4 @@
-use egui::{Color32, Painter, Rect, Response, Stroke, Vec2};
+use egui::{Painter, Rect, Response, Stroke, Vec2};
 
 use crate::common::app::AppState;
 use crate::state::{ComponentType, Point, Tool};
@@ -42,7 +42,7 @@ fn draw_wire_preview(
         let preview_pos_opt = state.schematic.wire_drawing.preview_pos;
 
         if !wire_points.is_empty() {
-            let wire_color = Color32::from_rgb(100, 200, 255);
+            let wire_color = crate::ui::tokens::active_palette().accent;
             let stroke = Stroke::new(1.0 * viewport.zoom, wire_color);
 
             for segment in wire_points.windows(2) {
@@ -87,9 +87,10 @@ fn draw_component_preview(
         let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, hover_pos);
         let preview_pos = viewport.schematic_to_screen(grid_pos);
 
+        // Ghost the symbol in dimmed accent until it is placed.
         let preview_stroke = Stroke::new(
             1.0 * viewport.zoom,
-            Color32::from_rgba_unmultiplied(100, 200, 100, 180),
+            crate::ui::tokens::active_palette().accent.gamma_multiply(0.7),
         );
 
         let svg_rendered = if let Some(library) = symbol_library {
@@ -182,16 +183,8 @@ fn draw_selection_rect(painter: &Painter, state: &AppState, tool_viewport: &View
 
         let selection_rect = Rect::from_min_max(top_left, bottom_right);
 
-        painter.rect_filled(
-            selection_rect,
-            0.0,
-            Color32::from_rgba_unmultiplied(100, 150, 255, 40),
-        );
-
-        painter.rect_stroke(
-            selection_rect,
-            0.0,
-            Stroke::new(1.0, Color32::from_rgb(100, 150, 255)),
-        );
+        let accent = crate::ui::tokens::active_palette().accent;
+        painter.rect_filled(selection_rect, 0.0, accent.gamma_multiply(0.14));
+        painter.rect_stroke(selection_rect, 0.0, Stroke::new(1.0, accent));
     }
 }
