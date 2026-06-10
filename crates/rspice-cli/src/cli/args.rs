@@ -5,10 +5,21 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+/// Version string with build metadata for `--version`.
+const LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("RSPICE_BUILD_TARGET"),
+    ", ",
+    env!("RSPICE_BUILD_PROFILE"),
+    " build)"
+);
+
 /// RSpice - High-performance SPICE circuit simulator
 #[derive(Parser, Debug)]
 #[command(name = "rspice")]
 #[command(author, version, about, long_about = None)]
+#[command(long_version = LONG_VERSION)]
 #[command(propagate_version = true)]
 pub struct Cli {
     #[command(subcommand)]
@@ -58,6 +69,17 @@ pub enum Commands {
 
     /// Compare results against golden file (regression testing)
     Compare(CompareArgs),
+
+    /// Generate shell completions on stdout
+    Completions(CompletionsArgs),
+}
+
+/// Arguments for the `completions` subcommand
+#[derive(Args, Debug)]
+pub struct CompletionsArgs {
+    /// Target shell
+    #[arg(value_name = "SHELL")]
+    pub shell: clap_complete::Shell,
 }
 
 /// Arguments for the `run` subcommand

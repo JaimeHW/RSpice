@@ -55,6 +55,16 @@ fn main() -> ExitCode {
         Commands::CompileVa(args) => commands::compile_va(args, &config, cli.verbose, cli.quiet),
         Commands::Check(args) => commands::check(args, cli.verbose, cli.quiet),
         Commands::Convert(args) => commands::convert(args, cli.verbose, cli.quiet),
+        Commands::Completions(args) => {
+            use clap::CommandFactory;
+            clap_complete::generate(
+                args.shell,
+                &mut Cli::command(),
+                "rspice",
+                &mut std::io::stdout(),
+            );
+            Ok(())
+        }
         Commands::Compare(args) => {
             let compare_args = commands::compare::CompareArgs {
                 result: args.result,

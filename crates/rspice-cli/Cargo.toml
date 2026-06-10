@@ -17,6 +17,7 @@ test = false
 rspice-core.workspace = true
 rspice-veriloga = { path = "../rspice-veriloga" }
 clap.workspace = true
+clap_complete.workspace = true
 log.workspace = true
 env_logger.workspace = true
 thiserror.workspace = true
