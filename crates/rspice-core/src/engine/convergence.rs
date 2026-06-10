@@ -26,10 +26,6 @@ mod tolerances;
 struct NewtonDampingState {
     pub(in crate::engine::convergence) bank_rose_alpha: Value,
     pub(in crate::engine::convergence) prev_step_norm: Option<Value>,
-    /// Consecutive iterations on which the merit line search rejected every
-    /// fraction of the Newton step (returned a zero step). Drives the
-    /// stagnation rescue in `apply_damping_strategy`.
-    pub(in crate::engine::convergence) stagnant_steps: usize,
 }
 
 impl Default for NewtonDampingState {
@@ -37,7 +33,6 @@ impl Default for NewtonDampingState {
         Self {
             bank_rose_alpha: 1.0,
             prev_step_norm: None,
-            stagnant_steps: 0,
         }
     }
 }
