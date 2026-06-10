@@ -7,7 +7,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use super::{DampingStrategy, Engine, SimulationError};
-use crate::abort_signal::{AbortSignal, NoAbort};
+use crate::abort_signal::AbortSignal;
 use crate::device::NonlinearConvergenceCriteria;
 use crate::solver::{
     ArcLengthConfig, ArcLengthContinuation, PseudoTransient, SolverError, StaticMatrix,

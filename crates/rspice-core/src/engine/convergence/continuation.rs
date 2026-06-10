@@ -142,45 +142,13 @@ impl Engine {
         Ok(solution)
     }
 
-    /// Source stepping for nonlinear circuits (starts from zero)
-    #[allow(dead_code)]
-    pub(crate) fn source_stepping_nonlinear(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-    ) -> Result<Vec<Value>, SimulationError> {
-        let size = circuit.matrix_size();
-        let zero_guess = vec![0.0; size];
-        self.source_stepping_nonlinear_with_guess_and_abort(circuit, matrix, &zero_guess, &NoAbort)
-    }
-
-    /// Source stepping for nonlinear circuits with initial guess
+    /// Source stepping for nonlinear circuits.
     ///
-    /// # Arguments
-    /// * `circuit` - Circuit data with nonlinear devices
-    /// * `matrix` - Sparse matrix structure
-    /// * `initial_guess` - Starting solution (e.g., from failed Newton iteration or previous sweep point)
-    ///
-    /// Source stepping ramps sources from 0% to 100%, which helps
-    /// find operating points in difficult circuits with strong nonlinearities.
-    /// The adaptive implementation below only advances after a converged
-    /// corrector solve at the target scale; failed trial states are rolled back
-    /// and retried with a smaller source increment.
-    #[allow(dead_code)]
-    pub(crate) fn source_stepping_nonlinear_with_guess(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        initial_guess: &[Value],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.source_stepping_nonlinear_with_guess_and_abort(
-            circuit,
-            matrix,
-            initial_guess,
-            &NoAbort,
-        )
-    }
-
+    /// Source stepping ramps sources from 0% to 100%, which helps find
+    /// operating points in difficult circuits with strong nonlinearities. The
+    /// adaptive implementation only advances after a converged corrector solve
+    /// at the target scale; failed trial states are rolled back and retried
+    /// with a smaller source increment.
     pub(crate) fn source_stepping_nonlinear_with_guess_and_abort(
         &self,
         circuit: &mut CircuitData,
@@ -301,21 +269,6 @@ impl Engine {
     /// Uses pseudo-capacitor anchoring (`Gpseudo * (x - x_prev)`) and grows the
     /// pseudo timestep as the solution stabilizes. This is a robust fallback for
     /// hard DC operating points where direct Newton/source/GMIN struggle.
-    #[allow(dead_code)]
-    pub(crate) fn pseudo_transient_nonlinear_with_guess(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        initial_guess: &[Value],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.pseudo_transient_nonlinear_with_guess_and_abort(
-            circuit,
-            matrix,
-            initial_guess,
-            &NoAbort,
-        )
-    }
-
     pub(crate) fn pseudo_transient_nonlinear_with_guess_and_abort(
         &self,
         circuit: &mut CircuitData,
@@ -422,21 +375,6 @@ impl Engine {
     ///
     /// Uses predictor-corrector continuation on source scale (lambda: 0 -> 1) with
     /// adaptive arc-length control. This improves robustness near turning points.
-    #[allow(dead_code)]
-    pub(crate) fn arc_length_continuation_nonlinear_with_guess(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        initial_guess: &[Value],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.arc_length_continuation_nonlinear_with_guess_and_abort(
-            circuit,
-            matrix,
-            initial_guess,
-            &NoAbort,
-        )
-    }
-
     pub(crate) fn arc_length_continuation_nonlinear_with_guess_and_abort(
         &self,
         circuit: &mut CircuitData,
@@ -661,16 +599,6 @@ impl Engine {
     /// This helps BJT and other semiconductor devices find their operating
     /// point by initially providing a strong DC path that's gradually removed.
     /// This is a technique used in commercial SPICE simulators like Spectre/HSPICE.
-    #[allow(dead_code)]
-    pub(crate) fn gmin_stepping_nonlinear(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        initial_guess: &[Value],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.gmin_stepping_nonlinear_with_abort(circuit, matrix, initial_guess, &NoAbort)
-    }
-
     pub(crate) fn gmin_stepping_nonlinear_with_abort(
         &self,
         circuit: &mut CircuitData,

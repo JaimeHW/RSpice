@@ -43,34 +43,13 @@ impl Engine {
         Err(SimulationError::Solver(last_err))
     }
 
-    /// Solve a nonlinear circuit using Newton-Raphson iteration
-    ///
-    /// This performs a linear pre-solve to get a warm-start initial guess,
-    /// which helps convergence especially for BJT circuits where starting
-    /// from 0V puts the transistor in an unphysical state.
-    #[allow(dead_code)]
-    pub(crate) fn solve_nonlinear(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, &[], &NoAbort)
-    }
-
     /// Solve nonlinear DC with optional node-voltage hint overrides.
     ///
-    /// `node_hints` entries are `(node_id, voltage)` with node IDs using the
-    /// standard 1-based non-ground circuit numbering.
-    #[allow(dead_code)]
-    pub(crate) fn solve_nonlinear_with_node_hints(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        node_hints: &[(usize, Value)],
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.solve_nonlinear_with_node_hints_and_abort(circuit, matrix, node_hints, &NoAbort)
-    }
-
+    /// Performs a linear pre-solve to get a warm-start initial guess, which
+    /// helps convergence especially for BJT circuits where starting from 0V
+    /// puts the transistor in an unphysical state. `node_hints` entries are
+    /// `(node_id, voltage)` with node IDs using the standard 1-based
+    /// non-ground circuit numbering.
     pub(crate) fn solve_nonlinear_with_node_hints_and_abort(
         &self,
         circuit: &mut CircuitData,
@@ -105,16 +84,6 @@ impl Engine {
     ///
     /// # Returns
     /// The converged solution vector, or error if Newton-Raphson fails to converge.
-    #[allow(dead_code)]
-    pub(crate) fn solve_nonlinear_with_guess(
-        &self,
-        circuit: &mut CircuitData,
-        matrix: &mut StaticMatrix,
-        initial_guess: Option<&[Value]>,
-    ) -> Result<Vec<Value>, SimulationError> {
-        self.solve_nonlinear_with_guess_and_abort(circuit, matrix, initial_guess, &NoAbort)
-    }
-
     pub(crate) fn solve_nonlinear_with_guess_and_abort(
         &self,
         circuit: &mut CircuitData,

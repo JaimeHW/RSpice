@@ -114,19 +114,6 @@ impl Engine {
         )
     }
 
-    /// Check if voltage solution has converged using legacy signature.
-    ///
-    /// Uses `tolerance` as an absolute voltage tolerance with default SPICE-like
-    /// relative tolerance of 1e-3.
-    #[allow(dead_code)]
-    pub(crate) fn check_voltage_convergence(
-        old: &[Value],
-        new: &[Value],
-        tolerance: Value,
-    ) -> bool {
-        Self::check_voltage_convergence_with_tolerances(old, new, tolerance, 1e-3)
-    }
-
     /// Check voltage convergence using explicit absolute and relative tolerances.
     ///
     /// Criterion: `|Î”V| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
