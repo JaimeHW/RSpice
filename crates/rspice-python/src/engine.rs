@@ -79,10 +79,10 @@ impl PyEngine {
     /// Example:
     ///     >>> result = engine.run_dc_op(netlist)
     ///     >>> print(f"V(out) = {result.voltage('out'):.3f} V")
-    pub fn run_dc_op(&self, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
+    pub fn run_dc_op(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PySimulationResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = engine
-            .run_dc_op(&netlist.inner)
+        let result = py
+            .allow_threads(|| engine.run_dc_op(&netlist.inner))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PySimulationResult::new(result))
     }
@@ -111,6 +111,7 @@ impl PyEngine {
     ///     ...     print(f"V1={v_in:.1f}V -> V(out)={sol.voltage('out'):.3f}V")
     pub fn run_dc_sweep(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         source_name: &str,
         start: f64,
@@ -118,8 +119,8 @@ impl PyEngine {
         step: f64,
     ) -> PyResult<PyDcSweepResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = engine
-            .run_dc_sweep(&netlist.inner, source_name, start, stop, step)
+        let results = py
+            .allow_threads(|| engine.run_dc_sweep(&netlist.inner, source_name, start, stop, step))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyDcSweepResult::new(results))
     }
@@ -144,10 +145,15 @@ impl PyEngine {
     ///     >>> result = engine.run_ac(netlist, freqs)
     ///     >>> for f, mag in zip(result.frequencies, result.voltage_magnitude(2)):
     ///     ...     print(f"{f:.0f} Hz: {20*np.log10(mag):.1f} dB")
-    pub fn run_ac(&self, netlist: &PyNetlist, frequencies: Vec<f64>) -> PyResult<PyAcResult> {
+    pub fn run_ac(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        frequencies: Vec<f64>,
+    ) -> PyResult<PyAcResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = engine
-            .run_ac(&netlist.inner, &frequencies)
+        let results = py
+            .allow_threads(|| engine.run_ac(&netlist.inner, &frequencies))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyAcResult::new(frequencies, results))
     }
@@ -177,13 +183,14 @@ impl PyEngine {
     #[pyo3(signature = (netlist, stop_time, max_step))]
     pub fn run_tran(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         stop_time: f64,
         max_step: f64,
     ) -> PyResult<PyTransientResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = engine
-            .run_tran(&netlist.inner, stop_time, max_step)
+        let result = py
+            .allow_threads(|| engine.run_tran(&netlist.inner, stop_time, max_step))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
         Ok(PyTransientResult::new(result))
     }
@@ -214,16 +221,17 @@ impl PyEngine {
     #[pyo3(signature = (netlist, output_node, frequencies, temperature=None))]
     fn run_noise(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         output_node: usize,
         frequencies: Vec<f64>,
         temperature: Option<f64>,
     ) -> PyResult<Vec<crate::results::PyNoiseResult>> {
-        let temp = temperature.unwrap_or(300.0);
-
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = engine
-            .run_noise(&netlist.inner, output_node, &frequencies, temp)
+        let temp = temperature.unwrap_or(engine.config().temperature);
+
+        let results = py
+            .allow_threads(|| engine.run_noise(&netlist.inner, output_node, &frequencies, temp))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
         Ok(results
@@ -253,13 +261,14 @@ impl PyEngine {
     ///     ...     print(f"Pole at {p.real:.2e} + {p.imag:.2e}j")
     fn run_pz(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         input_node: usize,
         output_node: usize,
     ) -> PyResult<crate::results::PyPoleZeroResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = engine
-            .run_pz(&netlist.inner, input_node, output_node)
+        let result = py
+            .allow_threads(|| engine.run_pz(&netlist.inner, input_node, output_node))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
         Ok(crate::results::PyPoleZeroResult::from_core(&result))
@@ -284,13 +293,14 @@ impl PyEngine {
     ///     >>> print(f"V(2): {v_out.mean:.3f} ± {v_out.std_dev:.3f}V")
     fn run_monte_carlo(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         num_runs: usize,
         seed: u64,
     ) -> PyResult<crate::results::PyMonteCarloResult> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let result = engine
-            .run_monte_carlo(&netlist.inner, num_runs, seed)
+        let result = py
+            .allow_threads(|| engine.run_monte_carlo(&netlist.inner, num_runs, seed))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
         Ok(crate::results::PyMonteCarloResult::from_core(&result))
@@ -317,6 +327,7 @@ impl PyEngine {
     #[pyo3(signature = (netlist, output_node, param_name, param_value, delta=None))]
     fn run_sensitivity(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         output_node: usize,
         param_name: &str,
@@ -333,21 +344,20 @@ impl PyEngine {
         netlist_plus.params.set(param_name, param_value + h);
         netlist_minus.params.set(param_name, param_value - h);
 
-        // Run DC analysis at both points
         let plus_engine = self.engine_for_netlist(&netlist_plus);
         let minus_engine = self.engine_for_netlist(&netlist_minus);
-        let result_plus = plus_engine
-            .run_dc_op(&netlist_plus)
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
-        let result_minus = minus_engine
-            .run_dc_op(&netlist_minus)
-            .map_err(crate::errors::simulation_error_to_pyerr)?;
 
-        // Compute central difference
-        let v_plus = result_plus.voltage(output_node);
-        let v_minus = result_minus.voltage(output_node);
-
-        Ok((v_plus - v_minus) / (2.0 * h))
+        // Central difference from two DC solves
+        py.allow_threads(
+            || -> Result<f64, rspice_core::engine::SimulationError> {
+                let result_plus = plus_engine.run_dc_op(&netlist_plus)?;
+                let result_minus = minus_engine.run_dc_op(&netlist_minus)?;
+                let v_plus = result_plus.voltage(output_node);
+                let v_minus = result_minus.voltage(output_node);
+                Ok((v_plus - v_minus) / (2.0 * h))
+            },
+        )
+        .map_err(crate::errors::simulation_error_to_pyerr)
     }
 
     /// Run parametric step analysis
@@ -370,13 +380,14 @@ impl PyEngine {
     ///     ...     print(f"R1={val:.0f}Ω: V(2)={result.voltage(2):.3f}V")
     fn run_step(
         &self,
+        py: Python<'_>,
         netlist: &PyNetlist,
         param_name: &str,
         values: Vec<f64>,
     ) -> PyResult<Vec<(f64, crate::results::PySimulationResult)>> {
         let engine = self.engine_for_netlist(&netlist.inner);
-        let results = engine
-            .run_step(&netlist.inner, param_name, &values)
+        let results = py
+            .allow_threads(|| engine.run_step(&netlist.inner, param_name, &values))
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
         Ok(results
