@@ -1,137 +1,119 @@
 # RSpice CLI
 
-**Command-line interface for automated analog circuit simulation and verification.**
+Command-line interface for the RSpice simulation engine. Designed for scripted runs, batch simulation, regression testing, and CI pipelines.
 
-The RSpice CLI provides a subcommand-based interface designed for batch simulation, CI/CD pipelines, and automated verification workflows.
-
----
-
-## Installation
+## Building
 
 ```bash
-# Build from source
-cd rspice
 cargo build --release -p rspice-cli
 
 # Binary location
 ./target/release/rspice --help
 ```
 
----
-
 ## Quick Start
 
 ```bash
-# Run simulation
+# Run all analyses requested by the netlist
 rspice run circuit.sp
 
-# Run with output file
+# Write results to a file
 rspice run circuit.sp -o results.raw
 
-# Show netlist info without simulating
+# Inspect a netlist without simulating
 rspice info circuit.sp
 
-# Validate netlist
+# Validate syntax and connectivity
 rspice check circuit.sp --connectivity
 ```
 
----
+## How Analyses Are Selected
 
-## Supported Analyses
+`rspice run` executes every analysis card found in the netlist, in order:
 
-| Analysis | CLI Flag | Description |
-|----------|----------|-------------|
-| DC Operating Point | `rspice run` | Finds DC solution with Enhanced Newton-Raphson |
-| DC Sweep | Built-in | Nested voltage/current/parameter sweeps |
-| Transient | Built-in | Time-domain with adaptive timestepping |
-| AC Small-Signal | Built-in | Frequency response |
-| Fourier | Built-in | THD and spectral decomposition (`.FOUR` command) |
-| Temperature | Built-in | Temperature sweep analysis (`.TEMP` command) |
-| Noise | `--noise` | Thermal, Shot, and Flicker (1/f) noise |
-| Monte Carlo | `--monte-carlo N` | Statistical yield with histogram & 3σ |
-| Corner Analysis | `--corners tt,ss,ff` | PVT sweep with NMOS/PMOS scaling |
-| PSS | `--pss-freq F` | Periodic Steady-State for oscillators |
-| Harmonic Balance | `--hb-freq F` | RF steady-state solution |
-| PAC | Built-in | Periodic AC analysis (.PAC) |
-| PXF | Built-in | Periodic Transfer Function (.PXF) |
-| Pole-Zero | `--pz-input/output` | Transfer function analysis |
-| Sensitivity | `--sens-*` | DC/AC sensitivity |
+`.OP`, `.DC`, `.TRAN`, `.AC`, `.DISTO`, `.NOISE`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. If the netlist contains no analysis cards, a DC operating point is run by default.
 
-## Device Models
+A handful of analyses can instead be requested from the command line. When one of these flags is present, it runs **instead of** the netlist's analysis cards:
 
-| Device | Models |
-|--------|--------|
-| **MOSFET** | BSIM4, BSIM3v3.24 (submicron), EKV, VDMOS (Power), Level 1-3 |
-| **BJT** | Gummel-Poon (NPN/PNP) with quasi-saturation and high-injection |
-| **Diode** | Shockley with junction and diffusion capacitance |
-| **JFET** | Curtice model with channel length modulation |
-| **GaN HEMT** | Cubic model with self-heating and trapping effects |
-| **Verilog-A** | JIT-compiled behavioral models via Cranelift |
-
----
+| Mode | Flags |
+| :--- | :--- |
+| Monte Carlo | `--monte-carlo N` (optional `--seed`) |
+| Periodic steady-state (PSS) | `--pss-freq F` (optional `--pss-harmonics`, `--pss-tstab`) |
+| Harmonic balance | `--hb-freq F` (optional `--hb-harmonics`) |
+| Pole-zero | `--pz-input NODE --pz-output NODE` |
+| DC sensitivity | `--sens-output NODE --sens-param NAME` (optional `--sens-value`) |
+| Process corners | `--corners tt,ss,ff` (optional `--corner-lib`) |
 
 ## Commands
 
-
 ### `rspice run` — Execute Simulations
-
-Run SPICE simulations with full analysis support.
 
 ```bash
 rspice run <NETLIST> [OPTIONS]
 ```
 
-**Options:**
+Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
+
+**Output options:**
 
 | Flag | Description |
-|------|-------------|
+| :--- | :--- |
 | `-o, --output <FILE>` | Output file for results |
-| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` |
-| `--temp <TEMP>` | Override temperature (Celsius) |
+| `-f, --format <FORMAT>` | Output format: `raw` (default), `ascii`, `csv`, `json`, `tsv`, `hdf5` |
+| `--node-names` | Use original netlist node names in output |
 | `--meas` | Print `.MEAS` measurement results |
-| `--progress` | Show progress bar with ETA |
-| `--compress` | Enable waveform compression (10-100x memory reduction) |
-| `--compress-tol <TOL>` | Compression tolerance (default: 1e-4) |
-| `--monte-carlo <N>` | Run N Monte Carlo iterations |
-| `--seed <SEED>` | Random seed for Monte Carlo |
+| `--progress` | Show a progress bar with ETA for transient analysis |
+| `--compress` | Enable waveform compression for long simulations |
+| `--compress-tol <TOL>` | Compression tolerance (default: 1e-4; requires `--compress`) |
+
+**Simulation options:**
+
+| Flag | Description |
+| :--- | :--- |
+| `--temp <TEMP>` | Override simulation temperature (Celsius) |
 | `--maxiter <N>` | Maximum Newton-Raphson iterations |
-| `--abstol <TOL>` | Convergence tolerance |
-| `--convergence <MODE>` | DC convergence: `fast`, `default`, `robust` |
-| `-I, --include <DIR>` | Add include path |
-| `-D, --define <NAME=VALUE>` | Define parameter |
+| `--abstol <TOL>` | Absolute convergence tolerance |
+| `--reltol <TOL>` | Relative convergence tolerance |
+| `--residual-reltol <TOL>` | Relative residual tolerance for equation convergence checks |
+| `--min-step <TIME>` | Minimum transient timestep |
+| `--max-step <TIME>` | Maximum transient timestep |
+| `--convergence <MODE>` | DC convergence preset: `fast`, `default`, `robust` |
+| `-I, --include <DIR>` | Add an include path for `.include` directives (repeatable) |
+| `-D, --define <NAME=VALUE>` | Define a parameter (repeatable) |
+| `-b, --batch` | Batch mode (no interactive prompts) |
 
-**CI/CD Options:**
-
-| Flag | Description |
-|------|-------------|
-| `--report-format <FORMAT>` | Report format: `junit`, `tap` |
-| `--report-file <FILE>` | Report output file |
-| `--meas-format <FORMAT>` | Measurement format: `json`, `csv` |
-| `--meas-file <FILE>` | Measurement output file |
-| `-q, --quiet` | Suppress non-error output |
-| `-b, --batch` | Batch mode (no prompts) |
-
-**Advanced RF/Analog Analysis:**
+**Analysis-mode options** (see [How Analyses Are Selected](#how-analyses-are-selected)):
 
 | Flag | Description |
-|------|-------------|
-| `--pss-freq <FREQ>` | Run PSS analysis at fundamental frequency |
+| :--- | :--- |
+| `--monte-carlo <N>` | Run N Monte Carlo iterations |
+| `--seed <SEED>` | Random seed for Monte Carlo (requires `--monte-carlo`) |
+| `--pss-freq <FREQ>` | PSS fundamental frequency in Hz |
 | `--pss-harmonics <N>` | Number of PSS harmonics (default: 9) |
-| `--pss-tstab <TIME>` | PSS stabilization time |
-| `--hb-freq <FREQ>` | Run Harmonic Balance at fundamental frequency |
+| `--pss-tstab <TIME>` | PSS stabilization time before the shooting method (default: auto) |
+| `--hb-freq <FREQ>` | Harmonic balance fundamental frequency in Hz |
 | `--hb-harmonics <N>` | Number of HB harmonics (default: 9) |
-| `--pz-input <NODE>` | Pole-Zero input node |
-| `--pz-output <NODE>` | Pole-Zero output node |
-| `--sens-output <NODE>` | Sensitivity analysis output node |
-| `--sens-param <PARAM>` | Parameter for sensitivity analysis |
-| `--sens-value <VALUE>` | Nominal parameter value |
-| `--corners <LIST>` | Process corners (comma-separated: tt,ss,ff,sf,fs) |
-| `--corner-lib <FILE>` | Library file with corner definitions |
+| `--pz-input <NODE>` | Pole-zero input node index |
+| `--pz-output <NODE>` | Pole-zero output node index (requires `--pz-input`) |
+| `--sens-output <NODE>` | Sensitivity analysis output node index |
+| `--sens-param <PARAM>` | Parameter name for sensitivity analysis (requires `--sens-output`) |
+| `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
+| `--corners <LIST>` | Process corners, comma-separated: `tt,ss,ff,sf,fs` |
+| `--corner-lib <FILE>` | Library file with corner definitions (requires `--corners`) |
+
+**Reporting options:**
+
+| Flag | Description |
+| :--- | :--- |
+| `--report-format <FORMAT>` | CI report format: `junit`, `tap` |
+| `--report-file <FILE>` | CI report output file (requires `--report-format`) |
+| `--meas-format <FORMAT>` | Machine-readable `.MEAS` format: `json`, `csv` |
+| `--meas-file <FILE>` | `.MEAS` output file (defaults to JSON if `--meas-format` is omitted) |
 
 **Examples:**
 
 ```bash
-# Basic simulation
+# Basic simulation with raw output
 rspice run amplifier.sp -o amp.raw
 
 # Transient with compression for long simulations
@@ -146,48 +128,37 @@ rspice run circuit.sp -q --report-format junit --report-file results.xml
 # Extract measurements to JSON
 rspice run circuit.sp --meas --meas-format json --meas-file meas.json
 
-# PSS (Periodic Steady-State) for oscillators
+# PSS for oscillators
 rspice run vco.sp --pss-freq 2.4e9 --pss-harmonics 15 -v
 
-# Harmonic Balance for RF circuits
+# Harmonic balance for RF circuits
 rspice run mixer.sp --hb-freq 900e6 --hb-harmonics 9
 
-# Pole-Zero analysis
+# Pole-zero analysis
 rspice run opamp.sp --pz-input 1 --pz-output 4
 
-# Sensitivity analysis
+# DC sensitivity
 rspice run amp.sp --sens-output 3 --sens-param R1 --sens-value 10k
 
 # Process corner sweep
 rspice run circuit.sp --corners tt,ss,ff,sf,fs -q
 ```
 
----
-
 ### `rspice info` — Netlist Information
 
-Display netlist summary without running simulation.
+Display a netlist summary without running a simulation.
 
 ```bash
 rspice info <NETLIST> [OPTIONS]
 ```
 
-**Options:**
-
 | Flag | Description |
-|------|-------------|
+| :--- | :--- |
 | `-d, --detailed` | Show detailed element information |
 | `--models` | Show model definitions |
 | `--hierarchy` | Show subcircuit hierarchy |
+| `--params` | Show parameter values |
 | `--json` | Output as JSON |
-
-**Example:**
-
-```bash
-rspice info circuit.sp --detailed --json
-```
-
----
 
 ### `rspice check` — Validate Netlist
 
@@ -197,135 +168,141 @@ Check netlist syntax and connectivity.
 rspice check <NETLIST> [OPTIONS]
 ```
 
-**Options:**
-
 | Flag | Description |
-|------|-------------|
-| `--connectivity` | Check for floating nodes |
+| :--- | :--- |
+| `--connectivity` | Warn about floating nodes |
 | `--models` | Check for undefined models |
 | `--strict` | Treat warnings as errors |
 | `--json` | Output as JSON |
 
-**Example:**
-
-```bash
-rspice check circuit.sp --connectivity --strict
-```
-
----
-
 ### `rspice compare` — Golden File Comparison
 
-Compare simulation results against reference files for regression testing.
+Compare simulation results against a reference file for regression testing. Exits with code `0` if the comparison passes and `1` if differences are found.
 
 ```bash
 rspice compare <RESULT> <GOLDEN> [OPTIONS]
 ```
 
-**Options:**
-
 | Flag | Description |
-|------|-------------|
+| :--- | :--- |
 | `--abstol <TOL>` | Absolute tolerance (default: 1e-9) |
 | `--reltol <TOL>` | Relative tolerance (default: 1e-6) |
-| `--variables <VAR>` | Compare specific variables only |
+| `--variables <VAR>` | Compare specific variables only (repeatable; default: all) |
 | `--fail-fast` | Stop on first difference |
 | `--json` | Output differences as JSON |
 
-**Example:**
-
-```bash
-# Compare with tolerances
-rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6
-
-# JSON output for CI parsing
-rspice compare results.csv golden.csv --json
-```
-
-**Exit Codes:**
-- `0` — Comparison passed
-- `1` — Differences found
-
----
-
-### `rspice compile-va` — Compile Verilog-A
-
-Compile Verilog-A models for use in simulations.
-
-```bash
-rspice compile-va <FILE> [OPTIONS]
-```
-
-**Options:**
-
-| Flag | Description |
-|------|-------------|
-| `-o, --output <FILE>` | Output compiled model |
-| `-I, --include <DIR>` | Add include directory |
-| `--strict` | Enable strict LRM compliance |
-| `--show-usage` | Generate usage example |
-
----
-
 ### `rspice convert` — Format Conversion
 
-Convert between simulation output formats.
+Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`.
 
 ```bash
-rspice convert <INPUT> <OUTPUT> --to <FORMAT>
+rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]
 ```
 
-**Supported Formats:** `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`
-
-**Example:**
+| Flag | Description |
+| :--- | :--- |
+| `--to <FORMAT>` | Output format (required) |
+| `--from <FORMAT>` | Input format (auto-detected if omitted) |
+| `--variables <VAR>` | Variables to include (repeatable; default: all) |
+| `--start <VALUE>` | Time/frequency range start |
+| `--stop <VALUE>` | Time/frequency range end |
 
 ```bash
 rspice convert results.raw results.csv --to csv
 rspice convert results.csv results.h5 --to hdf5
 ```
 
----
+### `rspice compile-va` — Compile Verilog-A
+
+Compile a Verilog-A model for use in simulations.
+
+```bash
+rspice compile-va <FILE> [OPTIONS]
+```
+
+| Flag | Description |
+| :--- | :--- |
+| `-o, --output <FILE>` | Output compiled model (optional, for caching) |
+| `-I, --include <DIR>` | Add an include directory (repeatable) |
+| `--strict` | Enable strict LRM compliance mode |
+| `--detailed` | Show detailed compilation information |
+| `--show-usage` | Generate a usage example in the output |
 
 ## Global Options
 
+Available on every subcommand:
+
 | Flag | Description |
-|------|-------------|
+| :--- | :--- |
 | `-v, --verbose` | Enable debug-level output |
 | `-q, --quiet` | Suppress non-error output |
-| `--config <FILE>` | Use specific config file |
+| `--config <FILE>` | Use a specific configuration file |
 | `--log-level <LEVEL>` | Set log level: `error`, `warn`, `info`, `debug`, `trace` |
-
----
 
 ## Configuration File
 
-RSpice looks for configuration in `~/.rspicerc` or `./.rspicerc` (TOML format):
+Configuration is loaded and merged in order of increasing priority:
+
+1. Built-in defaults
+2. User config: `~/.config/rspice/config.toml`, falling back to `~/.rspicerc`
+3. Project config: `./.rspicerc`
+4. Environment variables
+5. Command-line arguments
+
+All files use TOML. The full set of recognized keys, with their defaults:
 
 ```toml
 [simulation]
-temperature = 27.0
-abstol = 1e-12
-reltol = 1e-6
+temperature = 27.0            # Celsius
 max_iterations = 50
+abstol = 1e-12
+reltol = 1e-3
+residual_reltol = 1e-3
+min_timestep = 1e-15
+max_timestep = 1e-3
+compress_waveforms = false
+compression_tolerance = 1e-4
+convergence_mode = "default"  # "fast" | "default" | "robust"
 
 [output]
 format = "raw"
-node_names = true
+show_progress = false
+include_node_names = false
+# output_directory = "results"   # default: same directory as input
 
 [paths]
-include_dirs = ["./models", "./lib"]
+include_paths = ["./models", "./lib"]
+library_paths = []
+veriloga_includes = []
 ```
 
-Environment variables override config file values:
-- `RSPICE_TEMP` — Temperature
-- `RSPICE_ABSTOL` — Absolute tolerance
-- `RSPICE_INCLUDE` — Include paths (colon-separated)
+Environment variable overrides:
 
----
+| Variable | Effect |
+| :--- | :--- |
+| `RSPICE_TEMPERATURE` | Default simulation temperature (Celsius) |
+| `RSPICE_OUTPUT_FORMAT` | Default output format |
+| `RSPICE_INCLUDE_PATH` | Include paths, semicolon-separated |
+| `RSPICE_LIBRARY_PATH` | Model library paths, semicolon-separated |
 
-## CI/CD Integration
+## Exit Codes
 
-### GitHub Actions
+Exit codes follow BSD `sysexits` conventions:
+
+| Code | Meaning |
+| :--- | :--- |
+| 0 | Success |
+| 1 | General error (simulation failure, Verilog-A compile failure, conversion failure, comparison differences) |
+| 2 | Usage error (invalid arguments) |
+| 65 | Input format error (netlist parse failure) |
+| 66 | Input file not found |
+| 70 | Internal error |
+| 74 | I/O error (failed to read input or write output) |
+| 78 | Configuration error |
+
+## CI Integration
+
+`--report-format junit` produces JUnit XML, which most CI systems can ingest directly. Example with GitHub Actions:
 
 ```yaml
 jobs:
@@ -333,116 +310,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Install RSpice
         run: cargo install --path crates/rspice-cli
-      
-      - name: Run Simulations
+
+      - name: Run simulations
         run: rspice run circuits/amplifier.sp -q --report-format junit --report-file results.xml
-      
-      - name: Regression Test
+
+      - name: Regression check
         run: rspice compare output.csv golden/expected.csv --abstol 1e-9
-      
-      - name: Upload Results
+
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: simulation-results
           path: results.xml
 ```
 
-### Jenkins
-
-```groovy
-pipeline {
-    stages {
-        stage('Simulate') {
-            steps {
-                sh 'rspice run circuit.sp -q --report-format junit --report-file results.xml'
-            }
-            post {
-                always {
-                    junit 'results.xml'
-                }
-            }
-        }
-    }
-}
-```
-
-### GitLab CI
-
-```yaml
-simulate:
-  script:
-    - rspice run circuit.sp -q --report-format junit --report-file results.xml
-  artifacts:
-    reports:
-      junit: results.xml
-```
-
----
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Usage error (invalid arguments) |
-| 65 | Input file error |
-| 66 | Parse error |
-| 70 | Simulation error |
-| 73 | Output error |
-| 78 | Configuration error |
-
----
-
-## Examples
-
-### Basic Workflows
+A typical verification pipeline:
 
 ```bash
-# DC operating point
-rspice run circuit.sp
-
-# Transient with progress bar
-rspice run circuit.sp --progress
-
-# AC sweep with CSV output
-rspice run circuit.sp -o bode.csv -f csv
-```
-
-### Advanced Analysis
-
-```bash
-# Monte Carlo (1000 runs)
-rspice run circuit.sp --monte-carlo 1000 --seed 42 -v
-
-# Compressed transient (long simulations)
-rspice run power.sp --compress
-
-# Measurements to JSON
-rspice run circuit.sp --meas --meas-format json --meas-file meas.json
-```
-
-### Verification Pipeline
-
-```bash
-# Step 1: Validate netlist
+# 1. Validate the netlist
 rspice check circuit.sp --connectivity --strict
 
-# Step 2: Run simulation
+# 2. Run the simulation
 rspice run circuit.sp -q -o results.csv -f csv
 
-# Step 3: Compare to golden
+# 3. Compare against the golden reference
 rspice compare results.csv golden.csv --abstol 1e-9
 
-# Step 4: Extract measurements
+# 4. Extract measurements
 rspice run circuit.sp --meas-format json --meas-file metrics.json
 ```
 
----
-
 ## License
 
-RSpice CLI is part of the RSpice project and is licensed under the **RSpice Personal Use License**.
+RSpice CLI is part of the RSpice project and is licensed under the [RSpice Personal Use License](../../LICENSE).

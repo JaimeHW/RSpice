@@ -1,99 +1,77 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="RSpice Logo" width="180" />
+<img src="assets/logo.svg" alt="RSpice logo" width="180" />
 
 # RSpice
-**Rust-based SPICE simulation workspace for analog and mixed-signal design**
+
+**A SPICE circuit simulator written in Rust, with a desktop UI, CLI, Python bindings, and a Verilog-A compiler.**
 
 [![License](https://img.shields.io/badge/license-Source%20Available-red.svg?style=flat-square)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg?style=flat-square)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.94-orange.svg?style=flat-square)](rust-toolchain.toml)
 [![Platform](https://img.shields.io/badge/platform-win%20%7C%20macos%20%7C%20linux-lightgrey.svg?style=flat-square)](https://github.com/JaimeHW/rspice)
 
-<img src="assets/image.png" alt="RSpice Studio schematic and waveform view" width="100%" />
-<img src="assets/image2.png" alt="RSpice Studio analysis view" width="100%" />
+<img src="assets/image.png" alt="Schematic editor and waveform viewer" width="100%" />
+<img src="assets/image2.png" alt="Analysis and results view" width="100%" />
 
 </div>
 
 ## Overview
 
-RSpice is a Rust workspace for circuit simulation and design exploration. It combines a SPICE engine, a desktop UI, a command-line workflow, Python bindings, and a Verilog-A toolchain in one repository.
+RSpice is a circuit simulator for analog and mixed-signal design. The simulation engine, netlist parsers, device models, and analyses are implemented in Rust on top of sparse matrix solvers, with adaptive timestep control and configurable convergence aids for difficult circuits.
 
-The project is aimed at practical analog and mixed-signal work: release-oriented execution, regression-driven validation, broad device-model coverage, and tooling that supports both scripted flows and interactive debugging.
+Around the engine, the repository provides several front ends: a desktop application for schematic capture and waveform inspection, a CLI for scripted and batch workflows, Python bindings for automation, WebAssembly bindings, and a Verilog-A toolchain for compiling behavioral models.
 
-## Project Status
+## Status
 
-RSpice is in active development.
+RSpice is in active development. The implemented surface is broad — the analyses and device models listed below exist and are exercised by tests — but polish and coverage vary by area, and results are continuously validated against ngspice rather than assumed correct. It is not yet a substitute for mature EDA tooling.
 
-- The repository already contains a broad implementation surface: core analyses, device models, CLI workflows, a desktop UI, Python bindings, and Verilog-A infrastructure.
-- The workspace includes extensive automated tests and ngspice-based regression coverage.
-- The breadth of implemented functionality is ahead of product polish in some areas.
-- It is not yet a drop-in replacement for mature commercial EDA suites.
-
-This README is intentionally scoped to what is implemented in the repository today.
-
-## Highlights
-
-- Rust-native simulation engine with sparse linear algebra, adaptive transient stepping, convergence controls, and parameterized analyses.
-- Verilog-A compiler pipeline with VM execution and optional Cranelift JIT support.
-- Desktop application for schematic-driven workflows and waveform inspection.
-- CLI suitable for scripted runs, regression checks, reporting, and format conversion.
-- Python bindings for automation and post-processing.
-- Built-in HDF5 waveform storage for large result sets without external native HDF5 dependencies.
-
-## Capabilities
-
-The workspace includes implementations for the following analysis families. Frontend coverage and workflow polish vary by crate.
+## Features
 
 ### Analyses
 
-- DC operating point and DC sweep
-- Transient
-- AC small-signal
-- Noise
-- Fourier / `.FOUR`
-- Temperature sweep
-- Monte Carlo
-- Corner analysis
-- Sensitivity
-- Pole-zero
-- Harmonic balance
-- PSS / PAC / PNoise / PXF / PSTB
-- Envelope and multi-rate flows
-- Signal-integrity oriented analyses such as eye-diagram related tooling
+- **Core:** DC operating point, DC sweep, transient, AC small-signal, temperature sweep
+- **Frequency-domain:** noise, distortion, pole-zero, transfer function, stability, S-parameter
+- **Statistical and parametric:** Monte Carlo, process corners, `.STEP` parametric sweeps, sensitivity
+- **RF and periodic:** periodic steady-state (PSS) with shooting method, harmonic balance, PAC, PNoise, PXF, PSTB, envelope and multi-rate methods
+- **Post-processing:** `.MEAS` measurements, Fourier / `.FOUR`, eye-diagram and signal-integrity utilities
 
-### Device and Modeling Support
+### Device Models
 
-The repository includes implementations for:
+- **MOSFET:** BSIM4, BSIM3, B3SOI (DD/FD/PD), EKV, VDMOS, classic level models
+- **Bipolar:** Gummel-Poon BJT with a VBIC charge-model option
+- **Other semiconductors:** diode, JFET, GaN HEMT
+- **Passives:** resistor, capacitor, inductor, coupled inductors, saturable inductor with Jiles-Atherton hysteresis
+- **Interconnect:** ideal, lossy, coupled, and distributed transmission lines
+- **Behavioral:** controlled sources, behavioral sources, op-amp macromodel, PWL file sources, switches
+- **Mixed-signal:** XSPICE-style elements, tri-state drivers, and digital bridges
+- **Verilog-A:** compiled behavioral modules
 
-- MOSFET families including BSIM4, BSIM3, EKV, VDMOS, and classic level models
-- BJT, diode, JFET, switches, coupled magnetics, and transmission-line elements
-- Behavioral sources
-- Verilog-A modules
-- XSPICE-style mixed-signal elements and digital bridges
+### Verilog-A
+
+`rspice-veriloga` provides a parser, semantic analysis pipeline, and VM-based runtime for Verilog-A modules, with optional native code generation through a Cranelift JIT (the `native` feature).
+
+### Output Formats
+
+Results can be written as SPICE raw (binary or ASCII), CSV, TSV, JSON, or HDF5. The HDF5 writer is self-contained — no native HDF5 library is required.
 
 ## Workspace
 
-RSpice is organized as a five-crate Rust workspace:
-
 | Crate | Purpose |
 | :--- | :--- |
-| `rspice-core` | Core simulation engine, device models, analyses, parsers, and regression harnesses |
-| `rspice-cli` | Command-line workflow for simulation, validation, conversion, and reporting |
+| `rspice-core` | Simulation engine, device models, analyses, parsers, and regression harnesses |
+| `rspice-cli` | Command-line interface for simulation, validation, conversion, and reporting |
 | `rspice-ui` | Desktop application for schematic editing and waveform inspection |
 | `rspice-veriloga` | Verilog-A parser, semantic pipeline, runtime, and optional native codegen |
 | `rspice-python` | Python bindings built with PyO3 |
+| `rspice-wasm` | WebAssembly bindings for the simulation engine |
 
-Additional crate-specific details:
+Crate-specific documentation:
 - [CLI README](crates/rspice-cli/README.md)
 - [Python README](crates/rspice-python/README.md)
 
 ## Building
 
-### Prerequisites
-
-- Rust 1.85 or newer
-
-### Release Build
+The toolchain is pinned to Rust 1.94 via [rust-toolchain.toml](rust-toolchain.toml); rustup will pick it up automatically.
 
 ```bash
 git clone https://github.com/JaimeHW/RSpice.git
@@ -109,7 +87,7 @@ RUSTFLAGS="-C target-cpu=native" cargo build --release --workspace
 
 ## Quick Start
 
-Create a netlist like `rc_circuit.sp`:
+Create a netlist, `rc_circuit.sp`:
 
 ```spice
 * Simple RC Circuit
@@ -128,24 +106,16 @@ Run it with the CLI:
 cargo run -p rspice-cli --release -- run rc_circuit.sp
 ```
 
-Write the results directly to HDF5:
+Write the results to HDF5 instead:
 
 ```bash
 cargo run -p rspice-cli --release -- run rc_circuit.sp -o rc_circuit.h5 --format hdf5
 ```
 
-## Running the Workspace
-
 ### Desktop UI
 
 ```bash
 cargo run -p rspice-ui --release
-```
-
-### CLI
-
-```bash
-cargo run -p rspice-cli --release -- --help
 ```
 
 ### Python
@@ -165,9 +135,9 @@ result = engine.run_dc_op(netlist)
 print(result.voltage(1))
 ```
 
-## CLI Workflow
+## CLI
 
-Primary CLI commands:
+The CLI is built for scripted runs and CI: it executes the analyses requested by a netlist, validates and inspects netlists, converts between output formats, and compares results against golden references with JUnit/TAP reporting.
 
 | Command | Description |
 | :--- | :--- |
@@ -178,27 +148,19 @@ Primary CLI commands:
 | `rspice convert` | Convert between RAW, ASCII RAW, CSV, JSON, TSV, and HDF5 |
 | `rspice compile-va` | Compile Verilog-A models |
 
-Examples:
-
 ```bash
-# Quiet batch run with JUnit report
+# Quiet batch run with a JUnit report
 rspice run circuit.sp -q --report-format junit --report-file results.xml
-
-# Convert CSV data into HDF5
-rspice convert results.csv results.h5 --to hdf5
 
 # Compare results to a golden file
 rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6
 ```
 
-CLI-specific details are documented in [crates/rspice-cli/README.md](crates/rspice-cli/README.md).
+Full command and option reference: [crates/rspice-cli/README.md](crates/rspice-cli/README.md).
 
 ## Testing
 
-RSpice is validated at three levels: unit tests inside each crate, integration
-tests under `crates/rspice-core/tests/`, and an ngspice regression harness that
-runs the official ngspice test suite (vendored under `tests/`, including the
-checked-in reference `.out` oracles) against the RSpice engine.
+RSpice is validated at three levels: unit tests inside each crate, integration tests under `crates/rspice-core/tests/`, and an ngspice regression harness that runs the official ngspice test suite (vendored under `tests/`, including the checked-in reference `.out` oracles) against the RSpice engine.
 
 ```bash
 # Unit and integration tests for the core engine
@@ -211,29 +173,13 @@ cargo test --release -p rspice-core --test ngspice_regression
 cargo test --release -p rspice-core --test ngspice_regression -- test_ngspice_transient_suite
 ```
 
-### ngspice regression harness
+### ngspice Regression Harness
 
-The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every
-`.cir` deck under `tests/`, executes the analyses each deck requests (`.op`,
-`.dc`, `.tran`, `.ac`, `.pz`, `.noise`, `.sens`, `.tf`), and compares results
-row-by-row against the reference tables with a 2% relative tolerance plus
-probe-aware absolute floors. Every executed analysis must be backed by a
-validation oracle — checked-in reference data, `_t`/`_g` gold-node assertions,
-or an explicit entry in `tests/validation-manifest.tsv` (execution-only
-`smoke` decks and `.control`-scripted upstream decks) — so no deck can pass
-silently. Because reference tables sample each binary's internally chosen
-timesteps, two narrowly gated fallbacks keep the comparison measuring accuracy
-rather than step-sequence reproduction: steep transient rows allow a
-slope-gated time-jitter window of one local reference timestep (ngspice itself
-reproduces its own tables only to within a step at fast edges), and rows where
-the reference oscillates at sample scale (coarse-grid ringing overshoot that
-the official binary does not reproduce at converged settings) are compared
-against the local reference envelope. Operating points, smooth regions, and
-settled levels always keep the strict pointwise tolerances.
+The harness (`crates/rspice-core/src/testing/ngspice_runner/`) discovers every `.cir` deck under `tests/`, executes the analyses each deck requests (`.op`, `.dc`, `.tran`, `.ac`, `.pz`, `.noise`, `.sens`, `.tf`), and compares results row-by-row against the reference tables with a 2% relative tolerance plus probe-aware absolute floors. Every executed analysis must be backed by a validation oracle — checked-in reference data, `_t`/`_g` gold-node assertions, or an explicit entry in `tests/validation-manifest.tsv` — so no deck can pass silently.
 
-Each deck runs in an isolated watchdog-supervised process
-(`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
-Useful environment variables:
+Because reference tables sample each binary's internally chosen timesteps, two narrowly gated fallbacks keep the comparison measuring accuracy rather than step-sequence reproduction: steep transient rows allow a slope-gated time-jitter window of one local reference timestep (ngspice itself reproduces its own tables only to within a step at fast edges), and rows where the reference oscillates at sample scale are compared against the local reference envelope. Operating points, smooth regions, and settled levels always keep the strict pointwise tolerances.
+
+Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite. Useful environment variables:
 
 | Variable | Effect |
 | :--- | :--- |
@@ -243,4 +189,4 @@ Useful environment variables:
 
 ## License
 
-RSpice is source-available software licensed under the **RSpice Personal Use License**.
+RSpice is source-available software licensed under the [RSpice Personal Use License](LICENSE). Personal, educational, and open academic use are permitted; commercial use requires a separate license — see the license text for details.
