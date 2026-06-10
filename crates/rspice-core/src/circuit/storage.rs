@@ -17,6 +17,6 @@ mod passive;
 mod sources;
 
 pub use inductors::Inductors;
-pub use nonlinear::{B3SoiDds, Bjts, Diodes, Mosfets};
+pub use nonlinear::{B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Diodes, Mosfets};
 pub use passive::{Capacitors, Resistors};
 pub use sources::{CurrentSources, VoltageSources};

@@ -11,6 +11,12 @@ pub const MAX_EXP: Value = 5.834617425e14;
 pub const MIN_EXP: Value = 1.713908431e-15;
 /// Exponent magnitude threshold (ngspice `EXP_THRESHOLD`).
 pub const EXP_THRESHOLD: Value = 34.0;
+/// `exp(100.0)` guard value (ngspice `MAX_EXPL`, used by the PD threshold chain).
+pub const MAX_EXPL: Value = 2.688117142e43;
+/// `exp(-100.0)` guard value (ngspice `MIN_EXPL`).
+pub const MIN_EXPL: Value = 3.720075976e-44;
+/// PD exponent magnitude threshold (ngspice `EXPL_THRESHOLD`).
+pub const EXPL_THRESHOLD: Value = 100.0;
 /// Oxide permittivity used by the Berkeley source (F/m).
 pub const EPSOX: Value = 3.453133e-11;
 /// Silicon permittivity used by the Berkeley source (F/m).

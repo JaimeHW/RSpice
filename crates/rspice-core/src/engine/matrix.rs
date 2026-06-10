@@ -176,6 +176,43 @@ impl Engine {
             }
         }
 
+        // B3SOIFD (BSIMSOI level 55) stamps. FD has no body circuit node (the body
+        // is pinned algebraically), so only the 4 active terminals couple. The
+        // body slot is included defensively in case a body-contact node is present.
+        for dev in &circuit.b3soi_fd.devices {
+            let d = dev.node_drain;
+            let g = dev.node_gate;
+            let s = dev.node_source;
+            let e = dev.node_e;
+            let b = dev.node_body;
+            for &row in &[d, g, s, e, b] {
+                for &col in &[d, g, s, e, b] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
+        // B3SOIPD (BSIMSOI level 57) stamps. Like DD, PD couples the full
+        // 5-terminal block (drain, gate, source, back-gate E, body) plus the
+        // body-contact `p` node for the nonideal body tie (bodyMod 1).
+        for dev in &circuit.b3soi_pd.devices {
+            let d = dev.node_drain;
+            let g = dev.node_gate;
+            let s = dev.node_source;
+            let e = dev.node_e;
+            let b = dev.node_body;
+            let p = dev.node_p;
+            for &row in &[d, g, s, e, b, p] {
+                for &col in &[d, g, s, e, b, p] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // JFET stamps (3-terminal: include full 3x3 topology to support AC capacitances).
         for jfet in &circuit.jfets {
             let d = jfet.drain;

@@ -196,6 +196,116 @@ impl B3SoiDds {
     }
 }
 
+/// B3SOIFD (BSIMSOI level 55, fully depleted) storage for the Newton solve.
+///
+/// Mirrors [`B3SoiDds`] but holds [`crate::device::B3SoiFd`] instances. FD has no
+/// body node and its CAPMOD=3 charge companion is integrated by the same engine
+/// B3SOI transient pass as DD, so it shares the orchestration shape.
+#[derive(Debug, Clone, Default)]
+pub struct B3SoiFds {
+    pub devices: Vec<crate::device::B3SoiFd>,
+}
+
+impl B3SoiFds {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, device: crate::device::B3SoiFd) {
+        self.devices.push(device);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all B3SOIFD devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all B3SOIFD devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all B3SOIFD devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
+/// B3SOIPD (BSIMSOI level 57, partially depleted) storage for the Newton solve.
+///
+/// Mirrors [`B3SoiDds`] but holds [`crate::device::B3SoiPd`] instances. PD keeps
+/// a real floating-body node and the full body-current set, so its orchestration
+/// matches DD's exactly.
+#[derive(Debug, Clone, Default)]
+pub struct B3SoiPds {
+    pub devices: Vec<crate::device::B3SoiPd>,
+}
+
+impl B3SoiPds {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, device: crate::device::B3SoiPd) {
+        self.devices.push(device);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all B3SOIPD devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all B3SOIPD devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all B3SOIPD devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
 /// MOSFET storage for nonlinear Newton-Raphson iteration
 #[derive(Debug, Clone, Default)]
 pub struct Mosfets {

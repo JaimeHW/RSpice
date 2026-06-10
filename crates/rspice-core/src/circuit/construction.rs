@@ -24,6 +24,8 @@ impl CircuitData {
             bjts: Bjts::new(),
             mosfets: Mosfets::new(),
             b3soi: B3SoiDds::new(),
+            b3soi_fd: B3SoiFds::new(),
+            b3soi_pd: B3SoiPds::new(),
             jfets: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),

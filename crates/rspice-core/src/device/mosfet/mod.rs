@@ -15,7 +15,7 @@ mod mosfet;
 mod smooth;
 mod vdmos;
 
-pub use b3soi::{B3SoiDd, B3SoiDdModel, BodyMode};
+pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdModel, BodyMode};
 pub use bsim3::{Bsim3, Bsim3Params, Bsim3Region, Bsim3Type};
 pub use bsim4::{Bsim4, Bsim4Params, Bsim4Type};
 pub use ekv::EkvMosfet;
