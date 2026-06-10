@@ -42,9 +42,38 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         max_y
     );
 
-    // Normalize coordinates: translate so bounds start at (0,0)
-    // This is necessary because usvg preserves SVG coordinates with transforms applied
-    // center() uses bounds-based calculation, so paths must be normalized to match
+    // Get viewBox
+    let view_box = tree.size();
+    let vb = (0.0, 0.0, view_box.width(), view_box.height());
+
+    // Clean assets are authored directly in viewBox coordinates: the
+    // viewBox IS the symbol box and the artwork's position inside it is
+    // intentional (pin leads at the exact terminal coordinates). For
+    // those, trust the coordinates verbatim — re-fitting the art bounds
+    // to the viewBox would stretch the drawing and drift the pins off
+    // the terminal grid.
+    let tolerance = 0.5;
+    let authored_in_view_box = min_x != f32::MAX
+        && min_x >= -tolerance
+        && min_y >= -tolerance
+        && max_x <= vb.2 + tolerance
+        && max_y <= vb.3 + tolerance;
+    if authored_in_view_box {
+        return Ok(Symbol {
+            name: String::new(),
+            paths,
+            pins: Vec::new(),
+            bounds: vb,
+            view_box: vb,
+            // Default target dimensions - overridden by load_embedded.
+            target_width: 30.0,
+            target_height: 30.0,
+        });
+    }
+
+    // Legacy path (Inkscape exports with device-space transforms):
+    // normalize coordinates so bounds start at (0,0), then re-fit the art
+    // bounds onto the viewBox.
     let offset_x = if min_x != f32::MAX { min_x } else { 0.0 };
     let offset_y = if min_y != f32::MAX { min_y } else { 0.0 };
 
@@ -78,10 +107,6 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
     } else {
         (40.0, 40.0) // Default fallback
     };
-
-    // Get viewBox
-    let view_box = tree.size();
-    let vb = (0.0, 0.0, view_box.width(), view_box.height());
 
     // Scale paths to match viewBox coordinate space
     // usvg may extract paths at different DPI than viewBox dimensions

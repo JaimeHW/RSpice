@@ -18,9 +18,13 @@ use crate::ui::widgets::{
 // ---------------------------------------------------------------------------
 
 /// Render the schematic context's left panel.
-pub fn left(ui: &mut Ui, state: &mut AppState) {
+pub fn left(
+    ui: &mut Ui,
+    state: &mut AppState,
+    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
+) {
     hierarchy_section(ui, state);
-    components_section(ui, state);
+    components_section(ui, state, symbol_library);
     quick_place_section(ui, state);
 }
 
@@ -171,7 +175,11 @@ fn matching_cells(state: &AppState) -> std::rc::Rc<Vec<CellEntry>> {
     })
 }
 
-fn components_section(ui: &mut Ui, state: &mut AppState) {
+fn components_section(
+    ui: &mut Ui,
+    state: &mut AppState,
+    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
+) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -290,6 +298,7 @@ fn components_section(ui: &mut Ui, state: &mut AppState) {
                         rect,
                         kind,
                         c.symbol,
+                        symbol_library,
                     );
                 } else {
                     // Hierarchical cell: generic block symbol.

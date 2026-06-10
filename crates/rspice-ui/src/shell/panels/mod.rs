@@ -22,7 +22,11 @@ const LEFT_WIDTH: f32 = 264.0;
 const RIGHT_WIDTH: f32 = 304.0;
 
 /// Render both contextual side panels for the active view.
-pub fn show(ctx: &Context, state: &mut AppState) {
+pub fn show(
+    ctx: &Context,
+    state: &mut AppState,
+    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
+) {
     if state.shell.panels_hidden || !state.shell.view.has_side_panels() {
         return;
     }
@@ -45,7 +49,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 .id_salt("volta.left.scroll")
                 .auto_shrink([false, false])
                 .show(ui, |ui| match state.shell.view {
-                    WorkspaceView::Schematic => schematic::left(ui, state),
+                    WorkspaceView::Schematic => schematic::left(ui, state, symbol_library),
                     WorkspaceView::Simulate => simulate::left(ui, state),
                     WorkspaceView::Results => results::left(ui, state),
                     _ => {}

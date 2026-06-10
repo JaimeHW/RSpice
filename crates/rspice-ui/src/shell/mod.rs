@@ -49,7 +49,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     wtabs::show(ctx, &mut app.state);
     statusbar::show(ctx, &mut app.state);
     console::show(ctx, &mut app.state);
-    panels::show(ctx, &mut app.state);
+    panels::show(ctx, &mut app.state, app.symbol_library.as_ref());
     views::show(ctx, app);
 
     // Deferred requests that need IO backends owned by the app.

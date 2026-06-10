@@ -73,12 +73,36 @@ pub fn render_schematic_view(
 
 /// Paint a component symbol centered in `rect` — used by the component
 /// browser's preview pane. Pure presentation: no state access.
+///
+/// Uses the same SVG symbol the canvas renders (scaled to fit the rect);
+/// procedural primitives are only the no-library fallback.
 pub fn draw_symbol_preview(
     painter: &egui::Painter,
     rect: egui::Rect,
     kind: crate::state::ComponentType,
     color: egui::Color32,
+    symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
 ) {
     let stroke = egui::Stroke::new(1.6, color);
+
+    if let Some(library) = symbol_library
+        && let Some((symbol, rotation)) = library.get_with_rotation_variant(kind, 0, None)
+    {
+        // Fit the symbol's grid-unit box into the preview rect.
+        let fit = ((rect.width() - 12.0) / symbol.target_width.max(0.001))
+            .min((rect.height() - 8.0) / symbol.target_height.max(0.001));
+        crate::schematic::symbols::draw_symbol(
+            painter,
+            symbol,
+            rect.center(),
+            fit,
+            rotation,
+            false,
+            false,
+            stroke,
+        );
+        return;
+    }
+
     preview::draw_procedural_component_preview(painter, kind, rect.center(), 0.9, 0, stroke);
 }

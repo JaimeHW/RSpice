@@ -15,6 +15,9 @@ use super::types::{PathCommand, Symbol};
 #[derive(Debug, Clone, Default)]
 pub struct BakedSymbol {
     polylines: Vec<Vec<Vec2>>,
+    /// Closed filled shapes (arrowheads, junction bars) painted in the
+    /// stroke color.
+    filled: Vec<Vec<Vec2>>,
     corner_dots: Vec<Vec2>,
 }
 
@@ -38,11 +41,16 @@ pub fn bake_symbol(
     for path in &symbol.paths {
         let mut points: Vec<Vec2> = Vec::new();
         let mut current_pos = (0.0f32, 0.0f32);
+        let path_filled = path.filled;
 
-        let flush = |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
+        let flush = move |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
             if points.len() >= 2 {
-                collect_corner_dots(points, &mut baked.corner_dots);
-                baked.polylines.push(std::mem::take(points));
+                if path_filled {
+                    baked.filled.push(std::mem::take(points));
+                } else {
+                    collect_corner_dots(points, &mut baked.corner_dots);
+                    baked.polylines.push(std::mem::take(points));
+                }
             } else {
                 points.clear();
             }
@@ -139,6 +147,14 @@ pub fn draw_baked(
             let points: Vec<Pos2> = line.iter().map(|p| center + *p * scale).collect();
             painter.add(Shape::line(points, stroke));
         }
+    }
+    for polygon in &baked.filled {
+        let points: Vec<Pos2> = polygon.iter().map(|p| center + *p * scale).collect();
+        painter.add(Shape::convex_polygon(
+            points,
+            stroke.color,
+            Stroke::new(stroke.width * 0.5, stroke.color),
+        ));
     }
 }
 
@@ -264,7 +280,15 @@ pub fn draw_symbol(
 
         // Draw remaining points
         if points.len() >= 2 {
-            draw_path_segment(painter, &points, stroke);
+            if path.filled {
+                painter.add(Shape::convex_polygon(
+                    points.clone(),
+                    stroke.color,
+                    Stroke::new(stroke.width * 0.5, stroke.color),
+                ));
+            } else {
+                draw_path_segment(painter, &points, stroke);
+            }
         }
     }
 

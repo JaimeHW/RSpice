@@ -1,57 +1,15 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<!-- Created with Inkscape (http://www.inkscape.org/) -->
-
-<svg
-   width="40.500015mm"
-   height="71.000023mm"
-   viewBox="0 0 40.500015 71.000023"
-   version="1.1"
-   id="svg17030"
-   xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg">
-  <defs
-     id="defs17027">
-    <marker
-       style="overflow:visible"
-       id="TriangleInM-6-3"
-       refX="0"
-       refY="0"
-       orient="auto">
-      <path
-         transform="scale(-0.4)"
-         style="fill:context-stroke;fill-rule:evenodd;stroke:context-stroke;stroke-width:1pt"
-         d="M 5.77,0 -2.88,5 V -5 Z"
-         id="path20951-7-6" />
-    </marker>
-  </defs>
-  <g
-     id="layer1"
-     style="display:inline"
-     transform="translate(330,-504.25)">
-    <path
-       style="display:inline;fill:none;stroke:#000000;stroke-width:1.5;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;marker-start:url(#TriangleInM-6-3)"
-       d="m -296,554.75 h -1"
-       id="path1810-7" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:3;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="M -311,519.5 V 560"
-       id="path19671" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:3;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -318.5,524.75 v 30"
-       id="path19706" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -311,524.75 h 21 v -20"
-       id="path19788" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -311,554.75 h 21 v 20"
-       id="path19790" />
-    <path
-       style="fill:none;stroke:#000000;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1"
-       d="m -318,539.75 h -12"
-       id="path19835" />
-  </g>
-
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- N-channel enhancement MOSFET (four-terminal).
+     Box 40x80, pins D(40,0), G(0,40), S(40,80), B(40,40).
+     Broken channel (enhancement); body arrow points into the channel. -->
+<svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,40 H 13" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 13,27 V 53" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,25 V 35" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,37.5 V 42.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17,45 V 55" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 40,0 V 30 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,80 V 50 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 40,40 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 17.6,40 L 25,37.6 L 25,42.4 Z" fill="#000000" stroke="none"/>
 </svg>
