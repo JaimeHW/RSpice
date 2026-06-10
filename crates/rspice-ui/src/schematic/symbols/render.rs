@@ -39,15 +39,14 @@ pub fn bake_symbol(
         let mut points: Vec<Vec2> = Vec::new();
         let mut current_pos = (0.0f32, 0.0f32);
 
-        let mut flush =
-            |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
-                if points.len() >= 2 {
-                    collect_corner_dots(points, &mut baked.corner_dots);
-                    baked.polylines.push(std::mem::take(points));
-                } else {
-                    points.clear();
-                }
-            };
+        let flush = |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
+            if points.len() >= 2 {
+                collect_corner_dots(points, &mut baked.corner_dots);
+                baked.polylines.push(std::mem::take(points));
+            } else {
+                points.clear();
+            }
+        };
 
         for cmd in &path.commands {
             match cmd {

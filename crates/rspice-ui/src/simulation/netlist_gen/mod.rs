@@ -28,7 +28,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::state::{Component, ComponentType, Point, SchematicState, Wire};
+use crate::state::{Component, ComponentType, Point, SchematicState};
+#[cfg(test)]
+use crate::state::Wire;
 
 mod connectivity;
 mod formatting;
