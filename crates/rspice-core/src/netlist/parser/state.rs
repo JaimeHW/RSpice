@@ -25,6 +25,8 @@ pub(super) struct ParseState {
     pub(super) measurements: Vec<MeasureStatement>,
     pub(super) options: super::SimulationOptions,
     pub(super) subckt_stack: Vec<SubcktFrame>,
+    /// Open `.if`/`.elseif`/`.else` blocks, innermost last.
+    pub(super) conditional_stack: Vec<ConditionalFrame>,
 }
 
 impl ParseState {
@@ -42,6 +44,7 @@ impl ParseState {
             measurements: Vec::new(),
             options: super::SimulationOptions::default(),
             subckt_stack: Vec::new(),
+            conditional_stack: Vec::new(),
         }
     }
 

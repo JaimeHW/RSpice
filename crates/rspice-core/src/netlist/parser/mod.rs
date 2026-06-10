@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 
 mod command_parsers;
 mod commands;
+mod conditionals;
 mod elements;
 mod line;
 mod scoping;
@@ -31,6 +32,7 @@ mod values;
 
 use command_parsers::*;
 use commands::*;
+use conditionals::*;
 use elements::*;
 use line::*;
 use scoping::*;
@@ -89,7 +91,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
         // Process previous continued line if exists
         if !continuation.is_empty() {
-            process_line(&continuation, line_num - 1, &mut state)?;
+            process_line_gated(&continuation, line_num - 1, &mut state)?;
             continuation.clear();
         }
 
@@ -111,10 +113,34 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
     // Process final line
     if !continuation.is_empty() {
-        process_line(&continuation, line_num, &mut state)?;
+        process_line_gated(&continuation, line_num, &mut state)?;
+    }
+
+    if let Some(frame) = state.conditional_stack.last() {
+        return Err(ParseError::Syntax {
+            line: frame.opened_at_line,
+            message: ".if without a matching .endif".to_string(),
+        });
     }
 
     state.into_netlist(title, input, line_num)
+}
+
+/// Dispatch one logical line through the conditional gate: conditional
+/// directives update the block stack, lines inside false branches are
+/// skipped, and everything else flows to `process_line`.
+fn process_line_gated(
+    line: &str,
+    line_num: usize,
+    state: &mut ParseState,
+) -> Result<(), ParseError> {
+    if let Some(directive) = parse_conditional_directive(line) {
+        return state.apply_conditional_directive(directive, line_num);
+    }
+    if state.conditionals_suppress() {
+        return Ok(());
+    }
+    process_line(line, line_num, state)
 }
 
 /// Pre-scan for `.options seed=<n>` (alias `rndseed=<n>`) so the statistical
