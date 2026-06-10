@@ -96,14 +96,16 @@ pub(super) fn run_monte_carlo(
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
     } else {
-        let pb = indicatif::ProgressBar::new(num_runs as u64);
+        // The engine runs all iterations in one call without progress
+        // callbacks; show honest elapsed time instead of a frozen bar.
+        let pb = indicatif::ProgressBar::new_spinner();
         pb.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
+            indicatif::ProgressStyle::default_spinner()
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap(),
         );
-        pb.set_message("Monte Carlo");
+        pb.set_message(format!("Monte Carlo: {} runs (seed {})", num_runs, seed));
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
         pb
     };
 

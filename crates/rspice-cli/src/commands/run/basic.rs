@@ -283,15 +283,19 @@ pub(super) fn run_transient(
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
     } else if ctx.show_progress {
-        let eta_steps = ((tstop - tstart) / tstep) as u64;
-        let pb = indicatif::ProgressBar::new(eta_steps);
+        // The engine does not report per-step progress to the CLI yet, so
+        // show honest elapsed time rather than a bar that never advances.
+        let pb = indicatif::ProgressBar::new_spinner();
         pb.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("{spinner:.green} [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-                .unwrap()
-                .progress_chars("#>-"),
+            indicatif::ProgressStyle::default_spinner()
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap(),
         );
-        pb.set_message(format!("Transient: {} to {}", tstart, tstop));
+        pb.set_message(format!(
+            "Transient: {} to {} s (step {})",
+            tstart, tstop, tstep
+        ));
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
         pb
     } else {
         let pb = indicatif::ProgressBar::new_spinner();
