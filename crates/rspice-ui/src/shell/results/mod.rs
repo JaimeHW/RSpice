@@ -132,6 +132,8 @@ pub struct ResultsState {
     pub fft_series: Option<FftSeries>,
     /// Cached Bode margins + extremes for the active data version.
     pub bode: Option<BodeDerived>,
+    /// Baked EYE density texture for the active eye revision and size.
+    pub eye_texture: Option<EyeTexture>,
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
@@ -156,6 +158,26 @@ pub struct FftSeries {
     pub(crate) magnitude_db: std::sync::Arc<[f64]>,
     /// Cached finite (lo, hi) of the magnitude within view: (x1 bits, lo, hi).
     pub(crate) y_extremes: Option<(u64, f64, f64)>,
+}
+
+/// GPU density image for the EYE viewer, baked once per (data revision,
+/// plot size, trace color) — per frame the eye then costs one textured
+/// quad instead of restroking every folded acquisition.
+#[derive(Clone)]
+pub struct EyeTexture {
+    pub(crate) revision: u64,
+    pub(crate) size: [usize; 2],
+    pub(crate) color: egui::Color32,
+    pub(crate) handle: egui::TextureHandle,
+}
+
+impl std::fmt::Debug for EyeTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EyeTexture")
+            .field("revision", &self.revision)
+            .field("size", &self.size)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Stability numbers and axis extremes computed from the active AC curves.

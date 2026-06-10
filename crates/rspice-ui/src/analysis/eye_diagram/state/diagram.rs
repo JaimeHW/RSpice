@@ -46,6 +46,9 @@ pub struct EyeDiagramState {
     pub measurements_pane_width: Option<f32>,
     /// Runtime auto-fit width hint captured from rendered content.
     pub measurements_pane_auto_width_hint: f32,
+    /// Monotonic revision of `data`, bumped on every `load_data` — display
+    /// caches key on this instead of data identity.
+    data_revision: u64,
 }
 
 impl Default for EyeDiagramState {
@@ -70,6 +73,7 @@ impl Default for EyeDiagramState {
             persistence_cache: None,
             measurements_pane_width: None,
             measurements_pane_auto_width_hint: 0.0,
+            data_revision: 0,
         }
     }
 }
@@ -80,9 +84,15 @@ impl EyeDiagramState {
         Self::default()
     }
 
+    /// Monotonic revision of the loaded data, for display caches.
+    pub fn data_revision(&self) -> u64 {
+        self.data_revision
+    }
+
     /// Load eye data and recalculate measurements
     pub fn load_data(&mut self, data: EyeData) {
         self.ui_count = data.ui_count.max(1);
+        self.data_revision = self.data_revision.wrapping_add(1);
         self.data = data;
         if let Some(idx) = self.selected_trace
             && idx >= self.data.traces.len()

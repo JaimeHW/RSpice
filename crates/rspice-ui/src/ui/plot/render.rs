@@ -24,6 +24,23 @@ pub struct PlotResponse {
 /// A row of the hover readout: (label, value).
 pub type ReadoutRow = (String, String);
 
+/// The inner plot rectangle `show` will use for the current available
+/// space — for callers that pre-bake size-dependent resources (textures)
+/// before handing the spec over.
+pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
+    inner_rect(ui.available_rect_before_wrap(), spec)
+}
+
+fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
+    let left = spec.left_margin;
+    let right = if spec.y_right.is_some() { 54.0 } else { 16.0 };
+    let (top, bottom) = (12.0, 26.0);
+    Rect::from_min_max(
+        pos2(rect.left() + left, rect.top() + top),
+        pos2(rect.right() - right, rect.bottom() - bottom),
+    )
+}
+
 /// Render a plot filling the remaining space of `ui`.
 ///
 /// `cursors` draws the A/B verticals when placed (in this plot's X domain).
@@ -41,14 +58,7 @@ pub fn show(
 
     let rect = ui.available_rect_before_wrap();
     let response = ui.allocate_rect(rect, Sense::click());
-
-    let left = spec.left_margin;
-    let right = if spec.y_right.is_some() { 54.0 } else { 16.0 };
-    let (top, bottom) = (12.0, 26.0);
-    let plot_rect = Rect::from_min_max(
-        pos2(rect.left() + left, rect.top() + top),
-        pos2(rect.right() - right, rect.bottom() - bottom),
-    );
+    let plot_rect = inner_rect(rect, spec);
 
     let mut out = PlotResponse {
         response,
@@ -174,7 +184,10 @@ pub fn show(
     // ---- traces (clipped to the plot area)
     {
         let clipped = ui.painter_at(plot_rect.expand(1.0));
-        let columns = plot_rect.width().ceil() as usize;
+        // Round the column count up to 64-px buckets: a live window resize
+        // then reuses cached envelopes instead of re-decimating every trace
+        // every frame (the envelope is always at least pixel-dense).
+        let columns = (plot_rect.width().ceil() as usize).next_multiple_of(64);
         for trace in &spec.traces {
             if trace.x.is_empty() {
                 continue;
@@ -204,7 +217,10 @@ pub fn show(
             if points.len() < 2 {
                 continue;
             }
-            if trace.dashed {
+            // Dashing a dense min/max envelope would emit one shape per
+            // dash along a path that zig-zags every column — thousands of
+            // segments reading as noise. Sparse curves dash normally.
+            if trace.dashed && points.len() < columns {
                 clipped.extend(Shape::dashed_line(&points, stroke, 5.0, 4.0));
             } else {
                 clipped.add(Shape::line(points, stroke));

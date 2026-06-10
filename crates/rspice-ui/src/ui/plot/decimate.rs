@@ -16,9 +16,19 @@ use super::scale::XScale;
 /// cleared wholesale when the data version changes.
 #[derive(Debug, Default, Clone)]
 pub struct DecimationCache {
-    map: HashMap<CacheKey, Arc<[[f64; 2]]>>,
+    map: HashMap<CacheKey, Entry>,
     /// Data version the cache contents belong to.
     version: u64,
+    /// Frame tick, advanced once per frame by `ensure_version` — eviction
+    /// keeps entries the current frame touched instead of nuking the hot
+    /// working set.
+    tick: u64,
+}
+
+#[derive(Debug, Clone)]
+struct Entry {
+    envelope: Arc<[[f64; 2]]>,
+    last_used: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -29,14 +39,18 @@ struct CacheKey {
     x1_bits: u64,
 }
 
+/// Entry-count bound; old views evict once it's exceeded.
+const CACHE_CAP: usize = 256;
+
 impl DecimationCache {
     /// Drop everything if `version` differs from the cached one (new run /
-    /// new analysis selection).
+    /// new analysis selection), and advance the frame tick.
     pub fn ensure_version(&mut self, version: u64) {
         if self.version != version {
             self.map.clear();
             self.version = version;
         }
+        self.tick = self.tick.wrapping_add(1);
     }
 
     /// Fetch or compute the envelope for one trace at the given view.
@@ -56,15 +70,26 @@ impl DecimationCache {
             x0_bits: x0.to_bits(),
             x1_bits: x1.to_bits(),
         };
-        if let Some(hit) = self.map.get(&key) {
-            return Arc::clone(hit);
+        if let Some(hit) = self.map.get_mut(&key) {
+            hit.last_used = self.tick;
+            return Arc::clone(&hit.envelope);
         }
-        // Zooming/panning mints new keys; keep the working set bounded.
-        if self.map.len() > 256 {
-            self.map.clear();
+        // Resize/zoom mint new keys; evict stale views, keep this frame's.
+        if self.map.len() > CACHE_CAP {
+            let tick = self.tick;
+            self.map.retain(|_, entry| entry.last_used == tick);
+            if self.map.len() > CACHE_CAP {
+                self.map.clear();
+            }
         }
         let envelope: Arc<[[f64; 2]]> = decimate_minmax(x, y, x0, x1, x_scale, columns).into();
-        self.map.insert(key, Arc::clone(&envelope));
+        self.map.insert(
+            key,
+            Entry {
+                envelope: Arc::clone(&envelope),
+                last_used: self.tick,
+            },
+        );
         envelope
     }
 }

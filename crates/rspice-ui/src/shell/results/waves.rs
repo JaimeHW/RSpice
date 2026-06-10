@@ -292,7 +292,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             close_strip = Some(model.analysis_index);
                         }
 
-                        show_strip_plot(ui, state, model);
+                        // Strips scrolled out of view skip the plot body
+                        // entirely (range lookups, envelope mapping, shape
+                        // building) — only the space is reserved.
+                        let plot_rect = ui.available_rect_before_wrap();
+                        if ui.is_rect_visible(plot_rect) {
+                            show_strip_plot(ui, state, model);
+                        } else {
+                            ui.allocate_exact_size(plot_rect.size(), egui::Sense::hover());
+                        }
                     },
                 );
             }

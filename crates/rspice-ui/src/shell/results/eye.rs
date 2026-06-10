@@ -2,11 +2,14 @@
 //! metrics in the right panel.
 //!
 //! Acquisitions are folded segments of the active transient (built by the
-//! eye pipeline); each is stroked at low alpha so overlap accumulates into
-//! the classic density picture — one batched pass, no textures.
+//! eye pipeline). They are rasterized once per data revision into an
+//! alpha-accumulated density texture — the classic persistence picture —
+//! so each frame costs one textured quad plus the vector mask, instead of
+//! restroking a transient's worth of segments.
 
 use egui::Ui;
 
+use crate::analysis::eye_diagram::EyeData;
 use crate::common::AppState;
 use crate::ui::plot::{self, Axis, PlotSpec, XScale, fmt_si};
 use crate::ui::tokens::Tokens;
@@ -58,32 +61,57 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(y0, y1, "V"),
     );
 
-    // Density underlay: every acquisition at low alpha; the mask above them.
-    let show_mask = eye.show_mask && eye.mask.enabled && !eye.mask.inner.points.is_empty();
-    let alpha_color = {
-        let [r, g, b, _] = c.traces[0].to_array();
-        egui::Color32::from_rgba_unmultiplied(r, g, b, 18)
+    // Bake (or fetch) the density texture for the current plot size. The
+    // bake walks every acquisition once; frames just draw the quad.
+    let plot_rect = plot::plot_rect(ui, &spec);
+    let tex_size = [
+        (plot_rect.width().round() as usize).max(8),
+        (plot_rect.height().round() as usize).max(8),
+    ];
+    let revision = eye.data_revision();
+    let trace_color = c.traces[0];
+    let needs_bake = match &state.shell.results.eye_texture {
+        Some(tex) => {
+            tex.revision != revision || tex.size != tex_size || tex.color != trace_color
+        }
+        None => true,
     };
+    if needs_bake {
+        let image = rasterize_density(data, ui_count, y0, y1, tex_size, trace_color);
+        let handle =
+            ui.ctx()
+                .load_texture("volta.eye.density", image, egui::TextureOptions::LINEAR);
+        state.shell.results.eye_texture = Some(super::EyeTexture {
+            revision,
+            size: tex_size,
+            color: trace_color,
+            handle,
+        });
+    }
+    let texture_id = state
+        .shell
+        .results
+        .eye_texture
+        .as_ref()
+        .map(|tex| tex.handle.id());
+
+    // Underlay: the density quad, then the mask above it.
+    let show_mask = eye.show_mask && eye.mask.enabled && !eye.mask.inner.points.is_empty();
     let mask_fill = {
         let [r, g, b, _] = c.err.to_array();
         egui::Color32::from_rgba_unmultiplied(r, g, b, 26)
     };
-    let stroke = egui::Stroke::new(1.4, alpha_color);
-    let traces = &data.traces;
     let mask_points: &[(f64, f64)] = &eye.mask.inner.points;
     let v_cross = data.v_cross;
     let err = c.err;
     spec.underlay = Some(Box::new(move |painter, mapper| {
-        for trace in traces {
-            let points: Vec<egui::Pos2> = trace
-                .time
-                .iter()
-                .zip(trace.amplitude.iter())
-                .map(|(&x, &v)| egui::pos2(mapper.x(x), mapper.y(v)))
-                .collect();
-            if points.len() >= 2 {
-                painter.add(egui::Shape::line(points, stroke));
-            }
+        if let Some(texture_id) = texture_id {
+            painter.image(
+                texture_id,
+                mapper.rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
         }
         if show_mask {
             let points: Vec<egui::Pos2> = mask_points
@@ -118,6 +146,83 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 /// Map a normalized mask voltage to volts around the crossing level.
 fn eye_mask_v(v_normalized: f64, v_cross: f64, swing: f64) -> f64 {
     v_cross + v_normalized * swing
+}
+
+/// Rasterize every acquisition into an alpha-accumulated density image —
+/// the same visual as stroking each at ~18/255 alpha, computed once.
+fn rasterize_density(
+    data: &EyeData,
+    ui_count: f64,
+    y0: f64,
+    y1: f64,
+    size: [usize; 2],
+    color: egui::Color32,
+) -> egui::ColorImage {
+    let [width, height] = size;
+    let mut coverage = vec![0.0f32; width * height];
+    let x_scale = width as f64 / ui_count.max(1e-12);
+    let y_span = (y1 - y0).max(1e-12);
+    let y_scale = height as f64 / y_span;
+
+    for trace in &data.traces {
+        let n = trace.time.len().min(trace.amplitude.len());
+        for i in 1..n {
+            let ax = (trace.time[i - 1] * x_scale) as f32;
+            let ay = ((y1 - trace.amplitude[i - 1]) * y_scale) as f32;
+            let bx = (trace.time[i] * x_scale) as f32;
+            let by = ((y1 - trace.amplitude[i]) * y_scale) as f32;
+            accumulate_line(&mut coverage, width, height, ax, ay, bx, by);
+        }
+    }
+
+    let [r, g, b, _] = color.to_array();
+    let pixels = coverage
+        .iter()
+        .map(|&cov| {
+            let alpha = (cov * 18.0).min(255.0) as u8;
+            egui::Color32::from_rgba_unmultiplied(r, g, b, alpha)
+        })
+        .collect();
+    egui::ColorImage {
+        size: [width, height],
+        pixels,
+    }
+}
+
+/// Anti-aliased DDA: walk the segment one pixel-step at a time, splitting
+/// each step's coverage bilinearly across the four nearest pixels.
+fn accumulate_line(
+    coverage: &mut [f32],
+    width: usize,
+    height: usize,
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+) {
+    let dx = bx - ax;
+    let dy = by - ay;
+    let steps = dx.abs().max(dy.abs()).ceil().max(1.0) as usize;
+    let inv = 1.0 / steps as f32;
+    for step in 0..steps {
+        let t = step as f32 * inv;
+        let x = ax + dx * t;
+        let y = ay + dy * t;
+        let (xf, yf) = (x.floor(), y.floor());
+        let (fx, fy) = (x - xf, y - yf);
+        let (xi, yi) = (xf as isize, yf as isize);
+        let splat = [
+            (xi, yi, (1.0 - fx) * (1.0 - fy)),
+            (xi + 1, yi, fx * (1.0 - fy)),
+            (xi, yi + 1, (1.0 - fx) * fy),
+            (xi + 1, yi + 1, fx * fy),
+        ];
+        for (px, py, weight) in splat {
+            if px >= 0 && py >= 0 && (px as usize) < width && (py as usize) < height {
+                coverage[py as usize * width + px as usize] += weight;
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
