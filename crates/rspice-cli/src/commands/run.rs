@@ -10,9 +10,10 @@
 
 mod advanced;
 mod basic;
-mod export;
 mod frequency;
 mod shared;
+
+pub(crate) use crate::commands::export_table as export;
 
 use crate::report::{
     CsvMeasReporter, JUnitReporter, JsonMeasReporter, MeasurementReport, SimulationReport,

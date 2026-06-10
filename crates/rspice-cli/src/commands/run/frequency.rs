@@ -236,20 +236,20 @@ pub(super) fn run_noise(
                     use super::export::{ColumnData, ExportColumn, ExportTable};
 
                     ExportTable {
-                        analysis: "noise",
-                        plot_name: "Noise Spectral Density Curves",
+                        analysis: "noise".to_string(),
+                        plot_name: "Noise Spectral Density Curves".to_string(),
                         scale_name: "frequency".to_string(),
-                        scale_type: "frequency",
+                        scale_type: "frequency".to_string(),
                         scale: noise_frequencies,
                         columns: vec![
                             ExportColumn {
                                 name: "onoise_spectrum".to_string(),
-                                var_type: "voltage",
+                                var_type: "voltage".to_string(),
                                 data: ColumnData::Real(onoise),
                             },
                             ExportColumn {
                                 name: "inoise_spectrum".to_string(),
-                                var_type: "voltage",
+                                var_type: "voltage".to_string(),
                                 data: ColumnData::Real(inoise),
                             },
                         ],

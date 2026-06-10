@@ -1,4 +1,4 @@
-//! Unified text/raw output writers for `rspice run` analyses.
+//! Unified tabular result model shared by `run`, `convert`, and `compare`.
 //!
 //! Every analysis that honors `--output` routes its tabular results through
 //! [`ExportTable`], which renders the same data in any requested
@@ -10,6 +10,9 @@
 //! - `csv` / `tsv`: one column for the scale plus one (real) or two
 //!   (complex, `Re(..)`/`Im(..)`) columns per signal
 //! - `json`: a `{"analysis", "scale", "signals"}` document
+//!
+//! The same structure is what `convert` and `compare` read files back into;
+//! see [`crate::commands::waveform_io`].
 
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ComplexSignal, ScalarSignal};
@@ -17,54 +20,54 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// Data for one exported signal column.
-pub(super) enum ColumnData {
+pub(crate) enum ColumnData {
     Real(Vec<f64>),
     Complex { real: Vec<f64>, imag: Vec<f64> },
 }
 
 /// One exported signal column.
-pub(super) struct ExportColumn {
+pub(crate) struct ExportColumn {
     /// Display name, e.g. `V(out)` or `onoise_spectrum`
-    pub(super) name: String,
+    pub(crate) name: String,
     /// Rawfile variable type, e.g. `voltage`
-    pub(super) var_type: &'static str,
-    pub(super) data: ColumnData,
+    pub(crate) var_type: String,
+    pub(crate) data: ColumnData,
 }
 
 /// A complete result table for one analysis.
-pub(super) struct ExportTable {
+pub(crate) struct ExportTable {
     /// JSON `analysis` tag, e.g. `ac`
-    pub(super) analysis: &'static str,
+    pub(crate) analysis: String,
     /// Rawfile `Plotname`, e.g. `AC Analysis`
-    pub(super) plot_name: &'static str,
+    pub(crate) plot_name: String,
     /// Scale (independent variable) name, e.g. `time` or `frequency`
-    pub(super) scale_name: String,
+    pub(crate) scale_name: String,
     /// Rawfile variable type of the scale
-    pub(super) scale_type: &'static str,
-    pub(super) scale: Vec<f64>,
-    pub(super) columns: Vec<ExportColumn>,
+    pub(crate) scale_type: String,
+    pub(crate) scale: Vec<f64>,
+    pub(crate) columns: Vec<ExportColumn>,
 }
 
 /// Build a table from real-valued signals (transient, DC sweep, noise, ...).
-pub(super) fn scalar_table(
-    analysis: &'static str,
-    plot_name: &'static str,
+pub(crate) fn scalar_table(
+    analysis: impl Into<String>,
+    plot_name: impl Into<String>,
     scale_name: impl Into<String>,
-    scale_type: &'static str,
+    scale_type: impl Into<String>,
     scale: Vec<f64>,
     signals: &[ScalarSignal],
 ) -> ExportTable {
     ExportTable {
-        analysis,
-        plot_name,
+        analysis: analysis.into(),
+        plot_name: plot_name.into(),
         scale_name: scale_name.into(),
-        scale_type,
+        scale_type: scale_type.into(),
         scale,
         columns: signals
             .iter()
             .map(|signal| ExportColumn {
                 name: signal.display_name.clone(),
-                var_type: signal.kind.raw_variable_type(),
+                var_type: signal.kind.raw_variable_type().to_string(),
                 data: ColumnData::Real(signal.values.clone()),
             })
             .collect(),
@@ -72,23 +75,23 @@ pub(super) fn scalar_table(
 }
 
 /// Build a table from complex-valued signals (AC and related sweeps).
-pub(super) fn complex_table(
-    analysis: &'static str,
-    plot_name: &'static str,
+pub(crate) fn complex_table(
+    analysis: impl Into<String>,
+    plot_name: impl Into<String>,
     scale: Vec<f64>,
     signals: &[ComplexSignal],
 ) -> ExportTable {
     ExportTable {
-        analysis,
-        plot_name,
+        analysis: analysis.into(),
+        plot_name: plot_name.into(),
         scale_name: "frequency".to_string(),
-        scale_type: "frequency",
+        scale_type: "frequency".to_string(),
         scale,
         columns: signals
             .iter()
             .map(|signal| ExportColumn {
                 name: signal.display_name.clone(),
-                var_type: signal.kind.raw_variable_type(),
+                var_type: signal.kind.raw_variable_type().to_string(),
                 data: ColumnData::Complex {
                     real: signal.real.clone(),
                     imag: signal.imag.clone(),
@@ -99,16 +102,105 @@ pub(super) fn complex_table(
 }
 
 impl ExportTable {
-    fn is_complex(&self) -> bool {
+    pub(crate) fn is_complex(&self) -> bool {
         self.columns
             .iter()
             .any(|column| matches!(column.data, ColumnData::Complex { .. }))
     }
 
+    /// Keep only the requested columns (case-insensitive name match).
+    ///
+    /// Names match either the full column name (`V(out)`) or the bare inner
+    /// name (`out`). Unknown names are an error listing what is available.
+    pub(crate) fn select_variables(&mut self, requested: &[String]) -> Result<(), CliError> {
+        if requested.is_empty() {
+            return Ok(());
+        }
+
+        let matches = |column: &ExportColumn, want: &str| {
+            if column.name.eq_ignore_ascii_case(want) {
+                return true;
+            }
+            // Match `out` against `V(out)` / `I(out)`
+            let inner = column
+                .name
+                .split_once('(')
+                .and_then(|(_, rest)| rest.strip_suffix(')'));
+            inner.is_some_and(|inner| inner.eq_ignore_ascii_case(want))
+        };
+
+        for want in requested {
+            if !self.columns.iter().any(|column| matches(column, want)) {
+                let available: Vec<&str> =
+                    self.columns.iter().map(|c| c.name.as_str()).collect();
+                return Err(CliError::InvalidArgument {
+                    message: format!("variable '{}' not found in input", want),
+                    suggestion: Some(format!("available variables: {}", available.join(", "))),
+                });
+            }
+        }
+
+        self.columns
+            .retain(|column| requested.iter().any(|want| matches(column, want)));
+        Ok(())
+    }
+
+    /// Keep only rows whose scale value lies within `[start, stop]`.
+    pub(crate) fn clip_scale_range(&mut self, start: Option<f64>, stop: Option<f64>) {
+        if start.is_none() && stop.is_none() {
+            return;
+        }
+        let lo = start.unwrap_or(f64::NEG_INFINITY);
+        let hi = stop.unwrap_or(f64::INFINITY);
+
+        let keep: Vec<bool> = self
+            .scale
+            .iter()
+            .map(|&value| value >= lo && value <= hi)
+            .collect();
+
+        let filter = |values: &mut Vec<f64>| {
+            let mut index = 0;
+            values.retain(|_| {
+                let kept = keep.get(index).copied().unwrap_or(false);
+                index += 1;
+                kept
+            });
+        };
+
+        filter(&mut self.scale);
+        for column in &mut self.columns {
+            match &mut column.data {
+                ColumnData::Real(values) => filter(values),
+                ColumnData::Complex { real, imag } => {
+                    filter(real);
+                    filter(imag);
+                }
+            }
+        }
+    }
+
+    /// Flatten to real-valued named series, scale first; complex columns
+    /// expand to `Re(name)` / `Im(name)`. Used for value-wise comparison.
+    pub(crate) fn to_real_series(&self) -> Vec<(String, Vec<f64>)> {
+        let mut series = Vec::with_capacity(self.columns.len() + 1);
+        series.push((self.scale_name.clone(), self.scale.clone()));
+        for column in &self.columns {
+            match &column.data {
+                ColumnData::Real(values) => series.push((column.name.clone(), values.clone())),
+                ColumnData::Complex { real, imag } => {
+                    series.push((format!("Re({})", column.name), real.clone()));
+                    series.push((format!("Im({})", column.name), imag.clone()));
+                }
+            }
+        }
+        series
+    }
+
     /// Write the table to `path` in the requested format.
     ///
     /// HDF5 has analysis-specific sections and must be handled by the caller.
-    pub(super) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
+    pub(crate) fn write(&self, path: &Path, format: OutputFormat) -> Result<(), CliError> {
         let file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
         let mut writer = BufWriter::new(file);
 

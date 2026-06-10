@@ -14,7 +14,9 @@ pub mod compile_va;
 pub mod convert;
 pub mod info;
 pub mod run;
+pub(crate) mod export_table;
 mod run_signals;
+pub(crate) mod waveform_io;
 
 pub use check::execute as check;
 pub use compile_va::execute as compile_va;
