@@ -144,19 +144,28 @@ impl<'a> TreeRow<'a> {
         let cy = rect.center().y;
 
         if let Some(expanded) = self.twist {
-            let glyph = if expanded { "▾" } else { "▸" };
-            let galley = ui.fonts(|f| {
-                f.layout_no_wrap(
-                    glyph.to_owned(),
-                    theme::sans(9.0, FontWeight::Regular),
-                    c.text_faint,
-                )
-            });
-            painter.galley(
-                egui::pos2(x, cy - galley.size().y * 0.5),
-                galley,
+            // Painted triangle — text glyphs (▾/▸) are not covered by the
+            // embedded fonts and render as tofu boxes.
+            let center = egui::pos2(x + 4.0, cy);
+            let r = 3.2;
+            let points = if expanded {
+                vec![
+                    center + vec2(-r, -r * 0.5),
+                    center + vec2(r, -r * 0.5),
+                    center + vec2(0.0, r * 0.9),
+                ]
+            } else {
+                vec![
+                    center + vec2(-r * 0.5, -r),
+                    center + vec2(r * 0.9, 0.0),
+                    center + vec2(-r * 0.5, r),
+                ]
+            };
+            painter.add(egui::Shape::convex_polygon(
+                points,
                 c.text_faint,
-            );
+                Stroke::NONE,
+            ));
             x += 12.0;
         }
 

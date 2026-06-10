@@ -7,7 +7,7 @@ use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 
 /// A panel section header ("HIERARCHY", "RUN HISTORY", …) with an optional
-/// right-aligned action ("Descend", "Clear", "＋ Add"). Returns the action's
+/// right-aligned action ("Descend", "Clear", "+ Add"). Returns the action's
 /// response when an action label is provided and it was interacted with.
 pub fn section_header(ui: &mut Ui, title: &str, action: Option<&str>) -> Option<Response> {
     let t = Tokens::get(ui.ctx());

@@ -191,7 +191,7 @@ pub(super) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usize) -> &'st
                 setup.hb.additional_tones.remove(idx);
             }
             ui.add_space(4.0);
-            if action_line(ui, "＋ Add tone") {
+            if action_line(ui, "+ Add tone") {
                 setup.hb.additional_tones.push(Default::default());
             }
             "Multi-tone steady state in the frequency domain."
@@ -225,7 +225,7 @@ pub(super) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usize) -> &'st
                 setup.sp.ports.remove(idx);
             }
             ui.add_space(4.0);
-            if action_line(ui, "＋ Add port") {
+            if action_line(ui, "+ Add port") {
                 setup.sp.ports.push(Default::default());
             }
             "Scattering parameters between the defined ports."

@@ -46,7 +46,7 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
         );
         ui.label(kicker);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if Button::new("＋ Add point").ghost().show(ui).clicked() {
+            if Button::new("+ Add point").ghost().show(ui).clicked() {
                 state.adding_point = true;
             }
             if state.selected_row.is_some()

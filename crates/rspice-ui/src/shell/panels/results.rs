@@ -123,7 +123,7 @@ pub fn left(ui: &mut Ui, state: &mut AppState) {
     }
 
     // Derived signals come from the waveform calculator.
-    if let Some(action) = section_header(ui, "Expressions", Some("＋ Add")) {
+    if let Some(action) = section_header(ui, "Expressions", Some("+ Add")) {
         if action.clicked() {
             state.dialogs.waveform_calculator_dialog = true;
         }

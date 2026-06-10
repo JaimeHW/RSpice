@@ -143,7 +143,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
 
     card(ui, |ui| {
-        if let Some(action) = card_header(ui, "Analyses", "run in listed order", Some("＋ Add analysis")) {
+        if let Some(action) = card_header(ui, "Analyses", "run in listed order", Some("+ Add analysis")) {
             if action.clicked() {
                 state.sim_setup.picker_open = true;
             }
@@ -454,7 +454,7 @@ fn analysis_picker(ctx: &egui::Context, state: &mut AppState) {
                         painter.text(
                             egui::pos2(rect.right() - 8.0, rect.center().y),
                             egui::Align2::RIGHT_CENTER,
-                            "✓ added",
+                            "added",
                             theme::mono(tokens::FS_0, FontWeight::Regular),
                             c.accent,
                         );

@@ -36,7 +36,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let legend = [
         LegendChip {
-            name: "poles ✕",
+            name: "poles x",
             color: c.traces[5],
             on: true,
         },

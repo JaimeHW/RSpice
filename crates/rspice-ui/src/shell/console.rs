@@ -216,83 +216,97 @@ fn level_style(
 
 /// The interactive automation console: mono history above, a command
 /// input pinned at the bottom.
+///
+/// Laid out bottom-up with the history filling all remaining space — the
+/// panel re-fits to its content each frame, so any gap between content
+/// and panel height would ratchet the resizable panel smaller.
 fn script_body(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let row_font = theme::mono(11.5, FontWeight::Regular);
 
-    let input_height = 30.0;
-    let history_height = (ui.available_height() - input_height).max(0.0);
-
-    ui.spacing_mut().item_spacing.y = 0.0;
-    ScrollArea::vertical()
-        .id_salt("volta.console.script")
-        .auto_shrink([false, false])
-        .max_height(history_height)
-        .stick_to_bottom(true)
-        .show(ui, |ui| {
-            if state.script_console.history.is_empty() {
-                let (rect, _) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), 20.0),
-                    Sense::hover(),
-                );
-                ui.painter().text(
-                    egui::pos2(rect.left() + 12.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    "Type a command — 'help' lists the automation verbs",
-                    row_font.clone(),
-                    c.text_faint,
-                );
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        // Command input, pinned to the panel bottom.
+        ui.add_space(5.0);
+        let response = ui
+            .horizontal(|ui| {
+                ui.add_space(8.0);
+                ui.add_sized(
+                    vec2(ui.available_width() - 8.0, t.metrics.ctl_h),
+                    egui::TextEdit::singleline(&mut state.script_console.input_buffer)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("run tran · plot v(out) · help")
+                        .margin(egui::Margin::symmetric(8.0, 4.0))
+                        .lock_focus(true),
+                )
+            })
+            .inner;
+        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let command = state.script_console.input_buffer.trim().to_string();
+            if !command.is_empty() {
+                let output = state
+                    .script_console
+                    .executor
+                    .execute_command(&command, &mut state.simulation);
+                state
+                    .script_console
+                    .history
+                    .push(crate::panels::ConsoleHistoryItem { command, output });
+                state.script_console.input_buffer.clear();
+                response.request_focus();
             }
-            for item in &state.script_console.history {
-                let width = ui.available_width();
-                let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
-                let painter = ui.painter();
-                painter.text(
-                    egui::pos2(rect.left() + 12.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    format!("> {}", item.command),
-                    row_font.clone(),
-                    c.text,
-                );
-                let color = if item.output.success { c.ok } else { c.err };
-                for line in item.output.message.lines() {
-                    let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
-                    ui.painter().text(
-                        egui::pos2(rect.left() + 24.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        line,
-                        row_font.clone(),
-                        color,
-                    );
-                }
-            }
-        });
-
-    // Command input.
-    let response = ui.add_sized(
-        vec2(ui.available_width() - 16.0, t.metrics.ctl_h),
-        egui::TextEdit::singleline(&mut state.script_console.input_buffer)
-            .font(egui::TextStyle::Monospace)
-            .hint_text("run tran · plot v(out) · help")
-            .margin(egui::Margin::symmetric(8.0, 4.0))
-            .lock_focus(true),
-    );
-    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-        let command = state.script_console.input_buffer.trim().to_string();
-        if !command.is_empty() {
-            let output = state
-                .script_console
-                .executor
-                .execute_command(&command, &mut state.simulation);
-            state
-                .script_console
-                .history
-                .push(crate::panels::ConsoleHistoryItem { command, output });
-            state.script_console.input_buffer.clear();
-            response.request_focus();
         }
-    }
+        ui.add_space(4.0);
+
+        // History fills everything above the input exactly.
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            ScrollArea::vertical()
+                .id_salt("volta.console.script")
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    if state.script_console.history.is_empty() {
+                        let (rect, _) = ui.allocate_exact_size(
+                            vec2(ui.available_width(), 20.0),
+                            Sense::hover(),
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 12.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            "Type a command — 'help' lists the automation verbs",
+                            row_font.clone(),
+                            c.text_faint,
+                        );
+                    }
+                    for item in &state.script_console.history {
+                        let width = ui.available_width();
+                        let (rect, _) =
+                            ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+                        let painter = ui.painter();
+                        painter.text(
+                            egui::pos2(rect.left() + 12.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("> {}", item.command),
+                            row_font.clone(),
+                            c.text,
+                        );
+                        let color = if item.output.success { c.ok } else { c.err };
+                        for line in item.output.message.lines() {
+                            let (rect, _) =
+                                ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+                            ui.painter().text(
+                                egui::pos2(rect.left() + 24.0, rect.center().y),
+                                egui::Align2::LEFT_CENTER,
+                                line,
+                                row_font.clone(),
+                                color,
+                            );
+                        }
+                    }
+                });
+        });
+    });
 }
 
 fn log_body(ui: &mut Ui, state: &mut AppState) {

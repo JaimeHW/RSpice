@@ -16,6 +16,8 @@ enum Seg {
     Line(&'static [[f32; 2]]),
     /// Closed polygon through the listed points.
     Poly(&'static [[f32; 2]]),
+    /// Filled convex polygon through the listed points.
+    Fill(&'static [[f32; 2]]),
     /// Circle outline: center, radius.
     Circle([f32; 2], f32),
     /// Filled dot: center, radius.
@@ -156,13 +158,15 @@ impl Icon {
                 Line(&[[10.0, 13.0], [15.0, 13.0]]),
                 Line(&[[10.0, 16.0], [15.0, 16.0]]),
             ],
-            Icon::Stop => &[Poly(&[
-                [6.0, 6.0],
-                [18.0, 6.0],
-                [18.0, 18.0],
-                [6.0, 18.0],
+            // Transport glyphs are filled — a stroked square reads as a
+            // missing-glyph box, not a stop control.
+            Icon::Stop => &[Fill(&[
+                [7.0, 7.0],
+                [17.0, 7.0],
+                [17.0, 17.0],
+                [7.0, 17.0],
             ])],
-            Icon::Run => &[Poly(&[[7.0, 4.0], [20.0, 12.0], [7.0, 20.0]])],
+            Icon::Run => &[Fill(&[[7.0, 4.0], [20.0, 12.0], [7.0, 20.0]])],
             Icon::Library => &[
                 Poly(&[[4.0, 5.0], [20.0, 5.0], [20.0, 9.0], [4.0, 9.0]]),
                 Poly(&[[4.0, 13.0], [20.0, 13.0], [20.0, 19.0], [4.0, 19.0]]),
@@ -245,6 +249,13 @@ impl Icon {
                         stroke,
                     ));
                 }
+                Seg::Fill(pts) => {
+                    painter.add(Shape::convex_polygon(
+                        pts.iter().map(|&p| map(p)).collect(),
+                        color,
+                        Stroke::NONE,
+                    ));
+                }
                 Seg::Circle(center, r) => {
                     painter.circle_stroke(map(*center), r * scale, stroke);
                 }
@@ -313,7 +324,9 @@ mod tests {
                     );
                 };
                 match seg {
-                    Seg::Line(pts) | Seg::Poly(pts) => pts.iter().for_each(check),
+                    Seg::Line(pts) | Seg::Poly(pts) | Seg::Fill(pts) => {
+                        pts.iter().for_each(check);
+                    }
                     Seg::Circle(c, r) | Seg::Dot(c, r) | Seg::Arc(c, r, _, _) => {
                         assert!(c[0] - r >= -0.5 && c[0] + r <= GRID + 0.5, "{icon:?}");
                         assert!(c[1] - r >= -0.5 && c[1] + r <= GRID + 0.5, "{icon:?}");
