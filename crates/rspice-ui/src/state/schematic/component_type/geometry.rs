@@ -36,7 +36,7 @@ impl ComponentType {
 
     /// Get terminal offsets relative to component position.
     ///
-    /// Static per type â€” the coordinates are the `symbol_dimensions`
+    /// Static per type — the coordinates are the `symbol_dimensions`
     /// half-extents (the unit test below keeps the tables honest), and
     /// returning `&'static` keeps per-frame and hit-test paths
     /// allocation-free.
@@ -312,7 +312,7 @@ mod tests {
             for (name, offset) in offsets {
                 assert!(
                     offset.x.abs() <= hw && offset.y.abs() <= hh,
-                    "{kind:?} terminal {name}: offset {offset:?} outside (Â±{hw}, Â±{hh})"
+                    "{kind:?} terminal {name}: offset {offset:?} outside (+/-{hw}, +/-{hh})"
                 );
                 // Terminals sit on the symbol boundary, never inside corners.
                 assert!(

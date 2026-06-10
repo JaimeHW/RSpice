@@ -46,10 +46,6 @@ pub struct SimulationState {
     /// Populated during netlist generation, used for probe mode
     pub cross_probe: CrossProbeMapping,
 
-    /// DC operating point annotations for display on schematic
-    /// Populated after DC OP simulation, shows node voltages and branch currents
-    pub dc_annotations: DcAnnotationState,
-
     /// Yield analysis results from Monte Carlo runs
     pub yield_results: Vec<YieldResult>,
 

@@ -29,7 +29,7 @@ use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, chip, docbar};
-use crate::viewers::ActiveViewer;
+use crate::common::app::ActiveViewer;
 
 /// The result viewers, in tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

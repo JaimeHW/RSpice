@@ -22,7 +22,6 @@
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
-use egui::Color32;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -59,27 +58,6 @@ impl LogSeverity {
         }
     }
 
-    /// Short prefix for compact display
-    pub fn prefix(&self) -> &'static str {
-        match self {
-            Self::Error => "E",
-            Self::Warning => "W",
-            Self::Info => "I",
-            Self::Debug => "D",
-            Self::Trace => "T",
-        }
-    }
-
-    /// Color for UI rendering
-    pub fn color(&self) -> Color32 {
-        match self {
-            Self::Error => Color32::from_rgb(231, 76, 60), // Red
-            Self::Warning => Color32::from_rgb(241, 196, 15), // Yellow
-            Self::Info => Color32::from_rgb(52, 152, 219), // Blue
-            Self::Debug => Color32::from_rgb(149, 165, 166), // Gray
-            Self::Trace => Color32::from_rgb(127, 140, 141), // Dark gray
-        }
-    }
 }
 
 // =============================================================================
@@ -114,18 +92,6 @@ impl LogSource {
             Self::Drc => "DRC",
             Self::User => "USR",
             Self::System => "SYS",
-        }
-    }
-
-    /// Color for UI rendering
-    pub fn color(&self) -> Color32 {
-        match self {
-            Self::Simulation => Color32::from_rgb(46, 204, 113), // Green
-            Self::Engine => Color32::from_rgb(155, 89, 182),     // Purple
-            Self::Netlist => Color32::from_rgb(52, 152, 219),    // Blue
-            Self::Drc => Color32::from_rgb(230, 126, 34),        // Orange
-            Self::User => Color32::from_rgb(241, 196, 15),       // Yellow
-            Self::System => Color32::from_rgb(149, 165, 166),    // Gray
         }
     }
 }
@@ -384,71 +350,6 @@ impl LogBuffer {
     /// Get warning count (useful for status bar)
     pub fn warning_count(&self) -> usize {
         self.count_by_severity(LogSeverity::Warning)
-    }
-}
-
-// =============================================================================
-// Log Panel State
-// =============================================================================
-
-/// State for the log panel UI
-#[derive(Debug, Clone)]
-pub struct LogPanelState {
-    /// Text filter for searching
-    pub filter_text: String,
-    /// Minimum severity to display
-    pub filter_severity: LogSeverity,
-    /// Source filters (checked = visible)
-    pub source_filters: [bool; 6],
-    /// Auto-scroll to bottom
-    pub auto_scroll: bool,
-    /// Show timestamps
-    pub show_timestamps: bool,
-    /// Show source column
-    pub show_source: bool,
-}
-
-impl Default for LogPanelState {
-    fn default() -> Self {
-        Self {
-            filter_text: String::new(),
-            filter_severity: LogSeverity::Info,
-            source_filters: [true; 6], // All sources visible
-            auto_scroll: true,
-            show_timestamps: true,
-            show_source: true,
-        }
-    }
-}
-
-impl LogPanelState {
-    /// Check if a source is visible
-    pub fn is_source_visible(&self, source: LogSource) -> bool {
-        let idx = match source {
-            LogSource::Simulation => 0,
-            LogSource::Engine => 1,
-            LogSource::Netlist => 2,
-            LogSource::Drc => 3,
-            LogSource::User => 4,
-            LogSource::System => 5,
-        };
-        self.source_filters.get(idx).copied().unwrap_or(true)
-    }
-
-    /// Check if an entry passes all filters
-    pub fn passes_filter(&self, entry: &LogEntry) -> bool {
-        // Severity filter
-        if entry.severity > self.filter_severity {
-            return false;
-        }
-
-        // Source filter
-        if !self.is_source_visible(entry.source) {
-            return false;
-        }
-
-        // Text filter
-        entry.matches_filter(&self.filter_text)
     }
 }
 

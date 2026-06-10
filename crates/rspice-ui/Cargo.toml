@@ -47,9 +47,6 @@ log = "0.4"
 # FFT for frequency analysis
 rustfft = "6.2"
 
-# R-tree spatial indexing for O(log n) visibility queries
-rstar = "0.12"
-
 # Complex number support
 num-complex = "0.4"
 

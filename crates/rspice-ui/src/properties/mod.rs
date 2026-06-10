@@ -1,4 +1,4 @@
-//! Properties Module
+﻿//! Properties Module
 //!
 //! Property editing and design variable management.
 //! Provides UI components for editing component properties and design parameters.
@@ -15,7 +15,6 @@
 //! Properties are displayed in context-sensitive dialogs and panels.
 //! Design variables enable parameterized circuit design with expressions.
 
-pub mod design_variables;
 pub mod dialog;
 pub mod model_browser;
 pub mod property_bridge;
@@ -23,7 +22,6 @@ pub mod pwl_editor;
 pub mod tabbed_dialog;
 
 // Re-export main types
-pub use design_variables::{DesignVariable, DesignVariablesState};
 pub use dialog::{
     EditedProperties, PropertiesDialogResult, PropertyEditorState, format_engineering_value,
     parse_engineering_value, render_properties_dialog,

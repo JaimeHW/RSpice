@@ -52,7 +52,7 @@ pub mod analysis;
 /// Schematic editor - Canvas, export, toolbar, symbol library
 pub mod schematic;
 
-/// Waveform viewer - Multi-trace display with cursors and measurements
+/// Waveform measurements (min/max/RMS over sample slices)
 pub mod waveform;
 
 /// Simulation management - Controller, dialogs, netlist generation
@@ -72,9 +72,6 @@ pub mod ui;
 
 /// The IDE shell - menubar, toolbar, workspace tabs, panels, console, status bar
 pub mod shell;
-
-/// Integrated viewers - Multi-view synchronized displays
-pub mod viewers;
 
 // =============================================================================
 // Core Infrastructure

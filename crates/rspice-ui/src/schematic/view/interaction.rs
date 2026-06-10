@@ -348,6 +348,5 @@ fn open_component_properties(state: &mut AppState, grid_pos: Point) {
             }
         }
 
-        state.panels.properties = true;
     }
 }

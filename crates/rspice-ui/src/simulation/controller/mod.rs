@@ -553,14 +553,6 @@ impl SimulationController {
                     // Optional Touchstone export for S-parameter analyses.
                     self.maybe_export_touchstone(state, &sim_result);
 
-                    // Set axis labels based on current analysis type
-                    let (x_label, x_unit, y_label, y_unit) = analysis_type.axis_info();
-                    state.waveform_viewer.x_axis_label = x_label.to_string();
-                    state.waveform_viewer.x_axis_unit = x_unit.to_string();
-                    state.waveform_viewer.y_axis_label = y_label.to_string();
-                    state.waveform_viewer.y_axis_unit = y_unit.to_string();
-                    state.open_preferred_viewer_for_analysis(analysis_type);
-
                     // --- Phase 10-11-12 Integration Glue (run once per analysis) ---
 
                     // Run Yield Analysis (if MC results are present)

@@ -40,7 +40,6 @@ pub(crate) enum ShortcutCommand {
     Zoom100,
     ToolLabel,
     FocusCellSearch,
-    OpenPreferences,
 }
 
 impl ShortcutCommand {
@@ -86,7 +85,6 @@ impl ShortcutCommand {
             ShortcutCommand::Zoom100 => "Zoom 100 %",
             ShortcutCommand::ToolLabel => "Net Label Tool",
             ShortcutCommand::FocusCellSearch => "Find Instance",
-            ShortcutCommand::OpenPreferences => "Preferences",
         }
     }
 
@@ -132,7 +130,6 @@ impl ShortcutCommand {
             ShortcutCommand::Zoom100 => "Ctrl+0",
             ShortcutCommand::ToolLabel => "N",
             ShortcutCommand::FocusCellSearch => "Shift+I",
-            ShortcutCommand::OpenPreferences => "Ctrl+,",
         }
     }
 }

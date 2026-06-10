@@ -1,6 +1,4 @@
-use super::{
-    AnalysisWorkspaceState, AppState, DialogState, PanelSizes, PanelVisibility, RSpiceTheme,
-};
+use super::{AnalysisWorkspaceState, AppState, DialogState, RSpiceTheme};
 
 pub(super) fn default_model_library_manager() -> crate::state::model_library::ModelLibraryManager {
     let mut manager = crate::state::model_library::ModelLibraryManager::new();
@@ -33,15 +31,12 @@ pub(super) fn default_app_state() -> AppState {
     AppState {
         schematic,
         simulation: crate::state::SimulationState::default(),
-        panels: PanelVisibility::default(),
-        panel_sizes: PanelSizes::default(),
         dialogs: DialogState::default(),
-        theme: RSpiceTheme::dark(),
+        theme: RSpiceTheme::default(),
         log_buffer: crate::panels::LogBuffer::default(),
         property_editor: crate::properties::dialog::PropertyEditorState::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
-        viewer_workspace: crate::viewers::ViewerWorkspace::default(),
-        waveform_viewer: crate::waveform::WaveformViewerState::default(),
+        script_console_open: false,
         library_manager,
         workspace,
         pending_delete_cell: None,

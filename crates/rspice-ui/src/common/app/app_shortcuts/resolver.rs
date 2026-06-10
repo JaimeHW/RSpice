@@ -44,7 +44,7 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 25] = [
+const GLOBAL_RULES: [ShortcutRule; 24] = [
     ShortcutRule::new(ShortcutCommand::FileNew, Key::N, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileOpen, Key::O, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileSave, Key::S, Some(true), None),
@@ -79,7 +79,6 @@ const GLOBAL_RULES: [ShortcutRule; 25] = [
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Equals, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomOut, Key::Minus, Some(true), None),
     ShortcutRule::new(ShortcutCommand::Zoom100, Key::Num0, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::OpenPreferences, Key::Comma, Some(true), None),
 ];
 
 const FOCUS_FREE_RULES: [ShortcutRule; 20] = [

@@ -1,7 +1,4 @@
-use super::{AppState, BottomPanelTab};
-use crate::common::analysis_navigation;
-use crate::state::AnalysisType;
-use crate::viewers::ActiveViewer;
+use super::{ActiveViewer, AppState};
 
 /// Availability metadata for a specialized viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,50 +123,6 @@ impl AppState {
         self.viewer_capability(viewer).available
     }
 
-    /// Open/focus a specialized viewer and route the bottom panel to it.
-    ///
-    /// If the requested viewer lacks required data, this falls back to `Waveform`.
-    pub fn open_viewer(&mut self, viewer: ActiveViewer) -> ActiveViewer {
-        self.open_viewer_in_tab(viewer, BottomPanelTab::Waveform)
-    }
-
-    /// Open/focus a specialized viewer and route to a specific bottom tab.
-    ///
-    /// Returns the viewer that was actually activated after capability fallback.
-    pub fn open_viewer_in_tab(
-        &mut self,
-        viewer: ActiveViewer,
-        tab: BottomPanelTab,
-    ) -> ActiveViewer {
-        let selected = self.resolve_openable_viewer(viewer);
-        self.viewer_workspace.open_or_focus(selected);
-        self.panels.bottom_panel = true;
-        self.panels.active_bottom_tab = tab;
-        selected
-    }
-
-    /// Open the highest-priority available viewer for an analysis type.
-    pub fn open_preferred_viewer_for_analysis(
-        &mut self,
-        analysis_type: AnalysisType,
-    ) -> ActiveViewer {
-        let tab = analysis_navigation::preferred_bottom_tab(analysis_type);
-        let selected = analysis_navigation::preferred_viewers(analysis_type)
-            .iter()
-            .copied()
-            .find(|viewer| self.viewer_is_available(*viewer))
-            .unwrap_or(ActiveViewer::Waveform);
-        self.open_viewer_in_tab(selected, tab)
-    }
-
-    fn resolve_openable_viewer(&self, viewer: ActiveViewer) -> ActiveViewer {
-        if self.viewer_is_available(viewer) {
-            viewer
-        } else {
-            ActiveViewer::Waveform
-        }
-    }
-
     fn active_analysis_supports_eye_diagram(&self) -> bool {
         self.active_time_domain_waveform_len()
             .map(|len| len >= 8)
@@ -194,15 +147,5 @@ impl AppState {
             .iter()
             .map(|wf| wf.x.len().min(wf.y.len()))
             .max()
-    }
-
-    /// Close the active viewer tab.
-    pub fn close_active_viewer(&mut self) {
-        self.viewer_workspace.close_active();
-    }
-
-    /// Active specialized viewer currently displayed in the workspace.
-    pub fn active_viewer(&self) -> ActiveViewer {
-        self.viewer_workspace.active_viewer()
     }
 }

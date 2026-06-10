@@ -296,18 +296,10 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
         item(ui, "Export schematic SVG…", None),
     );
     set(
-        FileMenuAction::ExportPdf,
-        item(ui, "Export schematic PDF…", None),
-    );
-    set(
         FileMenuAction::ExportCsvWaveforms,
         item(ui, "Export waveforms CSV…", None),
     );
     separator(ui);
-    set(
-        FileMenuAction::OpenPreferences,
-        item(ui, "Preferences…", Some("Ctrl+,")),
-    );
     set(FileMenuAction::Exit, item(ui, "Exit", None));
 
     if let Some(action) = action {
@@ -481,9 +473,6 @@ fn check_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     if item(ui, "Run design checks", Some("Ctrl+E")) {
         crate::common::menu_bar::run_design_rule_check(state);
     }
-    if item(ui, "Open check results…", None) {
-        state.dialogs.drc_dialog = true;
-    }
 }
 
 fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
@@ -536,7 +525,7 @@ fn tools_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         state.pdk_settings_dialog.open(state.pdk_config.clone());
     }
     if item(ui, "Automation console", None) {
-        state.panels.script_console = true;
+        state.script_console_open = true;
     }
     separator(ui);
     if item(ui, "Compile Verilog-A…", None) {

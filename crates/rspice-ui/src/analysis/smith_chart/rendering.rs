@@ -169,7 +169,7 @@ fn render_header(
     ui: &mut Ui,
     layout: &SmithChartLayout,
     state: &mut SmithChartState,
-    app_state: &mut AppState,
+    _app_state: &mut AppState,
 ) {
     let painter = ui.painter();
 
@@ -230,14 +230,6 @@ fn render_header(
             {
                 state.normalized = !state.normalized;
             }
-
-            // Right-aligned close button
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(8.0);
-                if ui.small_button("✕").clicked() {
-                    app_state.close_active_viewer();
-                }
-            });
         });
     });
 }

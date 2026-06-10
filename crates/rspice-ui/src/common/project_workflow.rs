@@ -16,9 +16,6 @@ pub(crate) fn create_new_project(state: &mut AppState) {
     state.workspace = workspace;
     state.schematic = schematic;
     state.simulation.clear_runs();
-    state.panels.project_explorer = true;
-    state.panels.library_browser = false;
-    state.panels.results_browser = false;
     state.push_user_message(ConsoleMessage::info("Created new project"));
 }
 
@@ -90,9 +87,6 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
             state.workspace = project.workspace;
             state.restore_active_schematic_from_workspace();
             state.simulation.clear_runs();
-            state.panels.project_explorer = true;
-            state.panels.library_browser = false;
-            state.panels.results_browser = false;
             state.push_user_message(ConsoleMessage::info(format!(
                 "Opened project: {}",
                 path.display()

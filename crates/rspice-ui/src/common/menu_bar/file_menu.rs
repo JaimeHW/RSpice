@@ -17,10 +17,8 @@ pub(crate) enum FileMenuAction {
     Save,
     SaveAs,
     ExportSvg,
-    ExportPdf,
     ExportCsvWaveforms,
     ImportVerilogA,
-    OpenPreferences,
     Exit,
 }
 
@@ -71,12 +69,10 @@ pub(crate) fn dispatch_file_menu_action(
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)
         }
-        FileMenuAction::ExportPdf => open_pdf_export_dialog(state),
         FileMenuAction::ExportCsvWaveforms => {
             super::waveform_export::action_export_csv_with_io(state, export_workflow_io)
         }
         FileMenuAction::ImportVerilogA => open_veriloga_import_dialog(state),
-        FileMenuAction::OpenPreferences => open_preferences_dialog(state),
         FileMenuAction::Exit => request_exit(state),
     }
 }
@@ -90,16 +86,8 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
     true
 }
 
-fn open_pdf_export_dialog(state: &mut AppState) {
-    state.dialogs.pdf_export_dialog = true;
-}
-
 fn open_veriloga_import_dialog(state: &mut AppState) {
     state.dialogs.veriloga_dialog.open();
-}
-
-fn open_preferences_dialog(state: &mut AppState) {
-    state.dialogs.preferences = true;
 }
 
 fn request_exit(state: &mut AppState) {

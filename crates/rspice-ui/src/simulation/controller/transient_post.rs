@@ -3,7 +3,7 @@ use crate::analysis::eye_diagram::data::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
 use crate::common::app::AppState;
 use crate::state::AnalysisType;
-use crate::viewers::ActiveViewer;
+use crate::common::app::ActiveViewer;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 

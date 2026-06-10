@@ -1,4 +1,4 @@
-//! I/O Module
+﻿//! I/O Module
 //!
 //! File input/output for SPICE libraries, netlists, waveforms, and sessions.
 //!
@@ -16,7 +16,7 @@ pub mod lib_parser;
 pub mod netlist_export;
 pub mod project_io;
 pub mod schematic_io;
-pub mod session_io;
+
 pub mod waveform_io;
 
 // Re-exports
@@ -35,7 +35,7 @@ pub use schematic_io::{
     SchematicFile, SchematicIoError, SchematicVersion, load_schematic, save_schematic,
     show_open_dialog, show_save_dialog,
 };
-pub use session_io::{SessionFile, SessionVersion, load_session, save_session};
+
 pub use waveform_io::{
     SignalType, WaveformDataset, WaveformFormat, WaveformReader, WaveformSignal, WaveformWriter,
 };

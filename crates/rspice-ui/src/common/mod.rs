@@ -1,4 +1,4 @@
-//! Common UI Components Module
+﻿//! Common UI Components Module
 //!
 //! Shared UI components used across the application.
 //! Contains the main application shell and reusable UI elements.
@@ -15,7 +15,6 @@
 //! - Status bar shows simulation progress and tool tips
 //! - Theme provides consistent styling across all components
 
-pub mod analysis_navigation;
 pub mod app;
 pub mod examples;
 pub(crate) mod export_workflow;
@@ -28,5 +27,5 @@ pub mod theme;
 pub mod viewer_style;
 
 // Re-export main application type
-pub use app::{AppState, ConsoleMessage, RSpiceApp, WaveformViewRangeError};
+pub use app::{AppState, ConsoleMessage, RSpiceApp};
 pub use theme::RSpiceTheme;

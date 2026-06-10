@@ -3,8 +3,9 @@
 
 use crate::common::app::{AppState, ConsoleMessage};
 
-/// Run the design-rule / electrical-rule checks on the active schematic and
-/// open the results dialog.
+/// Run the design-rule / electrical-rule checks on the active schematic.
+/// Results surface as the ERC pill in the schematic docbar and a console
+/// summary line.
 pub(crate) fn run_design_rule_check(state: &mut AppState) {
     let result = crate::services::drc::run_drc_check(&state.schematic);
     let summary = result.summary();
@@ -21,5 +22,4 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
     };
     state.push_user_message(ConsoleMessage::info(msg));
     state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_dialog = true;
 }

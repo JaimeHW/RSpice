@@ -1,4 +1,4 @@
-//! Analysis Viewers Module
+﻿//! Analysis Viewers Module
 //!
 //! Commercial-grade analysis visualization components for circuit simulation results.
 //! Each viewer provides specialized plotting and measurement capabilities:
@@ -28,12 +28,11 @@ pub mod histogram;
 pub mod nyquist;
 pub mod phase_noise;
 pub mod pole_zero;
-pub mod rf_measurements;
 pub mod smith_chart;
 
 // Re-export main types for convenience (optional - users can also access via submodule)
 // Bode
-pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse, render_bode_panel};
+pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse};
 
 // FFT
 pub use fft::{

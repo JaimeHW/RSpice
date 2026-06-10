@@ -14,8 +14,6 @@ pub struct DialogState {
     pub simulation_options: bool,
     /// About dialog
     pub about: bool,
-    /// Preferences dialog
-    pub preferences: bool,
     /// Shortcuts help dialog
     pub shortcuts_help: bool,
     /// New Cell creation dialog
@@ -205,47 +203,13 @@ pub struct DialogState {
     // Commercial-Grade Tool Dialogs
     // =========================================================================
 
-    // --- DRC/ERC Dialog ---
-    /// DRC results dialog open
-    pub drc_dialog: bool,
-    /// DRC results (cached from last run)
+    // --- DRC/ERC ---
+    /// DRC results (cached from last run; surfaced by the schematic view)
     pub drc_results: Option<crate::services::drc::DrcResult>,
-    /// DRC running indicator
-    pub drc_running: bool,
-
-    // --- PDF Export Dialog ---
-    /// PDF export dialog open
-    pub pdf_export_dialog: bool,
-    /// PDF export configuration
-    pub pdf_config: crate::services::pdf_export::PdfExportConfig,
 
     // --- Waveform Calculator Dialog ---
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
-    /// Calculator expression input
-    pub calc_expression: String,
-    /// Calculator error message (if any)
-    pub calc_error: Option<String>,
-
-    // --- Measurements Panel ---
-    /// Measurements panel open
-    pub measurements_panel: bool,
-
-    // --- Model Browser Dialog ---
-    /// Model browser dialog open
-    pub model_browser_dialog: bool,
-    /// Model browser search filter
-    pub model_browser_filter: String,
-
-    // --- Engineering Calculators ---
-    /// Unit converter dialog open
-    pub unit_converter_dialog: bool,
-    /// Filter calculator dialog open
-    pub filter_calculator_dialog: bool,
-    /// Impedance calculator dialog open
-    pub impedance_calculator_dialog: bool,
-    /// S-parameter converter dialog open
-    pub sparam_converter_dialog: bool,
 
     // --- Verilog-A Model Loading ---
     /// Verilog-A model loading dialog state

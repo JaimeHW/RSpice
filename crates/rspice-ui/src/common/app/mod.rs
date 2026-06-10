@@ -24,15 +24,14 @@
 use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
-use crate::waveform::WaveformViewerState;
 
 use super::theme::RSpiceTheme;
 
+mod active_viewer;
+pub use active_viewer::ActiveViewer;
+
 mod app_shell_state;
-pub use app_shell_state::{
-    BottomPanelTab, ConfirmationAction, ConfirmationDialogState, ConfirmationResponse, PanelSizes,
-    PanelVisibility,
-};
+pub use app_shell_state::{ConfirmationAction, ConfirmationDialogState, ConfirmationResponse};
 
 mod app_dialog_state;
 pub use app_dialog_state::DialogState;
@@ -107,10 +106,6 @@ pub struct AppState {
     pub(crate) schematic: SchematicState,
     /// Simulation results and waveforms
     pub(crate) simulation: SimulationState,
-    /// Panel visibility
-    pub(crate) panels: PanelVisibility,
-    /// Panel sizes
-    pub(crate) panel_sizes: PanelSizes,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
     /// Current theme
@@ -121,10 +116,8 @@ pub struct AppState {
     pub(crate) property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
     pub(crate) script_console: crate::panels::ScriptConsoleState,
-    /// Open specialized viewer workspace tabs.
-    pub(crate) viewer_workspace: crate::viewers::ViewerWorkspace,
-    /// Waveform viewer state (persists across frames for pan/zoom)
-    pub(crate) waveform_viewer: WaveformViewerState,
+    /// Whether the automation console window is open.
+    pub(crate) script_console_open: bool,
     /// Library/Cell/View manager for design hierarchy
     pub(crate) library_manager: crate::state::LibraryManager,
     /// Project/workspace model for active design context and open LCV views.
@@ -154,28 +147,6 @@ pub struct AppState {
     /// IDE shell state (workspace view, theme, console, toasts).
     pub(crate) shell: crate::shell::ShellState,
 }
-
-/// Errors returned when applying a waveform-view range from external callers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WaveformViewRangeError {
-    /// The provided bounds contain `NaN` or infinity.
-    NonFiniteBounds,
-    /// The provided bounds do not describe a positive range.
-    NonPositiveRange,
-}
-
-impl std::fmt::Display for WaveformViewRangeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NonFiniteBounds => f.write_str("waveform view bounds must be finite"),
-            Self::NonPositiveRange => {
-                f.write_str("waveform view bounds must define a positive range")
-            }
-        }
-    }
-}
-
-impl std::error::Error for WaveformViewRangeError {}
 
 impl Default for AppState {
     fn default() -> Self {
@@ -217,36 +188,6 @@ impl AppState {
 
     pub fn clear_primary_log(&mut self) {
         self.log_buffer.clear();
-    }
-
-    /// Replace the waveform results that drive the shared waveform viewer.
-    pub fn replace_waveform_results(&mut self, waveforms: Vec<crate::state::WaveformData>) {
-        self.simulation.replace_waveforms(waveforms);
-    }
-
-    /// Set the visible X-axis window for the waveform viewer.
-    pub fn set_waveform_view_x_range(
-        &mut self,
-        x_min: f64,
-        x_max: f64,
-    ) -> Result<(), WaveformViewRangeError> {
-        if !x_min.is_finite() || !x_max.is_finite() {
-            return Err(WaveformViewRangeError::NonFiniteBounds);
-        }
-        if x_max <= x_min {
-            return Err(WaveformViewRangeError::NonPositiveRange);
-        }
-
-        self.waveform_viewer.view.x_min = x_min;
-        self.waveform_viewer.view.x_max = x_max;
-        self.waveform_viewer.view.enforce_minimum_range();
-
-        let bounds = self.waveform_viewer.data_bounds.clone();
-        if bounds.valid {
-            self.waveform_viewer.view.clamp_to_bounds(&bounds);
-        }
-
-        Ok(())
     }
 }
 
@@ -419,7 +360,7 @@ impl RSpiceApp {
 
     /// Floating automation/scripting console window (Tools menu).
     fn render_script_console_window(&mut self, ctx: &Context) {
-        if !self.state.panels.script_console {
+        if !self.state.script_console_open {
             return;
         }
         let mut open = true;
@@ -434,7 +375,7 @@ impl RSpiceApp {
                 );
             });
         if !open {
-            self.state.panels.script_console = false;
+            self.state.script_console_open = false;
         }
     }
 }
