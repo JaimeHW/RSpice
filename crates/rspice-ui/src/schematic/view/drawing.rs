@@ -306,8 +306,11 @@ fn draw_component_labels(
     if name_size < 4.0 {
         return;
     }
-    let name_font = egui::FontId::proportional(name_size);
-    let value_font = egui::FontId::proportional(quantize_font_size(9.0 * scale));
+    let name_font = crate::ui::theme::sans(name_size, crate::ui::theme::FontWeight::Medium);
+    let value_font = crate::ui::theme::sans(
+        quantize_font_size(9.0 * scale),
+        crate::ui::theme::FontWeight::Regular,
+    );
 
     let layout = compute_label_layout(pos, scale, component);
     let palette = crate::ui::tokens::active_palette();
