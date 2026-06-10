@@ -137,6 +137,108 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
     },
 ];
 
+const CONTROLLED: &[ComponentPaletteEntry] = &[
+    ComponentPaletteEntry {
+        kind: ComponentType::Vcvs,
+        label: "VCVS (E)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Vccs,
+        label: "VCCS (G)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Ccvs,
+        label: "CCVS (H)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::Cccs,
+        label: "CCCS (F)",
+    },
+];
+
+const BEHAVIORAL: &[ComponentPaletteEntry] = &[
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceGain,
+        label: "Gain",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceSummer,
+        label: "Summer",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceMultiplier,
+        label: "Multiplier",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceDivider,
+        label: "Divider",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceLimiter,
+        label: "Limiter",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceIntegrator,
+        label: "Integrator",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceDifferentiator,
+        label: "Differentiator",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceBuffer,
+        label: "Buffer",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceInverter,
+        label: "Inverter",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceTristate,
+        label: "Tri-State Buffer",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceAndGate,
+        label: "AND Gate",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceOrGate,
+        label: "OR Gate",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceNandGate,
+        label: "NAND Gate",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceNorGate,
+        label: "NOR Gate",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceXorGate,
+        label: "XOR Gate",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceDFlipFlop,
+        label: "D Flip-Flop",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceJkFlipFlop,
+        label: "JK Flip-Flop",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceSrLatch,
+        label: "SR Latch",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceAdcBridge,
+        label: "ADC Bridge",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::XspiceDacBridge,
+        label: "DAC Bridge",
+    },
+];
+
 const PALETTE: &[ComponentPaletteSection] = &[
     ComponentPaletteSection {
         title: "Passives",
@@ -149,6 +251,14 @@ const PALETTE: &[ComponentPaletteSection] = &[
     ComponentPaletteSection {
         title: "Semiconductors",
         entries: SEMICONDUCTORS,
+    },
+    ComponentPaletteSection {
+        title: "Controlled sources",
+        entries: CONTROLLED,
+    },
+    ComponentPaletteSection {
+        title: "Behavioral (XSPICE)",
+        entries: BEHAVIORAL,
     },
 ];
 

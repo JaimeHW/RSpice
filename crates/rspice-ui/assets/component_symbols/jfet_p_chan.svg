@@ -2,8 +2,8 @@
 <!-- P-channel JFET. Box 40x80, pins D(40,0), G(0,40), S(40,80).
      Gate arrow points away from the channel. -->
 <svg viewBox="0 0 40 80" xmlns="http://www.w3.org/2000/svg">
-  <path d="M 0,40 H 9.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
-  <path d="M 9.4,40 L 16.6,37.6 L 16.6,42.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 0,40 H 8.8" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 8.8,40 L 15.6,37.6 L 15.6,42.4 Z" fill="#000000" stroke="none"/>
   <path d="M 17,14 V 66" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
   <path d="M 40,0 V 14 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M 40,80 V 66 H 17" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>

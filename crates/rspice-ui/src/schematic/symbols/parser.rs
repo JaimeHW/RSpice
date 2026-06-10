@@ -248,9 +248,13 @@ fn extract_paths(
                 }
 
                 if !commands.is_empty() {
+                    // Filled only when explicitly fill-only: SVG's default
+                    // fill is black, so a stroked outline that omits
+                    // fill="none" must still render as strokes (a 2-point
+                    // "filled" line would vanish entirely).
                     paths.push(SymbolPath {
                         commands,
-                        filled: path.fill().is_some(),
+                        filled: path.fill().is_some() && path.stroke().is_none(),
                     });
                 }
             }
