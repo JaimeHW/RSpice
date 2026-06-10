@@ -57,6 +57,12 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyTransientResult>()?;
     m.add_class::<results::PyAcResult>()?;
     m.add_class::<results::PyDcSweepResult>()?;
+    m.add_class::<results::PyNoiseResult>()?;
+    m.add_class::<results::PyNoiseContribution>()?;
+    m.add_class::<results::PyMonteCarloResult>()?;
+    m.add_class::<results::PyVariableStatistics>()?;
+    m.add_class::<results::PyPoleZeroResult>()?;
+    m.add_class::<results::PyComplexValue>()?;
 
     // Exception types
     m.add("RSpiceError", m.py().get_type::<errors::RSpiceError>())?;
@@ -68,6 +74,32 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(
         "ConvergenceError",
         m.py().get_type::<errors::ConvergenceError>(),
+    )?;
+
+    m.add(
+        "__all__",
+        [
+            "Netlist",
+            "Engine",
+            "SimulationConfig",
+            "ConvergenceConfig",
+            "BypassConfig",
+            "DampingStrategy",
+            "SimulationResult",
+            "TransientResult",
+            "AcResult",
+            "DcSweepResult",
+            "NoiseResult",
+            "NoiseContribution",
+            "MonteCarloResult",
+            "VariableStatistics",
+            "PoleZeroResult",
+            "ComplexValue",
+            "RSpiceError",
+            "ParseError",
+            "SimulationError",
+            "ConvergenceError",
+        ],
     )?;
 
     Ok(())
