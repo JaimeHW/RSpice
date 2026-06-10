@@ -33,7 +33,7 @@ mod app_shell_state;
 pub use app_shell_state::{ConfirmationAction, ConfirmationDialogState, ConfirmationResponse};
 
 mod app_dialog_state;
-pub use app_dialog_state::DialogState;
+pub use app_dialog_state::{DialogState, LibraryDeleteTarget};
 
 mod app_serialization;
 

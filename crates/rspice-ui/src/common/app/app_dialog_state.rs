@@ -5,6 +5,27 @@
 
 use super::ConfirmationDialogState;
 
+/// A library deletion awaiting user confirmation.
+#[derive(Debug, Clone)]
+pub enum LibraryDeleteTarget {
+    /// Delete a whole cell (with all its views).
+    Cell {
+        /// Owning library.
+        library: String,
+        /// Cell to delete.
+        cell: String,
+    },
+    /// Delete a single view.
+    View {
+        /// Owning library.
+        library: String,
+        /// Owning cell.
+        cell: String,
+        /// View to delete.
+        view: String,
+    },
+}
+
 /// Dialog visibility state
 
 #[derive(Debug, Clone, Default)]
@@ -41,6 +62,8 @@ pub struct DialogState {
     pub new_view_type: crate::state::ViewType,
     /// New View validation error message
     pub new_view_error: Option<String>,
+    /// Library deletion awaiting confirmation
+    pub library_delete_confirm: Option<LibraryDeleteTarget>,
 
     /// Starting position of selection drag (grid coords)
     pub drag_start: Option<(i32, i32)>,

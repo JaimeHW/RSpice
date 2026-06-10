@@ -4,14 +4,67 @@
 use egui::Ui;
 
 use crate::common::AppState;
+use crate::common::app::LibraryDeleteTarget;
 use crate::shell::WorkspaceView;
 use crate::state::{CellViewRef, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, TreeRow, docbar, mono_input};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, TreeRow, docbar, mono_input};
+
+/// Destructive confirmation for cell/view deletion: the deletion only
+/// lands once the user confirms the err-styled primary.
+fn delete_confirm_dialog(ctx: &egui::Context, state: &mut AppState) {
+    let Some(target) = state.dialogs.library_delete_confirm.clone() else {
+        return;
+    };
+    let (title, body) = match &target {
+        LibraryDeleteTarget::Cell { library, cell } => (
+            format!("Delete cell '{cell}'"),
+            format!(
+                "Removes '{cell}' and all of its views from library '{library}'. \
+                 This cannot be undone."
+            ),
+        ),
+        LibraryDeleteTarget::View { cell, view, .. } => (
+            format!("Delete view '{view}'"),
+            format!("Removes view '{view}' from cell '{cell}'. This cannot be undone."),
+        ),
+    };
+    let choice = Dialog::new("Library", &title, "Delete")
+        .size(DialogSize::Sm)
+        .destructive()
+        .ghost("Cancel")
+        .show(ctx, |ui| {
+            let t = Tokens::get(ui.ctx());
+            ui.label(
+                egui::RichText::new(body)
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+        });
+    match choice {
+        DialogChoice::Primary => {
+            match target {
+                LibraryDeleteTarget::Cell { library, cell } => {
+                    state.pending_delete_cell = Some((library, cell));
+                }
+                LibraryDeleteTarget::View { library, cell, view } => {
+                    state.pending_delete_view = Some((library, cell, view));
+                }
+            }
+            state.library_manager.selected_view = None;
+            state.dialogs.library_delete_confirm = None;
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            state.dialogs.library_delete_confirm = None;
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
 
 /// Render the library manager.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
+    delete_confirm_dialog(ui.ctx(), state);
     docbar(ui, |ui| {
         let filter_width = 240.0;
         ui.scope(|ui| {
@@ -35,6 +88,28 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 if let Some(cell) = &state.library_manager.selected_cell {
                     state.dialogs.new_view_cell = cell.clone();
                 }
+            }
+            // Delete targets the deepest selection: view, else cell.
+            let delete_target = match (
+                state.library_manager.selected_library.clone(),
+                state.library_manager.selected_cell.clone(),
+                state.library_manager.selected_view.clone(),
+            ) {
+                (Some(library), Some(cell), Some(view)) => {
+                    Some(LibraryDeleteTarget::View { library, cell, view })
+                }
+                (Some(library), Some(cell), None) => {
+                    Some(LibraryDeleteTarget::Cell { library, cell })
+                }
+                _ => None,
+            };
+            if Button::new("Delete")
+                .ghost()
+                .enabled(delete_target.is_some())
+                .show(ui)
+                .clicked()
+            {
+                state.dialogs.library_delete_confirm = delete_target;
             }
         });
     });
