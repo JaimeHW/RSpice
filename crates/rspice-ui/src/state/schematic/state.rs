@@ -154,6 +154,11 @@ pub struct SchematicState {
     /// Manages snapshots for undo/redo operations
     #[serde(skip)]
     pub undo_history: super::undo_history::UndoHistory,
+
+    /// Frame-coherent canvas geometry (culling bounds, hover hit-test index).
+    /// Rebuilt when `topology_version` advances; resets on clone.
+    #[serde(skip)]
+    pub(super) canvas_cache: super::canvas_cache::CanvasCache,
 }
 
 impl Default for SchematicState {
@@ -185,6 +190,7 @@ impl Default for SchematicState {
             selection_rect: super::selection::SelectionRect::default(),
             net_highlight: super::net_highlight::NetHighlightState::default(),
             undo_history: super::undo_history::UndoHistory::default(),
+            canvas_cache: super::canvas_cache::CanvasCache::default(),
         }
     }
 }

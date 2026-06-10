@@ -8,6 +8,11 @@ use super::drawing::{draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
 use super::viewport::Viewport;
 
+/// Culling margin in world units: symbols extend up to ~40 units from their
+/// anchor and labels overhang further; generous slack keeps pop-in impossible
+/// while still rejecting everything genuinely off-screen.
+const CULL_MARGIN: f32 = 160.0;
+
 pub(super) fn draw_scene(
     painter: &Painter,
     available: Rect,
@@ -25,7 +30,21 @@ pub(super) fn draw_scene(
         None
     };
 
-    for wire in &state.schematic.wires {
+    // Viewport culling: only elements whose bounds intersect the visible
+    // world rect are transformed and tessellated.
+    let (wx0, wy0, wx1, wy1) = viewport.visible_world_rect(CULL_MARGIN);
+    let cache = state.schematic.canvas_cache();
+
+    for (index, wire) in state.schematic.wires.iter().enumerate() {
+        if let Some((min, max)) = cache.and_then(|c| c.wire_bounds.get(index)) {
+            if (max.x as f32) < wx0
+                || (min.x as f32) > wx1
+                || (max.y as f32) < wy0
+                || (min.y as f32) > wy1
+            {
+                continue;
+            }
+        }
         let mut is_selected = state.schematic.selection.wires.contains(&wire.id);
 
         if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
@@ -40,6 +59,10 @@ pub(super) fn draw_scene(
     }
 
     for component in &state.schematic.components {
+        let (cx, cy) = (component.pos.x as f32, component.pos.y as f32);
+        if cx < wx0 || cx > wx1 || cy < wy0 || cy > wy1 {
+            continue;
+        }
         let mut is_selected = state.schematic.selection.components.contains(&component.id);
 
         if !is_selected && let Some((min_x, min_y, max_x, max_y)) = preview_bounds {
@@ -60,12 +83,19 @@ pub(super) fn draw_scene(
     }
 
     for junction in &state.schematic.junctions {
+        let (jx, jy) = (junction.pos.x as f32, junction.pos.y as f32);
+        if jx < wx0 || jx > wx1 || jy < wy0 || jy > wy1 {
+            continue;
+        }
         draw_junction(painter, viewport, junction.pos, state);
     }
 
     if let Some((hx, hy)) = state.dialogs.interaction.hover_wire_vertex {
         let hover_pos = Point::new(hx, hy);
-        let is_junction = state.schematic.junctions.iter().any(|j| j.pos == hover_pos);
+        let is_junction = match cache {
+            Some(cache) => cache.junctions.contains(&hover_pos),
+            None => state.schematic.junctions.iter().any(|j| j.pos == hover_pos),
+        };
         if !is_junction {
             let pos = viewport.schematic_to_screen(hover_pos);
             let radius = 3.0 * viewport.zoom;

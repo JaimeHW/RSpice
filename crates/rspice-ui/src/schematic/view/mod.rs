@@ -44,6 +44,10 @@ pub fn render_schematic_view(
     let painter = ui.painter_at(available);
     let viewport = viewport_from_state(state, available);
 
+    // Refresh the frame-coherent canvas cache (culling bounds + hover
+    // hit-test index) before painting and interaction use it.
+    state.schematic.ensure_canvas_cache();
+
     draw_scene(&painter, available, &viewport, state, symbol_library);
     handle_viewport_navigation(ui, &response, available, state);
 

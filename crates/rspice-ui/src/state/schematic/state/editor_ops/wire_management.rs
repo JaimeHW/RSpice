@@ -65,7 +65,11 @@ impl SchematicState {
     ///
     /// Returns (wire_id, vertex_index) if there's a wire vertex at this position.
     /// This is used for wire corner dragging - a professional EDA feature.
+    /// O(1) via the canvas cache when it's current; linear scan otherwise.
     pub fn wire_vertex_at(&self, pos: Point) -> Option<(u64, usize)> {
+        if let Some(cache) = self.canvas_cache() {
+            return cache.wire_vertices.get(&pos).copied();
+        }
         for wire in &self.wires {
             for (idx, point) in wire.points.iter().enumerate() {
                 if *point == pos {
@@ -81,21 +85,14 @@ impl SchematicState {
     /// Returns true if there's either:
     /// - A wire vertex at this position
     /// - A junction marker at this position
-    /// - A wire segment that passes through this position
     ///
-    /// This is used for detecting draggable points to enable T-junction dragging.
+    /// This runs on every pointer-move frame, so it must not scan the
+    /// schematic; the canvas cache answers in O(1) when current.
     pub fn is_draggable_wire_point(&self, pos: Point) -> bool {
-        // Check for wire vertices
-        if self.wire_vertex_at(pos).is_some() {
-            return true;
+        if let Some(cache) = self.canvas_cache() {
+            return cache.wire_vertices.contains_key(&pos) || cache.junctions.contains(&pos);
         }
-
-        // Check for junction markers
-        if self.junctions.iter().any(|j| j.pos == pos) {
-            return true;
-        }
-
-        false
+        self.wire_vertex_at(pos).is_some() || self.junctions.iter().any(|j| j.pos == pos)
     }
 
     /// Start drawing a wire at position

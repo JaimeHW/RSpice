@@ -17,4 +17,16 @@ impl Viewport {
             self.bounds.min.y + self.offset.y + (point.y as f32) * self.zoom,
         )
     }
+
+    /// The visible region in schematic coordinates, expanded by `margin`
+    /// world units on every side (labels and symbol bodies overhang their
+    /// anchor points). Used for viewport culling.
+    pub(super) fn visible_world_rect(&self, margin: f32) -> (f32, f32, f32, f32) {
+        let inv = 1.0 / self.zoom.max(f32::EPSILON);
+        let x0 = -self.offset.x * inv;
+        let y0 = -self.offset.y * inv;
+        let x1 = (self.bounds.width() - self.offset.x) * inv;
+        let y1 = (self.bounds.height() - self.offset.y) * inv;
+        (x0 - margin, y0 - margin, x1 + margin, y1 + margin)
+    }
 }

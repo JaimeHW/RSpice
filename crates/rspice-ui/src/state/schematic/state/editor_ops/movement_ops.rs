@@ -55,65 +55,73 @@ impl SchematicState {
     /// Wires connected to selected components are stretched to maintain
     /// the connection. Wires that connect two selected components are
     /// moved entirely (not stretched).
+    /// Runs on every drag frame: one O(1)-membership pass over the wires —
+    /// no nested terminal scans, no per-update id searches.
     pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
-        let selected_components: Vec<u64> = self.selection.components.iter().copied().collect();
-        if selected_components.is_empty() && self.selection.wires.is_empty() {
+        if self.selection.components.is_empty() && self.selection.wires.is_empty() {
             return;
         }
 
-        // Collect all terminal positions for selected components BEFORE moving
-        let mut all_terminals: Vec<(u64, Point)> = Vec::new();
-        for comp_id in &selected_components {
-            if let Some(comp) = self.components.iter().find(|c| c.id == *comp_id) {
-                for (_, pos) in comp.terminal_positions() {
-                    all_terminals.push((*comp_id, pos));
-                }
-            }
+        // Terminal positions of every selected component, BEFORE moving.
+        let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
+        for comp in self
+            .components
+            .iter()
+            .filter(|c| self.selection.components.contains(&c.id))
+        {
+            terminals.extend(comp.terminal_positions().into_iter().map(|(_, pos)| pos));
         }
 
-        // Find wires that should be stretched (one end connected to selection)
-        // vs moved entirely (both ends connected to selection)
-        let mut wire_updates: Vec<(u64, usize, Point)> = Vec::new();
-        let mut wires_to_move: Vec<u64> = Vec::new();
+        // Classify unselected wires in one pass, by index (stable here):
+        // both ends on selected terminals → translate whole; otherwise
+        // stretch every point that sits on a selected terminal.
+        let mut wire_updates: Vec<(usize, usize, Point)> = Vec::new();
+        let mut wires_to_move: Vec<usize> = Vec::new();
 
-        for wire in &self.wires {
-            let start = wire.points.first().copied();
-            let end = wire.points.last().copied();
-
-            // Check if endpoints connect to selected components
-            let start_connected =
-                start.is_some_and(|p| all_terminals.iter().any(|(_, term_pos)| *term_pos == p));
-            let end_connected =
-                end.is_some_and(|p| all_terminals.iter().any(|(_, term_pos)| *term_pos == p));
+        for (wire_index, wire) in self.wires.iter().enumerate() {
+            if self.selection.wires.contains(&wire.id) {
+                continue; // moved wholesale below
+            }
+            let start_connected = wire.points.first().is_some_and(|p| terminals.contains(p));
+            let end_connected = wire.points.last().is_some_and(|p| terminals.contains(p));
 
             if start_connected && end_connected {
-                // Both ends connected to selection - move entire wire
-                wires_to_move.push(wire.id);
+                wires_to_move.push(wire_index);
             } else {
-                // Stretch endpoints that are connected
                 for (point_idx, point) in wire.points.iter().enumerate() {
-                    for (_, term_pos) in &all_terminals {
-                        if *point == *term_pos {
-                            let new_pos = Point::new(point.x + delta.x, point.y + delta.y);
-                            wire_updates.push((wire.id, point_idx, new_pos));
-                            break;
-                        }
+                    if terminals.contains(point) {
+                        let new_pos = Point::new(point.x + delta.x, point.y + delta.y);
+                        wire_updates.push((wire_index, point_idx, new_pos));
                     }
                 }
             }
         }
 
-        // Move selected components
-        for comp_id in &selected_components {
-            if let Some(comp) = self.components.iter_mut().find(|c| c.id == *comp_id) {
-                comp.pos.x += delta.x;
-                comp.pos.y += delta.y;
+        // Move selected components.
+        for comp in self
+            .components
+            .iter_mut()
+            .filter(|c| self.selection.components.contains(&c.id))
+        {
+            comp.pos.x += delta.x;
+            comp.pos.y += delta.y;
+        }
+
+        // Move selected wires wholesale.
+        for wire in self
+            .wires
+            .iter_mut()
+            .filter(|w| self.selection.wires.contains(&w.id))
+        {
+            for point in &mut wire.points {
+                point.x += delta.x;
+                point.y += delta.y;
             }
         }
 
-        // Move selected wires (from selection, not from rubber-banding)
-        for wire_id in self.selection.wires.iter() {
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == *wire_id) {
+        // Move fully attached wires.
+        for wire_index in wires_to_move {
+            if let Some(wire) = self.wires.get_mut(wire_index) {
                 for point in &mut wire.points {
                     point.x += delta.x;
                     point.y += delta.y;
@@ -121,27 +129,9 @@ impl SchematicState {
             }
         }
 
-        // Move wires that have both ends connected to selection
-        for wire_id in wires_to_move {
-            // Skip if already in selection (already moved above)
-            if self.selection.wires.contains(&wire_id) {
-                continue;
-            }
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id) {
-                for point in &mut wire.points {
-                    point.x += delta.x;
-                    point.y += delta.y;
-                }
-            }
-        }
-
-        // Apply stretch updates for partially connected wires
-        for (wire_id, point_idx, new_pos) in wire_updates {
-            // Skip if wire was already moved entirely
-            if self.selection.wires.contains(&wire_id) {
-                continue;
-            }
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
+        // Apply stretch updates for partially connected wires.
+        for (wire_index, point_idx, new_pos) in wire_updates {
+            if let Some(wire) = self.wires.get_mut(wire_index)
                 && point_idx < wire.points.len()
             {
                 wire.points[point_idx] = new_pos;
@@ -190,70 +180,59 @@ impl SchematicState {
 
     /// Move all selected components and wires by a delta
     pub fn move_selection(&mut self, delta: Point) {
-        let selection = self.selection.clone();
+        // Union of selected components' terminals, BEFORE moving.
+        let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
+        for comp in self
+            .components
+            .iter()
+            .filter(|c| self.selection.components.contains(&c.id))
+        {
+            terminals.extend(comp.terminal_positions().into_iter().map(|(_, pos)| pos));
+        }
 
-        let selected_wire_ids: std::collections::HashSet<u64> =
-            selection.wires.iter().copied().collect();
-
-        // Move all selected components with rubber-banding
-        for comp_id in &selection.components {
-            let terminals: Vec<Point> = {
-                if let Some(comp) = self.components.iter().find(|c| c.id == *comp_id) {
-                    comp.terminal_positions()
-                        .into_iter()
-                        .map(|(_, pos)| pos)
-                        .collect()
-                } else {
-                    continue;
-                }
-            };
-
-            let mut wire_updates: Vec<(u64, usize, Point)> = Vec::new();
-            for wire in &self.wires {
-                if selected_wire_ids.contains(&wire.id) {
-                    continue;
-                }
-                for (point_idx, point) in wire.points.iter().enumerate() {
-                    for term_pos in &terminals {
-                        if *point == *term_pos {
-                            let new_pos = Point::new(term_pos.x + delta.x, term_pos.y + delta.y);
-                            wire_updates.push((wire.id, point_idx, new_pos));
-                            break;
-                        }
+        // Rubber-band stretch: any unselected wire point on a selected
+        // terminal follows it.
+        if !terminals.is_empty() {
+            for wire in self
+                .wires
+                .iter_mut()
+                .filter(|w| !self.selection.wires.contains(&w.id))
+            {
+                for point in &mut wire.points {
+                    if terminals.contains(point) {
+                        point.x += delta.x;
+                        point.y += delta.y;
                     }
-                }
-            }
-
-            if let Some(comp) = self.components.iter_mut().find(|c| c.id == *comp_id) {
-                comp.pos.x += delta.x;
-                comp.pos.y += delta.y;
-            }
-
-            for (wire_id, point_idx, new_pos) in wire_updates {
-                if let Some(wire) = self.wires.iter_mut().find(|w| w.id == wire_id)
-                    && point_idx < wire.points.len()
-                {
-                    wire.points[point_idx] = new_pos;
                 }
             }
         }
 
-        // Move all selected wires entirely
+        // Move the selected components.
+        for comp in self
+            .components
+            .iter_mut()
+            .filter(|c| self.selection.components.contains(&c.id))
+        {
+            comp.pos.x += delta.x;
+            comp.pos.y += delta.y;
+        }
+
+        // Move selected wires entirely, tracking endpoints for junctions.
         let mut wire_endpoints: Vec<Point> = Vec::new();
-        for wire_id in &selection.wires {
-            if let Some(wire) = self.wires.iter().find(|w| w.id == *wire_id) {
-                if let Some(first) = wire.points.first() {
-                    wire_endpoints.push(*first);
-                }
-                if let Some(last) = wire.points.last() {
-                    wire_endpoints.push(*last);
-                }
+        for wire in self
+            .wires
+            .iter_mut()
+            .filter(|w| self.selection.wires.contains(&w.id))
+        {
+            if let Some(first) = wire.points.first() {
+                wire_endpoints.push(*first);
             }
-            if let Some(wire) = self.wires.iter_mut().find(|w| w.id == *wire_id) {
-                for point in &mut wire.points {
-                    point.x += delta.x;
-                    point.y += delta.y;
-                }
+            if let Some(last) = wire.points.last() {
+                wire_endpoints.push(*last);
+            }
+            for point in &mut wire.points {
+                point.x += delta.x;
+                point.y += delta.y;
             }
         }
 

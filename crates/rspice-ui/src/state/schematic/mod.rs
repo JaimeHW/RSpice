@@ -15,6 +15,7 @@
 //! - `net_label` - Net labels and junctions
 //! - `state` - Main SchematicState
 
+mod canvas_cache;
 mod clipboard;
 mod component;
 mod component_type;
@@ -30,6 +31,7 @@ mod undo_history;
 mod wire;
 
 // Re-export all public types for backwards compatibility
+pub use canvas_cache::CanvasCache;
 pub use clipboard::ClipboardData;
 pub use component::{Component, LibraryCellInstance};
 pub use component_type::ComponentType;
