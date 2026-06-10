@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOLTA — dialog &amp; workflow grammar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* =========================================================================
+   VOLTA tokens — Instrument · dark, lifted verbatim from ui/palette.rs
+   ========================================================================= */
+:root {
+  --bg-app:       #11171b;
+  --bg-panel:     #1a2024;
+  --bg-inset:     #0b1115;
+  --bg-elevated:  #21292e;
+  --bg-hover:     #262e33;
+  --bg-active:    #2e3a41;
+  --border:       #2b3136;
+  --border-strong:#444c50;
+  --text:         #d7dbde;
+  --text-dim:     #93999e;
+  --text-faint:   #646a6e;
+  --accent:       #65d68a;
+  --accent-ink:   #061b0d;
+  --accent-dim:   rgba(62, 133, 84, 0.14);
+  --ok:           #60c781;
+  --warn:         #e4b750;
+  --err:          #ef6661;
+  --canvas-bg:    #070c10;
+  --canvas-grid:  #1c2327;
+  --trace-1: #59d483; --trace-2: #4ac9ec; --trace-3: #e7b643;
+  --trace-4: #ed74bd; --trace-5: #78a5ef; --trace-6: #f2716a;
+
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  /* type scale (matches tokens::FS_*) */
+  --fs-0: 11px;  --fs-1: 12.5px;  --fs-2: 14px;  --fs-3: 16px;  --fs-4: 20px;
+
+  /* spacing scale */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 40px;
+
+  --radius: 4px;
+  --radius-lg: 6px;
+  --shadow-pop: 0 6px 24px rgba(0,0,0,0.45);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg-app);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: var(--fs-2);
+  line-height: 1.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* =========================================================================
+   Spec-document shell
+   ========================================================================= */
+.doc { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+.nav {
+  position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  background: var(--bg-panel); border-right: 1px solid var(--border);
+  padding: var(--sp-5) 0;
+}
+.nav .brand {
+  font-family: var(--mono); font-size: var(--fs-1); letter-spacing: 0.18em;
+  color: var(--accent); padding: 0 var(--sp-5) var(--sp-4);
+}
+.nav .brand small { display: block; color: var(--text-faint); letter-spacing: 0.04em; margin-top: 2px; }
+.nav a {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 7px var(--sp-5); color: var(--text-dim); text-decoration: none;
+  font-size: var(--fs-1); border-left: 2px solid transparent;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+.nav a:hover { color: var(--text); background: var(--bg-hover); }
+.nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.nav a .n { font-family: var(--mono); font-size: var(--fs-0); color: var(--text-faint); }
+
+.main { padding: var(--sp-6) clamp(24px, 5vw, 72px); max-width: 1180px; }
+section { margin-bottom: 72px; scroll-margin-top: 24px; }
+.kicker {
+  font-family: var(--mono); font-size: var(--fs-0); letter-spacing: 0.16em;
+  text-transform: uppercase; color: var(--accent); margin-bottom: var(--sp-2);
+}
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: var(--sp-3); }
+h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: var(--sp-3); }
+h3 { font-size: var(--fs-2); font-weight: 600; color: var(--text); margin: var(--sp-5) 0 var(--sp-2); }
+.lede { color: var(--text-dim); max-width: 70ch; text-wrap: pretty; }
+p.note { color: var(--text-dim); font-size: var(--fs-1); max-width: 70ch; margin-top: var(--sp-2); text-wrap: pretty; }
+
+.spec {
+  width: 100%; border-collapse: collapse; margin-top: var(--sp-3);
+  font-size: var(--fs-1);
+}
+.spec th {
+  text-align: left; font-family: var(--mono); font-size: var(--fs-0);
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
+  padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border-strong);
+}
+.spec td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.spec td:first-child { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+.spec td { color: var(--text-dim); }
+
+.demo {
+  margin-top: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-inset); padding: var(--sp-5); position: relative;
+}
+.demo-label {
+  position: absolute; top: -9px; left: 12px; background: var(--bg-app);
+  padding: 0 8px; font-family: var(--mono); font-size: var(--fs-0);
+  color: var(--text-faint); letter-spacing: 0.1em;
+}
+
+/* =========================================================================
+   VOLTA widgets (mirrors ui/widgets/*)
+   ========================================================================= */
+.btn {
+  font-family: var(--sans); font-size: var(--fs-1); font-weight: 500;
+  color: var(--text); background: var(--bg-elevated);
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  padding: 5px 14px; cursor: pointer; min-height: 26px;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.btn:active { background: var(--bg-active); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary {
+  background: var(--accent); color: var(--accent-ink); border-color: transparent;
+  letter-spacing: 0.02em;
+}
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { background: var(--err); color: #1d0605; border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn.ghost:hover { background: var(--bg-hover); color: var(--text); }
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: var(--fs-0); color: var(--text-dim);
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 10px; cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.chip:hover { color: var(--text); }
+.chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.input, select.input {
+  font-family: var(--mono); font-size: var(--fs-1); color: var(--text);
+  background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 5px 8px; width: 100%;
+  transition: border-color 0.2s ease;
+}
+.input:hover { border-color: var(--border-strong); }
+.input:focus-visible { outline: none; border-color: var(--accent); }
+.input[aria-invalid="true"] { border-color: var(--err); }
+.input::placeholder { color: var(--text-faint); }
+
+.field { display: grid; grid-template-columns: 132px 1fr 64px; gap: 10px; align-items: center; padding: 3px 0; }
+.field > label { font-size: var(--fs-1); color: var(--text-dim); }
+.field .unit { font-family: var(--mono); font-size: var(--fs-0); color: var(--text-faint); }
+.field .error { grid-column: 2 / 4; font-size: var(--fs-0); color: var(--err); padding-top: 2px; }
+
+.section-h {
+  font-family: var(--mono); font-size: var(--fs-0); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--text-faint);
+  padding: 10px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+}
+
+/* =========================================================================
+   01 — Modal primitive
+   ========================================================================= */
+.scrim {
+  position: fixed; inset: 0; background: rgba(2, 5, 7, 0.55);
+  display: none; align-items: center; justify-content: center; z-index: 50;
+  backdrop-filter: blur(1.5px);
+}
+.scrim.open { display: flex; }
+.modal {
+  background: var(--bg-panel); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-pop);
+  display: flex; flex-direction: column; max-height: min(82vh, 720px);
+  width: 560px;
+}
+.modal.sm { width: 400px; }
+.modal.lg { width: 780px; }
+.modal-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+.modal-head .m-kicker {
+  font-family: var(--mono); font-size: var(--fs-0); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--accent);
+}
+.modal-head h4 { font-size: var(--fs-2); font-weight: 600; flex: 1; }
+.modal-close {
+  width: 24px; height: 24px; border: none; background: transparent; color: var(--text-dim);
+  border-radius: var(--radius); cursor: pointer; font-size: 14px; line-height: 1;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text); }
+.modal-close:focus-visible { outline: 2px solid var(--accent); }
+.modal-body { padding: 16px; overflow-y: auto; }
+.modal-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px; border-top: 1px solid var(--border);
+}
+.modal-foot .hint { font-family: var(--mono); font-size: var(--fs-0); color: var(--text-faint); }
+.modal-foot .grow { flex: 1; }
+
+/* =========================================================================
+   Shared demo furniture
+   ========================================================================= */
+.faux-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inset-block {
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--fs-1); padding: 10px 12px; color: var(--text-dim);
+  overflow-x: auto; white-space: pre;
+}
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tab {
+  font-family: var(--mono); font-size: var(--fs-0); letter-spacing: 0.06em;
+  color: var(--text-dim); background: none; border: none; padding: 6px 11px; cursor: pointer;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color 0.2s ease;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.tree-row {
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+  border-radius: var(--radius); cursor: pointer; font-size: var(--fs-1);
+  transition: background 0.15s ease;
+}
+.tree-row:hover { background: var(--bg-hover); }
+.tree-row[aria-selected="true"] { background: var(--accent-dim); color: var(--text); }
+.tree-row .meta { margin-left: auto; font-family: var(--mono); font-size: var(--fs-0); color: var(--text-faint); }
+.tree-row .mono { font-family: var(--mono); }
+
+.data-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: var(--fs-1); }
+.data-table th {
+  text-align: left; font-size: var(--fs-0); letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint); font-weight: 400; padding: 6px 10px;
+  border-bottom: 1px solid var(--border-strong);
+}
+.data-table td { padding: 4px 10px; border-bottom: 1px solid var(--border); }
+.data-table tr:hover td { background: var(--bg-hover); }
+.data-table .num { text-align: right; }
+
+.toast-stack { position: fixed; right: 16px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 80; }
+.toast {
+  display: flex; align-items: center; gap: 10px; min-width: 260px; max-width: 380px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-pop);
+  padding: 9px 12px; font-size: var(--fs-1);
+  animation: toast-in 0.22s ease;
+}
+@keyframes toast-in { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+.toast .dot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.toast .body { flex: 1; }
+.toast .body small { display: block; font-family: var(--mono); font-size: var(--fs-0); color: var(--text-dim); }
+.toast .t-action {
+  font-family: var(--mono); font-size: var(--fs-0); color: var(--accent);
+  background: none; border: none; cursor: pointer; padding: 2px 4px;
+}
+.toast .t-action:hover { text-decoration: underline; }
+
+/* analyses picker grid */
+.an-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.an-card {
+  text-align: left; background: var(--bg-inset); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 8px 10px; cursor: pointer; color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.an-card:hover { border-color: var(--accent); background: var(--bg-hover); }
+.an-card:focus-visible { outline: 2px solid var(--accent); }
+.an-card .id { font-family: var(--mono); font-size: var(--fs-0); color: var(--accent); letter-spacing: 0.08em; }
+.an-card .nm { display: block; font-size: var(--fs-1); color: var(--text-dim); margin-top: 1px; }
+
+/* simulate-view mock */
+.sim-mock { display: grid; grid-template-columns: 1fr 300px; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.sim-center { background: var(--canvas-bg); padding: 16px; }
+.sim-right { background: var(--bg-panel); padding: 12px; }
+.card {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  margin-bottom: 12px; overflow: hidden;
+}
+.card-h {
+  display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.card-h .t { font-family: var(--mono); font-size: var(--fs-0); letter-spacing: 0.14em; color: var(--text-faint); text-transform: uppercase; flex: 1; }
+.an-row {
+  display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+  border-bottom: 1px solid var(--border); cursor: pointer; font-size: var(--fs-1);
+  transition: background 0.15s ease;
+}
+.an-row:last-child { border-bottom: none; }
+.an-row:hover { background: var(--bg-hover); }
+.an-row[aria-selected="true"] { background: var(--accent-dim); }
+.an-row .sw {
+  width: 28px; height: 16px; border-radius: 999px; background: var(--bg-active);
+  position: relative; flex: none; transition: background 0.2s ease;
+}
+.an-row .sw::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px;
+  border-radius: 50%; background: var(--text-dim); transition: transform 0.2s ease, background 0.2s ease;
+}
+.an-row.on .sw { background: var(--accent-dim); }
+.an-row.on .sw::after { transform: translateX(12px); background: var(--accent); }
+.an-row .an-id { font-family: var(--mono); color: var(--text); width: 52px; }
+.an-row .an-sum { font-family: var(--mono); font-size: var(--fs-0); color: var(--text-faint); margin-left: auto; }
+.an-row .an-bad { color: var(--err); font-family: var(--mono); font-size: var(--fs-0); margin-left: auto; }
+
+/* plot-grammar mock for diagnostic viewers */
+.plot-mock { background: var(--canvas-bg); border: 1px solid var(--border); border-radius: var(--radius); position: relative; }
+.tag {
+  position: absolute; font-family: var(--mono); font-size: 10px; color: var(--text);
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: 3px; padding: 1px 6px;
+}
+
+kbd {
+  font-family: var(--mono); font-size: var(--fs-0); color: var(--text-dim);
+  background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-bottom-width: 2px; border-radius: 3px; padding: 0 5px;
+}
+.swatches { display: flex; gap: 6px; flex-wrap: wrap; margin-top: var(--sp-2); }
+.swatch { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: var(--fs-0); color: var(--text-dim); }
+.swatch i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border-strong); display: inline-block; }
+</style>
+</head>
+<body>
+<div class="doc">
+
+<nav class="nav" aria-label="Sections">
+  <div class="brand">VOLTA<small>dialog &amp; workflow grammar · spec 1</small></div>
+  <a href="#grammar"><span class="n">01</span> Modal grammar</a>
+  <a href="#confirm"><span class="n">02</span> Confirmations</a>
+  <a href="#analyses"><span class="n">03</span> Analyses in Simulate</a>
+  <a href="#options"><span class="n">04</span> Simulation options</a>
+  <a href="#properties"><span class="n">05</span> Instance properties</a>
+  <a href="#browser"><span class="n">06</span> Model browser</a>
+  <a href="#forms"><span class="n">07</span> Small forms</a>
+  <a href="#probe"><span class="n">08</span> Probe feedback</a>
+  <a href="#viewers"><span class="n">09</span> Diagnostic viewers</a>
+</nav>
+
+<main class="main">
+
+<header style="margin-bottom:56px">
+  <div class="kicker">VOLTA design system · RSpice</div>
+  <h1>One dialog grammar for the whole simulator</h1>
+  <p class="lede">
+    The IDE shell, results workspace, and canvas already speak VOLTA. Every window the app
+    opens still speaks 2009-era defaults. This spec defines the single modal primitive they
+    all port onto, and redesigns the surfaces that deserve more than a re-skin: analysis
+    configuration moves into the Simulate view, property editing collapses to one surface,
+    and the three diagnostic viewers adopt the plot grammar. Tokens are lifted verbatim
+    from <code style="font-family:var(--mono);font-size:var(--fs-1)">ui/palette.rs</code> (Instrument · dark shown).
+  </p>
+</header>
+
+<!-- ================================================================== -->
+<section id="grammar">
+  <div class="kicker">01</div>
+  <h2>Modal grammar</h2>
+  <p class="lede">Every dialog is the same three-part surface over a scrim. No floating windows that
+  can be dragged off-screen and lost; no two dialogs with different button orders.</p>
+
+  <table class="spec">
+    <tr><th>Part</th><th>Rule</th></tr>
+    <tr><td>Scrim</td><td>Full-viewport, canvas-black at 55%, subtle blur. Click does not dismiss (explicit actions only); <kbd>Esc</kbd> cancels.</td></tr>
+    <tr><td>Surface</td><td><code>bg_panel</code>, 1px <code>border_strong</code>, 6px radius, pop shadow. Widths: <b>sm</b> 400 · <b>md</b> 560 · <b>lg</b> 780. Max height 82vh, body scrolls.</td></tr>
+    <tr><td>Header</td><td>Mono uppercase kicker (domain) + sans-semibold title + close. Close is the only chrome control.</td></tr>
+    <tr><td>Footer</td><td>Left: mono hint (validation count, shortcut). Right: <code>[ghost] [secondary] [primary]</code>. Primary is always rightmost, always exactly one, accent-filled. Destructive primaries use <code>err</code>.</td></tr>
+    <tr><td>Keys</td><td><kbd>Esc</kbd> = cancel · <kbd>Enter</kbd> = primary (when valid) · focus trapped inside; first field focused on open.</td></tr>
+    <tr><td>Commit</td><td>Dialogs edit a draft and commit on primary. OK and Cancel are never the same operation.</td></tr>
+  </table>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <div class="faux-row">
+      <button class="btn" data-open="demo-modal">Open template dialog</button>
+      <span style="font-size:var(--fs-1);color:var(--text-faint)">Esc closes · Enter confirms · focus trapped</span>
+    </div>
+  </div>
+
+  <div class="swatches">
+    <span class="swatch"><i style="background:var(--bg-panel)"></i>bg_panel</span>
+    <span class="swatch"><i style="background:var(--bg-inset)"></i>bg_inset</span>
+    <span class="swatch"><i style="background:var(--bg-elevated)"></i>bg_elevated</span>
+    <span class="swatch"><i style="background:var(--accent)"></i>accent</span>
+    <span class="swatch"><i style="background:var(--err)"></i>err</span>
+    <span class="swatch"><i style="background:var(--warn)"></i>warn</span>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="confirm">
+  <div class="kicker">02</div>
+  <h2>Confirmations</h2>
+  <p class="lede">The save-changes prompt is the template instance of the grammar: small surface,
+  one sentence, three explicit verbs. Destructive choice is never the primary.</p>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <button class="btn" data-open="confirm-modal">Trigger “unsaved changes”</button>
+    <button class="btn" data-open="delete-modal" style="margin-left:8px">Trigger “delete cell”</button>
+  </div>
+  <p class="note">Library deletions get the same surface with a destructive primary and the cell
+  name echoed in mono — the design currently has deletion plumbing with no confirmation at all.</p>
+</section>
+
+<!-- ================================================================== -->
+<section id="analyses">
+  <div class="kicker">03</div>
+  <h2>Analyses live in the Simulate view</h2>
+  <p class="lede">The 700×520 “Simulation Setup” window with 25 tabs is retired. The Simulate view’s
+  analyses card is the single source of truth: a row per analysis with an enable switch and a mono
+  summary of its parameters; selecting a row opens its typed form in the right panel. “Add analysis”
+  is a searchable picker, not a tab strip.</p>
+
+  <table class="spec">
+    <tr><th>Element</th><th>Rule</th></tr>
+    <tr><td>Row</td><td>switch · mono id (TRAN, AC, …) · name · right-aligned mono parameter summary. Invalid configs show the error count in <code>err</code> instead of the summary.</td></tr>
+    <tr><td>Form</td><td>Right panel, registry-driven rows: label / mono input / unit. Validation inline per field on edit; the Run bar refuses to run while any enabled analysis is invalid.</td></tr>
+    <tr><td>Picker</td><td><kbd>＋</kbd> opens an md modal: search box + category-grouped cards. Choosing one enables it and selects its form.</td></tr>
+    <tr><td>State</td><td>Typed per-analysis configs (no string-buffer god-struct). Draft-free: the view <em>is</em> the config; undoable like any state.</td></tr>
+  </table>
+
+  <div class="demo" style="padding:16px">
+    <span class="demo-label">LIVE — Simulate view (excerpt)</span>
+    <div class="sim-mock">
+      <div class="sim-center">
+        <div class="card">
+          <div class="card-h">
+            <span class="t">Analyses</span>
+            <button class="btn ghost" data-open="picker-modal" style="padding:1px 8px">＋ Add analysis</button>
+          </div>
+          <div id="an-list">
+            <div class="an-row on" data-an="tran" aria-selected="true" tabindex="0">
+              <span class="sw"></span><span class="an-id">TRAN</span> Transient
+              <span class="an-sum">0 → 5 ms · max 1 µs</span>
+            </div>
+            <div class="an-row on" data-an="ac" tabindex="0">
+              <span class="sw"></span><span class="an-id">AC</span> Small-signal sweep
+              <span class="an-sum">dec 20 · 1 Hz → 1 MHz</span>
+            </div>
+            <div class="an-row" data-an="noise" tabindex="0">
+              <span class="sw"></span><span class="an-id">NOISE</span> Noise
+              <span class="an-bad">2 fields invalid</span>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-h"><span class="t">Run</span></div>
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 12px">
+            <button class="btn primary">Run · F5</button>
+            <div style="flex:1;height:4px;background:var(--bg-active);border-radius:2px;overflow:hidden">
+              <div style="width:34%;height:100%;background:var(--accent)"></div>
+            </div>
+            <span style="font-family:var(--mono);font-size:var(--fs-0);color:var(--text-dim)">tran · 34 %</span>
+          </div>
+        </div>
+      </div>
+      <div class="sim-right">
+        <div class="section-h" id="an-form-title">TRAN · TRANSIENT</div>
+        <div id="an-form">
+          <div class="field"><label for="f-stop">Stop time</label><input class="input" id="f-stop" value="5m"><span class="unit">s</span></div>
+          <div class="field"><label for="f-step">Max step</label><input class="input" id="f-step" value="1u"><span class="unit">s</span></div>
+          <div class="field"><label for="f-start">Record from</label><input class="input" id="f-start" value="0"><span class="unit">s</span></div>
+          <div class="field"><label for="f-uic">Use initial conditions</label>
+            <button class="chip" aria-pressed="false" onclick="this.setAttribute('aria-pressed', this.getAttribute('aria-pressed')==='true'?'false':'true')">uic</button><span></span>
+          </div>
+          <div class="field">
+            <label for="f-bad">Demo: invalid</label>
+            <input class="input" id="f-bad" value="5 potatoes" aria-invalid="true"><span class="unit">s</span>
+            <span class="error">Not a time value — engineering notation expected (e.g. 2.5u)</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="options">
+  <div class="kicker">04</div>
+  <h2>Simulation options</h2>
+  <p class="lede">The one legacy dialog with good bones — validation, presets, live <code style="font-family:var(--mono)">.OPTIONS</code>
+  preview — ported to the grammar. Tabs are the mono underline pattern from the results docbar;
+  presets are chips; the preview is an inset mono block.</p>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <button class="btn" data-open="options-modal">Open simulation options</button>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="properties">
+  <div class="kicker">05</div>
+  <h2>Instance properties — one surface</h2>
+  <p class="lede">Three competing editors become one: the shell Inspector stays primary for quick edits
+  (undo-tracked, always visible); this dialog is the advanced editor opened by double-click or
+  <kbd>E</kbd>. Registry-driven rows, inline validation, modified markers, and the PWL table —
+  no second “simple” dialog.</p>
+
+  <table class="spec">
+    <tr><th>Element</th><th>Rule</th></tr>
+    <tr><td>Row</td><td>label / typed editor / unit. Modified fields show an accent dot before the label; errors render under the row in <code>err</code> — never raw <code>YELLOW</code>/<code>RED</code>.</td></tr>
+    <tr><td>Model</td><td>model fields get a trailing <b>Browse</b> ghost button → Model browser (06) in picker mode.</td></tr>
+    <tr><td>PWL</td><td>a real data table: mono columns, row hover, add/delete as ghost buttons in the header, footer summary (points · t-range · v-range).</td></tr>
+    <tr><td>Commit</td><td>Apply / Cancel / Revert; Apply commits one undo entry (session pattern shared with the Inspector).</td></tr>
+  </table>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <button class="btn" data-open="props-modal">Open property editor (V1 · PWL source)</button>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="browser">
+  <div class="kicker">06</div>
+  <h2>Model browser</h2>
+  <p class="lede">Same information architecture it always had — libraries → models → detail — rebuilt
+  with the Library view’s vocabulary: tree rows, mono metadata, a detail pane of stat tables. Corner
+  selection is a chip row. Opens standalone (Tools) or as a picker from the property editor.</p>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <button class="btn" data-open="browser-modal">Open model browser</button>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="forms">
+  <div class="kicker">07</div>
+  <h2>Small forms</h2>
+  <p class="lede">New Cell, New View, the Verilog-A loader, and PDK settings are sm/md instances of the
+  grammar: section headers, field rows, footer verbs. No emoji buttons — actions use the icon set or
+  words. New View arrives pre-filled from the Library selection (today it opens blank and can’t submit).</p>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <div class="faux-row">
+      <button class="btn" data-open="newcell-modal">New cell</button>
+      <button class="btn" data-open="veriloga-modal">Compile Verilog-A</button>
+    </div>
+  </div>
+  <p class="note">PDK settings keeps its four tabs on the docbar tab pattern; file-type badges become
+  mono chips in token colors; “Rescan” is a normal button with a progress spinner in the footer hint slot.
+  About/Shortcuts/Calculator are mechanical ports of the same shapes.</p>
+</section>
+
+<!-- ================================================================== -->
+<section id="probe">
+  <div class="kicker">08</div>
+  <h2>Probe feedback</h2>
+  <p class="lede">Probing currently reports into the console only — collapsed console, silent feature.
+  Every probe action gets a toast (bottom-right, above the status bar), and probed nets render a
+  small mono chip at the click point for one second. Toasts carry one optional action.</p>
+
+  <table class="spec">
+    <tr><th>Case</th><th>Toast</th></tr>
+    <tr><td>Wire hit</td><td><code>ok</code> dot · “Probing net <b>out</b>” · sub: “V(out) added to WAVES” · action: <i>View</i> → Results.</td></tr>
+    <tr><td>No data yet</td><td><code>warn</code> dot · “No waveform for V(out)” · sub: “Run a simulation first” · action: <i>Run</i>.</td></tr>
+    <tr><td>Ground</td><td><code>info</code> (text_dim) dot · “net 0 is the ground reference”.</td></tr>
+  </table>
+
+  <div class="demo">
+    <span class="demo-label">LIVE</span>
+    <div class="faux-row">
+      <button class="btn" onclick="toast('ok','Probing net out','V(out) added to WAVES','View')">Probe a wire</button>
+      <button class="btn" onclick="toast('warn','No waveform for V(out)','Run a simulation first','Run')">Probe before running</button>
+      <button class="btn" onclick="toast('dim','net 0 is the ground reference','','')">Probe ground</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== -->
+<section id="viewers">
+  <div class="kicker">09</div>
+  <h2>Diagnostic viewers on the plot grammar</h2>
+  <p class="lede">Nyquist, Smith, and pole-zero drop their private hardcoded palettes and rebuild on
+  the plot engine exactly like BODE/FFT: token grid and frame, decimated token traces, bordered
+  marker tags, stats in the right panel — numbers never float over curves. They keep their geometry,
+  not their chrome.</p>
+
+  <table class="spec">
+    <tr><th>Viewer</th><th>Treatment</th></tr>
+    <tr><td>NYQUIST</td><td>Square plot, unit circle as ref-line ring, −1 point as an <code>err</code> marker tag; encirclement count + GM/PM in the right panel (cached per data version).</td></tr>
+    <tr><td>SMITH</td><td>Polar resistance/reactance grid in <code>canvas_grid</code>; traces from the token cycle; markers show Γ, Z, VSWR. Normalization toggle is a chip in the docbar.</td></tr>
+    <tr><td>PZ</td><td>s-plane with stable half shaded <code>accent_dim</code>; poles ✕ in <code>trace-6</code>, zeros ○ in <code>trace-2</code>; table of roots with ζ and ω<sub>n</sub> at right.</td></tr>
+  </table>
+
+  <div class="demo" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <span class="demo-label">MOCK — grammar applied</span>
+    <div>
+      <div style="font-family:var(--mono);font-size:var(--fs-0);color:var(--text-faint);margin-bottom:6px">NYQUIST</div>
+      <div class="plot-mock" style="height:220px">
+        <svg viewBox="0 0 320 220" width="100%" height="100%" aria-label="Nyquist mock">
+          <g stroke="var(--canvas-grid)" stroke-width="1">
+            <line x1="0" y1="110" x2="320" y2="110"/><line x1="160" y1="0" x2="160" y2="220"/>
+            <circle cx="160" cy="110" r="55" fill="none" stroke-dasharray="4 3"/>
+          </g>
+          <path d="M 290 110 C 290 30, 120 18, 95 70 C 75 112, 120 150, 160 138" fill="none" stroke="var(--trace-1)" stroke-width="1.8"/>
+          <circle cx="105" cy="110" r="3" fill="var(--canvas-bg)" stroke="var(--err)" stroke-width="1.5"/>
+        </svg>
+        <span class="tag" style="left:78px;top:88px;color:var(--err)">−1 + j0</span>
+        <span class="tag" style="right:10px;top:10px">N = 0 · stable</span>
+      </div>
+    </div>
+    <div>
+      <div style="font-family:var(--mono);font-size:var(--fs-0);color:var(--text-faint);margin-bottom:6px">PZ</div>
+      <div class="plot-mock" style="height:220px">
+        <svg viewBox="0 0 320 220" width="100%" height="100%" aria-label="Pole-zero mock">
+          <rect x="0" y="0" width="160" height="220" fill="var(--accent-dim)"/>
+          <g stroke="var(--canvas-grid)" stroke-width="1">
+            <line x1="0" y1="110" x2="320" y2="110"/><line x1="160" y1="0" x2="160" y2="220"/>
+          </g>
+          <g stroke="var(--trace-6)" stroke-width="1.8">
+            <line x1="84" y1="44" x2="96" y2="56"/><line x1="96" y1="44" x2="84" y2="56"/>
+            <line x1="84" y1="164" x2="96" y2="176"/><line x1="96" y1="164" x2="84" y2="176"/>
+          </g>
+          <circle cx="208" cy="110" r="6" fill="none" stroke="var(--trace-2)" stroke-width="1.8"/>
+        </svg>
+        <span class="tag" style="left:100px;top:34px">p₁ ζ=0.10 ωₙ=10</span>
+        <span class="tag" style="left:218px;top:96px">z₁</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer style="color:var(--text-faint);font-size:var(--fs-1);padding-bottom:48px">
+  VOLTA dialog &amp; workflow grammar · Instrument dark · all colors from ui/palette.rs ·
+  light mode and the other directions follow from the same token names.
+</footer>
+
+</main>
+</div>
+
+<!-- ===================== MODALS ===================== -->
+
+<div class="scrim" id="demo-modal" role="dialog" aria-modal="true" aria-labelledby="demo-title">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="m-kicker">Template</span>
+      <h4 id="demo-title">Dialog title</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="section-h">Section</div>
+      <div class="field"><label for="t-a">Field</label><input class="input" id="t-a" value="value"><span class="unit">unit</span></div>
+      <div class="field"><label for="t-b">Another</label><input class="input" id="t-b" placeholder="placeholder"><span class="unit"></span></div>
+      <p class="note">Body is the only scrollable region. Section headers use the panel grammar.</p>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">Enter applies · Esc cancels</span>
+      <span class="grow"></span>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+  <div class="modal sm">
+    <div class="modal-head">
+      <span class="m-kicker">Schematic</span>
+      <h4 id="confirm-title">Save changes?</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:var(--fs-1);color:var(--text-dim)">
+        <span style="font-family:var(--mono);color:var(--text)">rc_lowpass</span> has unsaved changes.
+        Save before opening another schematic?
+      </p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>Cancel</button>
+      <span class="grow"></span>
+      <button class="btn" data-close>Don’t save</button>
+      <button class="btn primary" data-close>Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="delete-modal" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+  <div class="modal sm">
+    <div class="modal-head">
+      <span class="m-kicker" style="color:var(--err)">Library</span>
+      <h4 id="delete-title">Delete cell?</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:var(--fs-1);color:var(--text-dim)">
+        <span style="font-family:var(--mono);color:var(--text)">work / diff_pair</span> and its
+        2 views will be removed. This cannot be undone.
+      </p>
+    </div>
+    <div class="modal-foot">
+      <span class="grow"></span>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn danger" data-close>Delete cell</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="picker-modal" role="dialog" aria-modal="true" aria-labelledby="picker-title">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="m-kicker">Simulate</span>
+      <h4 id="picker-title">Add analysis</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <input class="input" id="picker-search" placeholder="Search analyses…" style="margin-bottom:12px" aria-label="Search analyses">
+      <div class="section-h">Core</div>
+      <div class="an-grid" data-cat>
+        <button class="an-card"><span class="id">OP</span><span class="nm">Operating point</span></button>
+        <button class="an-card"><span class="id">TRAN</span><span class="nm">Transient</span></button>
+        <button class="an-card"><span class="id">AC</span><span class="nm">Small-signal sweep</span></button>
+        <button class="an-card"><span class="id">DC</span><span class="nm">DC sweep</span></button>
+        <button class="an-card"><span class="id">NOISE</span><span class="nm">Noise</span></button>
+        <button class="an-card"><span class="id">PZ</span><span class="nm">Pole-zero</span></button>
+      </div>
+      <div class="section-h" style="margin-top:14px">RF · periodic</div>
+      <div class="an-grid" data-cat>
+        <button class="an-card"><span class="id">HB</span><span class="nm">Harmonic balance</span></button>
+        <button class="an-card"><span class="id">PSS</span><span class="nm">Periodic steady state</span></button>
+        <button class="an-card"><span class="id">PNOISE</span><span class="nm">Periodic noise</span></button>
+        <button class="an-card"><span class="id">SP</span><span class="nm">S-parameters</span></button>
+        <button class="an-card"><span class="id">PAC</span><span class="nm">Periodic AC</span></button>
+        <button class="an-card"><span class="id">PXF</span><span class="nm">Periodic transfer</span></button>
+      </div>
+      <div class="section-h" style="margin-top:14px">Statistical · sweeps</div>
+      <div class="an-grid" data-cat>
+        <button class="an-card"><span class="id">MC</span><span class="nm">Monte Carlo</span></button>
+        <button class="an-card"><span class="id">CORNER</span><span class="nm">Process corners</span></button>
+        <button class="an-card"><span class="id">SENS</span><span class="nm">Sensitivity</span></button>
+        <button class="an-card"><span class="id">OPT</span><span class="nm">Optimization</span></button>
+        <button class="an-card"><span class="id">REL</span><span class="nm">Reliability</span></button>
+        <button class="an-card"><span class="id">SOA</span><span class="nm">Safe operating area</span></button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint" id="picker-count">18 of 25 shown — search to filter</span>
+      <span class="grow"></span>
+      <button class="btn" data-close>Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="options-modal" role="dialog" aria-modal="true" aria-labelledby="options-title">
+  <div class="modal lg">
+    <div class="modal-head">
+      <span class="m-kicker">Simulate</span>
+      <h4 id="options-title">Simulation options</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs" role="tablist" data-tabs="opt">
+        <button class="tab" role="tab" aria-selected="true" data-tab="acc">ACCURACY</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="conv">CONVERGENCE</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="alg">ALGORITHM</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="lim">LIMITS</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="tmp">TEMPERATURE</button>
+      </div>
+      <div data-pane="acc">
+        <div class="field"><label for="o-reltol">RELTOL</label><input class="input" id="o-reltol" value="1e-3"><span class="unit"></span></div>
+        <div class="field"><label for="o-abstol">ABSTOL</label><input class="input" id="o-abstol" value="1e-12"><span class="unit">A</span></div>
+        <div class="field"><label for="o-vntol">VNTOL</label><input class="input" id="o-vntol" value="1e-6"><span class="unit">V</span></div>
+        <div class="field"><label for="o-chgtol">CHGTOL</label><input class="input" id="o-chgtol" value="1e-14"><span class="unit">C</span></div>
+      </div>
+      <div data-pane="conv" hidden>
+        <div class="field"><label for="o-itl1">ITL1</label><input class="input" id="o-itl1" value="100"><span class="unit"></span></div>
+        <div class="field"><label for="o-itl4">ITL4</label><input class="input" id="o-itl4" value="50"><span class="unit"></span></div>
+        <div class="field"><label for="o-gmin">GMIN</label><input class="input" id="o-gmin" value="1e-12"><span class="unit">S</span></div>
+      </div>
+      <div data-pane="alg" hidden><p class="note">Integration method, matrix ordering — same field grammar.</p></div>
+      <div data-pane="lim" hidden><p class="note">Step/iteration limits — same field grammar.</p></div>
+      <div data-pane="tmp" hidden>
+        <div class="field"><label for="o-temp">TEMP</label><input class="input" id="o-temp" value="27"><span class="unit">°C</span></div>
+        <div class="field"><label for="o-tnom">TNOM</label><input class="input" id="o-tnom" value="27"><span class="unit">°C</span></div>
+      </div>
+
+      <div class="section-h" style="margin-top:16px">Presets</div>
+      <div class="faux-row">
+        <button class="chip" aria-pressed="true">default</button>
+        <button class="chip" aria-pressed="false">fast</button>
+        <button class="chip" aria-pressed="false">accurate</button>
+        <button class="chip" aria-pressed="false">robust</button>
+      </div>
+
+      <div class="section-h" style="margin-top:16px">.OPTIONS preview</div>
+      <div class="inset-block">.OPTIONS RELTOL=1e-3 ABSTOL=1e-12 VNTOL=1e-6 CHGTOL=1e-14</div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">all values valid</span>
+      <span class="grow"></span>
+      <button class="btn ghost" data-close>Revert</button>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="props-modal" role="dialog" aria-modal="true" aria-labelledby="props-title">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="m-kicker">Instance</span>
+      <h4 id="props-title">V1 · PWL voltage source</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="tabs" role="tablist" data-tabs="props">
+        <button class="tab" role="tab" aria-selected="true" data-tab="p-gen">GENERAL</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="p-pwl">PWL DATA</button>
+      </div>
+      <div data-pane="p-gen">
+        <div class="field">
+          <label for="p-name"><span style="color:var(--accent)">●</span> Instance</label>
+          <input class="input" id="p-name" value="V1"><span class="unit"></span>
+        </div>
+        <div class="field"><label for="p-dc">DC value</label><input class="input" id="p-dc" value="0"><span class="unit">V</span></div>
+        <div class="field">
+          <label for="p-model">Model</label>
+          <span style="display:flex;gap:6px"><input class="input" id="p-model" value="—" readonly>
+          <button class="btn ghost" data-open="browser-modal" style="flex:none">Browse</button></span><span class="unit"></span>
+        </div>
+      </div>
+      <div data-pane="p-pwl" hidden>
+        <div style="display:flex;align-items:center;margin-bottom:8px">
+          <span class="section-h" style="border:none;padding:0;margin:0;flex:1">Points</span>
+          <button class="btn ghost">Add point</button>
+          <button class="btn ghost">Delete</button>
+        </div>
+        <table class="data-table">
+          <thead><tr><th>#</th><th class="num">time (s)</th><th class="num">value (V)</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td class="num">0</td><td class="num">0</td></tr>
+            <tr><td>2</td><td class="num">1u</td><td class="num">0</td></tr>
+            <tr><td>3</td><td class="num">1.1u</td><td class="num">3.3</td></tr>
+            <tr><td>4</td><td class="num">5u</td><td class="num">3.3</td></tr>
+          </tbody>
+        </table>
+        <p class="note" style="font-family:var(--mono);font-size:var(--fs-0)">4 points · 0 → 5 µs · 0 → 3.3 V</p>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">1 field modified</span>
+      <span class="grow"></span>
+      <button class="btn ghost" data-close>Revert</button>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Apply</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="browser-modal" role="dialog" aria-modal="true" aria-labelledby="browser-title">
+  <div class="modal lg">
+    <div class="modal-head">
+      <span class="m-kicker">Models</span>
+      <h4 id="browser-title">Model browser</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div style="display:grid;grid-template-columns:200px 240px 1fr;min-height:340px">
+        <div style="border-right:1px solid var(--border);padding:12px 8px">
+          <div class="section-h" style="margin:0 8px 8px">Libraries</div>
+          <div class="tree-row" aria-selected="true"><span class="mono">builtin</span><span class="meta">42</span></div>
+          <div class="tree-row"><span class="mono">tsmc28</span><span class="meta">214</span></div>
+          <div class="tree-row"><span class="mono">veriloga</span><span class="meta">3</span></div>
+        </div>
+        <div style="border-right:1px solid var(--border);padding:12px 8px">
+          <div style="padding:0 8px 8px"><input class="input" placeholder="Filter models…" aria-label="Filter models"></div>
+          <div class="tree-row"><span class="mono">nmos_1v8</span><span class="meta">NMOS</span></div>
+          <div class="tree-row" aria-selected="true"><span class="mono">pmos_1v8</span><span class="meta">PMOS</span></div>
+          <div class="tree-row"><span class="mono">npn_std</span><span class="meta">BJT</span></div>
+          <div class="tree-row"><span class="mono">d_schottky</span><span class="meta">DIODE</span></div>
+        </div>
+        <div style="padding:12px 16px">
+          <div class="section-h" style="margin-top:0">pmos_1v8 · BSIM4</div>
+          <table class="data-table">
+            <tbody>
+              <tr><td>VTH0</td><td class="num">−0.42 V</td></tr>
+              <tr><td>TOX</td><td class="num">1.85 nm</td></tr>
+              <tr><td>UO</td><td class="num">110 cm²/Vs</td></tr>
+              <tr><td>LMIN</td><td class="num">28 nm</td></tr>
+            </tbody>
+          </table>
+          <div class="section-h" style="margin-top:14px">Corner</div>
+          <div class="faux-row">
+            <button class="chip" aria-pressed="true">tt</button>
+            <button class="chip" aria-pressed="false">ff</button>
+            <button class="chip" aria-pressed="false">ss</button>
+            <button class="chip" aria-pressed="false">fs</button>
+            <button class="chip" aria-pressed="false">sf</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">259 models · 3 libraries</span>
+      <span class="grow"></span>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Use model</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="newcell-modal" role="dialog" aria-modal="true" aria-labelledby="newcell-title">
+  <div class="modal sm">
+    <div class="modal-head">
+      <span class="m-kicker">Library</span>
+      <h4 id="newcell-title">New cell</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label for="nc-lib">Library</label>
+        <select class="input" id="nc-lib"><option>work</option><option>testbenches</option></select><span class="unit"></span></div>
+      <div class="field"><label for="nc-name">Cell name</label><input class="input" id="nc-name" placeholder="opamp_2stage"><span class="unit"></span></div>
+      <div class="section-h" style="margin-top:12px">Views to create</div>
+      <div class="faux-row">
+        <button class="chip" aria-pressed="true">schematic</button>
+        <button class="chip" aria-pressed="false">symbol</button>
+        <button class="chip" aria-pressed="false">testbench</button>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="grow"></span>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Create</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="veriloga-modal" role="dialog" aria-modal="true" aria-labelledby="va-title">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="m-kicker">Verilog-A</span>
+      <h4 id="va-title">Compile model</h4>
+      <button class="modal-close" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label for="va-path">Source</label>
+        <span style="display:flex;gap:6px"><input class="input" id="va-path" value="models/varactor.va">
+        <button class="btn ghost" style="flex:none">Browse</button></span><span class="unit"></span></div>
+      <div class="section-h" style="margin-top:12px">Result</div>
+      <div class="inset-block" style="white-space:normal">
+        <span style="color:var(--ok)">compiled</span> · module <b style="color:var(--text)">varactor</b> ·
+        ports: p, n · params: c0=1p, vj=0.7
+      </div>
+      <p class="note" style="font-family:var(--mono);font-size:var(--fs-0)">
+        <span style="color:var(--warn)">W</span> line 41: implicit tolerance on i(p,n)
+      </p>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">1 warning · 0 errors</span>
+      <span class="grow"></span>
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" data-close>Add to library</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<script>
+// ---- modal plumbing: open/close, Esc, focus -------------------------------
+let lastFocus = null;
+function openModal(id) {
+  const scrim = document.getElementById(id);
+  if (!scrim) return;
+  lastFocus = document.activeElement;
+  scrim.classList.add("open");
+  const first = scrim.querySelector("input, select, button:not(.modal-close)");
+  if (first) first.focus();
+}
+function closeModal(scrim) {
+  scrim.classList.remove("open");
+  if (lastFocus) lastFocus.focus();
+}
+document.querySelectorAll("[data-open]").forEach(function (btn) {
+  btn.addEventListener("click", function () { openModal(btn.getAttribute("data-open")); });
+});
+document.querySelectorAll(".scrim").forEach(function (scrim) {
+  scrim.querySelectorAll("[data-close], .modal-close").forEach(function (btn) {
+    btn.addEventListener("click", function () { closeModal(scrim); });
+  });
+});
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".scrim.open").forEach(closeModal);
+  }
+});
+
+// ---- tabs -----------------------------------------------------------------
+document.querySelectorAll("[data-tabs]").forEach(function (strip) {
+  const panes = strip.parentElement.querySelectorAll("[data-pane]");
+  strip.querySelectorAll(".tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      strip.querySelectorAll(".tab").forEach(function (t) { t.setAttribute("aria-selected", "false"); });
+      tab.setAttribute("aria-selected", "true");
+      panes.forEach(function (p) {
+        p.hidden = !(p.getAttribute("data-pane").endsWith(tab.getAttribute("data-tab"))
+                     || p.getAttribute("data-pane") === tab.getAttribute("data-tab"));
+      });
+    });
+  });
+});
+
+// ---- analyses list interactions -------------------------------------------
+const forms = {
+  tran: { title: "TRAN · TRANSIENT" },
+  ac:   { title: "AC · SMALL-SIGNAL SWEEP" },
+  noise:{ title: "NOISE" }
+};
+document.querySelectorAll(".an-row").forEach(function (row) {
+  row.addEventListener("click", function (e) {
+    if (e.target.classList.contains("sw") || e.target.closest(".sw")) {
+      row.classList.toggle("on");
+      return;
+    }
+    document.querySelectorAll(".an-row").forEach(function (r) { r.removeAttribute("aria-selected"); });
+    row.setAttribute("aria-selected", "true");
+    const f = forms[row.getAttribute("data-an")];
+    if (f) document.getElementById("an-form-title").textContent = f.title;
+  });
+});
+
+// ---- picker search ---------------------------------------------------------
+const pickerSearch = document.getElementById("picker-search");
+if (pickerSearch) pickerSearch.addEventListener("input", function () {
+  const q = pickerSearch.value.toLowerCase();
+  let shown = 0;
+  document.querySelectorAll("#picker-modal .an-card").forEach(function (card) {
+    const hit = card.textContent.toLowerCase().includes(q);
+    card.style.display = hit ? "" : "none";
+    if (hit) shown++;
+  });
+  document.getElementById("picker-count").textContent = shown + " of 25 shown";
+});
+
+// ---- toasts ----------------------------------------------------------------
+function toast(kind, title, sub, action) {
+  const colors = { ok: "var(--ok)", warn: "var(--warn)", err: "var(--err)", dim: "var(--text-dim)" };
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML =
+    '<span class="dot" style="background:' + colors[kind] + '"></span>' +
+    '<span class="body">' + title + (sub ? "<small>" + sub + "</small>" : "") + "</span>" +
+    (action ? '<button class="t-action">' + action + "</button>" : "");
+  document.getElementById("toast-stack").appendChild(el);
+  setTimeout(function () { el.remove(); }, 4200);
+}
+</script>
+</body>
+</html>
