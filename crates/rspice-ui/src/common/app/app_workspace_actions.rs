@@ -12,12 +12,17 @@ fn view_type_for_reference(state: &AppState, reference: &CellViewRef) -> ViewTyp
 }
 
 fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
-    state
+    let mut schematic = state
         .workspace
         .schematic_buffers
         .get(&reference.key())
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Workspace buffers round-trip through serde, which skips the runtime
+    // ID counter and name counters: without recalculation a freshly placed
+    // component reuses an existing ID and selection matches both.
+    schematic.recalculate_runtime_state();
+    schematic
 }
 
 impl AppState {
