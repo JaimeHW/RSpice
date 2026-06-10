@@ -26,8 +26,13 @@ pub struct Cli {
     #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
 
-    /// Set log level (error, warn, info, debug, trace)
-    #[arg(long, global = true, value_name = "LEVEL")]
+    /// Set log level
+    #[arg(
+        long,
+        global = true,
+        value_name = "LEVEL",
+        value_parser = ["off", "error", "warn", "info", "debug", "trace"]
+    )]
     pub log_level: Option<String>,
 }
 

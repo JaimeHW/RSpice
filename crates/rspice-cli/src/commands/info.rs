@@ -87,6 +87,21 @@ fn print_summary(netlist: &Netlist, args: &InfoArgs, _quiet: bool) -> Result<(),
         println!();
     }
 
+    if args.params {
+        let mut params = netlist.params.all_params();
+        params.sort_by(|a, b| a.0.cmp(&b.0));
+        if params.is_empty() {
+            println!("Parameters: none");
+            println!();
+        } else {
+            println!("Parameters ({}):", params.len());
+            for (name, value) in &params {
+                println!("  {} = {}", name, value);
+            }
+            println!();
+        }
+    }
+
     if args.hierarchy && !netlist.subcircuits.is_empty() {
         println!("Subcircuits ({}):", netlist.subcircuits.len());
         for subckt in &netlist.subcircuits {
@@ -139,6 +154,13 @@ fn print_json(netlist: &Netlist, args: &InfoArgs) -> Result<(), CliError> {
         },
         "analyses": netlist.analyses.len(),
         "models": if args.models { Some(netlist.models.iter().map(|m| &m.name).collect::<Vec<_>>()) } else { None },
+        "params": if args.params {
+            let mut params = netlist.params.all_params();
+            params.sort_by(|a, b| a.0.cmp(&b.0));
+            Some(params.into_iter().map(|(name, value)| {
+                serde_json::json!({"name": name, "value": value})
+            }).collect::<Vec<_>>())
+        } else { None },
         "subcircuits": if args.hierarchy { Some(netlist.subcircuits.iter().map(|s| &s.name).collect::<Vec<_>>()) } else { None },
         "measurements": netlist.measurements.len(),
     });
@@ -198,9 +220,10 @@ fn count_elements(netlist: &Netlist) -> ElementCounts {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if s.chars().count() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len - 3])
+        let prefix: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{}...", prefix)
     }
 }
