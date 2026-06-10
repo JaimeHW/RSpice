@@ -394,25 +394,33 @@ impl Bjt {
         let transport = self.transport_charge_state(vbe_eff, vbc_eff);
         let bc = self.base_collector_current_state(transport, vbc_eff);
 
+        // ngspice load discipline (bjtload.c / vbicload.c): every junction
+        // current carries a `CKTgmin` parallel. The parallels keep junction
+        // rows nonsingular at saturation boundaries, and gmin stepping ramps
+        // them through the device equations, not just the matrix diagonal.
+        let gmin = self.junction_gmin;
         let ib_be = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
-            + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
-        let dibe_dvbe = self.gbe(vbe);
+            + self.diode_current_with_is(self.iben, vbe_eff, self.nen)
+            + gmin * vbe_eff;
+        let dibe_dvbe = self.gbe(vbe) + gmin;
+        let ibc = bc.ibc + gmin * vbc_eff;
+        let dibc_dvbc = bc.dibc_dvbc_eff + gmin;
         let iciei = transport.itzf - transport.itzr;
         let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
         let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
         let ibe_branch = Self::branch_from_vbe_vbc(p * ib_be, dibe_dvbe, 0.0);
-        let ibc_branch = Self::branch_from_vbe_vbc(p * bc.ibc, bc.dibc_dvbe_eff, bc.dibc_dvbc_eff);
+        let ibc_branch = Self::branch_from_vbe_vbc(p * ibc, bc.dibc_dvbe_eff, dibc_dvbc);
         let iciei_branch = Self::branch_from_vbe_vbc(p * iciei, diciei_dvbe, diciei_dvbc);
         let linearized = BjtLinearization {
             // The intrinsic collector terminal sees both the transport branch
             // (collector to emitter) and the opposing B-C junction branch.
-            ic: p * (iciei - bc.ibc),
-            ib: p * (ib_be + bc.ibc),
+            ic: p * (iciei - ibc),
+            ib: p * (ib_be + ibc),
             dic_dvbe: diciei_dvbe - bc.dibc_dvbe_eff,
-            dic_dvbc: diciei_dvbc - bc.dibc_dvbc_eff,
+            dic_dvbc: diciei_dvbc - dibc_dvbc,
             dic_dvrth: 0.0,
             dib_dvbe: dibe_dvbe + bc.dibc_dvbe_eff,
-            dib_dvbc: bc.dibc_dvbc_eff,
+            dib_dvbc: dibc_dvbc,
             dib_dvrth: 0.0,
             qb: transport.qb,
             dqb_dvbe: p * transport.dqb_dvbe_eff,

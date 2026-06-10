@@ -115,6 +115,12 @@ impl Bjt {
         vbp: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
+        // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbep
+        // unconditionally, even when the parasitic diode currents are zero.
+        let gmin = self.junction_gmin;
+        branch.current = gmin * (vbx - vbp);
+        branch.d_internal[IDX_VBX] = gmin;
+        branch.d_internal[IDX_VBP] = -gmin;
         if self.ibeip <= 0.0 && self.ibenp <= 0.0 {
             return branch;
         }
@@ -126,9 +132,9 @@ impl Bjt {
         let gbep = self.diode_conductance_with_is(self.ibeip, vbep_eff, self.nci.max(1e-12))
             + self.diode_conductance_with_is(self.ibenp, vbep_eff, self.ncn.max(1e-12));
 
-        branch.current = p * (ibeip + ibenp);
-        branch.d_internal[IDX_VBX] = gbep;
-        branch.d_internal[IDX_VBP] = -gbep;
+        branch.current += p * (ibeip + ibenp);
+        branch.d_internal[IDX_VBX] += gbep;
+        branch.d_internal[IDX_VBP] -= gbep;
         branch
     }
 
@@ -227,6 +233,12 @@ impl Bjt {
         vsi: Value,
     ) -> BranchLinearization {
         let mut branch = BranchLinearization::default();
+        // ngspice vbicload.c stamps the `CKTgmin` parallel on Vbcp
+        // unconditionally, even when the parasitic diode currents are zero.
+        let gmin = self.junction_gmin;
+        branch.current = gmin * (vsi - vbp);
+        branch.d_internal[IDX_VSI] = gmin;
+        branch.d_internal[IDX_VBP] = -gmin;
         if self.ibcip <= 0.0 && self.ibcnp <= 0.0 {
             return branch;
         }
@@ -238,9 +250,9 @@ impl Bjt {
         let gbcp = self.diode_conductance_with_is(self.ibcip, vbcp_eff, self.ncip.max(1e-12))
             + self.diode_conductance_with_is(self.ibcnp, vbcp_eff, self.ncnp.max(1e-12));
 
-        branch.current = p * (ibcip + ibcnp);
-        branch.d_internal[IDX_VSI] = gbcp;
-        branch.d_internal[IDX_VBP] = -gbcp;
+        branch.current += p * (ibcip + ibcnp);
+        branch.d_internal[IDX_VSI] += gbcp;
+        branch.d_internal[IDX_VBP] -= gbcp;
         branch
     }
 
@@ -381,10 +393,19 @@ impl Bjt {
         let irci_scale = (1.0 + derf * derf).sqrt();
         let inv_irci_scale = 1.0 / irci_scale;
         let common = -iohm * derf / (irci_scale * irci_scale * irci_scale);
-        let d_irci_eff_dvrci_eff = d_iohm_dvrci_eff * inv_irci_scale + common * d_derf_dvrci_eff;
-        let d_irci_eff_dvbci_eff = d_iohm_dvbci_eff * inv_irci_scale + common * d_derf_dvbci_eff;
-        let d_irci_eff_dvbcx_eff = d_iohm_dvbcx_eff * inv_irci_scale + common * d_derf_dvbcx_eff;
-        let irci_eff = iohm * inv_irci_scale;
+        // ngspice vbicload.c gives Irci a `CKTgmin` parallel per controlling
+        // voltage (Vrci, Vbci, Vbcx). These are what keep the CX/CI rows
+        // nonsingular when the Kull epi exponential crosses its saturation
+        // knife edge (the very rows ngspice reports as singular on decks it
+        // cannot solve), and gmin stepping ramps them with `CKTgmin`.
+        let gmin = self.junction_gmin;
+        let d_irci_eff_dvrci_eff =
+            d_iohm_dvrci_eff * inv_irci_scale + common * d_derf_dvrci_eff + gmin;
+        let d_irci_eff_dvbci_eff =
+            d_iohm_dvbci_eff * inv_irci_scale + common * d_derf_dvbci_eff + gmin;
+        let d_irci_eff_dvbcx_eff =
+            d_iohm_dvbcx_eff * inv_irci_scale + common * d_derf_dvbcx_eff + gmin;
+        let irci_eff = iohm * inv_irci_scale + gmin * (vrci_eff + vbci_eff + vbcx_eff);
 
         branch.current = p * irci_eff;
         branch.d_internal[IDX_VCX] = d_irci_eff_dvrci_eff - d_irci_eff_dvbcx_eff;

@@ -673,6 +673,11 @@ pub struct Bjt {
     pub ajs: Value,
     /// Portion of intrinsic B-E depletion charge assigned to Vbei (WBE)
     pub wbe: Value,
+    /// Circuit-level junction GMIN (ngspice `CKTgmin`): every nonlinear
+    /// branch carries a `gmin` parallel in ngspice's bjt/vbic loads, and
+    /// gmin stepping ramps this value through the device equations, not
+    /// just the matrix diagonal.
+    pub junction_gmin: Value,
     /// Forward-bias smoothing coefficient for B-C depletion charge (AJC)
     pub ajc: Value,
     /// B-C grading coefficient (MJC)
@@ -918,6 +923,13 @@ impl Bjt {
         Self::new(name, BjtType::Pnp, collector, base, emitter)
     }
 
+    /// Set the circuit-level junction GMIN (ngspice `CKTgmin`) carried in
+    /// parallel with every nonlinear branch of the bjt/vbic loads.
+    #[inline]
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
+        self.junction_gmin = gmin.max(0.0);
+    }
+
     fn new(
         name: String,
         bjt_type: BjtType,
@@ -1018,6 +1030,7 @@ impl Bjt {
             ms: 0.33,
             ajs: -0.5,
             wbe: 1.0,
+            junction_gmin: 0.0,
             ajc: -0.5,
             mjc: 0.33, // B-C grading coefficient
             tf: 4e-10, // Forward transit time (400ps)
