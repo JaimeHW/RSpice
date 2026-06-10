@@ -175,7 +175,7 @@ pub fn show(
     {
         let clipped = ui.painter_at(plot_rect.expand(1.0));
         let columns = plot_rect.width().ceil() as usize;
-        for (index, trace) in spec.traces.iter().enumerate() {
+        for trace in &spec.traces {
             if trace.x.is_empty() {
                 continue;
             }
@@ -183,7 +183,7 @@ pub fn show(
             let points: Vec<Pos2> = match trace.cache_key {
                 Some(key) => cache
                     .envelope(
-                        key.wrapping_add(index as u64),
+                        key,
                         trace.x,
                         trace.y,
                         spec.x.min,

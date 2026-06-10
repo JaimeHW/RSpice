@@ -133,6 +133,12 @@ impl FftState {
         &self.peak_cache.peak_indices
     }
 
+    /// Monotonic revision of the displayed spectrum; bumped on every
+    /// recompute. Display caches key on this rather than data identity.
+    pub fn spectrum_revision(&self) -> u64 {
+        self.spectrum_revision
+    }
+
     pub(super) fn mark_spectrum_changed(&mut self) {
         self.spectrum_revision = self.spectrum_revision.wrapping_add(1);
         self.peak_cache = PeakCache::default();

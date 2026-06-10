@@ -86,8 +86,9 @@ pub struct Trace<'a> {
     pub dashed: bool,
     /// Stroke width in points (design: 1.8 primary, 1.4 thin).
     pub width: f32,
-    /// Stable identity for the decimation cache. Combine the data version
-    /// with a per-trace index; `None` disables caching for this trace.
+    /// Stable identity for the decimation cache. Must be globally unique
+    /// per trace — the renderer mixes nothing in, so two traces sharing a
+    /// key would serve each other's envelopes. `None` disables caching.
     pub cache_key: Option<u64>,
 }
 
@@ -123,7 +124,7 @@ impl<'a> Trace<'a> {
         self
     }
 
-    /// Set the decimation-cache identity.
+    /// Set the decimation-cache identity (globally unique per trace).
     pub fn cache_key(mut self, key: u64) -> Self {
         self.cache_key = Some(key);
         self

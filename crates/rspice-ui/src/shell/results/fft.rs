@@ -14,8 +14,8 @@ use crate::ui::widgets::section_header;
 use super::strip::{self, LegendChip};
 use super::well_hint;
 
-/// Spectrum arrays + the analysis summary, with caching keyed on the data's
-/// identity (the points allocation).
+/// Spectrum arrays + the analysis summary, with the arrays cached on the
+/// FFT state's spectrum revision.
 struct FftModel {
     subtitle: String,
     frequency: Arc<[f64]>,
@@ -30,14 +30,21 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
     if data.points.is_empty() {
         return None;
     }
-    let identity = data.points.as_ptr() as u64;
-    let derived = &mut state.shell.results.derived;
-    let frequency = derived.get_or(identity ^ 0xF0F0_0001, || {
-        data.points.iter().map(|p| p.frequency).collect()
-    });
-    let magnitude_db = derived.get_or(identity ^ 0xF0F0_0002, || {
-        data.points.iter().map(|p| p.magnitude_db()).collect()
-    });
+    // Display arrays cached on the spectrum revision: a recompute (window,
+    // size, source) replaces the entry rather than growing a map, and a
+    // reused allocation can never serve stale arrays.
+    let revision = fft.spectrum_revision();
+    let series = &mut state.shell.results.fft_series;
+    let series = match series {
+        Some(series) if series.revision == revision => series,
+        _ => series.insert(super::FftSeries {
+            revision,
+            frequency: data.points.iter().map(|p| p.frequency).collect(),
+            magnitude_db: data.points.iter().map(|p| p.magnitude_db()).collect(),
+        }),
+    };
+    let frequency = Arc::clone(&series.frequency);
+    let magnitude_db = Arc::clone(&series.magnitude_db);
 
     let analysis = fft.analysis.as_ref();
     let fundamental = analysis.and_then(|a| {

@@ -382,8 +382,11 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         if !trace.visible {
             continue;
         }
-        let cache_key =
-            (model.analysis_index as u64) << 40 | (trace.waveform_index as u64) << 2;
+        // Trace identity: analysis, waveform, and derived kind — never the
+        // visible position, so legend toggles don't shift keys.
+        let cache_key = (model.analysis_index as u64) << 40
+            | (trace.waveform_index as u64) << 2
+            | trace.kind as u64;
         let mut plot_trace = Trace::new(&trace.x, &trace.y, trace.color).cache_key(cache_key);
         if trace.kind == TraceKind::PhaseDeg {
             plot_trace = plot_trace.right().dashed();

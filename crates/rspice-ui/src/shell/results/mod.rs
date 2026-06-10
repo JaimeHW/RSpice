@@ -128,6 +128,8 @@ pub struct ResultsState {
     pub hidden_strips: HashSet<usize>,
     /// Strip currently maximized via the strip action, if any.
     pub maximized_strip: Option<usize>,
+    /// Cached FFT display arrays for the active spectrum revision.
+    pub fft_series: Option<FftSeries>,
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
@@ -139,6 +141,17 @@ impl ResultsState {
         self.cursors.clear();
         self.cursor_strip = None;
     }
+}
+
+/// Frequency/magnitude-dB arrays derived from the active FFT, keyed on the
+/// FFT state's spectrum revision — the FFT can be recomputed (window, size,
+/// source) without a simulation data-version bump, and keying on the data's
+/// allocation address could serve stale arrays after a reallocation.
+#[derive(Debug, Clone)]
+pub struct FftSeries {
+    pub(crate) revision: u64,
+    pub(crate) frequency: std::sync::Arc<[f64]>,
+    pub(crate) magnitude_db: std::sync::Arc<[f64]>,
 }
 
 /// Cache of series derived from waveform data (dB conversions), cleared when
