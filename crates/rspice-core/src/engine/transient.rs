@@ -22,8 +22,16 @@ use crate::device::{NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::netlist::AnalysisCommand;
 use crate::{Netlist, Value};
 
+/// Per-iteration Newton merit tracing (`RSPICE_NEWTON_DEBUG=1`), the
+/// transient-Newton sibling of `RSPICE_LTE_DEBUG`.
+fn newton_merit_debug_enabled() -> bool {
+    std::env::var_os("RSPICE_NEWTON_DEBUG").is_some()
+}
+
 mod breakpoints;
 mod companion_stamps;
+mod globalization;
+mod rescue;
 mod residual;
 mod startup;
 mod state;
@@ -76,6 +84,12 @@ const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
 /// Minimum failed retries required at the effective minimum timestep before a
 /// timepoint may be force-accepted.
 const MIN_RETRIES_AT_MINIMUM_TIMESTEP: usize = 1;
+/// Failed Newton retries at a timepoint before the gmin-continuation rescue
+/// is attempted (see `transient/rescue.rs`). The first retries stay on the
+/// plain dt-cut path so ordinary stiffness keeps ngspice-parity stepping;
+/// a knife edge that survives two cuts is dt-independent and goes to
+/// continuation before the cut cascade can poison the charge history.
+const TRANSIENT_GMIN_RESCUE_MIN_RETRIES: usize = 2;
 /// Source edge magnitude that triggers transient source-step capping.
 const SOURCE_ACTIVE_DELTA: Value = 1e-2;
 /// Largest single source movement to allow on proactive nonlinear ramp tracking.
@@ -629,6 +643,14 @@ impl Engine {
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
 
+        // ngspice keeps `CKTgmin` live in every analysis mode: the compact
+        // models' junction parallels need the configured floor during
+        // transient stepping too, independent of whatever continuation
+        // level a preceding DC phase last left behind.
+        circuit.set_semiconductor_junction_gmin(
+            self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
+        );
+
         // Main transient loop
         let mut retry_count = 0;
         let mut total_iterations = 0;
@@ -855,6 +877,14 @@ impl Engine {
             }
             let mut nonlinear_state_matches_new_solution = false;
             let mut had_solver_candidate = false;
+            // Merit-gated Newton globalization state: the true nonlinear
+            // residual norm of the previously stamped iterate, the iterate
+            // itself, and any backtracking search currently walking a
+            // rejected step (see transient/globalization.rs).
+            let mut merit_backtrack: Option<globalization::NewtonMeritBacktrack> = None;
+            let mut last_stamped_iterate: Vec<Value> = Vec::new();
+            let mut last_stamped_merit = Value::INFINITY;
+            let mut have_stamped_iterate = false;
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
@@ -878,16 +908,19 @@ impl Engine {
                     &solution,
                     t + dt,
                     dt,
-                    &coeff,
-                    current_method,
-                    step_trap_order,
-                    &bjt_history,
+                    &residual::TransientSystemContext {
+                        coeff: &coeff,
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        bjt_history: &bjt_history,
+                        jfet_history: &jfet_history,
+                        mosfet_history: &mosfet_history,
+                        b3soi_history: &b3soi_history,
+                        suppress_gate_charge,
+                        tline_dc_refs: &tline_dc_refs,
+                        coupled_tline_refs: &coupled_tline_refs,
+                    },
                     &mut vbic_snapshot_cache,
-                    &jfet_history,
-                    &mosfet_history,
-                    suppress_gate_charge,
-                    &tline_dc_refs,
-                    &coupled_tline_refs,
                 )
             {
                 new_solution.clone_from(&solution);
@@ -910,135 +943,109 @@ impl Engine {
                 let iteration_delta_limit =
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = std::time::Instant::now();
-                matrix.clear_values();
-                rhs.fill(0.0);
-
-                // Add the configured baseline GMIN only on node-voltage equations.
-                // Branch-current equations (voltage source/inductor branches) must
-                // not receive this shunt or transient references are biased.
-                let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
-                if gmin_floor > 0.0 {
-                    for i in 0..num_nodes {
-                        matrix.add(i, i, gmin_floor);
-                    }
-                }
-
-                // Stamp linear devices (R, V, I) for transient.
-                // Tline transient behavior is stamped separately via companions.
-                circuit.stamp_transient_linear_direct(&mut matrix, &mut rhs);
-
-                // Update voltage source RHS values for time-varying sources (PULSE, SIN, etc.)
-                let num_nodes = circuit.num_nodes();
-                circuit.voltage_sources.update_transient_rhs(
-                    &mut rhs,
-                    t + dt, // Evaluate at target time point
-                    |br_ordinal| num_nodes + br_ordinal,
-                );
-                circuit
-                    .current_sources
-                    .update_transient_rhs(&mut rhs, t + dt);
-
-                circuit.refresh_jiles_atherton_inductances(&new_solution);
-                if circuit.has_nonlinear_devices() && !nonlinear_state_matches_new_solution {
-                    circuit.update_nonlinear(&new_solution);
-                }
-
-                // Stamp capacitor companion models for transient
-                circuit
-                    .capacitors
-                    .stamp_transient_companion(&mut matrix, &mut rhs, dt, &coeff);
-
-                // Stamp inductor companion models for transient
-                circuit.inductors.stamp_transient_companion(
-                    &mut matrix,
-                    &mut rhs,
-                    dt,
-                    &coeff,
-                    num_nodes,
-                );
-                circuit.stamp_coupled_inductor_pairs_transient(&mut matrix, &mut rhs, dt, &coeff);
-                circuit.stamp_multi_winding_transformers_transient(
-                    &mut matrix,
-                    &mut rhs,
-                    dt,
-                    &coeff,
-                );
-                Self::stamp_bjt_transient_companions(
-                    &circuit,
+                self.stamp_transient_system(
+                    &mut circuit,
                     &mut matrix,
                     &mut rhs,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
+                    t + dt,
                     dt,
-                    &bjt_history,
+                    &residual::TransientSystemContext {
+                        coeff: &coeff,
+                        method: current_method,
+                        trap_order: step_trap_order,
+                        bjt_history: &bjt_history,
+                        jfet_history: &jfet_history,
+                        mosfet_history: &mosfet_history,
+                        b3soi_history: &b3soi_history,
+                        suppress_gate_charge,
+                        tline_dc_refs: &tline_dc_refs,
+                        coupled_tline_refs: &coupled_tline_refs,
+                    },
                     &mut vbic_snapshot_cache,
                     if _iter == 0 {
                         VbicCachedSnapshotReuse::SeedOnly
                     } else {
                         VbicCachedSnapshotReuse::NewtonBypass
                     },
-                    self.voltage_abstol(),
-                    self.voltage_reltol(),
-                );
-                Self::stamp_jfet_transient_companions(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &jfet_history,
-                    suppress_gate_charge,
-                );
-                Self::stamp_mosfet_transient_companions(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &mosfet_history,
-                    suppress_gate_charge,
-                );
-                Self::stamp_b3soi_transient_companions(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &b3soi_history,
-                );
-                Self::stamp_tline_companions(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    t + dt,
-                    &tline_dc_refs,
-                );
-                Self::stamp_coupled_tline_companions(
-                    &circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    t + dt,
-                    dt,
-                    &coupled_tline_refs,
+                    !nonlinear_state_matches_new_solution,
+                    0.0,
                 );
 
-                // Stamp nonlinear devices if present
+                // Merit-gated Newton globalization: the freshly stamped
+                // system gives the true nonlinear residual at the current
+                // iterate for one matrix-vector product. Judge the previous
+                // Newton step with it and damp the step when it has left its
+                // basin — the saturation-boundary limit cycles this breaks
+                // are unreachable by timestep reduction alone (the cycle is
+                // driven by the static nonlinearity, not by stiffness).
                 if circuit.has_nonlinear_devices() {
-                    circuit.stamp_nonlinear(&mut matrix, &mut rhs, &new_solution);
-                    circuit.stamp_behavioral(&mut matrix, &mut rhs, &new_solution, t + dt);
-                }
-
-                // Evaluate and stamp XSPICE code models
-                if circuit.has_xspice_devices() {
-                    circuit.evaluate_xspice_with_timestep(t + dt, dt, &new_solution);
-                    circuit.stamp_xspice(&mut matrix, &mut rhs);
+                    let current_merit = match matrix.scaled_residual_inf_norm(
+                        &new_solution,
+                        &rhs,
+                        self.current_abstol(),
+                        self.residual_reltol(),
+                    ) {
+                        Ok(norm) if norm.is_finite() => norm,
+                        _ => Value::INFINITY,
+                    };
+                    if newton_merit_debug_enabled() {
+                        log::warn!(
+                            "NEWTON-MERIT t={:.6e} dt={:.3e} iter={} merit={:.6e} prev={:.6e} searching={}",
+                            t,
+                            dt,
+                            _iter,
+                            current_merit,
+                            last_stamped_merit,
+                            merit_backtrack.is_some(),
+                        );
+                    }
+                    if let Some(mut search) = merit_backtrack.take() {
+                        match search.judge(current_merit) {
+                            globalization::BacktrackAction::Trial(trial) => {
+                                new_solution = trial;
+                                circuit
+                                    .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                                nonlinear_state_matches_new_solution = false;
+                                merit_backtrack = Some(search);
+                                continue;
+                            }
+                            globalization::BacktrackAction::Accept => {}
+                        }
+                    } else if have_stamped_iterate
+                        && globalization::NewtonMeritBacktrack::step_needs_globalization(
+                            last_stamped_merit,
+                            current_merit,
+                        )
+                    {
+                        static MERIT_BACKTRACK_LOG_COUNT: std::sync::atomic::AtomicUsize =
+                            std::sync::atomic::AtomicUsize::new(0);
+                        let log_count = MERIT_BACKTRACK_LOG_COUNT
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if log_count < 20 {
+                            log::debug!(
+                                "Newton merit backtrack engaged at t={:.6e}, dt={:.3e}: residual {:.3e} -> {:.3e}",
+                                t,
+                                dt,
+                                last_stamped_merit,
+                                current_merit,
+                            );
+                        }
+                        let (search, trial) = globalization::NewtonMeritBacktrack::engage(
+                            &last_stamped_iterate,
+                            last_stamped_merit,
+                            &new_solution,
+                            current_merit,
+                        );
+                        new_solution = trial;
+                        circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
+                        nonlinear_state_matches_new_solution = false;
+                        merit_backtrack = Some(search);
+                        continue;
+                    }
+                    last_stamped_iterate.clone_from(&new_solution);
+                    last_stamped_merit = current_merit;
+                    have_stamped_iterate = true;
                 }
 
                 // Solve and check convergence
@@ -1271,16 +1278,19 @@ impl Engine {
                             &new_solution,
                             t + dt,
                             dt,
-                            &coeff,
-                            current_method,
-                            step_trap_order,
-                            &bjt_history,
+                            &residual::TransientSystemContext {
+                                coeff: &coeff,
+                                method: current_method,
+                                trap_order: step_trap_order,
+                                bjt_history: &bjt_history,
+                                jfet_history: &jfet_history,
+                                mosfet_history: &mosfet_history,
+                                b3soi_history: &b3soi_history,
+                                suppress_gate_charge,
+                                tline_dc_refs: &tline_dc_refs,
+                                coupled_tline_refs: &coupled_tline_refs,
+                            },
                             &mut vbic_snapshot_cache,
-                            &jfet_history,
-                            &mosfet_history,
-                            suppress_gate_charge,
-                            &tline_dc_refs,
-                            &coupled_tline_refs,
                         );
                         let nonlinear_norm = matrix
                             .scaled_residual_inf_norm(
@@ -1334,6 +1344,57 @@ impl Engine {
                     }
                 }
 
+                // Gmin-continuation rescue: a knife edge in the static
+                // nonlinearity repeats at every dt, so the cut cascade
+                // cannot fix it. Deform the step's system with diagonal
+                // shunts, converge, and track the solution back to the
+                // genuine system (transient/rescue.rs). A success flows
+                // into the normal LTE acceptance machinery below.
+                if retry_count >= TRANSIENT_GMIN_RESCUE_MIN_RETRIES
+                    && circuit.has_nonlinear_devices()
+                {
+                    if let Some(rescued) = self.rescue_transient_step_with_gmin_continuation(
+                        &mut circuit,
+                        &mut matrix,
+                        &mut rhs,
+                        &solution,
+                        t + dt,
+                        dt,
+                        &residual::TransientSystemContext {
+                            coeff: &coeff,
+                            method: current_method,
+                            trap_order: step_trap_order,
+                            bjt_history: &bjt_history,
+                            jfet_history: &jfet_history,
+                            mosfet_history: &mosfet_history,
+                            b3soi_history: &b3soi_history,
+                            suppress_gate_charge,
+                            tline_dc_refs: &tline_dc_refs,
+                            coupled_tline_refs: &coupled_tline_refs,
+                        },
+                        &mut vbic_snapshot_cache,
+                    ) {
+                        static GMIN_RESCUE_LOG_COUNT: std::sync::atomic::AtomicUsize =
+                            std::sync::atomic::AtomicUsize::new(0);
+                        let log_count = GMIN_RESCUE_LOG_COUNT
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if log_count < 20 {
+                            log::warn!(
+                                "Transient gmin-continuation rescue converged at t={:.6e}, dt={:.3e} (retry {})",
+                                t,
+                                dt,
+                                retry_count,
+                            );
+                        }
+                        new_solution = rescued;
+                        nonlinear_state_matches_new_solution = true;
+                        had_solver_candidate = true;
+                        converged = true;
+                    }
+                }
+            }
+
+            if !converged {
                 // Diagnostic logging for debugging timestep issues
                 if total_iterations < 100 || total_iterations % 10000 == 0 {
                     log::debug!(

@@ -46,7 +46,7 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::convergence) fn gmin_nonlinear_schedule(&self) -> Vec<Value> {
+    pub(in crate::engine) fn gmin_nonlinear_schedule(&self) -> Vec<Value> {
         let conv = &self.config.convergence_config;
         let start = conv.gmin_initial.max(1e-3);
         let end = conv.gmin_target.max(1e-12);

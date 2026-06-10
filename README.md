@@ -191,6 +191,7 @@ Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-
 | `RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS` | Raise the per-deck hard watchdog (default 30000) for long ring-oscillator decks |
 | `RSPICE_NGSPICE_LIVE_REFERENCES=1` | Compare against a live local ngspice instead of checked-in oracles (requires `NGSPICE_SOURCE_ROOT` and `NGSPICE_EXE`) |
 | `RSPICE_LTE_DEBUG=1` / `RSPICE_GRID_DEBUG=1` | Log binding LTE charge branches and accepted-step decisions for timestep-parity debugging |
+| `RSPICE_NEWTON_DEBUG=1` | Trace per-iteration transient Newton residual merits and gmin-continuation rescue levels |
 
 ## License
 

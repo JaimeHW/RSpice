@@ -4,7 +4,7 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine::convergence) fn effective_device_junction_gmin(
+    pub(in crate::engine) fn effective_device_junction_gmin(
         &self,
         gmin: Value,
     ) -> Value {
