@@ -26,6 +26,13 @@ pub struct B3SoiPdSized {
     pub weff: Value,
     pub leff_cv: Value,
     pub weff_cv: Value,
+    /// Body CV length `leffCVb = L - 2*dlc - dlcb` (b3soipdtemp.c:206-213).
+    pub leff_cv_b: Value,
+    /// Back-gate CV length `leffCVbg = leffCVb + 2*dlbg`
+    /// (b3soipdtemp.c:215-222).
+    pub leff_cv_bg: Value,
+    /// Body-charge scaling factor (FBODY model card parameter).
+    pub fbody: Value,
     pub abulk_cv_factor: Value,
 
     // Binned values (pParam).
@@ -305,6 +312,15 @@ impl B3SoiPdSized {
         if p.weff_cv <= 0.0 {
             return Err("B3SOIPD: effective channel width for C-V <= 0".to_string());
         }
+        p.leff_cv_b = geom.l - 2.0 * dlc - m.dlcb;
+        if p.leff_cv_b <= 0.0 {
+            return Err("B3SOIPD: effective body channel length for C-V <= 0".to_string());
+        }
+        p.leff_cv_bg = p.leff_cv_b + 2.0 * m.dlbg;
+        if p.leff_cv_bg <= 0.0 {
+            return Err("B3SOIPD: effective back-gate channel length for C-V <= 0".to_string());
+        }
+        p.fbody = m.fbody;
 
         // --- Not binned (lines 170-184) ---
         p.at = m.at;

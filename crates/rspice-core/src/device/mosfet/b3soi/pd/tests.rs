@@ -312,3 +312,176 @@ fn charge_matrix_is_consistent_with_charges() {
     let total = c0.qg + c0.qb + c0.qd + c0.qe;
     assert!(total.is_finite(), "charge sum not finite: {total}");
 }
+
+/// The stamped body-row conductances must be the Jacobian of the body current:
+/// `gbbs = d(-cb)/dVbs`, `gbgs = d(-cb)/dVgs`, `gbds = d(-cb)/dVds`, where
+/// `-cb = Iii + Idgidl + Isgidl - Ibs - Ibd` is the current INTO the body
+/// node. A sign error here lets impact-ionization/GIDL currents drive the
+/// floating body to a runaway with Newton unable to respond (the conductance
+/// pulls the wrong way). Checked across switching-edge biases where II and
+/// GIDL are active.
+#[test]
+fn body_current_jacobian_matches_conductances() {
+    let model = B3SoiPdModel::from_params(&n1_params(), false, 300.15);
+    let sized = B3SoiPdSized::new(&model, &geom(), 300.15).expect("sized");
+    let mc = model_consts(&model);
+    let op_at = |vg: Value, vd: Value, vb: Value, ve: Value| {
+        eval::eval(
+            &sized,
+            &mc,
+            B3SoiPdBias {
+                vbs: vb,
+                vgs: vg,
+                vds: vd,
+                ves: ve,
+                vps: 0.0,
+            },
+            1.0,
+            false,
+        )
+    };
+
+    let biases: [(Value, Value, Value, Value); 6] = [
+        (1.2, 0.8, 0.05, 0.0),
+        (0.1, 1.8, 0.2, 0.0),
+        (0.0, 2.0, 0.4, 0.0),
+        (2.0, 1.5, 0.6, 0.0),
+        (0.5, 1.0, -0.3, 0.0),
+        (1.0, 0.01, 0.3, 0.0),
+    ];
+    let h = 1e-7;
+    let ok = |analytic: Value, fd: Value| {
+        (analytic - fd).abs() <= 2e-2 * analytic.abs().max(fd.abs()) + 1e-12
+    };
+
+    for &(vg, vd, vb, ve) in &biases {
+        let o0 = op_at(vg, vd, vb, ve);
+        let into_body = |o: &eval::B3SoiPdOp| -o.cb;
+
+        let fd_b = (into_body(&op_at(vg, vd, vb + h, ve)) - into_body(&op_at(vg, vd, vb - h, ve)))
+            / (2.0 * h);
+        let fd_g = (into_body(&op_at(vg + h, vd, vb, ve)) - into_body(&op_at(vg - h, vd, vb, ve)))
+            / (2.0 * h);
+        let fd_d = (into_body(&op_at(vg, vd + h, vb, ve)) - into_body(&op_at(vg, vd - h, vb, ve)))
+            / (2.0 * h);
+
+        assert!(
+            ok(o0.gbbs, fd_b),
+            "bias {:?}: gbbs {:.6e} vs FD {fd_b:.6e}",
+            (vg, vd, vb, ve),
+            o0.gbbs,
+        );
+        assert!(
+            ok(o0.gbgs, fd_g),
+            "bias {:?}: gbgs {:.6e} vs FD {fd_g:.6e}",
+            (vg, vd, vb, ve),
+            o0.gbgs,
+        );
+        assert!(
+            ok(o0.gbds, fd_d),
+            "bias {:?}: gbds {:.6e} vs FD {fd_d:.6e}",
+            (vg, vd, vb, ve),
+            o0.gbds,
+        );
+    }
+}
+
+/// The stamped capacitance matrix must be the Jacobian of the node charges:
+/// `gcXgb = dqX/dVg`, `gcXdb = dqX/dVd`, `gcXeb = dqX/dVe`, and
+/// `gcXsb = dqX/dVs = -(dqX/dVg + dqX/dVd + dqX/dVb + dqX/dVe)`. Any mismatch
+/// makes the transient Newton diverge even though the charges themselves look
+/// sane. Checked by central finite differences across bias regimes covering
+/// subthreshold, strong inversion, forward-biased body (a switching SOI ring),
+/// vds near zero, and the inverse mode.
+#[test]
+fn charge_matrix_matches_charge_jacobian() {
+    let model = B3SoiPdModel::from_params(&n1_params(), false, 300.15);
+    let sized = B3SoiPdSized::new(&model, &geom(), 300.15).expect("sized");
+    let mc = model_consts(&model);
+    let charge = |vg: Value, vd: Value, vb: Value, ve: Value| {
+        eval::eval(
+            &sized,
+            &mc,
+            B3SoiPdBias {
+                vbs: vb,
+                vgs: vg,
+                vds: vd,
+                ves: ve,
+                vps: 0.0,
+            },
+            1.0,
+            true,
+        )
+        .charge
+        .unwrap()
+    };
+
+    let biases: [(Value, Value, Value, Value); 6] = [
+        (1.2, 0.8, 0.05, 0.0),
+        (0.6, 0.01, 0.4, 0.0),
+        (2.0, 0.4, 0.3, 0.0),
+        (0.3, 1.5, 0.5, 0.0),
+        (1.5, 0.002, 0.45, 0.0),
+        (1.2, -0.8, 0.05, 0.0),
+    ];
+    let h = 1e-7;
+    // FD noise on fF-scale charges sits near 1e-17; tolerate 2% + 2e-16.
+    let ok = |analytic: Value, fd: Value| {
+        (analytic - fd).abs() <= 2e-2 * analytic.abs().max(fd.abs()) + 2e-16
+    };
+
+    for &(vg, vd, vb, ve) in &biases {
+        let c0 = charge(vg, vd, vb, ve);
+        let q = |c: &eval::B3SoiPdCharge| [c.qg, c.qb, c.qd, c.qe];
+
+        let dg = {
+            let (p, m) = (charge(vg + h, vd, vb, ve), charge(vg - h, vd, vb, ve));
+            [0, 1, 2, 3].map(|k| (q(&p)[k] - q(&m)[k]) / (2.0 * h))
+        };
+        let dd = {
+            let (p, m) = (charge(vg, vd + h, vb, ve), charge(vg, vd - h, vb, ve));
+            [0, 1, 2, 3].map(|k| (q(&p)[k] - q(&m)[k]) / (2.0 * h))
+        };
+        let db = {
+            let (p, m) = (charge(vg, vd, vb + h, ve), charge(vg, vd, vb - h, ve));
+            [0, 1, 2, 3].map(|k| (q(&p)[k] - q(&m)[k]) / (2.0 * h))
+        };
+        let de = {
+            let (p, m) = (charge(vg, vd, vb, ve + h), charge(vg, vd, vb, ve - h));
+            [0, 1, 2, 3].map(|k| (q(&p)[k] - q(&m)[k]) / (2.0 * h))
+        };
+
+        let rows = [
+            ("qg", c0.gcggb, c0.gcgdb, c0.gcgsb, c0.gcgeb),
+            ("qb", c0.gcbgb, c0.gcbdb, c0.gcbsb, c0.gcbeb),
+            ("qd", c0.gcdgb, c0.gcddb, c0.gcdsb, c0.gcdeb),
+            ("qe", c0.gcegb, c0.gcedb, c0.gcesb, c0.gceeb),
+        ];
+        for (k, (name, gcg, gcd, gcs, gce)) in rows.into_iter().enumerate() {
+            let ds = -(dg[k] + dd[k] + db[k] + de[k]);
+            assert!(
+                ok(gcg, dg[k]),
+                "bias {:?}: gc{name}gb {gcg:.6e} vs FD {:.6e}",
+                (vg, vd, vb, ve),
+                dg[k]
+            );
+            assert!(
+                ok(gcd, dd[k]),
+                "bias {:?}: gc{name}db {gcd:.6e} vs FD {:.6e}",
+                (vg, vd, vb, ve),
+                dd[k]
+            );
+            assert!(
+                ok(gce, de[k]),
+                "bias {:?}: gc{name}eb {gce:.6e} vs FD {:.6e}",
+                (vg, vd, vb, ve),
+                de[k]
+            );
+            assert!(
+                ok(gcs, ds),
+                "bias {:?}: gc{name}sb {gcs:.6e} vs FD {ds:.6e}",
+                (vg, vd, vb, ve),
+            );
+        }
+    }
+}

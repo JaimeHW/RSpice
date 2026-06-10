@@ -205,6 +205,14 @@ pub struct B3SoiPdModel {
     pub dwc: Value,
     pub dlc: Value,
     pub dlc_given: bool,
+    /// Channel-length reduction for the body CV length `leffCVb`
+    /// (b3soipdset.c:420-421, default 0).
+    pub dlcb: Value,
+    /// Back-gate CV length extension for `leffCVbg` (b3soipdset.c:436-437,
+    /// default 0).
+    pub dlbg: Value,
+    /// Body-charge scaling factor (b3soipdset.c:422-423, default 1).
+    pub fbody: Value,
     pub cgso: Value,
     pub cgdo: Value,
     pub cgeo: Value,
@@ -535,6 +543,9 @@ impl B3SoiPdModel {
             dwc,
             dlc,
             dlc_given,
+            dlcb: val(p, "DLCB", 0.0),
+            dlbg: val(p, "DLBG", 0.0),
+            fbody: val(p, "FBODY", 1.0),
             cgso,
             cgdo,
             cgeo: val(p, "CGEO", 0.0),
