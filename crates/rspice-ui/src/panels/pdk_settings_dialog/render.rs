@@ -1,9 +1,14 @@
+//! PDK Settings on the modal primitive: underline tabs for paths,
+//! environment, discovered and recent files; footer per the dialog
+//! grammar with a live summary hint.
+
 use super::model::{PdkSettingsDialogResult, PdkSettingsDialogState, PdkSettingsTab};
 use super::tabs::{
     render_discovered_files_tab, render_environment_tab, render_library_paths_tab,
     render_recent_files_tab,
 };
-use egui::{Context, RichText, Window};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, dialog_tabs};
+use egui::Context;
 
 /// Render the PDK Settings dialog
 ///
@@ -20,115 +25,90 @@ pub fn render_pdk_settings_dialog(
     let mut should_close = false;
     let mut should_rescan = false;
 
-    Window::new("PDK Settings")
-        .resizable(true)
-        .collapsible(false)
-        .default_width(650.0)
-        .default_height(500.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+    let file_count = state.config.discovered_files().len();
+    let path_count = state.config.library_paths().len();
+    let enabled_count = state
+        .config
+        .library_paths()
+        .iter()
+        .filter(|p| p.enabled)
+        .count();
+    let hint = if state.has_changes() {
+        format!("{file_count} files · {enabled_count}/{path_count} paths · modified")
+    } else {
+        format!("{file_count} files · {enabled_count}/{path_count} paths")
+    };
+
+    let choice = Dialog::new("PDK", "PDK settings", "OK")
+        .size(DialogSize::Lg)
+        .secondary("Apply")
+        .ghost("Cancel")
+        .hint(&hint)
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
+            ui.spacing_mut().item_spacing.y = 4.0;
 
+            // Rescan action above the tab strip.
             ui.horizontal(|ui| {
-                for tab in PdkSettingsTab::all() {
-                    let selected = state.selected_tab == *tab;
-                    if ui.selectable_label(selected, tab.display_name()).clicked() {
-                        state.selected_tab = *tab;
-                    }
-                }
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if state.scanning {
                         ui.spinner();
-                        ui.label("Scanning...");
-                    } else if ui.button("🔄 Rescan").clicked() {
+                    } else if Button::new("Rescan paths").ghost().show(ui).clicked() {
                         should_rescan = true;
                     }
                 });
             });
 
-            ui.separator();
+            let tabs: Vec<&str> = PdkSettingsTab::all()
+                .iter()
+                .map(|tab| tab.display_name())
+                .collect();
+            let mut active = PdkSettingsTab::all()
+                .iter()
+                .position(|tab| *tab == state.selected_tab)
+                .unwrap_or(0);
+            dialog_tabs(ui, &tabs, &mut active);
+            state.selected_tab = PdkSettingsTab::all()[active.min(tabs.len() - 1)];
 
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .max_height(380.0)
-                .show(ui, |ui| match state.selected_tab {
-                    PdkSettingsTab::LibraryPaths => {
-                        render_library_paths_tab(ui, state);
-                    }
-                    PdkSettingsTab::Environment => {
-                        render_environment_tab(ui, state);
-                    }
-                    PdkSettingsTab::DiscoveredFiles => {
-                        if let Some(path) = render_discovered_files_tab(ui, state) {
-                            result = PdkSettingsDialogResult::LoadFile(path);
-                        }
-                    }
-                    PdkSettingsTab::RecentFiles => {
-                        if let Some(path) = render_recent_files_tab(ui, state) {
-                            result = PdkSettingsDialogResult::LoadFile(path);
-                        }
-                    }
-                });
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.horizontal(|ui| {
-                let file_count = state.config.discovered_files().len();
-                let path_count = state.config.library_paths().len();
-                let enabled_count = state
-                    .config
-                    .library_paths()
-                    .iter()
-                    .filter(|p| p.enabled)
-                    .count();
-
-                ui.label(
-                    RichText::new(format!(
-                        "{} files discovered | {} paths ({} enabled)",
-                        file_count, path_count, enabled_count
-                    ))
-                    .color(egui::Color32::GRAY)
-                    .size(11.0),
-                );
-
-                if state.has_changes() {
-                    ui.label(
-                        RichText::new("• Modified")
-                            .color(egui::Color32::YELLOW)
-                            .size(11.0),
-                    );
+            match state.selected_tab {
+                PdkSettingsTab::LibraryPaths => {
+                    render_library_paths_tab(ui, state);
                 }
-            });
-
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Cancel").clicked() {
-                        should_close = true;
-                        result = PdkSettingsDialogResult::Cancelled;
+                PdkSettingsTab::Environment => {
+                    render_environment_tab(ui, state);
+                }
+                PdkSettingsTab::DiscoveredFiles => {
+                    if let Some(path) = render_discovered_files_tab(ui, state) {
+                        result = PdkSettingsDialogResult::LoadFile(path);
                     }
-
-                    let apply_enabled = state.has_changes();
-                    if ui
-                        .add_enabled(apply_enabled, egui::Button::new("Apply"))
-                        .clicked()
-                    {
-                        let config = state.apply();
-                        result = PdkSettingsDialogResult::Applied(config);
-                        should_close = true;
+                }
+                PdkSettingsTab::RecentFiles => {
+                    if let Some(path) = render_recent_files_tab(ui, state) {
+                        result = PdkSettingsDialogResult::LoadFile(path);
                     }
-
-                    if ui.button("OK").clicked() {
-                        if state.has_changes() {
-                            let config = state.apply();
-                            result = PdkSettingsDialogResult::Applied(config);
-                        }
-                        should_close = true;
-                    }
-                });
-            });
+                }
+            }
         });
+
+    match choice {
+        DialogChoice::Primary => {
+            if state.has_changes() {
+                let config = state.apply();
+                result = PdkSettingsDialogResult::Applied(config);
+            }
+            should_close = true;
+        }
+        DialogChoice::Secondary => {
+            if state.has_changes() {
+                let config = state.apply();
+                result = PdkSettingsDialogResult::Applied(config);
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            should_close = true;
+            result = PdkSettingsDialogResult::Cancelled;
+        }
+        DialogChoice::None => {}
+    }
 
     if should_rescan {
         state.rescan();

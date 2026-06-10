@@ -67,11 +67,11 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
                 );
             }
 
-            if ui.small_button("🗑").on_hover_text("Remove path").clicked() {
+            if ui.small_button("remove").on_hover_text("Remove path").clicked() {
                 action = Some(PathListAction::Remove(idx));
             }
 
-            if ui.small_button("📁").on_hover_text("Browse...").clicked()
+            if ui.small_button("browse").on_hover_text("Browse...").clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .set_directory(&entry.path)
                     .pick_folder()
@@ -131,7 +131,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
 
     ui.add_space(12.0);
     ui.label(
-        RichText::new("💡 Tip: Use environment variables like $PDK_HOME in paths. Configure them in the Environment tab.")
+        RichText::new("Tip: Use environment variables like $PDK_HOME in paths. Configure them in the Environment tab.")
             .color(egui::Color32::from_rgb(150, 150, 200))
             .size(11.0),
     );

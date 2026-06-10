@@ -21,7 +21,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_discovered_files_tab(
                 .hint_text("Search files..."),
         );
 
-        if !state.file_filter.is_empty() && ui.small_button("✖").clicked() {
+        if !state.file_filter.is_empty() && ui.small_button("clear").clicked() {
             state.file_filter.clear();
         }
     });

@@ -43,7 +43,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_environment_tab(
                 );
             }
 
-            if ui.small_button("🗑").on_hover_text("Remove").clicked() {
+            if ui.small_button("remove").on_hover_text("Remove").clicked() {
                 remove_key = Some(name.clone());
             }
         });

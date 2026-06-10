@@ -29,8 +29,6 @@ pub(in crate::panels::pdk_settings_dialog) fn render_recent_files_tab(
 
         for file_path in recent.iter() {
             ui.horizontal(|ui| {
-                ui.label("📄");
-
                 if ui.link(file_path).clicked() {
                     load_file = Some(PathBuf::from(file_path));
                 }
