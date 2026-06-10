@@ -859,6 +859,11 @@ pub struct SimulationOptions {
     pub temp: Option<Value>,
     /// Nominal temperature in Celsius (default: 27)
     pub tnom: Option<Value>,
+    /// Seed for the statistical expression functions
+    /// (`gauss`/`agauss`/`unif`/`aunif`/2-arg `limit`). Applied netlist-wide
+    /// before parameter evaluation regardless of where the `.options` line
+    /// appears; Monte-Carlo drivers derive per-run streams from it.
+    pub seed: Option<u64>,
 }
 
 impl SimulationOptions {
@@ -916,6 +921,9 @@ impl SimulationOptions {
         }
         if other.tnom.is_some() {
             self.tnom = other.tnom;
+        }
+        if other.seed.is_some() {
+            self.seed = other.seed;
         }
     }
 }

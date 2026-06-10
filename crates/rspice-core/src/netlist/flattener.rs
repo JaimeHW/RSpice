@@ -18,7 +18,8 @@
 use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{
-    Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, SubcircuitDef,
+    Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, RandomState,
+    SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -130,6 +131,9 @@ pub struct Flattener<'a> {
     external_subckts: HashSet<String>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
+    /// Netlist-wide statistical-function stream (shared draw counter), so
+    /// per-instance expression draws are distinct yet reproducible.
+    random: RandomState,
 }
 
 impl<'a> Flattener<'a> {
@@ -157,6 +161,7 @@ impl<'a> Flattener<'a> {
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
             global_nodes: HashSet::new(),
+            random: RandomState::default(),
         }
     }
 
@@ -175,6 +180,9 @@ impl<'a> Flattener<'a> {
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist.global_nodes.clone();
+        // Continue the netlist's statistical draw sequence (seeded at parse
+        // time) so flatten-time draws are distinct per instance.
+        self.random = netlist.params.random().clone();
         let global_params: HashMap<String, Value> = netlist
             .params
             .all_params()
@@ -317,7 +325,8 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let param_map = build_subcircuit_param_scope(subckt, caller_scope_params, instance_params)?;
+        let param_map =
+            build_subcircuit_param_scope(subckt, caller_scope_params, instance_params, &self.random)?;
 
         // Expand each element in the subcircuit
         for sub_element in &subckt.elements {
@@ -525,7 +534,11 @@ impl<'a> Flattener<'a> {
                 instance_params,
             } => {
                 let resolved_value = if let Some(expr) = value_expr {
-                    resolve_parametric_value(&ParametricValue::Expression(expr.clone()), param_map)?
+                    resolve_parametric_value(
+                        &ParametricValue::Expression(expr.clone()),
+                        param_map,
+                        &self.random,
+                    )?
                 } else {
                     *value
                 };
@@ -560,7 +573,11 @@ impl<'a> Flattener<'a> {
                 for (name, value) in instance_params {
                     merged_params.push((
                         name.clone(),
-                        ParametricValue::Resolved(resolve_parametric_value(value, param_map)?),
+                        ParametricValue::Resolved(resolve_parametric_value(
+                            value,
+                            param_map,
+                            &self.random,
+                        )?),
                     ));
                 }
 
@@ -618,7 +635,7 @@ impl<'a> Flattener<'a> {
     ) -> Result<Element, ParseError> {
         if let ElementKind::Subcircuit { params, .. } = &mut element.kind {
             for (_, value) in params.iter_mut() {
-                let resolved = resolve_parametric_value(value, scope_params)?;
+                let resolved = resolve_parametric_value(value, scope_params, &self.random)?;
                 *value = ParametricValue::Resolved(resolved);
             }
         }
@@ -629,6 +646,7 @@ impl<'a> Flattener<'a> {
 fn resolve_parametric_value(
     value: &ParametricValue,
     param_map: &HashMap<String, Value>,
+    random: &RandomState,
 ) -> Result<Value, ParseError> {
     match value {
         ParametricValue::Resolved(v) => Ok(*v),
@@ -637,6 +655,10 @@ fn resolve_parametric_value(
             for (name, value) in param_map {
                 ctx.set(name, *value);
             }
+            // Join the netlist-wide stream: each instance expression that
+            // calls gauss/agauss/unif/aunif/limit advances one shared,
+            // reproducible sequence instead of replaying the same draws.
+            ctx.adopt_random(random);
             super::expr::eval_expression(expr, &ctx)
                 .map_err(|e| ParseError::InvalidValue(e.to_string()))
         }
@@ -651,6 +673,7 @@ fn build_subcircuit_param_scope(
     subckt: &SubcircuitDef,
     caller_scope_params: &HashMap<String, Value>,
     instance_params: &[(String, ParametricValue)],
+    random: &RandomState,
 ) -> Result<HashMap<String, Value>, ParseError> {
     let mut param_map: HashMap<String, Value> = caller_scope_params
         .iter()
@@ -662,7 +685,7 @@ fn build_subcircuit_param_scope(
     }
 
     for (name, value) in instance_params {
-        let resolved = resolve_parametric_value(value, caller_scope_params)?;
+        let resolved = resolve_parametric_value(value, caller_scope_params, random)?;
         param_map.insert(canonical_param_name(name), resolved);
     }
 

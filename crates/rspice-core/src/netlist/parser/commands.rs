@@ -183,6 +183,24 @@ pub(super) fn parse_options_command(
             "PIVTOL" => options.pivtol = Some(expect_value(stream, line_num, params)?),
             "TEMP" => options.temp = Some(expect_value(stream, line_num, params)?),
             "TNOM" => options.tnom = Some(expect_value(stream, line_num, params)?),
+            "SEED" | "RNDSEED" => {
+                // The parse pre-scan applies the seed before any parameter
+                // evaluation; this arm validates and records it for
+                // downstream drivers (e.g. per-run Monte-Carlo streams).
+                if let TokenKind::Ident(word) = &stream.peek().kind {
+                    if word.eq_ignore_ascii_case("random") {
+                        stream.advance();
+                        log::warn!(
+                            "line {line_num}: `.options seed=random` is not supported; \
+                             the deterministic default seed is used (set an explicit \
+                             integer seed to vary the stream)"
+                        );
+                        continue;
+                    }
+                }
+                let value = expect_value(stream, line_num, params)?;
+                options.seed = Some(parse_seed_option(value, line_num)?);
+            }
             "ITL1" => {
                 let value = expect_value(stream, line_num, params)?;
                 options.itl1 = Some(parse_usize_option("ITL1", value, line_num)?);
@@ -246,6 +264,21 @@ pub(super) fn parse_global_command(
             message: ".GLOBAL requires at least one node name".to_string(),
         })
     }
+}
+
+pub(super) fn parse_seed_option(value: Value, line_num: usize) -> Result<u64, ParseError> {
+    let rounded = value.round();
+    if !value.is_finite()
+        || value < 0.0
+        || (value - rounded).abs() > 1e-9
+        || rounded > u64::MAX as Value
+    {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("SEED must be a non-negative integer, found {}", value),
+        });
+    }
+    Ok(rounded as u64)
 }
 
 pub(super) fn parse_usize_option(
