@@ -257,73 +257,68 @@ pub(super) fn run_hb(ctx: &RunContext<'_>, freq: f64, harmonics: usize) -> Resul
 }
 
 pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Result<(), CliError> {
-    use rspice_core::analysis::advanced::ProcessCorner;
-
-    let corner_strs: Vec<&str> = corners_str.split(',').map(|s| s.trim()).collect();
-    let corners: Vec<(ProcessCorner, String)> = corner_strs
-        .iter()
-        .enumerate()
-        .map(|(i, s)| {
-            let corner = match s.to_lowercase().as_str() {
-                "tt" | "typ" | "typical" => ProcessCorner::TT,
-                "ss" | "slow" => ProcessCorner::SS,
-                "ff" | "fast" => ProcessCorner::FF,
-                "sf" | "snfp" => ProcessCorner::SF,
-                "fs" | "fnsp" => ProcessCorner::FS,
-                _ => ProcessCorner::Custom(i as u8),
-            };
-            (corner, s.to_string())
-        })
+    let corners: Vec<String> = corners_str
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
         .collect();
+    if corners.is_empty() {
+        return Err(CliError::InvalidArgument {
+            message: "--corners requires at least one corner name".to_string(),
+            suggestion: Some("e.g. --corners tt,ss,ff".to_string()),
+        });
+    }
+
+    let corner_lib = match ctx.args.corner_lib.as_ref() {
+        Some(lib) => {
+            if !lib.exists() {
+                return Err(CliError::InputNotFound {
+                    path: lib.clone(),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "Corner library not found",
+                    ),
+                });
+            }
+            // Absolute so the reference resolves regardless of netlist location.
+            Some(std::path::absolute(lib).unwrap_or_else(|_| lib.clone()))
+        }
+        None => None,
+    };
 
     if !ctx.quiet {
-        println!("Running PVT corner sweep: {} corners", corners.len());
-        if ctx.verbose {
-            println!("  Process corners:");
-            for (corner, name) in &corners {
+        println!("Running process corner sweep: {} corners", corners.len());
+        match &corner_lib {
+            Some(lib) => println!("  Corner library: {}", lib.display()),
+            None => {
+                println!("  Note: no --corner-lib given; every corner runs nominal models.");
                 println!(
-                    "    {}: NMOS={:.2}x, PMOS={:.2}x",
-                    name,
-                    corner.nmos_factor(),
-                    corner.pmos_factor()
+                    "        Provide a library with per-corner .lib sections (.lib ss ... .endl)"
                 );
+                println!("        to apply real corner models.");
             }
         }
     }
 
     let mut results: Vec<(String, bool)> = Vec::new();
 
-    for (i, (corner, name)) in corners.iter().enumerate() {
+    for (i, name) in corners.iter().enumerate() {
         if !ctx.quiet {
             println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
         }
 
-        if ctx.verbose && !ctx.quiet {
-            println!(
-                "  Process scaling: NMOS={:.2}x, PMOS={:.2}x",
-                corner.nmos_factor(),
-                corner.pmos_factor()
-            );
-        }
-
-        let mut corner_passed = true;
-        for analysis in &ctx.netlist.analyses {
-            if let Err(e) = ctx.run_analysis(analysis) {
-                if !ctx.quiet {
-                    eprintln!("  Analysis failed: {}", e);
+        let corner_passed = match corner_lib.as_deref() {
+            Some(lib) => match run_corner_with_lib(ctx, lib, name) {
+                Ok(passed) => passed,
+                Err(e) => {
+                    if !ctx.quiet {
+                        eprintln!("  Corner '{}' failed: {}", name, e);
+                    }
+                    false
                 }
-                corner_passed = false;
-            }
-        }
-
-        if ctx.netlist.analyses.is_empty()
-            && let Err(e) = run_dc_op(ctx)
-        {
-            if !ctx.quiet {
-                eprintln!("  DC OP failed: {}", e);
-            }
-            corner_passed = false;
-        }
+            },
+            None => run_corner_nominal(ctx),
+        };
 
         results.push((name.clone(), corner_passed));
     }
@@ -346,5 +341,147 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         );
     }
 
-    Ok(())
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|(_, passed)| !passed)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(CliError::simulation_error_in(
+            format!("corner(s) failed: {}", failed.join(", ")),
+            "Corners",
+        ))
+    }
+}
+
+/// Re-elaborate the deck with the corner's `.lib` section applied and run
+/// every analysis against the corner models.
+fn run_corner_with_lib(
+    ctx: &RunContext<'_>,
+    lib: &std::path::Path,
+    corner: &str,
+) -> Result<bool, CliError> {
+    let source = ctx
+        .netlist
+        .source_text
+        .as_deref()
+        .ok_or_else(|| CliError::InternalError {
+            message: "netlist source unavailable for corner re-elaboration".to_string(),
+        })?;
+
+    // Inject the corner's library section right below the title so its
+    // models and parameters are defined before first use.
+    let mut corner_source = String::with_capacity(source.len() + 64);
+    let mut lines = source.lines();
+    if let Some(title) = lines.next() {
+        corner_source.push_str(title);
+        corner_source.push('\n');
+    }
+    corner_source.push_str(&format!(".lib \"{}\" {}\n", lib.display(), corner));
+    for line in lines {
+        corner_source.push_str(line);
+        corner_source.push('\n');
+    }
+
+    let base = ctx
+        .netlist
+        .source_path
+        .clone()
+        .unwrap_or_else(|| ctx.args.input.clone());
+    let corner_netlist = rspice_core::Netlist::parse_with_path(&corner_source, &base).map_err(
+        |e| CliError::ParseError {
+            message: format!("corner '{}': {}", corner, e),
+            line: None,
+            suggestion: None,
+        },
+    )?;
+
+    let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
+    let corner_ctx = RunContext {
+        engine: &corner_engine,
+        netlist: &corner_netlist,
+        args: ctx.args,
+        format: ctx.format,
+        output: corner_output_path(ctx.output.as_deref(), corner),
+        show_progress: ctx.show_progress,
+        compress: ctx.compress,
+        compress_tol: ctx.compress_tol,
+        multi_analysis: corner_netlist.analyses.len() > 1,
+        verbose: ctx.verbose,
+        quiet: ctx.quiet,
+        measurements: std::cell::RefCell::new(Vec::new()),
+    };
+
+    let mut passed = true;
+    if corner_netlist.analyses.is_empty() {
+        if let Err(e) = run_dc_op(&corner_ctx) {
+            if !ctx.quiet {
+                eprintln!("  DC OP failed: {}", e);
+            }
+            passed = false;
+        }
+    } else {
+        for analysis in &corner_netlist.analyses {
+            if let Err(e) = corner_ctx.run_analysis(analysis) {
+                if !ctx.quiet {
+                    eprintln!("  Analysis failed: {}", e);
+                }
+                passed = false;
+            }
+        }
+    }
+
+    // Surface this corner's measurements in CI reports under tagged names.
+    let corner_measurements = corner_ctx.measurements.into_inner();
+    ctx.measurements
+        .borrow_mut()
+        .extend(corner_measurements.into_iter().map(|mut m| {
+            m.name = format!("{}:{}", corner, m.name);
+            m
+        }));
+
+    Ok(passed)
+}
+
+/// Run the deck's analyses unchanged (no corner library available).
+fn run_corner_nominal(ctx: &RunContext<'_>) -> bool {
+    let mut passed = true;
+    if ctx.netlist.analyses.is_empty() {
+        if let Err(e) = run_dc_op(ctx) {
+            if !ctx.quiet {
+                eprintln!("  DC OP failed: {}", e);
+            }
+            passed = false;
+        }
+    } else {
+        for analysis in &ctx.netlist.analyses {
+            if let Err(e) = ctx.run_analysis(analysis) {
+                if !ctx.quiet {
+                    eprintln!("  Analysis failed: {}", e);
+                }
+                passed = false;
+            }
+        }
+    }
+    passed
+}
+
+/// `results.csv` -> `results.ss.csv` so corner exports cannot collide.
+fn corner_output_path(
+    output: Option<&std::path::Path>,
+    corner: &str,
+) -> Option<std::path::PathBuf> {
+    let path = output?;
+    let mut file_name = path
+        .file_stem()
+        .map(|stem| stem.to_os_string())
+        .unwrap_or_default();
+    file_name.push(format!(".{corner}"));
+    if let Some(ext) = path.extension() {
+        file_name.push(".");
+        file_name.push(ext);
+    }
+    Some(path.with_file_name(file_name))
 }
