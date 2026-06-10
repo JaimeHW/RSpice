@@ -72,6 +72,19 @@ pub(in crate::device::transmission_line) struct TxlRuntime {
     dc1: Value,
     dc2: Value,
     history: VecDeque<TxlHistorySample>,
+    /// Previous accepted solver time before picosecond quantization. ngspice
+    /// advances its convolution exponentials with the solver's fractional
+    /// `CKTdelta` while the history grid and slopes run on truncated integer
+    /// picoseconds (txlload.c); both clocks must be kept to reproduce its
+    /// waveforms.
+    last_real_time: Value,
+}
+
+/// ngspice's TXL history clock: `(int)(time * 1e12)` picoseconds, stored back
+/// in seconds so the interpolation arithmetic stays in SI units.
+#[inline]
+fn quantize_txl_time(time: Value) -> Value {
+    (time * 1.0e12).trunc() * 1.0e-12
 }
 
 impl TxlRuntime {
@@ -112,6 +125,7 @@ impl TxlRuntime {
             dc1: 0.0,
             dc2: 0.0,
             history: VecDeque::new(),
+            last_real_time: 0.0,
         };
 
         runtime.y_pade(r, l, g, c)?;
@@ -159,12 +173,13 @@ impl TxlRuntime {
             term.cnv_o = -self.dc2 * term.c / term.x;
         }
         self.history.push_back(TxlHistorySample {
-            time,
+            time: quantize_txl_time(time),
             v_i: v1,
             v_o: v2,
             i_i: i1,
             i_o: i2,
         });
+        self.last_real_time = time;
     }
 
     pub(in crate::device::transmission_line) fn transient_stamp(
@@ -172,7 +187,11 @@ impl TxlRuntime {
         time: Value,
     ) -> Option<TxlTransientStamp> {
         let last = self.history.back()?;
-        let h = time - last.time;
+        // ngspice's candidate step: exponentials advance by the solver's
+        // fractional delta, while the delayed-history pickups anchor on the
+        // truncated-picosecond grid (txlload.c mixed clock).
+        let h = time - self.last_real_time;
+        let candidate_grid_time = quantize_txl_time(time).max(last.time);
         if !(h.is_finite() && h > 0.0) {
             return Some(TxlTransientStamp {
                 local_coeff: self.sqt_cd_l,
@@ -184,7 +203,7 @@ impl TxlRuntime {
         }
 
         let mut trial = self.clone();
-        let (rhs1, rhs2, ext, ratio) = trial.right_consts(last.time, time, h)?;
+        let (rhs1, rhs2, ext, ratio) = trial.right_consts(last.time, candidate_grid_time, h)?;
         let h1 = 0.5 * h;
         let local_coeff = trial.sqt_cd_l + h1 * trial.h1c;
         let mut delayed_voltage_coeff = 0.0;
@@ -217,27 +236,40 @@ impl TxlRuntime {
             self.initialize(time, v1, i1, v2, i2);
             return;
         };
-        let h = time - prev.time;
+        let h = time - self.last_real_time;
         if !(h.is_finite() && h > 0.0) {
             return;
         }
+        let grid_time = quantize_txl_time(time);
+        if grid_time <= prev.time {
+            // ngspice merges accepted points whose truncated-picosecond label
+            // does not advance: no history commit and no convolution update,
+            // but the fractional clock still moves so the next step's
+            // exponentials only span the remaining sub-interval.
+            self.last_real_time = time;
+            return;
+        }
+        // The grid slope spans the integer-picosecond interval even when the
+        // fractional step differs (truncation, merged sub-steps).
+        let grid_h = grid_time - prev.time;
 
         let mut accepted = self.clone();
-        if let Some((_rhs1, _rhs2, ext, ratio)) = accepted.right_consts(prev.time, time, h) {
+        if let Some((_rhs1, _rhs2, ext, ratio)) = accepted.right_consts(prev.time, grid_time, h) {
             accepted.ext = ext;
             accepted.ratio = ratio;
             accepted.history.push_back(TxlHistorySample {
-                time,
+                time: grid_time,
                 v_i: v1,
                 v_o: v2,
                 i_i: i1,
                 i_o: i2,
             });
-            accepted.update_cnv(prev, v1, v2, h);
+            accepted.update_cnv(prev, v1, v2, grid_h);
             if accepted.ext {
-                accepted.update_delayed_cnv(h);
+                accepted.update_delayed_cnv(grid_h);
             }
-            accepted.compact_history(time);
+            accepted.compact_history(grid_time);
+            accepted.last_real_time = time;
             *self = accepted;
         }
     }
@@ -977,6 +1009,123 @@ mod tests {
         assert!(
             (actual - expected).abs() <= tolerance,
             "actual={actual:.17e} expected={expected:.17e} tolerance={tolerance:.17e}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod oracle_replay {
+    use super::*;
+
+    /// Replay ngspice's committed (v, i) history for txl2_3's y1 line through
+    /// our runtime and compare the branch rhs stamps point by point.
+    ///
+    /// The fixtures were extracted with gdb from the vendored ngspice debug
+    /// build running tests/transmission/txl2_3_line.cir: committed history
+    /// samples at txlload.c:104 (truncated-picosecond time, v_i, v_o, i_i,
+    /// i_o) and per-load branch rhs stores at txlload.c:607 (candidate time
+    /// label, fractional CKTdelta, ff, gg, ext). Driving the runtime with the
+    /// oracle's own inputs isolates the convolution recursion from solver
+    /// grid differences and pins ngspice's mixed integer-picosecond/
+    /// fractional-delta clock bit-closely.
+    #[test]
+    fn replay_oracle_txl23_y1() {
+        let vi_text = include_str!("testdata/txl23_y1_vi.dat");
+        let ff_text = include_str!("testdata/txl23_y1_ff.dat");
+
+        struct Vi {
+            t_ps: i64,
+            v_i: Value,
+            v_o: Value,
+            i_i: Value,
+            i_o: Value,
+        }
+        let vi: Vec<Vi> = vi_text
+            .lines()
+            .map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                Vi {
+                    t_ps: f[0].parse().unwrap(),
+                    v_i: f[1].parse().unwrap(),
+                    v_o: f[2].parse().unwrap(),
+                    i_i: f[3].parse().unwrap(),
+                    i_o: f[4].parse().unwrap(),
+                }
+            })
+            .collect();
+
+        // Last FF record per candidate time = the accepted iterate's stamp.
+        let mut ff: std::collections::HashMap<i64, (Value, Value, Value)> =
+            std::collections::HashMap::new();
+        for line in ff_text.lines() {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let t2: i64 = f[0].parse().unwrap();
+            let h: Value = f[1].parse().unwrap();
+            let ffv: Value = f[2].parse().unwrap();
+            let ggv: Value = f[3].parse().unwrap();
+            ff.insert(t2, (h, ffv, ggv));
+        }
+
+        let mut rt = TxlRuntime::setup(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0).unwrap();
+        rt.initialize(0.0, vi[0].v_i, vi[0].i_i, vi[0].v_o, vi[0].i_o);
+
+        let mut compared = 0usize;
+        let mut grid_mismatch = 0usize;
+        let mut worst: (Value, i64) = (0.0, 0);
+        let mut first_bad: Option<i64> = None;
+        // Reconstruct ngspice's fractional time chain from the accepted
+        // deltas; the truncated labels must reproduce the vi grid.
+        let mut t_real = 0.0_f64;
+        for sample in &vi {
+            let Some(&(h_oracle, ff_oracle, gg_oracle)) = ff.get(&sample.t_ps) else {
+                let t = sample.t_ps as Value * 1.0e-12;
+                rt.accept(t, sample.v_i, sample.i_i, sample.v_o, sample.i_o);
+                t_real = t;
+                continue;
+            };
+            let t_cand = t_real + h_oracle;
+            if (t_cand * 1.0e12).trunc() as i64 != sample.t_ps {
+                grid_mismatch += 1;
+                // Re-anchor on the labelled grid so one drift does not poison
+                // the rest of the replay.
+                t_real = sample.t_ps as Value * 1.0e-12;
+                rt.accept(t_real, sample.v_i, sample.i_i, sample.v_o, sample.i_o);
+                continue;
+            }
+
+            let stamp = rt.transient_stamp(t_cand).expect("stamp");
+            let scale = ff_oracle.abs().max(gg_oracle.abs()).max(1.0e-9);
+            let err1 = (stamp.rhs1 - ff_oracle).abs() / scale;
+            let err2 = (stamp.rhs2 - gg_oracle).abs() / scale;
+            let err = err1.max(err2);
+            compared += 1;
+            if err > worst.0 {
+                worst = (err, sample.t_ps);
+            }
+            if err > 1.0e-6 && first_bad.is_none() {
+                first_bad = Some(sample.t_ps);
+                println!(
+                    "first divergence at t={}ps: ours=({:.12e},{:.12e}) oracle=({:.12e},{:.12e})",
+                    sample.t_ps, stamp.rhs1, stamp.rhs2, ff_oracle, gg_oracle
+                );
+            }
+            rt.accept(t_cand, sample.v_i, sample.i_i, sample.v_o, sample.i_o);
+            t_real = t_cand;
+        }
+        assert!(
+            compared > 450,
+            "expected to replay the full accepted sequence, compared {compared}"
+        );
+        assert_eq!(
+            grid_mismatch, 0,
+            "reconstructed fractional clock must reproduce ngspice's integer grid"
+        );
+        assert!(
+            first_bad.is_none() && worst.0 < 1.0e-6,
+            "stamp fidelity regressed: worst rel err {:.3e} at t={}ps, first>1e-6 at {:?}",
+            worst.0,
+            worst.1,
+            first_bad
         );
     }
 }
