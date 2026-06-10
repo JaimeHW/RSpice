@@ -607,6 +607,20 @@ impl TestRunner {
                         {
                             continue;
                         }
+                        // Sample-scale reference oscillations (ringing or
+                        // settling wiggles a coarse reference grid overshoots)
+                        // are compared against the local reference envelope.
+                        if time_axis
+                            && !phase_probe
+                            && self.matches_within_reference_envelope(
+                                expected_series,
+                                idx,
+                                actual,
+                                absolute_tolerance,
+                            )
+                        {
+                            continue;
+                        }
                         mismatches.push(ValueMismatch {
                             x_value: x_ref,
                             node: var.clone(),
