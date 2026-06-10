@@ -3389,18 +3389,9 @@ mod oracle_replay {
     /// label is the accepted iterate). Driving the runtime with the oracle's
     /// own inputs pins the multiconductor convolution - including the mixed
     /// integer-picosecond/fractional-delta clock - independently of solver
-    /// grid differences.
-    ///
-    /// CURRENTLY DIVERGENT: the replay first departs from the oracle at
-    /// t=18175ps (1.4% on ff[0], the first delayed-arrival region) and grows
-    /// to the same scale as the cpl deck gate failures, so this harness is
-    /// the deterministic reproduction of the open CPL convolution gap
-    /// (candidates: delayed_vi_samples_ps interpolation vs cplload get_pvs,
-    /// or the replay chain around ngspice's 217 merged/rejected labels).
-    /// Run with --ignored while investigating; un-ignore once the runtime
-    /// reproduces the oracle like the TXL and LTRA fixtures do.
+    /// grid differences. All accepted steps reproduce the oracle's ff/gg
+    /// vectors to sub-1e-9 relative error.
     #[test]
-    #[ignore = "documents the open CPL convolution divergence; see doc comment"]
     fn replay_oracle_cpl34_p1() {
         let hv_text = include_str!("transmission_line/testdata/cpl34_p1_hv.dat");
         let in_text = include_str!("transmission_line/testdata/cpl34_p1_in.dat");
@@ -3479,20 +3470,17 @@ mod oracle_replay {
         let mut prev_v_i = dc1.clone();
         let mut prev_v_o = dc2.clone();
         let mut t1_ps = 0i64;
-        let mut t_real = 0.0f64;
         let mut compared = 0usize;
-        let mut grid_mismatch = 0usize;
         let mut worst: (f64, i64) = (0.0, 0);
         let mut first_bad: Option<i64> = None;
         for sample in &hv {
+            // The IN rows carry ngspice's exact fractional CKTtime/CKTdelta, so
+            // the candidate clock replays the oracle bit-for-bit (keying both
+            // sides by the truncated label reproduces ngspice's own (int) cast).
             let Some((dt_oracle, ff_oracle, gg_oracle)) = inputs.get(&sample.t_ps) else {
                 continue;
             };
-            let t_cand = t_real + dt_oracle;
-            if (t_cand * 1.0e12).trunc() as i64 != sample.t_ps {
-                grid_mismatch += 1;
-                t_real = sample.t_ps as f64 * 1.0e-12;
-            } else {
+            {
                 let mut trial_history = history.clone();
                 let plan = rt
                     .step_stamp_plan(
@@ -3525,7 +3513,6 @@ mod oracle_replay {
                         sample.t_ps, plan.ff[0], ff_oracle[0]
                     );
                 }
-                t_real = t_cand;
             }
 
             let h_grid = (sample.t_ps - t1_ps) as f64 * 1.0e-12;
@@ -3556,10 +3543,16 @@ mod oracle_replay {
             prev_v_o = sample.v_o.clone();
             t1_ps = sample.t_ps;
         }
-        println!(
-            "compared {} steps ({} grid re-anchors); worst rel err {:.3e} at t={}ps; first>1e-6 at {:?}",
-            compared, grid_mismatch, worst.0, worst.1, first_bad
+        assert!(
+            compared > 1000,
+            "expected to replay the full accepted sequence, compared {compared}"
         );
-        assert!(compared > 900);
+        assert!(
+            first_bad.is_none() && worst.0 < 1.0e-6,
+            "CPL rhs fidelity regressed: worst rel err {:.3e} at t={}ps, first>1e-6 at {:?}",
+            worst.0,
+            worst.1,
+            first_bad
+        );
     }
 }
