@@ -28,22 +28,21 @@
 //! - The **DC matrix/RHS stamping** for `bodyMod` 0 (floating) and 2 (ideal
 //!   tie), no series R, no temp node ([`dd::B3SoiDd`] `stamp_op`).
 //!
+//! Done since: the **CAPMOD=3 charge model** (b3soiddld.c:2646-3784) with its
+//! transient companion stamping + charge-history/LTE integration, the back-gate
+//! (E) DC coupling, the floating-body convergence aids (`B3SOIDDlimit` /
+//! `B3SOIDDSmartVbs`), and the live LEVEL=56 builder dispatch. The DC sweep
+//! decks pass against the ngspice references.
+//!
 //! Deferred (clearly bounded, see `dd::eval` module docs for line refs):
-//! - **CAPMOD=3 charge model** (b3soiddld.c:2640-3400) and its transient
-//!   capacitor companion stamping + charge-history/LTE integration. Required
-//!   for `RampVg2`/`inv2`/`ring51` transient and for AC.
 //! - **Self-heating** (SHMOD=1) and the temperature node — SHMOD=0 in every
-//!   supported deck; the parameter is recognized and (per spec) should error
-//!   if enabled rather than be silently ignored. Not yet enforced.
+//!   supported deck; the parameter is recognized and (per spec) errors if RTH0
+//!   makes it active rather than being silently ignored.
 //! - **Body resistor** (`rbody`/`rbsh` > 0, `bodyMod==1`) and internal
 //!   drain/source primes (series R) — absent in the supported decks.
-//!
-//! Because the charge model is not yet ported, [`dd::B3SoiDd`] is **not wired
-//! into the builder dispatch** (`engine/builder.rs` still routes level 56 to
-//! the generic MOSFET). This keeps all non-SOI paths byte-identical and the
-//! existing regression suite green. Flipping the dispatch is the final step and
-//! must wait until the transient charge path lands, so the SOI transient decks
-//! are not left half-working.
+//! - **Fast-edge floating-body transient amplitude** (`RampVg2`) and the
+//!   **ring-oscillator DC startup** (`ring51`) need further calibration of the
+//!   body LTE / continuation against ngspice.
 //!
 //! # Next steps for the FD (55) / PD (57) siblings
 //!
@@ -58,4 +57,4 @@
 pub mod common;
 pub mod dd;
 
-pub use dd::{B3SoiDd, B3SoiDdModel};
+pub use dd::{B3SoiDd, B3SoiDdModel, BodyMode};

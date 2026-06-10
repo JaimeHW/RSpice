@@ -702,6 +702,199 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn initialize_b3soi_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+    ) -> B3SoiTransientHistory {
+        let n = circuit.b3soi.len();
+        let mut h = B3SoiTransientHistory {
+            qg_prev: Vec::with_capacity(n),
+            qg_prev_prev: Vec::with_capacity(n),
+            qg_prev_prev_prev: Vec::with_capacity(n),
+            cqg_prev: Vec::with_capacity(n),
+            qb_prev: Vec::with_capacity(n),
+            qb_prev_prev: Vec::with_capacity(n),
+            qb_prev_prev_prev: Vec::with_capacity(n),
+            cqb_prev: Vec::with_capacity(n),
+            qd_prev: Vec::with_capacity(n),
+            qd_prev_prev: Vec::with_capacity(n),
+            qd_prev_prev_prev: Vec::with_capacity(n),
+            cqd_prev: Vec::with_capacity(n),
+            qe_prev: Vec::with_capacity(n),
+            qe_prev_prev: Vec::with_capacity(n),
+            qe_prev_prev_prev: Vec::with_capacity(n),
+            cqe_prev: Vec::with_capacity(n),
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
+        };
+        for dev in &circuit.b3soi.devices {
+            let c = dev.charge_at(solution);
+            h.qg_prev.push(c.qg);
+            h.qg_prev_prev.push(c.qg);
+            h.qg_prev_prev_prev.push(c.qg);
+            h.cqg_prev.push(0.0);
+            h.qb_prev.push(c.qb);
+            h.qb_prev_prev.push(c.qb);
+            h.qb_prev_prev_prev.push(c.qb);
+            h.cqb_prev.push(0.0);
+            h.qd_prev.push(c.qd);
+            h.qd_prev_prev.push(c.qd);
+            h.qd_prev_prev_prev.push(c.qd);
+            h.cqd_prev.push(0.0);
+            h.qe_prev.push(c.qe);
+            h.qe_prev_prev.push(c.qe);
+            h.qe_prev_prev_prev.push(c.qe);
+            h.cqe_prev.push(0.0);
+        }
+        h
+    }
+
+    /// Stamp the B3SOIDD transient charge companion for every SOI instance.
+    ///
+    /// Integrates each of the four coupled node charges with the engine's
+    /// integration coefficient `ag0` and the per-charge history, then stamps the
+    /// coupled `gc**·ag0` capacitance matrix plus the `ceqq*` equivalent charge
+    /// currents (b3soiddld.c charge load). KCL-symmetric: the device routes the
+    /// full 5-terminal coupling so charge is conserved across g/b/d/s/e.
+    #[inline]
+    pub(super) fn stamp_b3soi_transient_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &B3SoiTransientHistory,
+    ) {
+        if circuit.b3soi.is_empty() {
+            return;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        // ag0 = the bare integration gain (companion geq for unit capacitance).
+        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        if ag0 <= 0.0 {
+            return;
+        }
+        let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
+        for (idx, dev) in circuit.b3soi.devices.iter().enumerate() {
+            let charge = dev.charge_at(voltages);
+            let cqg = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qg,
+                history.qg_prev[idx],
+                history.qg_prev_prev[idx],
+                history.cqg_prev[idx],
+            );
+            let cqb = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qb,
+                history.qb_prev[idx],
+                history.qb_prev_prev[idx],
+                history.cqb_prev[idx],
+            );
+            let cqd = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            );
+            let cqe = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qe,
+                history.qe_prev[idx],
+                history.qe_prev_prev[idx],
+                history.cqe_prev[idx],
+            );
+            dev.stamp_charge_companion(
+                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
+            );
+        }
+    }
+
+    /// Commit the B3SOIDD charge history after an accepted timestep.
+    #[inline]
+    pub(super) fn update_b3soi_history(
+        circuit: &crate::circuit::Circuit,
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &mut B3SoiTransientHistory,
+    ) {
+        if circuit.b3soi.is_empty() {
+            return;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        for (idx, dev) in circuit.b3soi.devices.iter().enumerate() {
+            let charge = dev.charge_at(voltages);
+            let cqg = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qg,
+                history.qg_prev[idx],
+                history.qg_prev_prev[idx],
+                history.cqg_prev[idx],
+            );
+            let cqb = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qb,
+                history.qb_prev[idx],
+                history.qb_prev_prev[idx],
+                history.cqb_prev[idx],
+            );
+            let cqd = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            );
+            let cqe = Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                charge.qe,
+                history.qe_prev[idx],
+                history.qe_prev_prev[idx],
+                history.cqe_prev[idx],
+            );
+            history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
+            history.qg_prev_prev[idx] = history.qg_prev[idx];
+            history.qg_prev[idx] = charge.qg;
+            history.cqg_prev[idx] = cqg;
+            history.qb_prev_prev_prev[idx] = history.qb_prev_prev[idx];
+            history.qb_prev_prev[idx] = history.qb_prev[idx];
+            history.qb_prev[idx] = charge.qb;
+            history.cqb_prev[idx] = cqb;
+            history.qd_prev_prev_prev[idx] = history.qd_prev_prev[idx];
+            history.qd_prev_prev[idx] = history.qd_prev[idx];
+            history.qd_prev[idx] = charge.qd;
+            history.cqd_prev[idx] = cqd;
+            history.qe_prev_prev_prev[idx] = history.qe_prev_prev[idx];
+            history.qe_prev_prev[idx] = history.qe_prev[idx];
+            history.qe_prev[idx] = charge.qe;
+            history.cqe_prev[idx] = cqe;
+        }
+        history.accepted_dt_prev_prev = history.accepted_dt_prev;
+        history.accepted_dt_prev = dt;
+    }
+
+    #[inline]
     pub(super) fn stamp_tline_companions(
         circuit: &crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
@@ -1304,6 +1497,7 @@ impl Engine {
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
+        b3soi_history: &mut B3SoiTransientHistory,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
         suppress_gate_charge_history: bool,
         tline_dc_refs: &[(Value, Value)],
@@ -1860,5 +2054,32 @@ impl Engine {
         }
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
+
+        Self::update_b3soi_history(circuit, accepted_solution, method, trap_order, dt, b3soi_history);
+    }
+}
+
+/// Adapter exposing the transient [`StaticMatrix`] + RHS pair as a
+/// [`MatrixStamper`] for devices that stamp through the generic trait (the
+/// B3SOIDD charge companion). Maps 1-indexed device NodeIds to the 0-indexed
+/// matrix/RHS, matching `CircuitData`'s own stamper convention.
+struct StaticMatrixChargeStamper<'a> {
+    matrix: &'a mut crate::solver::StaticMatrix,
+    rhs: &'a mut [Value],
+}
+
+impl crate::device::MatrixStamper for StaticMatrixChargeStamper<'_> {
+    #[inline]
+    fn stamp(&mut self, row: crate::circuit::NodeId, col: crate::circuit::NodeId, value: Value) {
+        if row > 0 && col > 0 {
+            self.matrix.add(row - 1, col - 1, value);
+        }
+    }
+
+    #[inline]
+    fn stamp_rhs(&mut self, index: crate::circuit::NodeId, value: Value) {
+        if index > 0 && index <= self.rhs.len() {
+            self.rhs[index - 1] += value;
+        }
     }
 }

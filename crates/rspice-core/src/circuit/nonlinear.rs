@@ -5,6 +5,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     diodes: Diodes,
     bjts: Bjts,
     mosfets: Mosfets,
+    b3soi: B3SoiDds,
     jfets: Vec<crate::device::Jfet>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
@@ -20,6 +21,7 @@ impl CircuitData {
         !self.diodes.is_empty()
             || !self.bjts.is_empty()
             || !self.mosfets.is_empty()
+            || !self.b3soi.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -44,6 +46,7 @@ impl CircuitData {
         !self.diodes.is_empty()
             || !self.bjts.is_empty()
             || !self.mosfets.is_empty()
+            || !self.b3soi.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -72,6 +75,7 @@ impl CircuitData {
         if !self.diodes.is_empty()
             || !self.bjts.is_empty()
             || !self.mosfets.is_empty()
+            || !self.b3soi.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self.has_xspice_devices()
@@ -141,6 +145,7 @@ impl CircuitData {
             diodes: self.diodes.clone(),
             bjts: self.bjts.clone(),
             mosfets: self.mosfets.clone(),
+            b3soi: self.b3soi.clone(),
             jfets: self.jfets.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
@@ -156,6 +161,7 @@ impl CircuitData {
         self.diodes = snapshot.diodes;
         self.bjts = snapshot.bjts;
         self.mosfets = snapshot.mosfets;
+        self.b3soi = snapshot.b3soi;
         self.jfets = snapshot.jfets;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
@@ -173,6 +179,7 @@ impl CircuitData {
         self.diodes.update_all(voltages);
         self.bjts.update_all(voltages);
         self.mosfets.update_all(voltages);
+        self.b3soi.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
         order.sort_by_key(|&idx| (self.jfets[idx].model_order(), idx));
         let mut hfet_inverse_latched = false;
@@ -233,6 +240,11 @@ impl CircuitData {
             jfet.stamp_direct(matrix, rhs, voltages);
         }
         let mut stamper = StaticMatrixStamper { matrix, rhs };
+        // B3SOIDD devices use the generic stamper path (1-indexed -> 0-indexed
+        // handled by StaticMatrixStamper). Their DC conductance/current stamp is
+        // applied here; the transient charge companion is added by the engine's
+        // dedicated B3SOI transient pass.
+        self.b3soi.stamp_all(&mut stamper, &mut [], voltages);
         for vswitch in &self.vswitches {
             vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
         }
@@ -273,6 +285,7 @@ impl CircuitData {
         self.diodes.all_converged(criteria)
             && self.bjts.all_converged(criteria)
             && self.mosfets.all_converged(criteria)
+            && self.b3soi.all_converged(criteria)
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))

@@ -23,6 +23,7 @@ impl CircuitData {
             diodes: Diodes::new(),
             bjts: Bjts::new(),
             mosfets: Mosfets::new(),
+            b3soi: B3SoiDds::new(),
             jfets: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),

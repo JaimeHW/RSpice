@@ -304,7 +304,7 @@ impl TestRunner {
             .elements
             .iter()
             .find(|element| element.name.eq_ignore_ascii_case(device_name))?;
-        let (pos_node, neg_node) = Self::resolve_device_voltage_nodes(element, quantity)?;
+        let (pos_node, neg_node) = Self::resolve_device_voltage_nodes(netlist, element, quantity)?;
         let pos_idx = Self::resolve_node_index(node_to_idx, &pos_node)?;
         let neg_idx = Self::resolve_node_index(node_to_idx, &neg_node)?;
         let pos = Self::transient_node_waveform(result, pos_idx);
@@ -318,29 +318,71 @@ impl TestRunner {
     }
 
     pub(in crate::testing::ngspice_runner) fn resolve_device_voltage_nodes(
+        netlist: &Netlist,
         element: &crate::netlist::Element,
         quantity: &str,
     ) -> Option<(String, String)> {
         let quantity = Self::normalize_variable_name(quantity);
         match &element.kind {
-            crate::netlist::ElementKind::Mosfet { .. } => match quantity.as_str() {
-                "vds" => Some((
-                    element.nodes.first()?.clone(),
-                    element.nodes.get(2)?.clone(),
-                )),
-                "vgs" => Some((element.nodes.get(1)?.clone(), element.nodes.get(2)?.clone())),
-                "vbs" => Some((element.nodes.get(3)?.clone(), element.nodes.get(2)?.clone())),
-                "vgd" => Some((
-                    element.nodes.get(1)?.clone(),
-                    element.nodes.first()?.clone(),
-                )),
-                "vbd" => Some((
-                    element.nodes.get(3)?.clone(),
-                    element.nodes.first()?.clone(),
-                )),
-                _ => None,
-            },
+            crate::netlist::ElementKind::Mosfet { model, .. } => {
+                // BSIMSOI floating-body level-56 devices own an internal body
+                // node; their `vbs`/`vbd` are measured against that node, not the
+                // external back-gate (`nodes[3]`). A 5-terminal instance ties the
+                // body to the external contact `nodes[4]` and keeps node-based
+                // resolution. Non-SOI MOSFETs keep the classic terminal mapping.
+                let soi_body = Self::bsimsoi_body_node_name(netlist, element, model);
+                match quantity.as_str() {
+                    "vds" => Some((
+                        element.nodes.first()?.clone(),
+                        element.nodes.get(2)?.clone(),
+                    )),
+                    "vgs" => {
+                        Some((element.nodes.get(1)?.clone(), element.nodes.get(2)?.clone()))
+                    }
+                    "vbs" => {
+                        let body = soi_body.unwrap_or(element.nodes.get(3)?.clone());
+                        Some((body, element.nodes.get(2)?.clone()))
+                    }
+                    "vgd" => Some((
+                        element.nodes.get(1)?.clone(),
+                        element.nodes.first()?.clone(),
+                    )),
+                    "vbd" => {
+                        let body = soi_body.unwrap_or(element.nodes.get(3)?.clone());
+                        Some((body, element.nodes.first()?.clone()))
+                    }
+                    _ => None,
+                }
+            }
             _ => None,
+        }
+    }
+
+    /// Body-node name for a BSIMSOI level-56 instance, or `None` for non-SOI
+    /// MOSFETs and tied-body (5-terminal) SOI instances that resolve to an
+    /// external node. Matches the builder's internal-node naming.
+    fn bsimsoi_body_node_name(
+        netlist: &Netlist,
+        element: &crate::netlist::Element,
+        model: &str,
+    ) -> Option<String> {
+        let level = netlist
+            .models
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(model))?
+            .params
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("LEVEL"))
+            .map(|(_, v)| *v as i32)?;
+        if level != 56 {
+            return None;
+        }
+        if element.nodes.len() > 4 {
+            // Tied body: the external contact `nodes[4]` is the body node.
+            element.nodes.get(4).cloned()
+        } else {
+            // Floating body: the builder allocates `<name>.__body.internal`.
+            Some(format!("{}.__body.internal", element.name))
         }
     }
 

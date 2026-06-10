@@ -422,6 +422,24 @@ impl Engine {
                         .and_then(|params| params.get("LEVEL").copied())
                         .unwrap_or(1.0) as i32;
 
+                    // BSIMSOI dynamic-depletion (level 56) is a distinct device with
+                    // its own SOI node topology and charge model. Levels 55 (FD) and
+                    // 57 (PD) are not yet ported and intentionally fall through to the
+                    // generic MOSFET path until their eval+charge land.
+                    if level == 56 {
+                        if let Some(params_map) = params_map.as_ref() {
+                            Self::build_b3soi_dd(
+                                &mut circuit,
+                                element,
+                                resolved_mos_type,
+                                params_map,
+                                instance_params,
+                                self.config.temperature,
+                            )?;
+                            continue;
+                        }
+                    }
+
                     let bulk_node_name = if is_bsimsoi_level(level) && element.nodes.len() > 4 {
                         &element.nodes[4]
                     } else {
@@ -1380,5 +1398,90 @@ impl Engine {
         }
 
         Ok(circuit)
+    }
+
+    /// Build and register a BSIMSOI dynamic-depletion (level 56) instance.
+    ///
+    /// Node topology (b3soiddset.c:975-1037):
+    /// - 4-terminal `m d g s e`: floating body. An internal body node
+    ///   `<name>.__body.internal` is allocated; `bodyMod = 0`, `float = 1`.
+    /// - 5-terminal `m d g s e p`: ideal body tie. The external `p` node *is* the
+    ///   body node; `bodyMod = 2`, no internal node.
+    ///
+    /// The drain/source primes coincide with the external drain/source (no series
+    /// R in the supported decks) and there is no self-heating temperature node
+    /// (SHMOD=0). Series-R / RSH support and bodyMod==1 are deferred with the
+    /// FD/PD siblings.
+    fn build_b3soi_dd(
+        circuit: &mut CircuitData,
+        element: &crate::netlist::Element,
+        mos_type: crate::netlist::MosType,
+        params_map: &HashMap<String, f64>,
+        instance_params: &[(String, f64)],
+        temperature_kelvin: f64,
+    ) -> Result<(), SimulationError> {
+        use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
+        use crate::device::mosfet::b3soi::dd::temp::B3SoiDdGeometry;
+
+        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
+        // `config.temperature` is already in Kelvin (`TEMP_REFERENCE`).
+        let temp_k = temperature_kelvin;
+
+        // ngspice TNOM defaults to 27C; the model card may override it (Celsius).
+        let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
+        let tnom_k = crate::analysis::temperature::celsius_to_kelvin(tnom_c);
+
+        let model = std::sync::Arc::new(B3SoiDdModel::from_params(params_map, is_pmos, tnom_k));
+
+        let node_drain = circuit.get_or_create_node(&element.nodes[0]);
+        let node_gate = circuit.get_or_create_node(&element.nodes[1]);
+        let node_source = circuit.get_or_create_node(&element.nodes[2]);
+        let node_e = circuit.get_or_create_node(&element.nodes[3]);
+
+        let (node_body, node_p, body_mode) = if element.nodes.len() > 4 {
+            // Ideal body tie: P is the body node.
+            let p = circuit.get_or_create_node(&element.nodes[4]);
+            (p, p, BodyMode::TiedIdeal)
+        } else {
+            // Floating body: allocate an internal body node.
+            let body =
+                circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
+            (body, 0, BodyMode::Floating)
+        };
+
+        // Instance geometry (W/L plus optional area/perimeter/squares).
+        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
+        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
+        let geom = B3SoiDdGeometry {
+            l,
+            w,
+            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
+            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
+            drain_squares: instance_param(instance_params, &["NRD"]).unwrap_or(0.0),
+            source_squares: instance_param(instance_params, &["NRS"]).unwrap_or(0.0),
+            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
+            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
+            body_squares: instance_param(instance_params, &["NRB"]).unwrap_or(0.0),
+            rth0: params_map.get("RTH0").copied().unwrap_or(0.0),
+            cth0: params_map.get("CTH0").copied().unwrap_or(0.0),
+        };
+
+        let device = B3SoiDd::new(
+            element.name.clone(),
+            node_drain,
+            node_gate,
+            node_source,
+            node_e,
+            node_body,
+            node_p,
+            body_mode,
+            model,
+            geom,
+            temp_k,
+        )
+        .map_err(SimulationError::Circuit)?;
+
+        circuit.b3soi.add(device);
+        Ok(())
     }
 }

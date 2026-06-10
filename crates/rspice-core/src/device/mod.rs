@@ -39,8 +39,9 @@ pub mod batch;
 
 // Re-export from subdirectories for backwards compatibility
 pub use mosfet::{
-    Bsim4, Bsim4Params, Bsim4Type, EkvMosfet, Jfet, JfetChannelModel, JfetParams, JfetType,
-    MosParams, MosRegion, MosType, Mosfet, MosfetIndices, Vdmos, VdmosRegion, VdmosType,
+    B3SoiDd, B3SoiDdModel, BodyMode, Bsim4, Bsim4Params, Bsim4Type, EkvMosfet, Jfet,
+    JfetChannelModel, JfetParams, JfetType, MosParams, MosRegion, MosType, Mosfet, MosfetIndices,
+    Vdmos, VdmosRegion, VdmosType,
 };
 pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,

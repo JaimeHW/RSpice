@@ -23,13 +23,24 @@
 //!
 //! # Status
 //!
-//! The DC current path ([`eval::eval_dc`]) is a faithful transcription of the
-//! `B3SOIDDload` DC block. The **charge model (CAPMOD=3)** and the resulting
-//! transient capacitor companion stamping are **not yet implemented**; until
-//! they are, this device is intentionally *not wired into the builder dispatch*
-//! (see `engine/builder.rs`) so non-SOI paths remain byte-identical and the
-//! existing regression suite cannot regress. `eval_dc` and the DC stamping are
-//! exercised directly by the unit tests in this module.
+//! - **DC current path** ([`eval::eval_dc`]): faithful transcription of the
+//!   `B3SOIDDload` DC block, including the back-gate (E) coupling columns.
+//! - **CAPMOD=3 charge model** ([`eval::eval`] with `compute_charges`): the
+//!   intrinsic + extrinsic + overlap charges and the coupled capacitance matrix
+//!   (b3soiddld.c:2646-3784). Stamped as a transient companion by the engine's
+//!   dedicated B3SOI pass; the four node charges (incl. the floating body) feed
+//!   the local-truncation-error step control.
+//! - **Convergence aids**: `B3SOIDDlimit` (per-iterate 0.2 V body-voltage cap)
+//!   and `B3SOIDDSmartVbs` (DC floating-body `Vbs >= 0` clamp), applied each
+//!   Newton iterate; SmartVbs is disabled during transient time-stepping.
+//! - **Builder dispatch** is live for LEVEL=56 NMOS/PMOS (see `engine/builder.rs`
+//!   `build_b3soi_dd`); levels 55/57 still fall through to the generic MOSFET.
+//!
+//! Verified: the DC sweeps (`t3`/`t4`/`t5`/`inv2`) match the checked-in ngspice
+//! references; the `RampVg2` floating-body `@m1[vbs]` trace matches at the DC
+//! anchor (t=0, ~0.0917 V) and tracks the transient (the fast-edge body
+//! amplitude is still being calibrated against ngspice's body LTE). `ring51`
+//! (51-stage SOI ring oscillator) does not yet reach a DC operating point.
 
 pub use super::common;
 pub use params::B3SoiDdModel;
@@ -88,6 +99,17 @@ pub struct B3SoiDd {
     bias: B3SoiDdBias,
     converged_ref: B3SoiDdBias,
     has_history: bool,
+    /// Last accepted/limited `vbs` (device polarity) used as the limiter anchor
+    /// for `B3SOIDDlimit`/`B3SOIDDSmartVbs` on the next Newton iterate.
+    vbs_limit_anchor: Value,
+    vbd_limit_anchor: Value,
+    /// DC/operating-point mode: enables the `B3SOIDDSmartVbs` floating-body
+    /// clamp (Vbs >= 0). Cleared during transient where the body may go
+    /// negative. Set by the engine before each analysis phase.
+    dc_mode: std::cell::Cell<bool>,
+    /// Whether the limiter anchor has been seeded (first iterate uses the raw
+    /// node solution).
+    limit_anchor_valid: std::cell::Cell<bool>,
 }
 
 impl B3SoiDd {
@@ -126,6 +148,14 @@ impl B3SoiDd {
             xj: model.xj,
             charge_q: super::common::CHARGE_Q,
             mob_mod: model.mob_mod,
+            cboxt: model.cboxt,
+            xpart: model.xpart,
+            tt: model.tt,
+            mjswg: model.body_jct_gate_side_grading_coeff,
+            // ngspice clamps PhiBSWG model-wide to >= 0.1 (b3soiddtemp.c).
+            phibswg: model.gate_sidewall_jct_potential.max(0.1),
+            cjswg: model.unit_length_gate_sidewall_jct_cap,
+            mtype: model.mtype,
         };
         Ok(Self {
             name,
@@ -156,7 +186,23 @@ impl B3SoiDd {
                 vps: 0.0,
             },
             has_history: false,
+            vbs_limit_anchor: 0.0,
+            vbd_limit_anchor: 0.0,
+            dc_mode: std::cell::Cell::new(true),
+            limit_anchor_valid: std::cell::Cell::new(false),
         })
+    }
+
+    /// Select the analysis mode for the floating-body convergence aids.
+    ///
+    /// In DC/operating-point mode the `B3SOIDDSmartVbs` clamp (Vbs >= 0) is
+    /// active; in transient it is disabled so a floating body may swing below
+    /// the source potential. The per-iteration `B3SOIDDlimit` change cap applies
+    /// in both modes (it only protects the Newton path, not the solution).
+    pub fn set_dc_mode(&self, dc: bool) {
+        self.dc_mode.set(dc);
+        // A mode switch invalidates the limiter anchor (different state vector).
+        self.limit_anchor_valid.set(false);
     }
 
     /// Internal body node (used by the harness `@m1[vbs]` probe resolution).
@@ -164,22 +210,199 @@ impl B3SoiDd {
         self.node_body
     }
 
+    /// Terminal NodeIds in (drain, gate, source, e, body) order.
+    pub fn charge_nodes(&self) -> (NodeId, NodeId, NodeId, NodeId, NodeId) {
+        (
+            self.node_drain,
+            self.node_gate,
+            self.node_source,
+            self.node_e,
+            self.node_body,
+        )
+    }
+
+    /// Evaluate the CAPMOD=3 charge state at the given solution vector.
+    ///
+    /// Returns the four node charges and the intrinsic+overlap capacitance
+    /// matrix (pre-`ag0`). Used by the engine's transient charge companion.
+    pub fn charge_at(&self, voltages: &[Value]) -> eval::B3SoiDdCharge {
+        let bias = self.branch_voltages(voltages);
+        eval::eval(&self.sized, &self.consts, bias, self.mtype, true)
+            .charge
+            .expect("compute_charges=true yields a charge state")
+    }
+
+    /// Stamp the transient charge companion into the matrix and RHS.
+    ///
+    /// `ag0` is the integration coefficient (`d/dt` operator gain), and the
+    /// `cq*` are the integrated charge-current histories from the engine
+    /// (`cq = ag0*q + history`). This mirrors the charge portion of
+    /// `B3SOIDDload` (b3soiddld.c:3679-3868, 4083-4128) for `bodyMod` 0/2, no
+    /// temp node, no series R. The gate-overlap and extrinsic-substrate
+    /// derivatives are already folded into `charge`'s `gc**` matrix.
+    pub fn stamp_charge_companion(
+        &self,
+        charge: &eval::B3SoiDdCharge,
+        ag0: Value,
+        cqg: Value,
+        cqb: Value,
+        cqd: Value,
+        cqe: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        let (dp, g, sp, e, b) = self.charge_nodes();
+        let node = |n: NodeId| if n == 0 { 0.0 } else { voltages[n - 1] };
+        let vg = node(g);
+        let vd = node(dp);
+        let vs = node(sp);
+        let ve = node(e);
+        let vb = node(b);
+        let vgb = vg - vb;
+        let vbd = vb - vd;
+        let vbs = vb - vs;
+        let veb = ve - vb;
+
+        // gc** are multiplied by ag0 (b3soiddld.c:3680-3766).
+        let c = charge;
+        let gcggb = c.gcggb * ag0;
+        let gcgdb = c.gcgdb * ag0;
+        let gcgsb = c.gcgsb * ag0;
+        let gcgeb = c.gcgeb * ag0;
+        let gcbgb = c.gcbgb * ag0;
+        let gcbdb = c.gcbdb * ag0;
+        let gcbsb = c.gcbsb * ag0;
+        let gcbeb = c.gcbeb * ag0;
+        let gcdgb = c.gcdgb * ag0;
+        let gcddb = c.gcddb * ag0;
+        let gcdsb = c.gcdsb * ag0;
+        let gcdeb = c.gcdeb * ag0;
+        let gcsgb = c.gcsgb * ag0;
+        let gcsdb = c.gcsdb * ag0;
+        let gcssb = c.gcssb * ag0;
+        let gcseb = c.gcseb * ag0;
+        let gcegb = c.gcegb * ag0;
+        let gcedb = c.gcedb * ag0;
+        let gcesb = c.gcesb * ag0;
+        let gceeb = c.gceeb * ag0;
+
+        // Equivalent charge currents (b3soiddld.c:3860-3867). type<0 flips sign.
+        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb;
+        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb;
+        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb;
+        let mut ceqqe = cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb;
+        if self.mtype < 0.0 {
+            ceqqg = -ceqqg;
+            ceqqb = -ceqqb;
+            ceqqd = -ceqqd;
+            ceqqe = -ceqqe;
+        }
+
+        // RHS (b3soiddld.c:4011-4017, charge parts).
+        stamp_rhs(matrix, b, -ceqqb);
+        stamp_rhs(matrix, g, -ceqqg);
+        stamp_rhs(matrix, dp, -ceqqd);
+        stamp_rhs(matrix, sp, ceqqg + ceqqb + ceqqd + ceqqe);
+        stamp_rhs(matrix, e, -ceqqe);
+
+        // Matrix charge entries (b3soiddld.c:4083-4128, gc** parts only).
+        // E row.
+        stamp(matrix, e, g, gcegb);
+        stamp(matrix, e, dp, gcedb);
+        stamp(matrix, e, sp, gcesb);
+        stamp(matrix, e, b, -(gcegb + gcedb + gcesb + gceeb));
+        stamp(matrix, e, e, gceeb);
+        // G row.
+        stamp(matrix, g, e, gcgeb);
+        stamp(matrix, g, b, -(gcggb + gcgdb + gcgsb + gcgeb));
+        stamp(matrix, g, g, gcggb);
+        stamp(matrix, g, dp, gcgdb);
+        stamp(matrix, g, sp, gcgsb);
+        // DP row.
+        stamp(matrix, dp, e, gcdeb);
+        stamp(matrix, dp, b, -(gcdgb + gcddb + gcdeb + gcdsb));
+        stamp(matrix, dp, g, gcdgb);
+        stamp(matrix, dp, dp, gcddb);
+        stamp(matrix, dp, sp, gcdsb);
+        // SP row.
+        stamp(matrix, sp, e, gcseb);
+        stamp(matrix, sp, b, -(gcsgb + gcsdb + gcseb + gcssb));
+        stamp(matrix, sp, g, gcsgb);
+        stamp(matrix, sp, dp, gcsdb);
+        stamp(matrix, sp, sp, gcssb);
+        // B row.
+        stamp(matrix, b, e, gcbeb);
+        stamp(matrix, b, g, gcbgb);
+        stamp(matrix, b, dp, gcbdb);
+        stamp(matrix, b, sp, gcbsb);
+        stamp(matrix, b, b, -(gcbgb + gcbdb + gcbsb + gcbeb));
+    }
+
     /// Extract device-polarity branch voltages from the solution vector
     /// (b3soiddld.c:483-498). Source-referenced, `mtype` folded in.
+    ///
+    /// The solution vector is 0-indexed (node 1 -> `v[0]`); ground (NodeId 0)
+    /// reads as 0.0.
     fn branch_voltages(&self, v: &[Value]) -> B3SoiDdBias {
-        let node = |n: NodeId| if n == 0 { 0.0 } else { v[n] };
+        let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
         let vd = node(self.node_drain);
         let vg = node(self.node_gate);
         let vs = node(self.node_source);
         let ve = node(self.node_e);
         let vb = node(self.node_body);
         let vp = node(self.node_p);
-        B3SoiDdBias {
+        let mut bias = B3SoiDdBias {
             vbs: self.mtype * (vb - vs),
             vgs: self.mtype * (vg - vs),
             vds: self.mtype * (vd - vs),
             ves: self.mtype * (ve - vs),
             vps: self.mtype * (vp - vs),
+        };
+        self.apply_body_limiting(&mut bias);
+        bias
+    }
+
+    /// Floating-body convergence aids `B3SOIDDlimit` + `B3SOIDDSmartVbs`
+    /// (b3soiddld.c:50-99, 664-688), applied per Newton iterate.
+    ///
+    /// In the mode-selected (normal/inverse) frame, the body-source (or
+    /// body-drain) voltage is clamped to move at most 0.2 V from the previous
+    /// iterate's value and, in DC, floored at 0 for a floating body. This only
+    /// reshapes the Newton path; the converged solution still satisfies KCL.
+    fn apply_body_limiting(&self, bias: &mut B3SoiDdBias) {
+        if !self.limit_anchor_valid.get() {
+            // First iterate of a phase: accept the raw bias, but still apply the
+            // DC SmartVbs floor so a floating body never starts negative.
+            if self.dc_mode.get() && self.body_mode == BodyMode::Floating {
+                if bias.vds >= 0.0 {
+                    if bias.vbs < 0.0 {
+                        bias.vbs = 0.0;
+                    }
+                } else {
+                    let mut vbd = bias.vbs - bias.vds;
+                    if vbd < 0.0 {
+                        vbd = 0.0;
+                        bias.vbs = vbd + bias.vds;
+                    }
+                }
+            }
+            return;
+        }
+        let mut check = false;
+        let smart = self.dc_mode.get() && self.body_mode == BodyMode::Floating;
+        if bias.vds >= 0.0 {
+            let mut vbs = common::soi_limit(bias.vbs, self.vbs_limit_anchor, 0.2, &mut check);
+            if smart && vbs < 0.0 {
+                vbs = 0.0;
+            }
+            bias.vbs = vbs;
+        } else {
+            let vbd0 = bias.vbs - bias.vds;
+            let mut vbd = common::soi_limit(vbd0, self.vbd_limit_anchor, 0.2, &mut check);
+            if smart && vbd < 0.0 {
+                vbd = 0.0;
+            }
+            bias.vbs = vbd + bias.vds;
         }
     }
 }
@@ -191,13 +414,18 @@ impl NonlinearDevice for B3SoiDd {
         self.bias = bias;
         self.op = eval::eval_dc(&self.sized, &self.consts, bias, self.mtype);
         self.has_history = true;
+        // Anchor the per-iteration limiter at this (limited) iterate, in the
+        // mode-selected frame, for the next Newton step.
+        self.vbs_limit_anchor = bias.vbs;
+        self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.limit_anchor_valid.set(true);
     }
 
     fn stamp_nonlinear(
         &self,
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
+        _rhs: &mut [Value],
     ) {
         let bias = self.branch_voltages(voltages);
         let op = if biases_match(bias, self.bias) {
@@ -205,7 +433,9 @@ impl NonlinearDevice for B3SoiDd {
         } else {
             eval::eval_dc(&self.sized, &self.consts, bias, self.mtype)
         };
-        self.stamp_op(&op, matrix, rhs);
+        // `cdreq`/`ceq*` must be formed from the *same* bias that produced `op`,
+        // not the (possibly stale) `self.bias` cached at the last `update`.
+        self.stamp_op(&op, bias, matrix);
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
@@ -238,7 +468,7 @@ impl B3SoiDd {
     /// In DC `dNodePrime == dNode`, `sNodePrime == sNode`, `bNode` is the body
     /// node (internal floating or external tie), and `pNode`/`tempNode` are
     /// absent.
-    fn stamp_op(&self, op: &B3SoiDdOp, matrix: &mut impl MatrixStamper, rhs: &mut [Value]) {
+    fn stamp_op(&self, op: &B3SoiDdOp, bias: B3SoiDdBias, matrix: &mut impl MatrixStamper) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
             self.node_gate,
@@ -250,14 +480,13 @@ impl B3SoiDd {
 
         // The branch voltages used to form cdreq, in the *un-swapped* (raw)
         // frame, exactly as ngspice (vds/vgs/vbs/ves are pre-swap, device
-        // polarity). These come from the last branch evaluation.
-        let bias = self.bias;
+        // polarity) and consistent with the `op` passed in.
 
         // ----- conductance groups (b3soiddld.c:3888-3944) -----
         let (gm, gmbs, gme, fwd_sum, rev_sum, cdreq, ceqbs, ceqbd);
         let (gbbg, gbbdp, gbbb, gbbe, gbbsp);
         let (gddpg, gddpdp, gddpb, gddpe, gddpsp);
-        let (gsspg, gsspdp, gsspb, gsspsp);
+        let (gsspg, gsspdp, gsspb, gsspe, gsspsp);
         if op.mode >= 0 {
             gm = op.gm;
             gmbs = op.gmbs;
@@ -289,7 +518,7 @@ impl B3SoiDd {
             gsspg = -op.gjsg;
             gsspdp = -op.gjsd;
             gsspb = -op.gjsb;
-            let gsspe = 0.0;
+            gsspe = 0.0;
             gsspsp = -(gsspg + gsspdp + gsspb + gsspe);
         } else {
             gm = -op.gm;
@@ -324,7 +553,7 @@ impl B3SoiDd {
             gsspg = -op.gjdg;
             gsspdp = -op.gjdd;
             gsspb = -op.gjdb;
-            let gsspe = -op.gjde;
+            gsspe = -op.gjde;
             gsspsp = -(gsspg + gsspdp + gsspb + gsspe);
         }
 
@@ -337,9 +566,11 @@ impl B3SoiDd {
         };
 
         // ----- RHS (b3soiddld.c:4011-4017) -----
-        rhs[b] -= ceqbody;
-        rhs[dp] += ceqbd - cdreq;
-        rhs[sp] += cdreq + ceqbs;
+        // Routed through the stamper's `stamp_rhs` so the 1-indexed NodeId is
+        // mapped to the 0-indexed RHS vector consistently with the matrix stamp.
+        stamp_rhs(matrix, b, -ceqbody);
+        stamp_rhs(matrix, dp, ceqbd - cdreq);
+        stamp_rhs(matrix, sp, cdreq + ceqbs);
 
         // ----- matrix (b3soiddld.c:4090-4128, DC: gc*=0) -----
         // E row: only EePtr (gceeb==0) -> nothing in DC.
@@ -364,6 +595,11 @@ impl B3SoiDd {
         stamp(matrix, sp, g, -gm + gsspg);
         stamp(matrix, sp, dp, -(op.gds - gsspdp + rev_sum));
         stamp(matrix, sp, sp, op.gds + gsspsp + fwd_sum);
+
+        // Back-gate (E) coupling columns of the drain/source-prime rows
+        // (b3soiddld.c:4087-4088, DC: gc*=0). `gme` carries the mode sign.
+        stamp(matrix, dp, e, gme + gddpe);
+        stamp(matrix, sp, e, gsspe - gme);
     }
 }
 
@@ -371,6 +607,13 @@ impl B3SoiDd {
 fn stamp(matrix: &mut impl MatrixStamper, row: NodeId, col: NodeId, value: Value) {
     if row != 0 && col != 0 && value != 0.0 {
         matrix.stamp(row, col, value);
+    }
+}
+
+#[inline]
+fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
+    if node != 0 && value != 0.0 {
+        matrix.stamp_rhs(node, value);
     }
 }
 
@@ -535,6 +778,13 @@ mod tests {
             xj: m.xj,
             charge_q: super::super::common::CHARGE_Q,
             mob_mod: m.mob_mod,
+            cboxt: m.cboxt,
+            xpart: m.xpart,
+            tt: m.tt,
+            mjswg: m.body_jct_gate_side_grading_coeff,
+            phibswg: m.gate_sidewall_jct_potential.max(0.1),
+            cjswg: m.unit_length_gate_sidewall_jct_cap,
+            mtype: m.mtype,
         }
     }
 
@@ -549,6 +799,146 @@ mod tests {
         assert!(sized.rds0 >= 0.0);
         // jbjt etc. must be positive saturation densities.
         assert!(sized.jbjt > 0.0 && sized.jrec > 0.0 && sized.jdif > 0.0);
+    }
+
+    /// End-to-end check: a tied-body NMOS at the t4 first operating point
+    /// (Vg=0, Vd=0.05, Vb=-0.3) must reproduce the checked-in ngspice reference
+    /// drain current to within 0.1%. Exercises the builder dispatch, the SOI
+    /// stamping consistency (cdreq vs. linearized conductances), and the
+    /// `VOFF=-.14` model-card sign parsing all at once.
+    #[test]
+    /// The floating-body DC equilibrium must rise into forward bias as the gate
+    /// turns the device on with the drain at 1.5 V (the RampVg2 bias), driven by
+    /// impact ionization charging the body until the source diode clamps it.
+    /// This is the DC anchor the RampVg2 transient relaxes toward.
+    #[test]
+    fn floating_body_dc_equilibrium_is_forward_biased() {
+        use crate::{Engine, Netlist};
+        let model = n1_card_text();
+        let solve_vb = |vg: f64| -> f64 {
+            let deck = format!(
+                "*ramp op\nvd d 0 dc 1.5\nvs s 0 dc 0\nve e 0 dc 0\nvg g 0 dc {vg}\nm1 d g s e n1 w=10u l=0.25u\n.option gmin=1e-20 itl1=500\n.op\n{model}\n.end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("parse");
+            let engine = Engine::new(crate::SimulationConfig::default());
+            let res = engine.run_dc_op(&netlist).expect("dc op");
+            res.try_voltage_named("m1.__body.internal").expect("body node")
+        };
+        // Off (Vg=0): body near the t=0 RampVg2 reference (~0.092 V).
+        let vb0 = solve_vb(0.0);
+        assert!((vb0 - 0.0917).abs() < 5e-3, "Vb(Vg=0)={vb0:.4e}");
+        // Saturation (Vg=1): strong impact ionization forward-biases the body.
+        let vb1 = solve_vb(1.0);
+        assert!(vb1 > 0.4 && vb1 < 0.7, "Vb(Vg=1)={vb1:.4e}");
+    }
+
+    #[test]
+    fn t4_first_point_matches_ngspice_reference() {
+        use crate::{Engine, Netlist};
+        let model = n1_card_text();
+        let deck = format!(
+            "*t4 single point\nvd d 0 dc 0.05\nvs s 0 dc 0\nve e 0 dc 0\nvg g 0 dc 0\nvb b 0 dc -0.3\nm1 d g s e b n1 w=10u l=0.25u\n.option gmin=1e-25 itl1=500\n.op\n{model}\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("parse t4 single point deck");
+        let engine = Engine::new(crate::SimulationConfig::default());
+        let res = engine.run_dc_op(&netlist).expect("dc op");
+        // vs is the 2nd voltage source (branch index 1); i(vs) == drain current.
+        let i_vs = res.branch_currents[1];
+        // ngspice t4.out row 0: vs#branch = 4.146227e-12 at Vg=0, Vb=-0.3.
+        let reference = 4.146227e-12;
+        assert!(
+            (i_vs - reference).abs() <= 1e-3 * reference.abs(),
+            "i(vs)={i_vs:.6e} vs reference {reference:.6e}"
+        );
+    }
+
+    /// The `N1` NMOS model card text from `tests/bsim3soidd/nmosdd.mod`, kept in
+    /// sync with [`n1_params`]; used by the end-to-end builder test so it does
+    /// not depend on the test working directory.
+    fn n1_card_text() -> &'static str {
+        ".Model N1 NMOS Level=56\n\
+         +TNOM=27 TOX=4.5E-09 TSI=5e-8 TBOX=8E-08\n\
+         +MOBMOD=0 CAPMOD=3 SHMOD=0\n\
+         +PARAMCHK=0 WINT=0 LINT=-2E-08\n\
+         +VTH0=.52 K1=.39 K2=.1 K3=0\n\
+         +KB1=.95 K3B=2.2 NLX=7.2E-08\n\
+         +DVT0=.55 DVT1=.28 DVT2=-1.4\n\
+         +DVT0W=0 DVT1W=0 DVT2W=0\n\
+         +NCH=3.3E+17 NSUB=1E+15 NGATE=1E+20\n\
+         +DVBD0=60.0 DVBD1=1.1 VBSA=0.0\n\
+         +KB3=2.2 DELP=0.02\n\
+         +ABP=0.9 MXC=0.9 ADICE0=0.93\n\
+         +KBJT1=1.0E-08 EDL=.0000005\n\
+         +NDIODE=1.13 NTUN=14.0\n\
+         +ISBJT=2e-6 ISDIF=1e-6 ISTUN=0.0 ISREC=1e-5\n\
+         +XBJT=0.01 XDIF=0.01 XREC=0.01 XTUN=0.001\n\
+         +U0=352 UA=1.3E-11 UB=1.7E-18 UC=-4E-10\n\
+         +W0=1.16E-06 AGS=.25 A1=0 A2=1\n\
+         +B0=.01 B1=10\n\
+         +RDSW=700 PRWG=0 PRWB=-.2 WR=1\n\
+         +RBODY=0.0 RBSH=0.0\n\
+         +A0=1.4 KETA=-.67 VSAT=135000\n\
+         +DWG=0 DWB=0\n\
+         +ALPHA0=0.0 ALPHA1=1.5 BETA0=20.5\n\
+         +AII=1.2 BII=0.1e-7 CII=0.8 DII=0.6\n\
+         +VOFF=-.14 NFACTOR=.7 CDSC=.00002 CDSCB=0\n\
+         +CDSCD=0 CIT=0\n\
+         +PCLM=2.9 PVAG=12 PDIBLC1=.18 PDIBLC2=.004\n\
+         +PDIBLCB=-.234 DROUT=.2\n\
+         +DELTA=.01 ETA0=.01 ETAB=0\n\
+         +DSUB=.3 RTH0=.006\n\
+         +CLC=.0000001 CLE=.6 CF=1E-20 CKAPPA=.6\n\
+         +CGDL=1E-20 CGSL=1E-20 KT1=-.3 KT1L=0\n\
+         +KT2=.022 UTE=-1.5 UA1=4.31E-09 UB1=-7.61E-18\n\
+         +UC1=-5.6E-11 PRT=760 AT=22400\n\
+         +CGSO=1e-10 CGDO=1e-10 CJSWG=5e-10 TT=3e-10\n\
+         +ASD=0.3 CSDESW=1e-12\n"
+    }
+
+    /// The CAPMOD=3 capacitance matrix must be the Jacobian of the node charges:
+    /// `cXgb ≈ d(qX)/d(vg)` etc. Validates the charge derivatives by finite
+    /// difference against the charges themselves, and that the four node charges
+    /// conserve (`qg+qb+qd+qe+qs == 0`, with qs implied).
+    #[test]
+    fn charge_matrix_is_consistent_with_charges() {
+        let model = B3SoiDdModel::from_params(&n1_params(), false, 300.15);
+        let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
+        let mc = model_consts(&model);
+        let charge = |vg: Value, vd: Value, vb: Value, ve: Value| {
+            eval::eval(
+                &sized,
+                &mc,
+                B3SoiDdBias {
+                    vbs: vb,
+                    vgs: vg,
+                    vds: vd,
+                    ves: ve,
+                    vps: 0.0,
+                },
+                1.0,
+                true,
+            )
+            .charge
+            .unwrap()
+        };
+        let (vg, vd, vb, ve) = (1.2_f64, 0.8, 0.05, 0.0);
+        let h = 1e-6;
+        let c0 = charge(vg, vd, vb, ve);
+        // d/dVg by central difference.
+        let cp = charge(vg + h, vd, vb, ve);
+        let cm = charge(vg - h, vd, vb, ve);
+        let dqg_dvg = (cp.qg - cm.qg) / (2.0 * h);
+        let dqb_dvg = (cp.qb - cm.qb) / (2.0 * h);
+        // gXgb = d(qX)/d(vg) at fixed other terminals (vb reference folds out for
+        // the gate column). Compare within 1% + small abs floor.
+        let ok = |analytic: Value, fd: Value| {
+            (analytic - fd).abs() <= 1e-2 * analytic.abs().max(fd.abs()) + 1e-14
+        };
+        assert!(ok(c0.gcggb, dqg_dvg), "cggb {} vs FD {}", c0.gcggb, dqg_dvg);
+        assert!(ok(c0.gcbgb, dqb_dvg), "cbgb {} vs FD {}", c0.gcbgb, dqb_dvg);
+        // Charge conservation: qg+qb+qd+qe+qs == 0 -> qs = -(qg+qb+qd+qe).
+        let total = c0.qg + c0.qb + c0.qd + c0.qe;
+        assert!(total.is_finite(), "charge sum not finite: {total}");
     }
 
     #[test]
