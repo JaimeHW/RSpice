@@ -35,7 +35,6 @@ pub(super) fn default_app_state() -> AppState {
         sim_setup: super::SimSetupState::default(),
         theme: RSpiceTheme::default(),
         log_buffer: crate::panels::LogBuffer::default(),
-        property_editor: crate::properties::dialog::PropertyEditorState::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
         script_console_open: false,
         library_manager,

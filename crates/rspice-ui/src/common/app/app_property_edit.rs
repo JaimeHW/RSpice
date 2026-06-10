@@ -1,44 +1,32 @@
+//! Opening the property editor for a schematic component.
+
 use super::AppState;
 
-pub(super) fn apply_component_property_edits(
-    state: &mut AppState,
-    id: u64,
-    props: crate::properties::dialog::EditedProperties,
-) -> bool {
-    let (old_name, changed) = match state
+/// Open the tabbed property editor for `component_id`, populated from the
+/// component's registry sheet and current values.
+pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
+    let Some(component) = state
         .schematic
         .components
         .iter()
-        .find(|component| component.id == id)
-    {
-        Some(component) => (
-            component.name.clone(),
-            component.name != props.name || component.value != props.value,
-        ),
-        None => return false,
+        .find(|component| component.id == component_id)
+    else {
+        return;
     };
-    if !changed {
-        return false;
-    }
-
-    let description = if old_name.is_empty() {
-        format!("Edit properties for component {}", id)
+    let component_type = component.kind;
+    let properties = crate::properties::property_bridge::collect_properties_from_component(
+        component,
+        &state.property_registry,
+    );
+    if let Some(sheet) = state.property_registry.get(component_type) {
+        state.tabbed_property_dialog.open_for_component(
+            component_id,
+            &component.name,
+            component_type,
+            sheet,
+            properties,
+        );
     } else {
-        format!("Edit properties for {}", old_name)
-    };
-    let new_name = props.name;
-    let new_value = props.value;
-
-    state.schematic.with_undo(description, move |schematic| {
-        if let Some(component) = schematic
-            .components
-            .iter_mut()
-            .find(|component| component.id == id)
-        {
-            component.name = new_name;
-            component.value = new_value;
-            schematic.is_dirty = true;
-            schematic.bump_topology_version();
-        }
-    })
+        log::warn!("No property sheet found for {:?}", component_type);
+    }
 }

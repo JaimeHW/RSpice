@@ -50,7 +50,7 @@ use app_veriloga_library::{
 };
 
 mod app_property_edit;
-use app_property_edit::apply_component_property_edits;
+pub(crate) use app_property_edit::open_property_editor;
 
 mod app_modal_workflows;
 
@@ -116,8 +116,6 @@ pub struct AppState {
     pub(crate) theme: RSpiceTheme,
     /// Structured log history buffer (ring-buffer, filterable).
     pub(crate) log_buffer: crate::panels::LogBuffer,
-    /// Component property editor state
-    pub(crate) property_editor: crate::properties::dialog::PropertyEditorState,
     /// Scripting/Automation console state
     pub(crate) script_console: crate::panels::ScriptConsoleState,
     /// Whether the automation console window is open.
@@ -299,7 +297,6 @@ impl RSpiceApp {
     fn render_frame_dialogs(&mut self, ctx: &Context) {
         self.render_script_console_window(ctx);
         self.render_confirmation_dialog(ctx);
-        self.process_component_properties_dialog(ctx);
         self.process_veriloga_load_dialog(ctx);
         crate::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);

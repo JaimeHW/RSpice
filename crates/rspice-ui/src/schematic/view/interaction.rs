@@ -322,31 +322,7 @@ fn open_component_properties(state: &mut AppState, grid_pos: Point) {
     if let Some(comp_id) = state.schematic.component_at(grid_pos) {
         state.schematic.selection.clear();
         state.schematic.selection.select_component(comp_id);
-
-        if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id) {
-            let component_type = component.kind;
-            let properties = crate::properties::property_bridge::collect_properties_from_component(
-                component,
-                &state.property_registry,
-            );
-
-            if let Some(sheet) = state.property_registry.get(component_type) {
-                state.tabbed_property_dialog.open_for_component(
-                    comp_id,
-                    &component.name,
-                    component_type,
-                    sheet,
-                    properties,
-                );
-                log::info!(
-                    "Double-clicked component {} ({:?}), opening properties dialog",
-                    comp_id,
-                    component_type
-                );
-            } else {
-                log::warn!("No property sheet found for {:?}", component_type);
-            }
-        }
+        crate::common::app::open_property_editor(state, comp_id);
 
     }
 }

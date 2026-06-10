@@ -23,6 +23,7 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
     {
         // Clone the values to avoid borrow conflict
         let values = state.tabbed_property_dialog.values.clone();
+        let before = crate::state::SchematicSnapshot::capture(&state.schematic);
 
         // Find the component and update its properties
         if let Some(component) = state
@@ -31,14 +32,14 @@ pub fn render_property_dialog(ctx: &egui::Context, state: &mut AppState) -> Tabb
             .iter_mut()
             .find(|c| c.id == comp_id)
         {
-            // Use property bridge for comprehensive property application
-            // This properly serializes all properties including secondary params
             crate::properties::property_bridge::apply_properties_to_component(
                 component,
                 &values,
                 &state.property_registry,
             );
-            log::info!("Applied property changes to component {}", comp_id);
+            state.schematic.is_dirty = true;
+            state.schematic.bump_topology_version();
+            state.schematic.commit_undo_from(before, "edit properties");
         }
 
         // Clear dialog state AFTER applying (values were preserved for this)
