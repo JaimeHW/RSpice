@@ -17,6 +17,8 @@ pub struct Button<'a> {
     icon: Option<Icon>,
     hint: Option<&'a str>,
     accent: bool,
+    ghost: bool,
+    destructive: bool,
     enabled: bool,
     min_width: f32,
 }
@@ -29,6 +31,8 @@ impl<'a> Button<'a> {
             icon: None,
             hint: None,
             accent: false,
+            ghost: false,
+            destructive: false,
             enabled: true,
             min_width: 0.0,
         }
@@ -49,6 +53,19 @@ impl<'a> Button<'a> {
     /// Render as the primary accent action.
     pub fn accent(mut self) -> Self {
         self.accent = true;
+        self
+    }
+
+    /// Render borderless and dimmed until hovered (tertiary actions).
+    pub fn ghost(mut self) -> Self {
+        self.ghost = true;
+        self
+    }
+
+    /// When combined with [`Button::accent`], fill with the error color —
+    /// the dialog grammar's destructive primary. No effect otherwise.
+    pub fn destructive(mut self, destructive: bool) -> Self {
+        self.destructive = destructive;
         self
     }
 
@@ -86,7 +103,18 @@ impl<'a> Button<'a> {
             )
         };
 
-        let fg = if self.accent { c.accent_ink } else { c.text };
+        let fg = if self.accent {
+            if self.destructive {
+                // Dark ink over the error fill, mirroring accent_ink.
+                mix(c.err, egui::Color32::BLACK, 0.82)
+            } else {
+                c.accent_ink
+            }
+        } else if self.ghost {
+            c.text_dim
+        } else {
+            c.text
+        };
         let galley = {
             let mut job = egui::text::LayoutJob::default();
             job.append(
@@ -129,13 +157,22 @@ impl<'a> Button<'a> {
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let (fill, stroke_color) = if self.accent {
-            // Hover brightens, press darkens the accent fill.
+            // Hover brightens, press darkens the fill (accent or err).
+            let base = if self.destructive { c.err } else { c.accent };
             let fill = if pressed {
-                mix(c.accent, egui::Color32::BLACK, 0.06)
+                mix(base, egui::Color32::BLACK, 0.06)
             } else {
-                mix(c.accent, egui::Color32::WHITE, hover * 0.07)
+                mix(base, egui::Color32::WHITE, hover * 0.07)
             };
             (fill, fill)
+        } else if self.ghost {
+            // Borderless; surfaces only on hover.
+            let fill = if pressed {
+                c.bg_active
+            } else {
+                mix(egui::Color32::TRANSPARENT, c.bg_hover, hover)
+            };
+            (fill, egui::Color32::TRANSPARENT)
         } else {
             let fill = if pressed {
                 c.bg_active

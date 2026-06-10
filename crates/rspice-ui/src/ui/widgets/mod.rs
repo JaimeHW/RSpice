@@ -7,6 +7,7 @@
 
 mod button;
 mod chip;
+mod dialog;
 mod docbar;
 mod form;
 mod pill;
@@ -17,6 +18,7 @@ mod tree;
 
 pub use button::{Button, IconButton};
 pub use chip::chip;
+pub use dialog::{Dialog, DialogChoice, DialogSize, dialog_tabs};
 pub use docbar::{crumb_text, docbar};
 pub use form::{check_row, input_row, input_row_readonly, kv_row, mono_input};
 pub use pill::{Pill, PillState};
