@@ -58,12 +58,12 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 
 | Flag | Description |
 | :--- | :--- |
-| `-o, --output <FILE>` | Output file for results |
-| `-f, --format <FORMAT>` | Output format: `raw` (default), `ascii`, `csv`, `json`, `tsv`, `hdf5` |
+| `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own tagged file: `out.csv` → `out.op.csv`, `out.tran.csv`, ... |
+| `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
 | `--meas` | Print `.MEAS` measurement results |
-| `--progress` | Show a progress bar with ETA for transient analysis |
+| `--progress` | Show a live elapsed-time indicator during transient analysis |
 | `--compress` | Enable waveform compression for long simulations |
-| `--compress-tol <TOL>` | Compression tolerance (default: 1e-4; requires `--compress`) |
+| `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
 
 **Simulation options:**
 
@@ -96,8 +96,10 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 | `--sens-output <NODE>` | Sensitivity analysis output node index |
 | `--sens-param <PARAM>` | Parameter name for sensitivity analysis (requires `--sens-output`) |
 | `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
-| `--corners <LIST>` | Process corners, comma-separated: `tt,ss,ff,sf,fs` |
-| `--corner-lib <FILE>` | Library file with corner definitions (requires `--corners`) |
+| `--corners <LIST>` | Process corners, comma-separated, e.g. `tt,ss,ff` |
+| `--corner-lib <FILE>` | Library with one `.lib <corner> ... .endl` section per corner; each corner re-elaborates the deck with its section applied (requires `--corners`) |
+
+Corner runs write per-corner tagged outputs (`res.csv` → `res.tt.csv`, `res.ss.csv`) and exit nonzero if any corner fails. Without `--corner-lib`, every corner runs nominal models and the sweep only checks convergence.
 
 **Reporting options:**
 
@@ -138,8 +140,11 @@ rspice run opamp.sp --pz-input 1 --pz-output 4
 # DC sensitivity
 rspice run amp.sp --sens-output 3 --sens-param R1 --sens-value 10k
 
-# Process corner sweep
-rspice run circuit.sp --corners tt,ss,ff,sf,fs -q
+# Process corner sweep with per-corner model sections
+rspice run circuit.sp --corners tt,ss,ff --corner-lib pdk/corners.lib -q
+
+# Override a parameter for a CI sweep
+rspice run filter.sp -D CLOAD=2.2p -o fast.csv -f csv
 ```
 
 ### `rspice info` — Netlist Information
@@ -175,7 +180,7 @@ rspice check <NETLIST> [OPTIONS]
 
 ### `rspice compare` — Golden File Comparison
 
-Compare simulation results against a reference file for regression testing. Exits with code `0` if the comparison passes and `1` if differences are found.
+Compare simulation results against a reference file for regression testing. Both files may be in any supported result format — rawfile (binary or ASCII), CSV, TSV, JSON, or HDF5, auto-detected by extension — so a binary rawfile result can be checked directly against a CSV golden. Complex AC data compares value-for-value as `Re(..)`/`Im(..)` series. Exits with code `0` if the comparison passes and `1` if differences are found.
 
 ```bash
 rspice compare <RESULT> <GOLDEN> [OPTIONS]
@@ -191,7 +196,7 @@ rspice compare <RESULT> <GOLDEN> [OPTIONS]
 
 ### `rspice convert` — Format Conversion
 
-Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`.
+Convert between simulation output formats: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5`. Complex AC data is preserved across every round trip (`Re(..)`/`Im(..)` column pairs in CSV/TSV, `Flags: complex` in rawfiles, real/imag arrays in JSON and HDF5).
 
 ```bash
 rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]
@@ -200,14 +205,15 @@ rspice convert <INPUT> <OUTPUT> --to <FORMAT> [OPTIONS]
 | Flag | Description |
 | :--- | :--- |
 | `--to <FORMAT>` | Output format (required) |
-| `--from <FORMAT>` | Input format (auto-detected if omitted) |
-| `--variables <VAR>` | Variables to include (repeatable; default: all) |
-| `--start <VALUE>` | Time/frequency range start |
-| `--stop <VALUE>` | Time/frequency range end |
+| `--from <FORMAT>` | Input format (auto-detected from the extension if omitted) |
+| `--variables <VAR>` | Variables to keep, by full (`V(out)`) or bare (`out`) name (repeatable; default: all) |
+| `--start <VALUE>` | Keep points with scale ≥ this time/frequency |
+| `--stop <VALUE>` | Keep points with scale ≤ this time/frequency |
 
 ```bash
 rspice convert results.raw results.csv --to csv
 rspice convert results.csv results.h5 --to hdf5
+rspice convert tran.raw window.csv --to csv --variables "V(out)" --start 1u --stop 5u
 ```
 
 ### `rspice compile-va` — Compile Verilog-A
@@ -226,6 +232,15 @@ rspice compile-va <FILE> [OPTIONS]
 | `--detailed` | Show detailed compilation information |
 | `--show-usage` | Generate a usage example in the output |
 
+### `rspice completions` — Shell Completions
+
+Emit a completion script on stdout for `bash`, `zsh`, `fish`, `powershell`, or `elvish`.
+
+```bash
+rspice completions bash > /etc/bash_completion.d/rspice
+rspice completions powershell >> $PROFILE
+```
+
 ## Global Options
 
 Available on every subcommand:
@@ -235,7 +250,9 @@ Available on every subcommand:
 | `-v, --verbose` | Enable debug-level output |
 | `-q, --quiet` | Suppress non-error output |
 | `--config <FILE>` | Use a specific configuration file |
-| `--log-level <LEVEL>` | Set log level: `error`, `warn`, `info`, `debug`, `trace` |
+| `--log-level <LEVEL>` | Set log level: `off`, `error`, `warn`, `info`, `debug`, `trace` |
+
+`rspice --version` reports the crate version with the build target and profile.
 
 ## Configuration File
 
@@ -263,15 +280,14 @@ compression_tolerance = 1e-4
 convergence_mode = "default"  # "fast" | "default" | "robust"
 
 [output]
-format = "raw"
-show_progress = false
-include_node_names = false
-# output_directory = "results"   # default: same directory as input
+format = "raw"                   # default for -f/--format
+show_progress = false            # default for --progress
+# output_directory = "results"   # relative -o paths land here (created on demand)
 
 [paths]
-include_paths = ["./models", "./lib"]
-library_paths = []
-veriloga_includes = []
+include_paths = ["./models", "./lib"]   # extra .include/.lib search dirs for run
+library_paths = []                      # extra .include/.lib search dirs for run
+veriloga_includes = []                  # extra include dirs for compile-va
 ```
 
 Environment variable overrides:
@@ -280,8 +296,8 @@ Environment variable overrides:
 | :--- | :--- |
 | `RSPICE_TEMPERATURE` | Default simulation temperature (Celsius) |
 | `RSPICE_OUTPUT_FORMAT` | Default output format |
-| `RSPICE_INCLUDE_PATH` | Include paths, semicolon-separated |
-| `RSPICE_LIBRARY_PATH` | Model library paths, semicolon-separated |
+| `RSPICE_INCLUDE_PATH` | Include search paths, platform path separator (`;` on Windows, `:` elsewhere) |
+| `RSPICE_LIBRARY_PATH` | Model library paths, platform path separator |
 
 ## Exit Codes
 
