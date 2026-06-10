@@ -254,6 +254,22 @@ fn statistical_functions_validate_arguments() {
 }
 
 #[test]
+fn ngspice_comparison_spellings() {
+    // numparam accepts `=` as equality and `<>` as inequality.
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "(3 = 3)"), 1.0);
+    assert_eq!(eval_with(&ctx, "(3 = 4)"), 0.0);
+    assert_eq!(eval_with(&ctx, "(3 <> 4)"), 1.0);
+    assert_eq!(eval_with(&ctx, "(3 <> 3)"), 0.0);
+    // The two-character spellings keep working.
+    assert_eq!(eval_with(&ctx, "(3 == 3)"), 1.0);
+    assert_eq!(eval_with(&ctx, "(3 != 3)"), 0.0);
+    // And `<`/`<=` are not shadowed by `<>`.
+    assert_eq!(eval_with(&ctx, "(3 < 4)"), 1.0);
+    assert_eq!(eval_with(&ctx, "(4 <= 4)"), 1.0);
+}
+
+#[test]
 fn statistical_functions_compose_with_parameters_and_expressions() {
     let mut ctx = ParamContext::new();
     ctx.set("W", 2.0e-6);

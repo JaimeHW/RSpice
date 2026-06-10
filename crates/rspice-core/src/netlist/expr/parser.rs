@@ -181,6 +181,15 @@ impl<'a> ExprParser<'a> {
                         left: Box::new(left),
                         right: Box::new(right),
                     };
+                } else if self.consume('>') {
+                    // ngspice numparam inequality spelling: `a <> b`.
+                    self.skip_ws();
+                    let right = self.parse_additive()?;
+                    left = Expr::BinOp {
+                        op: BinOpKind::Ne,
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    };
                 } else {
                     self.skip_ws();
                     let right = self.parse_additive()?;
@@ -191,18 +200,16 @@ impl<'a> ExprParser<'a> {
                     };
                 }
             } else if self.consume('=') {
-                if self.consume('=') {
-                    self.skip_ws();
-                    let right = self.parse_additive()?;
-                    left = Expr::BinOp {
-                        op: BinOpKind::Eq,
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    };
-                } else {
-                    self.pos = start_pos;
-                    break;
-                }
+                // Both `==` and the ngspice numparam single `=` compare for
+                // equality; assignment never occurs inside an expression.
+                self.consume('=');
+                self.skip_ws();
+                let right = self.parse_additive()?;
+                left = Expr::BinOp {
+                    op: BinOpKind::Eq,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             } else if self.consume('!') {
                 if self.consume('=') {
                     self.skip_ws();
