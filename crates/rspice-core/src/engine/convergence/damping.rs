@@ -186,8 +186,8 @@ impl Engine {
     where
         F: FnMut(&[Value]) -> Option<Value>,
     {
-        match self.config.convergence_config.damping_strategy {
-            DampingStrategy::None => proposal.to_vec(),
+        let damped = match self.config.convergence_config.damping_strategy {
+            DampingStrategy::None => return proposal.to_vec(),
             DampingStrategy::LineSearch => Self::line_search_step(old, proposal, &mut merit),
             DampingStrategy::VoltageLimiting => {
                 let limited = Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
@@ -206,7 +206,37 @@ impl Engine {
                     Self::interpolate_solution(old, &limited, damping_state.bank_rose_alpha);
                 Self::line_search_step(old, &bank_rose_step, &mut merit)
             }
+        };
+
+        // Stagnation rescue: when the merit line search rejects every
+        // fraction of the Newton step it returns `old`, and a zero step can
+        // never converge - the iteration deadlocks at a non-solution while
+        // the node-delta test reads as "converged". Devices with hard
+        // per-iterate clamps (the BSIM3SOI SmartVbs DC body clamp) make the
+        // residual merit non-smooth in exactly this way: the 51-stage SOI
+        // ring oscillator stalled here for thousands of iterations at a
+        // 354nA supply-row KCL violation that ngspice's undamped Newton
+        // resolves in four. After the stall persists for consecutive
+        // iterations (a single rejected step can be a legitimate transient of
+        // the line search that the next iterate escapes on its own - acting
+        // immediately can walk the iteration into a different solution
+        // basin), take the delta-limited Newton step and let device-level
+        // junction limiting absorb the nonlinearity, matching ngspice's
+        // iteration policy.
+        const STAGNATION_RESCUE_THRESHOLD: usize = 3;
+        let stagnated = damped
+            .iter()
+            .zip(old.iter())
+            .all(|(new, prev)| (new - prev).abs() <= 1e-15);
+        if stagnated {
+            damping_state.stagnant_steps += 1;
+            if damping_state.stagnant_steps >= STAGNATION_RESCUE_THRESHOLD {
+                return Self::limit_step_delta(old, proposal, Self::MAX_DELTA_VOLTAGE_LIMIT);
+            }
+        } else {
+            damping_state.stagnant_steps = 0;
         }
+        damped
     }
 
     pub(in crate::engine::convergence) fn clamp_solution_to_physical_bounds(
