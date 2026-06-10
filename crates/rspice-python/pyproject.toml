@@ -1,0 +1,33 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rspice"
+description = "Python bindings for the RSpice circuit simulation engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "RSpice Personal Use License" }
+authors = [{ name = "RSpice Contributors" }]
+keywords = ["spice", "circuit", "simulation", "eda", "analog"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Typing :: Typed",
+]
+dependencies = ["numpy>=1.20"]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/JaimeHW/RSpice"
+
+[tool.maturin]
+# Build the PyO3 extension with the abi3 wheel for broad version support.
+features = ["extension-module"]
+module-name = "rspice"
