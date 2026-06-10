@@ -39,7 +39,7 @@ mod analysis_spec_build;
 mod results_convert;
 mod results_post;
 mod results_update;
-mod spice_value;
+pub(crate) mod spice_value;
 mod touchstone;
 mod transient_post;
 pub(crate) use transient_post::DerivedViewerLoadState;

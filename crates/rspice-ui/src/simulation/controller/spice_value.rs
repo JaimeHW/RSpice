@@ -1,4 +1,4 @@
-pub(super) fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
+pub(crate) fn parse_spice_value_checked(s: &str) -> Result<f64, String> {
     let s = s.trim();
     if s.is_empty() {
         return Err("value is empty".to_string());

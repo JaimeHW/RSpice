@@ -197,6 +197,273 @@ pub struct SimSetupState {
 }
 
 impl SimSetupState {
+    /// One-line mono summary of an analysis configuration, for list rows.
+    pub fn summary(&self, index: usize) -> String {
+        let sweep_kind = ["dec", "oct", "lin"];
+        match index {
+            0 => format!("T = {} C", self.op.temperature),
+            1 => format!(
+                "{} -> {} · step {}",
+                self.tran.start, self.tran.stop, self.tran.step
+            ),
+            2 => format!(
+                "{} -> {} · {}/{}",
+                self.ac.fstart,
+                self.ac.fstop,
+                self.ac.points,
+                sweep_kind[self.ac.sweep.min(2)]
+            ),
+            3 => {
+                let mut text = format!(
+                    "{}: {} -> {} · {}",
+                    self.dc.source, self.dc.start, self.dc.stop, self.dc.step
+                );
+                if self.dc.nested {
+                    text.push_str(" · nested");
+                }
+                text
+            }
+            4 => format!(
+                "{} <- {} · {} -> {}",
+                self.noise.output, self.noise.input, self.noise.fstart, self.noise.fstop
+            ),
+            5 => format!("{} -> {}", self.pz.input_pos, self.pz.output_pos),
+            6 => self.sens.output_expr.clone(),
+            7 => format!(
+                "{} runs · {}",
+                self.mc.num_runs,
+                ["gaussian", "uniform", "worst-case"][self.mc.distribution_idx.min(2)]
+            ),
+            8 => format!(
+                "f0 {} · {} harmonics",
+                self.pss.fund_freq, self.pss.num_harmonics
+            ),
+            9 => format!(
+                "{} · {} -> {}",
+                self.stb.probe_source, self.stb.start_freq, self.stb.stop_freq
+            ),
+            10 => format!(
+                "{} -> {} C · step {}",
+                self.temp.temp_start, self.temp.temp_stop, self.temp.temp_step
+            ),
+            11 => format!(
+                "f0 {} · {} tone{}",
+                self.hb.fundamental,
+                1 + self.hb.additional_tones.len(),
+                if self.hb.additional_tones.is_empty() { "" } else { "s" }
+            ),
+            12 => format!("{} ports · Z0 {}", self.sp.ports.len(), self.sp.z0),
+            13 => format!(
+                "{} <- {} · {} -> {}",
+                self.pac.output_node, self.pac.input_source, self.pac.start_freq, self.pac.stop_freq
+            ),
+            14 => format!(
+                "{} · {} -> {}",
+                self.pnoise.output_node, self.pnoise.start_freq, self.pnoise.stop_freq
+            ),
+            15 => format!(
+                "{} <- {} · {} -> {}",
+                self.pxf.output_node, self.pxf.input_source, self.pxf.start_freq, self.pxf.stop_freq
+            ),
+            16 => format!(
+                "probe {} · {} harmonics",
+                self.pstb.probe, self.pstb.max_harmonics
+            ),
+            17 => format!(
+                "{} <- {} · {} -> {}",
+                self.xf.output_node, self.xf.input_source, self.xf.start_freq, self.xf.stop_freq
+            ),
+            18 => {
+                let corner = &self.corner;
+                let flags = [
+                    (corner.process_tt, "TT"),
+                    (corner.process_ss, "SS"),
+                    (corner.process_ff, "FF"),
+                    (corner.process_sf, "SF"),
+                    (corner.process_fs, "FS"),
+                ];
+                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
+                if on.is_empty() {
+                    "no corners selected".to_owned()
+                } else {
+                    on.join(" ")
+                }
+            }
+            19 => format!(
+                "f0 {} · to {}",
+                self.envelope.fundamental, self.envelope.stop_time
+            ),
+            20 => format!(
+                "f0 {} · {}h @ {}",
+                self.fourier.fundamental, self.fourier.harmonics, self.fourier.output_node
+            ),
+            21 => {
+                let rel = &self.reliability;
+                let flags = [
+                    (rel.enable_hci, "HCI"),
+                    (rel.enable_nbti, "NBTI"),
+                    (rel.enable_em, "EM"),
+                ];
+                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
+                format!(
+                    "{} y · {}",
+                    self.reliability.years_csv,
+                    if on.is_empty() { "no mechanisms".to_owned() } else { on.join(" ") }
+                )
+            }
+            22 => format!(
+                "{} {} · {}",
+                ["minimize", "maximize", "target"][self.optimization.goal_mode.min(2)],
+                self.optimization.objective_node,
+                ["gradient", "pattern", "anneal"][self.optimization.algorithm.min(2)]
+            ),
+            23 => {
+                let soa = &self.soa;
+                let flags = [
+                    (soa.check_vgs_max, "vgs"),
+                    (soa.check_vds_max, "vds"),
+                    (soa.check_vbe_max, "vbe"),
+                    (soa.check_vce_max, "vce"),
+                ];
+                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
+                format!(
+                    "to {} · {}",
+                    soa.stop_time,
+                    if on.is_empty() { "no checks".to_owned() } else { on.join(" ") }
+                )
+            }
+            24 => {
+                let ratio = self.disto_f2_over_f1.trim();
+                if ratio.is_empty() {
+                    format!("{} -> {}", self.ac.fstart, self.ac.fstop)
+                } else {
+                    format!("{} -> {} · f2/f1 {}", self.ac.fstart, self.ac.fstop, ratio)
+                }
+            }
+            _ => String::new(),
+        }
+    }
+
+    /// First validation problem in an analysis draft, if any — the same
+    /// parse the controller performs when it builds the run plan.
+    pub fn validation_error(&self, index: usize) -> Option<String> {
+        use crate::simulation::controller::spice_value::parse_spice_value_checked as parse;
+        let field = |name: &str, error: String| Some(format!("{name}: {error}"));
+        match index {
+            0 => self.op.to_config().err(),
+            1 => {
+                if let Err(e) = parse(&self.tran.stop) {
+                    return field("stop time", e);
+                }
+                if let Err(e) = parse(&self.tran.step) {
+                    return field("step time", e);
+                }
+                if let Err(e) = parse(&self.tran.start) {
+                    return field("start time", e);
+                }
+                let max = self.tran.max_step.trim();
+                if !max.is_empty() && !max.eq_ignore_ascii_case("auto") {
+                    if let Err(e) = parse(max) {
+                        return field("max step", e);
+                    }
+                }
+                None
+            }
+            2 => self.ac_sweep_error(),
+            3 => {
+                if self.dc.source.trim().is_empty() {
+                    return Some("sweep source is empty".to_owned());
+                }
+                if let Err(e) = parse(&self.dc.start) {
+                    return field("start", e);
+                }
+                if let Err(e) = parse(&self.dc.stop) {
+                    return field("stop", e);
+                }
+                if let Err(e) = parse(&self.dc.step) {
+                    return field("step", e);
+                }
+                if self.dc.nested {
+                    if self.dc.source2.trim().is_empty() {
+                        return Some("nested sweep source is empty".to_owned());
+                    }
+                    if let Err(e) = parse(&self.dc.start2) {
+                        return field("nested start", e);
+                    }
+                    if let Err(e) = parse(&self.dc.stop2) {
+                        return field("nested stop", e);
+                    }
+                    if let Err(e) = parse(&self.dc.step2) {
+                        return field("nested step", e);
+                    }
+                }
+                None
+            }
+            4 => {
+                if self.noise.output.trim().is_empty() {
+                    return Some("output node is empty".to_owned());
+                }
+                if let Err(e) = parse(&self.noise.fstart) {
+                    return field("start frequency", e);
+                }
+                if let Err(e) = parse(&self.noise.fstop) {
+                    return field("stop frequency", e);
+                }
+                self.points_error()
+            }
+            5 => self.pz.to_config().err(),
+            6 => self.sens.to_config().err(),
+            7 => self.mc.to_config().err(),
+            8 => self.pss.to_config().err(),
+            9 => self.stb.to_config().err(),
+            10 => self.temp.to_config().err(),
+            11 => self.hb.to_config().err(),
+            12 => self.sp.to_config().err(),
+            13 => self.pac.to_config().err(),
+            14 => self.pnoise.to_config().err(),
+            15 => self.pxf.to_config().err(),
+            16 => self.pstb.to_config().err(),
+            17 => self.xf.to_config().err(),
+            18 => self.corner.to_config().err(),
+            19 => self.envelope.to_config().err(),
+            20 => self.fourier.to_config().err(),
+            21 => self.reliability.to_config().err(),
+            22 => self.optimization.to_config().err(),
+            23 => self.soa.to_config().err(),
+            24 => {
+                if let Some(error) = self.ac_sweep_error() {
+                    return Some(error);
+                }
+                let ratio = self.disto_f2_over_f1.trim();
+                if !ratio.is_empty() && !ratio.eq_ignore_ascii_case("auto") {
+                    if let Err(e) = parse(ratio) {
+                        return field("f2/f1 ratio", e);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    fn ac_sweep_error(&self) -> Option<String> {
+        use crate::simulation::controller::spice_value::parse_spice_value_checked as parse;
+        if let Err(e) = parse(&self.ac.fstart) {
+            return Some(format!("start frequency: {e}"));
+        }
+        if let Err(e) = parse(&self.ac.fstop) {
+            return Some(format!("stop frequency: {e}"));
+        }
+        self.points_error()
+    }
+
+    fn points_error(&self) -> Option<String> {
+        match self.ac.points.trim().parse::<usize>() {
+            Ok(points) if points > 0 => None,
+            _ => Some(format!("points: '{}' is not a positive integer", self.ac.points)),
+        }
+    }
+
     /// Fill defaults into any analysis state still at its blank
     /// `Default` (each guards on its own `initialized` flag).
     pub fn ensure_initialized(&mut self) {

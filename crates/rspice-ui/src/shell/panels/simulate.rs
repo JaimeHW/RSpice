@@ -6,7 +6,7 @@ use egui::Ui;
 use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{TreeRow, check_row, input_row, kv_row, section_header};
+use crate::ui::widgets::{TreeRow, kv_row, section_header};
 
 // ---------------------------------------------------------------------------
 // Left panel
@@ -168,77 +168,18 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
             ui.spacing_mut().item_spacing.y = 2.0;
             let setup = &mut state.sim_setup;
             setup.ensure_initialized();
-            let note: &str = match selected_tab {
-                0 => {
-                    kv_row(ui, "Run before", "every analysis");
-                    kv_row(ui, "Write to", "run database");
-                    "Solves the DC operating point and annotates the schematic."
-                }
-                1 => {
-                    input_row(ui, "Stop time", &mut setup.tran.stop);
-                    input_row(ui, "Max step", &mut setup.tran.max_step);
-                    input_row(ui, "Step time", &mut setup.tran.step);
-                    input_row(ui, "Start time", &mut setup.tran.start);
-                    check_row(ui, "Use initial conditions", &mut setup.tran.uic);
-                    "Local truncation error controls step size between limits."
-                }
-                2 => {
-                    input_row(ui, "Start", &mut setup.ac.fstart);
-                    input_row(ui, "Stop", &mut setup.ac.fstop);
-                    input_row(ui, "Points", &mut setup.ac.points);
-                    let sweep = ["dec", "oct", "lin"];
-                    kv_row(ui, "Sweep", sweep[setup.ac.sweep.min(2)]);
-                    "Small-signal sweep around the operating point."
-                }
-                3 => {
-                    input_row(ui, "Source", &mut setup.dc.source);
-                    input_row(ui, "Start", &mut setup.dc.start);
-                    input_row(ui, "Stop", &mut setup.dc.stop);
-                    input_row(ui, "Step", &mut setup.dc.step);
-                    "Sweeps a source over the operating range."
-                }
-                4 => {
-                    input_row(ui, "Output", &mut setup.noise.output);
-                    input_row(ui, "Input ref", &mut setup.noise.input);
-                    input_row(ui, "Start", &mut setup.noise.fstart);
-                    input_row(ui, "Stop", &mut setup.noise.fstop);
-                    "Integrated and spot noise at the chosen output."
-                }
-                5 => {
-                    input_row(ui, "Input", &mut setup.pz.input_pos);
-                    input_row(ui, "Output", &mut setup.pz.output_pos);
-                    "Extracts poles and zeros of the small-signal transfer."
-                }
-                6 => {
-                    input_row(ui, "Output", &mut setup.sens.output_expr);
-                    "DC or AC sensitivity of the output to every parameter."
-                }
-                7 => {
-                    input_row(ui, "Samples", &mut setup.mc.num_runs);
-                    input_row(ui, "Seed", &mut setup.mc.seed);
-                    let vary = ["gaussian", "uniform", "worst-case"];
-                    kv_row(ui, "Vary", vary[setup.mc.distribution_idx.min(2)]);
-                    "Statistical runs share the analysis list above."
-                }
-                8 => {
-                    input_row(ui, "Fundamental", &mut setup.pss.fund_freq);
-                    input_row(ui, "Harmonics", &mut setup.pss.num_harmonics);
-                    "Shooting-method periodic steady state."
-                }
-                9 => {
-                    input_row(ui, "Probe", &mut setup.stb.probe_source);
-                    input_row(ui, "Start", &mut setup.stb.start_freq);
-                    input_row(ui, "Stop", &mut setup.stb.stop_freq);
-                    "Loop gain and phase margin via the probe source."
-                }
-                10 => {
-                    input_row(ui, "Start", &mut setup.temp.temp_start);
-                    input_row(ui, "Stop", &mut setup.temp.temp_stop);
-                    input_row(ui, "Step", &mut setup.temp.temp_step);
-                    "Repeats the selected analysis across temperature."
-                }
-                _ => "",
-            };
+
+            let note = super::simulate_forms::form(ui, setup, selected_tab);
+
+            // Inline validation — the same parse the controller runs.
+            if let Some(error) = setup.validation_error(selected_tab) {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(error)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(c.err),
+                );
+            }
 
             if !note.is_empty() {
                 ui.add_space(6.0);

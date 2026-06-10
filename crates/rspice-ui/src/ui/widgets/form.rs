@@ -113,3 +113,35 @@ pub fn check_row(ui: &mut Ui, label: &str, value: &mut bool) -> bool {
         .height(t.metrics.row_h);
     row.show(ui).checkbox_changed
 }
+
+/// A labeled chip-choice row for small enums (sweep type, distribution).
+/// Returns `true` if the selection changed.
+pub fn choice_row(ui: &mut Ui, label: &str, options: &[&str], value: &mut usize) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let row_h = t.metrics.row_h;
+    let mut changed = false;
+    ui.allocate_ui_with_layout(
+        vec2(ui.available_width(), row_h),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let (label_rect, _) =
+                ui.allocate_exact_size(vec2(LABEL_COL + 4.0, row_h), egui::Sense::hover());
+            ui.painter().text(
+                egui::pos2(label_rect.left(), label_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+                c.text_dim,
+            );
+            for (idx, option) in options.iter().enumerate() {
+                if super::chip(ui, option, *value == idx).clicked() {
+                    *value = idx;
+                    changed = true;
+                }
+            }
+        },
+    );
+    changed
+}

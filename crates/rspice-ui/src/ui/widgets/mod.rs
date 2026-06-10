@@ -20,7 +20,7 @@ pub use button::{Button, IconButton};
 pub use chip::chip;
 pub use dialog::{Dialog, DialogChoice, DialogSize, dialog_tabs};
 pub use docbar::{crumb_text, docbar};
-pub use form::{check_row, input_row, input_row_readonly, kv_row, mono_input};
+pub use form::{check_row, choice_row, input_row, input_row_readonly, kv_row, mono_input};
 pub use pill::{Pill, PillState};
 pub use section::section_header;
 pub use table::measurement_table;

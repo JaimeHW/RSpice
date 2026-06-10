@@ -212,7 +212,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
                 }
             }
 
-            // Name + description + state.
+            // Name + description + live summary + state.
             painter.text(
                 egui::pos2(rect.left() + 44.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -227,19 +227,31 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
                 theme::sans(tokens::FS_1, FontWeight::Regular),
                 c.text_dim,
             );
-            let state_label = if selected {
-                "selected".to_owned()
+            let invalid = enabled && state.sim_setup.validation_error(*tab_idx).is_some();
+            if rect.width() > 560.0 {
+                painter.text(
+                    egui::pos2(rect.right() - 88.0, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    state.sim_setup.summary(*tab_idx),
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    if invalid { c.err } else { c.text_faint },
+                );
+            }
+            let (state_label, state_color) = if invalid {
+                ("invalid", c.err)
+            } else if selected {
+                ("selected", c.text_faint)
             } else if enabled {
-                "enabled".to_owned()
+                ("enabled", c.text_faint)
             } else {
-                "off".to_owned()
+                ("off", c.text_faint)
             };
             painter.text(
                 egui::pos2(rect.right() - 14.0, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 state_label,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
-                c.text_faint,
+                state_color,
             );
 
             if response.clicked() {
