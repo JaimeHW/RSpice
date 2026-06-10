@@ -57,11 +57,11 @@ pub struct TransmissionLine {
     history_forward: DelayBuffer,
     /// V2 + Z0*I2 history
     history_backward: DelayBuffer,
-    /// Smoothed forward wave stored into the delay history
-    filtered_forward_wave: Value,
-    /// Smoothed backward wave stored into the delay history
-    filtered_backward_wave: Value,
-    /// Whether the filtered wave state has been seeded yet
+    /// Most recent forward wave (V1 + Z0*I1) stored into the delay history
+    launched_forward: Value,
+    /// Most recent backward wave (V2 + Z0*I2) stored into the delay history
+    launched_backward: Value,
+    /// Whether the wave history has been seeded yet
     history_initialized: bool,
     /// First accepted port state, retained even if old history samples are trimmed.
     initial_state: Option<TlineStateSample>,
@@ -234,8 +234,8 @@ impl TransmissionLine {
             branch2: None,
             history_forward: DelayBuffer::new(td),
             history_backward: DelayBuffer::new(td),
-            filtered_forward_wave: 0.0,
-            filtered_backward_wave: 0.0,
+            launched_forward: 0.0,
+            launched_backward: 0.0,
             history_initialized: false,
             initial_state: None,
             state_history: VecDeque::new(),
@@ -929,15 +929,15 @@ impl TransmissionLine {
         if !self.history_initialized {
             self.history_initialized = true;
         }
-        self.filtered_forward_wave = raw_forward;
-        self.filtered_backward_wave = raw_backward;
+        self.launched_forward = raw_forward;
+        self.launched_backward = raw_backward;
 
         // Forward wave: V1 + Z0*I1 propagates to port 2
-        self.history_forward.push(time, self.filtered_forward_wave);
+        self.history_forward.push(time, self.launched_forward);
 
         // Backward wave: V2 + Z0*I2 propagates to port 1
         self.history_backward
-            .push(time, self.filtered_backward_wave);
+            .push(time, self.launched_backward);
         self.state_history.push_back(TlineStateSample {
             time,
             v1,
@@ -994,20 +994,20 @@ impl TransmissionLine {
 
     #[inline]
     pub fn launched_forward_wave(&self) -> Value {
-        self.filtered_forward_wave
+        self.launched_forward
     }
 
     #[inline]
     pub fn launched_backward_wave(&self) -> Value {
-        self.filtered_backward_wave
+        self.launched_backward
     }
 
     /// Reset for new simulation
     pub fn reset(&mut self) {
         self.history_forward.clear();
         self.history_backward.clear();
-        self.filtered_forward_wave = 0.0;
-        self.filtered_backward_wave = 0.0;
+        self.launched_forward = 0.0;
+        self.launched_backward = 0.0;
         self.history_initialized = false;
         self.initial_state = None;
         self.state_history.clear();
