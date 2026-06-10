@@ -161,7 +161,7 @@ pub(super) fn parse_model_params(
                         }
                     }
                     _ => {
-                        if let Some(value) = try_value(stream, params) {
+                        if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
                         }
                     }
@@ -282,7 +282,48 @@ pub(super) fn expect_value(
 
 pub(super) fn try_value(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     skip_commas(stream);
+    try_value_unsigned(stream, params)
+}
 
+/// Like [`try_value`] but also recombines a `Minus`/`Plus` sign token that the
+/// lexer split off from a magnitude written without a leading zero (e.g.
+/// `-.14`, `+.5`). Model-card parameters such as `VOFF=-.14` depend on this.
+///
+/// Restricted to model-parameter parsing: element/source/command parsers handle
+/// signs in their own layers, so applying it there could double-consume tokens.
+pub(super) fn try_signed_model_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Option<Value> {
+    skip_commas(stream);
+    let sign = match &stream.peek().kind {
+        TokenKind::Plus => Some(1.0),
+        TokenKind::Minus => Some(-1.0),
+        _ => None,
+    };
+    if let Some(sign) = sign {
+        if token_is_value_like(&stream.peek_n(1).kind, params) {
+            stream.advance();
+            if let Some(magnitude) = try_value_unsigned(stream, params) {
+                return Some(sign * magnitude);
+            }
+        }
+    }
+    try_value_unsigned(stream, params)
+}
+
+#[inline]
+fn token_is_value_like(kind: &TokenKind, params: &ParamContext) -> bool {
+    match kind {
+        TokenKind::Number(_) | TokenKind::Expression(_) => true,
+        TokenKind::Ident(s) => {
+            params.get(s).is_some() || crate::netlist::lexer::parse_spice_value(s).is_ok()
+        }
+        _ => false,
+    }
+}
+
+fn try_value_unsigned(stream: &mut TokenStream, params: &ParamContext) -> Option<Value> {
     match &stream.peek().kind {
         TokenKind::Number(v) => {
             let v = *v;
