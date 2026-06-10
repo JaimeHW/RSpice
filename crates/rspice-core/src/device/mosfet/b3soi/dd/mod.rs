@@ -1167,4 +1167,41 @@ mod tests {
             }
         }
     }
+
+    /// Oracle-pinned charge check: the body charge and the full body row of
+    /// the capacitance matrix must reproduce a debug ngspice-46 evaluation of
+    /// the RampVg2 deck captured mid-gate-ramp (gdb at b3soiddld.c:3496,
+    /// t = 22.5 ps, Vbs = 0.1615795006, Vgs = 0.05, Vds = 1.5, Ves = 0).
+    /// qbody and cb** are pre-overlap quantities in ngspice and map directly
+    /// onto RSpice's charge.qb / gcb** (the overlap lump never touches the
+    /// body row).
+    #[test]
+    fn body_charge_matches_ngspice_oracle_at_ramp_bias() {
+        let model = B3SoiDdModel::from_params(&n1_params(), false, 300.15);
+        let sized = B3SoiDdSized::new(&model, &geom(), 300.15).expect("sized");
+        let mc = model_consts(&model);
+        let charge = eval::eval(
+            &sized,
+            &mc,
+            B3SoiDdBias {
+                vbs: 0.1615795006,
+                vgs: 0.05,
+                vds: 1.5,
+                ves: 0.0,
+                vps: 0.0,
+            },
+            1.0,
+            true,
+        )
+        .charge
+        .unwrap();
+        let ok = |actual: Value, oracle: Value| {
+            (actual - oracle).abs() <= 1e-6 * oracle.abs()
+        };
+        assert!(ok(charge.qb, -5.755219597e-15), "qb={:.9e}", charge.qb);
+        assert!(ok(charge.gcbgb, -6.264670704e-15), "gcbgb={:.9e}", charge.gcbgb);
+        assert!(ok(charge.gcbdb, -1.482516887e-15), "gcbdb={:.9e}", charge.gcbdb);
+        assert!(ok(charge.gcbsb, -8.674246038e-15), "gcbsb={:.9e}", charge.gcbsb);
+        assert!(ok(charge.gcbeb, -2.308017492e-15), "gcbeb={:.9e}", charge.gcbeb);
+    }
 }
