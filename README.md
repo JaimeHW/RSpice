@@ -221,10 +221,15 @@ probe-aware absolute floors. Every executed analysis must be backed by a
 validation oracle — checked-in reference data, `_t`/`_g` gold-node assertions,
 or an explicit entry in `tests/validation-manifest.tsv` (execution-only
 `smoke` decks and `.control`-scripted upstream decks) — so no deck can pass
-silently. Steep transient edges additionally use a slope-gated time-jitter
-window (one local reference timestep), because reference tables sample each
-binary's internally chosen timesteps and ngspice itself reproduces them only
-to within a step at fast edges.
+silently. Because reference tables sample each binary's internally chosen
+timesteps, two narrowly gated fallbacks keep the comparison measuring accuracy
+rather than step-sequence reproduction: steep transient rows allow a
+slope-gated time-jitter window of one local reference timestep (ngspice itself
+reproduces its own tables only to within a step at fast edges), and rows where
+the reference oscillates at sample scale (coarse-grid ringing overshoot that
+the official binary does not reproduce at converged settings) are compared
+against the local reference envelope. Operating points, smooth regions, and
+settled levels always keep the strict pointwise tolerances.
 
 Each deck runs in an isolated watchdog-supervised process
 (`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
