@@ -2,11 +2,16 @@
 //!
 //! Compiles Verilog-A model files and displays model information.
 
-use crate::cli::{CliError, CompileVaArgs};
+use crate::cli::{CliError, CompileVaArgs, Config};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 
 /// Execute the compile-va command
-pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), CliError> {
+pub fn execute(
+    args: CompileVaArgs,
+    config: &Config,
+    verbose: bool,
+    _quiet: bool,
+) -> Result<(), CliError> {
     // Validate input file exists
     if !args.input.exists() {
         return Err(CliError::InputNotFound {
@@ -21,8 +26,11 @@ pub fn execute(args: CompileVaArgs, verbose: bool, _quiet: bool) -> Result<(), C
         ..CompilerOptions::default()
     };
 
-    // Add include paths
+    // Add include paths (CLI flags first, then config paths.veriloga_includes)
     for include_dir in &args.includes {
+        options.include_paths.push(include_dir.clone());
+    }
+    for include_dir in &config.paths.veriloga_includes {
         options.include_paths.push(include_dir.clone());
     }
 

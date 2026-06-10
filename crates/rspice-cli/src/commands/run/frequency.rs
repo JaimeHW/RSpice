@@ -81,11 +81,11 @@ pub(super) fn run_ac(
                 }
             }
 
-            if let Some(ref output_path) = ctx.args.output {
+            if let Some(ref output_path) = ctx.output {
                 let signals = ac_signals(&results);
                 let frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
-                if matches!(ctx.args.format, OutputFormat::Hdf5) {
+                if matches!(ctx.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
 
@@ -103,7 +103,7 @@ pub(super) fn run_ac(
                         .map_err(|err| map_hdf5_output_error(output_path, err))?;
                 } else {
                     super::export::complex_table("ac", "AC Analysis", frequencies, &signals)
-                        .write(output_path, ctx.args.format)?;
+                        .write(output_path, ctx.format)?;
                 }
                 if !ctx.quiet {
                     println!("  AC response exported to: {}", output_path.display());
@@ -209,7 +209,7 @@ pub(super) fn run_noise(
                 }
             }
 
-            if let Some(ref output_path) = ctx.args.output {
+            if let Some(ref output_path) = ctx.output {
                 let noise_frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
                 let onoise: Vec<f64> = results
@@ -221,7 +221,7 @@ pub(super) fn run_noise(
                     .map(|result| result.input_referred_density)
                     .collect();
 
-                if matches!(ctx.args.format, OutputFormat::Hdf5) {
+                if matches!(ctx.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "Noise Analysis".to_string();
 
@@ -254,7 +254,7 @@ pub(super) fn run_noise(
                             },
                         ],
                     }
-                    .write(output_path, ctx.args.format)?;
+                    .write(output_path, ctx.format)?;
                 }
 
                 if !ctx.quiet {

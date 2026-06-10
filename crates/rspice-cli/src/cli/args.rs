@@ -66,9 +66,9 @@ pub struct RunArgs {
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 
-    /// Output format
-    #[arg(short, long, default_value = "raw", value_name = "FORMAT")]
-    pub format: OutputFormat,
+    /// Output format (default: config `output.format`, else `raw`)
+    #[arg(short, long, value_name = "FORMAT")]
+    pub format: Option<OutputFormat>,
 
     /// Override simulation temperature (Celsius)
     #[arg(long, value_name = "TEMP")]

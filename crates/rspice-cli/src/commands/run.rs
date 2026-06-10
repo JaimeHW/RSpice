@@ -20,7 +20,7 @@ use crate::report::{
     TapReporter,
 };
 
-use crate::cli::{CliError, Config, MeasFormat, RunArgs};
+use crate::cli::{CliError, Config, MeasFormat, OutputFormat, RunArgs};
 use rspice_core::netlist::AnalysisCommand;
 use rspice_core::{
     ConvergenceConfig, ConvergencePreset, Engine, Netlist, SimulationConfig,
@@ -33,6 +33,16 @@ struct RunContext<'a> {
     engine: &'a Engine,
     netlist: &'a Netlist,
     args: &'a RunArgs,
+    /// Resolved output format: CLI flag, else config `output.format`, else raw.
+    format: OutputFormat,
+    /// Resolved output path; relative paths land in config `output.output_directory`.
+    output: Option<std::path::PathBuf>,
+    /// CLI `--progress` or config `output.show_progress`.
+    show_progress: bool,
+    /// CLI `--compress` or config `simulation.compress_waveforms`.
+    compress: bool,
+    /// CLI `--compress-tol`, else config `simulation.compression_tolerance`.
+    compress_tol: f64,
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
@@ -45,17 +55,30 @@ impl<'a> RunContext<'a> {
         engine: &'a Engine,
         netlist: &'a Netlist,
         args: &'a RunArgs,
+        config: &Config,
         verbose: bool,
         quiet: bool,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, CliError> {
+        let format = args
+            .format
+            .unwrap_or_else(|| parse_format_name(&config.output.format));
+        let output = resolve_output_path(args.output.clone(), config)?;
+
+        Ok(Self {
             engine,
             netlist,
             args,
+            format,
+            output,
+            show_progress: args.progress || config.output.show_progress,
+            compress: args.compress || config.simulation.compress_waveforms,
+            compress_tol: args
+                .compress_tol
+                .unwrap_or(config.simulation.compression_tolerance),
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
-        }
+        })
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -172,7 +195,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     let sim_config = build_sim_config(&args, config, &netlist);
     let engine = Engine::new(sim_config);
-    let ctx = RunContext::new(&engine, &netlist, &args, verbose, quiet);
+    let ctx = RunContext::new(&engine, &netlist, &args, config, verbose, quiet)?;
 
     if run_requested_mode(&ctx, config)? {
         return Ok(());
@@ -305,6 +328,40 @@ fn load_netlist(args: &RunArgs, config: &Config) -> Result<Netlist, CliError> {
     }
 
     Ok(netlist)
+}
+
+/// Parse a config `output.format` name; unknown names warn and fall back to raw.
+fn parse_format_name(name: &str) -> OutputFormat {
+    use clap::ValueEnum;
+    OutputFormat::from_str(name, true).unwrap_or_else(|_| {
+        log::warn!("unrecognized output.format '{}' in config; using raw", name);
+        OutputFormat::Raw
+    })
+}
+
+/// Resolve `-o` against config `output.output_directory`.
+///
+/// Relative output paths are placed inside the configured directory (created
+/// on demand); absolute paths are used as given.
+fn resolve_output_path(
+    output: Option<PathBuf>,
+    config: &Config,
+) -> Result<Option<PathBuf>, CliError> {
+    let Some(path) = output else {
+        return Ok(None);
+    };
+    let Some(dir) = config.output.output_directory.as_ref() else {
+        return Ok(Some(path));
+    };
+    if path.is_absolute() {
+        return Ok(Some(path));
+    }
+
+    std::fs::create_dir_all(dir).map_err(|e| CliError::OutputError {
+        path: dir.clone(),
+        source: e,
+    })?;
+    Ok(Some(dir.join(path)))
 }
 
 /// Parse a `-D NAME=VALUE` override; the value accepts SPICE suffixes (4.7k, 1u, ...).

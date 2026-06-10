@@ -35,8 +35,8 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                 }
             }
 
-            if let Some(ref output_path) = ctx.args.output {
-                write_dc_op_output(output_path, &result, ctx.args.format)?;
+            if let Some(ref output_path) = ctx.output {
+                write_dc_op_output(output_path, &result, ctx.format)?;
                 if !ctx.quiet {
                     println!("Results exported to: {}", output_path.display());
                 }
@@ -210,10 +210,10 @@ pub(super) fn run_dc_sweep(
                 println!("DC Sweep: {} points computed", results.len());
             }
 
-            if let Some(ref output_path) = ctx.args.output {
+            if let Some(ref output_path) = ctx.output {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 let signals = crate::commands::run_signals::dc_sweep_voltage_signals(&results);
-                match ctx.args.format {
+                match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
                         data.title = "DC Sweep".to_string();
@@ -241,7 +241,7 @@ pub(super) fn run_dc_sweep(
                             source,
                             &node_names,
                             &node_waveforms,
-                            raw_export_format(ctx.args.format),
+                            raw_export_format(ctx.format),
                         )
                         .map_err(|e| CliError::OutputError {
                             path: output_path.clone(),
@@ -257,7 +257,7 @@ pub(super) fn run_dc_sweep(
                             sweep_vals,
                             &signals,
                         )
-                        .write(output_path, ctx.args.format)?;
+                        .write(output_path, ctx.format)?;
                     }
                 }
 
@@ -282,7 +282,7 @@ pub(super) fn run_transient(
 
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
-    } else if ctx.args.progress {
+    } else if ctx.show_progress {
         let eta_steps = ((tstop - tstart) / tstep) as u64;
         let pb = indicatif::ProgressBar::new(eta_steps);
         pb.set_style(
@@ -308,8 +308,8 @@ pub(super) fn run_transient(
         pb
     };
 
-    let result = if ctx.args.compress {
-        let compression_tol = ctx.args.compress_tol.unwrap_or(1e-4);
+    let result = if ctx.compress {
+        let compression_tol = ctx.compress_tol;
         let compression = rspice_core::engine::CompressionConfig {
             enabled: true,
             abs_tol: compression_tol,
@@ -341,7 +341,7 @@ pub(super) fn run_transient(
 
     match result {
         Ok(result) => {
-            if !ctx.quiet && !ctx.args.compress {
+            if !ctx.quiet && !ctx.compress {
                 println!(
                     "✓ Transient complete: {} time points computed",
                     result.time.len()
@@ -359,9 +359,9 @@ pub(super) fn run_transient(
                 }
             }
 
-            if let Some(ref output_path) = ctx.args.output {
+            if let Some(ref output_path) = ctx.output {
                 let signals = transient_voltage_signals(&result);
-                match ctx.args.format {
+                match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
                         data.title = "Transient Analysis".to_string();
@@ -388,7 +388,7 @@ pub(super) fn run_transient(
                             &result.time,
                             &node_names,
                             &waveforms,
-                            raw_export_format(ctx.args.format),
+                            raw_export_format(ctx.format),
                         )
                         .map_err(|e| CliError::OutputError {
                             path: output_path.clone(),
@@ -404,7 +404,7 @@ pub(super) fn run_transient(
                             result.time.clone(),
                             &signals,
                         )
-                        .write(output_path, ctx.args.format)?;
+                        .write(output_path, ctx.format)?;
                     }
                 }
 
@@ -566,8 +566,8 @@ pub(super) fn run_fourier(
         }
     }
 
-    if let Some(ref output_path) = ctx.args.output
-        && matches!(ctx.args.format, OutputFormat::Json)
+    if let Some(ref output_path) = ctx.output
+        && matches!(ctx.format, OutputFormat::Json)
     {
         use std::io::Write;
 
@@ -659,7 +659,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         println!("└─────────────────────────────────────┘");
     }
 
-    if let Some(ref output_path) = ctx.args.output {
+    if let Some(ref output_path) = ctx.output {
         use std::io::Write;
 
         let mut file = std::fs::File::create(output_path).map_err(|e| CliError::OutputError {
@@ -667,7 +667,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
             source: e,
         })?;
 
-        match ctx.args.format {
+        match ctx.format {
             OutputFormat::Csv => {
                 let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
                 let header: String = (1..=num_nodes).map(|i| format!(",V({})", i)).collect();
