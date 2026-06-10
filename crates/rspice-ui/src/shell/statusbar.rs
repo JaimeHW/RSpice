@@ -109,7 +109,11 @@ fn engine_pill(ui: &mut Ui, state: &AppState) {
 }
 
 fn thread_count() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZeroUsize::get)
-        .unwrap_or(1)
+    // available_parallelism is a syscall; the answer never changes.
+    static COUNT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *COUNT.get_or_init(|| {
+        std::thread::available_parallelism()
+            .map(std::num::NonZeroUsize::get)
+            .unwrap_or(1)
+    })
 }
