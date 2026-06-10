@@ -191,16 +191,6 @@ impl Engine {
             } else {
                 raw_solution
             };
-            if requires_conservative_nonlinear_limiting {
-                Self::limit_vbic_external_updates(
-                    circuit,
-                    &mut new_solution,
-                    &solution,
-                    circuit.num_nodes().min(size),
-                    None,
-                    false,
-                );
-            }
             // Solution limiting: prevent numerical blow-up by clamping extreme values
             // This is a critical convergence aid for circuits with strong nonlinearities
             for (i, v) in new_solution.iter_mut().enumerate() {
@@ -706,16 +696,6 @@ impl Engine {
             } else {
                 raw_solution
             };
-            if requires_conservative_nonlinear_limiting {
-                Self::limit_vbic_external_updates(
-                    circuit,
-                    &mut new_solution,
-                    &solution,
-                    circuit.num_nodes().min(size),
-                    None,
-                    false,
-                );
-            }
             Self::clamp_solution_to_physical_bounds(
                 &mut new_solution,
                 circuit.num_nodes().min(size),

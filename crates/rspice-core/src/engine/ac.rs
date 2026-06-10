@@ -215,6 +215,71 @@ impl Engine {
             return;
         }
 
+        if bjt.vbic_mna_promoted() {
+            // Promoted VBIC: the internal states are matrix unknowns, so each
+            // charge branch stamps jw*C directly on its own nodes alongside
+            // the promoted static real part - no dense Schur reduction.
+            let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(op_voltages);
+            let external_nodes = [
+                bjt.node_collector,
+                bjt.node_base,
+                bjt.node_emitter,
+                bjt.node_substrate,
+            ];
+            for (branch_idx, branch) in branches.iter().enumerate() {
+                if !branch.is_active() {
+                    continue;
+                }
+                if !include_delay_branches
+                    && (branch_idx == BJT_DELAY_XF1_BRANCH_INDEX
+                        || branch_idx == BJT_DELAY_XF2_BRANCH_INDEX)
+                {
+                    // ngspice linear AC decks treat VBIC excess-phase TD as a
+                    // transient-only dynamic delay state; without the xf
+                    // charges the algebraic xf rows pin vxf2 to Itzf and the
+                    // delayed-transport correction vanishes, matching the
+                    // reduced-path parity behavior.
+                    continue;
+                }
+
+                let mut stamp_row = |row: NodeId, sign: Value| {
+                    if row == 0 {
+                        return;
+                    }
+                    for col in 0..BJT_INTERNAL_STATE_DIM {
+                        let c = branch.d_internal[col];
+                        let col_node = bjt.vbic_internal_node(col);
+                        if c != 0.0 && col_node > 0 {
+                            matrix.add_imag(row - 1, col_node - 1, sign * omega * c);
+                        }
+                    }
+                    for col in 0..BJT_EXTERNAL_STATE_DIM {
+                        let c = branch.d_external[col];
+                        let col_node = external_nodes[col];
+                        if c != 0.0 && col_node > 0 {
+                            matrix.add_imag(row - 1, col_node - 1, sign * omega * c);
+                        }
+                    }
+                };
+
+                let pos = branch
+                    .pos_internal
+                    .map(|idx| bjt.vbic_internal_node(idx))
+                    .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
+                let neg = branch
+                    .neg_internal
+                    .map(|idx| bjt.vbic_internal_node(idx))
+                    .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
+                if let Some(row) = pos {
+                    stamp_row(row, 1.0);
+                }
+                if let Some(row) = neg {
+                    stamp_row(row, -1.0);
+                }
+            }
+            return;
+        }
+
         let [vc, vb, ve, vs] = [
             Self::ac_node_voltage(op_voltages, bjt.node_collector),
             Self::ac_node_voltage(op_voltages, bjt.node_base),

@@ -643,11 +643,7 @@ impl Bjt {
         let has_re = Self::series_active(self.re);
         let has_rs = Self::series_active(self.rs);
         let has_self_heat = self.self_heating_enabled();
-        let solve_vbp = Self::series_active(self.rbp)
-            || self.ibeip > 0.0
-            || self.ibenp > 0.0
-            || self.ibcip > 0.0
-            || self.ibcnp > 0.0;
+        let solve_vbp = self.vbic_solves_vbp();
 
         let [
             mut vcx,
@@ -821,11 +817,7 @@ impl Bjt {
         let has_re = Self::series_active(self.re);
         let has_rs = Self::series_active(self.rs);
         let has_self_heat = self.self_heating_enabled();
-        let solve_vbp = Self::series_active(self.rbp)
-            || self.ibeip > 0.0
-            || self.ibenp > 0.0
-            || self.ibcip > 0.0
-            || self.ibcnp > 0.0;
+        let solve_vbp = self.vbic_solves_vbp();
         let (collector_d, base_d, emitter_d) = self.intrinsic_terminal_derivatives(eval.linearized);
         let collector_internal = Self::branch_from_internal(eval.linearized.ic, collector_d);
         let base_internal = Self::branch_from_internal(eval.linearized.ib, base_d);

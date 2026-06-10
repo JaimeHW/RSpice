@@ -90,12 +90,40 @@ impl Engine {
             let vbe = vb - ve;
             let vbc = vb - vc;
             let vcs = vc - vs;
+
+            if bjt.vbic_mna_promoted() {
+                // Promoted VBIC: the internal states are part of the solved
+                // operating point, so the charge history seeds directly from
+                // the solution vector with no nested snapshot solve.
+                let (branches, internal, _) = bjt.vbic_mna_charge_state_at_solution(solution);
+                let charge_values = branches.map(|branch| branch.charge);
+                history.vbe_prev.push(vbe);
+                history.vbe_prev_prev.push(vbe);
+                history.ibe_prev.push(0.0);
+                history.vbc_prev.push(vbc);
+                history.vbc_prev_prev.push(vbc);
+                history.ibc_prev.push(0.0);
+                history.vcs_prev.push(vcs);
+                history.vcs_prev_prev.push(vcs);
+                history.ics_prev.push(0.0);
+                history.charge_q_prev.push(charge_values);
+                history.charge_q_prev_prev.push(charge_values);
+                history.charge_q_prev_prev_prev.push(charge_values);
+                history.charge_cq_prev.push([0.0; BJT_DYNAMIC_CHARGE_COUNT]);
+                history.dynamic_internal_prev.push(internal);
+                history.dynamic_internal_prev_prev.push(internal);
+                history
+                    .dynamic_linear_prev
+                    .push(VbicPredictorLinearBranchState::default());
+                history
+                    .dynamic_linear_prev_prev
+                    .push(VbicPredictorLinearBranchState::default());
+                continue;
+            }
+
             let charge_snapshot = bjt.charge_snapshot(vc, vb, ve, vs);
-            let (history_vbe, history_vbc, history_vcs) = if bjt.uses_vbic_dynamic_charges() {
-                (vbe, vbc, vcs)
-            } else {
-                Self::legacy_bjt_charge_branch_voltages(&charge_snapshot)
-            };
+            let (history_vbe, history_vbc, history_vcs) =
+                Self::legacy_bjt_charge_branch_voltages(&charge_snapshot);
             history.vbe_prev.push(history_vbe);
             history.vbe_prev_prev.push(history_vbe);
             history.ibe_prev.push(0.0);
@@ -107,17 +135,15 @@ impl Engine {
             history.ics_prev.push(0.0);
 
             let mut charge_values = charge_snapshot.branches.map(|branch| branch.charge);
-            if !bjt.uses_vbic_dynamic_charges() {
-                let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
-                    Self::legacy_bjt_charge_branch_voltages_with_vbx(&charge_snapshot);
-                let charges = bjt.legacy_transient_charge_state_with_vbx(
-                    legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
-                );
-                charge_values[BJT_QBE_BRANCH_INDEX] = charges.qbe;
-                charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
-                charge_values[BJT_QBCX_BRANCH_INDEX] = charges.qbx;
-                charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
-            }
+            let (legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs) =
+                Self::legacy_bjt_charge_branch_voltages_with_vbx(&charge_snapshot);
+            let charges = bjt.legacy_transient_charge_state_with_vbx(
+                legacy_vbe, legacy_vbc, legacy_vbx, legacy_vcs,
+            );
+            charge_values[BJT_QBE_BRANCH_INDEX] = charges.qbe;
+            charge_values[BJT_QBC_BRANCH_INDEX] = charges.qbc;
+            charge_values[BJT_QBCX_BRANCH_INDEX] = charges.qbx;
+            charge_values[BJT_QBCP_BRANCH_INDEX] = charges.qcs;
             let predictor_linear = Self::vbic_predictor_linear_branch_state(
                 bjt,
                 [vc, vb, ve, vs],
@@ -317,128 +343,42 @@ impl Engine {
             let ve = Self::node_voltage(voltages, bjt.node_emitter);
             let vs = Self::node_voltage(voltages, bjt.node_substrate);
 
-            if bjt.uses_vbic_dynamic_charges() && charge_factor > 0.0 {
-                let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
-                    Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
-                let cached_snapshot = vbic_snapshot_cache.get(idx).copied().flatten();
-                let snapshot_start = std::time::Instant::now();
-                // Stamping-time snapshot resolves run under the same
-                // deterministic evaluation budget as continuation solves: a
-                // mid-Newton iterate can request a wildly off-bias snapshot
-                // (multi-volt forward junctions), and an unbounded inner solve
-                // there burns >10s per device before the outer loop gets a
-                // chance to reject the iterate and cut dt.
-                let Some(snapshot) = Self::with_vbic_best_effort_eval_budget(
-                    Self::VBIC_CONTINUATION_EVAL_BUDGET,
-                    || {
-                        Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                            bjt,
-                            [vc, vb, ve, vs],
-                            method,
-                            trap_order,
-                            dt,
-                            &history.charge_q_prev[idx],
-                            &history.charge_q_prev_prev[idx],
-                            &history.charge_cq_prev[idx],
-                            history.dynamic_internal_prev.get(idx),
-                            history.dynamic_internal_prev_prev.get(idx),
-                            history.dynamic_linear_prev.get(idx),
-                            history.dynamic_linear_prev_prev.get(idx),
-                            history.accepted_dt_prev,
-                            cached_snapshot,
-                            cache_reuse,
-                            snapshot_reuse_abstol,
-                            snapshot_reuse_reltol,
-                        )
-                    },
-                ) else {
-                    vbic_snapshot_cache[idx] = None;
+            if bjt.vbic_mna_promoted() {
+                // Promoted VBIC: per-branch charge companions on the actual
+                // internal nodes (ngspice NIintegrate discipline), evaluated
+                // and linearized at the limited bias cached by the device
+                // update for this Newton iterate.
+                if charge_factor <= 0.0 {
                     continue;
-                };
-                let snapshot_elapsed = snapshot_start.elapsed();
-                static VBIC_SNAPSHOT_RESOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                if snapshot_elapsed.as_millis() >= 100 {
-                    let log_count = VBIC_SNAPSHOT_RESOLVE_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 {
-                        log::warn!(
-                            "Slow VBIC snapshot resolve {} dt={:.3e} trap_order={} ext=({:.6e}, {:.6e}, {:.6e}, {:.6e}) cached={} elapsed={:.3?}",
-                            bjt.name,
-                            dt,
-                            trap_order,
-                            vc,
-                            vb,
-                            ve,
-                            vs,
-                            cached_snapshot.is_some(),
-                            snapshot_elapsed,
-                        );
-                    }
                 }
-                let Some(linearization) = Self::assemble_vbic_transient_linearization(
-                    bjt,
-                    &snapshot,
-                    effective_method,
-                    trap_order,
-                    dt,
-                    &history.charge_q_prev[idx],
-                    &history.charge_q_prev_prev[idx],
-                    &history.charge_cq_prev[idx],
-                ) else {
-                    vbic_snapshot_cache[idx] = None;
-                    continue;
+                let (branches, internal, external) = bjt.vbic_mna_charge_state();
+                let mut stamper = StaticMatrixChargeStamper {
+                    matrix: &mut *matrix,
+                    rhs: &mut *rhs,
                 };
-                let base_static_g = snapshot.reduction.g_reduced;
-                vbic_snapshot_cache[idx] = Some(snapshot);
-
-                let Some((y_total, reduced_i_eq)) =
-                    Self::vbic_reduce_transient_external_system(&linearization)
-                else {
-                    vbic_snapshot_cache[idx] = None;
-                    continue;
-                };
-                let (_base_static_g, base_static_i_eq) = Self::vbic_static_stamped_external_system(
-                    bjt,
-                    &snapshot.reduction.external_voltages,
-                );
-
-                let mut delta = [[0.0; BJT_EXTERNAL_STATE_DIM]; BJT_EXTERNAL_STATE_DIM];
-                let mut delta_i_eq = [0.0; BJT_EXTERNAL_STATE_DIM];
-                for row in 0..BJT_EXTERNAL_STATE_DIM {
-                    delta_i_eq[row] = reduced_i_eq[row] - base_static_i_eq[row];
-                    for col in 0..BJT_EXTERNAL_STATE_DIM {
-                        delta[row][col] = y_total[row][col] - base_static_g[row][col];
+                for (branch_idx, branch) in branches.iter().enumerate() {
+                    if !branch.is_active() {
+                        continue;
                     }
-                }
-                let max_delta_i_eq = delta_i_eq
-                    .iter()
-                    .map(|value| value.abs())
-                    .fold(0.0, Value::max);
-                static VBIC_DELTA_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(0);
-                let delta_log_count =
-                    VBIC_DELTA_LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if max_delta_i_eq > 1.0 && delta_log_count < 20 {
-                    log::warn!(
-                        "VBIC transient delta {} max|di_eq|={:.3e}: total={:?} static={:?} delta={:?} xf=({:.3e}, {:.3e}) vrth={:.3e}",
-                        bjt.name,
-                        max_delta_i_eq,
-                        reduced_i_eq,
-                        base_static_i_eq,
-                        delta_i_eq,
-                        snapshot.reduction.internal_voltages[BJT_DELAY_XF1_STATE_INDEX],
-                        snapshot.reduction.internal_voltages[BJT_DELAY_XF2_STATE_INDEX],
-                        snapshot.reduction.internal_voltages[BJT_THERMAL_STATE_INDEX],
+                    let cq = Self::jfet_companion_ccap(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        branch.charge,
+                        history.charge_q_prev[idx][branch_idx],
+                        history.charge_q_prev_prev[idx][branch_idx],
+                        history.charge_cq_prev[idx][branch_idx],
+                    );
+                    Self::stamp_vbic_mna_charge_branch(
+                        &mut stamper,
+                        bjt,
+                        branch,
+                        charge_factor,
+                        cq,
+                        &internal,
+                        &external,
                     );
                 }
-                let nodes = [
-                    bjt.node_collector,
-                    bjt.node_base,
-                    bjt.node_emitter,
-                    bjt.node_substrate,
-                ];
-                Self::stamp_external_reduced_system(matrix, rhs, &nodes, &delta, &delta_i_eq);
                 continue;
             }
 
@@ -509,6 +449,71 @@ impl Engine {
                 bjt.node_substrate,
             ];
             Self::stamp_external_reduced_system(matrix, rhs, &nodes, &delta, &delta_i_eq);
+        }
+    }
+
+    /// Stamp one promoted VBIC charge branch as a Norton companion on its
+    /// actual matrix nodes. Charge branches use the standard MNA orientation:
+    /// the integrated current `cq` leaves the positive node and enters the
+    /// negative node, with conductance `ag0 * dq/dv` across every coupled
+    /// column and the linearization point folded into the source term.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_vbic_mna_charge_branch(
+        stamper: &mut impl crate::device::MatrixStamper,
+        bjt: &crate::device::Bjt,
+        branch: &BjtChargeBranch,
+        ag0: Value,
+        cq: Value,
+        internal: &[Value; BJT_INTERNAL_STATE_DIM],
+        external: &[Value; BJT_EXTERNAL_STATE_DIM],
+    ) {
+        let external_nodes = [
+            bjt.node_collector,
+            bjt.node_base,
+            bjt.node_emitter,
+            bjt.node_substrate,
+        ];
+        let mut source = -cq;
+        for col in 0..BJT_INTERNAL_STATE_DIM {
+            source += ag0 * branch.d_internal[col] * internal[col];
+        }
+        for col in 0..BJT_EXTERNAL_STATE_DIM {
+            source += ag0 * branch.d_external[col] * external[col];
+        }
+
+        let mut stamp_row = |row: crate::circuit::NodeId, sign: Value| {
+            if row == 0 {
+                return;
+            }
+            for col in 0..BJT_INTERNAL_STATE_DIM {
+                let g = ag0 * branch.d_internal[col];
+                if g != 0.0 {
+                    stamper.stamp(row, bjt.vbic_internal_node(col), sign * g);
+                }
+            }
+            for col in 0..BJT_EXTERNAL_STATE_DIM {
+                let g = ag0 * branch.d_external[col];
+                if g != 0.0 {
+                    stamper.stamp(row, external_nodes[col], sign * g);
+                }
+            }
+            stamper.stamp_rhs(row, sign * source);
+        };
+
+        let pos = branch
+            .pos_internal
+            .map(|idx| bjt.vbic_internal_node(idx))
+            .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
+        let neg = branch
+            .neg_internal
+            .map(|idx| bjt.vbic_internal_node(idx))
+            .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
+        if let Some(row) = pos {
+            stamp_row(row, 1.0);
+        }
+        if let Some(row) = neg {
+            stamp_row(row, -1.0);
         }
     }
 
@@ -1448,68 +1453,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn limit_vbic_transient_external_updates(
-        circuit: &crate::circuit::Circuit,
-        proposal: &mut [Value],
-        previous: &[Value],
-        accepted: &[Value],
-        num_nodes: usize,
-        protected_nodes: &[bool],
-        accepted_delta_limit: Value,
-    ) -> bool {
-        let mut changed = Self::limit_vbic_external_updates(
-            circuit,
-            proposal,
-            previous,
-            num_nodes,
-            Some(protected_nodes),
-            true,
-        );
-        if !std::ptr::eq(previous.as_ptr(), accepted.as_ptr()) {
-            changed |= Self::limit_vbic_external_updates(
-                circuit,
-                proposal,
-                accepted,
-                num_nodes,
-                Some(protected_nodes),
-                true,
-            );
-        }
-        if accepted_delta_limit.is_finite() && accepted_delta_limit > 0.0 {
-            for bjt in &circuit.bjts.devices {
-                if !bjt.uses_vbic_dynamic_charges() || bjt.td <= 0.0 {
-                    continue;
-                }
-                for node in [
-                    bjt.node_collector,
-                    bjt.node_base,
-                    bjt.node_emitter,
-                    bjt.node_substrate,
-                ] {
-                    if node == 0 {
-                        continue;
-                    }
-                    let proposal_idx = node - 1;
-                    if proposal_idx >= num_nodes
-                        || protected_nodes.get(proposal_idx).copied().unwrap_or(false)
-                    {
-                        continue;
-                    }
-                    let accepted_value = accepted[proposal_idx];
-                    let proposal_value = proposal[proposal_idx];
-                    let delta = proposal_value - accepted_value;
-                    if !delta.is_finite() || delta.abs() <= accepted_delta_limit {
-                        continue;
-                    }
-                    proposal[proposal_idx] = accepted_value + delta.signum() * accepted_delta_limit;
-                    changed = true;
-                }
-            }
-        }
-        changed
-    }
-
-    #[inline]
     pub(super) fn bounded_force_accept_candidate(
         circuit: &crate::circuit::Circuit,
         previous_solution: &[Value],
@@ -1891,37 +1834,13 @@ impl Engine {
             let vbe = vb - ve;
             let vbc = vb - vc;
             let vcs = vc - vs;
-            if bjt.uses_vbic_dynamic_charges() {
-                let snapshot_reuse_abstol = voltage_abstol.min(VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL);
-                let snapshot_reuse_reltol = voltage_reltol.min(VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL);
-                let cached_snapshot = vbic_snapshots
-                    .and_then(|cache| cache.get(idx))
-                    .copied()
-                    .flatten();
-                let Some(snapshot) =
-                    Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                        bjt,
-                        external,
-                        method,
-                        trap_order,
-                        dt,
-                        &bjt_history.charge_q_prev[idx],
-                        &bjt_history.charge_q_prev_prev[idx],
-                        &bjt_history.charge_cq_prev[idx],
-                        bjt_history.dynamic_internal_prev.get(idx),
-                        bjt_history.dynamic_internal_prev_prev.get(idx),
-                        bjt_history.dynamic_linear_prev.get(idx),
-                        bjt_history.dynamic_linear_prev_prev.get(idx),
-                        bjt_history.accepted_dt_prev,
-                        cached_snapshot,
-                        VbicCachedSnapshotReuse::SeedOnly,
-                        snapshot_reuse_abstol,
-                        snapshot_reuse_reltol,
-                    )
-                else {
-                    continue;
-                };
-                for (branch_idx, branch) in snapshot.branches.iter().enumerate() {
+            if bjt.vbic_mna_promoted() {
+                // Promoted VBIC: the accepted solution already carries the
+                // internal node voltages, so the charge history commits from
+                // a direct evaluation at the accepted bias.
+                let (branches, internal, _) =
+                    bjt.vbic_mna_charge_state_at_solution(accepted_solution);
+                for (branch_idx, branch) in branches.iter().enumerate() {
                     let q_prev = bjt_history.charge_q_prev[idx][branch_idx];
                     let q_prev_prev = bjt_history.charge_q_prev_prev[idx][branch_idx];
                     let cq_prev = bjt_history.charge_cq_prev[idx][branch_idx];
@@ -1941,14 +1860,7 @@ impl Engine {
                 }
                 bjt_history.dynamic_internal_prev_prev[idx] =
                     bjt_history.dynamic_internal_prev[idx];
-                bjt_history.dynamic_internal_prev[idx] = snapshot.reduction.internal_voltages;
-                let predictor_linear = Self::vbic_predictor_linear_branch_state(
-                    bjt,
-                    external,
-                    snapshot.reduction.internal_voltages,
-                );
-                bjt_history.dynamic_linear_prev_prev[idx] = bjt_history.dynamic_linear_prev[idx];
-                bjt_history.dynamic_linear_prev[idx] = predictor_linear;
+                bjt_history.dynamic_internal_prev[idx] = internal;
                 bjt_history.vbe_prev_prev[idx] = bjt_history.vbe_prev[idx];
                 bjt_history.vbe_prev[idx] = vbe;
                 bjt_history.ibe_prev[idx] = 0.0;

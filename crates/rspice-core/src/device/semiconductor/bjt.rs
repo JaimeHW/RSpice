@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 
 mod dynamic;
 mod intrinsic;
+mod mna;
 mod params;
 mod solve;
 
@@ -509,6 +510,28 @@ pub struct Bjt {
     /// Optional substrate node (4-terminal BJT syntax)
     pub node_substrate: NodeId,
 
+    // MNA-promoted VBIC internal nodes (ngspice vbicsetup.c topology). The
+    // circuit builder assigns these through `assign_vbic_internal_nodes`,
+    // aliasing collapsed states onto their parent nodes (`cx` onto the
+    // collector when RCX is zero, `ci` onto `cx` when RCI is zero, and so on)
+    // so every state keeps exactly one matrix column. `node_rth` and the
+    // excess-phase pair stay zero (ground, dropped by stampers) when
+    // self-heating or TD is disabled.
+    pub node_cx: NodeId,
+    pub node_ci: NodeId,
+    pub node_bx: NodeId,
+    pub node_bi: NodeId,
+    pub node_ei: NodeId,
+    pub node_bp: NodeId,
+    pub node_si: NodeId,
+    pub node_rth: NodeId,
+    pub node_xf1: NodeId,
+    pub node_xf2: NodeId,
+    /// True once the builder has promoted this VBIC instance's internal
+    /// states to MNA unknowns; legacy Gummel-Poon instances stay on the
+    /// reduced 4-terminal Schur stamp.
+    vbic_mna_promoted: bool,
+
     // Model parameters (Ebers-Moll)
     /// Saturation current (IS)
     pub is: Value,
@@ -827,6 +850,9 @@ pub struct Bjt {
     vbp: Value,
     vsi: Value,
     vrth: Value,
+    /// Excess-phase network states read from the MNA solution (TD > 0 only).
+    vxf1: Value,
+    vxf2: Value,
     vc_ext: Value,
     vb_ext: Value,
     ve_ext: Value,
@@ -862,6 +888,19 @@ pub struct Bjt {
     previous_reduced_linearization_valid: bool,
     charge_snapshot_cache: Cell<BjtChargeSnapshot>,
     charge_snapshot_cache_valid: Cell<bool>,
+    /// Static linearization at the limited MNA bias, written by
+    /// `update_vbic_mna` and consumed by the promoted stamp paths.
+    mna_eval: Option<EvaluatedBjtState>,
+    /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
+    /// MNA bias (TD > 0 only).
+    mna_delay_branches: [BjtCurrentBranch; 3],
+    /// Excess-phase correction to the thermal power row (TD > 0 with
+    /// self-heating only).
+    mna_delay_thermal: BjtCurrentBranch,
+    /// Dynamic charge branches at the limited MNA bias, computed on demand
+    /// for the transient companion and AC passes.
+    mna_charge_cache: Cell<[BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT]>,
+    mna_charge_cache_valid: Cell<bool>,
     thermal_variant_cache: RefCell<Vec<(u64, Box<Bjt>)>>,
 }
 
@@ -895,6 +934,17 @@ impl Bjt {
             node_base: base,
             node_emitter: emitter,
             node_substrate: 0,
+            node_cx: 0,
+            node_ci: 0,
+            node_bx: 0,
+            node_bi: 0,
+            node_ei: 0,
+            node_bp: 0,
+            node_si: 0,
+            node_rth: 0,
+            node_xf1: 0,
+            node_xf2: 0,
+            vbic_mna_promoted: false,
 
             // Default parameters (2N2222-like for NPN)
             is: 1e-14,          // Saturation current
@@ -1061,6 +1111,8 @@ impl Bjt {
             vbp: 0.0,
             vsi: 0.0,
             vrth: 0.0,
+            vxf1: 0.0,
+            vxf2: 0.0,
             vc_ext: 0.0,
             vb_ext: 0.0,
             ve_ext: 0.0,
@@ -1092,6 +1144,11 @@ impl Bjt {
             previous_reduced_linearization_valid: false,
             charge_snapshot_cache: Cell::new(BjtChargeSnapshot::default()),
             charge_snapshot_cache_valid: Cell::new(false),
+            mna_eval: None,
+            mna_delay_branches: [BjtCurrentBranch::default(); 3],
+            mna_delay_thermal: BjtCurrentBranch::default(),
+            mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),
+            mna_charge_cache_valid: Cell::new(false),
             thermal_variant_cache: RefCell::new(Vec::new()),
         }
     }
@@ -1296,6 +1353,10 @@ impl Bjt {
 
 impl NonlinearDevice for Bjt {
     fn update(&mut self, voltages: &[Value]) {
+        if self.vbic_mna_promoted {
+            self.update_vbic_mna(voltages);
+            return;
+        }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let previous_linearization_available = self.reduced_linearization_cache_valid.get()
             && self.cache_matches_external_biases(
@@ -1368,6 +1429,12 @@ impl NonlinearDevice for Bjt {
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
+        if self.vbic_mna_promoted {
+            // The promoted stamp is linearized at the limited bias cached by
+            // `update`, exactly like ngspice's limited-Vbei companion load.
+            self.stamp_vbic_mna(matrix);
+            return;
+        }
         let biases = self.external_terminal_voltages(voltages);
         let rows = self.small_signal_row_coefficients(
             biases[EXT_C],

@@ -379,14 +379,6 @@ impl Engine {
                         )
                     },
                 );
-                Self::limit_vbic_external_updates(
-                    circuit,
-                    &mut new_solution,
-                    &solution,
-                    circuit.num_nodes().min(size),
-                    None,
-                    false,
-                );
                 Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
                 let converged = self.node_voltage_convergence_met(
@@ -764,14 +756,6 @@ impl Engine {
                             &raw_solution,
                             &mut damping_state,
                             |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
-                        );
-                        Self::limit_vbic_external_updates(
-                            circuit,
-                            &mut new_solution,
-                            &solution,
-                            circuit.num_nodes().min(size),
-                            None,
-                            false,
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 

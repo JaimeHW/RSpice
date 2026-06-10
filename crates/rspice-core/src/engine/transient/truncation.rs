@@ -4,70 +4,6 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(super) fn collect_vbic_truncation_charge_state(
-        circuit: &crate::circuit::Circuit,
-        voltages: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
-        history: &BjtTransientHistory,
-        vbic_snapshot_cache: Option<&[Option<BjtChargeSnapshot>]>,
-        snapshot_reuse_abstol: Value,
-        snapshot_reuse_reltol: Value,
-    ) -> Option<Vec<Value>> {
-        let vbic_device_count = circuit
-            .bjts
-            .devices
-            .iter()
-            .filter(|bjt| bjt.uses_vbic_dynamic_charges())
-            .count();
-        if vbic_device_count == 0 {
-            return None;
-        }
-
-        let mut charges =
-            Vec::with_capacity(vbic_device_count.saturating_mul(BJT_VBIC_TRUNCATION_BRANCH_COUNT));
-
-        for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            if !bjt.uses_vbic_dynamic_charges() {
-                continue;
-            }
-
-            let vc = Self::node_voltage(voltages, bjt.node_collector);
-            let vb = Self::node_voltage(voltages, bjt.node_base);
-            let ve = Self::node_voltage(voltages, bjt.node_emitter);
-            let vs = Self::node_voltage(voltages, bjt.node_substrate);
-            let snapshot = Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                bjt,
-                [vc, vb, ve, vs],
-                method,
-                trap_order,
-                dt,
-                &history.charge_q_prev[idx],
-                &history.charge_q_prev_prev[idx],
-                &history.charge_cq_prev[idx],
-                history.dynamic_internal_prev.get(idx),
-                history.dynamic_internal_prev_prev.get(idx),
-                history.dynamic_linear_prev.get(idx),
-                history.dynamic_linear_prev_prev.get(idx),
-                history.accepted_dt_prev,
-                vbic_snapshot_cache.and_then(|cache| cache.get(idx).copied().flatten()),
-                VbicCachedSnapshotReuse::SeedOnly,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
-            )?;
-
-            charges.extend(
-                snapshot.branches[..BJT_VBIC_TRUNCATION_BRANCH_COUNT]
-                    .iter()
-                    .map(|branch| branch.charge),
-            );
-        }
-
-        Some(charges)
-    }
-
-    #[inline]
     pub(super) fn ngspice_vbic_truncation_factor(method: IntegrationMethod, order: u8) -> Value {
         match order.max(1) {
             1 => 0.5,
@@ -233,8 +169,6 @@ impl Engine {
         trap_order: u8,
         dt: Value,
         history: &BjtTransientHistory,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-        voltage_abstol: Value,
         reltol: Value,
         current_abstol: Value,
         charge_abstol: Value,
@@ -245,54 +179,17 @@ impl Engine {
         let mut found_branch = false;
 
         for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            if !bjt.uses_vbic_dynamic_charges() {
+            if !bjt.vbic_mna_promoted() {
                 continue;
             }
 
-            let vc = Self::node_voltage(candidate_solution, bjt.node_collector);
-            let vb = Self::node_voltage(candidate_solution, bjt.node_base);
-            let ve = Self::node_voltage(candidate_solution, bjt.node_emitter);
-            let vs = Self::node_voltage(candidate_solution, bjt.node_substrate);
-            let candidate_external = [vc, vb, ve, vs];
-            let cached_snapshot =
-                vbic_snapshot_cache
-                    .get(idx)
-                    .copied()
-                    .flatten()
-                    .filter(|snapshot| {
-                        Self::vbic_snapshot_matches_external_bias_exact(
-                            snapshot,
-                            &candidate_external,
-                        )
-                    });
-            let snapshot = if let Some(snapshot) = cached_snapshot {
-                snapshot
-            } else {
-                let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
-                    Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
-                Self::resolve_vbic_snapshot_for_external_bias_with_linear_history(
-                    bjt,
-                    candidate_external,
-                    method,
-                    trap_order,
-                    dt,
-                    &history.charge_q_prev[idx],
-                    &history.charge_q_prev_prev[idx],
-                    &history.charge_cq_prev[idx],
-                    history.dynamic_internal_prev.get(idx),
-                    history.dynamic_internal_prev_prev.get(idx),
-                    history.dynamic_linear_prev.get(idx),
-                    history.dynamic_linear_prev_prev.get(idx),
-                    history.accepted_dt_prev,
-                    vbic_snapshot_cache.get(idx).copied().flatten(),
-                    VbicCachedSnapshotReuse::SeedOnly,
-                    snapshot_reuse_abstol,
-                    snapshot_reuse_reltol,
-                )?
-            };
+            // Promoted VBIC: the candidate solution carries the internal node
+            // voltages, so the charges evaluate directly at the candidate
+            // bias (ngspice VBICtrunc CKTterr over the charge states).
+            let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(candidate_solution);
 
             for branch_idx in 0..BJT_VBIC_TRUNCATION_BRANCH_COUNT {
-                let q_curr = snapshot.branches[branch_idx].charge;
+                let q_curr = branches[branch_idx].charge;
                 let q_prev = history.charge_q_prev[idx][branch_idx];
                 let q_prev_prev = history.charge_q_prev_prev[idx][branch_idx];
                 let q_prev_prev_prev = history.charge_q_prev_prev_prev[idx][branch_idx];
@@ -485,8 +382,6 @@ impl Engine {
             trap_order,
             dt,
             history,
-            vbic_snapshot_cache,
-            voltage_abstol,
             reltol,
             current_abstol,
             charge_abstol,
@@ -1090,109 +985,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn vbic_charge_lte_startup_window_end(
-        hinted_max_step: Value,
-        smallest_vbic_excess_phase_td: Option<Value>,
-    ) -> Value {
-        let maxstep_window = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
-            hinted_max_step * 0.1
-        } else {
-            Value::INFINITY
-        };
-        let td_window = smallest_vbic_excess_phase_td
-            .filter(|td| td.is_finite() && *td > 0.0)
-            .map(|td| td * 32.0)
-            .unwrap_or(maxstep_window);
-
-        maxstep_window.min(td_window)
-    }
-
-    #[inline]
-    pub(super) fn vbic_excess_phase_startup_step_cap(
-        hinted_max_step: Value,
-        smallest_vbic_excess_phase_td: Option<Value>,
-    ) -> Option<Value> {
-        let td = smallest_vbic_excess_phase_td.filter(|td| td.is_finite() && *td > 0.0)?;
-        let hinted_max_step = if hinted_max_step.is_finite() && hinted_max_step > 0.0 {
-            hinted_max_step
-        } else {
-            Value::INFINITY
-        };
-
-        Some((td * 0.25).clamp(1e-15, hinted_max_step))
-    }
-
-    #[inline]
-    pub(super) fn should_use_vbic_charge_lte_startup_guard(
-        has_vbic_excess_phase: bool,
-        step_time: Value,
-        hinted_max_step: Value,
-        smallest_vbic_excess_phase_td: Option<Value>,
-    ) -> bool {
-        has_vbic_excess_phase
-            && step_time.is_finite()
-            && step_time
-                <= Self::vbic_charge_lte_startup_window_end(
-                    hinted_max_step,
-                    smallest_vbic_excess_phase_td,
-                )
-    }
-
-    #[inline]
-    pub(super) fn should_hold_vbic_excess_phase_first_order(
-        has_vbic_excess_phase: bool,
-        _accepted_time: Value,
-        _hinted_max_step: Value,
-        _smallest_vbic_excess_phase_td: Option<Value>,
-    ) -> bool {
-        // ngspice does not impose a VBIC-specific first-order hold once the
-        // current timepoint has been accepted. Promotion back to order 2 is
-        // controlled solely by the same order-2 truncation check used for any
-        // trapezoidal transient step.
-        let _ = has_vbic_excess_phase;
-        false
-    }
-
-    #[inline]
-    pub(super) fn should_use_vbic_charge_lte_estimator(
-        has_vbic_excess_phase: bool,
-        step_time: Value,
-        hinted_max_step: Value,
-        smallest_vbic_excess_phase_td: Option<Value>,
-        dt: Value,
-        preferred_min_dt: Value,
-    ) -> bool {
-        dt.is_finite()
-            && dt > preferred_min_dt
-            && Self::should_use_vbic_charge_lte_startup_guard(
-                has_vbic_excess_phase,
-                step_time,
-                hinted_max_step,
-                smallest_vbic_excess_phase_td,
-            )
-    }
-
-    #[inline]
-    pub(super) fn should_defer_voltage_lte_to_vbic_truncation(
-        has_vbic_excess_phase: bool,
-        step_time: Value,
-        hinted_max_step: Value,
-        smallest_vbic_excess_phase_td: Option<Value>,
-        vbic_truncation_limit: Option<Value>,
-        using_vbic_charge_lte_estimator: bool,
-    ) -> bool {
-        has_vbic_excess_phase
-            && !using_vbic_charge_lte_estimator
-            && vbic_truncation_limit.is_some()
-            && Self::should_use_vbic_charge_lte_startup_guard(
-                has_vbic_excess_phase,
-                step_time,
-                hinted_max_step,
-                smallest_vbic_excess_phase_td,
-            )
-    }
-
-    #[inline]
     pub(super) fn bjt_charge_truncation_covers_transient_lte(
         circuit: &crate::circuit::Circuit,
         bjt_truncation_limit: Option<Value>,
@@ -1283,59 +1075,15 @@ impl Engine {
     pub(super) fn estimate_transient_lte(
         circuit: &crate::circuit::Circuit,
         candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
         dt: Value,
         is_strictly_linear_transient: bool,
-        bjt_history: &BjtTransientHistory,
         voltage_lte_estimator: &LteEstimator,
-        vbic_charge_lte_estimator: Option<&LteEstimator>,
-        vbic_snapshot_cache: Option<&[Option<BjtChargeSnapshot>]>,
-        voltage_abstol: Value,
-        reltol: Value,
-    ) -> (Value, bool, bool) {
+    ) -> (Value, bool) {
         if is_strictly_linear_transient {
-            return (0.0, true, false);
+            return (0.0, true);
         }
 
-        let (snapshot_reuse_abstol, snapshot_reuse_reltol) =
-            Self::vbic_runtime_snapshot_reuse_tolerances(voltage_abstol, reltol);
-        if let Some(charge_lte_estimator) = vbic_charge_lte_estimator
-            && let Some(vbic_charge_state) = Self::collect_vbic_truncation_charge_state(
-                circuit,
-                candidate_solution,
-                method,
-                trap_order,
-                dt,
-                bjt_history,
-                vbic_snapshot_cache,
-                snapshot_reuse_abstol,
-                snapshot_reuse_reltol,
-            )
-        {
-            let (lte, accept) = charge_lte_estimator.estimate(&vbic_charge_state, dt);
-            return (lte, accept, true);
-        }
-
-        let (lte, accept) =
-            voltage_lte_estimator.estimate_prefix(candidate_solution, circuit.num_nodes(), dt);
-        (lte, accept, false)
-    }
-
-    #[inline]
-    pub(super) fn recommend_transient_lte_scale(
-        voltage_lte_estimator: &LteEstimator,
-        vbic_charge_lte_estimator: Option<&LteEstimator>,
-        lte: Value,
-        uses_vbic_charge_lte: bool,
-    ) -> Value {
-        if uses_vbic_charge_lte {
-            vbic_charge_lte_estimator
-                .unwrap_or(voltage_lte_estimator)
-                .recommend_scale(lte)
-        } else {
-            voltage_lte_estimator.recommend_scale(lte)
-        }
+        voltage_lte_estimator.estimate_prefix(candidate_solution, circuit.num_nodes(), dt)
     }
 
     #[inline]
@@ -1349,7 +1097,6 @@ impl Engine {
         jfet_history: &JfetTransientHistory,
         mosfet_history: &MosfetTransientHistory,
         voltage_lte_estimator: &LteEstimator,
-        vbic_charge_lte_estimator: Option<&LteEstimator>,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
         reltol: Value,
@@ -1396,19 +1143,12 @@ impl Engine {
             });
         }
 
-        let (candidate_lte, accept, uses_vbic_charge_lte) = Self::estimate_transient_lte(
+        let (candidate_lte, accept) = Self::estimate_transient_lte(
             circuit,
             accepted_solution,
-            method,
-            2,
             dt,
             is_strictly_linear_transient,
-            history,
             voltage_lte_estimator,
-            vbic_charge_lte_estimator,
-            Some(vbic_snapshot_cache),
-            voltage_abstol,
-            reltol,
         );
         if !accept {
             return None;
@@ -1417,12 +1157,7 @@ impl Engine {
         let candidate_scale = if is_strictly_linear_transient {
             1.0
         } else {
-            Self::recommend_transient_lte_scale(
-                voltage_lte_estimator,
-                vbic_charge_lte_estimator,
-                candidate_lte,
-                uses_vbic_charge_lte,
-            )
+            voltage_lte_estimator.recommend_scale(candidate_lte)
         };
         if candidate_scale >= 0.95 {
             Some(TrapezoidalOrderTrial {
@@ -1431,38 +1166,6 @@ impl Engine {
             })
         } else {
             None
-        }
-    }
-
-    #[inline]
-    pub(super) fn record_vbic_truncation_charge_state(
-        estimator: &mut Option<LteEstimator>,
-        circuit: &crate::circuit::Circuit,
-        accepted_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
-        history: &BjtTransientHistory,
-        vbic_snapshot_cache: Option<&[Option<BjtChargeSnapshot>]>,
-        method_order: u32,
-    ) {
-        let Some(estimator) = estimator.as_mut() else {
-            return;
-        };
-
-        if let Some(vbic_charge_state) = Self::collect_vbic_truncation_charge_state(
-            circuit,
-            accepted_solution,
-            method,
-            trap_order,
-            dt,
-            history,
-            vbic_snapshot_cache,
-            VBIC_HISTORY_SNAPSHOT_REUSE_ABSTOL,
-            VBIC_HISTORY_SNAPSHOT_REUSE_RELTOL,
-        ) {
-            estimator.record(&vbic_charge_state, dt);
-            estimator.set_method_order(method_order);
         }
     }
 

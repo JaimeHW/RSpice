@@ -145,124 +145,9 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::transient) fn vbic_excess_phase_device_convergence_met(
-        &self,
-        circuit: &crate::circuit::Circuit,
-        previous_solution: &[Value],
-        current_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
-        history: &BjtTransientHistory,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-    ) -> bool {
-        let effective_method = Self::effective_companion_method(method, trap_order);
-        let criteria = self.device_convergence_criteria();
-
-        for (idx, bjt) in circuit.bjts.devices.iter().enumerate() {
-            if !bjt.uses_vbic_dynamic_charges() || bjt.td <= 0.0 {
-                continue;
-            }
-
-            let previous_external = [
-                Self::node_voltage(previous_solution, bjt.node_collector),
-                Self::node_voltage(previous_solution, bjt.node_base),
-                Self::node_voltage(previous_solution, bjt.node_emitter),
-                Self::node_voltage(previous_solution, bjt.node_substrate),
-            ];
-            let current_external = [
-                Self::node_voltage(current_solution, bjt.node_collector),
-                Self::node_voltage(current_solution, bjt.node_base),
-                Self::node_voltage(current_solution, bjt.node_emitter),
-                Self::node_voltage(current_solution, bjt.node_substrate),
-            ];
-
-            let previous_snapshot = vbic_snapshot_cache
-                .get(idx)
-                .copied()
-                .flatten()
-                .filter(|snapshot| {
-                    snapshot
-                        .reduction
-                        .external_voltages
-                        .iter()
-                        .zip(previous_external.iter())
-                        .all(|(cached, expected)| (*cached - *expected).abs() <= 1e-18)
-                })
-                .or_else(|| {
-                    let seed_internal =
-                        Self::vbic_dynamic_internal_seed_from_history_with_linear_history(
-                            bjt,
-                            previous_external[0],
-                            previous_external[1],
-                            previous_external[2],
-                            previous_external[3],
-                            history.dynamic_internal_prev.get(idx),
-                            history.dynamic_internal_prev_prev.get(idx),
-                            history.dynamic_linear_prev.get(idx),
-                            history.dynamic_linear_prev_prev.get(idx),
-                            dt,
-                            history.accepted_dt_prev,
-                        );
-                    Self::solve_vbic_dynamic_snapshot(
-                        bjt,
-                        previous_external[0],
-                        previous_external[1],
-                        previous_external[2],
-                        previous_external[3],
-                        effective_method,
-                        trap_order,
-                        dt,
-                        &history.charge_q_prev[idx],
-                        &history.charge_q_prev_prev[idx],
-                        &history.charge_cq_prev[idx],
-                        Some(&seed_internal),
-                    )
-                    .map(|(snapshot, _, _)| snapshot)
-                });
-            let Some(previous_snapshot) = previous_snapshot else {
-                return false;
-            };
-
-            let current_snapshot = Self::solve_vbic_dynamic_snapshot(
-                bjt,
-                current_external[0],
-                current_external[1],
-                current_external[2],
-                current_external[3],
-                effective_method,
-                trap_order,
-                dt,
-                &history.charge_q_prev[idx],
-                &history.charge_q_prev_prev[idx],
-                &history.charge_cq_prev[idx],
-                Some(&previous_snapshot.reduction.internal_voltages),
-            )
-            .map(|(snapshot, _, _)| snapshot);
-            let Some(current_snapshot) = current_snapshot else {
-                return false;
-            };
-
-            if !Self::vbic_snapshot_convergence_met(
-                bjt,
-                previous_external,
-                &previous_snapshot,
-                current_external,
-                &current_snapshot,
-                criteria,
-            ) {
-                return false;
-            }
-        }
-
-        true
-    }
-
-    #[inline]
     pub(in crate::engine::transient) fn transient_static_device_convergence_met(
         &self,
         circuit: &crate::circuit::Circuit,
-        has_vbic_excess_phase: bool,
     ) -> bool {
         let criteria = self.device_convergence_criteria();
 
@@ -272,13 +157,7 @@ impl Engine {
             && circuit.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && circuit.iswitches.iter().all(|sw| sw.is_converged(criteria))
             && circuit.xspice_converged(criteria.voltage_tolerance())
-            && circuit.bjts.devices.iter().all(|bjt| {
-                if has_vbic_excess_phase && bjt.uses_vbic_dynamic_charges() && bjt.td > 0.0 {
-                    true
-                } else {
-                    bjt.is_converged(criteria)
-                }
-            })
+            && circuit.bjts.all_converged(criteria)
     }
 
     #[inline]

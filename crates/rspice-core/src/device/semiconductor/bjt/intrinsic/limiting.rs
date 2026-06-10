@@ -760,19 +760,17 @@ impl Bjt {
 
     /// Per-iteration junction-limiting scale for any BJT charge model.
     ///
-    /// Dispatches to the VBIC or legacy Gummel-Poon limiter; returns `None`
-    /// when the proposed update needs no limiting.
+    /// Dispatches to the legacy Gummel-Poon limiter; returns `None` when the
+    /// proposed update needs no limiting. MNA-promoted VBIC devices run
+    /// ngspice's pnjlim discipline on their own internal junctions inside
+    /// `update`, so their external nodes take full Newton steps.
     pub(crate) fn junction_external_step_limit_scale_against_previous(
         &self,
         previous_external: [Value; EXTERNAL_DIM],
         proposed_external: [Value; EXTERNAL_DIM],
     ) -> Option<Value> {
         match self.charge_model {
-            BjtChargeModel::Vbic => self
-                .vbic_external_step_limit_scale_against_previous(
-                    previous_external,
-                    proposed_external,
-                ),
+            BjtChargeModel::Vbic => None,
             BjtChargeModel::LegacyGummelPoon => {
                 let previous_internal = if self
                     .vbic_cached_external_matches(previous_external, 1e-12, 1e-9)
@@ -805,37 +803,4 @@ impl Bjt {
         }
     }
 
-    pub(crate) fn vbic_external_step_limit_scale_against_previous(
-        &self,
-        previous_external: [Value; EXTERNAL_DIM],
-        proposed_external: [Value; EXTERNAL_DIM],
-    ) -> Option<Value> {
-        let previous_internal = if self.vbic_cached_external_matches(previous_external, 1e-12, 1e-9)
-        {
-            self.internal_state_vector()
-        } else {
-            let solved_previous = self.solve_intrinsic_terminal_state(
-                previous_external[EXT_C],
-                previous_external[EXT_B],
-                previous_external[EXT_E],
-                previous_external[EXT_S],
-            );
-            [
-                solved_previous.vcx,
-                solved_previous.vci,
-                solved_previous.vbx,
-                solved_previous.vbi,
-                solved_previous.vei,
-                solved_previous.vbp,
-                solved_previous.vsi,
-                solved_previous.vrth,
-            ]
-        };
-
-        self.vbic_external_step_limit_scale_from_state(
-            previous_external,
-            previous_internal,
-            proposed_external,
-        )
-    }
 }

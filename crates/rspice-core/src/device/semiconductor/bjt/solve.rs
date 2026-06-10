@@ -75,11 +75,7 @@ impl Bjt {
         let has_rs = Self::series_active(self.rs);
         let has_self_heat = self.self_heating_enabled();
         let reuse_previous_state = self.reduced_linearization_cache_valid.get();
-        let solve_vbp = Self::series_active(self.rbp)
-            || self.ibeip > 0.0
-            || self.ibenp > 0.0
-            || self.ibcip > 0.0
-            || self.ibcnp > 0.0;
+        let solve_vbp = self.vbic_solves_vbp();
 
         let mut vcx = if reuse_previous_state {
             self.vcx
@@ -301,11 +297,7 @@ impl Bjt {
         let has_re = Self::series_active(self.re);
         let has_rs = Self::series_active(self.rs);
         let has_self_heat = self.self_heating_enabled();
-        let solve_vbp = Self::series_active(self.rbp)
-            || self.ibeip > 0.0
-            || self.ibenp > 0.0
-            || self.ibcip > 0.0
-            || self.ibcnp > 0.0;
+        let solve_vbp = self.vbic_solves_vbp();
 
         let eval = self.evaluate_state(
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
@@ -948,6 +940,13 @@ impl Bjt {
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
+        if self.vbic_mna_promoted() {
+            // The promoted static system (terminal rows, internal KCL rows,
+            // and excess-phase algebraic rows) is the small-signal real part;
+            // AC stampers ignore the rhs source terms.
+            self.stamp_vbic_mna(matrix);
+            return;
+        }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();

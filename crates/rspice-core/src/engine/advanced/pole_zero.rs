@@ -52,6 +52,71 @@ impl Engine {
                 continue;
             }
 
+            if bjt.vbic_mna_promoted() {
+                // Promoted VBIC: the internal states are matrix unknowns and
+                // the static linearization is already in the base G matrix,
+                // so only the charge derivatives join the C descriptor, on
+                // their actual system rows/columns.
+                let (branches, _, _) = bjt.vbic_mna_charge_state_at_solution(op_voltages);
+                let external_nodes = [
+                    bjt.node_collector,
+                    bjt.node_base,
+                    bjt.node_emitter,
+                    bjt.node_substrate,
+                ];
+                for (branch_idx, branch) in branches.iter().enumerate() {
+                    if !branch.is_active() {
+                        continue;
+                    }
+                    if branch_idx + 2 >= BJT_DYNAMIC_CHARGE_COUNT {
+                        // ngspice small-signal parity excludes VBIC excess-phase
+                        // TD companion charges from linearized frequency-domain
+                        // matrices.
+                        continue;
+                    }
+
+                    let mut stamp_row = |row: crate::NodeId, sign: Value| {
+                        let Some(row_idx) = Self::optional_system_index(row) else {
+                            return;
+                        };
+                        for col in 0..BJT_INTERNAL_STATE_DIM {
+                            let c = branch.d_internal[col];
+                            if c != 0.0
+                                && let Some(col_idx) =
+                                    Self::optional_system_index(bjt.vbic_internal_node(col))
+                            {
+                                c_matrix.add(row_idx, col_idx, sign * c);
+                            }
+                        }
+                        for col in 0..BJT_EXTERNAL_STATE_DIM {
+                            let c = branch.d_external[col];
+                            if c != 0.0
+                                && let Some(col_idx) =
+                                    Self::optional_system_index(external_nodes[col])
+                            {
+                                c_matrix.add(row_idx, col_idx, sign * c);
+                            }
+                        }
+                    };
+
+                    let pos = branch
+                        .pos_internal
+                        .map(|idx| bjt.vbic_internal_node(idx))
+                        .or_else(|| branch.pos_external.map(|idx| external_nodes[idx]));
+                    let neg = branch
+                        .neg_internal
+                        .map(|idx| bjt.vbic_internal_node(idx))
+                        .or_else(|| branch.neg_external.map(|idx| external_nodes[idx]));
+                    if let Some(row) = pos {
+                        stamp_row(row, 1.0);
+                    }
+                    if let Some(row) = neg {
+                        stamp_row(row, -1.0);
+                    }
+                }
+                continue;
+            }
+
             let vc = Self::ac_linearization_node_voltage(op_voltages, bjt.node_collector);
             let vb = Self::ac_linearization_node_voltage(op_voltages, bjt.node_base);
             let ve = Self::ac_linearization_node_voltage(op_voltages, bjt.node_emitter);

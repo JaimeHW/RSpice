@@ -73,12 +73,9 @@ const MAX_FORCE_ACCEPT_DELTA_V: Value = 5e-2;
 /// Relaxed trust-region limit used only during early startup when DC OP failed and
 /// transient had to begin from a linearized seed.
 const STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
-/// Moderately relaxed early-step trust region for VBIC excess-phase decks.
-///
-/// The hidden xf states need recovery headroom during startup, but the external
-/// node Newton solve should still stay on a sub-volt leash; the device-level
-/// branch limiting handles the large internal transport correction.
-const VBIC_STARTUP_RECOVERY_DELTA_V: Value = 2e-1;
+/// Minimum failed retries required at the effective minimum timestep before a
+/// timepoint may be force-accepted.
+const MIN_RETRIES_AT_MINIMUM_TIMESTEP: usize = 1;
 /// Source edge magnitude that triggers transient source-step capping.
 const SOURCE_ACTIVE_DELTA: Value = 1e-2;
 /// Largest single source movement to allow on proactive nonlinear ramp tracking.
@@ -470,20 +467,7 @@ impl Engine {
             .devices
             .iter()
             .any(|bjt| bjt.uses_vbic_dynamic_charges());
-        let has_vbic_excess_phase = circuit
-            .bjts
-            .devices
-            .iter()
-            .any(|bjt| bjt.uses_vbic_dynamic_charges() && bjt.td > 0.0);
-        let smallest_vbic_excess_phase_td = circuit
-            .bjts
-            .devices
-            .iter()
-            .filter(|bjt| bjt.uses_vbic_dynamic_charges() && bjt.td.is_finite() && bjt.td > 0.0)
-            .map(|bjt| bjt.td)
-            .min_by(|lhs, rhs| lhs.total_cmp(rhs));
-        let (_startup_div, min_div) =
-            Self::startup_timestep_divisors(has_bjts, has_vbic_excess_phase);
+        let (_startup_div, min_div) = Self::startup_timestep_divisors(has_bjts);
         let tran_step_hint = netlist.analyses.iter().find_map(|analysis| match analysis {
             AnalysisCommand::Tran { step, .. } if step.is_finite() && *step > 0.0 => Some(*step),
             _ => None,
@@ -508,13 +492,11 @@ impl Engine {
             Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
             breakpoints.next_after(0.0),
         );
-        let practical_min = Self::startup_practical_min_timestep_with_vbic_td(
+        let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
-            has_vbic_excess_phase,
             hinted_max_step,
             min_div,
             tran_step_hint,
-            smallest_vbic_excess_phase_td,
         );
         let preferred_min_dt = practical_min.max(self.config.min_timestep.max(1e-15));
         let hard_min_dt = Self::ngspice_hard_min_timestep(hinted_max_step, preferred_min_dt);
@@ -653,23 +635,6 @@ impl Engine {
         let mut stale_accept_count = 0;
         let mut force_accept_cooldown = 0_usize; // Failed retries to defer dt shrink immediately after force-accept
         let mut trap_order = 1_u8; // ngspice-style trap order: start at 1, promote to 2 after accepted smooth step
-        // Keep ngspice's exact VBICtrunc/CKTterr path authoritative for excess-phase
-        // charge control, but still expose the reduced VBIC charge state to the
-        // engine-level LTE controller so the broader transient loop can back off
-        // before Newton falls into repeated delmin force-accept recovery.
-        let mut vbic_charge_lte_estimator = has_vbic_excess_phase
-            .then(|| LteEstimator::with_tolerances(self.voltage_reltol(), self.charge_abstol()));
-        Self::record_vbic_truncation_charge_state(
-            &mut vbic_charge_lte_estimator,
-            &circuit,
-            &solution,
-            current_integration_method(&trapgear),
-            trap_order,
-            timestep.dt(),
-            &bjt_history,
-            Some(&vbic_snapshot_cache),
-            effective_method_order(current_integration_method(&trapgear), trap_order),
-        );
         const MAX_RETRIES: usize = 200; // Maximum retries per timepoint before force-accept
         const FORCE_ACCEPT_COOLDOWN_RETRIES: usize = 2;
         const LINEARIZED_STARTUP_RECOVERY_POINTS: usize = 96;
@@ -741,24 +706,6 @@ impl Engine {
                 at_breakpoint = breakpoints.at_breakpoint(t + dt);
                 expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
             }
-            if let Some(vbic_startup_step_cap) = Self::vbic_excess_phase_startup_step_cap(
-                hinted_max_step,
-                smallest_vbic_excess_phase_td,
-            )
-            .filter(|cap| {
-                has_vbic_excess_phase
-                    && dt > *cap
-                    && Self::should_use_vbic_charge_lte_startup_guard(
-                        has_vbic_excess_phase,
-                        t + dt,
-                        hinted_max_step,
-                        smallest_vbic_excess_phase_td,
-                    )
-            }) {
-                dt = vbic_startup_step_cap;
-                at_breakpoint = breakpoints.at_breakpoint(t + dt);
-                expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
-            }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
             } else if let Some(method) = fixed_method {
@@ -778,17 +725,14 @@ impl Engine {
                 );
             let legacy_bjt_retry_floor_dt = Self::legacy_bjt_startup_retry_floor(
                 has_bjts,
-                has_vbic_excess_phase,
                 step_time,
                 hinted_max_step,
                 retry_floor_source_activity_delta,
                 initial_step,
                 timestep.preferred_min_dt(),
             );
-            let newton_step_delta_limit = Self::startup_step_delta_limit_with_vbic_td(
+            let newton_step_delta_limit = Self::startup_step_delta_limit(
                 initial_solution_mode,
-                has_vbic_excess_phase,
-                smallest_vbic_excess_phase_td,
                 step_time,
                 hinted_max_step,
                 if legacy_ngspice_bjt_only_nonlinearity {
@@ -797,10 +741,8 @@ impl Engine {
                     MAX_NEWTON_ITER_DELTA_V
                 },
             );
-            let force_accept_delta_limit = Self::startup_force_accept_delta_limit_with_vbic_td(
+            let force_accept_delta_limit = Self::startup_force_accept_delta_limit(
                 initial_solution_mode,
-                has_vbic_excess_phase,
-                smallest_vbic_excess_phase_td,
                 step_time,
                 hinted_max_step,
                 MAX_FORCE_ACCEPT_DELTA_V,
@@ -906,18 +848,6 @@ impl Engine {
                 if damped {
                     circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                 }
-                let vbic_damped = Self::limit_vbic_transient_external_updates(
-                    &circuit,
-                    &mut new_solution,
-                    &solution,
-                    &solution,
-                    num_nodes,
-                    &force_accept_protected_nodes,
-                    newton_step_delta_limit,
-                );
-                if vbic_damped {
-                    circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
-                }
                 Self::clip_ideal_output_common_modes(
                     &solution,
                     &mut new_solution,
@@ -933,9 +863,7 @@ impl Engine {
             // budget, not the DC operating-point iteration limit.
             let tran_max_iterations = Self::transient_newton_iteration_budget(
                 self.config.transient_max_iterations,
-                has_vbic_excess_phase,
                 startup_recovery,
-                retry_count,
                 use_ngspice_floor_budget,
             );
             let mut converged = false;
@@ -982,11 +910,8 @@ impl Engine {
                     );
                     return Err(SimulationError::Aborted);
                 }
-                let iteration_delta_limit = Self::adaptive_transient_newton_delta_limit(
-                    newton_step_delta_limit,
-                    _iter,
-                    has_vbic_excess_phase,
-                );
+                let iteration_delta_limit =
+                    Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
                 let newton_stamp_start = std::time::Instant::now();
                 matrix.clear_values();
                 rhs.fill(0.0);
@@ -1250,18 +1175,6 @@ impl Engine {
                             if damped {
                                 circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
                             }
-                            let vbic_damped = Self::limit_vbic_transient_external_updates(
-                                &circuit,
-                                &mut sol,
-                                &new_solution,
-                                &solution,
-                                num_nodes,
-                                &force_accept_protected_nodes,
-                                iteration_delta_limit,
-                            );
-                            if vbic_damped {
-                                circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
-                            }
                             Self::clip_ideal_output_common_modes(
                                 &solution,
                                 &mut sol,
@@ -1292,33 +1205,8 @@ impl Engine {
                             self.voltage_abstol(),
                             self.voltage_reltol(),
                         );
-                        let voltage_converged_relaxed = has_vbic_excess_phase
-                            && Self::check_voltage_convergence_with_tolerances(
-                                &new_solution[..num_nodes],
-                                &sol[..num_nodes],
-                                self.voltage_abstol() * 20.0,
-                                self.voltage_reltol() * 20.0,
-                            );
-                        let linearized_residual_converged =
+                        let residual_converged =
                             self.residual_convergence_met(&matrix, &sol, &rhs);
-                        // The hidden VBIC excess-phase convergence check measures
-                        // whether the device-local hidden state stopped changing
-                        // BETWEEN successive Newton iterates (ngspice convTest
-                        // semantics), not whether it moved across the whole
-                        // timestep. Capture the previous Newton iterate before
-                        // `new_solution` is advanced so the check compares
-                        // iterate-to-iterate. Comparing against the frozen
-                        // previous-timestep `solution` makes the delta span the
-                        // entire step; the VBIC intrinsic resistor branch
-                        // voltages (vcx-vci, vbx-vbi, ...) on the hidden internal
-                        // nodes are amplified ~4x relative to the external delta
-                        // by the nested reduced solve, so that whole-step delta
-                        // can never fall below vntol once the external nodes have
-                        // settled, producing a microvolt limit cycle. The cached
-                        // snapshot from this iterate's stamping is the actual
-                        // linearization point at `previous_iterate`'s bias, so the
-                        // hidden check reuses it directly (exact external match).
-                        let previous_iterate = new_solution.clone();
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -1331,72 +1219,10 @@ impl Engine {
                             nonlinear_state_matches_new_solution = true;
                         }
 
-                        let static_device_converged = !circuit.has_nonlinear_devices()
-                            || self.transient_static_device_convergence_met(
-                                &circuit,
-                                has_vbic_excess_phase,
-                            );
-                        let hidden_device_converged =
-                            if has_vbic_excess_phase && static_device_converged {
-                                // The reduced global Newton solve can satisfy external
-                                // voltage/residual checks while the hidden VBIC excess-phase
-                                // state still misses ngspice's device-local predictor
-                                // tolerances. Treat that hidden-state metric as part of
-                                // transient device convergence so delayed-transport startup
-                                // candidates are retried instead of being accepted stale.
-                                self.vbic_excess_phase_device_convergence_met(
-                                    &circuit,
-                                    &previous_iterate,
-                                    &new_solution,
-                                    current_method,
-                                    step_trap_order,
-                                    dt,
-                                    &bjt_history,
-                                    &vbic_snapshot_cache,
-                                )
-                            } else {
-                                true
-                            };
-                        let device_converged = static_device_converged && hidden_device_converged;
-                        let nonlinear_residual_converged = if has_vbic_excess_phase
-                            && !linearized_residual_converged
-                            && device_converged
-                            && voltage_converged_relaxed
-                        {
-                            self.transient_nonlinear_residual_converged(
-                                &mut circuit,
-                                &mut matrix,
-                                &mut rhs,
-                                &new_solution,
-                                t + dt,
-                                dt,
-                                &coeff,
-                                current_method,
-                                step_trap_order,
-                                &bjt_history,
-                                &mut vbic_snapshot_cache,
-                                &jfet_history,
-                                &mosfet_history,
-                                suppress_gate_charge,
-                                &tline_dc_refs,
-                                &coupled_tline_refs,
-                            )
-                        } else {
-                            false
-                        };
-                        let residual_converged =
-                            linearized_residual_converged || nonlinear_residual_converged;
+                        let device_converged = !circuit.has_nonlinear_devices()
+                            || self.transient_static_device_convergence_met(&circuit);
 
-                        let strict_converged =
-                            voltage_converged && device_converged && residual_converged;
-                        let vbic_relaxed_converged = Self::vbic_relaxed_convergence_met(
-                            has_vbic_excess_phase,
-                            voltage_converged_relaxed,
-                            device_converged,
-                            residual_converged,
-                        );
-
-                        if strict_converged || vbic_relaxed_converged {
+                        if voltage_converged && device_converged && residual_converged {
                             converged = true;
                             break;
                         }
@@ -1426,36 +1252,16 @@ impl Engine {
                     // Check what specifically didn't converge
                     let v_conv =
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
-                    let d_conv_static = !circuit.has_nonlinear_devices()
-                        || self.transient_static_device_convergence_met(
-                            &circuit,
-                            has_vbic_excess_phase,
-                        );
-                    let d_conv_hidden = if has_vbic_excess_phase {
-                        self.vbic_excess_phase_device_convergence_met(
-                            &circuit,
-                            &solution,
-                            &new_solution,
-                            current_method,
-                            step_trap_order,
-                            dt,
-                            &bjt_history,
-                            &vbic_snapshot_cache,
-                        )
-                    } else {
-                        true
-                    };
-                    let d_conv = d_conv_static && d_conv_hidden;
+                    let d_conv = !circuit.has_nonlinear_devices()
+                        || self.transient_static_device_convergence_met(&circuit);
                     let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
-                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, static_device_conv={}, vbic_hidden_bypass_metric={}, residual_conv={}, max_dv={:.3e}, iter={}",
+                        "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",
                         t,
                         dt,
                         v_conv,
                         d_conv,
-                        d_conv_static,
-                        d_conv_hidden,
                         r_conv,
                         max_dv,
                         total_iterations
@@ -1565,13 +1371,7 @@ impl Engine {
                 let at_min_dt =
                     Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
-                let exhausted_at_min = at_min_dt
-                    && retry_count
-                        >= Self::min_retries_at_minimum_timestep(
-                            has_vbic_excess_phase,
-                            t + dt,
-                            hinted_max_step,
-                        );
+                let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
 
                 if exhausted_retries || exhausted_at_min {
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
@@ -1603,18 +1403,6 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
-                    let vbic_hidden_bypass_metric = self
-                        .force_candidate_vbic_hidden_bypass_metric_met(
-                            &circuit,
-                            has_vbic_excess_phase,
-                            &solution,
-                            &bounded_force_candidate,
-                            current_method,
-                            step_trap_order,
-                            dt,
-                            &bjt_history,
-                            &vbic_snapshot_cache,
-                        );
                     let stagnant_force_candidate = Self::is_stagnant_force_candidate(
                         &circuit,
                         &solution,
@@ -1622,7 +1410,7 @@ impl Engine {
                         num_nodes,
                         self.voltage_abstol(),
                         self.current_abstol(),
-                    ) && !vbic_hidden_bypass_metric;
+                    );
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -1826,17 +1614,6 @@ impl Engine {
                         method_after_step,
                         accepted_step_trap_order,
                     ));
-                    Self::record_vbic_truncation_charge_state(
-                        &mut vbic_charge_lte_estimator,
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        accepted_step_trap_order,
-                        dt,
-                        &bjt_history,
-                        Some(&vbic_snapshot_cache),
-                        effective_method_order(method_after_step, accepted_step_trap_order),
-                    );
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
@@ -1908,11 +1685,7 @@ impl Engine {
                     // Keep the accepted dt and only defer shrink for a couple of retries.
                     // Large cooldowns plus immediate dt growth can trap stiff switching decks
                     // in repeated force-accept loops instead of letting the controller retreat.
-                    force_accept_cooldown = if has_vbic_excess_phase {
-                        0
-                    } else {
-                        FORCE_ACCEPT_COOLDOWN_RETRIES
-                    };
+                    force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     timestep.force_step(next_force_dt);
                     if matches!(
                         current_method,
@@ -1926,7 +1699,9 @@ impl Engine {
 
             let first_accepted_transient_step =
                 Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len());
-            let vbic_truncation_limit = if !first_accepted_transient_step && has_vbic_excess_phase {
+            let vbic_truncation_limit = if !first_accepted_transient_step
+                && has_vbic_dynamic_charges
+            {
                 Self::vbic_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
@@ -1934,8 +1709,6 @@ impl Engine {
                     step_trap_order,
                     dt,
                     &bjt_history,
-                    &vbic_snapshot_cache,
-                    self.voltage_abstol(),
                     self.voltage_reltol(),
                     self.current_abstol(),
                     self.charge_abstol(),
@@ -2128,131 +1901,71 @@ impl Engine {
             }
 
             // Check LTE for physics accuracy
-            let active_vbic_charge_lte_estimator = if Self::should_use_vbic_charge_lte_estimator(
-                has_vbic_excess_phase,
-                t + dt,
-                hinted_max_step,
-                smallest_vbic_excess_phase_td,
-                dt,
-                timestep.preferred_min_dt(),
-            ) {
-                vbic_charge_lte_estimator.as_ref()
-            } else {
-                None
-            };
-            let using_vbic_charge_lte_estimator = active_vbic_charge_lte_estimator.is_some();
-            let defer_voltage_lte_to_vbic_truncation =
-                Self::should_defer_voltage_lte_to_vbic_truncation(
-                    has_vbic_excess_phase,
-                    t + dt,
-                    hinted_max_step,
-                    smallest_vbic_excess_phase_td,
-                    vbic_truncation_limit,
-                    using_vbic_charge_lte_estimator,
-                );
-            let defer_voltage_lte_to_bjt_truncation = !has_vbic_excess_phase
-                && Self::bjt_charge_truncation_covers_transient_lte(&circuit, bjt_truncation_limit);
-            let defer_voltage_lte_to_jfet_truncation = !has_vbic_excess_phase
-                && !has_bjts
+            let defer_voltage_lte_to_bjt_truncation =
+                Self::bjt_charge_truncation_covers_transient_lte(&circuit, bjt_truncation_limit);
+            let defer_voltage_lte_to_jfet_truncation = !has_bjts
                 && Self::jfet_charge_truncation_covers_transient_lte(
                     &circuit,
                     jfet_truncation_limit,
                 );
-            let defer_voltage_lte_to_mosfet_truncation = !has_vbic_excess_phase
-                && !has_bjts
+            let defer_voltage_lte_to_mosfet_truncation = !has_bjts
                 && circuit.jfets.is_empty()
                 && Self::mosfet_charge_truncation_covers_transient_lte(
                     &circuit,
                     mosfet_truncation_limit,
                 );
-            let defer_voltage_lte_to_ngspice_device_truncation = !has_vbic_excess_phase
-                && Self::ngspice_device_truncation_covers_transient_lte(
+            let defer_voltage_lte_to_ngspice_device_truncation =
+                Self::ngspice_device_truncation_covers_transient_lte(
                     &circuit,
                     capacitor_truncation_limit,
                     bjt_truncation_limit,
                     jfet_truncation_limit,
                     mosfet_truncation_limit,
                 );
-            let (lte, accept, uses_vbic_charge_lte) = if first_accepted_transient_step {
-                (0.0, true, false)
+            let (lte, accept) = if first_accepted_transient_step {
+                (0.0, true)
             } else if linearized_startup_recovery_points {
-                (0.0, true, false)
-            } else if defer_voltage_lte_to_vbic_truncation {
-                // ngspice's excess-phase startup control is charge/truncation-driven.
-                // When that authoritative truncation limit is available but our
-                // supplemental reduced charge-LTE estimator is intentionally idle
-                // (typically because dt collapsed near delmin), do not let the
-                // generic voltage LTE controller create a false reject loop.
-                (0.0, true, false)
+                (0.0, true)
             } else if defer_voltage_lte_to_bjt_truncation {
-                // Classic SPICE drives legacy BJT timesteps from device charge
-                // truncation (BJTtrunc -> CKTterr). For BJT-only reactive
-                // decks, the generic node-voltage predictor is a supplemental
-                // guard, not the authoritative LTE controller.
-                (0.0, true, false)
+                // Classic SPICE drives BJT timesteps from device charge
+                // truncation (BJTtrunc/VBICtrunc -> CKTterr). For BJT-only
+                // reactive decks, the generic node-voltage predictor is a
+                // supplemental guard, not the authoritative LTE controller.
+                (0.0, true)
             } else if defer_voltage_lte_to_jfet_truncation {
                 // ngspice drives JFET/MESFET/HFET dynamic gate charge control
                 // through device truncation (JFETtrunc/HFETtrunc -> CKTterr).
                 // For JFET-only reactive decks, keep that charge controller
                 // authoritative instead of letting generic node-voltage LTE
                 // collapse the timestep around sharp nonlinear gate edges.
-                (0.0, true, false)
+                (0.0, true)
             } else if defer_voltage_lte_to_mosfet_truncation {
                 // MOS transient gate-charge control is the device-local
                 // MOStrunc/MOS6trunc CKTterr path in ngspice. In MOS-only
                 // reactive decks it is the authoritative timestep controller.
-                (0.0, true, false)
+                (0.0, true)
             } else if defer_voltage_lte_to_ngspice_device_truncation {
                 // Classic ngspice uses device-local CKTterr truncation drivers
                 // (CAPtrunc, MOStrunc, BJTtrunc, etc.) rather than an additional
                 // global node-voltage predictor. Transmission-line decks rely on
                 // their model max-step/breakpoint controls plus those connected
                 // dynamic devices.
-                (0.0, true, false)
+                (0.0, true)
             } else {
                 Self::estimate_transient_lte(
                     &circuit,
                     &new_solution,
-                    current_method,
-                    step_trap_order,
                     dt,
                     is_strictly_linear_transient,
-                    &bjt_history,
                     &lte_estimator,
-                    active_vbic_charge_lte_estimator,
-                    Some(&vbic_snapshot_cache),
-                    self.voltage_abstol(),
-                    self.voltage_reltol(),
                 )
             };
             let lte_scale = if first_accepted_transient_step || is_strictly_linear_transient {
                 1.0
             } else {
-                Self::recommend_transient_lte_scale(
-                    &lte_estimator,
-                    active_vbic_charge_lte_estimator,
-                    lte,
-                    uses_vbic_charge_lte,
-                )
+                lte_estimator.recommend_scale(lte)
             };
             if !accept {
-                if uses_vbic_charge_lte {
-                    static VBIC_CHARGE_LTE_REJECT_LOG_COUNT: std::sync::atomic::AtomicUsize =
-                        std::sync::atomic::AtomicUsize::new(0);
-                    let log_count = VBIC_CHARGE_LTE_REJECT_LOG_COUNT
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
-                        log::warn!(
-                            "VBIC charge-LTE reject at t={:.6e}, dt={:.3e}, lte={:.3e}, scale={:.3e}, order={}, pref_min={:.3e}",
-                            t,
-                            dt,
-                            lte,
-                            lte_scale,
-                            step_trap_order,
-                            timestep.preferred_min_dt(),
-                        );
-                    }
-                }
                 retry_count += 1;
                 // LTE/truncation rejects in ngspice retry the same order at a
                 // smaller timestep instead of forcing trapezoidal back to order 1.
@@ -2275,13 +1988,7 @@ impl Engine {
                 let at_min_dt =
                     Self::is_at_effective_retry_minimum(&timestep, legacy_bjt_retry_floor_dt);
                 let exhausted_retries = retry_count >= MAX_RETRIES;
-                let exhausted_at_min = at_min_dt
-                    && retry_count
-                        >= Self::min_retries_at_minimum_timestep(
-                            has_vbic_excess_phase,
-                            t + dt,
-                            hinted_max_step,
-                        );
+                let exhausted_at_min = at_min_dt && retry_count >= MIN_RETRIES_AT_MINIMUM_TIMESTEP;
 
                 if exhausted_retries || exhausted_at_min {
                     let bounded_force_candidate = Self::bounded_force_accept_candidate(
@@ -2313,18 +2020,6 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
-                    let vbic_hidden_bypass_metric = self
-                        .force_candidate_vbic_hidden_bypass_metric_met(
-                            &circuit,
-                            has_vbic_excess_phase,
-                            &solution,
-                            &bounded_force_candidate,
-                            current_method,
-                            step_trap_order,
-                            dt,
-                            &bjt_history,
-                            &vbic_snapshot_cache,
-                        );
                     let stagnant_force_candidate = Self::is_stagnant_force_candidate(
                         &circuit,
                         &solution,
@@ -2332,7 +2027,7 @@ impl Engine {
                         num_nodes,
                         self.voltage_abstol(),
                         self.current_abstol(),
-                    ) && !vbic_hidden_bypass_metric;
+                    );
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -2521,17 +2216,6 @@ impl Engine {
                         method_after_step,
                         accepted_step_trap_order,
                     ));
-                    Self::record_vbic_truncation_charge_state(
-                        &mut vbic_charge_lte_estimator,
-                        &circuit,
-                        &new_solution,
-                        current_method,
-                        accepted_step_trap_order,
-                        dt,
-                        &bjt_history,
-                        Some(&vbic_snapshot_cache),
-                        effective_method_order(method_after_step, accepted_step_trap_order),
-                    );
                     if fixed_method.is_none() {
                         trapgear.update(&new_solution, dt);
                     }
@@ -2592,11 +2276,7 @@ impl Engine {
                         );
                     }
                     retry_count = 0; // Reset for next timepoint
-                    force_accept_cooldown = if has_vbic_excess_phase {
-                        0
-                    } else {
-                        FORCE_ACCEPT_COOLDOWN_RETRIES
-                    };
+                    force_accept_cooldown = FORCE_ACCEPT_COOLDOWN_RETRIES;
                     timestep.force_step(next_force_dt);
                     if matches!(
                         current_method,
@@ -2647,17 +2327,6 @@ impl Engine {
             lte_estimator.record(&new_solution, dt);
             lte_estimator
                 .set_method_order(effective_method_order(method_after_step, step_trap_order));
-            Self::record_vbic_truncation_charge_state(
-                &mut vbic_charge_lte_estimator,
-                &circuit,
-                &new_solution,
-                current_method,
-                step_trap_order,
-                dt,
-                &bjt_history,
-                Some(&vbic_snapshot_cache),
-                effective_method_order(method_after_step, step_trap_order),
-            );
             if fixed_method.is_none() {
                 trapgear.update(&new_solution, dt);
             }
@@ -2673,12 +2342,7 @@ impl Engine {
                     IntegrationMethod::Trapezoidal | IntegrationMethod::TrapGear
                 )
                 && !hit_breakpoint
-                && !Self::should_hold_vbic_excess_phase_first_order(
-                    has_vbic_excess_phase,
-                    t,
-                    hinted_max_step,
-                    smallest_vbic_excess_phase_td,
-                ) {
+            {
                 Self::trapezoidal_order_trial_timestep_limit(
                     &circuit,
                     &new_solution,
@@ -2689,7 +2353,6 @@ impl Engine {
                     &jfet_history,
                     &mosfet_history,
                     &lte_estimator,
-                    vbic_charge_lte_estimator.as_ref(),
                     &vbic_snapshot_cache,
                     self.voltage_abstol(),
                     self.voltage_reltol(),
@@ -2955,39 +2618,16 @@ mod tests {
     #[test]
     fn transient_newton_iteration_budget_uses_ngspice_floor_when_requested() {
         assert_eq!(
-            Engine::transient_newton_iteration_budget(10, false, false, 0, false),
+            Engine::transient_newton_iteration_budget(10, false, false),
             10
         );
         assert_eq!(
-            Engine::transient_newton_iteration_budget(10, false, false, 0, true),
+            Engine::transient_newton_iteration_budget(10, false, true),
             NGSPICE_NIITER_MIN_ITERATIONS
         );
         assert_eq!(
-            Engine::transient_newton_iteration_budget(10, true, false, 0, true),
-            NGSPICE_NIITER_MIN_ITERATIONS
-        );
-        assert_eq!(
-            Engine::transient_newton_iteration_budget(250, false, false, 0, false),
+            Engine::transient_newton_iteration_budget(250, false, false),
             250
         );
-    }
-
-    #[test]
-    fn native_txl_ngspice_floor_excludes_distributed_history_lines() {
-        let mut txl_circuit = crate::circuit::Circuit::new();
-        let mut txl_line = scalar_line("TTXL");
-        assert!(txl_line.enable_txl_runtime(12.45, 8.972e-9, 0.0, 0.468e-12, 16.0));
-        txl_circuit.tlines.push(txl_line);
-        assert!(Engine::should_use_native_txl_ngspice_newton_floor(
-            &txl_circuit
-        ));
-
-        let mut ltra_circuit = crate::circuit::Circuit::new();
-        let mut ltra_line = scalar_line("TLTRA");
-        ltra_line.set_distributed_rlgc(0.25, 4.0, 0.0, 1.0, 1.0);
-        ltra_circuit.tlines.push(ltra_line);
-        assert!(!Engine::should_use_native_txl_ngspice_newton_floor(
-            &ltra_circuit
-        ));
     }
 }

@@ -388,6 +388,19 @@ impl Engine {
                     bjt.set_temperature(self.config.temperature);
                     bjt.set_substrate_node(substrate);
 
+                    // VBIC instances solve their internal states as MNA
+                    // unknowns (ngspice vbicsetup.c topology); allocate the
+                    // non-collapsed internal nodes now so the matrix builder
+                    // reserves the coupled block.
+                    if bjt.uses_vbic_dynamic_charges() {
+                        bjt.assign_vbic_internal_nodes(|suffix| {
+                            circuit.get_or_create_node(&format!(
+                                "{}.__{}.internal",
+                                element.name, suffix
+                            ))
+                        });
+                    }
+
                     circuit.bjts.add(bjt);
                 }
                 ElementKind::Mosfet {

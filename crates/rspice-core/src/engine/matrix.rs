@@ -125,14 +125,28 @@ impl Engine {
             }
         }
 
-        // BJT stamps (3-terminal: 3x3 matrix for C, B, E)
+        // BJT stamps. MNA-promoted VBIC instances couple every terminal and
+        // internal node (static rows, charge companions, excess phase,
+        // thermal), so reserve their full block; legacy Gummel-Poon devices
+        // keep the reduced 4-terminal pattern.
         for bjt in &circuit.bjts.devices {
+            if bjt.vbic_mna_promoted() {
+                let nodes = bjt.vbic_mna_coupling_nodes();
+                for &row in &nodes {
+                    for &col in &nodes {
+                        if row > 0 && col > 0 {
+                            triplets.push((row - 1, col - 1, 0.0));
+                        }
+                    }
+                }
+                continue;
+            }
             let c = bjt.node_collector;
             let b = bjt.node_base;
             let e = bjt.node_emitter;
-            // 3x3 stamp pattern
-            for &row in &[c, b, e] {
-                for &col in &[c, b, e] {
+            let s = bjt.node_substrate;
+            for &row in &[c, b, e, s] {
+                for &col in &[c, b, e, s] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }

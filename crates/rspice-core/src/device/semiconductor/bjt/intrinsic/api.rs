@@ -105,6 +105,32 @@ impl Bjt {
 
     /// Stamp using O(1) direct indexing (call after link)
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
+        if self.vbic_mna_promoted() {
+            // The promoted system spans the internal nodes, so it stamps
+            // through the position-mapped path instead of the 3x3 linkage.
+            struct PromotedStamper<'a> {
+                matrix: &'a mut StaticMatrix,
+                rhs: &'a mut [Value],
+            }
+            impl crate::device::MatrixStamper for PromotedStamper<'_> {
+                #[inline]
+                fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+                    if row > 0 && col > 0 {
+                        self.matrix.add(row - 1, col - 1, value);
+                    }
+                }
+
+                #[inline]
+                fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+                    if index > 0 && index <= self.rhs.len() {
+                        self.rhs[index - 1] += value;
+                    }
+                }
+            }
+            let mut stamper = PromotedStamper { matrix, rhs };
+            self.stamp_vbic_mna(&mut stamper);
+            return;
+        }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();

@@ -150,14 +150,6 @@ impl Engine {
                 self.apply_damping_strategy(&solution, &raw_solution, damping_state, |trial| {
                     self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale)
                 });
-            Self::limit_vbic_external_updates(
-                circuit,
-                &mut new_solution,
-                &solution,
-                circuit.num_nodes().min(solution.len()),
-                None,
-                false,
-            );
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
             let voltage_converged =

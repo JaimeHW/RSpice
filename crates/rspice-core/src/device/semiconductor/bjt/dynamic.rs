@@ -468,6 +468,81 @@ impl Bjt {
         branches
     }
 
+    /// Evaluate the VBIC dynamic charge branches at an explicit bias,
+    /// including the finite-difference d/dVrth charge column and the
+    /// excess-phase transport sensitivity when self-heating is active. Shared
+    /// by the reduced charge-snapshot path and the MNA-promoted device so
+    /// both stamp identical physics.
+    pub(super) fn vbic_dynamic_charge_state_at_bias(
+        &self,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; BJT_INTERNAL_STATE_DIM],
+        cached_inputs: Option<BjtDynamicChargeInputs>,
+    ) -> (
+        [BjtChargeBranch; BJT_DYNAMIC_CHARGE_COUNT],
+        BjtDynamicChargeInputs,
+        Value,
+    ) {
+        // The branch builder reads only the bias voltages from the reduction.
+        let mut bias = BjtDynamicReduction::default();
+        bias.external_voltages = external;
+        bias.internal_voltages = internal;
+        let vrth = internal[IDX_VRTH];
+
+        if !self.self_heating_enabled() {
+            let inputs =
+                cached_inputs.unwrap_or_else(|| self.dynamic_charge_inputs(external, internal));
+            let branches = self.dynamic_charge_branches_from_inputs(&bias, inputs);
+            return (branches, inputs, 0.0);
+        }
+
+        let h = self.thermal_derivative_step(vrth);
+        let denom = 2.0 * h;
+
+        let mut plus_internal = internal;
+        plus_internal[IDX_VRTH] = vrth + h;
+        let mut minus_internal = internal;
+        minus_internal[IDX_VRTH] = vrth - h;
+
+        let base_inputs = cached_inputs.unwrap_or_else(|| {
+            self.with_temperature_variant(vrth, |model| {
+                model.dynamic_charge_inputs(external, internal)
+            })
+        });
+        let plus_inputs = self.with_temperature_variant(vrth + h, |model| {
+            model.dynamic_charge_inputs(external, plus_internal)
+        });
+        let minus_inputs = self.with_temperature_variant(vrth - h, |model| {
+            model.dynamic_charge_inputs(external, minus_internal)
+        });
+
+        let d_itzf_d_vrth = if self.td > 0.0 {
+            (plus_inputs.transport.itzf - minus_inputs.transport.itzf) / denom
+        } else {
+            0.0
+        };
+
+        let mut branches = self.with_temperature_variant(vrth, |model| {
+            model.dynamic_charge_branches_from_inputs(&bias, base_inputs)
+        });
+        let mut plus_bias = bias;
+        plus_bias.internal_voltages = plus_internal;
+        let mut minus_bias = bias;
+        minus_bias.internal_voltages = minus_internal;
+        let plus_branches = self.with_temperature_variant(vrth + h, |model| {
+            model.dynamic_charge_branches_from_inputs(&plus_bias, plus_inputs)
+        });
+        let minus_branches = self.with_temperature_variant(vrth - h, |model| {
+            model.dynamic_charge_branches_from_inputs(&minus_bias, minus_inputs)
+        });
+        for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
+            branches[branch_idx].d_internal[IDX_VRTH] =
+                (plus_branches[branch_idx].charge - minus_branches[branch_idx].charge) / denom;
+        }
+
+        (branches, base_inputs, d_itzf_d_vrth)
+    }
+
     pub(super) fn charge_snapshot_from_base(
         &self,
         base: BjtReducedLinearization,
@@ -482,66 +557,33 @@ impl Bjt {
         }
 
         let vrth = template.internal_voltages[IDX_VRTH];
-        if !self.self_heating_enabled() {
-            let inputs = base.cached_dynamic_inputs.unwrap_or_else(|| {
+        let inputs = base.cached_dynamic_inputs.unwrap_or_else(|| {
+            if self.self_heating_enabled() {
+                self.with_temperature_variant(vrth, |model| {
+                    model.dynamic_charge_inputs(
+                        template.external_voltages,
+                        template.internal_voltages,
+                    )
+                })
+            } else {
                 self.dynamic_charge_inputs(template.external_voltages, template.internal_voltages)
-            });
-            let reduction =
-                self.build_dynamic_reduction_from_transport(template, inputs.transport, 0.0);
-            return BjtChargeSnapshot {
-                reduction,
-                branches: self.dynamic_charge_branches_from_inputs(&reduction, inputs),
-            };
+            }
+        });
+
+        // The snapshot path seeds the excess-phase states at their DC fixed
+        // point (vxf1 = vxf2 = Itzf) before evaluating the xf charges.
+        let mut charge_internal = template.internal_voltages;
+        if self.td > 0.0 {
+            charge_internal[IDX_VXF1] = inputs.transport.itzf;
+            charge_internal[IDX_VXF2] = inputs.transport.itzf;
         }
-
-        let h = self.thermal_derivative_step(vrth);
-        let denom = 2.0 * h;
-
-        let mut plus_internal = template.internal_voltages;
-        plus_internal[IDX_VRTH] = vrth + h;
-        let mut minus_internal = template.internal_voltages;
-        minus_internal[IDX_VRTH] = vrth - h;
-
-        let base_inputs = base.cached_dynamic_inputs.unwrap_or_else(|| {
-            self.with_temperature_variant(vrth, |model| {
-                model.dynamic_charge_inputs(template.external_voltages, template.internal_voltages)
-            })
-        });
-        let plus_inputs = self.with_temperature_variant(vrth + h, |model| {
-            model.dynamic_charge_inputs(template.external_voltages, plus_internal)
-        });
-        let minus_inputs = self.with_temperature_variant(vrth - h, |model| {
-            model.dynamic_charge_inputs(template.external_voltages, minus_internal)
-        });
-
-        let d_itzf_d_vrth = if self.td > 0.0 {
-            (plus_inputs.transport.itzf - minus_inputs.transport.itzf) / denom
-        } else {
-            0.0
-        };
-        let reduction = self.build_dynamic_reduction_from_transport(
-            template,
-            base_inputs.transport,
-            d_itzf_d_vrth,
+        let (branches, _, d_itzf_d_vrth) = self.vbic_dynamic_charge_state_at_bias(
+            template.external_voltages,
+            charge_internal,
+            Some(inputs),
         );
-        let mut branches = self.with_temperature_variant(vrth, |model| {
-            model.dynamic_charge_branches_from_inputs(&reduction, base_inputs)
-        });
-
-        let mut plus_reduction = reduction;
-        plus_reduction.internal_voltages[IDX_VRTH] = vrth + h;
-        let mut minus_reduction = reduction;
-        minus_reduction.internal_voltages[IDX_VRTH] = vrth - h;
-        let plus_branches = self.with_temperature_variant(vrth + h, |model| {
-            model.dynamic_charge_branches_from_inputs(&plus_reduction, plus_inputs)
-        });
-        let minus_branches = self.with_temperature_variant(vrth - h, |model| {
-            model.dynamic_charge_branches_from_inputs(&minus_reduction, minus_inputs)
-        });
-        for branch_idx in 0..BJT_DYNAMIC_CHARGE_COUNT {
-            branches[branch_idx].d_internal[IDX_VRTH] =
-                (plus_branches[branch_idx].charge - minus_branches[branch_idx].charge) / denom;
-        }
+        let reduction =
+            self.build_dynamic_reduction_from_transport(template, inputs.transport, d_itzf_d_vrth);
 
         BjtChargeSnapshot {
             reduction,

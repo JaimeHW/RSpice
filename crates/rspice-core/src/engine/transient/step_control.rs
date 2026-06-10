@@ -103,32 +103,6 @@ impl Engine {
     }
 
     #[inline]
-    pub(super) fn force_candidate_vbic_hidden_bypass_metric_met(
-        &self,
-        circuit: &crate::circuit::Circuit,
-        has_vbic_excess_phase: bool,
-        previous_solution: &[Value],
-        candidate_solution: &[Value],
-        method: IntegrationMethod,
-        trap_order: u8,
-        dt: Value,
-        history: &BjtTransientHistory,
-        vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
-    ) -> bool {
-        has_vbic_excess_phase
-            && self.vbic_excess_phase_device_convergence_met(
-                circuit,
-                previous_solution,
-                candidate_solution,
-                method,
-                trap_order,
-                dt,
-                history,
-                vbic_snapshot_cache,
-            )
-    }
-
-    #[inline]
     pub(super) fn is_stale_step(
         previous_solution: &[Value],
         candidate_solution: &[Value],
@@ -220,9 +194,7 @@ impl Engine {
     #[inline]
     pub(super) fn transient_newton_iteration_budget(
         transient_max_iterations: usize,
-        has_vbic_excess_phase: bool,
         startup_recovery: bool,
-        retry_count: usize,
         use_ngspice_floor: bool,
     ) -> usize {
         let configured_budget = transient_max_iterations.max(1);
@@ -233,17 +205,8 @@ impl Engine {
         };
         if startup_recovery {
             standard_budget.max(64).min(128)
-        } else if !has_vbic_excess_phase {
-            standard_budget
-        } else if retry_count == 0 {
-            let first_try_budget = standard_budget.max(64);
-            if use_ngspice_floor {
-                first_try_budget
-            } else {
-                first_try_budget.min(96)
-            }
         } else {
-            standard_budget.max(64)
+            standard_budget
         }
     }
 
@@ -265,47 +228,14 @@ impl Engine {
     pub(super) fn adaptive_transient_newton_delta_limit(
         base_limit: Value,
         iteration: usize,
-        has_vbic_excess_phase: bool,
     ) -> Value {
-        if has_vbic_excess_phase || !(base_limit.is_finite() && base_limit > 0.0) {
+        if !(base_limit.is_finite() && base_limit > 0.0) {
             return base_limit;
         }
 
         let growth_stage = iteration.saturating_sub(4) / 4;
         let multiplier = 2.0_f64.powi(growth_stage.min(5) as i32);
         (base_limit * multiplier).min(MAX_ADAPTIVE_NEWTON_ITER_DELTA_V)
-    }
-
-    #[inline]
-    pub(super) fn vbic_relaxed_convergence_met(
-        has_vbic_excess_phase: bool,
-        voltage_converged_relaxed: bool,
-        device_converged: bool,
-        linearized_residual_converged: bool,
-    ) -> bool {
-        has_vbic_excess_phase
-            && voltage_converged_relaxed
-            && device_converged
-            && linearized_residual_converged
-    }
-
-    #[inline]
-    pub(super) fn min_retries_at_minimum_timestep(
-        has_vbic_excess_phase: bool,
-        step_time: Value,
-        hinted_max_step: Value,
-    ) -> usize {
-        let startup_retry_window = hinted_max_step * 0.1;
-        if has_vbic_excess_phase
-            && step_time.is_finite()
-            && hinted_max_step.is_finite()
-            && startup_retry_window.is_finite()
-            && step_time <= startup_retry_window
-        {
-            3
-        } else {
-            1
-        }
     }
 
     #[inline]
