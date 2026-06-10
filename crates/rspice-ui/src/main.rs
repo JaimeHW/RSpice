@@ -24,7 +24,9 @@ fn main() {
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 600.0]),
         vsync: true,
-        multisampling: 4,
+        // egui anti-aliases analytically (feathered tessellation); hardware
+        // MSAA would quadruple fill bandwidth for no visible gain.
+        multisampling: 1,
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
