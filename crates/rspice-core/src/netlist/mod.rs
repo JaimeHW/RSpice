@@ -136,6 +136,27 @@ impl Netlist {
         Self::parse_with_path(&content, path)
     }
 
+    /// Parse a netlist from a file with additional include search directories
+    ///
+    /// Like [`Netlist::parse_file`], but `.include`/`.lib` references that do
+    /// not resolve relative to the including file are also searched in
+    /// `search_paths`, in order.
+    pub fn parse_file_with_search_paths(
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+    ) -> Result<Self, ParseError> {
+        let content = read_file_with_encoding(path)?;
+        let mut processor = IncludeProcessor::new(path);
+        for dir in search_paths {
+            processor.add_lib_path(dir.clone());
+        }
+        let processed = processor.expand_content(&content, path)?;
+        let mut netlist = Self::parse(&processed)?;
+        Self::normalize_model_string_paths(&mut netlist, path);
+        netlist.source_path = Some(path.to_path_buf());
+        Ok(netlist)
+    }
+
     /// Preprocess netlist content to expand .include and .lib directives
     ///
     /// This method expands all .include and .lib directives in the content,
