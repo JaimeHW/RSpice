@@ -3373,3 +3373,193 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod oracle_replay {
+    use super::*;
+
+    /// Replay ngspice's committed (v, i) history for cpl3_4_line's P1 element
+    /// and compare the branch rhs vectors point by point.
+    ///
+    /// The fixtures were extracted with gdb from the vendored ngspice debug
+    /// build running tests/transmission/cpl3_4_line.cir: committed history
+    /// samples at cplload.c:686 (truncated-picosecond time plus per-conductor
+    /// v_i/v_o/i_i/i_o) and per-load branch rhs at cplload.c:578 (fractional
+    /// time and CKTdelta, per-conductor ff/gg; the last record per truncated
+    /// label is the accepted iterate). Driving the runtime with the oracle's
+    /// own inputs pins the multiconductor convolution - including the mixed
+    /// integer-picosecond/fractional-delta clock - independently of solver
+    /// grid differences.
+    ///
+    /// CURRENTLY DIVERGENT: the replay first departs from the oracle at
+    /// t=18175ps (1.4% on ff[0], the first delayed-arrival region) and grows
+    /// to the same scale as the cpl deck gate failures, so this harness is
+    /// the deterministic reproduction of the open CPL convolution gap
+    /// (candidates: delayed_vi_samples_ps interpolation vs cplload get_pvs,
+    /// or the replay chain around ngspice's 217 merged/rejected labels).
+    /// Run with --ignored while investigating; un-ignore once the runtime
+    /// reproduces the oracle like the TXL and LTRA fixtures do.
+    #[test]
+    #[ignore = "documents the open CPL convolution divergence; see doc comment"]
+    fn replay_oracle_cpl34_p1() {
+        let hv_text = include_str!("transmission_line/testdata/cpl34_p1_hv.dat");
+        let in_text = include_str!("transmission_line/testdata/cpl34_p1_in.dat");
+
+        const N: usize = 4;
+        struct Hv {
+            t_ps: i64,
+            v_i: Vec<f64>,
+            v_o: Vec<f64>,
+            i_i: Vec<f64>,
+            i_o: Vec<f64>,
+        }
+        let hv: Vec<Hv> = hv_text
+            .lines()
+            .map(|line| {
+                let f: Vec<f64> = line
+                    .split_whitespace()
+                    .map(|v| v.parse().unwrap())
+                    .collect();
+                assert_eq!(f.len(), 1 + 4 * N);
+                Hv {
+                    t_ps: f[0] as i64,
+                    v_i: f[1..1 + N].to_vec(),
+                    v_o: f[1 + N..1 + 2 * N].to_vec(),
+                    i_i: f[1 + 2 * N..1 + 3 * N].to_vec(),
+                    i_o: f[1 + 3 * N..1 + 4 * N].to_vec(),
+                }
+            })
+            .collect();
+        // Last record per truncated-picosecond label = the accepted iterate.
+        let mut inputs: std::collections::HashMap<i64, (f64, Vec<f64>, Vec<f64>)> =
+            std::collections::HashMap::new();
+        for line in in_text.lines() {
+            let f: Vec<f64> = line
+                .split_whitespace()
+                .map(|v| v.parse().unwrap())
+                .collect();
+            assert_eq!(f.len(), 2 + 2 * N);
+            let label = (f[0] * 1.0e12).trunc() as i64;
+            inputs.insert(label, (f[1], f[2..2 + N].to_vec(), f[2 + N..2 + 2 * N].to_vec()));
+        }
+
+        // .MODEL LOSSYMODE CPL: R=diag(0.3), L tridiag(9n, 5.4n),
+        // G=0, C tridiag(3.5e-13, -3e-14), length=6.3.
+        let mut r = vec![vec![0.0; N]; N];
+        let mut l = vec![vec![0.0; N]; N];
+        let g = vec![vec![0.0; N]; N];
+        let mut c = vec![vec![0.0; N]; N];
+        for i in 0..N {
+            r[i][i] = 0.3;
+            l[i][i] = 9.0e-9;
+            c[i][i] = 3.5e-13;
+            if i + 1 < N {
+                l[i][i + 1] = 5.4e-9;
+                l[i + 1][i] = 5.4e-9;
+                c[i][i + 1] = -3.0e-14;
+                c[i + 1][i] = -3.0e-14;
+            }
+        }
+        let mut rt = NativeCplRuntime::setup(&r, &l, &c, &g, 6.3).unwrap();
+
+        let dc1 = vec![0.0; N];
+        let dc2 = vec![0.0; N];
+        rt.initialize_dc_convolutions(&dc1, &dc2).unwrap();
+        let mut history = NativeCplViHistory::new(N, dc1.clone(), dc2.clone()).unwrap();
+        history
+            .push_sample(NativeCplViSample::new(
+                0,
+                dc1.clone(),
+                dc2.clone(),
+                vec![0.0; N],
+                vec![0.0; N],
+            ))
+            .unwrap();
+
+        let mut prev_v_i = dc1.clone();
+        let mut prev_v_o = dc2.clone();
+        let mut t1_ps = 0i64;
+        let mut t_real = 0.0f64;
+        let mut compared = 0usize;
+        let mut grid_mismatch = 0usize;
+        let mut worst: (f64, i64) = (0.0, 0);
+        let mut first_bad: Option<i64> = None;
+        for sample in &hv {
+            let Some((dt_oracle, ff_oracle, gg_oracle)) = inputs.get(&sample.t_ps) else {
+                continue;
+            };
+            let t_cand = t_real + dt_oracle;
+            if (t_cand * 1.0e12).trunc() as i64 != sample.t_ps {
+                grid_mismatch += 1;
+                t_real = sample.t_ps as f64 * 1.0e-12;
+            } else {
+                let mut trial_history = history.clone();
+                let plan = rt
+                    .step_stamp_plan(
+                        t1_ps,
+                        sample.t_ps,
+                        *dt_oracle,
+                        &prev_v_i,
+                        &prev_v_o,
+                        &mut trial_history,
+                    )
+                    .unwrap();
+                let mut scale = 1.0e-9f64;
+                for m in 0..N {
+                    scale = scale.max(ff_oracle[m].abs()).max(gg_oracle[m].abs());
+                }
+                let mut err = 0.0f64;
+                for m in 0..N {
+                    err = err
+                        .max((plan.ff[m] - ff_oracle[m]).abs() / scale)
+                        .max((plan.gg[m] - gg_oracle[m]).abs() / scale);
+                }
+                compared += 1;
+                if err > worst.0 {
+                    worst = (err, sample.t_ps);
+                }
+                if err > 1.0e-6 && first_bad.is_none() {
+                    first_bad = Some(sample.t_ps);
+                    println!(
+                        "first divergence at t={}ps: ours ff[0]={:.12e} oracle ff[0]={:.12e}",
+                        sample.t_ps, plan.ff[0], ff_oracle[0]
+                    );
+                }
+                t_real = t_cand;
+            }
+
+            let h_grid = (sample.t_ps - t1_ps) as f64 * 1.0e-12;
+            rt.commit_step(
+                t1_ps,
+                sample.t_ps,
+                *dt_oracle,
+                h_grid,
+                &prev_v_i,
+                &prev_v_o,
+                &sample.v_i,
+                &sample.v_o,
+                &sample.i_i,
+                &sample.i_o,
+                &mut history,
+            )
+            .unwrap();
+            history
+                .push_sample(NativeCplViSample::new(
+                    sample.t_ps,
+                    sample.v_i.clone(),
+                    sample.v_o.clone(),
+                    sample.i_i.clone(),
+                    sample.i_o.clone(),
+                ))
+                .unwrap();
+            prev_v_i = sample.v_i.clone();
+            prev_v_o = sample.v_o.clone();
+            t1_ps = sample.t_ps;
+        }
+        println!(
+            "compared {} steps ({} grid re-anchors); worst rel err {:.3e} at t={}ps; first>1e-6 at {:?}",
+            compared, grid_mismatch, worst.0, worst.1, first_bad
+        );
+        assert!(compared > 900);
+    }
+}
