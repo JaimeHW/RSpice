@@ -1508,7 +1508,7 @@ fn eval_charges_capmod3(
     mode: i32,
     i: &ChargeInputs,
 ) -> B3SoiFdCharge {
-    use super::super::common::{CONST_2OV3, DELTA_1, DELTA_3, DELTA_VCSCV, QEX_FACT};
+    use super::super::common::{CONST_2OV3, DELTA_1, DELTA_3, DELTA_4, DELTA_VCSCV, QEX_FACT};
 
     let k1 = i.k1;
     let phi = i.phi;
@@ -1886,8 +1886,28 @@ fn eval_charges_capmod3(
     let ce2d = dqe2_dvd;
     let ce2e = dqe2_dve;
 
-    // Total inversion charge (b3soifdld.c:3313-3326). VdseffCV == IV Vdseff here.
-    let vdseff_cv = i.vdseff;
+    // CV-consistent VdseffCV (b3soifdld.c:2322-2335). The inversion-charge
+    // partition below requires `AbulkCV*VdseffCV <= Vgsteff` so that
+    // `T1 = 12*(Vgsteff - 0.5*T0)` stays strictly positive; the IV-section
+    // `Vdseff` (different Vdsat, velocity saturation folded in) does not honor
+    // that bound and drives the 40/60 partition derivatives through a pole.
+    let mut vdsat_cv2 = vgsteff / abulk_cv;
+    vdsat_cv2 += 1.0e-5;
+    // `Vds` in the CV section is the mode-folded drain-source voltage.
+    let vds_mode = if mode > 0 { i.vds_raw } else { -i.vds_raw };
+    let v4 = vdsat_cv2 - vds_mode - DELTA_4;
+    let t0v = (v4 * v4 + 4.0 * DELTA_4 * vdsat_cv2).sqrt();
+    let vdseff_cv = vdsat_cv2 - 0.5 * (v4 + t0v);
+    // dVdseffCV_dVg folds dVdsatCV_dVg = 1/AbulkCV into T3; dVdseffCV_dVb
+    // re-expresses dVdsatCV_dVb = -VdsatCV*dAbulkCV_dVb/AbulkCV through T3.
+    let t1v = 0.5 * (1.0 + v4 / t0v);
+    let t2v = DELTA_4 / t0v;
+    let t3v = (1.0 - t1v - t2v) / abulk_cv;
+    let dvdseff_cv_dvg = t3v;
+    let dvdseff_cv_dvd = t1v;
+    let dvdseff_cv_dvb = -t3v * vdsat_cv2 * dabulk_cv_dvb;
+
+    // Total inversion charge (b3soifdld.c:3313-3326).
     let t0 = abulk_cv * vdseff_cv;
     let t1 = 12.0 * (vgsteff - 0.5 * t0 + 1e-20);
     let t2 = vdseff_cv / t1;
@@ -1896,9 +1916,9 @@ fn eval_charges_capmod3(
     let t5 = 6.0 * t0 * (4.0 * vgsteff - t0) / (t1 * t1) - 0.5;
     let t6 = 12.0 * t2 * t2 * vgsteff;
     let qinv = cox_wl * (vgsteff - 0.5 * vdseff_cv + t3);
-    let cgg1 = cox_wl * (t4 + t5 * i.dvdseff_dvg);
-    let cgd1 = cox_wl * t5 * i.dvdseff_dvd;
-    let cgb1 = cox_wl * (t5 * i.dvdseff_dvb + t6 * dabulk_cv_dvb);
+    let cgg1 = cox_wl * (t4 + t5 * dvdseff_cv_dvg);
+    let cgd1 = cox_wl * t5 * dvdseff_cv_dvd;
+    let cgb1 = cox_wl * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb);
 
     // Charge partition into S (b3soifdld.c:3329-3368).
     let (qsrc, csg1, csd1, csb1);
@@ -1909,9 +1929,9 @@ fn eval_charges_capmod3(
         let t4p = -(0.5 + 24.0 * t0 * t0 / (t1p * t1p));
         let t5p = -(0.25 * abulk_cv - 12.0 * abulk_cv * t0 * t7);
         let t6p = -(0.25 * vdseff_cv - 12.0 * t0 * vdseff_cv * t7);
-        csg1 = cox_wl * (t4p + t5p * i.dvdseff_dvg);
-        csd1 = cox_wl * t5p * i.dvdseff_dvd;
-        csb1 = cox_wl * (t5p * i.dvdseff_dvb + t6p * dabulk_cv_dvb);
+        csg1 = cox_wl * (t4p + t5p * dvdseff_cv_dvg);
+        csd1 = cox_wl * t5p * dvdseff_cv_dvd;
+        csb1 = cox_wl * (t5p * dvdseff_cv_dvb + t6p * dabulk_cv_dvb);
     } else if m.xpart < 0.5 {
         let t1p = t1 / 12.0;
         let t2p = 0.5 * cox_wl / (t1p * t1p);
@@ -1923,9 +1943,9 @@ fn eval_charges_capmod3(
             - t2p * (vgsteff * (3.0 * vgsteff - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
         let t5p = (qsrc / t1p + t2p * t7) * abulk_cv;
         let t6p = qsrc / t1p * vdseff_cv + t2p * t7 * vdseff_cv;
-        csg1 = t4p + t5p * i.dvdseff_dvg;
-        csd1 = t5p * i.dvdseff_dvd;
-        csb1 = t5p * i.dvdseff_dvb + t6p * dabulk_cv_dvb;
+        csg1 = t4p + t5p * dvdseff_cv_dvg;
+        csd1 = t5p * dvdseff_cv_dvd;
+        csb1 = t5p * dvdseff_cv_dvb + t6p * dabulk_cv_dvb;
     } else {
         qsrc = -0.5 * qinv;
         csg1 = -0.5 * cgg1;
