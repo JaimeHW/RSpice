@@ -635,3 +635,66 @@ mod parse_sanity {
         }
     }
 }
+
+#[cfg(test)]
+mod browser_audit {
+    use super::*;
+    use crate::schematic::component_palette;
+    use crate::state::ComponentType;
+
+    /// Endpoints reachable by the pen in a path (segment ends only).
+    fn endpoints(symbol: &Symbol) -> Vec<(f32, f32)> {
+        let mut points = Vec::new();
+        for path in &symbol.paths {
+            for command in &path.commands {
+                match command {
+                    super::super::types::PathCommand::MoveTo(x, y)
+                    | super::super::types::PathCommand::LineTo(x, y) => points.push((*x, *y)),
+                    super::super::types::PathCommand::CurveTo { end, .. } => points.push(*end),
+                    super::super::types::PathCommand::Close => {}
+                }
+            }
+        }
+        points
+    }
+
+    /// Every component the browser offers must resolve to a symbol whose
+    /// artwork actually reaches each of its terminal grid points — the
+    /// mechanical definition of "the pins line up".
+    #[test]
+    fn every_palette_entry_has_an_aligned_symbol() {
+        let library = SymbolLibrary::load_embedded().expect("library loads");
+
+        for section in component_palette() {
+            for entry in section.entries {
+                let kind: ComponentType = entry.kind;
+                let symbol = library
+                    .get(kind)
+                    .unwrap_or_else(|| panic!("{:?} ({}) has no symbol", kind, entry.label));
+
+                let (vb_w, vb_h) = (symbol.bounds.2, symbol.bounds.3);
+                let (target_w, target_h) = kind.symbol_dimensions();
+                // Map grid-unit terminal offsets into viewBox coordinates.
+                let scale_x = vb_w / target_w as f32;
+                let scale_y = vb_h / target_h as f32;
+                let (cx, cy) = (vb_w * 0.5, vb_h * 0.5);
+
+                let points = endpoints(symbol);
+                for (pin, offset) in kind.terminal_offsets() {
+                    let expected = (
+                        cx + offset.x as f32 * scale_x,
+                        cy + offset.y as f32 * scale_y,
+                    );
+                    let reached = points.iter().any(|(x, y)| {
+                        (x - expected.0).abs() <= 0.75 && (y - expected.1).abs() <= 0.75
+                    });
+                    assert!(
+                        reached,
+                        "{:?} ({}): pin '{}' at viewBox ({:.1},{:.1}) is not reached by the artwork",
+                        kind, entry.label, pin, expected.0, expected.1
+                    );
+                }
+            }
+        }
+    }
+}
