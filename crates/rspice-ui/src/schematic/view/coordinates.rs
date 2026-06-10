@@ -5,9 +5,19 @@ use crate::state::Point;
 
 use super::viewport::Viewport;
 
-pub(super) fn viewport_from_state(state: &AppState, bounds: Rect) -> Viewport {
+pub(super) fn viewport_from_state(
+    state: &AppState,
+    bounds: Rect,
+    pixels_per_point: f32,
+) -> Viewport {
+    // Snap the camera offset to whole physical pixels: feathered strokes
+    // shimmering across fractional positions read as judder during pans.
+    // The authoritative f64 pan is untouched, so motion never accumulates
+    // rounding error.
+    let ppp = pixels_per_point.max(0.5);
+    let snap = |v: f64| ((v as f32) * ppp).round() / ppp;
     Viewport {
-        offset: Pos2::new(state.schematic.pan.0 as f32, state.schematic.pan.1 as f32),
+        offset: Pos2::new(snap(state.schematic.pan.0), snap(state.schematic.pan.1)),
         zoom: state.schematic.zoom as f32,
         bounds,
     }

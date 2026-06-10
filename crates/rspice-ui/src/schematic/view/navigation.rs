@@ -8,10 +8,20 @@ pub(super) fn handle_viewport_navigation(
     available: Rect,
     state: &mut AppState,
 ) {
-    if response.dragged_by(egui::PointerButton::Middle)
-        || (response.dragged_by(egui::PointerButton::Primary) && ui.input(|i| i.modifiers.shift))
-    {
-        let delta = response.drag_delta();
+    // Middle-button pan follows the raw pointer delta from the very first
+    // event: egui's click-vs-drag threshold would swallow the first few
+    // pixels as a dead zone, and the canvas has no competing middle-click
+    // action. Shift+primary keeps the threshold so clicks stay clicks.
+    let middle_pan =
+        response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down());
+    let shift_pan =
+        response.dragged_by(egui::PointerButton::Primary) && ui.input(|i| i.modifiers.shift);
+    if middle_pan || shift_pan {
+        let delta = if middle_pan {
+            ui.input(|i| i.pointer.delta())
+        } else {
+            response.drag_delta()
+        };
         state.schematic.pan.0 += delta.x as f64;
         state.schematic.pan.1 += delta.y as f64;
     }

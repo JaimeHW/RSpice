@@ -16,32 +16,24 @@ pub(super) fn draw_interaction_previews(
     painter: &Painter,
     response: &Response,
     state: &mut AppState,
-    tool_viewport: &Viewport,
-    draw_viewport: &Viewport,
+    viewport: &Viewport,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    draw_wire_preview(painter, response, state, tool_viewport);
-    draw_component_preview(
-        painter,
-        response,
-        state,
-        tool_viewport,
-        draw_viewport,
-        symbol_library,
-    );
-    draw_selection_rect(painter, state, tool_viewport);
+    draw_wire_preview(painter, response, state, viewport);
+    draw_component_preview(painter, response, state, viewport, symbol_library);
+    draw_selection_rect(painter, state, viewport);
 }
 
 fn draw_wire_preview(
     painter: &Painter,
     response: &Response,
     state: &mut AppState,
-    tool_viewport: &Viewport,
+    viewport: &Viewport,
 ) {
     let wire_active = state.schematic.wire_drawing.active;
 
     if wire_active && let Some(hover_pos) = response.hover_pos() {
-        let grid_pos = screen_to_wire_grid(tool_viewport, state.schematic.grid_size, hover_pos);
+        let grid_pos = screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos);
         state.schematic.update_wire_preview(grid_pos);
     }
 
@@ -51,28 +43,28 @@ fn draw_wire_preview(
 
         if !wire_points.is_empty() {
             let wire_color = Color32::from_rgb(100, 200, 255);
-            let stroke = Stroke::new(1.0 * tool_viewport.zoom, wire_color);
+            let stroke = Stroke::new(1.0 * viewport.zoom, wire_color);
 
             for segment in wire_points.windows(2) {
-                let p1 = tool_viewport.schematic_to_screen(segment[0]);
-                let p2 = tool_viewport.schematic_to_screen(segment[1]);
+                let p1 = viewport.schematic_to_screen(segment[0]);
+                let p2 = viewport.schematic_to_screen(segment[1]);
                 painter.line_segment([p1, p2], stroke);
             }
 
             if let Some(preview) = preview_pos_opt
                 && let Some(last) = wire_points.last()
             {
-                let p1 = tool_viewport.schematic_to_screen(*last);
-                let p2 = tool_viewport.schematic_to_screen(preview);
+                let p1 = viewport.schematic_to_screen(*last);
+                let p2 = viewport.schematic_to_screen(preview);
                 painter.line_segment(
                     [p1, p2],
-                    Stroke::new(1.0 * tool_viewport.zoom, wire_color.gamma_multiply(0.6)),
+                    Stroke::new(1.0 * viewport.zoom, wire_color.gamma_multiply(0.6)),
                 );
             }
 
             if let Some(start) = wire_points.first() {
-                let start_screen = tool_viewport.schematic_to_screen(*start);
-                painter.circle_filled(start_screen, 4.0 * tool_viewport.zoom, wire_color);
+                let start_screen = viewport.schematic_to_screen(*start);
+                painter.circle_filled(start_screen, 4.0 * viewport.zoom, wire_color);
             }
         }
     }
@@ -82,8 +74,7 @@ fn draw_component_preview(
     painter: &Painter,
     response: &Response,
     state: &AppState,
-    tool_viewport: &Viewport,
-    draw_viewport: &Viewport,
+    viewport: &Viewport,
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let preview_tool = state.schematic.tool;
@@ -93,11 +84,11 @@ fn draw_component_preview(
     if let Tool::Place(component_type) = preview_tool
         && let Some(hover_pos) = response.hover_pos()
     {
-        let grid_pos = screen_to_grid(tool_viewport, state.schematic.grid_size, hover_pos);
-        let preview_pos = tool_viewport.schematic_to_screen(grid_pos);
+        let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, hover_pos);
+        let preview_pos = viewport.schematic_to_screen(grid_pos);
 
         let preview_stroke = Stroke::new(
-            1.0 * tool_viewport.zoom,
+            1.0 * viewport.zoom,
             Color32::from_rgba_unmultiplied(100, 200, 100, 180),
         );
 
@@ -109,7 +100,7 @@ fn draw_component_preview(
                     painter,
                     symbol,
                     preview_pos,
-                    draw_viewport.zoom,
+                    viewport.zoom,
                     adjusted_rotation,
                     false,
                     false,
@@ -128,7 +119,7 @@ fn draw_component_preview(
                 painter,
                 component_type,
                 preview_pos,
-                draw_viewport.zoom,
+                viewport.zoom,
                 preview_rotation_index,
                 preview_stroke,
             );

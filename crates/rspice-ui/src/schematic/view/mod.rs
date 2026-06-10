@@ -42,25 +42,21 @@ pub fn render_schematic_view(
 
     let response = ui.allocate_rect(available, Sense::click_and_drag());
     let painter = ui.painter_at(available);
-    let viewport = viewport_from_state(state, available);
+
+    // Input first, painting second. Pan/zoom and tool edits apply BEFORE
+    // the camera is built and the scene is painted — the old order drew
+    // last frame's state, so the canvas trailed the cursor by a full
+    // frame during pans and drags.
+    handle_viewport_navigation(ui, &response, available, state);
+    let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
+    handle_tool_interactions(ui, &response, state, &viewport);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
-    // hit-test index) before painting and interaction use it.
+    // hit-test index) after interactions may have edited topology.
     state.schematic.ensure_canvas_cache();
 
     draw_scene(&painter, available, &viewport, state, symbol_library);
-    handle_viewport_navigation(ui, &response, available, state);
-
-    let tool_viewport = viewport_from_state(state, available);
-    handle_tool_interactions(ui, &response, state, &tool_viewport);
-    draw_interaction_previews(
-        &painter,
-        &response,
-        state,
-        &tool_viewport,
-        &viewport,
-        symbol_library,
-    );
+    draw_interaction_previews(&painter, &response, state, &viewport, symbol_library);
 
     // Report the cursor position in grid units; the shell status bar shows it.
     state.shell.canvas_hover = response.hover_pos().map(|cursor| {

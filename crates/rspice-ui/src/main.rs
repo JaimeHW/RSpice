@@ -28,6 +28,13 @@ fn main() {
         // MSAA would quadruple fill bandwidth for no visible gain.
         multisampling: 1,
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            // One queued frame instead of wgpu's default two: a full frame
+            // less input-to-photon latency while panning the canvas, with
+            // vsync still pacing presentation.
+            desired_maximum_frame_latency: Some(1),
+            ..Default::default()
+        },
         ..Default::default()
     };
 
