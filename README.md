@@ -147,6 +147,7 @@ The CLI is built for scripted runs and CI: it executes the analyses requested by
 | `rspice compare` | Compare output against a golden result |
 | `rspice convert` | Convert between RAW, ASCII RAW, CSV, JSON, TSV, and HDF5 |
 | `rspice compile-va` | Compile Verilog-A models |
+| `rspice completions` | Generate shell completion scripts |
 
 ```bash
 # Quiet batch run with a JUnit report
