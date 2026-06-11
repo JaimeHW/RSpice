@@ -7,6 +7,7 @@
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
+use std::collections::HashMap;
 
 /// Compiled device model in IR form
 #[derive(Debug, Clone)]
@@ -21,10 +22,12 @@ pub struct DeviceIR {
     pub parameters: Vec<ParamDef>,
     /// Internal variables (state)
     pub variables: Vec<VarDef>,
-    /// Variable assignments (in execution order)
-    pub assignments: Vec<VarAssignment>,
+    /// Variable assignments and runtime loops (in execution order)
+    pub assignments: Vec<IrAssignmentItem>,
     /// Branch equations
     pub equations: Vec<BranchEquation>,
+    /// Branch-current unknowns introduced by potential contributions
+    pub branch_unknowns: Vec<BranchUnknownDef>,
     /// Noise sources
     pub noise_sources: Vec<NoiseSourceDef>,
 }
@@ -71,17 +74,43 @@ pub struct VarAssignment {
     pub expr: IrExpr,
 }
 
-/// Branch equation: represents I(p,n) <+ f(V, params)
+/// An ordered evaluation step: a plain assignment or a runtime-bounded loop
+#[derive(Debug, Clone)]
+pub enum IrAssignmentItem {
+    /// Single variable assignment
+    Assign(VarAssignment),
+    /// Loop executing its body while the condition evaluates nonzero
+    Loop {
+        condition: IrExpr,
+        body: Vec<IrAssignmentItem>,
+    },
+}
+
+/// Branch equation: represents I(p,n) <+ f(...) or V(p,n) <+ f(...)
 #[derive(Debug, Clone)]
 pub struct BranchEquation {
     /// Branch identifier
     pub branch: BranchRef,
     /// Whether this contributes current (true) or voltage (false)
     pub is_current: bool,
+    /// Potential contributions reference a branch-current unknown
+    pub branch_ordinal: Option<usize>,
+    /// Instance-static activation condition (parameter-only guard peeled
+    /// from the contribution). None = always active.
+    pub static_condition: Option<IrExpr>,
     /// The expression tree
     pub expr: IrExpr,
     /// Partial derivatives (Jacobian entries)
     pub derivatives: Vec<Derivative>,
+}
+
+/// A branch-current unknown introduced by potential contributions
+#[derive(Debug, Clone)]
+pub struct BranchUnknownDef {
+    /// Positive node (unified index)
+    pub pos: usize,
+    /// Negative node (unified index)
+    pub neg: usize,
 }
 
 /// Branch reference
@@ -103,12 +132,10 @@ pub struct Derivative {
 /// What a derivative is with respect to
 #[derive(Debug, Clone)]
 pub enum DerivativeWrt {
-    /// Voltage at terminal
+    /// Voltage at a unified node index
     Voltage(usize),
-    /// Current through branch
-    Current(usize, usize),
-    /// Time (for ddt)
-    Time,
+    /// Branch-current unknown (by ordinal)
+    BranchCurrent(usize),
 }
 
 /// IR Expression tree
@@ -125,8 +152,10 @@ pub enum IrExpr {
     Var(SmolStr),
     /// Voltage at terminal pair
     Voltage(usize, usize),
-    /// Current through branch  
+    /// Current through branch
     Current(usize, usize),
+    /// Branch-current unknown of a potential contribution (by ordinal)
+    BranchCurrent(usize),
     /// Time variable
     Time,
     /// Temperature ($temperature)
@@ -311,6 +340,7 @@ impl DeviceIR {
             variables: Vec::new(),
             assignments: Vec::new(),
             equations: Vec::new(),
+            branch_unknowns: Vec::new(),
             noise_sources: Vec::new(),
         };
 
@@ -381,29 +411,20 @@ impl DeviceIR {
             }
         }
 
-        // Convert assignments to IR (in order)
-        for assign in &module.assignments {
-            let expr = converter.convert(&assign.expression)?;
-            ir.assignments.push(VarAssignment {
-                var_index: assign.var_index,
-                expr,
-            });
-        }
+        // Convert evaluation statements (assignments and runtime loops) to
+        // IR, in order
+        let mut items = Vec::with_capacity(module.statements.len());
+        Self::convert_statements(&module.statements, &converter, &mut items)?;
+        ir.assignments = items;
 
-        // Forward-mode AD over the assignment sequence: build shadow
-        // assignments holding each variable's partial derivative w.r.t.
-        // every node voltage, so equation Jacobians chain through
-        // intermediate variables.
-        let shadows = autodiff::build_shadow_assignments(&mut ir, num_nodes);
-
-        // Resolve ddx() operators now that the shadow context exists
-        for assign in &mut ir.assignments {
-            assign.expr = autodiff::resolve_ddx(&assign.expr, &shadows);
-        }
-
-        // Convert contributions to equations
+        // Pre-pass over contributions: parse branch refs and register a
+        // branch-current unknown per node pair receiving a potential
+        // contribution. Pairs are normalized so V(a,b) and V(b,a) share
+        // one unknown (the reversed orientation flips the sign).
+        let mut parsed_contribs = Vec::with_capacity(module.contributions.len());
+        // (min,max) node pair -> (ordinal, oriented positive node)
+        let mut branch_table: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
         for contrib in &module.contributions {
-            // Parse branch name (format: "pos,neg" or "pos")
             let branch_ref =
                 Self::parse_branch_name(&contrib.branch, &ctx).ok_or_else(|| {
                     crate::error::CodeGenError::new(
@@ -414,22 +435,146 @@ impl DeviceIR {
                     )
                 })?;
 
+            if !contrib.is_current {
+                let key = (
+                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
+                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                );
+                branch_table.entry(key).or_insert_with(|| {
+                    let ordinal = ir.branch_unknowns.len();
+                    ir.branch_unknowns.push(BranchUnknownDef {
+                        pos: branch_ref.pos_terminal,
+                        neg: branch_ref.neg_terminal,
+                    });
+                    (ordinal, branch_ref.pos_terminal)
+                });
+            }
+
+            parsed_contribs.push(branch_ref);
+        }
+        let num_branches = ir.branch_unknowns.len();
+
+        // Current probes I(a,b) of a branch that carries a potential
+        // contribution read the branch unknown (exact), not the inferred
+        // contribution cache.
+        if !branch_table.is_empty() {
+            autodiff::rewrite_branch_probes_in_items(&mut ir.assignments, &branch_table);
+        }
+
+        // Forward-mode AD over the assignment sequence: build shadow
+        // assignments holding each variable's partial derivative w.r.t.
+        // every node voltage and branch-current unknown, so equation
+        // Jacobians chain through intermediate variables. Shadow updates
+        // recurse into loop bodies so loop-carried dependencies
+        // differentiate correctly.
+        let shadows = autodiff::build_shadow_assignments(&mut ir, num_nodes, num_branches);
+
+        // Resolve ddx() operators now that the shadow context exists
+        autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
+
+        // Convert contributions to equations
+        for (contrib, branch_ref) in module.contributions.iter().zip(parsed_contribs) {
             // Convert the expression
             let expr = converter.convert(&contrib.expression)?;
+            let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
-            // Generate derivatives for Jacobian
-            let derivatives = Self::generate_derivatives(&expr, num_nodes, &shadows);
+            // Peel instance-static (parameter-only) guards: a potential
+            // contribution that is mode-disabled must leave the branch
+            // open, not short it to zero volts.
+            let (static_condition, expr) = Self::peel_static_condition(expr);
+
+            let (branch_ref, expr, branch_ordinal) = if contrib.is_current {
+                (branch_ref, expr, None)
+            } else {
+                let key = (
+                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
+                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                );
+                let (ordinal, oriented_pos) = branch_table[&key];
+                if branch_ref.pos_terminal == oriented_pos {
+                    (branch_ref, expr, Some(ordinal))
+                } else {
+                    // Reversed orientation: V(b,a) <+ E is V(a,b) <+ -E
+                    let unknown = &ir.branch_unknowns[ordinal];
+                    (
+                        BranchRef {
+                            pos_terminal: unknown.pos,
+                            neg_terminal: unknown.neg,
+                        },
+                        IrExpr::Unary(UnaryOp::Neg, Box::new(expr)),
+                        Some(ordinal),
+                    )
+                }
+            };
+
+            // Generate derivatives for Jacobian (over node voltages and
+            // branch-current unknowns)
+            let derivatives =
+                Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
 
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
                 is_current: contrib.is_current,
+                branch_ordinal,
+                static_condition,
                 expr,
                 derivatives,
             });
         }
 
         Ok(ir)
+    }
+
+    /// Peel leading instance-static guards (`cond ? inner : 0` where cond
+    /// depends only on parameters) into a separate activation condition
+    fn peel_static_condition(expr: IrExpr) -> (Option<IrExpr>, IrExpr) {
+        let mut condition: Option<IrExpr> = None;
+        let mut current = expr;
+        loop {
+            match current {
+                IrExpr::Conditional(cond, then_expr, else_expr)
+                    if Self::is_static_param_expr(&cond)
+                        && matches!(*else_expr, IrExpr::Const(v) if v == 0.0) =>
+                {
+                    condition = Some(match condition {
+                        Some(prev) => {
+                            IrExpr::Binary(BinaryOp::And, Box::new(prev), cond)
+                        }
+                        None => *cond,
+                    });
+                    current = *then_expr;
+                }
+                other => return (condition, other),
+            }
+        }
+    }
+
+    /// Convert analyzed statements (assignments and runtime loops) to IR
+    fn convert_statements(
+        statements: &[crate::semantic::AnalyzedStatement],
+        converter: &crate::expr_converter::ExprConverter,
+        out: &mut Vec<IrAssignmentItem>,
+    ) -> crate::error::CompileResult<()> {
+        use crate::semantic::AnalyzedStatement;
+        for stmt in statements {
+            match stmt {
+                AnalyzedStatement::Assignment(assign) => {
+                    let expr = converter.convert(&assign.expression)?;
+                    out.push(IrAssignmentItem::Assign(VarAssignment {
+                        var_index: assign.var_index,
+                        expr,
+                    }));
+                }
+                AnalyzedStatement::Loop(loop_stmt) => {
+                    let condition = converter.convert(&loop_stmt.condition)?;
+                    let mut body = Vec::with_capacity(loop_stmt.body.len());
+                    Self::convert_statements(&loop_stmt.body, converter, &mut body)?;
+                    out.push(IrAssignmentItem::Loop { condition, body });
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Parse a branch name string like "p,n" or "p" to node indices
@@ -456,17 +601,16 @@ impl DeviceIR {
     }
 
     /// Generate derivatives for Jacobian entries over the unified node
-    /// space (terminals first, then internal nodes)
+    /// space (terminals, internal nodes) and the branch-current unknowns
     fn generate_derivatives(
         expr: &IrExpr,
         num_nodes: usize,
+        num_branches: usize,
         shadows: &autodiff::ShadowContext,
     ) -> Vec<Derivative> {
         let mut derivatives = Vec::new();
 
-        // Generate partial derivative with respect to each node voltage
-        for i in 0..num_nodes {
-            let wrt = DerivativeWrt::Voltage(i);
+        for wrt in autodiff::axes(num_nodes, num_branches) {
             let deriv_expr = autodiff::differentiate_with_shadows(expr, &wrt, shadows);
             let simplified = autodiff::simplify(deriv_expr);
 
@@ -534,9 +678,13 @@ pub mod autodiff {
             Self::default()
         }
 
-        /// Name of the shadow variable holding d(name)/dV(node)
-        pub fn shadow_name(name: &str, node: usize) -> SmolStr {
-            format!("{name}@d{node}").into()
+        /// Name of the shadow variable holding the derivative of `name`
+        /// along the given axis (node voltage or branch current)
+        pub fn shadow_name(name: &str, wrt: &DerivativeWrt) -> SmolStr {
+            match wrt {
+                DerivativeWrt::Voltage(node) => format!("{name}@d{node}").into(),
+                DerivativeWrt::BranchCurrent(k) => format!("{name}@dI{k}").into(),
+            }
         }
 
         pub fn is_shadowed(&self, name: &str) -> bool {
@@ -544,11 +692,19 @@ pub mod autodiff {
         }
     }
 
+    /// All differentiation axes of a device: node voltages first, then
+    /// branch-current unknowns
+    pub(crate) fn axes(num_nodes: usize, num_branches: usize) -> impl Iterator<Item = DerivativeWrt> {
+        (0..num_nodes)
+            .map(DerivativeWrt::Voltage)
+            .chain((0..num_branches).map(DerivativeWrt::BranchCurrent))
+    }
+
     /// Check whether an expression depends on node quantities, directly or
     /// through already-shadowed variables.
     fn depends_on_nodes(expr: &IrExpr, shadowed: &HashSet<SmolStr>) -> bool {
         match expr {
-            IrExpr::Voltage(..) | IrExpr::Current(..) => true,
+            IrExpr::Voltage(..) | IrExpr::Current(..) | IrExpr::BranchCurrent(_) => true,
             IrExpr::Var(name) => shadowed.contains(name),
             IrExpr::Const(_)
             | IrExpr::Param(_)
@@ -607,25 +763,93 @@ pub mod autodiff {
         }
     }
 
+    /// Collect voltage-dependent variable names over an item tree
+    /// (fixpoint helper for [`build_shadow_assignments`])
+    fn scan_shadowed(
+        items: &[IrAssignmentItem],
+        variables: &[VarDef],
+        shadowed: &mut HashSet<SmolStr>,
+        changed: &mut bool,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    let name = &variables[assign.var_index].name;
+                    if !shadowed.contains(name) && depends_on_nodes(&assign.expr, shadowed) {
+                        shadowed.insert(name.clone());
+                        *changed = true;
+                    }
+                }
+                IrAssignmentItem::Loop { body, .. } => {
+                    scan_shadowed(body, variables, shadowed, changed);
+                }
+            }
+        }
+    }
+
+    /// Interleave shadow derivative updates before each original
+    /// assignment, recursing into loop bodies so loop-carried voltage
+    /// dependencies accumulate their derivatives per iteration
+    fn interleave_shadows(
+        items: Vec<IrAssignmentItem>,
+        variables: &[VarDef],
+        shadow_index: &HashMap<SmolStr, usize>,
+        ctx: &ShadowContext,
+        num_nodes: usize,
+        num_branches: usize,
+    ) -> Vec<IrAssignmentItem> {
+        let mut rewritten = Vec::with_capacity(items.len() * 2);
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    let target = variables[assign.var_index].name.clone();
+                    if ctx.is_shadowed(&target) {
+                        for wrt in axes(num_nodes, num_branches) {
+                            let deriv =
+                                simplify(differentiate_with_shadows(&assign.expr, &wrt, ctx));
+                            let shadow = ShadowContext::shadow_name(&target, &wrt);
+                            rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                var_index: shadow_index[&shadow],
+                                expr: deriv,
+                            }));
+                        }
+                    }
+                    rewritten.push(IrAssignmentItem::Assign(assign));
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    let body = interleave_shadows(
+                        body,
+                        variables,
+                        shadow_index,
+                        ctx,
+                        num_nodes,
+                        num_branches,
+                    );
+                    rewritten.push(IrAssignmentItem::Loop { condition, body });
+                }
+            }
+        }
+        rewritten
+    }
+
     /// Build shadow derivative assignments for voltage-dependent variables.
     ///
     /// Rewrites `ir.assignments` so that each assignment to a
     /// voltage-dependent variable is preceded by assignments computing the
-    /// variable's partial derivative w.r.t. every node voltage. Shadow
-    /// variables are appended to `ir.variables`.
-    pub fn build_shadow_assignments(ir: &mut DeviceIR, num_nodes: usize) -> ShadowContext {
+    /// variable's partial derivative w.r.t. every node voltage and
+    /// branch-current unknown. Shadow variables are appended to
+    /// `ir.variables`.
+    pub fn build_shadow_assignments(
+        ir: &mut DeviceIR,
+        num_nodes: usize,
+        num_branches: usize,
+    ) -> ShadowContext {
         // Fixpoint: a variable is voltage-dependent if any assignment to it
         // depends on node quantities or on another shadowed variable.
         let mut shadowed: HashSet<SmolStr> = HashSet::new();
         loop {
             let mut changed = false;
-            for assign in &ir.assignments {
-                let name = ir.variables[assign.var_index].name.clone();
-                if !shadowed.contains(&name) && depends_on_nodes(&assign.expr, &shadowed) {
-                    shadowed.insert(name);
-                    changed = true;
-                }
-            }
+            scan_shadowed(&ir.assignments, &ir.variables, &mut shadowed, &mut changed);
             if !changed {
                 break;
             }
@@ -642,8 +866,8 @@ pub mod autodiff {
         // Register shadow variables
         let mut shadow_index: HashMap<SmolStr, usize> = HashMap::new();
         for name in &shadowed {
-            for node in 0..num_nodes {
-                let shadow = ShadowContext::shadow_name(name, node);
+            for wrt in axes(num_nodes, num_branches) {
+                let shadow = ShadowContext::shadow_name(name, &wrt);
                 shadow_index.insert(shadow.clone(), ir.variables.len());
                 ir.variables.push(VarDef {
                     name: shadow,
@@ -656,25 +880,58 @@ pub mod autodiff {
         // Both the derivative and the original expression read the
         // pre-assignment values, so the shadows must be written first.
         let originals = std::mem::take(&mut ir.assignments);
-        let mut rewritten = Vec::with_capacity(originals.len() * (1 + num_nodes));
-        for assign in originals {
-            let target = ir.variables[assign.var_index].name.clone();
-            if shadowed.contains(&target) {
-                for node in 0..num_nodes {
-                    let wrt = DerivativeWrt::Voltage(node);
-                    let deriv = simplify(differentiate_with_shadows(&assign.expr, &wrt, &ctx));
-                    let shadow = ShadowContext::shadow_name(&target, node);
-                    rewritten.push(VarAssignment {
-                        var_index: shadow_index[&shadow],
-                        expr: deriv,
+        ir.assignments = interleave_shadows(
+            originals,
+            &ir.variables,
+            &shadow_index,
+            &ctx,
+            num_nodes,
+            num_branches,
+        );
+
+        ctx
+    }
+
+    /// Rewrite I(a,b) probes of branches carrying potential contributions
+    /// into branch-current unknown references. The table maps a normalized
+    /// (min,max) node pair to (ordinal, oriented positive node); a probe
+    /// against the orientation negates.
+    pub fn rewrite_branch_probes(
+        expr: &IrExpr,
+        table: &HashMap<(usize, usize), (usize, usize)>,
+    ) -> IrExpr {
+        map_expr(expr, &mut |e| {
+            if let IrExpr::Current(p, n) = e {
+                let key = (*p.min(n), *p.max(n));
+                if let Some(&(ordinal, oriented_pos)) = table.get(&key) {
+                    let unknown = IrExpr::BranchCurrent(ordinal);
+                    return Some(if *p == oriented_pos {
+                        unknown
+                    } else {
+                        IrExpr::Unary(UnaryOp::Neg, Box::new(unknown))
                     });
                 }
             }
-            rewritten.push(assign);
-        }
-        ir.assignments = rewritten;
+            None
+        })
+    }
 
-        ctx
+    /// Apply [`rewrite_branch_probes`] across an assignment-item tree
+    pub fn rewrite_branch_probes_in_items(
+        items: &mut [IrAssignmentItem],
+        table: &HashMap<(usize, usize), (usize, usize)>,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    assign.expr = rewrite_branch_probes(&assign.expr, table);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = rewrite_branch_probes(condition, table);
+                    rewrite_branch_probes_in_items(body, table);
+                }
+            }
+        }
     }
 
     /// Resolve ddx() operators into explicit derivative expressions
@@ -688,6 +945,21 @@ pub mod autodiff {
                 None
             }
         })
+    }
+
+    /// Resolve ddx() operators across an assignment-item tree
+    pub fn resolve_ddx_in_items(items: &mut [IrAssignmentItem], shadows: &ShadowContext) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    assign.expr = resolve_ddx(&assign.expr, shadows);
+                }
+                IrAssignmentItem::Loop { condition, body } => {
+                    *condition = resolve_ddx(condition, shadows);
+                    resolve_ddx_in_items(body, shadows);
+                }
+            }
+        }
     }
 
     /// Structurally map an IR expression bottom-up. The closure may replace
@@ -792,11 +1064,19 @@ pub mod autodiff {
             }
 
             // Chain rule through intermediate variables: the shadow
-            // variable carries d(var)/dV(node)
-            IrExpr::Var(name) => match wrt {
-                DerivativeWrt::Voltage(node) if shadows.is_shadowed(name) => {
-                    IrExpr::Var(ShadowContext::shadow_name(name, *node))
+            // variable carries the derivative along the active axis
+            IrExpr::Var(name) => {
+                if shadows.is_shadowed(name) {
+                    IrExpr::Var(ShadowContext::shadow_name(name, wrt))
+                } else {
+                    IrExpr::Const(0.0)
                 }
+            }
+
+            // Branch-current unknowns differentiate to 1 along their own
+            // axis and 0 along every other
+            IrExpr::BranchCurrent(k) => match wrt {
+                DerivativeWrt::BranchCurrent(j) if j == k => IrExpr::Const(1.0),
                 _ => IrExpr::Const(0.0),
             },
 

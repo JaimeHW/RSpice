@@ -56,6 +56,15 @@ impl<'a> Vm<'a> {
             Instruction::PushCurrent(pos, neg) => {
                 self.stack.push(self.context.current(*pos, *neg));
             }
+            Instruction::PushBranchCurrent(k) => {
+                let v = self
+                    .context
+                    .branch_current_values
+                    .get(*k)
+                    .copied()
+                    .unwrap_or(0.0);
+                self.stack.push(v);
+            }
             Instruction::PushInternalVoltage(idx) => {
                 self.stack.push(self.context.internal_voltage(*idx));
             }
@@ -79,6 +88,12 @@ impl<'a> Vm<'a> {
             Instruction::Mul => self.binary_op(|a, b| a * b)?,
             Instruction::Div => self.binary_op(|a, b| a / b)?,
             Instruction::Pow => self.binary_op(|a, b| a.powf(b))?,
+            Instruction::Mod => self.binary_op(|a, b| a % b)?,
+            Instruction::Shl => self.binary_op(|a, b| ((a as i64) << (b as i64)) as f64 )?,
+            Instruction::Shr => self.binary_op(|a, b| ((a as i64) >> (b as i64)) as f64 )?,
+            Instruction::BitAnd => self.binary_op(|a, b| ((a as i64) & (b as i64)) as f64 )?,
+            Instruction::BitOr => self.binary_op(|a, b| ((a as i64) | (b as i64)) as f64 )?,
+            Instruction::BitXor => self.binary_op(|a, b| ((a as i64) ^ (b as i64)) as f64 )?,
 
             // Unary operations
             Instruction::Neg => self.unary_op(|a| -a)?,

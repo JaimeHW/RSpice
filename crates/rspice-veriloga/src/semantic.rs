@@ -174,11 +174,18 @@ pub struct SemanticAnalyzer {
     subst_stack: Vec<HashMap<SmolStr, Expression>>,
     /// Counter for generating unique hoisted local names
     local_counter: usize,
-    /// Constant parameter values known so far (for range evaluation and
-    /// loop-bound folding)
+    /// Constant parameter default values (compile-time diagnostics only:
+    /// instances may override parameters, so these must never influence
+    /// generated code)
     param_consts: HashMap<SmolStr, f64>,
+    /// Values that cannot vary per instance (localparams derived purely
+    /// from literals). Safe for loop unrolling and code folding.
+    invariant_consts: HashMap<SmolStr, f64>,
     /// Current function inlining depth (recursion guard)
     inline_depth: usize,
+    /// Nesting depth of runtime-bounded loops (contributions inside them
+    /// are not representable and must error)
+    runtime_loop_depth: usize,
 }
 
 /// Analyzed source file with resolved symbols
@@ -207,11 +214,35 @@ pub struct AnalyzedModule {
     pub variables: Vec<AnalyzedVariable>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
-    pub assignments: Vec<AnalyzedAssignment>,
+    /// Ordered evaluation statements (assignments and runtime loops),
+    /// executed before the contributions on every device evaluation
+    pub statements: Vec<AnalyzedStatement>,
     pub internal_nodes: Vec<AnalyzedInternalNode>,
     /// Names of nets declared `ground` (they map to the global reference)
     pub ground_nodes: Vec<SmolStr>,
     pub symbol_table: SymbolTable,
+}
+
+/// An ordered evaluation step of the analog block
+#[derive(Debug, Clone)]
+pub enum AnalyzedStatement {
+    /// Variable assignment
+    Assignment(AnalyzedAssignment),
+    /// Loop whose bounds are only known at runtime (e.g. parameter
+    /// dependent). The condition is re-evaluated before every iteration.
+    Loop(AnalyzedLoop),
+}
+
+/// Runtime-bounded loop over assignment statements
+#[derive(Debug, Clone)]
+pub struct AnalyzedLoop {
+    /// Loop continues while this evaluates nonzero (any enclosing guard
+    /// is folded in, so a guarded loop runs zero iterations when inactive)
+    pub condition: Expression,
+    /// Loop body (assignments and nested loops)
+    pub body: Vec<AnalyzedStatement>,
+    /// Source span
+    pub span: Span,
 }
 
 /// Analyzed port
@@ -306,7 +337,9 @@ impl SemanticAnalyzer {
             subst_stack: Vec::new(),
             local_counter: 0,
             param_consts: HashMap::new(),
+            invariant_consts: HashMap::new(),
             inline_depth: 0,
+            runtime_loop_depth: 0,
         }
     }
 
@@ -336,7 +369,9 @@ impl SemanticAnalyzer {
                 self.subst_stack.clear();
                 self.local_counter = 0;
                 self.param_consts.clear();
+                self.invariant_consts.clear();
                 self.inline_depth = 0;
+                self.runtime_loop_depth = 0;
 
                 match self.analyze_module(module) {
                     Ok(analyzed) => {
@@ -361,11 +396,14 @@ impl SemanticAnalyzer {
             variables: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
-            assignments: Vec::new(),
+            statements: Vec::new(),
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             symbol_table: SymbolTable::new(),
         };
+        // Evaluation statements accumulate in a local sink so loop bodies
+        // can recurse into their own sinks without aliasing the module
+        let mut statements: Vec<AnalyzedStatement> = Vec::new();
         self.user_functions = module
             .functions
             .iter()
@@ -542,7 +580,10 @@ impl SemanticAnalyzer {
             };
 
             // Parse parameter range if present
-            let range = param.range.as_ref().map(|r| self.parse_range(r));
+            let range = param
+                .range
+                .as_ref()
+                .map(|r| self.parse_range(r, &param_names));
 
             // Validate default against range
             if let (Some(default_val), Some(range_constraint)) = (default, &range)
@@ -633,6 +674,13 @@ impl SemanticAnalyzer {
             if let Some(value) = self.eval_const(default) {
                 self.param_consts.insert(localparam.name.clone(), value);
             }
+            // A localparam derived purely from literals (and other
+            // invariant localparams) cannot vary per instance, so it may
+            // participate in loop unrolling and other code folding
+            if let Some(value) = self.eval_const_invariant(default) {
+                self.invariant_consts
+                    .insert(localparam.name.clone(), value);
+            }
 
             let var_index = analyzed.variables.len();
             analyzed.variables.push(AnalyzedVariable {
@@ -656,13 +704,13 @@ impl SemanticAnalyzer {
 
             let expression = self.lower_expression(default)?;
             let expr_type = self.infer_type(&expression)?;
-            analyzed.assignments.push(AnalyzedAssignment {
+            statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                 target: localparam.name.clone(),
                 var_index,
                 expression,
                 expr_type,
                 span: localparam.span,
-            });
+            }));
         }
 
         // Phase 10: Module-level variable initializers run before the
@@ -677,13 +725,13 @@ impl SemanticAnalyzer {
                         .expect("variable registered above");
                     let expression = self.lower_expression(init)?;
                     let expr_type = self.infer_type(&expression)?;
-                    analyzed.assignments.push(AnalyzedAssignment {
+                    statements.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                         target: item.name.clone(),
                         var_index,
                         expression,
                         expr_type,
                         span: item.span,
-                    });
+                    }));
                 }
             }
         }
@@ -691,16 +739,18 @@ impl SemanticAnalyzer {
         // Phase 11: analog initial runs before the main analog block
         if let Some(block) = &module.analog_initial {
             for stmt in &block.statements {
-                self.analyze_statement(stmt, &mut analyzed)?;
+                self.analyze_statement(stmt, &mut analyzed, &mut statements)?;
             }
         }
 
         // Phase 12: Analyze analog block
         if let Some(block) = &module.analog_block {
             for stmt in &block.statements {
-                self.analyze_statement(stmt, &mut analyzed)?;
+                self.analyze_statement(stmt, &mut analyzed, &mut statements)?;
             }
         }
+
+        analyzed.statements = statements;
 
         // Surface every recorded diagnostic instead of silently succeeding
         if !self.errors.is_empty() {
@@ -791,18 +841,20 @@ impl SemanticAnalyzer {
     ///
     /// Assignments and contributions inside conditionals become conditional
     /// expressions (`guard ? value : previous`), so the recorded flat lists
-    /// preserve branch semantics exactly.
+    /// preserve branch semantics exactly. Loops whose bounds do not fold to
+    /// compile-time constants lower to runtime loop statements.
     fn analyze_statement(
         &mut self,
         stmt: &AnalogStatement,
         module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
         match stmt {
             AnalogStatement::Contribution(contrib) => {
                 self.analyze_contribution(contrib, module)?;
             }
             AnalogStatement::Assignment(assign) => {
-                self.analyze_assignment(assign, module)?;
+                self.analyze_assignment(assign, module, sink)?;
             }
             AnalogStatement::Block(block) => {
                 self.symbols.enter_scope();
@@ -859,19 +911,19 @@ impl SemanticAnalyzer {
                                 .iter()
                                 .position(|v| v.name == hoisted)
                                 .expect("just registered");
-                            module.assignments.push(AnalyzedAssignment {
+                            sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
                                 target: hoisted.clone(),
                                 var_index,
                                 expression,
                                 expr_type,
                                 span: item.span,
-                            });
+                            }));
                         }
                     }
                 }
 
                 for s in &block.statements {
-                    self.analyze_statement(s, module)?;
+                    self.analyze_statement(s, module, sink)?;
                 }
 
                 self.subst_stack.pop();
@@ -890,12 +942,12 @@ impl SemanticAnalyzer {
                 }
 
                 self.guard_stack.push(condition.clone());
-                self.analyze_statement(&cond.then_branch, module)?;
+                self.analyze_statement(&cond.then_branch, module, sink)?;
                 self.guard_stack.pop();
 
                 if let Some(else_branch) = &cond.else_branch {
                     self.guard_stack.push(Self::not_expr(condition));
-                    self.analyze_statement(else_branch, module)?;
+                    self.analyze_statement(else_branch, module, sink)?;
                     self.guard_stack.pop();
                 }
             }
@@ -928,7 +980,7 @@ impl SemanticAnalyzer {
                     };
 
                     self.guard_stack.push(guard);
-                    self.analyze_statement(&item.statement, module)?;
+                    self.analyze_statement(&item.statement, module, sink)?;
                     self.guard_stack.pop();
 
                     prior_match = Some(match prior_match {
@@ -941,51 +993,68 @@ impl SemanticAnalyzer {
                     match prior_match {
                         Some(prior) => {
                             self.guard_stack.push(Self::not_expr(prior));
-                            self.analyze_statement(default, module)?;
+                            self.analyze_statement(default, module, sink)?;
                             self.guard_stack.pop();
                         }
-                        None => self.analyze_statement(default, module)?,
+                        None => self.analyze_statement(default, module, sink)?,
                     }
                 }
             }
             AnalogStatement::For(for_stmt) => {
-                self.analyze_for(for_stmt, module)?;
+                self.analyze_for(for_stmt, module, sink)?;
             }
             AnalogStatement::Repeat(repeat) => {
                 let count_expr = self.lower_expression(&repeat.count)?;
-                let Some(count) = self.eval_const(&count_expr) else {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidAnalogOperator(
-                            "repeat count must be a compile-time constant".into(),
-                        ),
-                        repeat.span,
-                    )));
-                };
-                let count = count as usize;
-                if count > Self::MAX_UNROLL_ITERATIONS {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::InvalidAnalogOperator(format!(
-                            "repeat count {count} exceeds the unroll limit"
-                        )),
-                        repeat.span,
-                    )));
-                }
-                for _ in 0..count {
-                    self.analyze_statement(&repeat.body, module)?;
+                match self.eval_const_invariant(&count_expr) {
+                    Some(count) if (count as usize) <= Self::MAX_UNROLL_ITERATIONS => {
+                        for _ in 0..(count as usize) {
+                            self.analyze_statement(&repeat.body, module, sink)?;
+                        }
+                    }
+                    Some(count) => {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidAnalogOperator(format!(
+                                "repeat count {count} exceeds the unroll limit"
+                            )),
+                            repeat.span,
+                        )));
+                    }
+                    // Runtime-dependent count: lower to a runtime loop with
+                    // a synthesized counter
+                    None => self.lower_runtime_repeat(repeat, count_expr, module, sink)?,
                 }
             }
             AnalogStatement::While(while_stmt) => {
                 let condition = self.lower_expression(&while_stmt.condition)?;
-                match self.eval_const(&condition) {
+                match self.eval_const_invariant(&condition) {
                     Some(0.0) => {} // statically dead loop
-                    _ => {
+                    Some(_) => {
                         return Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(
-                                "while loops with non-constant conditions are not supported"
-                                    .into(),
+                                "while loop condition is constant-true (infinite loop)".into(),
                             ),
                             while_stmt.span,
                         )));
+                    }
+                    None => {
+                        // Runtime condition: lower to a runtime loop
+                        let cond_type = self.infer_type(&condition)?;
+                        if !cond_type.is_condition() {
+                            self.record_error_at(
+                                SemanticErrorKind::InvalidCondition {
+                                    found: cond_type.to_string(),
+                                },
+                                while_stmt.span,
+                            );
+                        }
+                        let condition = self.fold_guard_into_condition(condition);
+                        let body =
+                            self.analyze_loop_body(&while_stmt.body, None, module)?;
+                        sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
+                            condition,
+                            body,
+                            span: while_stmt.span,
+                        }));
                     }
                 }
             }
@@ -993,11 +1062,11 @@ impl SemanticAnalyzer {
                 match self.event_guard(&event_ctrl.event)? {
                     EventLowering::Guard(guard) => {
                         self.guard_stack.push(guard);
-                        self.analyze_statement(&event_ctrl.statement, module)?;
+                        self.analyze_statement(&event_ctrl.statement, module, sink)?;
                         self.guard_stack.pop();
                     }
                     EventLowering::Always => {
-                        self.analyze_statement(&event_ctrl.statement, module)?;
+                        self.analyze_statement(&event_ctrl.statement, module, sink)?;
                     }
                     EventLowering::Never => {} // e.g. final_step bodies
                 }
@@ -1020,8 +1089,14 @@ impl SemanticAnalyzer {
 
     const MAX_UNROLL_ITERATIONS: usize = 65536;
 
-    /// Statically unroll a for loop with compile-time-constant bounds
-    fn analyze_for(&mut self, for_stmt: &ForStmt, module: &mut AnalyzedModule) -> CompileResult<()> {
+    /// Analyze a for loop: statically unroll when the bounds fold to
+    /// compile-time constants, otherwise lower to a runtime loop
+    fn analyze_for(
+        &mut self,
+        for_stmt: &ForStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
         let loop_var = self.resolve_substituted_name(&for_stmt.var);
         if self.symbols.lookup(&loop_var).is_none() {
             return Err(CompileError::Semantic(SemanticError::new(
@@ -1032,16 +1107,6 @@ impl SemanticAnalyzer {
             )));
         }
 
-        let init = self.lower_expression(&for_stmt.init)?;
-        let Some(mut value) = self.eval_const(&init) else {
-            return Err(CompileError::Semantic(SemanticError::new(
-                SemanticErrorKind::InvalidAnalogOperator(
-                    "for-loop bounds must be compile-time constants".into(),
-                ),
-                for_stmt.span,
-            )));
-        };
-
         if *for_stmt.update.target_name() != for_stmt.var {
             return Err(CompileError::Semantic(SemanticError::new(
                 SemanticErrorKind::InvalidAnalogOperator(
@@ -1051,6 +1116,45 @@ impl SemanticAnalyzer {
             )));
         }
 
+        // Probe whether init, condition, and update fold to constants;
+        // only then is static unrolling sound.
+        let init = self.lower_expression(&for_stmt.init)?;
+        let init_value = self.eval_const_invariant(&init);
+        let static_unrollable = if let Some(value) = init_value {
+            self.subst_stack.push(HashMap::from([(
+                for_stmt.var.clone(),
+                Self::number_expr(value, for_stmt.span),
+            )]));
+            let cond_probe = self
+                .lower_expression(&for_stmt.condition)
+                .ok()
+                .and_then(|c| self.eval_const_invariant(&c));
+            let update_probe = self
+                .lower_expression(&for_stmt.update.value)
+                .ok()
+                .and_then(|u| self.eval_const_invariant(&u));
+            self.subst_stack.pop();
+            cond_probe.is_some() && update_probe.is_some()
+        } else {
+            false
+        };
+
+        if static_unrollable {
+            self.unroll_for(for_stmt, init_value.expect("checked"), module, sink)
+        } else {
+            self.lower_runtime_for(for_stmt, module, sink)
+        }
+    }
+
+    /// Statically unroll a for loop with compile-time-constant bounds
+    fn unroll_for(
+        &mut self,
+        for_stmt: &ForStmt,
+        init_value: f64,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        let mut value = init_value;
         let mut iterations = 0usize;
         loop {
             // Bind the loop variable to its current constant value
@@ -1060,11 +1164,11 @@ impl SemanticAnalyzer {
             )]));
 
             let condition = self.lower_expression(&for_stmt.condition)?;
-            let Some(cond_value) = self.eval_const(&condition) else {
+            let Some(cond_value) = self.eval_const_invariant(&condition) else {
                 self.subst_stack.pop();
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidAnalogOperator(
-                        "for-loop condition must be a compile-time constant".into(),
+                        "for-loop condition stopped folding during unrolling".into(),
                     ),
                     for_stmt.span,
                 )));
@@ -1074,14 +1178,14 @@ impl SemanticAnalyzer {
                 break;
             }
 
-            self.analyze_statement(&for_stmt.body, module)?;
+            self.analyze_statement(&for_stmt.body, module, sink)?;
 
             let update = self.lower_expression(&for_stmt.update.value)?;
-            let Some(next_value) = self.eval_const(&update) else {
+            let Some(next_value) = self.eval_const_invariant(&update) else {
                 self.subst_stack.pop();
                 return Err(CompileError::Semantic(SemanticError::new(
                     SemanticErrorKind::InvalidAnalogOperator(
-                        "for-loop update must be a compile-time constant step".into(),
+                        "for-loop update stopped folding during unrolling".into(),
                     ),
                     for_stmt.span,
                 )));
@@ -1101,6 +1205,170 @@ impl SemanticAnalyzer {
             }
         }
 
+        Ok(())
+    }
+
+    /// AND the enclosing guard into a runtime loop condition so a guarded
+    /// loop runs zero iterations when its guard is inactive
+    fn fold_guard_into_condition(&self, condition: Expression) -> Expression {
+        match self.current_guard() {
+            Some(guard) => Self::binary_expr(BinaryOp::And, guard, condition),
+            None => condition,
+        }
+    }
+
+    /// Analyze loop-body statements into a fresh sink, tracking the
+    /// runtime-loop nesting depth (contributions inside are rejected).
+    /// An optional trailing statement (the for-loop update) is analyzed
+    /// after the body.
+    fn analyze_loop_body(
+        &mut self,
+        body: &AnalogStatement,
+        trailing: Option<&AnalogStatement>,
+        module: &mut AnalyzedModule,
+    ) -> CompileResult<Vec<AnalyzedStatement>> {
+        let mut statements = Vec::new();
+        self.runtime_loop_depth += 1;
+        let result = self
+            .analyze_statement(body, module, &mut statements)
+            .and_then(|()| match trailing {
+                Some(stmt) => self.analyze_statement(stmt, module, &mut statements),
+                None => Ok(()),
+            });
+        self.runtime_loop_depth -= 1;
+        result?;
+        Ok(statements)
+    }
+
+    /// Lower a for loop with runtime-dependent bounds (e.g. iterating to a
+    /// parameter like BSIM4's nf finger count) into a runtime loop
+    fn lower_runtime_for(
+        &mut self,
+        for_stmt: &ForStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        // Loop variable initialization through the normal guarded path
+        let init_stmt = AssignmentStmt {
+            target: LValue::Variable {
+                name: for_stmt.var.clone(),
+                span: for_stmt.span,
+            },
+            value: for_stmt.init.clone(),
+            span: for_stmt.span,
+        };
+        self.analyze_assignment(&init_stmt, module, sink)?;
+
+        // Condition re-evaluated each iteration, with the enclosing guard
+        // folded in
+        let condition = self.lower_expression(&for_stmt.condition)?;
+        let cond_type = self.infer_type(&condition)?;
+        if !cond_type.is_condition() {
+            self.record_error_at(
+                SemanticErrorKind::InvalidCondition {
+                    found: cond_type.to_string(),
+                },
+                for_stmt.span,
+            );
+        }
+        let condition = self.fold_guard_into_condition(condition);
+
+        // Body, then the update assignment, inside the loop sink
+        let update_stmt = AnalogStatement::Assignment((*for_stmt.update).clone());
+        let body = self.analyze_loop_body(&for_stmt.body, Some(&update_stmt), module)?;
+
+        sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
+            condition,
+            body,
+            span: for_stmt.span,
+        }));
+        Ok(())
+    }
+
+    /// Lower a repeat loop with a runtime-dependent count into a runtime
+    /// loop over a synthesized counter
+    fn lower_runtime_repeat(
+        &mut self,
+        repeat: &RepeatStmt,
+        count_expr: Expression,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        let span = repeat.span;
+
+        // Synthesize counter and count-snapshot variables (the LRM
+        // evaluates the repeat count once, before iterating)
+        self.local_counter += 1;
+        let idx_name: SmolStr = format!("__repeat_i{}", self.local_counter).into();
+        let cnt_name: SmolStr = format!("__repeat_n{}", self.local_counter).into();
+        let mut register = |this: &mut Self, name: &SmolStr| -> CompileResult<usize> {
+            let var_index = module.variables.len();
+            module.variables.push(AnalyzedVariable {
+                name: name.clone(),
+                var_type: VarType::Real,
+                value_type: ValueType::Real,
+                is_state: false,
+            });
+            this.define_symbol(Symbol {
+                name: name.clone(),
+                kind: SymbolKind::Variable,
+                value_type: ValueType::Real,
+                span,
+                attrs: Default::default(),
+            })?;
+            Ok(var_index)
+        };
+        let idx_index = register(self, &idx_name)?;
+        let cnt_index = register(self, &cnt_name)?;
+
+        let ident = |name: &SmolStr| {
+            Expression::Identifier(Identifier {
+                name: name.clone(),
+                span,
+            })
+        };
+
+        // cnt = <count>; idx = 0;
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: cnt_name.clone(),
+            var_index: cnt_index,
+            expression: count_expr,
+            expr_type: ValueType::Real,
+            span,
+        }));
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: idx_name.clone(),
+            var_index: idx_index,
+            expression: Self::number_expr(0.0, span),
+            expr_type: ValueType::Real,
+            span,
+        }));
+
+        // while (guard && idx < cnt) { body; idx = idx + 1; }
+        let condition = self.fold_guard_into_condition(Self::binary_expr(
+            BinaryOp::Lt,
+            ident(&idx_name),
+            ident(&cnt_name),
+        ));
+
+        let mut body = self.analyze_loop_body(&repeat.body, None, module)?;
+        body.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: idx_name.clone(),
+            var_index: idx_index,
+            expression: Self::binary_expr(
+                BinaryOp::Add,
+                ident(&idx_name),
+                Self::number_expr(1.0, span),
+            ),
+            expr_type: ValueType::Real,
+            span,
+        }));
+
+        sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
+            condition,
+            body,
+            span,
+        }));
         Ok(())
     }
 
@@ -1200,6 +1468,17 @@ impl SemanticAnalyzer {
         contrib: &ContributionStmt,
         module: &mut AnalyzedModule,
     ) -> CompileResult<()> {
+        // Contributions accumulate into fixed stamp programs; a contribution
+        // executed a runtime-dependent number of times is not representable
+        if self.runtime_loop_depth > 0 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(
+                    "contributions inside loops require compile-time-constant bounds".into(),
+                ),
+                contrib.span,
+            )));
+        }
+
         let (branch_name, is_current) = match &contrib.target {
             BranchAccess::Nodes {
                 access, pos, neg, ..
@@ -1294,6 +1573,7 @@ impl SemanticAnalyzer {
         &mut self,
         assign: &AssignmentStmt,
         module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
         let (target_name, span) = match &assign.target {
             LValue::Variable { name, span } => {
@@ -1374,13 +1654,13 @@ impl SemanticAnalyzer {
         let expression = self.apply_guard(expression, fallback);
 
         // Record the assignment for code generation
-        module.assignments.push(AnalyzedAssignment {
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
             target: target_name,
             var_index,
             expression,
             expr_type: value_type,
             span,
-        });
+        }));
 
         Ok(())
     }
@@ -1816,11 +2096,27 @@ impl SemanticAnalyzer {
         }
     }
 
+    /// Constant evaluation against parameter defaults. Suitable only for
+    /// compile-time diagnostics (range checks on declared defaults):
+    /// instances may override parameters.
     fn eval_const(&self, expr: &Expression) -> Option<f64> {
+        Self::eval_const_with(expr, &self.param_consts)
+    }
+
+    /// Constant evaluation that only resolves instance-invariant values.
+    /// Anything that shapes generated code (loop unrolling, repeat counts)
+    /// must use this: folding a parameter's *default* would bake it in and
+    /// break per-instance overrides.
+    fn eval_const_invariant(&self, expr: &Expression) -> Option<f64> {
+        Self::eval_const_with(expr, &self.invariant_consts)
+    }
+
+    fn eval_const_with(expr: &Expression, env: &HashMap<SmolStr, f64>) -> Option<f64> {
+        let eval = |e: &Expression| Self::eval_const_with(e, env);
         match expr {
             Expression::Number(n) => Some(n.value),
             Expression::Unary(u) => {
-                let v = self.eval_const(&u.operand)?;
+                let v = eval(&u.operand)?;
                 Some(match u.op {
                     UnaryOp::Neg => -v,
                     UnaryOp::Pos => v,
@@ -1835,8 +2131,8 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::Binary(b) => {
-                let l = self.eval_const(&b.left)?;
-                let r = self.eval_const(&b.right)?;
+                let l = eval(&b.left)?;
+                let r = eval(&b.right)?;
                 Some(match b.op {
                     BinaryOp::Add => l + r,
                     BinaryOp::Sub => l - r,
@@ -1860,16 +2156,15 @@ impl SemanticAnalyzer {
                 })
             }
             Expression::Conditional(c) => {
-                let cond = self.eval_const(&c.condition)?;
+                let cond = eval(&c.condition)?;
                 if cond != 0.0 {
-                    self.eval_const(&c.then_expr)
+                    eval(&c.then_expr)
                 } else {
-                    self.eval_const(&c.else_expr)
+                    eval(&c.else_expr)
                 }
             }
             Expression::Call(call) => {
-                let args: Option<Vec<f64>> =
-                    call.args.iter().map(|a| self.eval_const(a)).collect();
+                let args: Option<Vec<f64>> = call.args.iter().map(eval).collect();
                 let args = args?;
                 match (call.name.as_str(), args.as_slice()) {
                     ("abs", [x]) => Some(x.abs()),
@@ -1887,22 +2182,34 @@ impl SemanticAnalyzer {
             }
             Expression::Identifier(ident) => match ident.name.as_str() {
                 "inf" => Some(f64::INFINITY),
-                name => self.param_consts.get(name).copied(),
+                name => env.get(name).copied(),
             },
             _ => None,
         }
     }
 
-    fn parse_range(&self, range: &ParameterRange) -> TypedParameterRange {
+    fn parse_range(
+        &self,
+        range: &ParameterRange,
+        param_names: &std::collections::HashSet<SmolStr>,
+    ) -> TypedParameterRange {
+        // A bound that references another parameter must not fold against
+        // that parameter's default: the instance may override it, and a
+        // baked-in bound would clamp against the wrong limit. Such bounds
+        // stay unchecked (None).
+        let fold = |e: &Expression| -> Option<f64> {
+            if Self::references_identifiers(e, param_names) {
+                None
+            } else {
+                self.eval_const(e)
+            }
+        };
+
         // Extract bounds from first range bound if present
         if let Some(bound) = range.bounds.first() {
-            let min = bound.lower.as_ref().and_then(|e| self.eval_const(e));
-            let max = bound.upper.as_ref().and_then(|e| self.eval_const(e));
-            let exclude: Vec<f64> = range
-                .exclude
-                .iter()
-                .filter_map(|e| self.eval_const(e))
-                .collect();
+            let min = bound.lower.as_ref().and_then(fold);
+            let max = bound.upper.as_ref().and_then(fold);
+            let exclude: Vec<f64> = range.exclude.iter().filter_map(fold).collect();
 
             TypedParameterRange {
                 min,
@@ -1992,6 +2299,22 @@ mod tests {
         format!("{PREAMBLE}{body}\nendmodule")
     }
 
+    /// Flatten the statement tree into the assignments it contains
+    /// (loop bodies included), preserving order
+    fn flat_assignments(m: &AnalyzedModule) -> Vec<&AnalyzedAssignment> {
+        fn walk<'a>(stmts: &'a [AnalyzedStatement], out: &mut Vec<&'a AnalyzedAssignment>) {
+            for stmt in stmts {
+                match stmt {
+                    AnalyzedStatement::Assignment(a) => out.push(a),
+                    AnalyzedStatement::Loop(l) => walk(&l.body, out),
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(&m.statements, &mut out);
+        out
+    }
+
     #[test]
     fn conditional_assignment_lowered_to_guarded_expression() {
         let m = analyze_one(&module_src(
@@ -2007,18 +2330,18 @@ mod tests {
             end
             "#,
         ));
-        assert_eq!(m.assignments.len(), 2);
+        assert_eq!(flat_assignments(&m).len(), 2);
         // Both branch assignments must be guarded conditionals, not raw values
         assert!(matches!(
-            m.assignments[0].expression,
+            flat_assignments(&m)[0].expression,
             Expression::Conditional(_)
         ));
         assert!(matches!(
-            m.assignments[1].expression,
+            flat_assignments(&m)[1].expression,
             Expression::Conditional(_)
         ));
         // The else-branch guard preserves the previous value via the variable
-        let Expression::Conditional(c) = &m.assignments[1].expression else {
+        let Expression::Conditional(c) = &flat_assignments(&m)[1].expression else {
             unreachable!()
         };
         assert!(matches!(*c.else_expr, Expression::Identifier(_)));
@@ -2057,7 +2380,7 @@ mod tests {
             end
             "#,
         ));
-        assert_eq!(m.assignments.len(), 3);
+        assert_eq!(flat_assignments(&m).len(), 3);
     }
 
     #[test]
@@ -2070,8 +2393,8 @@ mod tests {
             "#,
         ));
         assert!(m.variables.iter().any(|v| v.name == "area"));
-        assert_eq!(m.assignments.len(), 1);
-        assert_eq!(m.assignments[0].target.as_str(), "area");
+        assert_eq!(flat_assignments(&m).len(), 1);
+        assert_eq!(flat_assignments(&m)[0].target.as_str(), "area");
     }
 
     #[test]
@@ -2082,8 +2405,8 @@ mod tests {
             analog I(p, n) <+ x * V(p, n);
             "#,
         ));
-        assert_eq!(m.assignments.len(), 1);
-        assert_eq!(m.assignments[0].target.as_str(), "x");
+        assert_eq!(flat_assignments(&m).len(), 1);
+        assert_eq!(flat_assignments(&m)[0].target.as_str(), "x");
     }
 
     #[test]
@@ -2155,7 +2478,7 @@ mod tests {
             2
         );
         // The block assignment targets the hoisted name, not the outer tmp
-        assert_ne!(m.assignments[0].target.as_str(), "tmp");
+        assert_ne!(flat_assignments(&m)[0].target.as_str(), "tmp");
     }
 
     #[test]
@@ -2263,7 +2586,7 @@ mod tests {
             end
             "#,
         ));
-        let Expression::Conditional(c) = &m.assignments[0].expression else {
+        let Expression::Conditional(c) = &flat_assignments(&m)[0].expression else {
             panic!("expected guarded assignment");
         };
         let Expression::Call(call) = &*c.condition else {
@@ -2273,15 +2596,122 @@ mod tests {
     }
 
     #[test]
-    fn while_loop_with_runtime_condition_errors() {
-        let result = analyze(&module_src(
+    fn while_loop_with_runtime_condition_lowers_to_runtime_loop() {
+        let m = analyze_one(&module_src(
             r#"
             real x;
             analog begin
-                while (V(p, n) > 0) x = x + 1.0;
+                while (x < 10.0) x = x + 1.0;
             end
             "#,
         ));
-        assert!(result.is_err());
+        assert!(
+            m.statements
+                .iter()
+                .any(|s| matches!(s, AnalyzedStatement::Loop(_))),
+            "runtime while must lower to a loop statement"
+        );
+    }
+
+    #[test]
+    fn parameter_bounded_for_loop_lowers_to_runtime_loop() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter integer nf = 4;
+            integer i;
+            real acc;
+            analog begin
+                acc = 0.0;
+                for (i = 0; i < nf; i = i + 1)
+                    acc = acc + 2.0;
+                I(p, n) <+ acc * V(p, n);
+            end
+            "#,
+        ));
+        let loops: Vec<_> = m
+            .statements
+            .iter()
+            .filter(|s| matches!(s, AnalyzedStatement::Loop(_)))
+            .collect();
+        assert_eq!(loops.len(), 1, "parameter-bounded loop stays a loop");
+        let AnalyzedStatement::Loop(l) = loops[0] else {
+            unreachable!()
+        };
+        // Body: accumulator update + loop variable update
+        assert_eq!(l.body.len(), 2);
+    }
+
+    #[test]
+    fn guarded_runtime_loop_condition_includes_guard() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter integer nf = 4;
+            parameter integer en = 1;
+            integer i;
+            real acc;
+            analog begin
+                if (en > 0)
+                    for (i = 0; i < nf; i = i + 1)
+                        acc = acc + 1.0;
+                I(p, n) <+ acc * V(p, n);
+            end
+            "#,
+        ));
+        let AnalyzedStatement::Loop(l) = m
+            .statements
+            .iter()
+            .find(|s| matches!(s, AnalyzedStatement::Loop(_)))
+            .expect("loop present")
+        else {
+            unreachable!()
+        };
+        // The enclosing guard is ANDed into the loop condition
+        assert!(
+            matches!(&l.condition, Expression::Binary(b) if b.op == BinaryOp::And),
+            "guard must be folded into the loop condition, got {:?}",
+            l.condition
+        );
+    }
+
+    #[test]
+    fn contribution_inside_runtime_loop_is_an_error() {
+        let result = analyze(&module_src(
+            r#"
+            parameter integer nf = 4;
+            integer i;
+            analog begin
+                for (i = 0; i < nf; i = i + 1)
+                    I(p, n) <+ V(p, n);
+            end
+            "#,
+        ));
+        assert!(
+            result.is_err(),
+            "contributions need compile-time-constant loop bounds"
+        );
+    }
+
+    #[test]
+    fn runtime_repeat_synthesizes_counter() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter integer nf = 3;
+            real acc;
+            analog begin
+                repeat (nf) acc = acc + 1.0;
+                I(p, n) <+ acc * V(p, n);
+            end
+            "#,
+        ));
+        assert!(
+            m.statements
+                .iter()
+                .any(|s| matches!(s, AnalyzedStatement::Loop(_))),
+            "runtime repeat lowers to a loop"
+        );
+        assert!(
+            m.variables.iter().any(|v| v.name.starts_with("__repeat")),
+            "synthesized counter variables registered"
+        );
     }
 }

@@ -278,21 +278,103 @@ endmodule
 }
 
 #[test]
-fn voltage_contribution_is_a_clean_error() {
-    let result = VerilogACompiler::new(CompilerOptions::default()).compile(
+fn voltage_contribution_stamps_branch_unknown() {
+    let model = compile(
         r#"
 `include "disciplines.vams"
 module vsrc(p, n);
     inout p, n;
     electrical p, n;
-    analog V(p, n) <+ 1.5;
+    parameter real level = 1.5;
+    analog V(p, n) <+ level;
 endmodule
 "#,
     );
-    assert!(
-        result.is_err(),
-        "voltage contributions must fail loudly until branch unknowns exist"
+    assert_eq!(model.branch_sources.len(), 1, "one branch unknown");
+
+    // p -> node1 (row 0), n -> node2 (row 1), branch unknown -> node3 (row 2)
+    let mut device = VerilogADevice::new("V1", model, &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+
+    let (matrix, rhs) = collect_stamps(&mut device, &[0.0, 0.0, 0.0]);
+
+    // Structural coupling: KCL rows gain the branch column, the branch row
+    // reads the node potentials
+    assert!((matrix[&(0, 2)] - 1.0).abs() < 1e-12);
+    assert!((matrix[&(1, 2)] + 1.0).abs() < 1e-12);
+    assert!((matrix[&(2, 0)] - 1.0).abs() < 1e-12);
+    assert!((matrix[&(2, 1)] + 1.0).abs() < 1e-12);
+
+    // Branch row RHS carries the source value: V(p) - V(n) = 1.5
+    assert!((rhs[&2] - 1.5).abs() < 1e-12, "rhs: {rhs:?}");
+}
+
+#[test]
+fn impedance_form_resistor_via_voltage_contribution() {
+    // V(p,n) <+ I(p,n) * r is a resistor written in impedance form;
+    // the branch row must read V(p) - V(n) - r*i_br = 0
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module zres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 2000.0 from (0:inf);
+    analog V(p, n) <+ I(p, n) * r;
+endmodule
+"#,
     );
+    assert_eq!(model.branch_sources.len(), 1);
+
+    let mut device = VerilogADevice::new("Z1", model, &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+
+    // Branch current solution value 1 mA
+    let (matrix, _rhs) = collect_stamps(&mut device, &[1.0, 0.5, 1e-3]);
+
+    // Constitutive row: dE/di = r stamps -r at (branch, branch)
+    assert!(
+        (matrix[&(2, 2)] + 2000.0).abs() < 1e-9,
+        "got {:?}",
+        matrix.get(&(2, 2))
+    );
+}
+
+#[test]
+fn mode_disabled_voltage_contribution_leaves_branch_open() {
+    // A potential contribution under a parameter-only guard must leave
+    // the branch OPEN when disabled, not short it to zero volts
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module modal(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer shorted = 0;
+    analog begin
+        if (shorted > 0)
+            V(p, n) <+ 0.0;
+    end
+endmodule
+"#,
+    );
+    assert_eq!(model.branch_sources.len(), 1);
+
+    // Disabled (default): branch row pinned to zero current, no coupling
+    let mut device = VerilogADevice::new("M1", model.clone(), &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+    let (matrix, _) = collect_stamps(&mut device, &[1.0, 0.0, 0.0]);
+    assert!((matrix[&(2, 2)] - 1.0).abs() < 1e-12, "identity pin");
+    assert!(!matrix.contains_key(&(0, 2)), "no KCL coupling when open");
+
+    // Enabled: structural short V(p)-V(n)=0
+    let mut device = VerilogADevice::new("M2", model, &[1, 2]);
+    device.set_branch_current_indices(&[3]);
+    device.set_parameter("shorted", 1.0);
+    device.resolve_parameter_defaults();
+    let (matrix, _) = collect_stamps(&mut device, &[1.0, 0.0, 0.0]);
+    assert!((matrix[&(0, 2)] - 1.0).abs() < 1e-12);
+    assert!((matrix[&(2, 0)] - 1.0).abs() < 1e-12);
 }
 
 #[test]

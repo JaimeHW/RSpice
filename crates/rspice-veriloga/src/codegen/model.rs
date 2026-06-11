@@ -35,16 +35,18 @@ pub struct CompiledModel {
     pub parameters: Vec<CompiledParameter>,
     /// Number of variables
     pub num_variables: usize,
-    /// Variable assignment programs (executed in order before contributions)
-    pub assignment_programs: Vec<AssignmentProgram>,
+    /// Evaluation steps (assignments and runtime loops), executed in order
+    /// before the contributions
+    pub assignment_steps: Vec<AssignmentStep>,
     /// Compiled stamp programs for each contribution
     pub stamp_programs: Vec<StampProgram>,
     /// Lookup tables for $table_model (x_data, y_data pairs)
     pub lookup_tables: Vec<LookupTable>,
     /// Number of internal nodes (if any)
     pub internal_nodes: usize,
-    /// Number of branch currents to track
-    pub branch_currents: usize,
+    /// Branch-current unknowns required by potential contributions; the
+    /// engine must allocate one extra system unknown per entry
+    pub branch_sources: Vec<CompiledBranchSource>,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
 }
@@ -86,6 +88,13 @@ pub struct StampProgram {
     pub value_program: BytecodeProgram,
     /// Jacobian programs (one per derivative)
     pub jacobian_programs: Vec<JacobianEntry>,
+    /// For potential contributions: the branch-current unknown this
+    /// equation defines. None for current contributions.
+    pub branch_ordinal: Option<usize>,
+    /// Instance-static activation condition (parameter-only). When it
+    /// evaluates to zero the program is skipped entirely - for potential
+    /// contributions this leaves the branch open instead of shorting it.
+    pub static_condition: Option<BytecodeProgram>,
 }
 
 /// Assignment program for a variable
@@ -97,6 +106,19 @@ pub struct AssignmentProgram {
     pub program: BytecodeProgram,
 }
 
+/// One evaluation step: a variable assignment or a runtime-bounded loop
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AssignmentStep {
+    /// Compute a value and store it in a variable
+    Assign(AssignmentProgram),
+    /// Execute the body steps while the condition program evaluates
+    /// nonzero (re-checked before every iteration)
+    Loop {
+        condition: BytecodeProgram,
+        body: Vec<AssignmentStep>,
+    },
+}
+
 /// Location to stamp in matrix
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StampLocation {
@@ -105,12 +127,32 @@ pub struct StampLocation {
     pub sign: f64,
 }
 
-/// Index for stamping (terminal or internal)
+/// Index for stamping (terminal, internal node, branch unknown, or ground)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StampIndex {
     Terminal(usize),
     Internal(usize),
+    /// Branch-current unknown introduced by a potential contribution
+    Branch(usize),
     Ground,
+}
+
+/// Differentiation column axis of a Jacobian entry
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum ColumnAxis {
+    /// Unified node index (terminals first, then internal nodes)
+    Node(usize),
+    /// Branch-current unknown ordinal
+    Branch(usize),
+}
+
+/// A branch-current unknown of a potential contribution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledBranchSource {
+    /// Positive node of the source branch
+    pub pos: StampIndex,
+    /// Negative node of the source branch
+    pub neg: StampIndex,
 }
 
 /// Jacobian entry
@@ -118,9 +160,9 @@ pub enum StampIndex {
 pub struct JacobianEntry {
     pub row: StampIndex,
     pub col: StampIndex,
-    /// Unified node index of the derivative column (terminals first, then
-    /// internal nodes). Used to compute the companion RHS term G*V.
-    pub col_node: usize,
+    /// Differentiation axis of this column (node voltage or branch
+    /// current). Used to compute the companion RHS term G*x.
+    pub col_axis: ColumnAxis,
     /// Sign applied to the derivative value when stamping
     pub sign: f64,
     pub program: BytecodeProgram,
@@ -141,6 +183,8 @@ pub enum Instruction {
     PushParam(usize),
     /// Push 1.0 if the parameter was explicitly set on the instance
     PushParamGiven(usize),
+    /// Push the value of a branch-current unknown (potential contribution)
+    PushBranchCurrent(usize),
     /// Push voltage V(i, j)
     PushVoltage(usize, usize),
     /// Push current I(i, j)
@@ -161,6 +205,14 @@ pub enum Instruction {
     Mul,
     Div,
     Pow,
+    /// Modulus (fmod semantics on reals, LRM 4.2.3)
+    Mod,
+    /// Bitwise/shift operations (operands truncate to integers)
+    Shl,
+    Shr,
+    BitAnd,
+    BitOr,
+    BitXor,
     /// Unary operations
     Neg,
     /// Functions

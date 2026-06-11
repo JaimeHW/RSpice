@@ -524,6 +524,24 @@ impl JitCompiler {
                     return Err(JitError::UnsupportedInstruction("PushParamGiven"));
                 }
 
+                // Branch-current unknowns are not part of the native ABI yet
+                Instruction::PushBranchCurrent(_) => {
+                    return Err(JitError::UnsupportedInstruction("PushBranchCurrent"));
+                }
+
+                // Modulus and integer bit operations are rare in hot model
+                // paths; not worth native lowering yet
+                Instruction::Mod => {
+                    return Err(JitError::UnsupportedInstruction("Mod"));
+                }
+                Instruction::Shl
+                | Instruction::Shr
+                | Instruction::BitAnd
+                | Instruction::BitOr
+                | Instruction::BitXor => {
+                    return Err(JitError::UnsupportedInstruction("bitwise op"));
+                }
+
                 // AboveState: level crossing event
                 // In DC, compare value > threshold
                 Instruction::AboveState(_detector_id) => {

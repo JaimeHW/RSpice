@@ -44,6 +44,16 @@ pub struct VerilogADevice {
     internal_node_indices: Vec<usize>,
     /// Number of internal nodes in this device
     num_internal_nodes: usize,
+    /// Mapping from branch-current unknown ordinal to circuit node ID
+    /// (the engine allocates one extra system unknown per potential
+    /// contribution branch)
+    branch_current_indices: Vec<usize>,
+    /// Per stamp program: instance-static activation (parameter-only
+    /// guards evaluated after parameter resolution)
+    program_active: Vec<bool>,
+    /// Per branch unknown: whether any potential contribution drives it
+    /// (an undriven branch is forced to zero current)
+    branch_active: Vec<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     matrix_indices: MatrixIndices,
     /// Native compiled model (if compilation succeeded)
@@ -131,6 +141,8 @@ impl VerilogADevice {
         #[cfg(feature = "native")]
         let (native_model, native_vars) = Self::try_native_compile(&model);
 
+        let num_branch_unknowns = model.branch_sources.len();
+        let num_stamp_programs = model.stamp_programs.len();
         let mut device = Self {
             name: name.into(),
             model,
@@ -138,12 +150,16 @@ impl VerilogADevice {
             node_mapping,
             internal_node_indices: vec![0; num_internal_nodes],
             num_internal_nodes,
+            branch_current_indices: vec![0; num_branch_unknowns],
+            program_active: vec![true; num_stamp_programs],
+            branch_active: vec![true; num_branch_unknowns],
             matrix_indices: MatrixIndices::default(),
             #[cfg(feature = "native")]
             native_model,
             #[cfg(feature = "native")]
             native_vars,
         };
+        device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
         device.resolve_parameter_defaults();
         device
@@ -182,9 +198,24 @@ impl VerilogADevice {
             }
         };
 
-        for assignment in &model.assignment_programs {
-            scan_program(&assignment.program);
+        fn scan_steps(
+            steps: &[crate::codegen::AssignmentStep],
+            scan_program: &mut impl FnMut(&crate::codegen::BytecodeProgram),
+        ) {
+            for step in steps {
+                match step {
+                    crate::codegen::AssignmentStep::Assign(assignment) => {
+                        scan_program(&assignment.program);
+                    }
+                    crate::codegen::AssignmentStep::Loop { condition, body } => {
+                        scan_program(condition);
+                        scan_steps(body, scan_program);
+                    }
+                }
+            }
         }
+
+        scan_steps(&model.assignment_steps, &mut scan_program);
 
         for stamp in &model.stamp_programs {
             scan_program(&stamp.value_program);
@@ -329,11 +360,16 @@ impl VerilogADevice {
             };
             self.context.set_param(i, clamped);
         }
+
+        // Topology guards depend on final parameter values
+        self.refresh_static_conditions();
     }
 
     /// Set simulation temperature in Kelvin
     pub fn set_temperature(&mut self, temp_k: f64) {
         self.context.temperature = temp_k;
+        // Static guards may reference $temperature
+        self.refresh_static_conditions();
     }
 
     /// Set simulation time
@@ -368,9 +404,61 @@ impl VerilogADevice {
         self.rebuild_matrix_indices();
     }
 
+    /// Number of branch-current unknowns required by this device's
+    /// potential contributions (the engine allocates one extra system
+    /// unknown per entry)
+    pub fn num_branch_unknowns(&self) -> usize {
+        self.model.branch_sources.len()
+    }
+
+    /// Set the circuit node indices allocated for branch-current unknowns
+    pub fn set_branch_current_indices(&mut self, indices: &[usize]) {
+        for (i, &idx) in indices.iter().enumerate() {
+            if i < self.branch_current_indices.len() {
+                self.branch_current_indices[i] = idx;
+            }
+        }
+        self.rebuild_matrix_indices();
+    }
+
+    /// Re-evaluate instance-static activation conditions (parameter-only
+    /// mode guards peeled from contributions). A potential contribution
+    /// whose guard is false leaves its branch open; a branch driven by no
+    /// active potential contribution is forced to zero current.
+    fn refresh_static_conditions(&mut self) {
+        let model = &self.model;
+        let mut program_active = vec![true; model.stamp_programs.len()];
+        let mut branch_active = vec![false; model.branch_sources.len()];
+
+        {
+            let mut vm = Vm::new(&mut self.context);
+            for (idx, program) in model.stamp_programs.iter().enumerate() {
+                let active = match &program.static_condition {
+                    Some(condition) => vm.execute(condition).map(|v| v != 0.0).unwrap_or(true),
+                    None => true,
+                };
+                program_active[idx] = active;
+                if active
+                    && let Some(ordinal) = program.branch_ordinal
+                    && ordinal < branch_active.len()
+                {
+                    branch_active[ordinal] = true;
+                }
+            }
+        }
+
+        self.program_active = program_active;
+        self.branch_active = branch_active;
+    }
+
     /// Get the circuit node index for an internal node
     pub fn internal_node_index(&self, internal_idx: usize) -> Option<usize> {
         self.internal_node_indices.get(internal_idx).copied()
+    }
+
+    /// Get the circuit node index allocated for a branch-current unknown
+    pub fn branch_current_index(&self, ordinal: usize) -> Option<usize> {
+        self.branch_current_indices.get(ordinal).copied()
     }
 
     /// Remap circuit node IDs after an external topology rewrite.
@@ -427,6 +515,7 @@ impl VerilogADevice {
                         &loc.row,
                         &self.node_mapping,
                         &self.internal_node_indices,
+                        &self.branch_current_indices,
                     ),
                     sign: loc.sign,
                     program_idx,
@@ -442,11 +531,13 @@ impl VerilogADevice {
                         &jac_entry.row,
                         &self.node_mapping,
                         &self.internal_node_indices,
+                        &self.branch_current_indices,
                     ),
                     col: Self::index_to_node(
                         &jac_entry.col,
                         &self.node_mapping,
                         &self.internal_node_indices,
+                        &self.branch_current_indices,
                     ),
                     program_idx,
                     jacobian_idx,
@@ -496,6 +587,20 @@ impl VerilogADevice {
                 self.context.internal_voltages[internal_idx] = v;
             }
         }
+
+        // Update branch-current unknown values
+        for (ordinal, &circuit_node) in self.branch_current_indices.iter().enumerate() {
+            if ordinal < self.context.branch_current_values.len() {
+                let v = if circuit_node == 0 {
+                    0.0
+                } else if circuit_node <= circuit_voltages.len() {
+                    circuit_voltages[circuit_node - 1]
+                } else {
+                    0.0
+                };
+                self.context.branch_current_values[ordinal] = v;
+            }
+        }
     }
 
     /// Evaluate the device: compute branch current
@@ -517,16 +622,24 @@ impl VerilogADevice {
     fn evaluate_interpreter(&mut self) -> Vec<f64> {
         self.context.clear_currents();
 
+        let program_active = &self.program_active;
         let mut vm = Vm::new(&mut self.context);
         Self::execute_assignment_programs(&mut vm, &self.model);
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
-        for program in &self.model.stamp_programs {
+        for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
+            if !program_active.get(program_idx).copied().unwrap_or(true) {
+                currents.push(0.0);
+                vm.context.currents.push(0.0);
+                continue;
+            }
             match vm.execute(&program.value_program) {
                 Ok(value) => {
                     currents.push(value);
                     vm.context.currents.push(value);
-                    if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+                    if program.branch_ordinal.is_none()
+                        && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+                    {
                         vm.context.set_branch_current(pos, neg, value);
                     }
                 }
@@ -608,16 +721,54 @@ impl VerilogADevice {
         stamp_values
     }
 
+    /// Safety cap on runtime-loop iterations per evaluation (a model bug
+    /// must not hang the Newton loop)
+    const MAX_RUNTIME_LOOP_ITERATIONS: usize = 100_000;
+
     /// Execute assignment programs and update VM variable storage.
     fn execute_assignment_programs(vm: &mut Vm<'_>, model: &CompiledModel) {
         if vm.context.variables.len() < model.num_variables {
             vm.context.variables.resize(model.num_variables, 0.0);
         }
 
-        for assignment in &model.assignment_programs {
-            let value = vm.execute(&assignment.program).unwrap_or(0.0);
-            if assignment.var_index < vm.context.variables.len() {
-                vm.context.variables[assignment.var_index] = value;
+        Self::execute_assignment_steps(vm, &model.assignment_steps, &model.name);
+    }
+
+    /// Execute a sequence of evaluation steps (assignments and runtime
+    /// loops), recursively
+    fn execute_assignment_steps(
+        vm: &mut Vm<'_>,
+        steps: &[crate::codegen::AssignmentStep],
+        model_name: &str,
+    ) {
+        for step in steps {
+            match step {
+                crate::codegen::AssignmentStep::Assign(assignment) => {
+                    let value = vm.execute(&assignment.program).unwrap_or(0.0);
+                    if assignment.var_index < vm.context.variables.len() {
+                        vm.context.variables[assignment.var_index] = value;
+                    }
+                }
+                crate::codegen::AssignmentStep::Loop { condition, body } => {
+                    let mut iterations = 0usize;
+                    loop {
+                        let active = vm.execute(condition).unwrap_or(0.0);
+                        if active == 0.0 {
+                            break;
+                        }
+                        Self::execute_assignment_steps(vm, body, model_name);
+                        iterations += 1;
+                        if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
+                            log::warn!(
+                                "Verilog-A model '{}': runtime loop exceeded {} iterations; \
+                                 aborting the loop (check the loop bounds)",
+                                model_name,
+                                Self::MAX_RUNTIME_LOOP_ITERATIONS
+                            );
+                            break;
+                        }
+                    }
+                }
             }
         }
     }
@@ -631,14 +782,21 @@ impl VerilogADevice {
 
         context.clear_currents();
 
+        let program_active = &self.program_active;
         let mut vm = Vm::new(context);
         Self::execute_assignment_programs(&mut vm, model);
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
+            if !program_active.get(prog_idx).copied().unwrap_or(true) {
+                vm.context.currents.push(0.0);
+                continue;
+            }
             let value = vm.execute(&program.value_program).unwrap_or(0.0);
             vm.context.currents.push(value);
-            if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+            if program.branch_ordinal.is_none()
+                && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+            {
                 vm.context.set_branch_current(pos, neg, value);
             }
 
@@ -671,8 +829,9 @@ impl VerilogADevice {
         M: FnMut(usize, usize, f64),
         R: FnMut(usize, f64),
     {
-        // Update context with current voltages
-        self.update_voltages(circuit_voltages);
+        // Update context with the full solution (terminals, internal
+        // nodes, and branch-current unknowns)
+        self.update_all_voltages(circuit_voltages);
 
         // Extract disjoint fields to satisfy borrow checker
         let context = &mut self.context;
@@ -684,24 +843,79 @@ impl VerilogADevice {
         let mut vm = Vm::new(context);
         Self::execute_assignment_programs(&mut vm, model);
 
+        // Structural stamps of the branch-current unknowns: the KCL rows of
+        // the source nodes couple to the branch column, and the branch row
+        // reads the node potentials. An undriven branch (all its potential
+        // contributions mode-disabled) is pinned to zero current so its row
+        // stays non-singular while the branch itself is open.
+        for (ordinal, source) in model.branch_sources.iter().enumerate() {
+            let br = Self::index_to_node(
+                &StampIndex::Branch(ordinal),
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+            let Some(br) = br else { continue };
+
+            if !self.branch_active.get(ordinal).copied().unwrap_or(false) {
+                matrix_add(br, br, 1.0);
+                continue;
+            }
+
+            let pos = Self::index_to_node(
+                &source.pos,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+            let neg = Self::index_to_node(
+                &source.neg,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            );
+
+            if let Some(p) = pos {
+                matrix_add(p, br, 1.0);
+                matrix_add(br, p, 1.0);
+            }
+            if let Some(n) = neg {
+                matrix_add(n, br, -1.0);
+                matrix_add(br, n, -1.0);
+            }
+        }
+
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
-            // Compute the branch current/value
+            if !self.program_active.get(program_idx).copied().unwrap_or(true) {
+                continue;
+            }
+
+            // Compute the contribution value (branch current for current
+            // contributions, source voltage for potential contributions)
             let value = match vm.execute(&program.value_program) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
 
             vm.context.currents.push(value);
-            if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
+            if program.branch_ordinal.is_none()
+                && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+            {
                 vm.context.set_branch_current(pos, neg, value);
             }
 
-            // Companion model: solve A*V_new = z with the device linearized
-            // at V_old. Each KCL row receives the equivalent current
-            //   Ieq = I(V_old) - sum_col dI/dV_col * V_col_old
-            // and the Jacobian G stamps both the positive and negative rows
-            // (the entry sign tracks the row).
-            let mut ieq = value;
+            // Companion model: solve A*x_new = z with the device linearized
+            // at x_old.
+            //
+            // Current contributions: each KCL row receives the equivalent
+            // current Ieq = I(x_old) - sum_col dI/dx_col * x_col_old and
+            // the Jacobian stamps both KCL rows (entry sign tracks the row).
+            //
+            // Potential contributions: the branch row carries
+            // V(p) - V(n) - E(x) = 0; the entries hold -dE/dx (sign -1)
+            // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
+            // exactly value + sum(sign * deriv * x_old).
+            let mut eq_value = value;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
@@ -710,11 +924,23 @@ impl VerilogADevice {
                     Err(_) => continue,
                 };
 
-                // Count each derivative column once for the RHS companion
-                // term (entries come in +row/-row pairs)
-                if model_entry.sign > 0.0 {
-                    let v_col = Self::unified_node_voltage(vm.context, model_entry.col_node);
-                    ieq -= deriv * v_col;
+                // Accumulate the companion RHS term once per derivative
+                // column. Current contributions duplicate entries per KCL
+                // row (+1/-1): count only the positive copy. Potential
+                // contributions carry single -1-signed entries whose sign
+                // already encodes the subtraction.
+                match program.branch_ordinal {
+                    None => {
+                        if model_entry.sign > 0.0 {
+                            let x_col =
+                                Self::axis_value(vm.context, &model_entry.col_axis);
+                            eq_value -= deriv * x_col;
+                        }
+                    }
+                    Some(_) => {
+                        let x_col = Self::axis_value(vm.context, &model_entry.col_axis);
+                        eq_value += model_entry.sign * deriv * x_col;
+                    }
                 }
 
                 if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
@@ -722,13 +948,28 @@ impl VerilogADevice {
                 }
             }
 
-            // RHS: rhs[pos] -= Ieq, rhs[neg] += Ieq (signs recorded at
-            // compile time)
+            // RHS: current contributions stamp -/+ Ieq at the KCL rows;
+            // potential contributions stamp +Eeq at the branch row
             for entry in &matrix_indices.rhs[program_idx] {
                 if let Some(row) = entry.node {
-                    rhs_add(row, entry.sign * ieq);
+                    rhs_add(row, entry.sign * eq_value);
                 }
             }
+        }
+    }
+
+    /// Value of a differentiation axis: a unified node voltage or a
+    /// branch-current unknown
+    fn axis_value(context: &VmContext, axis: &crate::codegen::ColumnAxis) -> f64 {
+        match axis {
+            crate::codegen::ColumnAxis::Node(node) => {
+                Self::unified_node_voltage(context, *node)
+            }
+            crate::codegen::ColumnAxis::Branch(k) => context
+                .branch_current_values
+                .get(*k)
+                .copied()
+                .unwrap_or(0.0),
         }
     }
 
@@ -754,6 +995,7 @@ impl VerilogADevice {
         index: &StampIndex,
         node_mapping: &[usize],
         internal_node_indices: &[usize],
+        branch_current_indices: &[usize],
     ) -> Option<usize> {
         match index {
             StampIndex::Terminal(t) => {
@@ -762,6 +1004,10 @@ impl VerilogADevice {
             }
             StampIndex::Internal(i) => {
                 let node = internal_node_indices.get(*i).copied().unwrap_or(0);
+                if node > 0 { Some(node - 1) } else { None }
+            }
+            StampIndex::Branch(k) => {
+                let node = branch_current_indices.get(*k).copied().unwrap_or(0);
                 if node > 0 { Some(node - 1) } else { None }
             }
             StampIndex::Ground => None,
@@ -779,7 +1025,12 @@ impl VerilogADevice {
                     Some(self.model.num_terminals + *i)
                 }
             }
-            _ => Self::index_to_node(index, &self.node_mapping, &self.internal_node_indices),
+            _ => Self::index_to_node(
+                index,
+                &self.node_mapping,
+                &self.internal_node_indices,
+                &self.branch_current_indices,
+            ),
         }
     }
 

@@ -179,7 +179,7 @@ impl JitCompiler {
         let math_funcs = self.import_math_functions(&mut module)?;
 
         // Compile assignment function if there are assignments
-        let assignment_fn_id = if !model.assignment_programs.is_empty() {
+        let assignment_fn_id = if !model.assignment_steps.is_empty() {
             Some(self.compile_assignments(&mut module, &mut ctx, model, &math_funcs)?)
         } else {
             None

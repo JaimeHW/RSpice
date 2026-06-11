@@ -1,21 +1,17 @@
-//! Compilation-frontier regression pin for the bundled BSIM4.8 model.
+//! Full-compilation regression pin for the bundled BSIM4.8 model.
 //!
-//! The 12.6k-line bsim4.va exercises the preprocessor (heavy macro use,
-//! conditional blocks, standard headers), the lexer, the full parser, and
-//! most of semantic analysis. It currently stops at a known architectural
-//! limit: stress-effect for-loops bounded by the `nf` parameter need
-//! runtime loops, which the dataflow lowering does not support yet.
-//!
-//! This test pins that exact frontier. If the model starts failing earlier
-//! (lex/parse/preprocess regression) the assertion message changes and the
-//! test fails. When runtime loops land, this test should be replaced by a
-//! full-compile assertion.
+//! The 12.6k-line bsim4.va exercises the entire pipeline: heavy macro
+//! preprocessing, the full parser, guarded-dataflow lowering, runtime
+//! (nf-bounded) loops, analog function inlining, branch-current unknowns
+//! for its collapse/impedance voltage contributions, and shadow-based
+//! Jacobian generation. Any regression that breaks one of those features
+//! fails this test immediately.
 
 use rspice_veriloga::VerilogACompiler;
 use std::path::Path;
 
 #[test]
-fn bsim4_reaches_the_known_runtime_loop_frontier() {
+fn bsim4_compiles_end_to_end() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
@@ -23,23 +19,30 @@ fn bsim4_reaches_the_known_runtime_loop_frontier() {
         .join("veriloga")
         .join("bsim4.va");
     if !path.exists() {
-        eprintln!("bsim4.va not present; skipping frontier pin");
+        eprintln!("bsim4.va not present; skipping full-compile pin");
         return;
     }
 
-    let result = VerilogACompiler::default().compile_file(&path);
-    let err = match result {
-        Ok(_) => {
-            // Full compilation means runtime loops landed - tighten this
-            // test into result checks instead of deleting it.
-            return;
-        }
-        Err(e) => e.to_string(),
-    };
+    let model = VerilogACompiler::default()
+        .compile_file(&path)
+        .expect("BSIM4.8 must compile end to end");
 
+    // Structural pins: drain/gate/source/bulk terminals, the model's
+    // documented internal node set, and the substrate/gate-resistance
+    // branch network introduced by its voltage contributions.
+    assert_eq!(model.num_terminals, 4, "d/g/s/b terminals");
+    assert_eq!(model.internal_nodes, 7, "di/si/gi/gm/dbulk/sbulk/bi");
     assert!(
-        err.contains("for-loop condition must be a compile-time constant"),
-        "BSIM4 must preprocess, lex, and parse cleanly, stopping only at \
-         the documented runtime-loop limitation; got: {err}"
+        model.parameters.len() > 800,
+        "BSIM4.8 carries ~900 parameters, got {}",
+        model.parameters.len()
+    );
+    assert!(
+        !model.branch_sources.is_empty(),
+        "rdsmod/rgatemod/rbodymod voltage contributions need branch unknowns"
+    );
+    assert!(
+        !model.stamp_programs.is_empty() && !model.assignment_steps.is_empty(),
+        "stamp and evaluation programs generated"
     );
 }

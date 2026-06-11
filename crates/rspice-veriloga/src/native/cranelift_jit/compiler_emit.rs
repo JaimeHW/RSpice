@@ -34,8 +34,17 @@ impl JitCompiler {
         let ctx_ptr = builder.block_params(entry_block)[0];
         let vars_ptr = builder.block_params(entry_block)[1];
 
-        // Compile each assignment
-        for assign in &model.assignment_programs {
+        // Compile each assignment. Runtime loops need re-evaluated
+        // conditions and mutable iteration state; refuse so the device
+        // falls back to the bytecode interpreter.
+        for step in &model.assignment_steps {
+            let assign = match step {
+                crate::codegen::AssignmentStep::Assign(assign) => assign,
+                crate::codegen::AssignmentStep::Loop { .. } => {
+                    return Err(JitError::UnsupportedInstruction("runtime loop"));
+                }
+            };
+
             let value = self.compile_expression(
                 &mut builder,
                 &assign.program,

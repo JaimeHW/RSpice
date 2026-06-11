@@ -73,22 +73,23 @@ impl CodeGenerator {
             terminal_names: ir.terminals.iter().map(|t| t.name.clone()).collect(),
             parameters,
             num_variables: ir.variables.len(),
-            assignment_programs: Vec::new(),
+            assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),
             internal_nodes: ir.internal_nodes.len(),
-            branch_currents: 0,
+            branch_sources: ir
+                .branch_unknowns
+                .iter()
+                .map(|b| CompiledBranchSource {
+                    pos: Self::node_stamp_index(ir, b.pos),
+                    neg: Self::node_stamp_index(ir, b.neg),
+                })
+                .collect(),
             laplace_filters: Vec::new(),
         };
 
-        // Generate assignment programs (executed in order before contributions)
-        for assign in &ir.assignments {
-            let program = self.compile_expr(&assign.expr, ir)?;
-            model.assignment_programs.push(AssignmentProgram {
-                var_index: assign.var_index,
-                program,
-            });
-        }
+        // Generate evaluation steps (executed in order before contributions)
+        model.assignment_steps = self.compile_assignment_items(&ir.assignments, ir)?;
 
         // Generate stamp programs for each equation
         for eq in &ir.equations {
@@ -100,6 +101,31 @@ impl CodeGenerator {
         model.lookup_tables = self.lookup_tables.take();
 
         Ok(model)
+    }
+
+    /// Compile assignment items (assignments and runtime loops) to steps
+    fn compile_assignment_items(
+        &self,
+        items: &[crate::ir::IrAssignmentItem],
+        ir: &DeviceIR,
+    ) -> CompileResult<Vec<AssignmentStep>> {
+        items
+            .iter()
+            .map(|item| match item {
+                crate::ir::IrAssignmentItem::Assign(assign) => {
+                    let program = self.compile_expr(&assign.expr, ir)?;
+                    Ok(AssignmentStep::Assign(AssignmentProgram {
+                        var_index: assign.var_index,
+                        program,
+                    }))
+                }
+                crate::ir::IrAssignmentItem::Loop { condition, body } => {
+                    let condition = self.compile_expr(condition, ir)?;
+                    let body = self.compile_assignment_items(body, ir)?;
+                    Ok(AssignmentStep::Loop { condition, body })
+                }
+            })
+            .collect()
     }
 
     /// Map a unified node index (terminals, then internal nodes, ground
@@ -114,60 +140,98 @@ impl CodeGenerator {
         }
     }
 
+    /// Map a derivative axis to its stamp column and column-axis record
+    fn axis_stamp_column(ir: &DeviceIR, wrt: &DerivativeWrt) -> (StampIndex, ColumnAxis) {
+        match wrt {
+            DerivativeWrt::Voltage(node) => {
+                (Self::node_stamp_index(ir, *node), ColumnAxis::Node(*node))
+            }
+            DerivativeWrt::BranchCurrent(k) => (StampIndex::Branch(*k), ColumnAxis::Branch(*k)),
+        }
+    }
+
     /// Compile a branch equation to a stamp program
     ///
     /// Current contributions use the standard SPICE companion form: the
-    /// Jacobian G stamps all four (pos/neg x col) positions and the RHS
-    /// receives -/+ Ieq where Ieq = I - sum(G*V) is computed by the device
-    /// at stamp time.
+    /// Jacobian G stamps both KCL rows and the RHS receives -/+ Ieq where
+    /// Ieq = I - sum(G*x) is computed by the device at stamp time.
+    ///
+    /// Potential contributions define a branch-current unknown i_br with
+    /// the equation V(p) - V(n) - E(...) = 0:
+    /// the device stamps the structural +-1 coupling (KCL rows gain the
+    /// branch column; the branch row gains the node columns), each
+    /// -dE/dx into the branch row, and Eeq = E - sum(dE/dx * x) into the
+    /// branch RHS.
     fn compile_equation(&self, eq: &BranchEquation, ir: &DeviceIR) -> CompileResult<StampProgram> {
-        if !eq.is_current {
-            // Potential contributions (V(a,b) <+ ...) require a branch
-            // current unknown in the MNA system, which the engine does not
-            // allocate yet. Failing is better than silently stamping
-            // nothing, which produced plausible-looking wrong results.
-            return Err(CompileError::CodeGen(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(
-                    "potential (voltage) contributions are not supported yet; \
-                     rewrite the model with current contributions"
-                        .into(),
-                ),
-            )));
-        }
-
         let value_program = self.compile_expr(&eq.expr, ir)?;
+        let static_condition = eq
+            .static_condition
+            .as_ref()
+            .map(|cond| self.compile_expr(cond, ir))
+            .transpose()?;
 
         let pos = Self::node_stamp_index(ir, eq.branch.pos_terminal);
         let neg = Self::node_stamp_index(ir, eq.branch.neg_terminal);
 
         let mut jacobian_programs = Vec::new();
+
+        if let Some(ordinal) = eq.branch_ordinal {
+            // Potential contribution: constitutive row of the branch
+            // unknown receives -dE/dx for every axis
+            let branch_row = StampIndex::Branch(ordinal);
+            for deriv in &eq.derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                jacobian_programs.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: -1.0,
+                    program,
+                });
+            }
+
+            // The companion source Eeq stamps into the branch row
+            let stamp_locations = vec![StampLocation {
+                row: branch_row,
+                col: StampIndex::Ground,
+                sign: 1.0,
+            }];
+
+            return Ok(StampProgram {
+                stamp_locations,
+                value_program,
+                jacobian_programs,
+                branch_ordinal: Some(ordinal),
+                static_condition,
+            });
+        }
+
+        // Current contribution
         for deriv in &eq.derivatives {
-            let DerivativeWrt::Voltage(col_node) = deriv.wrt else {
-                continue;
-            };
-            let col = Self::node_stamp_index(ir, col_node);
+            let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
             let program = self.compile_expr(&deriv.expr, ir)?;
 
-            // KCL row of the positive node gains +dI/dV, the negative node
-            // row gains -dI/dV
+            // KCL row of the positive node gains +dI/dx, the negative node
+            // row gains -dI/dx
             jacobian_programs.push(JacobianEntry {
                 row: pos.clone(),
                 col: col.clone(),
-                col_node,
+                col_axis,
                 sign: 1.0,
                 program: program.clone(),
             });
             jacobian_programs.push(JacobianEntry {
                 row: neg.clone(),
                 col,
-                col_node,
+                col_axis,
                 sign: -1.0,
                 program,
             });
         }
 
         // Current contribution: I leaves pos, enters neg.
-        // The device computes Ieq = I - G*V and stamps rhs[pos] -= Ieq,
+        // The device computes Ieq = I - G*x and stamps rhs[pos] -= Ieq,
         // rhs[neg] += Ieq (signs recorded here).
         let stamp_locations = vec![
             StampLocation {
@@ -186,6 +250,8 @@ impl CodeGenerator {
             stamp_locations,
             value_program,
             jacobian_programs,
+            branch_ordinal: None,
+            static_condition,
         })
     }
 
@@ -263,6 +329,11 @@ impl CodeGenerator {
             IrExpr::Current(p, n) => {
                 program.instructions.push(Instruction::PushCurrent(*p, *n));
             }
+            IrExpr::BranchCurrent(k) => {
+                program
+                    .instructions
+                    .push(Instruction::PushBranchCurrent(*k));
+            }
             IrExpr::Temperature => {
                 program.instructions.push(Instruction::PushTemperature);
             }
@@ -282,6 +353,7 @@ impl CodeGenerator {
                     BinaryOp::Mul => Instruction::Mul,
                     BinaryOp::Div => Instruction::Div,
                     BinaryOp::Pow => Instruction::Pow,
+                    BinaryOp::Mod => Instruction::Mod,
                     // Comparisons
                     BinaryOp::Gt => Instruction::Gt,
                     BinaryOp::Lt => Instruction::Lt,
@@ -292,11 +364,12 @@ impl CodeGenerator {
                     // Logical
                     BinaryOp::And => Instruction::And,
                     BinaryOp::Or => Instruction::Or,
-                    _ => {
-                        return Err(CompileError::CodeGen(CodeGenError::new(
-                            CodeGenErrorKind::UnsupportedFeature(format!("Binary op {:?}", op)),
-                        )));
-                    }
+                    // Bitwise/shift
+                    BinaryOp::Shl => Instruction::Shl,
+                    BinaryOp::Shr => Instruction::Shr,
+                    BinaryOp::BitAnd => Instruction::BitAnd,
+                    BinaryOp::BitOr => Instruction::BitOr,
+                    BinaryOp::BitXor => Instruction::BitXor,
                 });
             }
             IrExpr::Unary(crate::ast::UnaryOp::Neg, inner) => {

@@ -26,7 +26,7 @@ pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
                 log::info!(
                     "[JIT] Successfully compiled '{}': {} assignments, {} stamps",
                     model.name,
-                    model.assignment_programs.len(),
+                    model.assignment_steps.len(),
                     model.stamp_programs.len()
                 );
                 Some(native_model)

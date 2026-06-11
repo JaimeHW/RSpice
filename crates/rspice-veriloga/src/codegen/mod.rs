@@ -16,6 +16,7 @@ mod lookup_table;
 mod model;
 
 pub use model::{
-    AssignmentProgram, BytecodeProgram, CodeGenerator, CompiledModel, CompiledParameter,
-    Instruction, JacobianEntry, LookupTable, StampIndex, StampLocation, StampProgram,
+    AssignmentProgram, AssignmentStep, BytecodeProgram, CodeGenerator, ColumnAxis,
+    CompiledBranchSource, CompiledModel, CompiledParameter, Instruction, JacobianEntry,
+    LookupTable, StampIndex, StampLocation, StampProgram,
 };

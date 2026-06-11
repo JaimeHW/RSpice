@@ -11,6 +11,9 @@ pub struct VmContext {
     pub internal_voltages: Vec<f64>,
     /// Branch currents
     pub currents: Vec<f64>,
+    /// Solution values of branch-current unknowns (potential
+    /// contributions), updated from the circuit solution each iteration
+    pub branch_current_values: Vec<f64>,
     /// Terminal-pair branch current lookup table (flattened NxN matrix).
     terminal_pair_currents: Vec<f64>,
     /// Parameter values (indexed by parameter)
@@ -55,6 +58,7 @@ impl Default for VmContext {
             voltages: Vec::new(),
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            branch_current_values: Vec::new(),
             terminal_pair_currents: Vec::new(),
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -83,6 +87,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -109,6 +114,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: vec![0.0; num_internal],
             currents: Vec::new(),
+            branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             param_given: Vec::new(),
@@ -135,6 +141,7 @@ impl VmContext {
             voltages: vec![0.0; num_terminals],
             internal_voltages: Vec::new(),
             currents: Vec::new(),
+            branch_current_values: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
             param_given: Vec::new(),
