@@ -10,9 +10,6 @@
 [![Rust](https://img.shields.io/badge/rust-1.94-orange.svg?style=flat-square)](rust-toolchain.toml)
 [![Platform](https://img.shields.io/badge/platform-win%20%7C%20macos%20%7C%20linux-lightgrey.svg?style=flat-square)](https://github.com/JaimeHW/rspice)
 
-<img src="assets/image.png" alt="Schematic editor and waveform viewer" width="100%" />
-<img src="assets/image2.png" alt="Analysis and results view" width="100%" />
-
 </div>
 
 ## Overview
