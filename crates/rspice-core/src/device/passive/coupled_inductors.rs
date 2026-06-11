@@ -179,80 +179,59 @@ impl CoupledInductorPair {
         self.l2 * (1.0 - self.k * self.k)
     }
 
-    /// Stamp DC short-circuit topology for the pair.
-    pub fn stamp_dc_short(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
-        let branch1 = self.branch1.expect("Branch1 index must be set");
-        let branch2 = self.branch2.expect("Branch2 index must be set");
+    /// DC stamp for the coupling: intentionally nothing.
+    ///
+    /// The pair is a *mutual overlay* — the two standalone inductors own
+    /// their branch rows (DC shorts included). Mutual inductance contributes
+    /// no DC term, and stamping incidence here again would double the rows.
+    pub fn stamp_dc_short(&self, _matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {}
 
-        matrix.stamp(branch1, self.node1_pos, 1.0);
-        matrix.stamp(branch1, self.node1_neg, -1.0);
-        matrix.stamp(self.node1_pos, branch1, 1.0);
-        matrix.stamp(self.node1_neg, branch1, -1.0);
-
-        matrix.stamp(branch2, self.node2_pos, 1.0);
-        matrix.stamp(branch2, self.node2_neg, -1.0);
-        matrix.stamp(self.node2_pos, branch2, 1.0);
-        matrix.stamp(self.node2_neg, branch2, -1.0);
-
-        matrix.stamp_rhs(branch1, 0.0);
-        matrix.stamp_rhs(branch2, 0.0);
-    }
-
-    /// Calculate equivalent circuit values for the configured integration method.
-    fn companion_values(
-        &self,
-        dt: Value,
-        coeff: &CompanionCoefficients,
-    ) -> (Value, Value, Value, Value, Value) {
-        let r11 = coeff.inductor_req(self.l1, dt);
-        let r22 = coeff.inductor_req(self.l2, dt);
+    /// Mutual-coupling history magnitudes — the M-only terms of the dual of
+    /// `CompanionCoefficients::inductor_veq` (the standalone inductors carry
+    /// the self terms, including the trapezoidal voltage history).
+    fn mutual_companion_values(&self, dt: Value, coeff: &CompanionCoefficients) -> (Value, Value, Value) {
         let r12 = coeff.inductor_req(self.m, dt);
-
-        let prev_mix_1 = coeff.coeff_v_n_minus_1
-            * (self.l1 * self.current1_prev_prev + self.m * self.current2_prev_prev)
-            / dt;
-        let prev_mix_2 = coeff.coeff_v_n_minus_1
-            * (self.m * self.current1_prev_prev + self.l2 * self.current2_prev_prev)
-            / dt;
-
-        let v1_eq =
-            r11 * self.current1_prev + r12 * self.current2_prev + self.voltage1_prev + prev_mix_1;
-        let v2_eq =
-            r12 * self.current1_prev + r22 * self.current2_prev + self.voltage2_prev + prev_mix_2;
-
-        (r11, r22, r12, v1_eq, v2_eq)
+        let h = coeff.coeff_v_n * self.m / dt;
+        let mut v1_mut = h * self.current2_prev;
+        let mut v2_mut = h * self.current1_prev;
+        if coeff.needs_two_history {
+            let h2 = coeff.coeff_v_n_minus_1 * self.m / dt;
+            v1_mut += h2 * self.current2_prev_prev;
+            v2_mut += h2 * self.current1_prev_prev;
+        }
+        (r12, v1_mut, v2_mut)
     }
 
-    /// Stamp the transient companion for the configured integration method.
-    pub fn stamp_transient_companion(
+    /// Stamp ONLY the mutual terms onto the two existing inductor branch rows
+    /// (matrix indices supplied by the caller): `-r12` cross-coupling plus the
+    /// mutual history sources. Branch rows demand `-v_eq`; `stamp_rhs`
+    /// accumulates on top of the self terms the standalone inductors stamped.
+    pub fn stamp_transient_mutual(
         &self,
+        branch1: NodeId,
+        branch2: NodeId,
         dt: Value,
         coeff: &CompanionCoefficients,
         matrix: &mut impl MatrixStamper,
-        _rhs: &mut [Value],
     ) {
-        let branch1 = self.branch1.expect("Branch1 index must be set");
-        let branch2 = self.branch2.expect("Branch2 index must be set");
-
-        let (r11, r22, r12, v1_eq, v2_eq) = self.companion_values(dt, coeff);
-
-        matrix.stamp(branch1, self.node1_pos, 1.0);
-        matrix.stamp(branch1, self.node1_neg, -1.0);
-        matrix.stamp(branch1, branch1, -r11);
+        let (r12, v1_mut, v2_mut) = self.mutual_companion_values(dt, coeff);
         matrix.stamp(branch1, branch2, -r12);
-
-        matrix.stamp(branch2, self.node2_pos, 1.0);
-        matrix.stamp(branch2, self.node2_neg, -1.0);
         matrix.stamp(branch2, branch1, -r12);
-        matrix.stamp(branch2, branch2, -r22);
+        matrix.stamp_rhs(branch1, -v1_mut);
+        matrix.stamp_rhs(branch2, -v2_mut);
+    }
 
-        matrix.stamp(self.node1_pos, branch1, 1.0);
-        matrix.stamp(self.node1_neg, branch1, -1.0);
-        matrix.stamp(self.node2_pos, branch2, 1.0);
-        matrix.stamp(self.node2_neg, branch2, -1.0);
-
-        matrix.stamp_rhs(branch1, v1_eq);
-        matrix.stamp_rhs(branch2, v2_eq);
+    /// Update history from an accepted solution vector, given the two branch
+    /// matrix indices (1-based, num_nodes + ordinal).
+    pub fn update_state_with_branches(
+        &mut self,
+        solution: &[Value],
+        branch1: NodeId,
+        branch2: NodeId,
+    ) {
+        self.branch1 = Some(branch1);
+        self.branch2 = Some(branch2);
+        self.update_state_from_solution(solution);
     }
 
     /// Update history from an accepted solution vector.
@@ -296,9 +275,17 @@ impl DynamicDevice for CoupledInductorPair {
         _voltages: &[Value],
         dt: Value,
         matrix: &mut impl MatrixStamper,
-        rhs: &mut [Value],
+        _rhs: &mut [Value],
     ) {
-        self.stamp_transient_companion(dt, &CompanionCoefficients::trapezoidal(), matrix, rhs);
+        let branch1 = self.branch1.expect("Branch1 index must be set");
+        let branch2 = self.branch2.expect("Branch2 index must be set");
+        self.stamp_transient_mutual(
+            branch1,
+            branch2,
+            dt,
+            &CompanionCoefficients::trapezoidal(),
+            matrix,
+        );
     }
 
     fn step(&mut self, voltages: &[Value], _dt: Value) {
@@ -422,10 +409,14 @@ impl MultiWindingTransformer {
             .map(|row| row.iter().map(|&l| coeff.inductor_req(l, dt)).collect())
             .collect();
 
+        // History magnitudes use coeff_v_n (not the matrix coefficient
+        // coeff_g — they differ for Gear2); the voltage history applies for
+        // Trapezoidal only. Dual of CompanionCoefficients::inductor_veq.
         let mut v_eq = vec![0.0; n];
         for i in 0..n {
             for j in 0..n {
-                v_eq[i] += r_matrix[i][j] * self.currents_prev[j];
+                v_eq[i] +=
+                    coeff.coeff_v_n * self.inductance_matrix[i][j] * self.currents_prev[j] / dt;
                 if coeff.needs_two_history {
                     v_eq[i] += coeff.coeff_v_n_minus_1
                         * self.inductance_matrix[i][j]
@@ -433,7 +424,9 @@ impl MultiWindingTransformer {
                         / dt;
                 }
             }
-            v_eq[i] += self.voltages_prev[i];
+            if coeff.needs_current_history {
+                v_eq[i] += self.voltages_prev[i];
+            }
         }
 
         (r_matrix, v_eq)
@@ -464,7 +457,8 @@ impl MultiWindingTransformer {
 
             matrix.stamp(pos_i, branch_i, 1.0);
             matrix.stamp(neg_i, branch_i, -1.0);
-            matrix.stamp_rhs(branch_i, v_eq[i]);
+            // Branch rows demand -v_eq; see companion_matrix.
+            matrix.stamp_rhs(branch_i, -v_eq[i]);
         }
     }
 

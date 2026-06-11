@@ -1428,6 +1428,57 @@ impl Engine {
             .resolve_control_elements()
             .map_err(|e| SimulationError::Circuit(e.to_string()))?;
 
+        // Resolve K couplings into mutual-coupling overlays now that every
+        // inductor and its branch ordinal exist. The standalone inductors keep
+        // their full self-inductance stamps; each pair contributes ONLY the
+        // mutual terms (see CoupledInductorPair). K cards with 3+ inductors
+        // couple every pair with the same k (ngspice semantics).
+        let couplings = std::mem::take(&mut circuit.couplings);
+        for coupling in &couplings {
+            if coupling.inductor_names.len() < 2 {
+                return Err(SimulationError::Circuit(format!(
+                    "coupling {} names fewer than two inductors",
+                    coupling.name
+                )));
+            }
+            let mut indices = Vec::with_capacity(coupling.inductor_names.len());
+            for lname in &coupling.inductor_names {
+                let idx = circuit
+                    .inductors
+                    .names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(lname))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "coupling {} references unknown inductor {}",
+                            coupling.name, lname
+                        ))
+                    })?;
+                indices.push(idx);
+            }
+            for a in 0..indices.len() {
+                for b in (a + 1)..indices.len() {
+                    let (i, j) = (indices[a], indices[b]);
+                    let device = crate::device::CoupledInductorPair::new(
+                        coupling.name.clone(),
+                        circuit.inductors.node_pos[i],
+                        circuit.inductors.node_neg[i],
+                        circuit.inductors.inductances[i],
+                        circuit.inductors.node_pos[j],
+                        circuit.inductors.node_neg[j],
+                        circuit.inductors.inductances[j],
+                        coupling.coefficient,
+                    );
+                    circuit.add_coupled_inductor_pair(
+                        circuit.inductors.branch_indices[i],
+                        circuit.inductors.branch_indices[j],
+                        device,
+                    );
+                }
+            }
+        }
+        circuit.couplings = couplings;
+
         let junction_gmin = self
             .config
             .convergence_config

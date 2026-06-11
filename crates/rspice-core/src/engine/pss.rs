@@ -688,6 +688,9 @@ impl Engine {
                     }
                 }
 
+                // Mutual coupling overlays on top of the standalone inductors.
+                circuit.stamp_coupled_inductor_pairs_transient(matrix, &mut rhs, dt, &coeff);
+
                 if circuit.has_nonlinear_devices() {
                     circuit.update_nonlinear(&new_solution);
                     circuit.stamp_nonlinear(matrix, &mut rhs, &new_solution);

@@ -30,7 +30,10 @@ impl CircuitData {
         }
     }
 
-    /// Stamp coupled inductor companion models for transient analysis.
+    /// Stamp coupled inductor mutual-coupling overlays for transient analysis.
+    ///
+    /// The standalone inductors stamp their own self-inductance rows; each
+    /// pair adds only the -r12 cross terms and mutual history sources.
     pub fn stamp_coupled_inductor_pairs_transient(
         &self,
         matrix: &mut StaticMatrix,
@@ -40,9 +43,11 @@ impl CircuitData {
     ) {
         let mut stamper = StaticMatrixStamper { matrix, rhs };
         for binding in &self.coupled_inductor_pairs {
+            let br1 = self.num_nodes + binding.branch1_ordinal;
+            let br2 = self.num_nodes + binding.branch2_ordinal;
             binding
                 .device
-                .stamp_transient_companion(dt, coeff, &mut stamper, &mut []);
+                .stamp_transient_mutual(br1, br2, dt, coeff, &mut stamper);
         }
     }
 
@@ -64,8 +69,11 @@ impl CircuitData {
 
     /// Update coupled inductor transient history from an accepted solution.
     pub fn update_coupled_inductor_pair_state(&mut self, solution: &[Value]) {
+        let num_nodes = self.num_nodes;
         for binding in &mut self.coupled_inductor_pairs {
-            binding.device.update_state_from_solution(solution);
+            let br1 = num_nodes + binding.branch1_ordinal;
+            let br2 = num_nodes + binding.branch2_ordinal;
+            binding.device.update_state_with_branches(solution, br1, br2);
         }
     }
 

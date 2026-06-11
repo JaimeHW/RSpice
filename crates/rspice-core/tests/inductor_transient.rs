@@ -148,3 +148,126 @@ L1 out 0 10m
         );
     }
 }
+
+//=============================================================================
+// Coupled inductors (K elements) — phasor-exact steady-state pins
+//=============================================================================
+
+use rspice_core::Complex64;
+
+/// Last-cycle peak |v(node)| once the start-up transient has decayed.
+fn late_cycle_peak(time: &[f64], v: &[f64], t_from: f64) -> f64 {
+    time.iter()
+        .zip(v)
+        .filter(|(t, _)| **t >= t_from)
+        .map(|(_, v)| v.abs())
+        .fold(0.0f64, f64::max)
+}
+
+/// Exact steady-state secondary node amplitude for a transformer driven by
+/// V*sin(wt) through r1, with secondary loaded by r_load:
+///   (r1 + jwL1) I1 + jwM I2 = V
+///   jwM I1 + (r_load + jwL2) I2 = 0,  v_sec = -I2 * r_load
+/// Open secondary (r_load = inf): v_sec = jwM * V / (r1 + jwL1).
+fn phasor_secondary_amplitude(
+    v: f64,
+    w: f64,
+    r1: f64,
+    l1: f64,
+    l2: f64,
+    m: f64,
+    r_load: Option<f64>,
+) -> f64 {
+    let jw = Complex64::new(0.0, w);
+    let z11 = Complex64::new(r1, 0.0) + jw * l1;
+    match r_load {
+        None => (jw * m * v / z11).norm(),
+        Some(rl) => {
+            let z12 = jw * m;
+            let z22 = Complex64::new(rl, 0.0) + jw * l2;
+            let det = z11 * z22 - z12 * z12;
+            let i2 = -(z12 * v) / det;
+            (i2 * rl).norm()
+        }
+    }
+}
+
+/// Open-secondary transformer: the induced EMF must match jwM*I1 exactly.
+/// Before the fix the secondary sat at identically 0 V.
+#[test]
+fn coupled_open_secondary_emf_matches_phasor() {
+    let deck = "\
+* open-secondary transformer, K = 0.5
+V1 in 0 SIN(0 1 1k)
+R1 in p1 50
+L1 p1 0 10m
+L2 s1 0 10m
+K1 L1 L2 0.5
+.end
+";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 5e-3, 5e-6)
+        .expect("transformer transient must converge");
+    let v_s1 = node_series(&result.node_names, &result.voltages, "s1");
+
+    for (k, &t) in result.time.iter().enumerate() {
+        assert!(
+            v_s1[k].is_finite() && v_s1[k].abs() < 2.0,
+            "secondary diverged at t={t:.3e}: {:.3e}",
+            v_s1[k]
+        );
+    }
+
+    let w = 2.0 * std::f64::consts::PI * 1000.0;
+    let m = 0.5 * (10e-3f64 * 10e-3f64).sqrt();
+    let expected = phasor_secondary_amplitude(1.0, w, 50.0, 10e-3, 10e-3, m, None);
+    let measured = late_cycle_peak(&result.time, v_s1, 4e-3);
+    assert!(
+        measured > 0.05,
+        "secondary is dead ({measured:.4} V) — coupling not stamped"
+    );
+    let rel = (measured - expected).abs() / expected;
+    assert!(
+        rel < 0.03,
+        "open-secondary EMF off by {:.1}%: measured {measured:.4} V, phasor {expected:.4} V",
+        rel * 100.0
+    );
+}
+
+/// Loaded 1:1 transformer, K = 0.98: secondary amplitude must match the exact
+/// two-mesh phasor solution.
+#[test]
+fn coupled_loaded_transformer_matches_phasor() {
+    let deck = "\
+* loaded 1:1 transformer, K = 0.98
+V1 in 0 SIN(0 1 1k)
+R1 in p1 10
+L1 p1 0 100m
+L2 s1 0 100m
+K1 L1 L2 0.98
+RL s1 0 1k
+.end
+";
+    let netlist = Netlist::parse(deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 5e-3, 5e-6)
+        .expect("loaded transformer transient must converge");
+    let v_s1 = node_series(&result.node_names, &result.voltages, "s1");
+
+    let w = 2.0 * std::f64::consts::PI * 1000.0;
+    let m = 0.98 * (100e-3f64 * 100e-3f64).sqrt();
+    let expected =
+        phasor_secondary_amplitude(1.0, w, 10.0, 100e-3, 100e-3, m, Some(1000.0));
+    let measured = late_cycle_peak(&result.time, v_s1, 4e-3);
+    assert!(
+        measured > 0.1,
+        "secondary is dead ({measured:.4} V) — coupling not stamped"
+    );
+    let rel = (measured - expected).abs() / expected;
+    assert!(
+        rel < 0.03,
+        "loaded secondary off by {:.1}%: measured {measured:.4} V, phasor {expected:.4} V",
+        rel * 100.0
+    );
+}
