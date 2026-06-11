@@ -143,7 +143,10 @@ pub(super) fn run_ac(
             }
 
             if let Some(ref output_path) = ctx.output_path_for("ac") {
-                let signals = ac_signals(&results);
+                let signals = crate::commands::run_signals::apply_save_set_complex(
+                    ac_signals(&results),
+                    &ctx.netlist.saves,
+                );
                 let frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
                 if matches!(ctx.format, OutputFormat::Hdf5) {

@@ -13,8 +13,8 @@ use super::{
     AnalysisCommand, BjtType, Element, ElementKind, FreqVariation, InitialCondition, JfetType,
     MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet,
     ParamContext, ParametricValue, ParseError, PoleZeroAnalysisType, PoleZeroTransferType,
-    SensitivityAcSweep, SimulationOptions, SourceSpec, StepCommand, StepSweep, StepTarget,
-    SubcircuitDef, SwitchState, VerilogAInclude,
+    SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StepCommand,
+    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};

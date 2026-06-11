@@ -192,6 +192,7 @@ pub(super) fn process_line(
             let initial_conditions = &mut state.initial_conditions;
             let node_sets = &mut state.node_sets;
             let global_nodes = &mut state.global_nodes;
+            let saves = &mut state.saves;
             let options = &mut state.options;
             let frame = state
                 .subckt_stack
@@ -213,6 +214,7 @@ pub(super) fn process_line(
                     initial_conditions,
                     node_sets,
                     global_nodes,
+                    saves,
                     options,
                 },
             )?;
@@ -235,6 +237,7 @@ pub(super) fn process_line(
             initial_conditions: &mut state.initial_conditions,
             node_sets: &mut state.node_sets,
             global_nodes: &mut state.global_nodes,
+            saves: &mut state.saves,
             options: &mut state.options,
         },
     )
@@ -255,6 +258,7 @@ pub(super) fn parse_line(
         initial_conditions,
         node_sets,
         global_nodes,
+        saves,
         options,
     } = context;
 
@@ -293,6 +297,7 @@ pub(super) fn parse_line(
                 node_sets,
                 global_nodes,
                 measurements,
+                saves,
                 options,
             },
         ),
@@ -307,7 +312,7 @@ pub(super) fn parse_line(
         'L' => parse_inductor(&mut stream, line_num, elements, params),
         'V' => parse_voltage_source(&mut stream, line_num, elements, params),
         'I' => parse_current_source(&mut stream, line_num, elements, params),
-        'D' => parse_diode(&mut stream, line_num, elements),
+        'D' => parse_diode(&mut stream, line_num, elements, params),
         'Q' => parse_bjt(&mut stream, line_num, elements, params),
         'M' => parse_mosfet(&mut stream, line_num, elements, params),
         'J' => parse_jfet(&mut stream, line_num, elements, params),

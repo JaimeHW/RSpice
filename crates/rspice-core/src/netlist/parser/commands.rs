@@ -15,6 +15,7 @@ pub(super) fn parse_command(
         node_sets,
         global_nodes,
         measurements,
+        saves,
         options,
     } = context;
 
@@ -147,6 +148,14 @@ pub(super) fn parse_command(
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
             measurements.push(parse_meas_command(stream, line_num, params)?);
         }
+        ".SAVE" | ".PROBE" => {
+            parse_save_command(stream, line_num, saves, false)?;
+        }
+        ".PRINT" | ".PLOT" => {
+            // .PRINT/.PLOT take an optional leading analysis type before the
+            // probe list; the probes feed the same output-selection set.
+            parse_save_command(stream, line_num, saves, true)?;
+        }
         _ => {
             // Ignore unknown commands
             log::debug!("Ignoring unknown command: {}", cmd);
@@ -154,6 +163,223 @@ pub(super) fn parse_command(
     }
 
     Ok(())
+}
+
+/// Parse a `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` probe list into the netlist's
+/// output-selection set.
+///
+/// Accepted probe forms (case-insensitive):
+/// - `all`
+/// - `v(node)` / `v(a,b)` — also when the lexer splits them into
+///   `v ( node )` token runs
+/// - `i(elem)`
+/// - `@dev[param]`
+/// - bare vector names (`out` is shorthand for `v(out)`)
+///
+/// With `skip_analysis_type`, a leading analysis keyword (`TRAN`, `AC`, ...)
+/// is consumed and ignored, matching `.PRINT TRAN v(out)` usage.
+pub(super) fn parse_save_command(
+    stream: &mut TokenStream,
+    line_num: usize,
+    saves: &mut super::SaveSet,
+    skip_analysis_type: bool,
+) -> Result<(), ParseError> {
+    use super::SaveSignal;
+
+    let mut first_token = true;
+    let mut parsed_any = false;
+
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(raw) => {
+                let raw = raw.clone();
+                stream.advance();
+                let upper = raw.to_ascii_uppercase();
+
+                if first_token
+                    && skip_analysis_type
+                    && matches!(
+                        upper.as_str(),
+                        "TRAN" | "AC" | "DC" | "NOISE" | "DISTO" | "OP" | "TF" | "SP" | "PSS"
+                    )
+                {
+                    first_token = false;
+                    continue;
+                }
+                first_token = false;
+
+                if upper == "ALL" {
+                    saves.signals.push(SaveSignal::All);
+                    parsed_any = true;
+                    continue;
+                }
+
+                // `v(...)` / `i(...)` may arrive either as one identifier or
+                // as an identifier followed by a parenthesized token run.
+                let is_probe_prefix = upper == "V" || upper == "I";
+                if is_probe_prefix && matches!(stream.peek().kind, TokenKind::LParen) {
+                    let mut probe = raw.clone();
+                    probe.push('(');
+                    stream.advance(); // consume '('
+                    let mut depth = 1usize;
+                    while depth > 0
+                        && !stream.is_eof()
+                        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                    {
+                        match &stream.peek().kind {
+                            TokenKind::LParen => {
+                                depth += 1;
+                                probe.push('(');
+                            }
+                            TokenKind::RParen => {
+                                depth -= 1;
+                                if depth > 0 {
+                                    probe.push(')');
+                                }
+                            }
+                            TokenKind::Ident(s) => probe.push_str(s),
+                            TokenKind::Number(n) => probe.push_str(&format!("{}", n)),
+                            TokenKind::Comma => probe.push(','),
+                            _ => {}
+                        }
+                        stream.advance();
+                    }
+                    probe.push(')');
+                    if let Some(signal) = parse_save_probe(&probe) {
+                        saves.signals.push(signal);
+                        parsed_any = true;
+                    }
+                    continue;
+                }
+
+                if let Some(signal) = parse_save_probe(&raw) {
+                    saves.signals.push(signal);
+                    parsed_any = true;
+                }
+            }
+            TokenKind::AtSign => {
+                stream.advance();
+                first_token = false;
+                // @dev[param]: device then bracketed parameter name.
+                let device = match &stream.peek().kind {
+                    TokenKind::Ident(s) => {
+                        let device = s.clone();
+                        stream.advance();
+                        device
+                    }
+                    _ => {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: "Expected device name after '@' in save directive"
+                                .to_string(),
+                        });
+                    }
+                };
+                if stream.consume(&TokenKind::LBracket) {
+                    let param = match &stream.peek().kind {
+                        TokenKind::Ident(s) => {
+                            let param = s.clone();
+                            stream.advance();
+                            param
+                        }
+                        _ => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected parameter name in '@{}[...]' save directive",
+                                    device
+                                ),
+                            });
+                        }
+                    };
+                    stream.consume(&TokenKind::RBracket);
+                    saves.signals.push(SaveSignal::DeviceParam { device, param });
+                } else {
+                    saves.signals.push(SaveSignal::Raw(device));
+                }
+                parsed_any = true;
+            }
+            TokenKind::Number(_) => {
+                // Numeric node names (e.g. `.save 2`) select v(2).
+                if let TokenKind::Number(n) = &stream.peek().kind {
+                    let name = if n.fract() == 0.0 {
+                        format!("{}", *n as i64)
+                    } else {
+                        format!("{}", n)
+                    };
+                    saves.signals.push(SaveSignal::Raw(name));
+                    parsed_any = true;
+                }
+                stream.advance();
+                first_token = false;
+            }
+            _ => {
+                stream.advance();
+            }
+        }
+    }
+
+    if !parsed_any {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Save/print directive requires at least one output signal".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Parse a single textual probe (`v(out)`, `v(a,b)`, `i(v1)`, `@m1[id]`, or a
+/// bare vector name) into a [`super::SaveSignal`].
+fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
+    use super::SaveSignal;
+
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+
+    if let Some(inner) = lower.strip_prefix("v(").and_then(|s| s.strip_suffix(')')) {
+        let inner = inner.trim();
+        if inner.is_empty() {
+            return None;
+        }
+        return Some(match inner.split_once(',') {
+            Some((a, b)) => {
+                SaveSignal::VoltageDiff(a.trim().to_string(), b.trim().to_string())
+            }
+            None => SaveSignal::Voltage(inner.to_string()),
+        });
+    }
+
+    if let Some(inner) = lower.strip_prefix("i(").and_then(|s| s.strip_suffix(')')) {
+        let inner = inner.trim();
+        if inner.is_empty() {
+            return None;
+        }
+        return Some(SaveSignal::Current(inner.to_string()));
+    }
+
+    if let Some(rest) = lower.strip_prefix('@') {
+        if let Some((device, param)) = rest
+            .split_once('[')
+            .and_then(|(d, p)| p.strip_suffix(']').map(|p| (d, p)))
+        {
+            return Some(SaveSignal::DeviceParam {
+                device: device.trim().to_string(),
+                param: param.trim().to_string(),
+            });
+        }
+        return Some(SaveSignal::Raw(rest.trim().to_string()));
+    }
+
+    Some(SaveSignal::Raw(lower))
 }
 
 pub(super) fn parse_options_command(

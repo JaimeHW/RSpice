@@ -44,6 +44,81 @@ pub use veriloga_cache::{
 #[cfg(feature = "veriloga")]
 use veriloga_cache::{normalize_model_key, resolve_cached_or_compile_veriloga};
 
+/// Construct a Jiles-Atherton (magnetic-core) inductor instance and add it,
+/// together with its linear runtime companion, to the circuit.
+fn add_jiles_atherton_inductor_element(
+    circuit: &mut CircuitData,
+    netlist: &Netlist,
+    element: &crate::netlist::Element,
+    value: f64,
+    model: &str,
+    initial_current: Option<f64>,
+) -> Result<(), SimulationError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(SimulationError::Circuit(format!(
+            "Jiles-Atherton inductor '{}' has invalid inductance value {}",
+            element.name, value
+        )));
+    }
+
+    let np = circuit.get_or_create_node(&element.nodes[0]);
+    let nn = circuit.get_or_create_node(&element.nodes[1]);
+    let branch = circuit.allocate_branch_named(&element.name);
+
+    let model_def = find_model_def(netlist, model).ok_or_else(|| {
+        SimulationError::Circuit(format!(
+            "Jiles-Atherton inductor '{}' references unknown model '{}'",
+            element.name, model
+        ))
+    })?;
+    ensure_model_type(
+        "Jiles-Atherton inductor",
+        &element.name,
+        model,
+        model_def,
+        &["CORE", "JA", "JILES", "JILESATHERTON"],
+    )?;
+
+    let params = resolve_jiles_atherton_model_params(model_def, value)?;
+    let mut ja =
+        crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
+            .with_params(params);
+    if let Some(ic) = initial_current {
+        ja.set_initial_current(ic);
+    }
+
+    let effective_l = ja.effective_inductance();
+    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
+        effective_l
+    } else {
+        value
+    };
+
+    if let Some(ic) = initial_current {
+        circuit
+            .inductors
+            .add_with_ic(element.name.clone(), np, nn, branch, runtime_l, ic);
+    } else {
+        circuit
+            .inductors
+            .add(element.name.clone(), np, nn, branch, runtime_l);
+    }
+
+    let inductor_index = circuit.inductors.len().saturating_sub(1);
+    circuit.add_jiles_atherton_inductor(inductor_index, branch, ja);
+
+    Ok(())
+}
+
+/// `true` when a model card's type names a magnetic-core (Jiles-Atherton)
+/// model rather than a linear inductor card.
+fn is_magnetic_core_model_type(model_type: &str) -> bool {
+    model_type.eq_ignore_ascii_case("CORE")
+        || model_type.eq_ignore_ascii_case("JA")
+        || model_type.eq_ignore_ascii_case("JILES")
+        || model_type.eq_ignore_ascii_case("JILESATHERTON")
+}
+
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
@@ -145,84 +220,98 @@ impl Engine {
                         small_signal_resistance,
                     );
                 }
-                ElementKind::Capacitor { value, .. } => {
-                    let np = circuit.get_or_create_node(&element.nodes[0]);
-                    let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    circuit.capacitors.add(element.name.clone(), np, nn, *value);
-                }
-                ElementKind::Inductor { value, .. } => {
-                    let np = circuit.get_or_create_node(&element.nodes[0]);
-                    let nn = circuit.get_or_create_node(&element.nodes[1]);
-                    let branch = circuit.allocate_branch_named(&element.name);
-                    circuit
-                        .inductors
-                        .add(element.name.clone(), np, nn, branch, *value);
-                }
-                ElementKind::JilesAthertonInductor {
+                ElementKind::Capacitor {
                     value,
+                    initial_voltage,
                     model,
-                    initial_current,
+                    instance_params,
                 } => {
-                    if !value.is_finite() || *value <= 0.0 {
-                        return Err(SimulationError::Circuit(format!(
-                            "Jiles-Atherton inductor '{}' has invalid inductance value {}",
-                            element.name, value
-                        )));
+                    let capacitance = resolve_capacitor_instance_value(
+                        netlist,
+                        &element.name,
+                        *value,
+                        model.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )?;
+                    let np = circuit.get_or_create_node(&element.nodes[0]);
+                    let nn = circuit.get_or_create_node(&element.nodes[1]);
+                    if let Some(ic) = *initial_voltage {
+                        circuit
+                            .capacitors
+                            .add_with_ic(element.name.clone(), np, nn, capacitance, ic);
+                    } else {
+                        circuit
+                            .capacitors
+                            .add(element.name.clone(), np, nn, capacitance);
+                    }
+                }
+                ElementKind::Inductor {
+                    value,
+                    initial_current,
+                    model,
+                    instance_params,
+                } => {
+                    // Magnetic-core model cards (Jiles-Atherton) route to the
+                    // hysteretic inductor; plain L/IND cards and modelless
+                    // instances stay linear.
+                    let core_model = model.as_deref().and_then(|model_name| {
+                        find_model_def(netlist, model_name)
+                            .filter(|def| is_magnetic_core_model_type(&def.model_type))
+                            .map(|_| model_name)
+                    });
+
+                    if let Some(model_name) = core_model {
+                        add_jiles_atherton_inductor_element(
+                            &mut circuit,
+                            netlist,
+                            element,
+                            *value,
+                            model_name,
+                            *initial_current,
+                        )?;
+                        continue;
                     }
 
+                    let inductance = resolve_inductor_instance_value(
+                        netlist,
+                        &element.name,
+                        *value,
+                        model.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )?;
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     let branch = circuit.allocate_branch_named(&element.name);
-
-                    let model_def = find_model_def(netlist, model).ok_or_else(|| {
-                        SimulationError::Circuit(format!(
-                            "Jiles-Atherton inductor '{}' references unknown model '{}'",
-                            element.name, model
-                        ))
-                    })?;
-                    ensure_model_type(
-                        "Jiles-Atherton inductor",
-                        &element.name,
-                        model,
-                        model_def,
-                        &["CORE", "JA", "JILES", "JILESATHERTON"],
-                    )?;
-
-                    let params = resolve_jiles_atherton_model_params(model_def, *value)?;
-                    let mut ja = crate::device::passive::JilesAthertonInductor::new(
-                        element.name.clone(),
-                        np,
-                        nn,
-                    )
-                    .with_params(params);
-                    if let Some(ic) = *initial_current {
-                        ja.set_initial_current(ic);
-                    }
-
-                    let effective_l = ja.effective_inductance();
-                    let runtime_l = if effective_l.is_finite() && effective_l > 0.0 {
-                        effective_l
-                    } else {
-                        *value
-                    };
-
                     if let Some(ic) = *initial_current {
                         circuit.inductors.add_with_ic(
                             element.name.clone(),
                             np,
                             nn,
                             branch,
-                            runtime_l,
+                            inductance,
                             ic,
                         );
                     } else {
                         circuit
                             .inductors
-                            .add(element.name.clone(), np, nn, branch, runtime_l);
+                            .add(element.name.clone(), np, nn, branch, inductance);
                     }
-
-                    let inductor_index = circuit.inductors.len().saturating_sub(1);
-                    circuit.add_jiles_atherton_inductor(inductor_index, branch, ja);
+                }
+                ElementKind::JilesAthertonInductor {
+                    value,
+                    model,
+                    initial_current,
+                } => {
+                    add_jiles_atherton_inductor_element(
+                        &mut circuit,
+                        netlist,
+                        element,
+                        *value,
+                        model,
+                        *initial_current,
+                    )?;
                 }
                 ElementKind::VoltageSource(spec) => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
@@ -289,12 +378,16 @@ impl Engine {
                         transient_spec,
                     );
                 }
-                ElementKind::Diode { model } => {
+                ElementKind::Diode {
+                    model,
+                    instance_params,
+                } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
                     let mut diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
 
                     // Look up model and apply parameters
+                    let rs_given;
                     if let Some(device_model) = find_model_def(netlist, model) {
                         ensure_model_type(
                             "Diode",
@@ -304,10 +397,12 @@ impl Engine {
                             &["D", "DIODE"],
                         )?;
                         let params_map = model_params_upper_map(&device_model.params);
+                        rs_given = params_map.contains_key("RS");
                         diode = diode.with_model_params(&params_map);
                     } else if let Some(params_map) =
                         builtin_diode_model_map().get(&model.to_uppercase())
                     {
+                        rs_given = params_map.contains_key("RS");
                         diode = diode.with_model_params(params_map);
                         log::debug!(
                             "Applied embedded diode fallback model '{}' to {}",
@@ -319,6 +414,51 @@ impl Engine {
                             "Diode '{}' references unknown model '{}'",
                             element.name, model
                         )));
+                    }
+
+                    // Instance scaling: AREA and M/MULT both act as parallel
+                    // junction multipliers for the lumped junction (ngspice
+                    // DIOload semantics): currents and depletion charge scale
+                    // up, series resistance scales down.
+                    let area = instance_param(instance_params, &["AREA"]).unwrap_or(1.0);
+                    let mult = instance_param(instance_params, &["M", "MULT"]).unwrap_or(1.0);
+                    if !area.is_finite() || area <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Diode '{}' has invalid AREA={} (must be finite and > 0)",
+                            element.name, area
+                        )));
+                    }
+                    if !mult.is_finite() || mult <= 0.0 {
+                        return Err(SimulationError::Circuit(format!(
+                            "Diode '{}' has invalid multiplicity M={} (must be finite and > 0)",
+                            element.name, mult
+                        )));
+                    }
+                    let junction_scale = area * mult;
+                    if junction_scale != 1.0 {
+                        diode.apply_junction_scaling(junction_scale);
+                    }
+
+                    if instance_param(instance_params, &["TEMP", "DTEMP"]).is_some() {
+                        log::warn!(
+                            "Diode '{}': TEMP/DTEMP instance overrides are not yet honored \
+                             by the junction model and were ignored",
+                            element.name
+                        );
+                    }
+
+                    // Series resistance participates in the solution as an
+                    // explicit resistor between the anode and an internal
+                    // node (the junction model itself never stamps RS). Only
+                    // externalized when the model card provides RS, keeping
+                    // decks without RS bit-identical to prior behavior.
+                    if rs_given && diode.rs.is_finite() && diode.rs > 0.0 {
+                        let aint_name = format!("{}.__aint", element.name);
+                        let aint = circuit.get_or_create_node(&aint_name);
+                        let rs_name = format!("{}.__rs", element.name);
+                        circuit.resistors.add(rs_name, anode, aint, diode.rs);
+                        diode.node_anode = aint;
+                        diode.rs = 0.0;
                     }
 
                     circuit.diodes.add(diode);

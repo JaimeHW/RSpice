@@ -1,11 +1,15 @@
 #![allow(clippy::needless_range_loop)]
 use super::*;
 
+mod capacitors;
+mod inductors;
 mod magnetic;
 mod resistors;
 mod transmission;
 mod xspice;
 
+pub(super) use capacitors::*;
+pub(super) use inductors::*;
 pub(super) use magnetic::*;
 pub(super) use resistors::*;
 pub(super) use transmission::*;
@@ -43,6 +47,46 @@ fn normalize_temperature_param_to_celsius(value: f64) -> f64 {
     } else {
         value
     }
+}
+
+/// Build the expression-evaluation context for a passive instance (R/C/L),
+/// honoring instance `TEMP`/`DTEMP` overrides and the model card's `TNOM`.
+///
+/// Returns `(context, instance_temperature_celsius, tnom_celsius)`.
+fn resolve_passive_eval_context(
+    netlist: &Netlist,
+    model_def: Option<&crate::netlist::ModelDef>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<(crate::netlist::ParamContext, f64, f64), SimulationError> {
+    let mut current_temp_c = crate::analysis::temperature::kelvin_to_celsius(temperature_kelvin);
+    if let Some(temp) = instance_param(instance_params, &["TEMP"]) {
+        current_temp_c = normalize_temperature_param_to_celsius(temp);
+    } else if let Some(dtemp) = instance_param(instance_params, &["DTEMP"]) {
+        current_temp_c += dtemp;
+    }
+
+    let base_tnom_c = netlist.options.tnom.unwrap_or(27.0);
+    let Some(model_def) = model_def else {
+        let mut ctx = netlist.params.clone();
+        ctx.set("TEMP", current_temp_c);
+        ctx.set("TEMPER", current_temp_c);
+        ctx.set("TNOM", base_tnom_c);
+        return Ok((ctx, current_temp_c, base_tnom_c));
+    };
+
+    let initial_ctx = build_model_eval_context(netlist, model_def, current_temp_c, base_tnom_c);
+    let model_tnom_c = resolve_model_param(model_def, &["TNOM"], &initial_ctx)?
+        .map(normalize_temperature_param_to_celsius)
+        .unwrap_or(base_tnom_c);
+
+    let ctx = if (model_tnom_c - base_tnom_c).abs() > f64::EPSILON {
+        build_model_eval_context(netlist, model_def, current_temp_c, model_tnom_c)
+    } else {
+        initial_ctx
+    };
+
+    Ok((ctx, current_temp_c, model_tnom_c))
 }
 
 fn build_model_eval_context(

@@ -129,6 +129,21 @@ impl Diode {
         self
     }
 
+    /// Apply a parallel-junction scale factor (instance `AREA` × `M`).
+    ///
+    /// Saturation and breakdown-knee currents and the zero-bias depletion
+    /// capacitance scale with the number of parallel junctions; series
+    /// resistance scales inversely. Mirrors ngspice's AREA/M handling for
+    /// the lumped diode.
+    pub fn apply_junction_scaling(&mut self, scale: Value) {
+        self.is *= scale;
+        self.ibv *= scale;
+        self.cj0 *= scale;
+        if self.rs > 0.0 {
+            self.rs /= scale;
+        }
+    }
+
     /// Set junction capacitance parameters
     pub fn with_capacitance(mut self, cj0: Value, vj: Value, m: Value, tt: Value) -> Self {
         self.cj0 = cj0;

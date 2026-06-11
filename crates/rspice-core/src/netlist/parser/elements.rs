@@ -184,6 +184,112 @@ pub(super) fn parse_resistor(
     Ok(())
 }
 
+/// Shared value/model/parameter tail for capacitors and inductors.
+///
+/// Accepts the same instance grammar SPICE dialects use for passives:
+/// an optional leading value (`1u`, `{expr}`, a parameter reference), an
+/// optional bare model name, and named `PARAM=value` assignments. `IC` and
+/// `MODEL` are extracted specially; every other assignment is preserved as
+/// an instance parameter for build-time resolution (M/SCALE/TC1/TC2/W/L...).
+struct PassiveTail {
+    value: Option<Value>,
+    model: Option<String>,
+    ic: Option<Value>,
+    instance_params: Vec<(String, Value)>,
+}
+
+fn parse_passive_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    element_label: &str,
+    value_keys: &[&str],
+) -> Result<PassiveTail, ParseError> {
+    let mut tail = PassiveTail {
+        value: None,
+        model: None,
+        ic: None,
+        instance_params: Vec::new(),
+    };
+
+    skip_commas(stream);
+
+    // Optional leading positional value or model name.
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match &stream.peek().kind {
+            TokenKind::Number(_) | TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+                tail.value = Some(expect_value(stream, line_num, params)?);
+            }
+            TokenKind::Ident(s) => {
+                let ident = s.clone();
+                if let Some(resolved) = params.get(&ident) {
+                    stream.advance();
+                    tail.value = Some(resolved);
+                } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
+                    stream.advance();
+                    tail.value = Some(v);
+                } else if !matches!(stream.peek_n(1).kind, TokenKind::Equals) {
+                    tail.model = Some(ident);
+                    stream.advance();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Remaining named parameters (and a possible bare model name).
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(raw_name) => {
+                let raw_name = raw_name.clone();
+                let name_upper = raw_name.to_ascii_uppercase();
+                stream.advance();
+
+                if stream.consume(&TokenKind::Equals) {
+                    if name_upper == "MODEL" {
+                        tail.model = Some(expect_ident(stream, line_num)?);
+                        continue;
+                    }
+
+                    let param_value =
+                        try_value(stream, params).ok_or_else(|| ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "Expected value for {} parameter '{}'",
+                                element_label, raw_name
+                            ),
+                        })?;
+
+                    if name_upper == "IC" {
+                        tail.ic = Some(param_value);
+                        continue;
+                    }
+                    if value_keys.iter().any(|key| name_upper == *key) {
+                        tail.value = Some(param_value);
+                        continue;
+                    }
+                    tail.instance_params.push((name_upper, param_value));
+                } else if tail.model.is_none() && tail.value.is_none() {
+                    tail.model = Some(raw_name);
+                }
+            }
+            TokenKind::Number(_) => {
+                tail.value = Some(expect_value(stream, line_num, params)?);
+            }
+            _ => {
+                stream.advance();
+            }
+        }
+    }
+
+    Ok(tail)
+}
+
 pub(super) fn parse_capacitor(
     stream: &mut TokenStream,
     line_num: usize,
@@ -195,14 +301,22 @@ pub(super) fn parse_capacitor(
     let node_neg = expect_node(stream, line_num)?;
 
     skip_optional_param_name(stream, "C");
-    let value = expect_value(stream, line_num, params)?;
-    let initial_voltage = try_value_with_param(stream, params, "IC");
+    let tail = parse_passive_tail(stream, line_num, params, "capacitor", &["C", "VALUE", "CAP"])?;
+
+    if tail.value.is_none() && tail.model.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Capacitor requires either a value or a model".to_string(),
+        });
+    }
 
     elements.push(Element {
         name,
         kind: ElementKind::Capacitor {
-            value,
-            initial_voltage,
+            value: tail.value.unwrap_or(Value::NAN),
+            initial_voltage: tail.ic,
+            model: tail.model,
+            instance_params: tail.instance_params,
         },
         nodes: vec![node_pos, node_neg],
     });
@@ -221,28 +335,26 @@ pub(super) fn parse_inductor(
     let node_neg = expect_node(stream, line_num)?;
 
     skip_optional_param_name(stream, "L");
-    let value = expect_value(stream, line_num, params)?;
-    let initial_current = try_value_with_param(stream, params, "IC");
+    let tail = parse_passive_tail(stream, line_num, params, "inductor", &["L", "VALUE", "IND"])?;
 
-    // Check for MODEL parameter (indicates Jiles-Atherton or other nonlinear inductor)
-    let model = try_string_with_param(stream, "MODEL");
+    if tail.value.is_none() && tail.model.is_none() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Inductor requires either a value or a model".to_string(),
+        });
+    }
 
-    let kind = if let Some(model_name) = model {
-        ElementKind::JilesAthertonInductor {
-            value,
-            model: model_name,
-            initial_current,
-        }
-    } else {
-        ElementKind::Inductor {
-            value,
-            initial_current,
-        }
-    };
-
+    // Magnetic-core (Jiles-Atherton) vs linear model-card dispatch happens at
+    // circuit-build time based on the referenced model's type; the parser
+    // records the reference only.
     elements.push(Element {
         name,
-        kind,
+        kind: ElementKind::Inductor {
+            value: tail.value.unwrap_or(Value::NAN),
+            initial_current: tail.ic,
+            model: tail.model,
+            instance_params: tail.instance_params,
+        },
         nodes: vec![node_pos, node_neg],
     });
 
@@ -295,15 +407,62 @@ pub(super) fn parse_diode(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
+    params: &ParamContext,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let anode = expect_node(stream, line_num)?;
     let cathode = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
 
+    // Instance tail: positional AREA, bare OFF keyword, and PARAM=value
+    // assignments (AREA/M/PJ/TEMP/DTEMP/IC...), mirroring ngspice's D-line
+    // grammar.
+    let mut instance_params = Vec::new();
+    let mut area_positional_seen = false;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        skip_commas(stream);
+        if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(raw_name) => {
+                let raw_name = raw_name.clone();
+                let name_upper = raw_name.to_ascii_uppercase();
+                stream.advance();
+
+                if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
+                    instance_params.push(("OFF".to_string(), 1.0));
+                    continue;
+                }
+
+                if stream.consume(&TokenKind::Equals) {
+                    let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Expected value for diode parameter '{}'", raw_name),
+                    })?;
+                    instance_params.push((name_upper, value));
+                }
+            }
+            TokenKind::Number(v) => {
+                if !area_positional_seen {
+                    instance_params.push(("AREA".to_string(), *v));
+                    area_positional_seen = true;
+                }
+                stream.advance();
+            }
+            _ => {
+                stream.advance();
+            }
+        }
+    }
+
     elements.push(Element {
         name,
-        kind: ElementKind::Diode { model },
+        kind: ElementKind::Diode {
+            model,
+            instance_params,
+        },
         nodes: vec![anode, cathode],
     });
 

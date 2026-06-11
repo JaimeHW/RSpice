@@ -36,7 +36,7 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             }
 
             if let Some(ref output_path) = ctx.output_path_for("op") {
-                write_dc_op_output(output_path, &result, ctx.format)?;
+                write_dc_op_output(output_path, &result, ctx.format, &ctx.netlist.saves)?;
                 if !ctx.quiet {
                     println!("Results exported to: {}", output_path.display());
                 }
@@ -52,10 +52,12 @@ fn write_dc_op_output(
     path: &Path,
     result: &rspice_core::solver::SimulationResult,
     format: OutputFormat,
+    saves: &rspice_core::netlist::SaveSet,
 ) -> Result<(), CliError> {
     use std::io::Write;
 
-    let signals = dc_operating_point_signals(result);
+    let signals =
+        crate::commands::run_signals::apply_save_set(dc_operating_point_signals(result), saves);
 
     if matches!(format, OutputFormat::Hdf5) {
         let mut data = Hdf5SimulationData::new();
@@ -212,7 +214,10 @@ pub(super) fn run_dc_sweep(
 
             if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
-                let signals = crate::commands::run_signals::dc_sweep_voltage_signals(&results);
+                let signals = crate::commands::run_signals::apply_save_set(
+                    crate::commands::run_signals::dc_sweep_voltage_signals(&results),
+                    &ctx.netlist.saves,
+                );
                 match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();
@@ -364,7 +369,10 @@ pub(super) fn run_transient(
             }
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {
-                let signals = transient_voltage_signals(&result);
+                let signals = crate::commands::run_signals::apply_save_set(
+                    transient_voltage_signals(&result),
+                    &ctx.netlist.saves,
+                );
                 match ctx.format {
                     OutputFormat::Hdf5 => {
                         let mut data = Hdf5SimulationData::new();

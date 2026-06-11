@@ -23,6 +23,7 @@ pub(super) struct ParseState {
     pub(super) global_nodes: HashSet<String>,
     pub(super) veriloga_includes: Vec<VerilogAInclude>,
     pub(super) measurements: Vec<MeasureStatement>,
+    pub(super) saves: SaveSet,
     pub(super) options: super::SimulationOptions,
     pub(super) subckt_stack: Vec<SubcktFrame>,
     /// Open `.if`/`.elseif`/`.else` blocks, innermost last.
@@ -42,6 +43,7 @@ impl ParseState {
             global_nodes: HashSet::new(),
             veriloga_includes: Vec::new(),
             measurements: Vec::new(),
+            saves: SaveSet::default(),
             options: super::SimulationOptions::default(),
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
@@ -76,6 +78,7 @@ impl ParseState {
             node_sets: self.node_sets,
             global_nodes: self.global_nodes,
             measurements: self.measurements,
+            saves: self.saves,
             options: self.options,
             veriloga_includes: self.veriloga_includes,
             source_text: Some(input.to_string()),
@@ -90,6 +93,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,
     pub(super) node_sets: &'a mut Vec<NodeSet>,
     pub(super) global_nodes: &'a mut HashSet<String>,
+    pub(super) saves: &'a mut SaveSet,
     pub(super) options: &'a mut super::SimulationOptions,
 }
 
@@ -101,5 +105,6 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) node_sets: &'a mut Vec<NodeSet>,
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) measurements: &'a mut Vec<MeasureStatement>,
+    pub(super) saves: &'a mut SaveSet,
     pub(super) options: &'a mut super::SimulationOptions,
 }

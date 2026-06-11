@@ -135,7 +135,7 @@ fn check_model_references(netlist: &Netlist, result: &mut ValidationResult) {
 fn get_element_model(elem: &rspice_core::netlist::Element) -> Option<String> {
     use rspice_core::netlist::ElementKind;
     match &elem.kind {
-        ElementKind::Diode { model } => Some(model.clone()),
+        ElementKind::Diode { model, .. } => Some(model.clone()),
         ElementKind::Bjt { model, .. } => Some(model.clone()),
         ElementKind::Mosfet { model, .. } => Some(model.clone()),
         ElementKind::Jfet { model, .. } => Some(model.clone()),

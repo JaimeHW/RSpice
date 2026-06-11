@@ -44,9 +44,11 @@ pub(super) fn rewrite_scoped_references(
         }
 
         let model_ref = match &mut element.kind {
-            ElementKind::Resistor { model, .. } => model.as_mut(),
+            ElementKind::Resistor { model, .. }
+            | ElementKind::Capacitor { model, .. }
+            | ElementKind::Inductor { model, .. } => model.as_mut(),
             ElementKind::JilesAthertonInductor { model, .. } => Some(model),
-            ElementKind::Diode { model }
+            ElementKind::Diode { model, .. }
             | ElementKind::Bjt { model, .. }
             | ElementKind::Mosfet { model, .. }
             | ElementKind::Jfet { model, .. }

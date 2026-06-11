@@ -1,6 +1,21 @@
 use super::*;
 
 impl CircuitData {
+    /// Read-only access to linear resistor storage (names, nodes, conductances).
+    pub fn resistor_storage(&self) -> &Resistors {
+        &self.resistors
+    }
+
+    /// Read-only access to capacitor storage (names, nodes, capacitances, ICs).
+    pub fn capacitor_storage(&self) -> &Capacitors {
+        &self.capacitors
+    }
+
+    /// Read-only access to inductor storage (names, nodes, inductances, ICs).
+    pub fn inductor_storage(&self) -> &Inductors {
+        &self.inductors
+    }
+
     /// Get node names sorted by their node index (1, 2, 3, ...)
     /// Returns a Vec where index i contains the name of node (i+1)
     /// This is useful for waveform output labels like V(N001), V(N002)

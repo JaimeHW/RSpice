@@ -400,48 +400,6 @@ pub(super) fn expect_value_default(
     try_value(stream, params).unwrap_or(default)
 }
 
-pub(super) fn try_value_with_param(
-    stream: &mut TokenStream,
-    params: &ParamContext,
-    param_name: &str,
-) -> Option<Value> {
-    skip_commas(stream);
-
-    // Check if next token is the param name followed by =
-    if let TokenKind::Ident(s) = &stream.peek().kind
-        && s.eq_ignore_ascii_case(param_name)
-    {
-        stream.advance();
-        if stream.consume(&TokenKind::Equals) {
-            return try_value(stream, params);
-        }
-    }
-
-    try_value(stream, params)
-}
-
-/// Try to consume a named string parameter (e.g., MODEL=name)
-pub(super) fn try_string_with_param(stream: &mut TokenStream, param_name: &str) -> Option<String> {
-    skip_commas(stream);
-
-    // Check if next token is the param name followed by =
-    if let TokenKind::Ident(s) = &stream.peek().kind
-        && s.eq_ignore_ascii_case(param_name)
-    {
-        stream.advance();
-        if stream.consume(&TokenKind::Equals) {
-            // Get the string value (identifier)
-            if let TokenKind::Ident(value) = &stream.peek().kind {
-                let value = value.clone();
-                stream.advance();
-                return Some(value);
-            }
-        }
-    }
-
-    None
-}
-
 pub(super) fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {
     if let TokenKind::Ident(s) = &stream.peek().kind
         && s == param_name

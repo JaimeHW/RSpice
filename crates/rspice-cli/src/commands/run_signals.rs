@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use rspice_core::{
-    Complex64, Value, analysis::AcResult, engine::TransientResult, solver::SimulationResult,
+    Complex64, Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet,
+    solver::SimulationResult,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,6 +77,35 @@ pub(crate) fn current_raw_name(name: &str, fallback_index: usize) -> String {
 
 pub(crate) fn current_display_name(name: &str, fallback_index: usize) -> String {
     format!("I({})", current_raw_name(name, fallback_index))
+}
+
+/// Restrict scalar signals to a netlist's `.save`/`.probe`/`.print` selection.
+///
+/// An empty selection (or one containing `all`) keeps every signal. Matching
+/// runs against the display name (`V(out)` / `I(v1)`), which follows raw-file
+/// conventions.
+pub(crate) fn apply_save_set(signals: Vec<ScalarSignal>, saves: &SaveSet) -> Vec<ScalarSignal> {
+    if saves.keeps_everything() {
+        return signals;
+    }
+    signals
+        .into_iter()
+        .filter(|signal| saves.selects(&signal.display_name))
+        .collect()
+}
+
+/// Restrict complex (AC) signals to a netlist's output selection.
+pub(crate) fn apply_save_set_complex(
+    signals: Vec<ComplexSignal>,
+    saves: &SaveSet,
+) -> Vec<ComplexSignal> {
+    if saves.keeps_everything() {
+        return signals;
+    }
+    signals
+        .into_iter()
+        .filter(|signal| saves.selects(&signal.display_name))
+        .collect()
 }
 
 fn voltage_signal(raw_name: String, values: Vec<Value>) -> ScalarSignal {

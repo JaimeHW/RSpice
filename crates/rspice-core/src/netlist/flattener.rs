@@ -19,7 +19,7 @@ use super::hierarchy_path::HierarchyPath;
 use super::param_scope::ParamResolver;
 use super::{
     Element, ElementKind, Netlist, ParamContext, ParametricValue, ParseError, RandomState,
-    SubcircuitDef,
+    SourceSpec, SubcircuitDef,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -328,10 +328,42 @@ impl<'a> Flattener<'a> {
         let param_map =
             build_subcircuit_param_scope(subckt, caller_scope_params, instance_params, &self.random)?;
 
+        // X-line multiplicity: `M=` on a subcircuit instance multiplies the
+        // parallel multiplicity of every device it expands to (HSPICE/ngspice
+        // semantics), composing multiplicatively through nested hierarchy.
+        // A subcircuit that declares its own formal `M` parameter keeps
+        // ordinary parameter behavior instead — the author owns the name.
+        let formal_declares_m = subckt
+            .params
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("M"));
+        let mut multiplicity = 1.0;
+        if !formal_declares_m {
+            for (name, value) in instance_params {
+                if name.eq_ignore_ascii_case("M") {
+                    let resolved =
+                        resolve_parametric_value(value, caller_scope_params, &self.random)?;
+                    if !resolved.is_finite() || resolved <= 0.0 {
+                        return Err(ParseError::Syntax {
+                            line: 0,
+                            message: format!(
+                                "Subcircuit instance '{}' has invalid multiplicity M={}",
+                                instance.name, resolved
+                            ),
+                        });
+                    }
+                    multiplicity = resolved;
+                }
+            }
+        }
+
         // Expand each element in the subcircuit
         for sub_element in &subckt.elements {
             // Apply parameter substitution to element values
-            let substituted = self.substitute_params(sub_element, &param_map)?;
+            let mut substituted = self.substitute_params(sub_element, &param_map)?;
+            if multiplicity != 1.0 {
+                apply_element_multiplicity(&mut substituted, multiplicity);
+            }
             self.flatten_element(
                 &substituted,
                 &new_prefix,
@@ -552,16 +584,24 @@ impl<'a> Flattener<'a> {
             ElementKind::Capacitor {
                 value,
                 initial_voltage,
+                model,
+                instance_params,
             } => ElementKind::Capacitor {
                 value: *value,
                 initial_voltage: *initial_voltage,
+                model: model.clone(),
+                instance_params: instance_params.clone(),
             },
             ElementKind::Inductor {
                 value,
                 initial_current,
+                model,
+                instance_params,
             } => ElementKind::Inductor {
                 value: *value,
                 initial_current: *initial_current,
+                model: model.clone(),
+                instance_params: instance_params.clone(),
             },
 
             // Nested subcircuit - propagate parameters
@@ -690,6 +730,151 @@ fn build_subcircuit_param_scope(
     }
 
     Ok(param_map)
+}
+
+/// Multiply an element's effective parallel multiplicity by `m`.
+///
+/// Composes an inherited X-line multiplicity into the element's own `M`
+/// instance parameter (devices), the child instance's `M` binding (nested
+/// subcircuits, so the next expansion level applies it recursively), or the
+/// source amplitudes (current sources). Voltage-like elements are left
+/// untouched: parallel copies of an ideal voltage source are electrically
+/// identical to a single one.
+fn apply_element_multiplicity(element: &mut Element, m: Value) {
+    match &mut element.kind {
+        ElementKind::Resistor {
+            instance_params, ..
+        }
+        | ElementKind::Capacitor {
+            instance_params, ..
+        }
+        | ElementKind::Inductor {
+            instance_params, ..
+        }
+        | ElementKind::Diode {
+            instance_params, ..
+        }
+        | ElementKind::Bjt {
+            instance_params, ..
+        }
+        | ElementKind::Mosfet {
+            instance_params, ..
+        }
+        | ElementKind::Jfet {
+            instance_params, ..
+        }
+        | ElementKind::Mesfet {
+            instance_params, ..
+        } => {
+            scale_multiplicity_param(instance_params, m);
+        }
+        ElementKind::Subcircuit { params, .. } => {
+            if let Some((_, value)) = params
+                .iter_mut()
+                .find(|(name, _)| name.eq_ignore_ascii_case("M"))
+            {
+                let composed = match &*value {
+                    ParametricValue::Resolved(v) => ParametricValue::Resolved(*v * m),
+                    ParametricValue::Expression(expr) => {
+                        ParametricValue::Expression(format!("({})*({})", expr, m))
+                    }
+                };
+                *value = composed;
+            } else {
+                params.push(("M".to_string(), ParametricValue::Resolved(m)));
+            }
+        }
+        ElementKind::CurrentSource(spec) => scale_source_amplitudes(spec, m),
+        _ => {}
+    }
+}
+
+/// Fold a multiplicity factor into an instance-parameter list, composing
+/// with any `M`/`MULT` the instance already carries.
+fn scale_multiplicity_param(instance_params: &mut Vec<(String, Value)>, m: Value) {
+    if let Some((_, value)) = instance_params
+        .iter_mut()
+        .find(|(name, _)| name.eq_ignore_ascii_case("M") || name.eq_ignore_ascii_case("MULT"))
+    {
+        *value *= m;
+    } else {
+        instance_params.push(("M".to_string(), m));
+    }
+}
+
+/// Scale every amplitude-like quantity of a source specification by `m`,
+/// recursing through combined DC/AC/transient forms. Time-like quantities
+/// (delays, frequencies, time constants) are never touched.
+fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
+    match spec {
+        SourceSpec::Dc(v) => *v *= m,
+        SourceSpec::Ac { magnitude, .. } => *magnitude *= m,
+        SourceSpec::DcAc {
+            dc_value,
+            ac_magnitude,
+            ..
+        } => {
+            *dc_value *= m;
+            *ac_magnitude *= m;
+        }
+        SourceSpec::DcTransient { dc_value, transient } => {
+            *dc_value *= m;
+            scale_source_amplitudes(transient, m);
+        }
+        SourceSpec::DcAcTransient {
+            dc_value,
+            ac_magnitude,
+            transient,
+            ..
+        } => {
+            *dc_value *= m;
+            *ac_magnitude *= m;
+            scale_source_amplitudes(transient, m);
+        }
+        SourceSpec::Pulse { v1, v2, .. } => {
+            *v1 *= m;
+            *v2 *= m;
+        }
+        SourceSpec::Sin {
+            offset, amplitude, ..
+        } => {
+            *offset *= m;
+            *amplitude *= m;
+        }
+        SourceSpec::Pwl { points } => {
+            for (_, value) in points {
+                *value *= m;
+            }
+        }
+        SourceSpec::PwlFile {
+            value_scale,
+            value_offset,
+            ..
+        } => {
+            *value_scale *= m;
+            *value_offset *= m;
+        }
+        SourceSpec::Exp { v1, v2, .. } => {
+            *v1 *= m;
+            *v2 *= m;
+        }
+        SourceSpec::Sffm {
+            offset, amplitude, ..
+        } => {
+            *offset *= m;
+            *amplitude *= m;
+        }
+        SourceSpec::Am {
+            offset,
+            modulation_offset,
+            modulation_amplitude,
+            ..
+        } => {
+            *offset *= m;
+            *modulation_offset *= m;
+            *modulation_amplitude *= m;
+        }
+    }
 }
 
 /// Convenience function to flatten a netlist

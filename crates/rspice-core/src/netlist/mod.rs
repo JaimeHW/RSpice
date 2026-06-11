@@ -84,6 +84,8 @@ pub struct Netlist {
     pub global_nodes: HashSet<String>,
     /// Measurement statements from .MEAS commands
     pub measurements: Vec<MeasureStatement>,
+    /// Output selection from .SAVE/.PROBE/.PRINT/.PLOT commands
+    pub saves: SaveSet,
     /// Simulation options from .OPTIONS commands
     pub options: SimulationOptions,
     /// Verilog-A model includes from .VERILOGA statements
@@ -258,6 +260,7 @@ impl Default for Netlist {
             node_sets: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
+            saves: SaveSet::default(),
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
             source_text: None,

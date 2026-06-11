@@ -129,16 +129,35 @@ pub enum ElementKind {
         instance_params: Vec<(String, Value)>,
     },
 
-    /// Capacitor: value in Farads
+    /// Capacitor.
+    ///
+    /// Supports both numeric-value form (`C1 n+ n- 1u`) and model-based form
+    /// (`C1 n+ n- CMOD W=10u L=20u`).
     Capacitor {
+        /// Explicit capacitance value in Farads when provided directly.
+        /// `NAN` when the value must be resolved from a model card.
         value: Value,
         initial_voltage: Option<Value>,
+        /// Optional model name for model-based capacitor instances.
+        model: Option<String>,
+        /// Optional instance parameters (e.g. `W`, `L`, `M`, `SCALE`, `TC1`).
+        instance_params: Vec<(String, Value)>,
     },
 
-    /// Inductor: value in Henries
+    /// Inductor.
+    ///
+    /// Supports both numeric-value form (`L1 n+ n- 1m`) and model-based form
+    /// (`L1 n+ n- LMOD`); magnetic-core (Jiles-Atherton) models are detected
+    /// from the referenced model card's type at circuit-build time.
     Inductor {
+        /// Explicit inductance value in Henries when provided directly.
+        /// `NAN` when the value must be resolved from a model card.
         value: Value,
         initial_current: Option<Value>,
+        /// Optional model name for model-based inductor instances.
+        model: Option<String>,
+        /// Optional instance parameters (e.g. `M`, `SCALE`, `TC1`, `TC2`).
+        instance_params: Vec<(String, Value)>,
     },
 
     /// Jiles-Atherton hysteresis inductor: magnetic core with nonlinear B-H curve
@@ -165,7 +184,11 @@ pub enum ElementKind {
     // Semiconductor Devices
     //-------------------------------------------------------------------------
     /// Diode
-    Diode { model: String },
+    Diode {
+        model: String,
+        /// Instance parameters (e.g. `AREA`, `M`, `TEMP`, `DTEMP`, `OFF`).
+        instance_params: Vec<(String, Value)>,
+    },
 
     /// BJT (NPN or PNP)
     Bjt {
@@ -337,6 +360,115 @@ pub enum ElementKind {
 pub enum SwitchState {
     On,
     Off,
+}
+
+//=============================================================================
+// Output selection (.save / .probe / .print / .plot)
+//=============================================================================
+
+/// One requested output signal from a `.save`/`.probe`/`.print`/`.plot` card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SaveSignal {
+    /// `all` — keep every computed vector.
+    All,
+    /// `v(node)` — a node voltage.
+    Voltage(String),
+    /// `v(a,b)` — a differential voltage probe.
+    VoltageDiff(String, String),
+    /// `i(elem)` — a branch/element current.
+    Current(String),
+    /// `@dev[param]` — a device-parameter probe.
+    DeviceParam { device: String, param: String },
+    /// A bare vector name (`out` is shorthand for `v(out)` in ngspice).
+    Raw(String),
+}
+
+/// Accumulated output selection for a netlist.
+///
+/// Empty means "no directive given", in which case simulators keep every
+/// vector. A non-empty set restricts stored/exported vectors to the selected
+/// signals; analysis scale vectors (time, frequency, sweep) are always kept.
+#[derive(Debug, Clone, Default)]
+pub struct SaveSet {
+    /// Selected signals in netlist order (duplicates are harmless).
+    pub signals: Vec<SaveSignal>,
+}
+
+impl SaveSet {
+    /// `true` when no `.save`-family directive was given.
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+
+    /// `true` when every vector should be kept (no directive, or `all`).
+    pub fn keeps_everything(&self) -> bool {
+        self.is_empty() || self.signals.iter().any(|s| matches!(s, SaveSignal::All))
+    }
+
+    /// Whether an output vector named `variable` is selected.
+    ///
+    /// `variable` follows raw-file conventions: `v(out)`, `V(OUT)`, `i(v1)`,
+    /// `vd#branch`, `time`, `frequency`. Matching is case-insensitive and
+    /// scale vectors are always selected.
+    pub fn selects(&self, variable: &str) -> bool {
+        if self.keeps_everything() {
+            return true;
+        }
+
+        let var = variable.trim().to_ascii_lowercase();
+        if matches!(
+            var.as_str(),
+            "time" | "frequency" | "freq" | "v-sweep" | "v(v-sweep)" | "sweep" | "temp-sweep"
+        ) {
+            return true;
+        }
+
+        let inner_v = var.strip_prefix("v(").and_then(|s| s.strip_suffix(')'));
+        let inner_i = var.strip_prefix("i(").and_then(|s| s.strip_suffix(')'));
+        let branch = var.strip_suffix("#branch");
+
+        for signal in &self.signals {
+            match signal {
+                SaveSignal::All => return true,
+                SaveSignal::Voltage(node) => {
+                    let node = node.to_ascii_lowercase();
+                    if inner_v == Some(node.as_str()) || var == node {
+                        return true;
+                    }
+                }
+                SaveSignal::VoltageDiff(a, b) => {
+                    let probe =
+                        format!("v({},{})", a.to_ascii_lowercase(), b.to_ascii_lowercase());
+                    if var.replace(' ', "") == probe {
+                        return true;
+                    }
+                }
+                SaveSignal::Current(elem) => {
+                    let elem = elem.to_ascii_lowercase();
+                    if inner_i == Some(elem.as_str()) || branch == Some(elem.as_str()) {
+                        return true;
+                    }
+                }
+                SaveSignal::DeviceParam { device, param } => {
+                    let probe = format!(
+                        "@{}[{}]",
+                        device.to_ascii_lowercase(),
+                        param.to_ascii_lowercase()
+                    );
+                    if var == probe {
+                        return true;
+                    }
+                }
+                SaveSignal::Raw(name) => {
+                    let name = name.to_ascii_lowercase();
+                    if var == name || inner_v == Some(name.as_str()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
 }
 
 //=============================================================================
