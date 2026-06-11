@@ -856,4 +856,20 @@ mod hfet1_tests {
             "ids={ids:e} expected 2.68269e-4 (gm={gm:e} gds={gds:e})"
         );
     }
+
+    #[test]
+    fn hfet1_operating_terms_match_the_raw_channel_current() {
+        // Same oracle point through the full stamping wrapper: the channel
+        // term must agree with calculate(); the engine-level 399uA on this
+        // deck has to come from somewhere downstream.
+        let mut jfet = Jfet::njf("z1", 1, 2, 3).enable_hfet_model();
+        jfet.params.vto = 0.1;
+        let (ids, _gm, _gds, igs, igd, _ggs, _ggd, vds_linear) =
+            jfet.compute_operating_terms(0.4, 0.05, 0.35);
+        assert!(
+            (ids - 2.68269e-4).abs() <= 2.68269e-4 * 1.0e-3,
+            "ids={ids:e} expected 2.68269e-4 (igs={igs:e} igd={igd:e} vds_linear={vds_linear})"
+        );
+        assert_eq!(vds_linear, 0.05);
+    }
 }
