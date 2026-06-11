@@ -139,30 +139,35 @@ impl Engine {
             );
         }
 
+        // One shared Arc per model: instances share the (megabyte-scale)
+        // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<String, rspice_veriloga::CompiledModel> = HashMap::new();
+        let mut veriloga_models: HashMap<String, std::sync::Arc<rspice_veriloga::CompiledModel>> =
+            HashMap::new();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let model = resolve_cached_or_compile_veriloga(&include.file_path)?;
+                let model = std::sync::Arc::new(resolve_cached_or_compile_veriloga(
+                    &include.file_path,
+                )?);
 
                 let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
                     .entry(model_key)
-                    .or_insert_with(|| model.clone());
+                    .or_insert_with(|| std::sync::Arc::clone(&model));
 
                 if let Some(alias) = include.model_name.as_deref() {
                     veriloga_models
                         .entry(normalize_model_key(alias))
-                        .or_insert_with(|| model.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
                     veriloga_models
                         .entry(normalize_model_key(stem))
-                        .or_insert_with(|| model.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 log::info!(
@@ -1295,7 +1300,7 @@ impl Engine {
 
                         let mut device = crate::device::veriloga::VerilogADevice::new(
                             element.name.clone(),
-                            model.clone(),
+                            std::sync::Arc::clone(model),
                             &node_ids,
                         );
 

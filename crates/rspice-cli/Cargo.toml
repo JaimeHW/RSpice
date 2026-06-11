@@ -14,7 +14,7 @@ path = "src/main.rs"
 test = false
 
 [dependencies]
-rspice-core.workspace = true
+rspice-core = { workspace = true, features = ["veriloga-native"] }
 rspice-veriloga = { path = "../rspice-veriloga" }
 clap.workspace = true
 clap_complete.workspace = true

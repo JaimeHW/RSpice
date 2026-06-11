@@ -24,6 +24,8 @@ veriloga = [
     "dep:blake3",
     "dep:dirs",
 ]
+# Cranelift JIT for Verilog-A devices (native targets only)
+veriloga-native = ["veriloga", "rspice-veriloga/native"]
 simd = ["wide"]
 
 [lib]
