@@ -7,11 +7,12 @@ impl serde::Serialize for AppState {
     {
         // Serialize minimal state needed for session recovery.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 4)?;
+        let mut state = serializer.serialize_struct("AppState", 5)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
         state.serialize_field("recent_files", &self.recent_files)?;
+        state.serialize_field("license_key", &self.license_key)?;
         state.end()
     }
 }
@@ -33,6 +34,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             shell: crate::shell::ShellStateSer,
             #[serde(default)]
             recent_files: Vec<super::RecentFile>,
+            #[serde(default)]
+            license_key: Option<String>,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -44,12 +47,19 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .active_schematic()
             .cloned()
             .unwrap_or_default();
+        // Re-verify the stored key; the grant itself is never trusted from disk.
+        let license = de
+            .license_key
+            .as_deref()
+            .and_then(|key| crate::services::license::parse_and_verify(key).ok());
         let mut state = Self {
             schematic,
             workspace: project_workspace,
             library_manager,
             shell: de.shell.into(),
             recent_files: de.recent_files,
+            license_key: de.license_key,
+            license,
             ..Default::default()
         };
         state.workspace.save_active_schematic(&state.schematic);

@@ -33,7 +33,7 @@ mod app_shell_state;
 pub use app_shell_state::{ConfirmationAction, ConfirmationDialogState, ConfirmationResponse};
 
 mod app_dialog_state;
-pub use app_dialog_state::{DialogState, LibraryDeleteTarget};
+pub use app_dialog_state::{DialogState, LibraryDeleteTarget, LicenseDialogState, LicensePhase};
 
 mod app_serialization;
 
@@ -74,6 +74,8 @@ mod app_help_dialogs;
 mod app_confirmation_dialog;
 
 mod app_preferences_dialog;
+
+mod app_license_dialog;
 
 mod app_workspace_actions;
 
@@ -160,6 +162,10 @@ pub struct AppState {
     /// Recently opened/saved schematic and project files, most recent first
     /// (persisted across sessions; drives File ▸ Open recent).
     pub(crate) recent_files: Vec<RecentFile>,
+    /// The activated license key as pasted (persisted; re-verified on load).
+    pub(crate) license_key: Option<String>,
+    /// The verified grant behind `license_key` (derived, never persisted).
+    pub(crate) license: Option<crate::services::license::LicenseInfo>,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: AnalysisWorkspaceState,
     /// IDE shell state (workspace view, theme, console, toasts).
@@ -292,6 +298,15 @@ impl RSpiceApp {
         restore_global_veriloga_library(&mut state.library_manager);
         state.restore_active_schematic_from_workspace();
 
+        // A license file on disk wins over (or backfills) the session copy.
+        #[cfg(not(target_arch = "wasm32"))]
+        if state.license.is_none()
+            && let Some((key, info)) = crate::services::license::load_stored()
+        {
+            state.license_key = Some(key);
+            state.license = Some(info);
+        }
+
         // Load symbol library
         let symbol_library = match crate::schematic::symbols::SymbolLibrary::load_embedded() {
             Ok(lib) => {
@@ -375,6 +390,7 @@ impl RSpiceApp {
         self.process_pdk_settings_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
+        self.render_license_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);

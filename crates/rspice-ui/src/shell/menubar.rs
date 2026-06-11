@@ -48,7 +48,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 top_menu(ui, "Simulate", |ui| simulate_menu(ui, &mut app.state));
                 top_menu(ui, "Tools", |ui| tools_menu(ui, &mut app.state));
                 top_menu(ui, "Window", |ui| window_menu(ui, &mut app.state));
-                top_menu(ui, "Help", |ui| help_menu(ui, &mut app.state));
+                top_menu(ui, "Help", |ui| help_menu(ui, app));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
@@ -58,6 +58,14 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                             .color(c.text_faint),
                     );
+                    if let Some(info) = &app.state.license {
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(&info.tier)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                                .color(c.accent),
+                        );
+                    }
                 });
             });
         });
@@ -610,19 +618,27 @@ fn window_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     }
 }
 
-fn help_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
+fn help_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     submenu(ui, "Documentation", |ui| {
         for (title, path) in crate::common::menu_bar::DOC_REFERENCES {
             if item(ui, title, None) {
-                crate::common::menu_bar::open_documentation_reference(state, title, path);
+                crate::common::menu_bar::open_documentation_reference(&mut app.state, title, path);
             }
         }
     });
     if item(ui, "Keyboard shortcuts", Some("F1")) {
-        state.dialogs.shortcuts_help = true;
+        app.state.dialogs.shortcuts_help = true;
+    }
+    separator(ui);
+    let license_label = match &app.state.license {
+        Some(info) => format!("License — {} until {}", info.tier, info.updates_until),
+        None => "Enter license key…".to_owned(),
+    };
+    if item(ui, &license_label, None) {
+        app.open_license_dialog();
     }
     separator(ui);
     if item(ui, "About RSpice", None) {
-        state.dialogs.about = true;
+        app.state.dialogs.about = true;
     }
 }

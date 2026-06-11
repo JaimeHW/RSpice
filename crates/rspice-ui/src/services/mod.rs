@@ -4,6 +4,7 @@
 //! Contains specialized processing and analysis utilities.
 
 pub mod drc;
+pub mod license;
 pub mod safety;
 pub mod simulation_runner;
 pub mod yield_manager;

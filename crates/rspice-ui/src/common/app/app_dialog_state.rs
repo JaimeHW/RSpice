@@ -26,6 +26,29 @@ pub enum LibraryDeleteTarget {
     },
 }
 
+/// Where the license-activation flow stands (`design/volta-license-dialog.html`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum LicensePhase {
+    /// Waiting for a key.
+    #[default]
+    Entry,
+    /// Last verification failed; the message renders under the field.
+    Error(String),
+    /// Key verified — summary pane with the grant, primary = Activate.
+    Verified(crate::services::license::LicenseInfo),
+}
+
+/// License activation dialog state.
+#[derive(Debug, Clone, Default)]
+pub struct LicenseDialogState {
+    /// Whether the dialog is showing.
+    pub open: bool,
+    /// The pasted key text.
+    pub text: String,
+    /// Current phase of the flow.
+    pub phase: LicensePhase,
+}
+
 /// Dialog visibility state
 
 #[derive(Debug, Clone, Default)]
@@ -81,6 +104,9 @@ pub struct DialogState {
 
     /// Preferences dialog open
     pub preferences_open: bool,
+
+    /// License activation dialog state
+    pub license_dialog: LicenseDialogState,
 
     /// Verilog-A model loading dialog state
     pub veriloga_dialog: crate::panels::VerilogALoadDialogState,

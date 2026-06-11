@@ -48,6 +48,8 @@ pub(super) fn default_app_state() -> AppState {
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
         recent_files: Vec::new(),
+        license_key: None,
+        license: None,
         analysis,
         shell: crate::shell::ShellState::new(),
     }
