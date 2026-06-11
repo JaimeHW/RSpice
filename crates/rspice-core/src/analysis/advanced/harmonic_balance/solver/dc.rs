@@ -93,8 +93,9 @@ impl HbSolver {
 
                 // Verify final residual at the best achievable GMIN
                 self.compute_dc_residual(state, last_good_gmin.max(target_gmin));
-                let rel_norm = state.residual_norm / (self.dc_solution_norm(state) + dc_abstol);
-                if state.residual_norm < dc_abstol || rel_norm < dc_reltol {
+                if state.residual_norm < dc_abstol
+                    || state.dc_rows_converged(dc_reltol, dc_abstol)
+                {
                     return Ok(self.extract_dc_solution(state));
                 }
             }
@@ -230,28 +231,12 @@ impl HbSolver {
             // Compute DC residual
             self.compute_dc_residual(state, gmin);
 
-            // Check convergence using standard criteria:
-            // - Absolute: residual < abstol (current tolerance)
-            // - Relative: residual < reltol * max_current_in_circuit
-            // The relative tolerance should be against CURRENT, not voltage
-            let max_source_current: f64 = self
-                .source_spectra
-                .iter()
-                .filter_map(|s| s.first())
-                .map(|c| c.re.abs())
-                .fold(0.0, |a: f64, b| a.max(b));
-
-            // Scale for relative convergence: max of source currents or minimum threshold
-            let current_scale = max_source_current.max(abstol);
-            let rel_current_norm = state.residual_norm / current_scale;
-
-            // Converge if:
-            // 1. Absolute residual is tiny (< 1e-9 A), OR
-            // 2. Both: relative residual is small (<1%) AND absolute residual is reasonable (<1mA)
-            // This prevents declaring convergence with large absolute current imbalance
-            let converged = state.residual_norm < abstol
-                || (rel_current_norm < tol && state.residual_norm < 1e-3);
-            if converged {
+            // Check convergence per KCL row: |res| <= abstol + reltol*scale
+            // with the scale built from that row's own current contributions.
+            // Any circuit-wide reference (a norm, the max source current)
+            // lets a microamp imbalance at a high-impedance node hide under
+            // the amp scale of stiff Norton source rows.
+            if state.residual_norm < abstol || state.dc_rows_converged(tol, abstol) {
                 return true;
             }
 
@@ -288,7 +273,8 @@ impl HbSolver {
     fn compute_dc_residual(&mut self, state: &mut HbSolverState, gmin: Value) {
         let n = self.num_nodes;
 
-        // Initialize residual with DC sources
+        // Initialize residual with DC sources; the per-row scale accumulates
+        // |contribution| alongside every term for the KCL convergence test.
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
                 let source = self
@@ -298,6 +284,9 @@ impl HbSolver {
                     .map(|c| c.re)
                     .unwrap_or(0.0);
                 state.residual[node][0] = Complex64::new(source, 0.0);
+                if !state.residual_scale[node].is_empty() {
+                    state.residual_scale[node][0] = source.abs();
+                }
             }
         }
 
@@ -318,6 +307,7 @@ impl HbSolver {
             if row < n && col < n && row < state.residual.len() {
                 let contribution = g * v_dc[col];
                 state.residual[row][0] -= Complex64::new(contribution, 0.0);
+                state.residual_scale[row][0] += contribution.abs();
             }
         }
 
@@ -326,6 +316,7 @@ impl HbSolver {
             if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
                 state.residual[row][0] -=
                     Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
+                state.residual_scale[row][0] += DC_SHORT_CONDUCTANCE * v_dc[col].abs();
             }
         }
 
@@ -333,6 +324,7 @@ impl HbSolver {
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
                 state.residual[node][0] -= Complex64::new(gmin * v_dc[node], 0.0);
+                state.residual_scale[node][0] += gmin * v_dc[node].abs();
             }
         }
 
@@ -344,6 +336,7 @@ impl HbSolver {
             for (node, current) in currents {
                 if node < state.residual.len() && !state.residual[node].is_empty() {
                     state.residual[node][0] += Complex64::new(current, 0.0);
+                    state.residual_scale[node][0] += current.abs();
                 }
             }
         }
@@ -362,6 +355,7 @@ impl HbSolver {
                     for &(row, sign) in rows {
                         if row < n && row < state.residual.len() {
                             state.residual[row][0] += Complex64::new(sign * *value, 0.0);
+                            state.residual_scale[row][0] += value.abs();
                         }
                     }
                 }
@@ -624,21 +618,6 @@ impl HbSolver {
                     .unwrap_or(0.0)
             })
             .collect()
-    }
-
-    /// Compute DC solution norm
-    fn dc_solution_norm(&self, state: &HbSolverState) -> Value {
-        let sum_sq: Value = (0..self.num_nodes)
-            .map(|node| {
-                state
-                    .x
-                    .get(node)
-                    .and_then(|x| x.first())
-                    .map(|c| c.re * c.re)
-                    .unwrap_or(0.0)
-            })
-            .sum();
-        sum_sq.sqrt()
     }
 
     /// Initialize node voltages for diode circuits

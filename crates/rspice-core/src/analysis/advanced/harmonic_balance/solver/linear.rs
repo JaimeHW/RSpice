@@ -238,6 +238,13 @@ impl HbSolver {
                 *c = Complex64::new(0.0, 0.0);
             }
         }
+        // The per-row current scale accumulates |contribution| alongside
+        // every residual term (the SPICE KCL convergence reference).
+        for node_scale in &mut state.residual_scale {
+            for s in node_scale.iter_mut() {
+                *s = 0.0;
+            }
+        }
 
         // Add source contributions first
         for (node, source) in self.source_spectra.iter().enumerate() {
@@ -245,6 +252,7 @@ impl HbSolver {
                 for (k, &s) in source.iter().enumerate() {
                     if k < state.residual[node].len() {
                         state.residual[node][k] += s; // Source current INTO node
+                        state.residual_scale[node][k] += s.norm();
                     }
                 }
             }
@@ -256,6 +264,7 @@ impl HbSolver {
                 for k in 0..=self.num_harmonics {
                     if k < state.x[j].len() && k < state.residual[i].len() {
                         state.residual[i][k] -= g * state.x[j][k];
+                        state.residual_scale[i][k] += g.abs() * state.x[j][k].norm();
                     }
                 }
             }
@@ -269,6 +278,7 @@ impl HbSolver {
                         let omega_k = (k as f64) * omega0;
                         let j_omega = Complex64::new(0.0, omega_k);
                         state.residual[i][k] -= j_omega * c * state.x[j][k];
+                        state.residual_scale[i][k] += omega_k * c.abs() * state.x[j][k].norm();
                     }
                 }
             }
@@ -286,10 +296,14 @@ impl HbSolver {
                             // DC: inductor is short circuit
                             // Add very large conductance to force V_i = V_j
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
+                            state.residual_scale[i][k] +=
+                                DC_SHORT_CONDUCTANCE * state.x[j][k].norm();
                         } else {
                             // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                             state.residual[i][k] -= y_l * state.x[j][k];
+                            state.residual_scale[i][k] +=
+                                state.x[j][k].norm() / (omega_k * l.abs());
                         }
                     }
                 }

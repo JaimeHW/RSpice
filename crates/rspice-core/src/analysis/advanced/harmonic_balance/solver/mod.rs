@@ -74,6 +74,14 @@ pub struct HbSolverState {
     /// Residual vector [node][harmonic]
     pub residual: Vec<Vec<Complex64>>,
 
+    /// Per-row current scale [node][harmonic]: the sum of the magnitudes of
+    /// every individual current contribution into the row, accumulated
+    /// alongside the residual. Convergence is judged per row against
+    /// abstol + reltol * scale (the SPICE KCL criterion), which a global
+    /// norm cannot do: a microamp imbalance at a megohm node hides under
+    /// the norm of a circuit whose stiff rows carry amps.
+    pub residual_scale: Vec<Vec<Value>>,
+
     /// Current residual norm
     pub residual_norm: Value,
 
@@ -95,6 +103,7 @@ impl HbSolverState {
         Self {
             x: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             residual: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
+            residual_scale: vec![vec![0.0; num_harmonics + 1]; num_nodes],
             residual_norm: f64::INFINITY,
             iteration: 0,
             total_iterations: 0,
@@ -111,6 +120,35 @@ impl HbSolverState {
             .map(|c| c.norm_sqr())
             .sum();
         self.residual_norm = sum.sqrt();
+    }
+
+    /// SPICE-style per-row KCL convergence: every residual entry must
+    /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
+    /// row), using the scale accumulated during residual assembly.
+    pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        self.residual
+            .iter()
+            .zip(self.residual_scale.iter())
+            .all(|(res_row, scale_row)| {
+                res_row
+                    .iter()
+                    .zip(scale_row.iter())
+                    .all(|(r, s)| r.norm() <= abstol + reltol * s)
+            })
+    }
+
+    /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
+    /// the DC operating-point pre-solve which only assembles harmonic 0.
+    pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        self.residual
+            .iter()
+            .zip(self.residual_scale.iter())
+            .all(|(res_row, scale_row)| {
+                match (res_row.first(), scale_row.first()) {
+                    (Some(r), Some(s)) => r.norm() <= abstol + reltol * s,
+                    _ => true,
+                }
+            })
     }
 
     /// Compute solution norm for relative tolerance
@@ -390,6 +428,12 @@ pub struct NonlinearDeviceParams {
     pub cap_a: DepletionCap,
     /// Secondary junction depletion capacitance (BJT B-C, JFET G-D)
     pub cap_b: DepletionCap,
+    /// Secondary-junction saturation current (MOS drain-bulk diode; the
+    /// source-bulk diode rides on `is`)
+    pub is2: Value,
+    /// Total intrinsic oxide capacitance Cox' * W * Leff (MOS channel
+    /// charge model; zero disables it)
+    pub cox_wl: Value,
     /// Forward transit time: diode TT / BJT TF (diffusion charge tau_f * i_f)
     pub tt_f: Value,
     /// Reverse transit time: BJT TR (diffusion charge tau_r * i_r)
@@ -419,6 +463,8 @@ impl Default for NonlinearDeviceParams {
             control_gain: 1.0,
             cap_a: DepletionCap::none(),
             cap_b: DepletionCap::none(),
+            is2: 1e-14,
+            cox_wl: 0.0,
             tt_f: 0.0,
             tt_r: 0.0,
         }

@@ -97,8 +97,7 @@ impl HbSolver {
                 }
                 // Recompute residual with target GMIN to check tolerance
                 self.compute_full_residual_with_gmin(state, gmin);
-                let rel_norm = state.residual_norm / (state.solution_norm() + abstol);
-                if state.residual_norm < abstol || rel_norm < tol {
+                if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
                     state.converged = true;
                     return Ok(());
                 }
@@ -234,11 +233,10 @@ impl HbSolver {
             // 1. Compute full residual: linear + nonlinear + GMIN contributions
             self.compute_full_residual_with_gmin(state, gmin);
 
-            // 2. Check convergence
-            let sol_norm = state.solution_norm();
-            let rel_norm = state.residual_norm / (sol_norm + abstol);
-
-            if state.residual_norm < abstol || rel_norm < tol {
+            // 2. Check convergence: per-row KCL test. A global norm hides a
+            // microamp imbalance at a high-impedance node behind the amp
+            // scale of stiff source rows, accepting grossly wrong bias.
+            if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
                 return true;
             }
 
@@ -285,6 +283,7 @@ impl HbSolver {
             for k in 0..=self.num_harmonics {
                 if node < state.residual.len() && k < state.residual[node].len() {
                     state.residual[node][k] -= gmin * state.x[node][k];
+                    state.residual_scale[node][k] += gmin * state.x[node][k].norm();
                 }
             }
         }
@@ -462,6 +461,7 @@ impl HbSolver {
             for (k, &i_k) in i_spectrum.iter().enumerate() {
                 if k <= self.num_harmonics && node < state.residual.len() {
                     state.residual[node][k] += i_k;
+                    state.residual_scale[node][k] += i_k.norm();
                 }
             }
         }
@@ -493,6 +493,7 @@ impl HbSolver {
                     if k <= self.num_harmonics && node < state.residual.len() {
                         let omega_k = (k as f64) * omega0;
                         state.residual[node][k] += Complex64::new(0.0, omega_k) * q_k;
+                        state.residual_scale[node][k] += omega_k * q_k.norm();
                     }
                 }
             }
@@ -1003,6 +1004,7 @@ impl HbSolver {
             for (k, &i) in i_spec.iter().enumerate() {
                 if node < state.residual.len() && k < state.residual[node].len() {
                     state.residual[node][k] += i;
+                    state.residual_scale[node][k] += i.norm();
                 }
             }
         }
@@ -1010,9 +1012,8 @@ impl HbSolver {
         state.compute_residual_norm();
         state.iteration += 1;
 
-        // Check convergence
-        let rel_norm = state.residual_norm / (state.solution_norm() + self.config.abstol);
-        state.converged = rel_norm < self.config.tolerance;
+        // Check convergence per KCL row.
+        state.converged = state.rows_converged(self.config.tolerance, self.config.abstol);
 
         Ok(())
     }
