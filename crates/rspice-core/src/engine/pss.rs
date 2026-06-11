@@ -682,7 +682,9 @@ impl Engine {
                     if br > 0 {
                         let br_idx = circuit.num_nodes() + br - 1;
                         matrix.add(br_idx, br_idx, -req);
-                        rhs[br_idx] = veq;
+                        // Branch row sign convention: v - r_eq*i = -v_eq (see
+                        // Inductors::stamp_transient_companion).
+                        rhs[br_idx] = -veq;
                     }
                 }
 

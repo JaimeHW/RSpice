@@ -163,8 +163,12 @@ impl Inductors {
                 self.v_prev[i],
             );
 
-            // MNA stamp for inductor companion model (V-source branch)
-            // L: v = L*di/dt â†’ v_n+1 - v_eq = r_eq * i_n+1
+            // MNA stamp for inductor companion model (V-source branch).
+            // Branch row: v(np) - v(nn) - r_eq*i_{n+1} = -v_eq, the dual of the
+            // capacitor companion (see CompanionCoefficients::inductor_veq for
+            // the per-method expansion). The negation here is load-bearing:
+            // stamping +v_eq flips the history feedback sign and the companion
+            // recursion diverges on any L in transient.
             if np > 0 {
                 matrix.add(br - 1, np - 1, 1.0);
                 matrix.add(np - 1, br - 1, 1.0);
@@ -174,7 +178,7 @@ impl Inductors {
                 matrix.add(nn - 1, br - 1, -1.0);
             }
             matrix.add(br - 1, br - 1, -r_eq);
-            rhs[br - 1] = v_eq;
+            rhs[br - 1] = -v_eq;
         }
     }
 
@@ -218,6 +222,8 @@ impl Inductors {
             let br = num_nodes + br_ordinal;
 
             let req = 2.0 * self.inductances[i] / dt;
+            // Trapezoidal branch row: v - req*i_{n+1} = -(req*i_n + v_n);
+            // same sign convention as stamp_transient_companion above.
             let veq = req * self.i_prev[i] + self.v_prev[i];
 
             if np > 0 {
@@ -229,7 +235,7 @@ impl Inductors {
                 matrix.push(nn - 1, br - 1, -1.0);
             }
             matrix.push(br - 1, br - 1, -req);
-            rhs[br - 1] = veq;
+            rhs[br - 1] = -veq;
         }
     }
 

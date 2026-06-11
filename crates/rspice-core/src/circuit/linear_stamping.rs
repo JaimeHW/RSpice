@@ -494,12 +494,14 @@ impl CircuitData {
     ///
     /// This intentionally excludes transmission-line DC fallback conductances:
     /// transient delay behavior is handled by dedicated tline companion stamps.
+    /// It also excludes inductors, coupled pairs, and multi-winding
+    /// transformers: their transient behavior is owned entirely by the
+    /// companion stamps. Stamping their DC shorts here as well doubled the
+    /// branch incidence (`2*v - r_eq*i = -v_eq`), which silently corrupted
+    /// every transient solve containing an inductor.
     pub fn stamp_transient_linear_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value]) {
         self.resistors.stamp_all_direct(matrix);
         let num_nodes = self.num_nodes;
-        self.inductors.stamp_dc_short_direct(matrix, rhs, num_nodes);
-        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
-        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.voltage_sources
             .stamp_all_direct(matrix, rhs, |br_ordinal| num_nodes + br_ordinal);
         self.current_sources.stamp_all(rhs);
@@ -518,13 +520,19 @@ impl CircuitData {
     /// Time-varying independent sources are evaluated at the requested
     /// transient time, while transmission lines use their DC fallback
     /// conductance so their far ends start from the correct operating point
-    /// before delayed-wave companions take over for t > 0.
+    /// before delayed-wave companions take over for t > 0. Magnetics are DC
+    /// shorts here (operating-point semantics); for t > 0 their companion
+    /// stamps take over and these shorts must NOT be applied.
     pub fn stamp_transient_operating_point_direct(
         &self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
     ) {
         self.stamp_transient_linear_direct(matrix, rhs);
+        self.inductors
+            .stamp_dc_short_direct(matrix, rhs, self.num_nodes);
+        self.stamp_coupled_inductors_dc_direct(matrix, rhs);
+        self.stamp_multi_winding_transformers_dc_direct(matrix, rhs);
         self.stamp_tlines_dc_direct(matrix);
         self.stamp_coupled_tlines_dc_direct(matrix);
     }

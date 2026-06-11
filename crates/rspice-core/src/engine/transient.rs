@@ -665,7 +665,7 @@ impl Engine {
         const ABORT_CHECK_INTERVAL: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
         let max_total_iterations = estimated_steps.saturating_mul(40).max(10_000_000);
-        let mut last_progress_log = std::time::Instant::now();
+        let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
 
@@ -682,7 +682,7 @@ impl Engine {
                     trap_order,
                     total_iterations
                 );
-                last_progress_log = std::time::Instant::now();
+                last_progress_log = crate::time_compat::Instant::now();
             }
 
             // Abort check - check every ABORT_CHECK_INTERVAL iterations for minimal overhead
@@ -894,39 +894,19 @@ impl Engine {
                 startup_recovery,
             );
             let mut converged = false;
-            // Reusing the accepted state is only valid when a full restamp
-            // proves the linear companion equations are still satisfied.
-            // Nonlinear compact devices carry limiter state and charge history
-            // that must be re-solved at each accepted transient point.
-            if !circuit.has_nonlinear_devices()
-                && expected_source_delta <= SOURCE_ACTIVE_DELTA
-                && !circuit.has_xspice_devices()
-                && self.transient_nonlinear_residual_converged(
-                    &mut circuit,
-                    &mut matrix,
-                    &mut rhs,
-                    &solution,
-                    t + dt,
-                    dt,
-                    &residual::TransientSystemContext {
-                        coeff: &coeff,
-                        method: current_method,
-                        trap_order: step_trap_order,
-                        bjt_history: &bjt_history,
-                        jfet_history: &jfet_history,
-                        mosfet_history: &mosfet_history,
-                        b3soi_history: &b3soi_history,
-                        suppress_gate_charge,
-                        tline_dc_refs: &tline_dc_refs,
-                        coupled_tline_refs: &coupled_tline_refs,
-                    },
-                    &mut vbic_snapshot_cache,
-                )
-            {
-                new_solution.clone_from(&solution);
-                nonlinear_state_matches_new_solution = circuit.has_nonlinear_devices();
-                converged = true;
-            }
+            // NOTE: an earlier fast path reused the previous accepted solution
+            // without solving whenever its residual on the restamped system
+            // passed the Newton tolerance (linear decks, quiet sources). That
+            // check is scaled by row magnitudes dominated by the reactive
+            // companion sources (r_eq*i_n ~ 2L/dt * i, g_eq*v_n ~ 2C/dt * v),
+            // which dwarf the signal scale, so any exponential tail whose
+            // per-step change fell below reltol * |companion source| was
+            // frozen mid-decay (e.g. an RL step stopped decaying at ~reltol *
+            // 2L/dt * i volts and held that value forever). Solution reuse is
+            // only sound when the system is bit-identical, which dynamic
+            // companion histories never are; linear decks already converge in
+            // exactly one direct solve below, so the bypass bought one linear
+            // solve per step at the cost of wrong waveforms. Removed.
             for _iter in 0..tran_max_iterations {
                 if converged {
                     break;
@@ -942,7 +922,7 @@ impl Engine {
                 }
                 let iteration_delta_limit =
                     Self::adaptive_transient_newton_delta_limit(newton_step_delta_limit, _iter);
-                let newton_stamp_start = std::time::Instant::now();
+                let newton_stamp_start = crate::time_compat::Instant::now();
                 self.stamp_transient_system(
                     &mut circuit,
                     &mut matrix,
@@ -1065,7 +1045,7 @@ impl Engine {
                         );
                     }
                 }
-                let newton_solve_start = std::time::Instant::now();
+                let newton_solve_start = crate::time_compat::Instant::now();
                 let solve_result = if prefer_dense_solver {
                     matrix.solve_dense(&rhs)
                 } else {

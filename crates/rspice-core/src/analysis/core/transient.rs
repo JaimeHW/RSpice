@@ -1032,8 +1032,27 @@ impl CompanionCoefficients {
         self.coeff_g * inductance / dt
     }
 
-    /// Calculate equivalent voltage source for an inductor
-    /// i_n is current current, i_n_minus_1 is previous current (for Gear2)
+    /// Calculate the equivalent voltage-source magnitude for an inductor.
+    ///
+    /// Exact dual of [`Self::capacitor_ieq`] (v <-> i, C <-> L): the i_n
+    /// history term uses `coeff_v_n` (NOT `coeff_g` — they differ for Gear2),
+    /// the i_{n-1} term applies only when the method keeps two history points,
+    /// and the conjugate-variable history v_n applies only for Trapezoidal
+    /// (`needs_current_history`), never for BE/Gear2.
+    ///
+    /// The branch row is stamped as `v(np) - v(nn) - R_eq*i_{n+1} = -V_eq`,
+    /// i.e. the stamp site negates this value, yielding:
+    ///   BE:   v_{n+1} = (L/dt)*(i_{n+1} - i_n)
+    ///   Trap: v_{n+1} = (2L/dt)*(i_{n+1} - i_n) - v_n
+    ///   BDF2: v_{n+1} = (L/dt)*(1.5*i_{n+1} - 2*i_n + 0.5*i_{n-1})
+    ///
+    /// The previous formulation (`coeff_g*L*i_n/dt + v_n`, stamped without
+    /// negation) made the companion recursion non-contractive: on a plain RL
+    /// deck the branch state alternated sign each step, the TrapGear
+    /// controller read that as ringing, and the error compounded ~2x per
+    /// accepted step until node voltages crossed the +-1 kV sanity clamp and
+    /// the stepper death-spiraled at femtosecond dt. See the
+    /// `inductor_transient` integration tests for the analytic pins.
     #[inline]
     pub fn inductor_veq(
         &self,
@@ -1043,13 +1062,14 @@ impl CompanionCoefficients {
         i_n_minus_1: Value,
         v_n: Value,
     ) -> Value {
-        let base = self.coeff_g * inductance * i_n / dt + v_n;
+        let mut veq = self.coeff_v_n * inductance * i_n / dt;
         if self.needs_two_history {
-            // For BDF2 inductor: V_eq = R_eqÂ·i_n + (4/3)Â·LÂ·i_n/dt - (1/3)Â·LÂ·i_{n-1}/dt
-            base + self.coeff_v_n_minus_1 * inductance * i_n_minus_1 / dt
-        } else {
-            base
+            veq += self.coeff_v_n_minus_1 * inductance * i_n_minus_1 / dt;
         }
+        if self.needs_current_history {
+            veq += v_n;
+        }
+        veq
     }
 }
 

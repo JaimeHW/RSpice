@@ -35,6 +35,7 @@ pub mod library;
 pub mod netlist;
 pub mod solver;
 pub mod testing;
+pub mod time_compat;
 pub mod xspice;
 
 /// Abort signal for cancelling long-running simulations

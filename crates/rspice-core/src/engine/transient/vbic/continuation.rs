@@ -265,7 +265,7 @@ impl Engine {
         q_prev_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
         cq_prev: &[Value; BJT_DYNAMIC_CHARGE_COUNT],
     ) -> Option<BjtChargeSnapshot> {
-        let continuation_started_at = std::time::Instant::now();
+        let continuation_started_at = crate::time_compat::Instant::now();
         // Stop expanding continuation micro-steps once the shared deterministic
         // evaluation budget for this continuation is spent: the remaining nested
         // best-effort solves would all bail immediately anyway, so further
@@ -326,7 +326,7 @@ impl Engine {
                 previous_internal,
                 next_external,
             );
-            let attempt_started_at = std::time::Instant::now();
+            let attempt_started_at = crate::time_compat::Instant::now();
             let next_snapshot_result = Self::solve_vbic_dynamic_snapshot_for_continuation_step(
                 bjt,
                 current_external,
