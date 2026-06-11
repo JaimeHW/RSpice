@@ -53,6 +53,7 @@ impl SimulationController {
                 output_noise,
                 input_noise,
                 contributors,
+                ..
             } => {
                 let shared_freqs: Arc<[f64]> = Arc::from(frequencies.clone());
                 let mut results = Vec::new();
@@ -218,13 +219,26 @@ impl SimulationController {
                     power_dissipation: Vec::new(),
                 };
 
-                AnalysisResult::new(1, analysis_type, label.to_string()).with_dc_op(state_dc_op)
+                let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_dc_op(state_dc_op);
+                if let Some(report) = &dc_result.device_report {
+                    result = result.with_device_op(report.clone());
+                }
+                result
+            }
+
+            SimulationResult::Noise { summary, .. } => {
+                let mut result = AnalysisResult::new(1, analysis_type, label.to_string())
+                    .with_waveforms(self.waveforms_for_result(sim_result));
+                if let Some(summary) = summary {
+                    result = result.with_noise_summary(summary.clone());
+                }
+                result
             }
 
             SimulationResult::Transient { .. }
             | SimulationResult::Ac { .. }
-            | SimulationResult::DcSweep { .. }
-            | SimulationResult::Noise { .. } => {
+            | SimulationResult::DcSweep { .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.waveforms_for_result(sim_result))
             }

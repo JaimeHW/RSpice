@@ -22,6 +22,32 @@ pub struct DcOpResult {
     pub power_dissipation: Vec<OperatingPointValue>,
 }
 
+/// One row of the ranked noise-contributor table (band-integrated).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoiseContributorRow {
+    /// Device instance name.
+    pub device: String,
+    /// Noise mechanism label ("thermal", "flicker", "shot", "burst").
+    pub mechanism: &'static str,
+    /// Output-referred noise power integrated over the band (V²).
+    pub power: f64,
+    /// Share of the total integrated output noise (percent).
+    pub share_pct: f64,
+}
+
+/// Ranked noise summary for a noise analysis: per-device/mechanism
+/// contributions plus the band total — the table analog designers read
+/// first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NoiseSummary {
+    /// Contributors, ranked by integrated power, descending.
+    pub rows: Vec<NoiseContributorRow>,
+    /// Total integrated output noise over the band (V rms).
+    pub total_rms: f64,
+    /// Analysis band, for the panel header (Hz).
+    pub band: (f64, f64),
+}
+
 /// Single analysis result with metadata and waveforms.
 ///
 /// This represents one analysis within a simulation run, containing
@@ -40,6 +66,11 @@ pub struct AnalysisResult {
     pub waveforms: Vec<WaveformData>,
     /// DC operating point data (for DC Op analysis)
     pub dc_op: Option<DcOpResult>,
+    /// Per-device operating point report (bias + small-signal parameters,
+    /// the Spectre-style OP info), for DC Op analyses.
+    pub device_op: Option<rspice_core::circuit::DeviceOpReport>,
+    /// Ranked, band-integrated noise contributors, for noise analyses.
+    pub noise_summary: Option<NoiseSummary>,
     /// Whether this analysis completed successfully
     pub success: bool,
     /// Error message if analysis failed
@@ -56,6 +87,8 @@ impl AnalysisResult {
             timestamp: Self::current_timestamp(),
             waveforms: Vec::new(),
             dc_op: None,
+            device_op: None,
+            noise_summary: None,
             success: true,
             error_message: None,
         }
@@ -75,6 +108,8 @@ impl AnalysisResult {
             timestamp: Self::current_timestamp(),
             waveforms: Vec::new(),
             dc_op: None,
+            device_op: None,
+            noise_summary: None,
             success: false,
             error_message: Some(error.into()),
         }
@@ -89,6 +124,22 @@ impl AnalysisResult {
     /// Add DC operating point data
     pub fn with_dc_op(mut self, dc_op: DcOpResult) -> Self {
         self.dc_op = Some(dc_op);
+        self
+    }
+
+    /// Attach the per-device operating-point report.
+    pub fn with_device_op(mut self, report: rspice_core::circuit::DeviceOpReport) -> Self {
+        if !report.is_empty() {
+            self.device_op = Some(report);
+        }
+        self
+    }
+
+    /// Attach the ranked noise-contributor summary.
+    pub fn with_noise_summary(mut self, summary: NoiseSummary) -> Self {
+        if !summary.rows.is_empty() {
+            self.noise_summary = Some(summary);
+        }
         self
     }
 

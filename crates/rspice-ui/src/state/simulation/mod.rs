@@ -20,7 +20,9 @@ mod waveform;
 
 pub const MAX_RUN_HISTORY: usize = 20;
 
-pub use analysis_result::{AnalysisResult, DcOpResult, OperatingPointValue};
+pub use analysis_result::{
+    AnalysisResult, DcOpResult, NoiseContributorRow, NoiseSummary, OperatingPointValue,
+};
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;
 pub use run::SimulationRun;

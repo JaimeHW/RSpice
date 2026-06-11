@@ -237,6 +237,9 @@ fn run_pnoise(
         output_noise: data.output_noise,
         input_noise: data.input_noise,
         contributors,
+        // PNoise carries cyclostationary percentages, not band-integrated
+        // mechanism contributions; no ranked summary for it (yet).
+        summary: None,
     })
 }
 

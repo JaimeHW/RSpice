@@ -62,6 +62,9 @@ pub enum SimulationResult {
         input_noise: Option<Vec<f64>>,
         /// Noise contributors by source
         contributors: HashMap<String, Vec<f64>>,
+        /// Ranked band-integrated contributor summary (per device and
+        /// mechanism), when the analysis provides it.
+        summary: Option<crate::state::NoiseSummary>,
     },
 
     /// Pole-zero analysis results

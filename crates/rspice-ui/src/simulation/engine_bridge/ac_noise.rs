@@ -139,11 +139,36 @@ impl EngineBridge {
             }
         }
 
+        // Ranked band-integrated contributor summary — the table the noise
+        // viewer's right panel shows. Consumes the per-frequency results
+        // last; everything above only borrowed them.
+        let band = (
+            frequencies.first().copied().unwrap_or(0.0),
+            frequencies.last().copied().unwrap_or(0.0),
+        );
+        let integrated = rspice_core::analysis::IntegratedNoise::new(noise_results);
+        let rows: Vec<crate::state::NoiseContributorRow> = integrated
+            .contribution_summary()
+            .into_iter()
+            .map(|contribution| crate::state::NoiseContributorRow {
+                device: contribution.device_name,
+                mechanism: contribution.noise_type.label(),
+                power: contribution.integrated_power,
+                share_pct: contribution.percentage,
+            })
+            .collect();
+        let summary = crate::state::NoiseSummary {
+            rows,
+            total_rms: integrated.total_output_noise(),
+            band,
+        };
+
         Ok(SimulationResult::Noise {
             frequencies,
             output_noise,
             input_noise: Some(input_noise),
             contributors,
+            summary: Some(summary),
         })
     }
 

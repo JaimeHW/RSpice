@@ -15,6 +15,11 @@ pub struct DcOpResult {
 
     /// Device operating points
     pub device_ops: HashMap<String, DeviceOpPoint>,
+
+    /// Per-device operating-point report from the engine (bias and
+    /// small-signal parameters with regions, in netlist order) — the data
+    /// behind the OP inspector.
+    pub device_report: Option<rspice_core::circuit::DeviceOpReport>,
 }
 
 impl DcOpResult {

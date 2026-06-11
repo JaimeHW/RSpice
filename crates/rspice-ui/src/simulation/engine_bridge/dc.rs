@@ -12,11 +12,15 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
     ) -> Result<SimulationResult, SimulationError> {
         let engine = self.engine_for_netlist(netlist);
-        let core_result = engine
-            .run_dc_op(netlist)
+        let (core_result, device_report) = engine
+            .run_dc_op_with_report(netlist)
             .map_err(|e| self.translate_error(e))?;
 
-        Ok(SimulationResult::DcOp(convert_dc_result(&core_result)))
+        let mut result = convert_dc_result(&core_result);
+        if !device_report.is_empty() {
+            result.device_report = Some(device_report);
+        }
+        Ok(SimulationResult::DcOp(result))
     }
 
     /// Run DC sweep analysis.

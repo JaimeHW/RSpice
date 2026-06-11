@@ -79,8 +79,7 @@ impl SimulationController {
             SimulationResult::Noise {
                 frequencies,
                 output_noise,
-                input_noise: _,
-                contributors: _,
+                ..
             } => {
                 // Calculate integrated noise
                 let integrated: f64 = output_noise.iter().sum::<f64>().sqrt();
