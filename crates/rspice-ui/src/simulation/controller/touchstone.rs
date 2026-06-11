@@ -76,6 +76,7 @@ impl SimulationController {
             crate::simulation::SimulationResult::Ac {
                 frequencies,
                 waveforms,
+                ..
             } => (frequencies, waveforms),
             _ => return Err("result is not frequency-domain S-parameter data".to_string()),
         };

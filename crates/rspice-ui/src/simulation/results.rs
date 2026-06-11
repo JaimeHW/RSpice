@@ -34,6 +34,8 @@ pub enum SimulationResult {
         sweep_values: Vec<f64>,
         /// Waveforms indexed by signal name
         waveforms: HashMap<String, WaveformData>,
+        /// Evaluated `.MEAS DC` results.
+        measurements: Vec<rspice_core::MeasureResult>,
     },
 
     /// Transient analysis results
@@ -42,6 +44,8 @@ pub enum SimulationResult {
         time: Vec<f64>,
         /// Waveforms indexed by signal name
         waveforms: HashMap<String, WaveformData>,
+        /// Evaluated `.MEAS TRAN` results.
+        measurements: Vec<rspice_core::MeasureResult>,
     },
 
     /// AC analysis results
@@ -50,6 +54,8 @@ pub enum SimulationResult {
         frequencies: Vec<f64>,
         /// Complex waveforms indexed by signal name
         waveforms: HashMap<String, WaveformData>,
+        /// Evaluated `.MEAS AC` results (against magnitude data).
+        measurements: Vec<rspice_core::MeasureResult>,
     },
 
     /// Noise analysis results

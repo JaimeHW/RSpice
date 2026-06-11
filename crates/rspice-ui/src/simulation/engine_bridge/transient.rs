@@ -19,7 +19,11 @@ impl EngineBridge {
             .run_tran(netlist, config.stop_time, max_step)
             .map_err(|e| self.translate_error(e))?;
 
-        Ok(convert_transient_result(tran_result, config.start_time))
+        Ok(convert_transient_result(
+            netlist,
+            tran_result,
+            config.start_time,
+        ))
     }
 
     /// Run transient analysis with abort signal for cooperative cancellation.
@@ -36,7 +40,11 @@ impl EngineBridge {
             .run_tran_with_abort(netlist, config.stop_time, max_step, abort)
             .map_err(|e| self.translate_error(e))?;
 
-        Ok(convert_transient_result(tran_result, config.start_time))
+        Ok(convert_transient_result(
+            netlist,
+            tran_result,
+            config.start_time,
+        ))
     }
 }
 
@@ -74,6 +82,7 @@ fn transient_sample_count_after_index(
 }
 
 fn convert_transient_result(
+    netlist: &rspice_core::Netlist,
     tran_result: rspice_core::engine::TransientResult,
     start_time: f64,
 ) -> SimulationResult {
@@ -100,8 +109,11 @@ fn convert_transient_result(
         );
     }
 
+    let measurements =
+        super::measure::evaluate_measurements(netlist, "TRAN", &filtered_time, &waveforms);
     SimulationResult::Transient {
         time: filtered_time,
         waveforms,
+        measurements,
     }
 }

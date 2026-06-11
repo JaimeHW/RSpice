@@ -10,14 +10,16 @@ impl SimulationController {
         use crate::state::WaveformData;
 
         match sim_result {
-            SimulationResult::Transient { time, waveforms } => self
-                .build_sorted_waveforms_with_shared_x(time, waveforms, |name, waveform| {
-                    (name, waveform.y_values.clone())
-                }),
+            SimulationResult::Transient {
+                time, waveforms, ..
+            } => self.build_sorted_waveforms_with_shared_x(time, waveforms, |name, waveform| {
+                (name, waveform.y_values.clone())
+            }),
 
             SimulationResult::Ac {
                 frequencies,
                 waveforms,
+                ..
             } => self.build_waveforms_with_shared_x(
                 frequencies,
                 waveforms
@@ -236,11 +238,12 @@ impl SimulationController {
                 result
             }
 
-            SimulationResult::Transient { .. }
-            | SimulationResult::Ac { .. }
-            | SimulationResult::DcSweep { .. } => {
+            SimulationResult::Transient { measurements, .. }
+            | SimulationResult::Ac { measurements, .. }
+            | SimulationResult::DcSweep { measurements, .. } => {
                 AnalysisResult::new(1, analysis_type, label.to_string())
                     .with_waveforms(self.waveforms_for_result(sim_result))
+                    .with_measurements(measurements.clone())
             }
 
             SimulationResult::PoleZero { .. } => {

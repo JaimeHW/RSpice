@@ -120,10 +120,13 @@ impl EngineBridge {
             }
         }
 
+        let measurements =
+            super::measure::evaluate_measurements(netlist, "DC", &sweep_values, &waveforms);
         Ok(SimulationResult::DcSweep {
             sweep_var: config.source.clone(),
             sweep_values,
             waveforms,
+            measurements,
         })
     }
 }

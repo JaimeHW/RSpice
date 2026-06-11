@@ -75,9 +75,12 @@ impl EngineBridge {
             );
         }
 
+        let measurements =
+            super::measure::evaluate_measurements(netlist, "AC", &frequencies, &waveforms);
         Ok(SimulationResult::Ac {
             frequencies,
             waveforms,
+            measurements,
         })
     }
 

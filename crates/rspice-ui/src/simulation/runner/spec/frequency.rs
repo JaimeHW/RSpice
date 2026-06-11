@@ -103,6 +103,7 @@ fn run_sparameter(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -159,6 +160,7 @@ fn run_tf(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -177,6 +179,7 @@ fn run_pac(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms: spectra_to_complex_waveforms(data.spectra),
+        measurements: Vec::new(),
     })
 }
 
@@ -211,6 +214,7 @@ fn run_pxf(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -280,6 +284,7 @@ fn run_stb(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -332,6 +337,7 @@ fn run_pstb(
     Ok(SimulationResult::Ac {
         frequencies: data.mode_indices,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 

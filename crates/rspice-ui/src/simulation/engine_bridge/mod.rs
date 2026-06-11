@@ -26,6 +26,7 @@ use super::runner::SimulationError;
 mod ac_noise;
 mod dc;
 mod error;
+mod measure;
 mod parsing;
 mod pole_zero;
 mod sensitivity;

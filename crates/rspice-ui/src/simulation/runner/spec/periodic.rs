@@ -119,7 +119,7 @@ fn run_pss(
         })
         .collect();
 
-    Ok(SimulationResult::Transient { time, waveforms })
+    Ok(SimulationResult::Transient { time, waveforms, measurements: Vec::new() })
 }
 
 fn run_harmonic_balance(
@@ -139,6 +139,7 @@ fn run_harmonic_balance(
     Ok(SimulationResult::Ac {
         frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -171,6 +172,7 @@ fn run_envelope(
     Ok(SimulationResult::Transient {
         time: data.time,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -225,6 +227,7 @@ fn run_fourier(
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 
@@ -312,6 +315,7 @@ fn run_disto(
     Ok(SimulationResult::Ac {
         frequencies,
         waveforms,
+        measurements: Vec::new(),
     })
 }
 

@@ -1,5 +1,34 @@
 ﻿use super::*;
 
+/// Echo evaluated `.MEAS` results to the console, the way the CLI prints
+/// them — value lines for successes, warnings for failures.
+fn echo_measurements(state: &mut AppState, measurements: &[rspice_core::MeasureResult]) {
+    if measurements.is_empty() {
+        return;
+    }
+    state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
+        "Measurements ({}):",
+        measurements.len()
+    )));
+    for m in measurements {
+        match m.value {
+            Some(value) => {
+                state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
+                    "  {} = {:.6e}",
+                    m.name, value
+                )));
+            }
+            None => {
+                state.push_sim_message(crate::common::app::ConsoleMessage::warning(format!(
+                    "  {} = FAILED ({})",
+                    m.name,
+                    m.error.as_deref().unwrap_or("unknown")
+                )));
+            }
+        }
+    }
+}
+
 impl SimulationController {
     pub(super) fn apply_result_side_effects(
         &mut self,
@@ -36,7 +65,11 @@ impl SimulationController {
 
             }
 
-            SimulationResult::Transient { time, waveforms } => {
+            SimulationResult::Transient {
+                time,
+                waveforms,
+                measurements,
+            } => {
                 self.invalidate_transient_post_views(state);
                 self.prime_transient_fft_source_selection(state);
 
@@ -45,12 +78,13 @@ impl SimulationController {
                     time.len(),
                     waveforms.len()
                 )));
-
+                echo_measurements(state, measurements);
             }
 
             SimulationResult::Ac {
                 frequencies,
                 waveforms,
+                measurements,
             } => {
                 self.populate_ac_post_views(state, frequencies, waveforms);
 
@@ -59,13 +93,14 @@ impl SimulationController {
                     frequencies.len(),
                     waveforms.len()
                 )));
-
+                echo_measurements(state, measurements);
             }
 
             SimulationResult::DcSweep {
                 sweep_var,
                 sweep_values,
                 waveforms,
+                measurements,
             } => {
                 state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
                     "DC Sweep ({}): {} points, {} waveforms",
@@ -73,7 +108,7 @@ impl SimulationController {
                     sweep_values.len(),
                     waveforms.len()
                 )));
-
+                echo_measurements(state, measurements);
             }
 
             SimulationResult::Noise {

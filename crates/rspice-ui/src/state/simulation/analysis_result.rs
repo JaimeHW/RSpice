@@ -71,6 +71,8 @@ pub struct AnalysisResult {
     pub device_op: Option<rspice_core::circuit::DeviceOpReport>,
     /// Ranked, band-integrated noise contributors, for noise analyses.
     pub noise_summary: Option<NoiseSummary>,
+    /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
+    pub measurements: Vec<rspice_core::MeasureResult>,
     /// Whether this analysis completed successfully
     pub success: bool,
     /// Error message if analysis failed
@@ -89,6 +91,7 @@ impl AnalysisResult {
             dc_op: None,
             device_op: None,
             noise_summary: None,
+            measurements: Vec::new(),
             success: true,
             error_message: None,
         }
@@ -110,6 +113,7 @@ impl AnalysisResult {
             dc_op: None,
             device_op: None,
             noise_summary: None,
+            measurements: Vec::new(),
             success: false,
             error_message: Some(error.into()),
         }
@@ -140,6 +144,12 @@ impl AnalysisResult {
         if !summary.rows.is_empty() {
             self.noise_summary = Some(summary);
         }
+        self
+    }
+
+    /// Attach evaluated `.MEAS` results.
+    pub fn with_measurements(mut self, measurements: Vec<rspice_core::MeasureResult>) -> Self {
+        self.measurements = measurements;
         self
     }
 
