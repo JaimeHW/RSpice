@@ -787,6 +787,20 @@ impl Engine {
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
                         let params_map = model_params_upper_map(&device_model.params);
+                        // ngspice's NJF/PJF LEVEL=2 is the Parker-Skellern
+                        // JFET2 model, which has no port here; running the
+                        // level-1 equations silently would be wrong physics.
+                        if params_map
+                            .get("LEVEL")
+                            .copied()
+                            .is_some_and(|level| level.is_finite() && level.round() as i32 == 2)
+                        {
+                            log::warn!(
+                                "JFET '{}': LEVEL=2 (Parker-Skellern JFET2) is not \
+                                 implemented; using the level-1 Shichman-Hodges model",
+                                element.name
+                            );
+                        }
                         jfet = jfet.with_model_params(&params_map);
                     }
                     jfet = jfet.with_instance_params(instance_params);
