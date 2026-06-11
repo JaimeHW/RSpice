@@ -62,7 +62,58 @@ impl Engine {
                     drain, gate, source, bulk, -mos.vto, kp, mos.lambda,
                 ),
             };
-            solver.add_nonlinear_device(instance.with_body_effect(mos.gamma, mos.phi));
+            // Effective bulk-junction zero-bias capacitances: explicit
+            // CBD/CBS overrides, else bottom density times area, plus the
+            // sidewall density times perimeter folded at the bottom grading.
+            let cbs0 = mos
+                .source_bulk_cap_zero_bias
+                .unwrap_or(mos.cj * mos.source_area)
+                .max(0.0)
+                + (mos.cjsw * mos.source_perimeter).max(0.0);
+            let cbd0 = mos
+                .drain_bulk_cap_zero_bias
+                .unwrap_or(mos.cj * mos.drain_area)
+                .max(0.0)
+                + (mos.cjsw * mos.drain_perimeter).max(0.0);
+            let is_s = if mos.js_bulk > 0.0 && mos.source_area > 0.0 {
+                mos.js_bulk * mos.source_area
+            } else {
+                mos.is_bulk
+            };
+            let is_d = if mos.js_bulk > 0.0 && mos.drain_area > 0.0 {
+                mos.js_bulk * mos.drain_area
+            } else {
+                mos.is_bulk
+            };
+            // Intrinsic channel charge: total oxide capacitance over the
+            // effective (lateral-diffusion-shortened) channel.
+            let leff = (mos.l - 2.0 * mos.ld).max(1e-12);
+            solver.add_nonlinear_device(
+                instance
+                    .with_body_effect(mos.gamma, mos.phi)
+                    .with_intrinsic_gate(mos.cox * mos.w * leff)
+                    .with_bulk_junctions(
+                        DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
+                        DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
+                        is_s,
+                        is_d,
+                    ),
+            );
+
+            // Gate overlap capacitances are bias-independent in level 1:
+            // stamp them as ordinary linear capacitors.
+            let cgs_ov = (mos.cgso * mos.w).max(0.0);
+            let cgd_ov = (mos.cgdo * mos.w).max(0.0);
+            let cgb_ov = (mos.cgbo * leff).max(0.0);
+            if cgs_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_source, cgs_ov, false);
+            }
+            if cgd_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_drain, cgd_ov, false);
+            }
+            if cgb_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_bulk, cgb_ov, false);
+            }
         }
 
         for jfet in &circuit.jfets {
