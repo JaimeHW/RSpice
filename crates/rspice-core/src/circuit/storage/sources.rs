@@ -435,6 +435,41 @@ impl VoltageSources {
         (td, tr, tf, pw, per)
     }
 
+    /// ngspice's EXP timing defaults (vsrcload.c): TD1, TAU1, and TAU2
+    /// fall back to the transient step when omitted *or zero*, TD2 to
+    /// TD1 + step.
+    #[inline]
+    fn resolve_exp_timing(
+        td1: Value,
+        tau1: Value,
+        td2: Value,
+        tau2: Value,
+        context: Option<TransientSourceContext>,
+    ) -> (Value, Value, Value, Value) {
+        let step = Self::pulse_step_default(context);
+        let td1 = if td1.is_finite() && td1 != 0.0 {
+            td1
+        } else {
+            step
+        };
+        let tau1 = if tau1.is_finite() && tau1 != 0.0 {
+            tau1
+        } else {
+            step
+        };
+        let td2 = if td2.is_finite() && td2 != 0.0 {
+            td2
+        } else {
+            td1 + step
+        };
+        let tau2 = if tau2.is_finite() && tau2 != 0.0 {
+            tau2
+        } else {
+            step
+        };
+        (td1, tau1, td2, tau2)
+    }
+
     #[inline]
     fn evaluate_source_at_time_with_context(
         spec: &crate::netlist::SourceSpec,
@@ -509,7 +544,9 @@ impl VoltageSources {
                     Self::sin_frequency_default(context)
                 };
                 if time < *delay {
-                    *offset
+                    // ngspice holds VO + VA*sin(PHASE) before the delay,
+                    // not the bare offset (vsrcload.c).
+                    offset + amplitude * phase.sin()
                 } else {
                     let t = time - delay;
                     offset
@@ -569,9 +606,11 @@ impl VoltageSources {
                 td2,
                 tau2,
             } => {
-                if time < *td1 {
+                let (td1, tau1, td2, tau2) =
+                    Self::resolve_exp_timing(*td1, *tau1, *td2, *tau2, context);
+                if time <= td1 {
                     *v1
-                } else if time < *td2 {
+                } else if time <= td2 {
                     v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
                 } else {
                     v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
@@ -941,6 +980,68 @@ mod tests {
         );
 
         assert_close(value, 1.0);
+    }
+
+    #[test]
+    fn exp_omitted_timing_resolves_to_ngspice_tstep_defaults() {
+        // EXP(0 1): TD1=TAU1=TAU2=tstep, TD2=TD1+tstep (vsrcload.c).
+        let spec = SourceSpec::Exp {
+            v1: 0.0,
+            v2: 1.0,
+            td1: Value::NAN,
+            tau1: Value::NAN,
+            td2: Value::NAN,
+            tau2: Value::NAN,
+        };
+        let ctx = transient_context(1.0e-9, 10.0e-9);
+
+        // Holds V1 through TD1.
+        let early = VoltageSources::evaluate_source_at_time_with_context(&spec, 0.5e-9, ctx);
+        assert_close(early, 0.0);
+
+        // Rising region: V1 + (V2-V1)*(1 - exp(-(t-TD1)/TAU1)).
+        let rising = VoltageSources::evaluate_source_at_time_with_context(&spec, 1.5e-9, ctx);
+        assert_close(rising, 1.0 - (-0.5f64).exp());
+
+        // Decaying region adds the TD2 term.
+        let decaying = VoltageSources::evaluate_source_at_time_with_context(&spec, 3.0e-9, ctx);
+        assert_close(decaying, (1.0 - (-2.0f64).exp()) - (1.0 - (-1.0f64).exp()));
+    }
+
+    #[test]
+    fn exp_explicit_zero_timing_also_resolves_to_defaults() {
+        // ngspice treats an explicit 0.0 for TD1/TAU1/TD2/TAU2 exactly
+        // like an omitted value.
+        let spec = SourceSpec::Exp {
+            v1: 0.0,
+            v2: 1.0,
+            td1: 0.0,
+            tau1: 0.0,
+            td2: 0.0,
+            tau2: 0.0,
+        };
+        let ctx = transient_context(1.0e-9, 10.0e-9);
+        let rising = VoltageSources::evaluate_source_at_time_with_context(&spec, 1.5e-9, ctx);
+        assert_close(rising, 1.0 - (-0.5f64).exp());
+    }
+
+    #[test]
+    fn sin_holds_phase_value_before_delay() {
+        // SIN with PHASE=90deg holds VO + VA*sin(PHASE) until TD.
+        let spec = SourceSpec::Sin {
+            offset: 1.0,
+            amplitude: 2.0,
+            frequency: 1.0e3,
+            delay: 5.0e-9,
+            damping: 0.0,
+            phase: std::f64::consts::FRAC_PI_2,
+        };
+        let value = VoltageSources::evaluate_source_at_time_with_context(
+            &spec,
+            1.0e-9,
+            transient_context(1.0e-9, 10.0e-9),
+        );
+        assert_close(value, 3.0);
     }
 
     #[test]

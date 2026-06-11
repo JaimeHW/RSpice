@@ -178,8 +178,21 @@ impl Engine {
                 }
             },
             SourceSpec::Exp { td1, td2, .. } => {
-                Self::add_breakpoint_if_in_range(breakpoints, *td1, tstop);
-                Self::add_breakpoint_if_in_range(breakpoints, *td2, tstop);
+                // Match the waveform runtime: omitted or zero delays
+                // resolve to tstep-based defaults (ngspice vsrcload.c).
+                let step_default = tstep_hint.max(1e-18);
+                let td1 = if td1.is_finite() && *td1 != 0.0 {
+                    *td1
+                } else {
+                    step_default
+                };
+                let td2 = if td2.is_finite() && *td2 != 0.0 {
+                    *td2
+                } else {
+                    td1 + step_default
+                };
+                Self::add_breakpoint_if_in_range(breakpoints, td1, tstop);
+                Self::add_breakpoint_if_in_range(breakpoints, td2, tstop);
             }
             // SFFM/AM are exactly 0 until TD and generally discontinuous
             // there (ngspice vsrcload.c), so the switch-on instant must be

@@ -498,6 +498,9 @@ fn parse_pwl_spec(
     Ok(SourceSpec::Pwl { points })
 }
 
+/// Parse EXP(V1 V2 TD1 TAU1 TD2 TAU2); omitted timing parameters stay NaN
+/// so the transient runtime can resolve ngspice's tstep-based defaults
+/// (TD1/TAU1/TAU2 default to TSTEP, TD2 to TD1+TSTEP).
 fn parse_exp_spec(
     stream: &mut TokenStream,
     _line_num: usize,
@@ -507,10 +510,10 @@ fn parse_exp_spec(
 
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
-    let td1 = expect_value_default(stream, params, 0.0);
-    let tau1 = expect_value_default(stream, params, 1e-6);
-    let td2 = expect_value_default(stream, params, 0.0);
-    let tau2 = expect_value_default(stream, params, 1e-6);
+    let td1 = try_value(stream, params).unwrap_or(Value::NAN);
+    let tau1 = try_value(stream, params).unwrap_or(Value::NAN);
+    let td2 = try_value(stream, params).unwrap_or(Value::NAN);
+    let tau2 = try_value(stream, params).unwrap_or(Value::NAN);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
