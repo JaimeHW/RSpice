@@ -9,10 +9,28 @@
 #![allow(clippy::needless_range_loop)]
 use super::SolverError;
 use crate::Value;
-use faer::Mat;
+use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::solvers::Solve;
+use faer::sparse::linalg::lu as sparse_lu;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
-use faer::sparse::{SparseColMat, SymbolicSparseColMat};
+use faer::sparse::{SparseColMat, SparseColMatRef, SymbolicSparseColMat};
+use faer::{Conj, Mat, get_global_parallelism};
+use std::sync::Arc;
+
+/// Reusable sparse-LU workspace for the Newton hot path.
+///
+/// The symbolic analysis is computed once for the frozen sparsity pattern;
+/// the numeric factorization, scratch arena, and RHS buffer are reused so
+/// repeated solves perform no per-iteration allocations. The symbolic part is
+/// `Arc`-shared because LU symbolic analysis depends only on the pattern, not
+/// the scalar type — AC's complex matrices reuse it as-is.
+struct LuWorkspace {
+    symbolic: Arc<sparse_lu::SymbolicLu<usize>>,
+    numeric: sparse_lu::NumericLu<usize, Value>,
+    factor_mem: MemBuffer,
+    solve_mem: MemBuffer,
+    rhs: Mat<Value>,
+}
 
 //=============================================================================
 // Static Structure Matrix - The Key Optimization
@@ -31,17 +49,16 @@ pub struct StaticMatrix {
     /// Matrix dimensions
     pub nrows: usize,
     pub ncols: usize,
-    /// CSC column pointers (frozen after setup)
-    col_ptrs: Vec<usize>,
-    /// CSC row indices (frozen after setup)
-    row_indices: Vec<usize>,
+    /// Frozen CSC sparsity pattern, validated once at construction.
+    /// Solves borrow it as a view — no per-iteration structure copies.
+    csc: SymbolicSparseColMat<usize>,
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
     /// Mapping from (row, col) to index in values array
     /// This enables O(1) stamping during simulation
     position_map: std::collections::HashMap<(usize, usize), usize>,
-    /// Cached symbolic LU factorization
-    symbolic_lu: Option<SymbolicLu<usize>>,
+    /// Reusable LU workspace (lazily initialized on first solve)
+    lu: Option<LuWorkspace>,
 }
 
 impl StaticMatrix {
@@ -53,19 +70,20 @@ impl StaticMatrix {
         Self {
             nrows: self.nrows,
             ncols: self.ncols,
-            col_ptrs: self.col_ptrs.clone(),
-            row_indices: self.row_indices.clone(),
+            csc: self.csc.clone(),
             values: vec![0.0; self.values.len()],
             position_map: self.position_map.clone(),
-            symbolic_lu: None,
+            lu: None,
         }
     }
 
     fn to_dense_real(&self) -> Vec<Vec<Value>> {
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[idx];
                 dense[row][col] = self.values[idx];
             }
         }
@@ -127,14 +145,17 @@ impl StaticMatrix {
             col_ptrs[i] += col_ptrs[i - 1];
         }
 
+        // Validate the pattern once here; every solve afterwards borrows it
+        // without re-checking.
+        let csc = SymbolicSparseColMat::new_checked(nrows, ncols, col_ptrs, None, row_indices);
+
         Ok(Self {
             nrows,
             ncols,
-            col_ptrs,
-            row_indices,
+            csc,
             values,
             position_map,
-            symbolic_lu: None,
+            lu: None,
         })
     }
 
@@ -236,14 +257,16 @@ impl StaticMatrix {
             1e-3
         };
 
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
         let mut ax = vec![0.0; self.nrows];
         for col in 0..self.ncols {
             let x = solution[col];
             if !x.is_finite() {
                 return Ok(Value::INFINITY);
             }
-            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[idx];
                 ax[row] += self.values[idx] * x;
             }
         }
@@ -276,14 +299,16 @@ impl StaticMatrix {
             ));
         }
 
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
         let mut ax = vec![0.0; self.nrows];
         for col in 0..self.ncols {
             let x = solution[col];
             if x == 0.0 {
                 continue;
             }
-            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[idx];
                 ax[row] += self.values[idx] * x;
             }
         }
@@ -295,19 +320,40 @@ impl StaticMatrix {
         Ok(ax)
     }
 
-    /// Convert to faer SparseColMat (borrows values, no allocation)
+    /// Convert to an owned faer SparseColMat (legacy/test path; copies)
     fn to_sparse_col_mat(&self) -> SparseColMat<usize, Value> {
-        let symbolic = SymbolicSparseColMat::new_checked(
-            self.nrows,
-            self.ncols,
-            self.col_ptrs.clone(),
-            None,
-            self.row_indices.clone(),
-        );
-        SparseColMat::new(symbolic, self.values.clone())
+        SparseColMat::new(self.csc.clone(), self.values.clone())
     }
 
-    /// Solve Ax = b using cached structure
+    /// Initialize the reusable LU workspace if it does not exist yet.
+    fn ensure_lu_workspace(&mut self) -> Result<(), SolverError> {
+        if self.lu.is_some() {
+            return Ok(());
+        }
+        let par = get_global_parallelism();
+        let symbolic = sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
+            .map_err(|_| SolverError::SingularMatrix)?;
+        let factor_mem = MemBuffer::try_new(
+            symbolic.factorize_numeric_lu_scratch::<Value>(par, Default::default()),
+        )
+        .map_err(|_| SolverError::SingularMatrix)?;
+        let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Value>(1, par))
+            .map_err(|_| SolverError::SingularMatrix)?;
+        self.lu = Some(LuWorkspace {
+            symbolic: Arc::new(symbolic),
+            numeric: sparse_lu::NumericLu::new(),
+            factor_mem,
+            solve_mem,
+            rhs: Mat::zeros(self.nrows, 1),
+        });
+        Ok(())
+    }
+
+    /// Solve Ax = b using cached structure.
+    ///
+    /// Hot path: borrows the frozen pattern and live values as a view and
+    /// refactorizes into a persistent numeric workspace — no structure
+    /// copies and no allocations after the first call.
     pub fn solve(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
         let n = self.nrows;
 
@@ -319,34 +365,36 @@ impl StaticMatrix {
             )));
         }
 
-        let sparse_mat = self.to_sparse_col_mat();
+        self.ensure_lu_workspace()?;
 
-        // Create or reuse symbolic factorization
-        let symbolic = match &self.symbolic_lu {
-            Some(s) => s.clone(),
-            None => {
-                let s = SymbolicLu::try_new(sparse_mat.symbolic())
-                    .map_err(|_| SolverError::SingularMatrix)?;
-                self.symbolic_lu = Some(s.clone());
-                s
-            }
-        };
+        let par = get_global_parallelism();
+        let Self {
+            csc, values, lu, ..
+        } = self;
+        let ws = lu.as_mut().expect("LU workspace initialized above");
 
-        // Factorize with current values
-        let lu = Lu::try_new_with_symbolic(symbolic, sparse_mat.as_ref())
+        let mat = SparseColMatRef::new(csc.as_ref(), values.as_slice());
+
+        let lu_ref = ws
+            .symbolic
+            .factorize_numeric_lu(
+                &mut ws.numeric,
+                mat,
+                par,
+                MemStack::new(&mut ws.factor_mem),
+                Default::default(),
+            )
             .map_err(|_| SolverError::SingularMatrix)?;
 
-        // Create RHS as column vector
-        let mut b = Mat::<Value>::zeros(n, 1);
-        for (i, &val) in rhs.iter().enumerate() {
-            b[(i, 0)] = val;
-        }
+        ws.rhs.col_as_slice_mut(0).copy_from_slice(rhs);
+        lu_ref.solve_in_place_with_conj(
+            Conj::No,
+            ws.rhs.as_mut(),
+            par,
+            MemStack::new(&mut ws.solve_mem),
+        );
 
-        // Solve in-place
-        lu.solve_in_place(b.as_mut());
-
-        // Extract solution
-        Ok((0..n).map(|i| b[(i, 0)]).collect())
+        Ok(ws.rhs.col_as_slice(0).to_vec())
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
@@ -398,8 +446,8 @@ impl ComplexMatrix {
         Self {
             nrows: real_matrix.nrows,
             ncols: real_matrix.ncols,
-            col_ptrs: real_matrix.col_ptrs.clone(),
-            row_indices: real_matrix.row_indices.clone(),
+            col_ptrs: real_matrix.csc.col_ptr().to_vec(),
+            row_indices: real_matrix.csc.row_idx().to_vec(),
             values: vec![Complex64::new(0.0, 0.0); nnz],
             position_map: real_matrix.position_map.clone(),
         }
