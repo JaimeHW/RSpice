@@ -234,11 +234,13 @@ impl Engine {
                     && (branch_idx == BJT_DELAY_XF1_BRANCH_INDEX
                         || branch_idx == BJT_DELAY_XF2_BRANCH_INDEX)
                 {
-                    // ngspice linear AC decks treat VBIC excess-phase TD as a
-                    // transient-only dynamic delay state; without the xf
-                    // charges the algebraic xf rows pin vxf2 to Itzf and the
-                    // delayed-transport correction vanishes, matching the
-                    // reduced-path parity behavior.
+                    // Without the xf charges the algebraic xf rows pin vxf2
+                    // to Itzf and the delayed-transport correction vanishes
+                    // (the pre-xf reduced behavior). ngspice-46 keeps these
+                    // charges in AC (vbicacld.c XQxf stamps), so every
+                    // production caller passes true; the reduced mode
+                    // remains for descriptor-based callers that add charge
+                    // terms themselves.
                     continue;
                 }
 
@@ -300,9 +302,8 @@ impl Engine {
                 && (branch_idx == BJT_DELAY_XF1_BRANCH_INDEX
                     || branch_idx == BJT_DELAY_XF2_BRANCH_INDEX)
             {
-                // ngspice linear AC decks treat VBIC excess-phase TD as a
-                // transient-only dynamic delay state; keep AC parity by excluding
-                // xf1/xf2 companion-charge contributions from small-signal stamping.
+                // Reduced mode without the xf companion charges (see the
+                // promoted arm above); ngspice-46 includes them in AC.
                 continue;
             }
             branch.accumulate_derivatives(&mut c_ii, &mut c_ie, &mut c_ei, &mut c_ee);
@@ -830,13 +831,19 @@ impl Engine {
         op_voltages: &[Value],
         omega: Value,
     ) -> ComplexMatrix {
+        // ngspice-46 includes the VBIC excess-phase network in small-signal
+        // analysis: vbicacld.c stamps the full Ixf static coupling and the
+        // cqxf1/cqxf2 charges (times omega) onto the xf rows. The delayed
+        // transport therefore shapes AC and noise transfers above ~1/TD,
+        // and the official binary fails the pre-xf 2005 AC tables by over
+        // 1 dB at 10 GHz on the CEamp deck.
         Self::build_small_signal_ac_matrix_with_vbic_delay_mode(
             circuit,
             matrix,
             op_voltages,
             omega,
             true,
-            false,
+            true,
         )
     }
 

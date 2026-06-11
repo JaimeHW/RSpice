@@ -64,17 +64,15 @@ impl Engine {
                     bjt.node_emitter,
                     bjt.node_substrate,
                 ];
-                for (branch_idx, branch) in branches.iter().enumerate() {
+                for branch in branches.iter() {
                     if !branch.is_active() {
                         continue;
                     }
-                    if branch_idx + 2 >= BJT_DYNAMIC_CHARGE_COUNT {
-                        // ngspice small-signal parity excludes VBIC excess-phase
-                        // TD companion charges from linearized frequency-domain
-                        // matrices.
-                        continue;
-                    }
-
+                    // The qxf delay charges join the C descriptor like every
+                    // other branch: ngspice-46 keeps the excess-phase network
+                    // in small-signal analysis (vbicacld.c XQxf stamps), and
+                    // its CEamp pole set carries the corresponding xf Bessel
+                    // pair at (-3 +- j*sqrt(3))/(2*TD).
                     let mut stamp_row = |row: crate::NodeId, sign: Value| {
                         let Some(row_idx) = Self::optional_system_index(row) else {
                             return;
