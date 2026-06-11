@@ -1,10 +1,10 @@
-//! Window-image (PNG) export.
+//! Viewer-image (PNG) export.
 //!
 //! Native flow: a one-shot request sends `ViewportCommand::Screenshot`;
-//! the frame after, the screenshot arrives as an input event, gets a save
-//! dialog, and is encoded with the `png` crate at physical-pixel
-//! resolution. The web build points at the browser's own capture instead
-//! of pretending.
+//! the frame after, the screenshot arrives as an input event, gets cropped
+//! to the results document well, gets a save dialog, and is encoded with
+//! the `png` crate at physical-pixel resolution. The web build points at
+//! the browser's own capture instead of pretending.
 
 use egui::Context;
 
@@ -39,9 +39,28 @@ impl RSpiceApp {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn save_screenshot_png(&mut self, ctx: &Context, image: &egui::ColorImage) {
+        // Crop the window capture to the document well so the export is
+        // the viewer, not the chrome around it. Falls back to the full
+        // window when no well rect was recorded.
+        let pixels_per_point = ctx.pixels_per_point();
+        let cropped = self.state.shell.results.well_rect.and_then(|well| {
+            let image_rect = egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(
+                    image.size[0] as f32 / pixels_per_point,
+                    image.size[1] as f32 / pixels_per_point,
+                ),
+            );
+            let well = well.intersect(image_rect);
+            (well.width() > 1.0 && well.height() > 1.0)
+                .then(|| image.region(&well, Some(pixels_per_point)))
+        });
+        let image = cropped.as_ref().unwrap_or(image);
+
+        let viewer = self.state.shell.results.viewer.label().to_lowercase();
         let Some(path) = rfd::FileDialog::new()
             .add_filter("PNG image", &["png"])
-            .set_file_name("rspice-window.png")
+            .set_file_name(format!("rspice-{viewer}.png"))
             .save_file()
         else {
             return;

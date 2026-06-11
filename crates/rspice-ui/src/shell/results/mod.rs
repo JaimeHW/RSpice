@@ -200,6 +200,9 @@ pub struct ResultsState {
     /// strips' phase traces; the margin math always reads the raw wrapped
     /// arrays. Transient — not persisted with the session.
     pub phase_continuous: bool,
+    /// Screen rect of the document well (docbar excluded) from the last
+    /// rendered frame — the crop window for viewer PNG export. Transient.
+    pub well_rect: Option<egui::Rect>,
 }
 
 /// One user expression trace on a waves strip.
@@ -628,9 +631,11 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     show_docbar(ui, &mut app.state);
 
     let t = Tokens::get(ui.ctx());
-    // The document well backdrop; viewers paint on top.
+    // The document well backdrop; viewers paint on top. The rect doubles
+    // as the crop window for viewer PNG export.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
+    app.state.shell.results.well_rect = Some(well);
 
     if !app.state.simulation.has_results() {
         well_hint(ui, "No results yet — run a simulation (F5)");
@@ -670,7 +675,7 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                     state.shell.export_csv_requested = true;
                     ui.close_menu();
                 }
-                if ui.button("Window image (PNG)…").clicked() {
+                if ui.button("Viewer image (PNG)…").clicked() {
                     state.shell.export_png_requested = true;
                     ui.close_menu();
                 }
