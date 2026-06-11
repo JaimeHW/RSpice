@@ -15,7 +15,13 @@ impl TestRunner {
 
         let ascending = x[0] <= x[x.len() - 1];
         let axis_scale = x[0].abs().max(x[x.len() - 1].abs()).max(x_query.abs());
-        let range_eps = (8e-15 * axis_scale).max(1e-18);
+        // A multiplicative AC sweep accumulates ~n*ulp of endpoint drift
+        // (a 500-step decade sweep lands ~1e-14 relative short of fstop)
+        // and reference files quantize the axis to print precision, so the
+        // edge gate must be far looser than interpolation snapping. Real
+        // grid misplacement is at least one grid step (~1e-2 relative),
+        // six orders above this gate.
+        let range_eps = (1e-9 * axis_scale).max(1e-18);
         let in_range = if ascending {
             x_query >= x[0] - range_eps && x_query <= x[x.len() - 1] + range_eps
         } else {
