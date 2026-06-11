@@ -52,7 +52,17 @@ impl SchematicState {
             }
         }
 
-        self.clipboard = ClipboardData::from_selection(selected_comps, wires_to_copy);
+        // Junction dots that sit on a copied wire travel with the selection;
+        // a pasted multi-way joint must keep its explicit connection dots.
+        let junctions_to_copy: Vec<Point> = self
+            .junctions
+            .iter()
+            .map(|j| j.pos)
+            .filter(|pos| wires_to_copy.iter().any(|w| w.points.contains(pos)))
+            .collect();
+
+        self.clipboard =
+            ClipboardData::from_selection(selected_comps, wires_to_copy, junctions_to_copy);
     }
 
     /// Check if clipboard has content
@@ -60,46 +70,54 @@ impl SchematicState {
         self.clipboard.has_content()
     }
 
-    /// Paste clipboard contents at the given position
+    /// Paste clipboard contents at the given position (one undo entry)
     pub fn paste_at(&mut self, pos: Point) {
         if !self.can_paste() {
             return;
         }
 
-        let clipboard_components = self.clipboard.components.clone();
-        let clipboard_wires = self.clipboard.wires.clone();
-        let origin = self.clipboard.origin;
+        self.with_undo("paste", |s| {
+            let clipboard_components = s.clipboard.components.clone();
+            let clipboard_wires = s.clipboard.wires.clone();
+            let clipboard_junctions = s.clipboard.junctions.clone();
+            let origin = s.clipboard.origin;
 
-        let offset_x = pos.x - origin.x;
-        let offset_y = pos.y - origin.y;
+            let offset_x = pos.x - origin.x;
+            let offset_y = pos.y - origin.y;
 
-        self.selection.clear();
+            s.selection.clear();
 
-        // Paste components with new IDs
-        for comp in clipboard_components {
-            let new_id = self.next_id();
-            let mut new_comp = comp;
-            new_comp.id = new_id;
-            new_comp.pos.x += offset_x;
-            new_comp.pos.y += offset_y;
-            new_comp.name = self.generate_name(new_comp.kind);
-            self.components.push(new_comp);
-            self.selection.select_component(new_id);
-        }
+            // Paste components with new IDs
+            for comp in clipboard_components {
+                let new_id = s.next_id();
+                let mut new_comp = comp;
+                new_comp.id = new_id;
+                new_comp.pos.x += offset_x;
+                new_comp.pos.y += offset_y;
+                new_comp.name = s.generate_name(new_comp.kind);
+                s.components.push(new_comp);
+                s.selection.select_component(new_id);
+            }
 
-        // Paste wires with new IDs
-        for wire in clipboard_wires {
-            let new_id = self.next_id();
-            let new_points: Vec<Point> = wire
-                .points
-                .iter()
-                .map(|p| Point::new(p.x + offset_x, p.y + offset_y))
-                .collect();
-            self.wires.push(Wire::new(new_id, new_points));
-            self.selection.select_wire(new_id);
-        }
+            // Paste wires with new IDs
+            for wire in clipboard_wires {
+                let new_id = s.next_id();
+                let new_points: Vec<Point> = wire
+                    .points
+                    .iter()
+                    .map(|p| Point::new(p.x + offset_x, p.y + offset_y))
+                    .collect();
+                s.wires.push(Wire::new(new_id, new_points));
+                s.selection.select_wire(new_id);
+            }
 
-        self.is_dirty = true;
-        self.bump_topology_version();
+            // Re-create junction dots on the pasted wires (deduplicated).
+            for junction in clipboard_junctions {
+                s.add_junction(Point::new(junction.x + offset_x, junction.y + offset_y));
+            }
+
+            s.is_dirty = true;
+            s.bump_topology_version();
+        });
     }
 }

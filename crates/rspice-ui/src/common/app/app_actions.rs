@@ -190,8 +190,8 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_edit_paste(&mut self) {
-        use crate::state::Point;
-        self.state.schematic.paste_at(Point::new(200, 200));
+        let anchor = self.state.schematic_paste_anchor();
+        self.state.schematic.paste_at(anchor);
     }
 
     pub(super) fn action_edit_cut(&mut self) {

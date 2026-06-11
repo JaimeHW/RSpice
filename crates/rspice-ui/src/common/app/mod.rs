@@ -186,6 +186,19 @@ impl AppState {
     pub fn clear_primary_log(&mut self) {
         self.log_buffer.clear();
     }
+
+    /// Where a paste should land, snapped to the schematic grid: under the
+    /// cursor when it hovers the canvas, otherwise the center of the visible
+    /// canvas (menu-driven paste), otherwise a sane fixed spot.
+    pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
+        let grid = self.schematic.grid_size.max(1);
+        let (x, y) = self
+            .shell
+            .canvas_hover
+            .or(self.shell.canvas_view_center)
+            .unwrap_or((20.0, 20.0));
+        crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
+    }
 }
 
 // =============================================================================

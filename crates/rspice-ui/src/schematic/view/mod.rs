@@ -59,16 +59,18 @@ pub fn render_schematic_view(
     draw_interaction_previews(&painter, &response, state, &viewport, symbol_library);
 
     // Report the cursor position in grid units; the shell status bar shows it.
-    state.shell.canvas_hover = response.hover_pos().map(|cursor| {
+    let to_grid_units = |pos: egui::Pos2, state: &AppState| {
         let grid = f64::from(state.schematic.grid_size.max(1));
-        let x = ((f64::from(cursor.x - available.min.x)) - state.schematic.pan.0)
+        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.pan.0)
             / state.schematic.zoom
             / grid;
-        let y = ((f64::from(cursor.y - available.min.y)) - state.schematic.pan.1)
+        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.pan.1)
             / state.schematic.zoom
             / grid;
         (x, y)
-    });
+    };
+    state.shell.canvas_hover = response.hover_pos().map(|cursor| to_grid_units(cursor, state));
+    state.shell.canvas_view_center = Some(to_grid_units(available.center(), state));
 }
 
 /// Paint a component symbol centered in `rect` — used by the component

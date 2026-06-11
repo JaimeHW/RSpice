@@ -125,6 +125,10 @@ pub struct ShellState {
     /// Schematic-space cursor position, reported by the canvas each frame the
     /// pointer hovers it; consumed by the status bar.
     pub canvas_hover: Option<(f64, f64)>,
+    /// Schematic-space center of the visible canvas, reported each frame the
+    /// canvas renders; paste targets fall back to it when the cursor is not
+    /// over the canvas (menu-driven paste).
+    pub canvas_view_center: Option<(f64, f64)>,
     /// `simulation.data_version` at the last time the Results view was shown;
     /// drives the "new results" badge on the Results tab.
     pub results_seen_version: u64,

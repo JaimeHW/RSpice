@@ -24,6 +24,12 @@ pub struct ClipboardData {
     /// Copied wires (stored with original positions)
     pub wires: Vec<Wire>,
 
+    /// Junction-dot positions sitting on the copied wires (stored with
+    /// original positions) — without them a pasted multi-way joint loses
+    /// its explicit connection dots.
+    #[serde(default)]
+    pub junctions: Vec<Point>,
+
     /// Origin point (center of copied selection)
     ///
     /// Used to calculate offsets when pasting at a new location.
@@ -55,17 +61,20 @@ impl ClipboardData {
     pub fn clear(&mut self) {
         self.components.clear();
         self.wires.clear();
+        self.junctions.clear();
         self.origin = Point::origin();
     }
 
-    /// Create clipboard data from components and wires
+    /// Create clipboard data from components, wires, and the junction dots
+    /// that sit on those wires.
     ///
     /// Calculates the center of the selection as the origin for paste offsets.
-    pub fn from_selection(components: Vec<Component>, wires: Vec<Wire>) -> Self {
+    pub fn from_selection(components: Vec<Component>, wires: Vec<Wire>, junctions: Vec<Point>) -> Self {
         let origin = Self::calculate_center(&components, &wires);
         Self {
             components,
             wires,
+            junctions,
             origin,
         }
     }

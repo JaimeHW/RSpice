@@ -86,13 +86,17 @@ fn handle_select_dragging(
     }
 
     if response.drag_started_by(egui::PointerButton::Primary)
-        && !ui.input(|i| i.modifiers.shift)
         && let Some(pos) = response.interact_pointer_pos()
     {
         let grid_pos = screen_to_grid(viewport, grid_size, pos);
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
 
-        if state.schematic.is_draggable_wire_point(wire_grid_pos) {
+        if ui.input(|i| i.modifiers.shift) {
+            // Shift+drag is always an additive marquee — even when it starts
+            // on a component, the intent is to extend the selection, not to
+            // move the part (Virtuoso convention).
+            state.schematic.selection_rect.start_at(grid_pos);
+        } else if state.schematic.is_draggable_wire_point(wire_grid_pos) {
             state.schematic.begin_operation("drag wire vertex");
             state.dialogs.interaction.vertex_drag_pos = Some((wire_grid_pos.x, wire_grid_pos.y));
             state
@@ -155,7 +159,7 @@ fn handle_select_dragging(
             state.dialogs.drag_start = None;
             state.dialogs.last_drag_pos = None;
         } else if let Some((min_x, min_y, max_x, max_y)) = state.schematic.selection_rect.finish() {
-            let add_mode = ui.input(|i| i.modifiers.ctrl);
+            let add_mode = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
             state
                 .schematic
                 .select_in_rect(min_x, min_y, max_x, max_y, add_mode);
@@ -183,7 +187,9 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
 }
 
 fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
-    let ctrl_held = ui.input(|i| i.modifiers.ctrl);
+    // Ctrl and Shift both extend the selection (toggle the clicked item);
+    // a plain click replaces it.
+    let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let alt_held = ui.input(|i| i.modifiers.alt);
 
     let comp_id = state.schematic.component_at(grid_pos);
@@ -191,7 +197,7 @@ fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
 
     if let Some(id) = comp_id {
         state.schematic.net_highlight.clear();
-        if ctrl_held {
+        if additive {
             state.schematic.selection.toggle_component(id);
         } else {
             state.schematic.selection.clear();
@@ -211,7 +217,7 @@ fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
                 "Highlighted net with {} wires",
                 state.schematic.net_highlight.highlighted_wires.len()
             );
-        } else if ctrl_held {
+        } else if additive {
             state.schematic.net_highlight.clear();
             state.schematic.selection.toggle_wire(id);
         } else {
@@ -219,7 +225,7 @@ fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
             state.schematic.selection.clear();
             state.schematic.selection.select_wire(id);
         }
-    } else if !ctrl_held {
+    } else if !additive {
         state.schematic.selection.clear();
         state.schematic.net_highlight.clear();
     }

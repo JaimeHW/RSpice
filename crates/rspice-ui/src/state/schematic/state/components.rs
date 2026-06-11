@@ -64,13 +64,7 @@ impl SchematicState {
 
     /// Rotate selected components
     pub fn rotate_selection(&mut self) {
-        for id in &self.selection.components {
-            if let Some(c) = self.components.iter_mut().find(|c| c.id == *id) {
-                c.rotation = c.rotation.rotate_cw();
-            }
-        }
-        self.is_dirty = true;
-        self.bump_topology_version();
+        self.transform_selection("rotate selection", |c| c.rotation = c.rotation.rotate_cw());
     }
 
     /// Mirror selected components horizontally (flip about Y-axis)
@@ -79,13 +73,7 @@ impl SchematicState {
     /// Essential for proper transistor orientation in circuit design.
     /// Matches Cadence Virtuoso 'H' key behavior.
     pub fn mirror_selection_h(&mut self) {
-        for id in &self.selection.components {
-            if let Some(c) = self.components.iter_mut().find(|c| c.id == *id) {
-                c.toggle_mirror_h();
-            }
-        }
-        self.is_dirty = true;
-        self.bump_topology_version();
+        self.transform_selection("mirror horizontally", |c| c.toggle_mirror_h());
     }
 
     /// Mirror selected components vertically (flip about X-axis)
@@ -93,12 +81,59 @@ impl SchematicState {
     /// This flips components up-to-down, swapping terminal positions.
     /// Matches Cadence Virtuoso 'V' key behavior.
     pub fn mirror_selection_v(&mut self) {
-        for id in &self.selection.components {
-            if let Some(c) = self.components.iter_mut().find(|c| c.id == *id) {
-                c.toggle_mirror_v();
-            }
+        self.transform_selection("mirror vertically", |c| c.toggle_mirror_v());
+    }
+
+    /// Apply an in-place transform (rotate/mirror) to every selected
+    /// component as one undoable operation, dragging attached wire points
+    /// along so connectivity survives the transform — terminals move under
+    /// rotation/mirror, and a wire endpoint left on the old position would
+    /// silently disconnect.
+    fn transform_selection(&mut self, description: &str, transform: impl Fn(&mut Component)) {
+        if self.selection.components.is_empty() {
+            return;
         }
-        self.is_dirty = true;
-        self.bump_topology_version();
+        let ids: Vec<u64> = self.selection.components.iter().copied().collect();
+        self.with_undo(description, |s| {
+            for id in ids {
+                let Some(index) = s.components.iter().position(|c| c.id == id) else {
+                    continue;
+                };
+                let before: Vec<Point> = s.components[index]
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(_, pos)| pos)
+                    .collect();
+                transform(&mut s.components[index]);
+                let after: Vec<Point> = s.components[index]
+                    .terminal_positions()
+                    .into_iter()
+                    .map(|(_, pos)| pos)
+                    .collect();
+
+                // Terminal order is positional and stable across transforms.
+                // Collect updates against the pre-transform wire state, then
+                // apply: a mirror swaps terminal positions, so remapping
+                // in place would move the same wire point twice.
+                let mut updates: Vec<(usize, usize, Point)> = Vec::new();
+                for (old_pos, new_pos) in before.iter().zip(after.iter()) {
+                    if old_pos == new_pos {
+                        continue;
+                    }
+                    for (wire_index, wire) in s.wires.iter().enumerate() {
+                        for (point_index, point) in wire.points.iter().enumerate() {
+                            if point == old_pos {
+                                updates.push((wire_index, point_index, *new_pos));
+                            }
+                        }
+                    }
+                }
+                for (wire_index, point_index, new_pos) in updates {
+                    s.wires[wire_index].points[point_index] = new_pos;
+                }
+            }
+            s.is_dirty = true;
+            s.bump_topology_version();
+        });
     }
 }
