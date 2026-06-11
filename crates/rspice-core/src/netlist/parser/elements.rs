@@ -961,29 +961,494 @@ pub(super) fn parse_subcircuit_instance(
     Ok(())
 }
 
+//=============================================================================
+// Extended controlled-source forms (POLY / VALUE / TABLE)
+//=============================================================================
+
+/// Which extended controlled-source keyword starts at the stream cursor.
+enum ControlledSourceForm {
+    Poly(usize),
+    Value,
+    Table,
+    Laplace,
+    Freq,
+}
+
+/// Detect (and consume) an extended controlled-source keyword.
+///
+/// Handles both token shapes the lexer can produce: `POLY ( 2 )` as separate
+/// tokens and `POLY(2)` glued into one identifier.
+fn try_controlled_source_form(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<Option<ControlledSourceForm>, ParseError> {
+    let TokenKind::Ident(raw) = &stream.peek().kind else {
+        return Ok(None);
+    };
+    let upper = raw.to_ascii_uppercase();
+
+    if let Some(rest) = upper.strip_prefix("POLY") {
+        let rest = rest.trim();
+        // Glued form: POLY(2)
+        if let Some(dims) = rest
+            .strip_prefix('(')
+            .and_then(|s| s.strip_suffix(')'))
+            .and_then(|s| s.trim().parse::<usize>().ok())
+        {
+            stream.advance();
+            return Ok(Some(ControlledSourceForm::Poly(dims)));
+        }
+        // Split form: POLY ( 2 )
+        if rest.is_empty() && matches!(stream.peek_n(1).kind, TokenKind::LParen) {
+            stream.advance(); // POLY
+            stream.advance(); // (
+            let dims = match &stream.peek().kind {
+                TokenKind::Number(n) if *n >= 1.0 && n.fract() == 0.0 => *n as usize,
+                other => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "POLY dimension must be a positive integer, found {:?}",
+                            other
+                        ),
+                    });
+                }
+            };
+            stream.advance(); // dimension
+            if !stream.consume(&TokenKind::RParen) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected ')' after POLY dimension".to_string(),
+                });
+            }
+            return Ok(Some(ControlledSourceForm::Poly(dims)));
+        }
+        return Ok(None);
+    }
+
+    let form = match upper.as_str() {
+        "VALUE" => Some(ControlledSourceForm::Value),
+        "TABLE" => Some(ControlledSourceForm::Table),
+        "LAPLACE" => Some(ControlledSourceForm::Laplace),
+        "FREQ" => Some(ControlledSourceForm::Freq),
+        _ => None,
+    };
+    if form.is_some() {
+        stream.advance();
+        stream.consume(&TokenKind::Equals);
+    }
+    Ok(form)
+}
+
+/// Collect a signed numeric list (POLY coefficients, TABLE pairs) to end of
+/// line, tolerating commas and parentheses as pair decoration.
+fn collect_numeric_tail(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+) -> Vec<Value> {
+    let mut values = Vec::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match &stream.peek().kind {
+            TokenKind::Comma | TokenKind::LParen | TokenKind::RParen => {
+                stream.advance();
+            }
+            TokenKind::Minus => {
+                stream.advance();
+                if let Some(value) = try_value(stream, params) {
+                    values.push(-value);
+                }
+            }
+            TokenKind::Plus => {
+                stream.advance();
+            }
+            _ => {
+                if let Some(value) = try_value(stream, params) {
+                    values.push(value);
+                } else {
+                    stream.advance();
+                }
+            }
+        }
+    }
+    values
+}
+
+/// Reconstruct a brace expression argument (`VALUE={...}` / `TABLE {...}`),
+/// accepting either a single Expression token or a bare token run.
+fn collect_expression_argument(
+    stream: &mut TokenStream,
+    line_num: usize,
+    terminator: Option<&TokenKind>,
+) -> Result<String, ParseError> {
+    if let TokenKind::Expression(inner) = &stream.peek().kind {
+        let inner = inner.clone();
+        stream.advance();
+        return Ok(inner);
+    }
+
+    let mut parts = Vec::new();
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if let Some(term) = terminator
+            && std::mem::discriminant(&stream.peek().kind) == std::mem::discriminant(term)
+        {
+            break;
+        }
+        if let Some(fragment) = behavioral_expr_token_fragment(&stream.peek().kind) {
+            parts.push(fragment);
+        }
+        stream.advance();
+    }
+
+    let expression = parts.join(" ").trim().to_string();
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Controlled source requires a non-empty expression".to_string(),
+        });
+    }
+    Ok(expression)
+}
+
+/// Build the polynomial expression for SPICE2-style `POLY(n)` sources.
+///
+/// Monomials follow the graded ordering every PSpice-derived deck assumes:
+/// degree 0 (`p0`), then linear terms `v1..vn`, then within each higher
+/// degree the exponent tuples in lexicographically descending order —
+/// for `POLY(2)`: `p3*v1^2 + p4*v1*v2 + p5*v2^2`, etc.
+///
+/// SPICE2 special case: a single coefficient is `p1` (a pure linear gain on
+/// the first controlling variable), not a constant.
+fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
+    fn push_monomials(
+        remaining_vars: &[String],
+        degree: usize,
+        prefix: &mut Vec<(usize, usize)>, // (var index offset into vars, exponent)
+        out: &mut Vec<Vec<(usize, usize)>>,
+        base_index: usize,
+    ) {
+        if remaining_vars.len() == 1 {
+            let mut term = prefix.clone();
+            if degree > 0 {
+                term.push((base_index, degree));
+            }
+            out.push(term);
+            return;
+        }
+        for first_exp in (0..=degree).rev() {
+            let mut term_prefix = prefix.clone();
+            if first_exp > 0 {
+                term_prefix.push((base_index, first_exp));
+            }
+            push_monomials(
+                &remaining_vars[1..],
+                degree - first_exp,
+                &mut term_prefix,
+                out,
+                base_index + 1,
+            );
+        }
+    }
+
+    if coeffs.is_empty() {
+        return "0".to_string();
+    }
+    if coeffs.len() == 1 {
+        // SPICE2 rule: a lone coefficient is the linear gain on v1.
+        return format!("({})*({})", coeffs[0], vars[0]);
+    }
+
+    // Enumerate monomials degree by degree until coefficients are exhausted.
+    let mut terms: Vec<String> = Vec::new();
+    let mut coeff_idx = 0usize;
+    let mut degree = 0usize;
+    while coeff_idx < coeffs.len() {
+        let mut monomials = Vec::new();
+        let mut prefix = Vec::new();
+        push_monomials(vars, degree, &mut prefix, &mut monomials, 0);
+        for monomial in monomials {
+            if coeff_idx >= coeffs.len() {
+                break;
+            }
+            let coeff = coeffs[coeff_idx];
+            coeff_idx += 1;
+            if coeff == 0.0 {
+                continue;
+            }
+            let mut factors = vec![format!("({})", coeff)];
+            for (var_idx, exponent) in &monomial {
+                for _ in 0..*exponent {
+                    factors.push(format!("({})", vars[*var_idx]));
+                }
+            }
+            terms.push(factors.join("*"));
+        }
+        degree += 1;
+        // Safety valve: coefficients beyond degree 8 in n vars would be a
+        // pathological deck; stop rather than loop unbounded.
+        if degree > 8 {
+            break;
+        }
+    }
+
+    if terms.is_empty() {
+        "0".to_string()
+    } else {
+        terms.join(" + ")
+    }
+}
+
+/// Build the clamped TABLE transfer expression.
+///
+/// PSpice TABLE sources clamp to the endpoint outputs outside the listed
+/// range; clamping the *input* into `[x_first, x_last]` reproduces that
+/// exactly with the runtime's interpolating `table()` function.
+fn table_transfer_expression(
+    input_expr: &str,
+    pairs: &[(Value, Value)],
+) -> String {
+    let mut sorted = pairs.to_vec();
+    sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let x_min = sorted.first().map(|(x, _)| *x).unwrap_or(0.0);
+    let x_max = sorted.last().map(|(x, _)| *x).unwrap_or(0.0);
+
+    let mut args = Vec::with_capacity(1 + sorted.len() * 2);
+    args.push(format!("limit(({}), {}, {})", input_expr, x_min, x_max));
+    for (x, y) in &sorted {
+        args.push(format!("{}", x));
+        args.push(format!("{}", y));
+    }
+    format!("table({})", args.join(", "))
+}
+
+fn unsupported_form_error(
+    line_num: usize,
+    element: &str,
+    form: &str,
+) -> ParseError {
+    ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{} {} sources are not supported yet; supported extended forms are \
+             POLY(n), VALUE={{expr}}, and TABLE {{expr}} = (x,y) pairs",
+            element, form
+        ),
+    }
+}
+
+/// Shared implementation for E (VCVS) and G (VCCS) parsing, covering the
+/// linear, POLY, VALUE, and TABLE forms. Extended forms lower onto the
+/// behavioral-source engine, which provides Newton linearization, AC
+/// small-signal handling, and hierarchical expression remapping.
+fn parse_voltage_controlled_source(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    is_voltage_output: bool,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let node_pos = expect_node(stream, line_num)?;
+    let node_neg = expect_node(stream, line_num)?;
+
+    let element_label = if is_voltage_output { "E (VCVS)" } else { "G (VCCS)" };
+
+    let lower_behavioral = |expression: String| -> ElementKind {
+        if is_voltage_output {
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+            }
+        } else {
+            ElementKind::BehavioralCurrent {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+            }
+        }
+    };
+
+    match try_controlled_source_form(stream, line_num)? {
+        Some(ControlledSourceForm::Poly(dims)) => {
+            let mut vars = Vec::with_capacity(dims);
+            for _ in 0..dims {
+                let cp = expect_node(stream, line_num)?;
+                let cn = expect_node(stream, line_num)?;
+                vars.push(format!("V({},{})", cp, cn));
+            }
+            let coeffs = collect_numeric_tail(stream, params);
+            if coeffs.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "{} POLY({}) requires at least one coefficient",
+                        element_label, dims
+                    ),
+                });
+            }
+            elements.push(Element {
+                name,
+                kind: lower_behavioral(poly_expression(&vars, &coeffs)),
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+        Some(ControlledSourceForm::Value) => {
+            let expression = collect_expression_argument(stream, line_num, None)?;
+            elements.push(Element {
+                name,
+                kind: lower_behavioral(expression),
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+        Some(ControlledSourceForm::Table) => {
+            let input_expr =
+                collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
+            stream.consume(&TokenKind::Equals);
+            let flat = collect_numeric_tail(stream, params);
+            if flat.len() < 4 || flat.len() % 2 != 0 {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "{} TABLE requires at least two (x,y) pairs",
+                        element_label
+                    ),
+                });
+            }
+            let pairs: Vec<(Value, Value)> =
+                flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            elements.push(Element {
+                name,
+                kind: lower_behavioral(table_transfer_expression(&input_expr, &pairs)),
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+        Some(ControlledSourceForm::Laplace) => {
+            return Err(unsupported_form_error(line_num, element_label, "LAPLACE"));
+        }
+        Some(ControlledSourceForm::Freq) => {
+            return Err(unsupported_form_error(line_num, element_label, "FREQ"));
+        }
+        None => {
+            let ctrl_pos = expect_node(stream, line_num)?;
+            let ctrl_neg = expect_node(stream, line_num)?;
+            let gain = expect_value(stream, line_num, params)?;
+            let kind = if is_voltage_output {
+                ElementKind::Vcvs {
+                    gain,
+                    control_nodes: (ctrl_pos, ctrl_neg),
+                }
+            } else {
+                ElementKind::Vccs {
+                    transconductance: gain,
+                    control_nodes: (ctrl_pos, ctrl_neg),
+                }
+            };
+            elements.push(Element {
+                name,
+                kind,
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Shared implementation for F (CCCS) and H (CCVS) parsing, covering the
+/// linear and POLY forms (controlling variables are branch currents of named
+/// voltage sources).
+fn parse_current_controlled_source(
+    stream: &mut TokenStream,
+    line_num: usize,
+    elements: &mut Vec<Element>,
+    params: &ParamContext,
+    is_voltage_output: bool,
+) -> Result<(), ParseError> {
+    let name = expect_ident(stream, line_num)?;
+    let node_pos = expect_node(stream, line_num)?;
+    let node_neg = expect_node(stream, line_num)?;
+
+    let element_label = if is_voltage_output { "H (CCVS)" } else { "F (CCCS)" };
+
+    match try_controlled_source_form(stream, line_num)? {
+        Some(ControlledSourceForm::Poly(dims)) => {
+            let mut vars = Vec::with_capacity(dims);
+            for _ in 0..dims {
+                let source = expect_ident(stream, line_num)?;
+                vars.push(format!("I({})", source));
+            }
+            let coeffs = collect_numeric_tail(stream, params);
+            if coeffs.is_empty() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "{} POLY({}) requires at least one coefficient",
+                        element_label, dims
+                    ),
+                });
+            }
+            let expression = poly_expression(&vars, &coeffs);
+            let kind = if is_voltage_output {
+                ElementKind::BehavioralVoltage {
+                    expression,
+                    tc1: 0.0,
+                    tc2: 0.0,
+                }
+            } else {
+                ElementKind::BehavioralCurrent {
+                    expression,
+                    tc1: 0.0,
+                    tc2: 0.0,
+                }
+            };
+            elements.push(Element {
+                name,
+                kind,
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+        Some(other) => {
+            let form = match other {
+                ControlledSourceForm::Value => "VALUE",
+                ControlledSourceForm::Table => "TABLE",
+                ControlledSourceForm::Laplace => "LAPLACE",
+                ControlledSourceForm::Freq => "FREQ",
+                ControlledSourceForm::Poly(_) => unreachable!(),
+            };
+            return Err(unsupported_form_error(line_num, element_label, form));
+        }
+        None => {
+            let control_element = expect_ident(stream, line_num)?;
+            let gain = expect_value(stream, line_num, params)?;
+            let kind = if is_voltage_output {
+                ElementKind::Ccvs {
+                    transresistance: gain,
+                    control_element,
+                }
+            } else {
+                ElementKind::Cccs {
+                    gain,
+                    control_element,
+                }
+            };
+            elements.push(Element {
+                name,
+                kind,
+                nodes: vec![node_pos, node_neg],
+            });
+        }
+    }
+
+    Ok(())
+}
+
 pub(super) fn parse_vcvs(
     stream: &mut TokenStream,
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
-    let node_pos = expect_node(stream, line_num)?;
-    let node_neg = expect_node(stream, line_num)?;
-    let ctrl_pos = expect_node(stream, line_num)?;
-    let ctrl_neg = expect_node(stream, line_num)?;
-    let gain = expect_value(stream, line_num, params)?;
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::Vcvs {
-            gain,
-            control_nodes: (ctrl_pos, ctrl_neg),
-        },
-        nodes: vec![node_pos, node_neg],
-    });
-
-    Ok(())
+    parse_voltage_controlled_source(stream, line_num, elements, params, true)
 }
 
 pub(super) fn parse_cccs(
@@ -992,22 +1457,7 @@ pub(super) fn parse_cccs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
-    let node_pos = expect_node(stream, line_num)?;
-    let node_neg = expect_node(stream, line_num)?;
-    let control_element = expect_ident(stream, line_num)?;
-    let gain = expect_value(stream, line_num, params)?;
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::Cccs {
-            gain,
-            control_element,
-        },
-        nodes: vec![node_pos, node_neg],
-    });
-
-    Ok(())
+    parse_current_controlled_source(stream, line_num, elements, params, false)
 }
 
 pub(super) fn parse_vccs(
@@ -1016,23 +1466,7 @@ pub(super) fn parse_vccs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
-    let node_pos = expect_node(stream, line_num)?;
-    let node_neg = expect_node(stream, line_num)?;
-    let ctrl_pos = expect_node(stream, line_num)?;
-    let ctrl_neg = expect_node(stream, line_num)?;
-    let transconductance = expect_value(stream, line_num, params)?;
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::Vccs {
-            transconductance,
-            control_nodes: (ctrl_pos, ctrl_neg),
-        },
-        nodes: vec![node_pos, node_neg],
-    });
-
-    Ok(())
+    parse_voltage_controlled_source(stream, line_num, elements, params, false)
 }
 
 pub(super) fn parse_ccvs(
@@ -1041,22 +1475,7 @@ pub(super) fn parse_ccvs(
     elements: &mut Vec<Element>,
     params: &ParamContext,
 ) -> Result<(), ParseError> {
-    let name = expect_ident(stream, line_num)?;
-    let node_pos = expect_node(stream, line_num)?;
-    let node_neg = expect_node(stream, line_num)?;
-    let control_element = expect_ident(stream, line_num)?;
-    let transresistance = expect_value(stream, line_num, params)?;
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::Ccvs {
-            transresistance,
-            control_element,
-        },
-        nodes: vec![node_pos, node_neg],
-    });
-
-    Ok(())
+    parse_current_controlled_source(stream, line_num, elements, params, true)
 }
 
 pub(super) fn parse_behavioral(
