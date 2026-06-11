@@ -183,6 +183,53 @@ pub struct ResultsState {
     /// re-runs on purpose — keeping the zoomed window across parameter
     /// tweaks is how engineers compare iterations.
     pub views: std::collections::HashMap<(ResultViewer, usize), PlotView>,
+    /// User expression traces per waves strip (analysis index), evaluated by
+    /// the calculator against that analysis' waveforms. Persisted with the
+    /// session (visibility resets to on).
+    pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
+    /// The inline expression editor, when open (one strip at a time).
+    pub expr_editor: Option<ExprEditor>,
+    /// Evaluated expression series, keyed by (analysis index, expression);
+    /// refreshed when the simulation data version advances.
+    pub expr_cache: std::collections::HashMap<(usize, String), ExprSeries>,
+}
+
+/// One user expression trace on a waves strip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExprTrace {
+    /// The calculator expression as typed ("V(out)/V(in)").
+    pub text: String,
+    /// Legend-chip visibility.
+    #[serde(default = "default_visible")]
+    pub visible: bool,
+}
+
+fn default_visible() -> bool {
+    true
+}
+
+/// State of the inline expression editor under a strip header.
+#[derive(Debug, Clone, Default)]
+pub struct ExprEditor {
+    /// The strip (analysis index) the editor is attached to.
+    pub analysis_index: usize,
+    /// Text being edited.
+    pub text: String,
+    /// Last evaluation error, shown inline.
+    pub error: Option<String>,
+    /// Request keyboard focus on the next frame (set when opened).
+    pub want_focus: bool,
+}
+
+/// One evaluated expression series (owned arrays, cheap to clone).
+#[derive(Debug, Clone)]
+pub struct ExprSeries {
+    /// `simulation.data_version` the series was computed against.
+    pub version: u64,
+    /// Evaluation result, or the error to show on the strip.
+    pub series: Result<(std::sync::Arc<[f64]>, std::sync::Arc<[f64]>), String>,
+    /// Finite (min, max) of y, for the automatic fit.
+    pub y_extremes: Option<(f64, f64)>,
 }
 
 impl ResultsState {

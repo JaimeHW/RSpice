@@ -152,15 +152,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         },
     ];
     let view = state.shell.results.plot_view(super::ResultViewer::Bode, 0);
-    let header = strip::header(
-        ui,
+    let header = strip::StripHeader::new(
         "STB",
         &format!("{} · margins from the simulated curves", model.signal),
         &legend,
-        false,
-        false,
-        view.is_zoomed(),
-    );
+    )
+    .zoomed(view.is_zoomed())
+    .show(ui);
     if header.fit_clicked {
         state
             .shell

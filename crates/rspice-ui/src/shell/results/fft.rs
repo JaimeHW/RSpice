@@ -96,15 +96,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         on: true,
     }];
     let view = state.shell.results.plot_view(super::ResultViewer::Fft, 0);
-    let header = strip::header(
-        ui,
-        "FFT",
-        &model.subtitle,
-        &legend,
-        false,
-        false,
-        view.is_zoomed(),
-    );
+    let header = strip::StripHeader::new("FFT", &model.subtitle, &legend)
+        .zoomed(view.is_zoomed())
+        .show(ui);
     if header.fit_clicked {
         state
             .shell

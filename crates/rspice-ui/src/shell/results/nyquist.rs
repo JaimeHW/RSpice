@@ -86,15 +86,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         color: c.traces[0],
         on: true,
     }];
-    strip::header(
-        ui,
-        "NYQ",
-        &format!("{name} · {point_count} pts"),
-        &legend,
-        false,
-        false,
-        false,
-    );
+    strip::StripHeader::new("NYQ", &format!("{name} · {point_count} pts"), &legend).show(ui);
 
     // Equal-aspect ranges around the locus and the critical point.
     let mut extent = 1.3f64;

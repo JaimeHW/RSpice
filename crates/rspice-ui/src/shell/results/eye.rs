@@ -45,7 +45,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         color: c.traces[0],
         on: true,
     }];
-    strip::header(ui, "EYE", &subtitle, &legend, false, false, false);
+    strip::StripHeader::new("EYE", &subtitle, &legend).show(ui);
 
     let ui_count = f64::from(data.ui_count.max(1));
     let swing = (data.v_high - data.v_low).abs().max(1e-9);

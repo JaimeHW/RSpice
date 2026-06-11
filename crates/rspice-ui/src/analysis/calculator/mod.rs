@@ -92,6 +92,81 @@ impl<'a> SimulationContext<'a> {
     }
 }
 
+/// Evaluation context backed by one analysis' waveform list — used by the
+/// Results workspace, where each strip evaluates expressions against its
+/// own analysis instead of the live (active-analysis) waveform set.
+pub struct WaveformsContext<'a> {
+    waveforms: &'a [WaveformData],
+}
+
+impl<'a> WaveformsContext<'a> {
+    /// Wrap an analysis' waveforms.
+    pub fn new(waveforms: &'a [WaveformData]) -> Self {
+        Self { waveforms }
+    }
+}
+
+/// Find a waveform by signal name with flexible matching: exact name,
+/// net name inside `V()`/`I()`, and AC magnitude entries (`|V(out)|`
+/// matches `V(out)` so `dB(V(out)/V(in))` works on AC strips).
+fn find_in<'a>(waveforms: &'a [WaveformData], signal: &str) -> Option<&'a WaveformData> {
+    let signal_lower = signal.to_lowercase();
+
+    if let Some(wf) = waveforms
+        .iter()
+        .find(|wf| wf.name.eq_ignore_ascii_case(signal))
+    {
+        return Some(wf);
+    }
+
+    // `|V(out)|` (AC magnitude) matches a request for `V(out)`.
+    if let Some(wf) = waveforms
+        .iter()
+        .find(|wf| wf.name.trim_matches('|').eq_ignore_ascii_case(signal))
+    {
+        return Some(wf);
+    }
+
+    // Bare net name matches inside V() / I() wrappers.
+    waveforms.iter().find(|wf| {
+        let wf_net = wf
+            .name
+            .trim_matches('|')
+            .trim_start_matches("V(")
+            .trim_start_matches("I(")
+            .trim_end_matches(')')
+            .to_lowercase();
+        wf_net == signal_lower
+    })
+}
+
+impl<'a> EvaluationContext for WaveformsContext<'a> {
+    fn get_waveform(
+        &self,
+        signal: &str,
+        dataset: Option<&str>,
+    ) -> Result<CalcValue, EvaluationError> {
+        let _ = dataset;
+        match signal.to_uppercase().as_str() {
+            "TIME" | "T" | "FREQ" | "FREQUENCY" => {
+                if let Some(wf) = self.waveforms.first() {
+                    let x: Vec<f64> = wf.x.to_vec();
+                    let y = x.clone();
+                    return Ok(CalcValue::create_waveform(x, y));
+                }
+                return Err(EvaluationError::IdentifierNotFound(format!(
+                    "No waveforms available for {signal}"
+                )));
+            }
+            _ => {}
+        }
+        match find_in(self.waveforms, signal) {
+            Some(wf) => Ok(SimulationContext::waveform_to_calc_value(wf)),
+            None => Err(EvaluationError::IdentifierNotFound(signal.to_string())),
+        }
+    }
+}
+
 impl<'a> EvaluationContext for SimulationContext<'a> {
     fn get_waveform(
         &self,

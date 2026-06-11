@@ -60,15 +60,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         })
         .collect();
-    strip::header(
-        ui,
-        "SMITH",
-        &format!("Z₀ = {} Ω", smith.z0),
-        &legend,
-        false,
-        false,
-        false,
-    );
+    strip::StripHeader::new("SMITH", &format!("Z₀ = {} Ω", smith.z0), &legend).show(ui);
 
     let mut spec = PlotSpec::new(
         Axis::linear(-1.12, 1.12, "Re Γ"),

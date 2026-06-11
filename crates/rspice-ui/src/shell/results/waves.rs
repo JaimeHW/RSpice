@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use egui::Ui;
 
+use crate::analysis::calculator;
 use crate::common::AppState;
 use crate::state::{AnalysisType, SimulationState};
 use crate::ui::plot::{
@@ -19,8 +20,8 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
 
-use super::strip::{self, LegendChip};
-use super::{DerivedSeries, waveform_color, well_hint};
+use super::strip::{LegendChip, StripHeader};
+use super::{DerivedSeries, ExprEditor, ExprSeries, ExprTrace, waveform_color, well_hint};
 
 /// How a trace's Y values are interpreted.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -238,6 +239,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut toggle_maximize: Option<usize> = None;
     let mut close_strip: Option<usize> = None;
     let mut fit_strip: Option<usize> = None;
+    let mut toggle_expr: Option<(usize, usize)> = None;
+    let mut remove_expr: Option<(usize, usize)> = None;
+    let mut open_editor: Option<usize> = None;
 
     let avail = ui.available_rect_before_wrap();
     let n = visible.len();
@@ -273,23 +277,50 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 on: trace.visible,
                             })
                             .collect();
+                        // Expression chips follow the waveform chips; long
+                        // expressions are elided so a chip never eats the row.
+                        let strip_exprs: Vec<ExprTrace> = state
+                            .shell
+                            .results
+                            .exprs
+                            .get(&model.analysis_index)
+                            .cloned()
+                            .unwrap_or_default();
+                        let expr_labels: Vec<String> =
+                            strip_exprs.iter().map(|e| elide(&e.text, 24)).collect();
+                        let mut legend = legend;
+                        for (i, expr) in strip_exprs.iter().enumerate() {
+                            legend.push(LegendChip {
+                                name: &expr_labels[i],
+                                color: expr_color(&t, model.traces.len() + i),
+                                on: expr.visible,
+                            });
+                        }
+
                         let zoomed = state
                             .shell
                             .results
                             .plot_view(super::ResultViewer::Waves, model.analysis_index)
                             .is_zoomed();
-                        let header = strip::header(
-                            ui,
-                            &model.kind_tag,
-                            &model.subtitle,
-                            &legend,
-                            maximized,
-                            !maximized && n > 1,
-                            zoomed,
-                        );
+                        let header = StripHeader::new(&model.kind_tag, &model.subtitle, &legend)
+                            .maximized(maximized)
+                            .closable(!maximized && n > 1)
+                            .zoomed(zoomed)
+                            .expr_action(true)
+                            .removable_from(model.traces.len())
+                            .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
                             if let Some(trace) = model.traces.get(chip_index) {
                                 toggle_trace = Some((model.analysis_index, trace.waveform_index));
+                            } else {
+                                toggle_expr =
+                                    Some((model.analysis_index, chip_index - model.traces.len()));
+                            }
+                        }
+                        if let Some(chip_index) = header.legend_removed {
+                            if chip_index >= model.traces.len() {
+                                remove_expr =
+                                    Some((model.analysis_index, chip_index - model.traces.len()));
                             }
                         }
                         if header.maximize_clicked {
@@ -301,6 +332,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         if header.fit_clicked {
                             fit_strip = Some(model.analysis_index);
                         }
+                        if header.add_expr_clicked {
+                            open_editor = Some(model.analysis_index);
+                        }
+
+                        expr_editor_row(ui, state, model.analysis_index);
 
                         // Strips scrolled out of view skip the plot body
                         // entirely (range lookups, envelope mapping, shape
@@ -333,6 +369,307 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if let Some(idx) = fit_strip {
         results.reset_plot_view(super::ResultViewer::Waves, idx);
     }
+    if let Some((analysis, index)) = toggle_expr {
+        if let Some(expr) = results
+            .exprs
+            .get_mut(&analysis)
+            .and_then(|list| list.get_mut(index))
+        {
+            expr.visible = !expr.visible;
+        }
+    }
+    if let Some((analysis, index)) = remove_expr {
+        if let Some(list) = results.exprs.get_mut(&analysis) {
+            if index < list.len() {
+                let removed = list.remove(index);
+                results.expr_cache.remove(&(analysis, removed.text));
+            }
+            if list.is_empty() {
+                results.exprs.remove(&analysis);
+            }
+        }
+    }
+    if let Some(analysis) = open_editor {
+        results.expr_editor = Some(ExprEditor {
+            analysis_index: analysis,
+            text: String::new(),
+            error: None,
+            want_focus: true,
+        });
+    }
+}
+
+/// Shorten a label to `max` characters with a typographic ellipsis.
+fn elide(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_owned();
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
+}
+
+/// Palette color for the i-th trace slot of a strip (waveforms, then
+/// expressions).
+fn expr_color(tokens: &Tokens, slot: usize) -> egui::Color32 {
+    tokens.color.traces[slot % tokens.color.traces.len()]
+}
+
+/// The inline expression editor row under a strip header (when open for
+/// this strip): mono input, Enter/Add commits, Esc closes, error inline.
+fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
+    let open_for_strip = state
+        .shell
+        .results
+        .expr_editor
+        .as_ref()
+        .is_some_and(|e| e.analysis_index == analysis_index);
+    if !open_for_strip {
+        return;
+    }
+
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    enum Action {
+        None,
+        Commit,
+        Cancel,
+    }
+    let mut action = Action::None;
+
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 34.0),
+        egui::Sense::hover(),
+    );
+    ui.painter().rect_filled(rect, 0.0, c.bg_panel);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(10.0, 5.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let row = &mut child;
+    row.spacing_mut().item_spacing.x = 8.0;
+
+    row.label(
+        egui::RichText::new("expr")
+            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+            .color(c.text_dim),
+    );
+
+    let editor = state
+        .shell
+        .results
+        .expr_editor
+        .as_mut()
+        .expect("checked above");
+    let response = row.add(
+        egui::TextEdit::singleline(&mut editor.text)
+            .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+            .hint_text("V(out)/V(in) · dB(V(out)) · deriv(V(out))")
+            .desired_width(340.0),
+    );
+    if editor.want_focus {
+        response.request_focus();
+        editor.want_focus = false;
+    }
+    if response.lost_focus() && row.input(|i| i.key_pressed(egui::Key::Enter)) {
+        action = Action::Commit;
+    }
+    if row.input(|i| i.key_pressed(egui::Key::Escape)) {
+        action = Action::Cancel;
+    }
+    if crate::ui::widgets::Button::new("Add").show(row).clicked() {
+        action = Action::Commit;
+    }
+    if let Some(error) = &editor.error {
+        row.label(
+            egui::RichText::new(elide(error, 64))
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .color(c.err),
+        );
+    }
+
+    match action {
+        Action::None => {}
+        Action::Cancel => state.shell.results.expr_editor = None,
+        Action::Commit => {
+            let text = state
+                .shell
+                .results
+                .expr_editor
+                .as_ref()
+                .map(|e| e.text.trim().to_owned())
+                .unwrap_or_default();
+            if text.is_empty() {
+                state.shell.results.expr_editor = None;
+                return;
+            }
+            let (series, extremes) = evaluate_expression(&state.simulation, analysis_index, &text);
+            match series {
+                Ok(series) => {
+                    state.shell.results.expr_cache.insert(
+                        (analysis_index, text.clone()),
+                        ExprSeries {
+                            version: state.simulation.data_version,
+                            series: Ok(series),
+                            y_extremes: extremes,
+                        },
+                    );
+                    state
+                        .shell
+                        .results
+                        .exprs
+                        .entry(analysis_index)
+                        .or_default()
+                        .push(ExprTrace {
+                            text,
+                            visible: true,
+                        });
+                    state.shell.results.expr_editor = None;
+                }
+                Err(error) => {
+                    if let Some(editor) = state.shell.results.expr_editor.as_mut() {
+                        editor.error = Some(error);
+                        editor.want_focus = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Evaluate one expression against an analysis' waveforms. Scalars become a
+/// constant trace across the analysis' x span.
+fn evaluate_expression(
+    simulation: &SimulationState,
+    analysis_index: usize,
+    text: &str,
+) -> (Result<(Arc<[f64]>, Arc<[f64]>), String>, Option<(f64, f64)>) {
+    let Some(analysis) = simulation
+        .active_run()
+        .and_then(|run| run.analyses.get(analysis_index))
+    else {
+        return (Err("analysis no longer exists".to_owned()), None);
+    };
+
+    let ctx = calculator::WaveformsContext::new(&analysis.waveforms);
+    let expr = calculator::parser::parse(text);
+    match calculator::evaluator::evaluate(&expr, &ctx) {
+        Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
+            let extremes = super::finite_extremes(&y);
+            (Ok((x.into(), y.into())), extremes)
+        }
+        Ok(calculator::CalcValue::Waveform(..)) => {
+            (Err("expression produced no samples".to_owned()), None)
+        }
+        Ok(calculator::CalcValue::Scalar(value)) => {
+            let span = analysis.waveforms.first().and_then(|w| {
+                (w.x.len() >= 2).then(|| (w.x[0], w.x[w.x.len() - 1]))
+            });
+            match span {
+                Some((x0, x1)) => (
+                    Ok((vec![x0, x1].into(), vec![value, value].into())),
+                    Some((value, value)),
+                ),
+                None => (Err("scalar result with no x span".to_owned()), None),
+            }
+        }
+        Err(error) => (Err(error.to_string()), None),
+    }
+}
+
+/// One expression trace resolved for plotting.
+struct ResolvedExpr {
+    x: Arc<[f64]>,
+    y: Arc<[f64]>,
+    color: egui::Color32,
+    cache_key: u64,
+    label: String,
+    y_extremes: Option<(f64, f64)>,
+}
+
+/// Refresh the expression cache for a strip at the current data version and
+/// hand back plottable series (visible expressions, successful evaluations).
+fn resolve_strip_exprs(
+    state: &mut AppState,
+    model: &StripModel,
+    tokens: &Tokens,
+) -> Vec<ResolvedExpr> {
+    let exprs: Vec<(usize, ExprTrace)> = state
+        .shell
+        .results
+        .exprs
+        .get(&model.analysis_index)
+        .map(|list| list.iter().cloned().enumerate().collect())
+        .unwrap_or_default();
+    if exprs.is_empty() {
+        return Vec::new();
+    }
+
+    let version = state.simulation.data_version;
+    let mut resolved = Vec::new();
+    for (slot, expr) in exprs {
+        let key = (model.analysis_index, expr.text.clone());
+        let fresh = state
+            .shell
+            .results
+            .expr_cache
+            .get(&key)
+            .is_some_and(|s| s.version == version);
+        if !fresh {
+            let (series, extremes) =
+                evaluate_expression(&state.simulation, model.analysis_index, &expr.text);
+            if let Err(error) = &series {
+                state.push_user_message(crate::common::app::ConsoleMessage::warning(format!(
+                    "expression `{}`: {}",
+                    expr.text, error
+                )));
+            }
+            state.shell.results.expr_cache.insert(
+                key.clone(),
+                ExprSeries {
+                    version,
+                    series,
+                    y_extremes: extremes,
+                },
+            );
+        }
+        if !expr.visible {
+            continue;
+        }
+        if let Some(ExprSeries {
+            series: Ok((x, y)),
+            y_extremes,
+            ..
+        }) = state.shell.results.expr_cache.get(&key)
+        {
+            resolved.push(ResolvedExpr {
+                x: Arc::clone(x),
+                y: Arc::clone(y),
+                color: expr_color(tokens, model.traces.len() + slot),
+                cache_key: expr_cache_key(model.analysis_index, &expr.text),
+                label: elide(&expr.text, 24),
+                y_extremes: *y_extremes,
+            });
+        }
+    }
+    resolved
+}
+
+/// Stable decimation-cache identity for an expression trace. The high bit
+/// keeps it out of the waveform trace_key space.
+fn expr_cache_key(analysis_index: usize, text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (analysis_index, text).hash(&mut hasher);
+    hasher.finish() | (1 << 63)
 }
 
 /// Flip a waveform's visibility on the run, keeping the live copy in sync.
@@ -372,7 +709,33 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         well_hint(ui, "No data");
         return;
     };
-    let Some((y0, y1)) = y_range(&mut state.shell.results.derived, model, false) else {
+
+    // Expression traces participate in the automatic fit alongside the
+    // run's visible traces.
+    let exprs = resolve_strip_exprs(state, model, &t);
+    let model_range = y_range(&mut state.shell.results.derived, model, false);
+    let auto_y = {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        if let Some((a, b)) = model_range {
+            lo = a;
+            hi = b;
+        }
+        for expr in &exprs {
+            if let Some((a, b)) = expr.y_extremes {
+                lo = lo.min(a);
+                hi = hi.max(b);
+            }
+        }
+        if !lo.is_finite() || !hi.is_finite() {
+            None
+        } else if lo == hi {
+            Some((lo - 1.0, hi + 1.0))
+        } else {
+            Some((lo, hi))
+        }
+    };
+    let Some((y0, y1)) = auto_y else {
         well_hint(ui, "No visible traces — enable one in the legend");
         return;
     };
@@ -431,6 +794,13 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         }
         spec.traces.push(plot_trace);
     }
+    for expr in &exprs {
+        spec.traces.push(
+            Trace::new(&expr.x, &expr.y, expr.color)
+                .thin()
+                .cache_key(expr.cache_key),
+        );
+    }
 
     let cursors = (state.shell.results.cursor_strip == Some(model.analysis_index))
         .then_some(state.shell.results.cursors);
@@ -440,6 +810,10 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         for trace in model.traces.iter().filter(|t| t.visible).take(6) {
             let value = sample_at(&trace.x, &trace.y, x);
             rows.push((trace.name.clone(), model.format_trace_value(trace, value)));
+        }
+        for expr in exprs.iter().take(3) {
+            let value = sample_at(&expr.x, &expr.y, x);
+            rows.push((expr.label.clone(), fmt_si(value, "", 3)));
         }
         rows
     };

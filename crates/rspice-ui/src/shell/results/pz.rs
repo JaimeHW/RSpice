@@ -46,15 +46,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: true,
         },
     ];
-    strip::header(
-        ui,
+    strip::StripHeader::new(
         "PZ",
         &format!("{} · {} roots", data.name, data.roots.len()),
         &legend,
-        false,
-        false,
-        false,
-    );
+    )
+    .show(ui);
 
     // Symmetric ranges around the roots.
     let mut extent = 1.0f64;
