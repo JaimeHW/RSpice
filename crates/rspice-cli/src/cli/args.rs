@@ -117,6 +117,16 @@ pub struct RunArgs {
     #[arg(long, value_name = "TOL", requires = "compress")]
     pub compress_tol: Option<f64>,
 
+    /// Save the end-of-run transient state to a checkpoint file
+    /// (segmented long runs; continue later with --restore)
+    #[arg(long, value_name = "FILE")]
+    pub checkpoint: Option<PathBuf>,
+
+    /// Resume a transient from a checkpoint written by --checkpoint;
+    /// the run continues from the checkpoint time to the deck's tstop
+    #[arg(long, value_name = "FILE", conflicts_with = "compress")]
+    pub restore: Option<PathBuf>,
+
     /// Maximum Newton-Raphson iterations
     #[arg(long, value_name = "N")]
     pub maxiter: Option<usize>,

@@ -343,6 +343,28 @@ pub(super) fn run_dc_sweep(
     }
 }
 
+/// Write the end-of-run checkpoint when `--checkpoint` was given.
+fn save_checkpoint_if_requested(
+    ctx: &RunContext<'_>,
+    end_state: &rspice_core::engine::TransientCheckpoint,
+) -> Result<(), CliError> {
+    let Some(path) = &ctx.args.checkpoint else {
+        return Ok(());
+    };
+    end_state.save(path).map_err(|e| CliError::OutputError {
+        path: path.clone(),
+        source: std::io::Error::other(e),
+    })?;
+    if !ctx.quiet {
+        println!(
+            "Checkpoint written: {} (t={:.6e}s)",
+            path.display(),
+            end_state.time
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn run_transient(
     ctx: &RunContext<'_>,
     tstop: f64,
@@ -406,6 +428,44 @@ pub(super) fn run_transient(
                     );
                 }
                 Ok(compressed.into())
+            }
+            Err(e) => Err(e),
+        }
+    } else if let Some(restore_path) = &ctx.args.restore {
+        let checkpoint = rspice_core::engine::TransientCheckpoint::load(restore_path)
+            .map_err(|e| CliError::InvalidArgument {
+                message: format!("--restore {}: {e}", restore_path.display()),
+                suggestion: Some(
+                    "pass a checkpoint file written by a previous run's --checkpoint".to_string(),
+                ),
+            })?;
+        if !ctx.quiet {
+            println!(
+                "Resuming transient from t={:.6e}s ({})",
+                checkpoint.time,
+                restore_path.display()
+            );
+        }
+        let result = ctx
+            .engine
+            .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step);
+        pb.finish_and_clear();
+        match result {
+            Ok((result, end_state)) => {
+                save_checkpoint_if_requested(ctx, &end_state)?;
+                Ok(result)
+            }
+            Err(e) => Err(e),
+        }
+    } else if ctx.args.checkpoint.is_some() {
+        let result = ctx
+            .engine
+            .run_tran_checkpointed(ctx.netlist, tstop, internal_max_step);
+        pb.finish_and_clear();
+        match result {
+            Ok((result, end_state)) => {
+                save_checkpoint_if_requested(ctx, &end_state)?;
+                Ok(result)
             }
             Err(e) => Err(e),
         }
