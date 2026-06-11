@@ -264,6 +264,27 @@ impl CircuitData {
         }
     }
 
+    /// Prepare Verilog-A devices for a transient timepoint evaluation
+    ///
+    /// Sets the simulation time, integration timestep, and analysis type so
+    /// ddt/idt and event operators see transient semantics.
+    #[cfg(feature = "veriloga")]
+    pub fn prepare_veriloga_timepoint(&mut self, time: Value, dt: Value) {
+        for device in self.veriloga_devices.iter_mut() {
+            device.set_analysis_type(2);
+            device.set_time(time);
+            device.set_timestep(dt);
+        }
+    }
+
+    /// Commit Verilog-A integrator state after an accepted timestep
+    #[cfg(feature = "veriloga")]
+    pub fn accept_veriloga_timestep(&mut self) {
+        for device in self.veriloga_devices.iter_mut() {
+            device.advance_state();
+        }
+    }
+
     /// Check if all XSPICE instances have converged
     pub fn xspice_converged(&self, tolerance: Value) -> bool {
         self.xspice_instances

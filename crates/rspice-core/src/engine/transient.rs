@@ -1817,6 +1817,10 @@ impl Engine {
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
                     }
+                    #[cfg(feature = "veriloga")]
+                    if circuit.has_veriloga_devices() {
+                        circuit.accept_veriloga_timestep();
+                    }
 
                     solution.clone_from(&new_solution);
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
@@ -2419,6 +2423,10 @@ impl Engine {
                     if circuit.has_xspice_devices() {
                         circuit.accept_xspice_timestep();
                     }
+                    #[cfg(feature = "veriloga")]
+                    if circuit.has_veriloga_devices() {
+                        circuit.accept_veriloga_timestep();
+                    }
 
                     solution.clone_from(&new_solution);
                     if std::env::var_os("RSPICE_GRID_DEBUG").is_some() {
@@ -2564,6 +2572,10 @@ impl Engine {
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_timestep();
+            }
+            #[cfg(feature = "veriloga")]
+            if circuit.has_veriloga_devices() {
+                circuit.accept_veriloga_timestep();
             }
 
             solution.clone_from(&new_solution);

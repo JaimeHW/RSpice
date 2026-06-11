@@ -132,6 +132,10 @@ impl Engine {
         Self::stamp_coupled_tline_companions(circuit, matrix, rhs, time, dt, ctx.coupled_tline_refs);
 
         if circuit.has_nonlinear_devices() {
+            #[cfg(feature = "veriloga")]
+            if circuit.has_veriloga_devices() {
+                circuit.prepare_veriloga_timepoint(time, dt);
+            }
             circuit.stamp_nonlinear(matrix, rhs, solution);
             circuit.stamp_behavioral(matrix, rhs, solution, time);
         }
