@@ -21,10 +21,13 @@
 //!
 //! # Algorithm
 //!
-//! 1. Obtain PSS solution (periodic operating point and Monodromy matrix)
-//! 2. Compute time-varying small-signal parameters along the period
-//! 3. Apply Floquet transformation to get conversion matrices
-//! 4. Sweep input frequency and compute transfer at each sideband
+//! 1. Solve the large-signal periodic operating point with harmonic balance
+//! 2. Sample the periodically time-varying small-signal conductances and
+//!    transform them to conversion-coupling spectra
+//! 3. Solve the sideband-coupled admittance system at every sweep offset
+//!
+//! The solve lives in the engine, which owns the circuit: see
+//! `Engine::run_pac` and `harmonic_balance::solver::periodic_ac`.
 //!
 //! # SPICE Syntax
 //!
@@ -35,17 +38,19 @@
 //! # Example
 //!
 //! ```ignore
-//! use rspice_core::analysis::advanced::pac::{PacConfig, PacAnalyzer};
+//! use rspice_core::analysis::advanced::pac::PacConfig;
 //!
-//! // After running PSS...
 //! let pac_config = PacConfig::new()
-//!     .with_sweep(1e6, 1e9, 100)    // 1 MHz to 1 GHz, 100 points
-//!     .with_sidebands(-5, 5);        // Harmonics -5 to +5
+//!     .with_fundamental(1e9)         // 1 GHz LO
+//!     .with_sweep(1e6, 1e9, 100)     // 1 MHz to 1 GHz, 100 points
+//!     .with_sidebands(-5, 5)         // Harmonics -5 to +5
+//!     .with_input_source("VRF")
+//!     .with_output_node("vout");
 //!
-//! let pac_result = engine.run_pac(&netlist, &pss_result, pac_config)?;
+//! let pac_result = engine.run_pac(&netlist, pac_config)?;
 //!
-//! // Get conversion gain from RF (sideband 1) to IF (sideband 0)
-//! let conversion_gain = pac_result.transfer(1, 0, output_node);
+//! // Conversion gain from RF (sideband 1) to IF (sideband 0)
+//! let conversion_gain = pac_result.result.conversion_gain(1, 0, 0);
 //! ```
 
 mod config;
@@ -56,4 +61,4 @@ mod solver;
 pub use config::{PacConfig, PacSweepType};
 pub use conversion_matrix::{ConversionMatrix, SidebandTransfer};
 pub use result::{PacResult, PacSidebandData};
-pub use solver::{PacAnalyzer, PacError};
+pub use solver::PacError;

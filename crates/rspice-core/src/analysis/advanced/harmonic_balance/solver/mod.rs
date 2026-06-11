@@ -19,7 +19,10 @@ mod linear;
 mod linear_algebra;
 mod newton;
 mod nonlinear_api;
+mod periodic_ac;
 mod result_builder;
+
+pub use periodic_ac::PeriodicAcExcitation;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]

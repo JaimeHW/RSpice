@@ -140,29 +140,13 @@ pub(super) fn run_pac_internal(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
 ) -> Result<PacInternalResult, String> {
-    use rspice_core::analysis::PssConfig;
-    use rspice_core::analysis::advanced::pac::{PacAnalyzer, PacConfig};
+    use rspice_core::analysis::advanced::pac::PacConfig;
 
     config.validate()?;
 
     let mut sim_config = build_engine_config(netlist, None);
     sim_config.tolerance = config.pss_tolerance;
     let engine = Engine::new(sim_config);
-
-    let pss_config = PssConfig::new(config.pss_fundamental_freq)
-        .with_harmonics(config.pss_num_harmonics)
-        .with_tolerance(config.pss_tolerance)
-        .with_max_iterations(50)
-        .with_tstab_periods(10);
-    let pss_result = engine
-        .run_pss(netlist, pss_config)
-        .map_err(|e| format!("PAC prerequisite PSS error: {}", e))?;
-
-    let fundamental = if pss_result.period > 0.0 {
-        1.0 / pss_result.period
-    } else {
-        return Err("PAC prerequisite PSS returned non-positive period".to_string());
-    };
 
     let mut pac_config = PacConfig::new()
         .with_sweep(config.start_freq, config.stop_freq, config.points_per_unit)
@@ -172,7 +156,7 @@ pub(super) fn run_pac_internal(
         .with_output_node(&normalize_pac_node_name(&config.output_node))
         .with_tolerances(config.reltol, config.abstol)
         .with_dc(config.include_dc)
-        .with_fundamental(fundamental);
+        .with_fundamental(config.pss_fundamental_freq);
 
     if let Some(output_ref) = &config.output_ref {
         let trimmed = output_ref.trim();
@@ -185,15 +169,12 @@ pub(super) fn run_pac_internal(
         .validate()
         .map_err(|e| format!("PAC configuration error: {}", e))?;
 
-    let mut analyzer = PacAnalyzer::new(pac_config);
-    let pac_result = analyzer
-        .analyze(
-            &pss_result.result,
-            pss_result.result.num_nodes(),
-            pss_result.result.node_names.clone(),
-            Vec::new(),
-        )
-        .map_err(|e| format!("PAC error: {}", e))?;
+    // The engine solves the periodic operating point with harmonic balance
+    // and the sideband-coupled small-signal system around it.
+    let pac_result = engine
+        .run_pac(netlist, pac_config)
+        .map_err(|e| format!("PAC error: {}", e))?
+        .result;
 
     let output_node_idx =
         resolve_pac_output_node(&pac_result, &config.output_node).ok_or_else(|| {

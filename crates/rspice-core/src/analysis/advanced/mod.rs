@@ -52,7 +52,7 @@ pub use noise::{
     IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution, NoiseResult,
     NoiseSource, NoiseSourceType,
 };
-pub use pac::{ConversionMatrix, PacAnalyzer, PacConfig, PacError, PacResult, PacSweepType};
+pub use pac::{ConversionMatrix, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 pub use pstb::{FloquetMultiplier, PstbAnalyzer, PstbConfig, PstbResult, StabilityType};

@@ -27,7 +27,10 @@ use num_complex::Complex64;
 use std::collections::BTreeSet;
 
 mod drive;
+mod pac;
 mod stamping;
+
+pub use pac::PacAnalysisResult;
 
 /// HB-specific error types
 #[derive(Debug, Clone)]
