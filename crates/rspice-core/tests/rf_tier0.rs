@@ -91,19 +91,13 @@ fn hb_linear_rc_matches_the_ac_transfer_function() {
 /// second-harmonic-to-fundamental ratio of exactly `a / (4·Vov)` in the
 /// drain current (and therefore in the resistive drain voltage).
 ///
-/// KNOWN GAP (live repro): the engine reports exactly 2× this ratio.
-/// Root cause identified: HB stores solution coefficients in a
-/// full-amplitude convention (a 0.2 V drive stores c1 = 0.2) while the
-/// FFT pair (`HbFft::to_time_domain`/`to_frequency_domain`) implements
-/// the two-sided half-amplitude convention — so every nonlinear device
-/// is evaluated at twice the true voltage swing. Linear circuits are
-/// scale-invariant and mask it (see the passing test above). The fix is
-/// a coherent basis audit: stamp source harmonics at A/2, extract
-/// reported spectra at 2·w_k, and leave the (mathematically standard)
-/// two-sided FFT/Toeplitz machinery untouched. Un-ignore both gap tests
-/// when landed.
+/// This pins the HB amplitude-basis convention end to end: an engine
+/// that evaluates nonlinear devices at the wrong multiple of the true
+/// swing (the historical defect was exactly 2×, from full-amplitude
+/// solution storage feeding the two-sided half-amplitude FFT pair)
+/// scales this ratio by the same factor, while linear circuits stay
+/// scale-invariant and mask it.
 #[test]
-#[ignore = "HB amplitude-basis mismatch doubles nonlinear drive (see doc comment)"]
 fn hb_mosfet_square_law_second_harmonic_ratio_is_exact() {
     let f0 = 1.0e6;
     let vov = 1.0; // VGS - VT
@@ -251,13 +245,11 @@ fn pss_mean_matches_the_transient_referee_on_a_rectifier() {
     );
 }
 
-/// KNOWN GAP (live repro, same root cause as the square-law test): HB's
-/// DC component on this hard-clipping rectifier reads ~1.97 V where PSS
-/// and the transient referee agree on ~0.53 V — the doubled nonlinear
-/// drive overdrives the diode. Un-ignore when the amplitude basis is
-/// fixed.
+/// Hard-clipping rectifier: HB's DC component must agree with the PSS
+/// and transient referees (~0.53 V). An amplitude-basis error overdrives
+/// the diode and pushes the rectified DC far off (the historical 2×
+/// defect read ~1.97 V here).
 #[test]
-#[ignore = "HB amplitude-basis mismatch doubles nonlinear drive (see square-law test)"]
 fn hb_dc_component_matches_the_transient_referee_on_a_rectifier() {
     let netlist = Netlist::parse(RECTIFIER_DECK).expect("deck parses");
     let referee = transient_mean_out(&netlist);
