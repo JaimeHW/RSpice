@@ -594,6 +594,9 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.clear_cursors();
+        // Pinned XY readouts index into the old run's point arrays;
+        // a same-shape new run would silently relabel them.
+        results.rf_pin.clear();
     }
     results.cache.ensure_version(data_version);
     results.derived.ensure_version(data_version);

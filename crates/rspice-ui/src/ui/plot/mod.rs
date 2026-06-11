@@ -29,6 +29,6 @@ mod spec;
 pub use cursor::CursorPair;
 pub use decimate::{DecimationCache, sample_at};
 pub use format::fmt_si;
-pub use render::{PlotResponse, ViewChange, plot_rect, show};
+pub use render::{PlotResponse, ViewChange, plot_rect, show, square_outer_rect};
 pub use scale::XScale;
 pub use spec::{Axis, Band, Marker, PlotMapper, PlotSpec, RefLine, Trace, YSide};

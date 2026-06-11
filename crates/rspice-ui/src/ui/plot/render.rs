@@ -57,13 +57,41 @@ pub fn plot_rect(ui: &Ui, spec: &PlotSpec<'_>) -> Rect {
     inner_rect(ui.available_rect_before_wrap(), spec)
 }
 
+/// Margins around the inner plot area (tick labels, axis units).
+const MARGIN_TOP: f32 = 12.0;
+const MARGIN_BOTTOM: f32 = 26.0;
+const MARGIN_RIGHT_PLAIN: f32 = 16.0;
+const MARGIN_RIGHT_AXIS: f32 = 54.0;
+
+fn right_margin(spec: &PlotSpec<'_>) -> f32 {
+    if spec.y_right.is_some() {
+        MARGIN_RIGHT_AXIS
+    } else {
+        MARGIN_RIGHT_PLAIN
+    }
+}
+
 fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
-    let left = spec.left_margin;
-    let right = if spec.y_right.is_some() { 54.0 } else { 16.0 };
-    let (top, bottom) = (12.0, 26.0);
     Rect::from_min_max(
-        pos2(rect.left() + left, rect.top() + top),
-        pos2(rect.right() - right, rect.bottom() - bottom),
+        pos2(rect.left() + spec.left_margin, rect.top() + MARGIN_TOP),
+        pos2(rect.right() - right_margin(spec), rect.bottom() - MARGIN_BOTTOM),
+    )
+}
+
+/// A rect centered in `avail` whose INNER plot area (after this spec's
+/// margins) is square. The XY viewers (Smith, Nyquist, pole-zero) need
+/// circle grids and trace geometry on identical X/Y scales — a square
+/// OUTER rect leaves the inner area taller than wide and the unit circle
+/// would lie about |Γ| = 1.
+pub fn square_outer_rect(avail: Rect, spec: &PlotSpec<'_>) -> Rect {
+    let h_margins = spec.left_margin + right_margin(spec);
+    let v_margins = MARGIN_TOP + MARGIN_BOTTOM;
+    let inner = (avail.width() - h_margins)
+        .min(avail.height() - v_margins)
+        .max(48.0);
+    Rect::from_center_size(
+        avail.center(),
+        vec2(inner + h_margins, inner + v_margins),
     )
 }
 

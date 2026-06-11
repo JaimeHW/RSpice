@@ -65,6 +65,7 @@ pub struct Dialog<'a> {
     size: DialogSize,
     primary: &'a str,
     primary_enabled: bool,
+    primary_on_enter: bool,
     destructive: bool,
     secondary: Option<&'a str>,
     ghost: Option<&'a str>,
@@ -81,11 +82,19 @@ impl<'a> Dialog<'a> {
             size: DialogSize::Md,
             primary,
             primary_enabled: true,
+            primary_on_enter: true,
             destructive: false,
             secondary: None,
             ghost: None,
             hint: None,
         }
+    }
+
+    /// Disable the Enter→primary mapping — for dialogs whose body owns the
+    /// Enter key (multiline editors, where Enter must insert a newline).
+    pub fn primary_on_enter(mut self, on: bool) -> Self {
+        self.primary_on_enter = on;
+        self
     }
 
     /// Surface width.
@@ -139,7 +148,10 @@ impl<'a> Dialog<'a> {
         // Keys first so they work regardless of focus inside the body.
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
             choice = DialogChoice::Cancelled;
-        } else if self.primary_enabled && ctx.input(|i| i.key_pressed(Key::Enter)) {
+        } else if self.primary_enabled
+            && self.primary_on_enter
+            && ctx.input(|i| i.key_pressed(Key::Enter))
+        {
             choice = DialogChoice::Primary;
         }
 

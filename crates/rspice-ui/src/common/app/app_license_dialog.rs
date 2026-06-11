@@ -62,6 +62,11 @@ impl RSpiceApp {
             _ => true,
         };
 
+        // Ctrl+Enter verifies; bare Enter belongs to the textarea (the
+        // field note explicitly invites line breaks).
+        let ctrl_enter =
+            ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+
         let state = &mut self.state;
         let choice = Dialog::new("License", "Enter license key", primary)
             .size(DialogSize::Md)
@@ -69,6 +74,7 @@ impl RSpiceApp {
             .ghost("Cancel")
             .hint(&hint)
             .primary_enabled(primary_enabled)
+            .primary_on_enter(false)
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
@@ -124,6 +130,12 @@ impl RSpiceApp {
                     }
                 }
             });
+
+        let choice = if choice == DialogChoice::None && ctrl_enter && primary_enabled {
+            DialogChoice::Primary
+        } else {
+            choice
+        };
 
         match choice {
             DialogChoice::None => {}

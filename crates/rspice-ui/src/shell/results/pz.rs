@@ -104,10 +104,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }));
 
-    // Square region for honest geometry.
+    // Region sized so the INNER plot area is square — σ and jω on one scale.
     let avail = ui.available_rect_before_wrap();
-    let side = avail.width().min(avail.height());
-    let rect = egui::Rect::from_center_size(avail.center(), egui::vec2(side, side));
+    let rect = plot::square_outer_rect(avail, &spec);
     let mut plot_ui = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)

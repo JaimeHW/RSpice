@@ -86,7 +86,9 @@ fn render_expression_editor(
 ) -> Option<PropertyValue> {
     let text = match current {
         PropertyValue::Expression(e) => e.clone(),
-        PropertyValue::Number { value, .. } => value.to_string(),
+        // Round-trip through engineering notation so typing "100k" rebinds
+        // as "100k", not "100000" replaced under the cursor mid-edit.
+        PropertyValue::Number { value, .. } => format_engineering(*value),
         _ => current.display_string(),
     };
 

@@ -44,7 +44,7 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 26] = [
+const GLOBAL_RULES: [ShortcutRule; 18] = [
     ShortcutRule::new(
         ShortcutCommand::OpenPreferences,
         Key::Comma,
@@ -60,14 +60,6 @@ const GLOBAL_RULES: [ShortcutRule; 26] = [
     ShortcutRule::new(ShortcutCommand::FileNew, Key::N, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileOpen, Key::O, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileSave, Key::S, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::EditUndo, Key::Z, Some(true), Some(false)),
-    ShortcutRule::new(ShortcutCommand::EditRedo, Key::Y, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::EditRedo, Key::Z, Some(true), Some(true)),
-    ShortcutRule::new(ShortcutCommand::EditCopy, Key::C, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::EditPaste, Key::V, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::EditCut, Key::X, Some(true), None),
-    ShortcutRule::new(ShortcutCommand::EditDelete, Key::Delete, None, None),
-    ShortcutRule::new(ShortcutCommand::EditSelectAll, Key::A, Some(true), None),
     ShortcutRule::new(
         ShortcutCommand::ToggleBrowserPanel,
         Key::L,
@@ -91,6 +83,21 @@ const GLOBAL_RULES: [ShortcutRule; 26] = [
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Equals, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomOut, Key::Minus, Some(true), None),
     ShortcutRule::new(ShortcutCommand::Zoom100, Key::Num0, Some(true), None),
+];
+
+/// Edit-class shortcuts act on the schematic and must never fire while a
+/// text field has focus — Ctrl+V into the license textarea must not also
+/// paste components, and Delete while editing the palette query must not
+/// delete the selection. Their text-editing meaning belongs to the widget.
+const GLOBAL_EDIT_RULES: [ShortcutRule; 8] = [
+    ShortcutRule::new(ShortcutCommand::EditUndo, Key::Z, Some(true), Some(false)),
+    ShortcutRule::new(ShortcutCommand::EditRedo, Key::Y, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::EditRedo, Key::Z, Some(true), Some(true)),
+    ShortcutRule::new(ShortcutCommand::EditCopy, Key::C, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::EditPaste, Key::V, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::EditCut, Key::X, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::EditDelete, Key::Delete, None, None),
+    ShortcutRule::new(ShortcutCommand::EditSelectAll, Key::A, Some(true), None),
 ];
 
 const FOCUS_FREE_RULES: [ShortcutRule; 20] = [
@@ -170,6 +177,7 @@ pub(crate) fn collect_shortcut_commands(snapshot: &ShortcutInputSnapshot) -> Vec
         return commands;
     }
 
+    collect_matching_rules(&mut commands, snapshot, &GLOBAL_EDIT_RULES);
     collect_matching_rules(&mut commands, snapshot, &FOCUS_FREE_RULES);
 
     commands
