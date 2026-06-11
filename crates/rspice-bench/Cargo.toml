@@ -1,0 +1,19 @@
+[package]
+name = "rspice-bench"
+description = "Macro-benchmark rig comparing RSpice against reference simulators (M0.5)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rspice-bench"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
