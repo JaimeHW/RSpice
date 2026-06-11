@@ -839,3 +839,21 @@ impl Jfet {
         }
     }
 }
+
+#[cfg(test)]
+mod hfet1_tests {
+    use super::*;
+
+    #[test]
+    fn hfet1_linear_region_current_matches_ngspice46() {
+        // Oracle: ngspice-46 .op on `nmf(level=5 gatemod=0 vto=0.1)`,
+        // z1 l=1u w=20u, vgs=0.4, vds=0.05 -> vd#branch = -2.68269e-4.
+        let mut jfet = Jfet::njf("z1", 1, 2, 3).enable_hfet_model();
+        jfet.params.vto = 0.1;
+        let (ids, gm, gds) = jfet.calculate(0.4, 0.05, 300.15);
+        assert!(
+            (ids - 2.68269e-4).abs() <= 2.68269e-4 * 1.0e-3,
+            "ids={ids:e} expected 2.68269e-4 (gm={gm:e} gds={gds:e})"
+        );
+    }
+}
