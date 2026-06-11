@@ -55,6 +55,100 @@ impl Engine {
     }
 
     #[inline]
+    /// Exact LTRA small-signal branch load (ngspice ltraacld.c):
+    /// `Y0(s)*V1 - I1 = e^{-lambda*l}*(Y0(s)*V2 + I2)` and symmetrically for
+    /// port 2, with `Y0 = sqrt((G+sC)/(R+sL))`, `lambda*l =
+    /// sqrt((G+sCtot)(R+sLtot))` in total quantities (G = 0 for the native
+    /// kernel). Stamped on the branch rows the native topology reserves.
+    fn stamp_ltra_branch_ac(
+        matrix: &mut ComplexMatrix,
+        tline: &crate::device::TransmissionLine,
+        br1: NodeId,
+        br2: NodeId,
+        omega: Value,
+    ) -> bool {
+        let Some((ltot, ctot, rtot)) = tline.ltra_ac_total_rlc() else {
+            return false;
+        };
+
+        let s_c = Complex64::new(0.0, omega * ctot);
+        let z_series = Complex64::new(rtot, omega * ltot);
+        let y0 = (s_c / z_series).sqrt();
+        let lambda_l = (s_c * z_series).sqrt();
+        let explambda = (-lambda_l).exp();
+        let y0exp = y0 * explambda;
+        if !(y0.re.is_finite() && y0.im.is_finite() && explambda.re.is_finite()) {
+            return false;
+        }
+
+        let mut add = |row: NodeId, col: NodeId, value: Complex64| {
+            if row > 0 && col > 0 {
+                matrix.add_real(row - 1, col - 1, value.re);
+                matrix.add_imag(row - 1, col - 1, value.im);
+            }
+        };
+        let one = Complex64::new(1.0, 0.0);
+
+        for &(br, (pos_self, neg_self), (pos_far, neg_far), far_br) in &[
+            (
+                br1,
+                (tline.node1_pos, tline.node1_neg),
+                (tline.node2_pos, tline.node2_neg),
+                br2,
+            ),
+            (
+                br2,
+                (tline.node2_pos, tline.node2_neg),
+                (tline.node1_pos, tline.node1_neg),
+                br1,
+            ),
+        ] {
+            add(br, pos_self, y0);
+            add(br, neg_self, -y0);
+            add(br, br, -one);
+            add(br, pos_far, -y0exp);
+            add(br, neg_far, y0exp);
+            add(br, far_br, -explambda);
+        }
+        add(tline.node1_pos, br1, one);
+        add(tline.node1_neg, br1, -one);
+        add(tline.node2_pos, br2, one);
+        add(tline.node2_neg, br2, -one);
+        true
+    }
+
+    /// Native TXL small-signal load. ngspice registers the regular TXLload
+    /// as DEVacLoad, and the AC driver runs it under MODEDC, so the oracle
+    /// semantic is the DC resistive two-port: `I1 + I2 = 0` and
+    /// `V1 - V2 - R*len*I1 = 0` on the reserved branch rows.
+    fn stamp_txl_branch_ac(
+        matrix: &mut ComplexMatrix,
+        tline: &crate::device::TransmissionLine,
+        br1: NodeId,
+        br2: NodeId,
+    ) {
+        let r_series = tline.dc_series_resistance();
+        let mut add = |row: NodeId, col: NodeId, value: Value| {
+            if row > 0 && col > 0 {
+                matrix.add_real(row - 1, col - 1, value);
+            }
+        };
+
+        add(tline.node1_pos, br1, 1.0);
+        add(tline.node1_neg, br1, -1.0);
+        add(tline.node2_pos, br2, 1.0);
+        add(tline.node2_neg, br2, -1.0);
+
+        add(br1, br1, 1.0);
+        add(br1, br2, 1.0);
+
+        add(br2, tline.node1_pos, 1.0);
+        add(br2, tline.node1_neg, -1.0);
+        add(br2, tline.node2_pos, -1.0);
+        add(br2, tline.node2_neg, 1.0);
+        add(br2, br1, -r_series);
+    }
+
     fn stamp_transmission_line_ac(
         matrix: &mut ComplexMatrix,
         tline: &crate::device::TransmissionLine,
@@ -540,8 +634,20 @@ impl Engine {
             }
         }
 
-        // Stamp transmission lines as distributed 2-port Y-parameters.
+        // Stamp transmission lines. Native LTRA/TXL lines carry branch
+        // unknowns whose rows only the branch-form loads can fill -- the
+        // nodal Y-parameter stamp would land on absent matrix cells and
+        // leave the branch equations singular (dead far port).
         for tline in &circuit.tlines {
+            if let Some((br1, br2)) = tline.ltra_branch_matrix_indices() {
+                if Self::stamp_ltra_branch_ac(&mut ac_matrix, tline, br1, br2, omega) {
+                    continue;
+                }
+            }
+            if let Some((br1, br2)) = tline.txl_branch_matrix_indices() {
+                Self::stamp_txl_branch_ac(&mut ac_matrix, tline, br1, br2);
+                continue;
+            }
             Self::stamp_transmission_line_ac(&mut ac_matrix, tline, omega);
         }
 
