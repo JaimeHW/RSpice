@@ -32,6 +32,3 @@ Thumbs.db
 /rtlinv_*.json
 /rtlinv_*.cir
 .agent/
-
-# Claude Code local files
-.claude/
