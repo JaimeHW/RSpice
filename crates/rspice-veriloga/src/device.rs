@@ -428,9 +428,10 @@ impl VerilogADevice {
         self.rebuild_matrix_indices();
     }
 
-    /// Re-evaluate instance-static activation conditions (parameter-only
-    /// mode guards peeled from contributions). A potential contribution
-    /// whose guard is false leaves its branch open; a branch driven by no
+    /// Re-evaluate instance-static activation conditions (mode guards
+    /// peeled from contributions: parameter expressions or variables
+    /// derived purely from parameters). A potential contribution whose
+    /// guard is false leaves its branch open; a branch driven by no
     /// active potential contribution is forced to zero current.
     fn refresh_static_conditions(&mut self) {
         let model = &self.model;
@@ -439,6 +440,11 @@ impl VerilogADevice {
 
         {
             let mut vm = Vm::new(&mut self.context);
+            // Static guards may reference instance-static variables (e.g.
+            // BSIM4rdsMod derived from the rdsmod parameter); run the
+            // evaluation stream once so those variables hold their values.
+            // Node voltages are irrelevant to instance-static expressions.
+            Self::execute_assignment_programs(&mut vm, model);
             for (idx, program) in model.stamp_programs.iter().enumerate() {
                 let active = match &program.static_condition {
                     Some(condition) => vm.execute(condition).map(|v| v != 0.0).unwrap_or(true),

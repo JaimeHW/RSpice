@@ -7,7 +7,7 @@
 use crate::ast::{BinaryOp, UnaryOp};
 use crate::semantic::AnalyzedModule;
 use smol_str::SmolStr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Compiled device model in IR form
 #[derive(Debug, Clone)]
@@ -469,6 +469,10 @@ impl DeviceIR {
             autodiff::rewrite_branch_probes_in_items(&mut ir.assignments, &branch_table);
         }
 
+        // Variables that are fixed per instance (computed purely from
+        // parameters) may participate in topology guards
+        let static_vars = Self::compute_instance_static_vars(&ir.assignments, &ir.variables);
+
         // Forward-mode AD over the assignment sequence: build shadow
         // assignments holding each variable's partial derivative w.r.t.
         // every node voltage and branch-current unknown, so equation
@@ -487,10 +491,11 @@ impl DeviceIR {
             let expr = autodiff::rewrite_branch_probes(&expr, &branch_table);
             let expr = autodiff::resolve_ddx(&expr, &shadows);
 
-            // Peel instance-static (parameter-only) guards: a potential
+            // Peel instance-static guards (parameter expressions or
+            // variables derived purely from parameters): a potential
             // contribution that is mode-disabled must leave the branch
             // open, not short it to zero volts.
-            let (static_condition, expr) = Self::peel_static_condition(expr);
+            let (static_condition, expr) = Self::peel_static_condition(expr, &static_vars);
 
             let (branch_ref, expr, branch_ordinal) = if contrib.is_current {
                 (branch_ref, expr, None)
@@ -535,14 +540,17 @@ impl DeviceIR {
     }
 
     /// Peel leading instance-static guards (`cond ? inner : 0` where cond
-    /// depends only on parameters) into a separate activation condition
-    fn peel_static_condition(expr: IrExpr) -> (Option<IrExpr>, IrExpr) {
+    /// is fixed per instance) into a separate activation condition
+    fn peel_static_condition(
+        expr: IrExpr,
+        static_vars: &HashSet<SmolStr>,
+    ) -> (Option<IrExpr>, IrExpr) {
         let mut condition: Option<IrExpr> = None;
         let mut current = expr;
         loop {
             match current {
                 IrExpr::Conditional(cond, then_expr, else_expr)
-                    if Self::is_static_param_expr(&cond)
+                    if Self::is_instance_static_expr(&cond, static_vars)
                         && matches!(*else_expr, IrExpr::Const(v) if v == 0.0) =>
                 {
                     condition = Some(match condition {
@@ -642,24 +650,100 @@ impl DeviceIR {
     /// Check whether an expression depends only on parameters and constants
     /// (valid for instance-time parameter default evaluation)
     fn is_static_param_expr(expr: &IrExpr) -> bool {
+        Self::is_instance_static_expr(expr, &HashSet::new())
+    }
+
+    /// Check whether an expression is fixed per instance: it depends only
+    /// on parameters, constants, temperature, and variables proven
+    /// instance-static. Such expressions may gate device topology.
+    fn is_instance_static_expr(expr: &IrExpr, static_vars: &HashSet<SmolStr>) -> bool {
+        let recurse = |e: &IrExpr| Self::is_instance_static_expr(e, static_vars);
         match expr {
             IrExpr::Const(_)
             | IrExpr::Param(_)
             | IrExpr::ParamGiven(_)
             | IrExpr::Temperature
             | IrExpr::Vt => true,
-            IrExpr::Binary(_, l, r) => {
-                Self::is_static_param_expr(l) && Self::is_static_param_expr(r)
-            }
-            IrExpr::Unary(_, e) | IrExpr::Limexp(e) => Self::is_static_param_expr(e),
-            IrExpr::Call(_, args) => args.iter().all(Self::is_static_param_expr),
-            IrExpr::Conditional(c, t, e) => {
-                Self::is_static_param_expr(c)
-                    && Self::is_static_param_expr(t)
-                    && Self::is_static_param_expr(e)
-            }
+            IrExpr::Var(name) => static_vars.contains(name),
+            IrExpr::Binary(_, l, r) => recurse(l) && recurse(r),
+            IrExpr::Unary(_, e) | IrExpr::Limexp(e) => recurse(e),
+            IrExpr::Call(_, args) => args.iter().all(recurse),
+            IrExpr::Conditional(c, t, e) => recurse(c) && recurse(t) && recurse(e),
             _ => false,
         }
+    }
+
+    /// Fixpoint over the assignment tree: a variable is instance-static if
+    /// every assignment to it uses only parameters, constants, and other
+    /// instance-static variables. These variables hold the same value for
+    /// every evaluation of a given instance (BSIM4's mode selectors like
+    /// BSIM4rdsMod), so guards built from them may gate topology.
+    fn compute_instance_static_vars(
+        items: &[IrAssignmentItem],
+        variables: &[VarDef],
+    ) -> HashSet<SmolStr> {
+        // Start from "all assigned variables are static" and remove any
+        // with a non-static assignment until stable. Variables assigned
+        // inside runtime loops stay eligible only if the loop condition is
+        // also static (the iteration count must not vary per evaluation).
+        let mut static_vars: HashSet<SmolStr> = HashSet::new();
+        fn collect_targets(
+            items: &[IrAssignmentItem],
+            variables: &[VarDef],
+            out: &mut HashSet<SmolStr>,
+        ) {
+            for item in items {
+                match item {
+                    IrAssignmentItem::Assign(a) => {
+                        out.insert(variables[a.var_index].name.clone());
+                    }
+                    IrAssignmentItem::Loop { body, .. } => {
+                        collect_targets(body, variables, out);
+                    }
+                }
+            }
+        }
+        collect_targets(items, variables, &mut static_vars);
+
+        loop {
+            let mut changed = false;
+            fn prune(
+                items: &[IrAssignmentItem],
+                variables: &[VarDef],
+                static_vars: &mut HashSet<SmolStr>,
+                changed: &mut bool,
+                enclosing_static: bool,
+            ) {
+                for item in items {
+                    match item {
+                        IrAssignmentItem::Assign(a) => {
+                            let name = &variables[a.var_index].name;
+                            if static_vars.contains(name)
+                                && (!enclosing_static
+                                    || !DeviceIR::is_instance_static_expr(
+                                        &a.expr,
+                                        static_vars,
+                                    ))
+                            {
+                                static_vars.remove(name);
+                                *changed = true;
+                            }
+                        }
+                        IrAssignmentItem::Loop { condition, body } => {
+                            let loop_static = enclosing_static
+                                && DeviceIR::is_instance_static_expr(condition, static_vars);
+                            prune(body, variables, static_vars, changed, loop_static);
+                        }
+                    }
+                }
+            }
+            prune(items, variables, &mut static_vars, &mut changed, true);
+            if !changed {
+                break;
+            }
+        }
+
+        static_vars
     }
 }
 
