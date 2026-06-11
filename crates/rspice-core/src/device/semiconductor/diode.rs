@@ -57,6 +57,15 @@ pub struct Diode {
     /// Model nominal temperature override in Celsius (TNOM)
     pub tnom_c: Option<Value>,
 
+    // Noise parameters
+    /// Flicker noise coefficient (KF)
+    pub kf: Value,
+    /// Flicker noise current exponent (AF)
+    pub af: Value,
+    /// Instance multiplicity (M), kept apart from the folded junction
+    /// scaling because dionoise.c rides flicker on `m·KF·|Id/m|^AF`.
+    pub multiplicity: Value,
+
     /// Previous iteration voltage (for convergence check)
     prev_vd: Value,
     /// Previous voltage for convergence
@@ -92,10 +101,27 @@ impl Diode {
             eg: 1.11,
             tnom_c: None,
 
+            // Flicker noise off by default (diosetup.c: fNcoef 0, fNexp 1).
+            kf: 0.0,
+            af: 1.0,
+            multiplicity: 1.0,
+
             prev_vd: 0.0,
             prev_vd_old: 0.0,
             prev_id: 0.0,
             indices: DiodeIndices::default(),
+        }
+    }
+
+    /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
+    /// model card. dionoise.c rides the source on the junction current as
+    /// `m·KF·|Id/m|^AF / f`, so the caller folds `self.multiplicity` into
+    /// the coefficient.
+    pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value)> {
+        if self.kf > 0.0 && self.kf.is_finite() {
+            Some((self.kf, self.af.max(1e-12)))
+        } else {
+            None
         }
     }
 
@@ -117,6 +143,20 @@ impl Diode {
         }
         if let Some(&v) = params.get("RS") {
             self.rs = v;
+        }
+        if let Some(v) = params
+            .get("KF")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.kf = v;
+        }
+        if let Some(v) = params
+            .get("AF")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.af = v;
         }
         if let Some(&v) = params.get("BV")
             && v.is_finite()

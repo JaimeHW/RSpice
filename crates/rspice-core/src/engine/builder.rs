@@ -438,6 +438,7 @@ impl Engine {
                     if junction_scale != 1.0 {
                         diode.apply_junction_scaling(junction_scale);
                     }
+                    diode.multiplicity = mult;
 
                     // Junction temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; the model TNOM

@@ -64,7 +64,13 @@ impl Engine {
             ));
         }
 
-        // Shot noise from diodes (2qI).
+        // Diode shot noise (2qI) and KF flicker, both across the junction
+        // (the builder externalizes RS onto an internal anode node, so
+        // node_anode is the junction side and the series resistance already
+        // contributes thermal noise through the resistor walk above —
+        // dionoise.c's source set exactly). Flicker follows dionoise.c:
+        // m·KF·|Id/m|^AF / f, with the multiplicity folded into the
+        // coefficient as KF·m^(1−AF) on the folded junction current.
         for diode in &circuit.diodes.devices {
             let vd = Self::noise_node_voltage(dc_solution, diode.node_anode)
                 - Self::noise_node_voltage(dc_solution, diode.node_cathode);
@@ -75,6 +81,20 @@ impl Engine {
                     diode.node_anode,
                     diode.node_cathode,
                     id,
+                ));
+            }
+            if let Some((kf, af)) = diode.flicker_noise_coefficients()
+                && id.abs() > 1e-15
+            {
+                let m = diode.multiplicity.max(1.0);
+                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                    format!("{}:flicker", diode.name),
+                    diode.node_anode,
+                    diode.node_cathode,
+                    kf * m.powf(1.0 - af),
+                    af,
+                    1.0,
+                    id.abs(),
                 ));
             }
         }
@@ -553,6 +573,80 @@ Q1 C B 0 0 N1
 
 .END
 ";
+
+    /// onoise_spectrum table of [`DIODE_FLICKER_DECK`] from the official
+    /// ngspice-46 binary, in its default root-spectral-density units.
+    const DIODE_FLICKER_ORACLE: &str =
+        include_str!("../../../tests/testdata/diode_flicker_ngspice46.dat");
+
+    /// Forward-biased diode with KF flicker at AF=1.3 and instance M=3:
+    /// the low-frequency rows are flicker-lifted above the white floor,
+    /// and the non-unity AF makes the multiplicity folding observable.
+    const DIODE_FLICKER_DECK: &str = "\
+Diode flicker noise testbench
+
+V1 IN 0 DC 0.7 AC 1
+R1 IN A 100
+D1 A 0 DM M=3
+
+.OPTIONS NOACCT
+
+.NOISE v(a) V1 DEC 5 10 100k
+
+.MODEL DM D IS=1e-14 N=1.8 RS=5 CJO=2e-12 KF=1e-12 AF=1.3
+
+.END
+";
+
+    /// Diode KF flicker and the externalized-RS source set must reproduce
+    /// the official binary, including the m-folding at AF != 1.
+    #[test]
+    fn diode_flicker_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(DIODE_FLICKER_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("a").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            5,
+            10.0,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "V1", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = DIODE_FLICKER_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "frequency grids must match");
+
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            assert!(
+                (result.frequency - freq_ref).abs() <= 1e-6 * freq_ref,
+                "sweep grid diverged from the oracle at {:e}",
+                freq_ref,
+            );
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
 
     /// The VBIC parasitic-resistance thermal sources and internal-node shot
     /// sources must reproduce the official binary on a deck designed to
