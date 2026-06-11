@@ -977,7 +977,7 @@ impl SemanticAnalyzer {
             AnalogStatement::While(while_stmt) => {
                 let condition = self.lower_expression(&while_stmt.condition)?;
                 match self.eval_const(&condition) {
-                    Some(v) if v == 0.0 => {} // statically dead loop
+                    Some(0.0) => {} // statically dead loop
                     _ => {
                         return Err(CompileError::Semantic(SemanticError::new(
                             SemanticErrorKind::InvalidAnalogOperator(

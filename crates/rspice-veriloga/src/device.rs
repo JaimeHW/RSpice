@@ -598,10 +598,10 @@ impl VerilogADevice {
             let value = native.evaluate_stamp(i, &stamp_ctx, &self.native_vars);
             stamp_values.push(value);
             self.context.currents.push(value);
-            if let Some(program) = self.model.stamp_programs.get(i) {
-                if let Some((pos, neg)) = Self::infer_current_terminal_pair(program) {
-                    self.context.set_branch_current(pos, neg, value);
-                }
+            if let Some(program) = self.model.stamp_programs.get(i)
+                && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
+            {
+                self.context.set_branch_current(pos, neg, value);
             }
         }
 

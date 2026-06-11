@@ -2,6 +2,7 @@ use super::*;
 
 impl JitCompiler {
     /// Compile a bytecode program to Cranelift IR, returning the result value
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn compile_expression(
         &self,
         builder: &mut FunctionBuilder,
