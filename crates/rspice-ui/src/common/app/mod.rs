@@ -79,6 +79,8 @@ mod app_license_dialog;
 
 mod app_command_palette;
 
+mod app_export_image;
+
 mod app_workspace_actions;
 
 mod app_veriloga_workflow;
@@ -355,6 +357,7 @@ impl RSpiceApp {
             .workspace
             .set_active_dirty(self.state.schematic.is_dirty);
         self.sync_window_title(ctx);
+        self.handle_image_export(ctx);
     }
 
     /// Keep the OS window title (or browser tab title) in sync with the

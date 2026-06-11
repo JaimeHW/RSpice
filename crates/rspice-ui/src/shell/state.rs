@@ -155,6 +155,10 @@ pub struct ShellState {
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the shell level).
     pub export_csv_requested: bool,
+    /// One-shot request to capture the window as a PNG (native: viewport
+    /// screenshot + save dialog; the web build offers the browser's own
+    /// capture instead).
+    pub export_png_requested: bool,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: super::results::ResultsState,
     /// In-flight inspector edit session, if any.

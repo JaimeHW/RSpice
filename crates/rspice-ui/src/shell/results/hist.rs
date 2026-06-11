@@ -128,11 +128,39 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
-    // Bars under everything else.
+    // Bars under everything else, with the out-of-spec regions washed in
+    // the error tint — the fail zone itself, not the data envelope.
     let bins = &histogram.bins;
     let accent = c.accent;
     let accent_dim = c.accent_dim;
+    let err = c.err;
+    let spec_limits = state
+        .simulation
+        .yield_results
+        .first()
+        .map(|y| (y.spec.min, y.spec.max));
     spec.underlay = Some(Box::new(move |painter, mapper| {
+        if let Some((lsl, usl)) = spec_limits {
+            let wash = err.gamma_multiply(0.09);
+            if let Some(lsl) = lsl {
+                if lsl > x0 {
+                    let rect = egui::Rect::from_min_max(
+                        egui::pos2(mapper.rect.left(), mapper.rect.top()),
+                        egui::pos2(mapper.x(lsl.min(x1)), mapper.rect.bottom()),
+                    );
+                    painter.rect_filled(rect, 0.0, wash);
+                }
+            }
+            if let Some(usl) = usl {
+                if usl < x1 {
+                    let rect = egui::Rect::from_min_max(
+                        egui::pos2(mapper.x(usl.max(x0)), mapper.rect.top()),
+                        egui::pos2(mapper.rect.right(), mapper.rect.bottom()),
+                    );
+                    painter.rect_filled(rect, 0.0, wash);
+                }
+            }
+        }
         for bin in bins {
             if bin.count == 0 {
                 continue;

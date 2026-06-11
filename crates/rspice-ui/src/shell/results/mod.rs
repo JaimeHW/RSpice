@@ -31,7 +31,7 @@ use crate::state::WaveformData;
 use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, chip, docbar};
+use crate::ui::widgets::{chip, docbar};
 use crate::common::app::ActiveViewer;
 
 /// The result viewers, in tab order.
@@ -638,9 +638,16 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            if Button::new("Export…").show(ui).clicked() {
-                state.shell.export_csv_requested = true;
-            }
+            ui.menu_button("Export…", |ui| {
+                if ui.button("Waveform data (CSV)…").clicked() {
+                    state.shell.export_csv_requested = true;
+                    ui.close_menu();
+                }
+                if ui.button("Window image (PNG)…").clicked() {
+                    state.shell.export_png_requested = true;
+                    ui.close_menu();
+                }
+            });
             // Viewer-local controls.
             match state.shell.results.viewer {
                 ResultViewer::Waves => {

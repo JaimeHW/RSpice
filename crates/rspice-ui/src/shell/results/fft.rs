@@ -106,6 +106,34 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Fft, 0);
     }
 
+    // Window-function selector: the leakage/resolution tradeoff is an
+    // analysis decision, so it lives on the strip, not in a buried dialog.
+    ui.horizontal(|ui| {
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new("window")
+                .font(crate::ui::theme::mono(
+                    crate::ui::tokens::FS_0,
+                    crate::ui::theme::FontWeight::Medium,
+                ))
+                .color(c.text_dim),
+        );
+        let current = state.analysis.fft_state.window;
+        egui::ComboBox::from_id_salt("volta.fft.window")
+            .selected_text(current.display_name())
+            .show_ui(ui, |ui| {
+                for &window in crate::analysis::fft::WindowFunction::all() {
+                    if ui
+                        .selectable_label(window == current, window.display_name())
+                        .clicked()
+                    {
+                        state.analysis.fft_state.set_window(window);
+                    }
+                }
+            });
+    });
+    ui.add_space(2.0);
+
     // X: linear; zoom to ~11 harmonics when a fundamental is known.
     let data_max = *model.frequency.last().unwrap_or(&1.0);
     let x1 = match model.fundamental {
