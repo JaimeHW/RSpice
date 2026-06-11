@@ -46,8 +46,12 @@ impl HbFft {
     /// # Arguments
     /// * `num_harmonics` - Number of harmonics (not including DC)
     /// * `oversample` - Oversampling factor (typically 2 or 4)
+    ///
+    /// The oversampling factor is floored at 2: below that the top
+    /// harmonics collide with the conjugate half of the spectrum and would
+    /// be silently dropped from the solution representation.
     pub fn new(num_harmonics: usize, oversample: usize) -> Self {
-        let min_size = (num_harmonics + 1) * oversample;
+        let min_size = (num_harmonics + 1) * oversample.max(2);
         let fft_size = min_size.next_power_of_two();
 
         let mut planner = FftPlanner::new();

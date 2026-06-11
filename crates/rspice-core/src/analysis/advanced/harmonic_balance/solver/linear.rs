@@ -274,7 +274,6 @@ impl HbSolver {
                         if k == 0 {
                             // DC: inductor is short circuit
                             // Add very large conductance to force V_i = V_j
-                            const DC_SHORT_CONDUCTANCE: Value = 1e6;
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
                         } else {
                             // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
@@ -354,7 +353,6 @@ impl HbSolver {
                 for k in 0..h {
                     if k < state.x[j].len() && k < state.residual[i].len() {
                         if k == 0 {
-                            const DC_SHORT_CONDUCTANCE: Value = 1e6;
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
                         } else {
                             let omega_k = (k as f64) * omega0;
@@ -442,7 +440,6 @@ impl HbSolver {
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     if k == 0 {
-                        const DC_SHORT_CONDUCTANCE: Value = 1e6;
                         y_matrix[i][j] += DC_SHORT_CONDUCTANCE;
                     } else {
                         let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));

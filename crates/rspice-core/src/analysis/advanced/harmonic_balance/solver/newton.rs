@@ -26,9 +26,12 @@ impl HbSolver {
             return self.solve_linear(state);
         }
 
-        // Use constant GMIN for numerical stability
-        // Larger gmin provides better Jacobian conditioning for difficult circuits
-        let gmin = 1e-9;
+        // Target GMIN for the converged solution: the SPICE-standard 1e-12.
+        // The stabilizer stays in the final residual, so anything larger
+        // would leave a visible leak at high-impedance nodes; difficult
+        // circuits get their conditioning help from the GMIN ladder below,
+        // which always refines back to this target.
+        let gmin = 1e-12;
 
         // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
@@ -502,7 +505,7 @@ impl HbSolver {
                     let col = j * h + k;
                     if k == 0 {
                         // DC: short circuit
-                        jac[row][col] -= 1e6;
+                        jac[row][col] -= DC_SHORT_CONDUCTANCE;
                     } else {
                         // AC: Y_L = -j/(Ï‰L)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));

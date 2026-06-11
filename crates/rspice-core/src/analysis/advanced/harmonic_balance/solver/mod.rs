@@ -24,6 +24,12 @@ mod result_builder;
 
 pub use periodic_ac::PeriodicAcExcitation;
 
+/// Conductance used to model an inductor as a DC short across every solve
+/// path (full-spectrum residual, Jacobian, DC seed, linear solve). One value
+/// everywhere keeps the operating point and the seed solving the same
+/// circuit.
+pub(super) const DC_SHORT_CONDUCTANCE: Value = 1e6;
+
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
 pub enum HbError {

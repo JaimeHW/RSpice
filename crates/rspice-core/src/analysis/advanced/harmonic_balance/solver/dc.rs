@@ -163,7 +163,7 @@ impl HbSolver {
 
     /// Solve DC for linear circuit (no nonlinear devices)
     fn solve_dc_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
-        // Build DC conductance matrix (G only, no jÏ‰C or 1/jÏ‰L at DC)
+        // Build DC conductance matrix (G plus inductor DC shorts)
         let n = self.num_nodes;
         let mut g_dc = vec![vec![0.0; n]; n];
 
@@ -171,6 +171,15 @@ impl HbSolver {
         for &(row, col, g) in &self.g_matrix {
             if row < n && col < n {
                 g_dc[row][col] += g;
+            }
+        }
+
+        // Inductors are DC shorts, with the same conductance the
+        // full-spectrum residual uses; leaving them open would seed Newton
+        // with the operating point of a different circuit.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && l.abs() > 1e-30 {
+                g_dc[row][col] += DC_SHORT_CONDUCTANCE;
             }
         }
 
@@ -208,7 +217,7 @@ impl HbSolver {
     ///
     /// Uses the same algorithm as the full HB Newton but operates only on harmonic 0.
     fn dc_newton_inner_loop(
-        &self,
+        &mut self,
         state: &mut HbSolverState,
         gmin: Value,
         max_iterations: usize,
@@ -276,7 +285,7 @@ impl HbSolver {
     }
 
     /// Compute DC residual: R = I_source_dc - G*V_dc - I_nonlinear(V_dc) - gmin*V_dc
-    fn compute_dc_residual(&self, state: &mut HbSolverState, gmin: Value) {
+    fn compute_dc_residual(&mut self, state: &mut HbSolverState, gmin: Value) {
         let n = self.num_nodes;
 
         // Initialize residual with DC sources
@@ -312,6 +321,14 @@ impl HbSolver {
             }
         }
 
+        // Inductor DC shorts, consistent with the full-spectrum residual.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
+                state.residual[row][0] -=
+                    Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
+            }
+        }
+
         // Subtract GMIN: gmin * V_dc (diagonal)
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
@@ -331,6 +348,26 @@ impl HbSolver {
             }
         }
 
+        // Verilog-A devices participate in the DC seed too; skipping them
+        // here let the seed "converge" on a circuit without their currents.
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            for device in &mut self.veriloga_nonlinear_devices {
+                device.device.update_all_voltages(&v_dc);
+                let values = device.device.evaluate();
+                for (program_idx, value) in values.iter().enumerate() {
+                    let Some(rows) = device.rhs_rows.get(program_idx) else {
+                        continue;
+                    };
+                    for &(row, sign) in rows {
+                        if row < n && row < state.residual.len() {
+                            state.residual[row][0] += Complex64::new(sign * *value, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+
         // Compute residual norm (DC only)
         let norm_sq: Value = (0..n)
             .map(|node| {
@@ -346,7 +383,7 @@ impl HbSolver {
     }
 
     /// Build DC Jacobian: J = -G - dI_nonlinear/dV - gmin*I
-    fn build_dc_jacobian(&self, state: &HbSolverState, gmin: Value) -> Vec<Vec<Value>> {
+    fn build_dc_jacobian(&mut self, state: &HbSolverState, gmin: Value) -> Vec<Vec<Value>> {
         let n = self.num_nodes;
         let mut jacobian = vec![vec![0.0; n]; n];
 
@@ -354,6 +391,13 @@ impl HbSolver {
         for &(row, col, g) in &self.g_matrix {
             if row < n && col < n {
                 jacobian[row][col] -= g;
+            }
+        }
+
+        // Inductor DC shorts, matching compute_dc_residual.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && l.abs() > 1e-30 {
+                jacobian[row][col] -= DC_SHORT_CONDUCTANCE;
             }
         }
 
@@ -389,12 +433,34 @@ impl HbSolver {
             }
         }
 
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            for device in &mut self.veriloga_nonlinear_devices {
+                device.device.update_all_voltages(&v_dc);
+                let jac_entries = device.device.compute_jacobian();
+                for entry in jac_entries {
+                    let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
+                        continue;
+                    };
+                    let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
+                        continue;
+                    };
+                    if let (Some(i), Some(j)) = (row, col)
+                        && i < n
+                        && j < n
+                    {
+                        jacobian[i][j] -= entry.value;
+                    }
+                }
+            }
+        }
+
         jacobian
     }
 
     /// Apply DC line search with voltage limiting
     fn apply_dc_line_search(
-        &self,
+        &mut self,
         state: &mut HbSolverState,
         delta_x: &[Value],
         gmin: Value,
