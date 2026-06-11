@@ -26,6 +26,14 @@ pub struct VerilogALoadDialogState {
     pub compiled_dependencies: Option<Vec<PathBuf>>,
     /// Whether to show advanced options.
     pub show_advanced_options: bool,
+    /// egui clock (seconds) when the running compile started, for the
+    /// elapsed readout while compiling.
+    pub(super) compile_started_at: Option<f64>,
+    /// Wall-clock seconds the last finished compile took.
+    pub(super) last_compile_secs: Option<f64>,
+    /// Verilog-A compile-cache totals (entry count, bytes) sampled when the
+    /// dialog opens, for the idle footer hint.
+    pub(super) cache_stats: Option<(usize, u64)>,
     /// Background compilation task receiver.
     pub(super) compile_task_receiver: Option<Arc<Mutex<mpsc::Receiver<CompileTaskResult>>>>,
 }
@@ -43,6 +51,9 @@ impl Default for VerilogALoadDialogState {
             compiled_artifact: None,
             compiled_dependencies: None,
             show_advanced_options: false,
+            compile_started_at: None,
+            last_compile_secs: None,
+            cache_stats: None,
             compile_task_receiver: None,
         }
     }
@@ -61,6 +72,9 @@ impl Clone for VerilogALoadDialogState {
             compiled_artifact: self.compiled_artifact.clone(),
             compiled_dependencies: self.compiled_dependencies.clone(),
             show_advanced_options: self.show_advanced_options,
+            compile_started_at: self.compile_started_at,
+            last_compile_secs: self.last_compile_secs,
+            cache_stats: self.cache_stats,
             compile_task_receiver: self.compile_task_receiver.clone(),
         }
     }
@@ -87,6 +101,9 @@ impl std::fmt::Debug for VerilogALoadDialogState {
                 &self.compiled_dependencies.as_ref().map(|d| d.len()),
             )
             .field("show_advanced_options", &self.show_advanced_options)
+            .field("compile_started_at", &self.compile_started_at)
+            .field("last_compile_secs", &self.last_compile_secs)
+            .field("cache_stats", &self.cache_stats)
             .field(
                 "compile_task_receiver",
                 &self.compile_task_receiver.is_some(),
@@ -110,6 +127,11 @@ impl VerilogALoadDialogState {
     pub fn open(&mut self) {
         self.reset();
         self.open = true;
+        // Sample the simulator's Verilog-A compile cache once for the idle
+        // footer hint; unavailable (e.g. browser build) simply omits it.
+        self.cache_stats = rspice_core::veriloga_cache_stats()
+            .ok()
+            .map(|stats| (stats.entry_count, stats.total_bytes));
     }
 
     /// Close the dialog.
@@ -126,6 +148,8 @@ impl VerilogALoadDialogState {
         self.compiled_module = None;
         self.compiled_artifact = None;
         self.compiled_dependencies = None;
+        self.compile_started_at = None;
+        self.last_compile_secs = None;
         self.compilation_state = CompilationState::Idle;
     }
 
