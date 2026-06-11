@@ -78,6 +78,8 @@ unsafe impl Sync for VerilogADevice {}
 pub struct MatrixIndices {
     /// Jacobian mappings grouped per stamp program.
     pub jacobian: Vec<Vec<JacobianIndex>>,
+    /// Reactive (charge) Jacobian mappings grouped per stamp program.
+    pub reactive: Vec<Vec<JacobianIndex>>,
     /// RHS mappings grouped per stamp program.
     pub rhs: Vec<Vec<RhsIndex>>,
 }
@@ -538,25 +540,10 @@ impl VerilogADevice {
     fn rebuild_matrix_indices(&mut self) {
         let mut rhs = vec![Vec::new(); self.model.stamp_programs.len()];
         let mut jacobian = vec![Vec::new(); self.model.stamp_programs.len()];
+        let mut reactive = vec![Vec::new(); self.model.stamp_programs.len()];
 
-        for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
-            rhs[program_idx] = program
-                .stamp_locations
-                .iter()
-                .map(|loc| RhsIndex {
-                    node: Self::index_to_node(
-                        &loc.row,
-                        &self.node_mapping,
-                        &self.internal_node_indices,
-                        &self.branch_current_indices,
-                    ),
-                    sign: loc.sign,
-                    program_idx,
-                })
-                .collect();
-
-            jacobian[program_idx] = program
-                .jacobian_programs
+        let map_entries = |entries: &[crate::codegen::JacobianEntry], program_idx: usize| {
+            entries
                 .iter()
                 .enumerate()
                 .map(|(jacobian_idx, jac_entry)| JacobianIndex {
@@ -576,10 +563,74 @@ impl VerilogADevice {
                     jacobian_idx,
                     sign: jac_entry.sign,
                 })
+                .collect::<Vec<_>>()
+        };
+
+        for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
+            rhs[program_idx] = program
+                .stamp_locations
+                .iter()
+                .map(|loc| RhsIndex {
+                    node: Self::index_to_node(
+                        &loc.row,
+                        &self.node_mapping,
+                        &self.internal_node_indices,
+                        &self.branch_current_indices,
+                    ),
+                    sign: loc.sign,
+                    program_idx,
+                })
                 .collect();
+
+            jacobian[program_idx] = map_entries(&program.jacobian_programs, program_idx);
+            reactive[program_idx] = map_entries(&program.reactive_jacobians, program_idx);
         }
 
-        self.matrix_indices = MatrixIndices { jacobian, rhs };
+        self.matrix_indices = MatrixIndices {
+            jacobian,
+            reactive,
+            rhs,
+        };
+    }
+
+    /// Stamp the reactive (charge/flux) Jacobian dQ/dx.
+    ///
+    /// AC analysis multiplies these entries by the angular frequency and
+    /// adds them to the imaginary part of the system matrix: capacitances
+    /// for current contributions, inductive terms on the branch rows of
+    /// potential contributions.
+    pub fn stamp_reactive<M>(&mut self, circuit_voltages: &[f64], mut matrix_add: M)
+    where
+        M: FnMut(usize, usize, f64),
+    {
+        self.update_all_voltages(circuit_voltages);
+
+        let context = &mut self.context;
+        let model = &self.model;
+        let matrix_indices = &self.matrix_indices;
+        let program_active = &self.program_active;
+
+        context.clear_currents();
+
+        let mut vm = Vm::new(context);
+        Self::execute_assignment_programs(&mut vm, model);
+
+        for (program_idx, program) in model.stamp_programs.iter().enumerate() {
+            if !program_active.get(program_idx).copied().unwrap_or(true) {
+                continue;
+            }
+
+            for entry in &matrix_indices.reactive[program_idx] {
+                let model_entry = &program.reactive_jacobians[entry.jacobian_idx];
+                let deriv = match vm.execute(&model_entry.program) {
+                    Ok(v) if v.is_finite() => v,
+                    _ => continue,
+                };
+                if let (Some(row), Some(col)) = (entry.row, entry.col) {
+                    matrix_add(row, col, entry.sign * deriv);
+                }
+            }
+        }
     }
 
     /// Update terminal voltages from circuit solution

@@ -413,15 +413,23 @@ impl Engine {
             sw.stamp_nonlinear(op_voltages, &mut stamper, &mut rhs_dummy);
         }
         #[cfg(feature = "veriloga")]
-        for device in circuit.veriloga_devices().iter() {
-            // AC linearization uses Jacobian terms at the DC operating point.
-            // Verilog-A device stamping exposes Jacobian through matrix callbacks.
-            let mut cloned = device.clone();
-            cloned.stamp(
-                op_voltages,
-                |row, col, value| matrix.add_real(row, col, value),
-                |_index, _value| {},
-            );
+        {
+            let omega = 2.0 * std::f64::consts::PI * frequency_hz;
+            for device in circuit.veriloga_devices().iter() {
+                // AC linearization uses Jacobian terms at the DC operating
+                // point. Verilog-A device stamping exposes the Jacobian
+                // through matrix callbacks.
+                let mut cloned = device.clone();
+                cloned.stamp(
+                    op_voltages,
+                    |row, col, value| matrix.add_real(row, col, value),
+                    |_index, _value| {},
+                );
+                // Reactive (ddt charge/flux) part: jw * dQ/dx
+                cloned.stamp_reactive(op_voltages, |row, col, charge_deriv| {
+                    matrix.add_imag(row, col, omega * charge_deriv);
+                });
+            }
         }
     }
 

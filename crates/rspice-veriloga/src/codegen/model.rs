@@ -91,6 +91,10 @@ pub struct StampProgram {
     pub value_program: BytecodeProgram,
     /// Jacobian programs (one per derivative)
     pub jacobian_programs: Vec<JacobianEntry>,
+    /// Reactive Jacobian programs: dQ/dx of the contribution's ddt()
+    /// operand. AC analysis stamps these as jw * dQ/dx (capacitances for
+    /// current contributions, inductances for potential contributions).
+    pub reactive_jacobians: Vec<JacobianEntry>,
     /// For potential contributions: the branch-current unknown this
     /// equation defines. None for current contributions.
     pub branch_ordinal: Option<usize>,

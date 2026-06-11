@@ -192,6 +192,21 @@ impl CodeGenerator {
                 });
             }
 
+            // Reactive part of the source (flux: V <+ ddt(L*i)) stamps
+            // -jw * dQ/dx into the branch row in AC
+            let mut reactive_jacobians = Vec::new();
+            for deriv in &eq.reactive_derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                reactive_jacobians.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: -1.0,
+                    program,
+                });
+            }
+
             // The companion source Eeq stamps into the branch row
             let stamp_locations = vec![StampLocation {
                 row: branch_row,
@@ -203,6 +218,7 @@ impl CodeGenerator {
                 stamp_locations,
                 value_program,
                 jacobian_programs,
+                reactive_jacobians,
                 branch_ordinal: Some(ordinal),
                 static_condition,
             });
@@ -231,6 +247,28 @@ impl CodeGenerator {
             });
         }
 
+        // Reactive (capacitance) entries: AC stamps jw * dQ/dx with the
+        // same KCL row pairing
+        let mut reactive_jacobians = Vec::new();
+        for deriv in &eq.reactive_derivatives {
+            let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+            let program = self.compile_expr(&deriv.expr, ir)?;
+            reactive_jacobians.push(JacobianEntry {
+                row: pos.clone(),
+                col: col.clone(),
+                col_axis,
+                sign: 1.0,
+                program: program.clone(),
+            });
+            reactive_jacobians.push(JacobianEntry {
+                row: neg.clone(),
+                col,
+                col_axis,
+                sign: -1.0,
+                program,
+            });
+        }
+
         // Current contribution: I leaves pos, enters neg.
         // The device computes Ieq = I - G*x and stamps rhs[pos] -= Ieq,
         // rhs[neg] += Ieq (signs recorded here).
@@ -251,6 +289,7 @@ impl CodeGenerator {
             stamp_locations,
             value_program,
             jacobian_programs,
+            reactive_jacobians,
             branch_ordinal: None,
             static_condition,
         })

@@ -102,6 +102,10 @@ pub struct BranchEquation {
     pub expr: IrExpr,
     /// Partial derivatives (Jacobian entries)
     pub derivatives: Vec<Derivative>,
+    /// Derivatives of the reactive operand Q (where expr ~ resistive +
+    /// ddt(Q)): the small-signal capacitance/inductance entries stamped
+    /// as jw * dQ/dx in AC analysis
+    pub reactive_derivatives: Vec<Derivative>,
 }
 
 /// A branch-current unknown introduced by potential contributions
@@ -526,6 +530,15 @@ impl DeviceIR {
             let derivatives =
                 Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
 
+            // Reactive (charge/flux) derivatives for AC analysis: extract
+            // the ddt() operand and differentiate it
+            let reactive_derivatives = match Self::extract_charge(&expr) {
+                Some(charge) => {
+                    Self::generate_derivatives(&charge, num_nodes, num_branches, &shadows)
+                }
+                None => Vec::new(),
+            };
+
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
                 is_current: contrib.is_current,
@@ -533,10 +546,144 @@ impl DeviceIR {
                 static_condition,
                 expr,
                 derivatives,
+                reactive_derivatives,
             });
         }
 
         Ok(ir)
+    }
+
+    /// Extract the reactive operand of a contribution: for
+    /// expr ~ resistive + ddt(Q), returns Q. Returns None when no ddt()
+    /// is present.
+    ///
+    /// ddt() results must combine linearly per the LRM; sums, differences,
+    /// negation, guards, and ddt-free multiplicative factors fold into Q
+    /// (a bias-dependent factor f folds as f*Q, the quasi-static
+    /// approximation: at the operating point dq/dt = 0, so the factor's
+    /// own derivative carries no small-signal current).
+    fn extract_charge(expr: &IrExpr) -> Option<IrExpr> {
+        fn contains_ddt(e: &IrExpr) -> bool {
+            match e {
+                IrExpr::Ddt(_) => true,
+                IrExpr::Binary(_, l, r) => contains_ddt(l) || contains_ddt(r),
+                IrExpr::Unary(_, inner)
+                | IrExpr::Limexp(inner)
+                | IrExpr::DdtCompanion(inner)
+                | IrExpr::IdtCompanion(inner) => contains_ddt(inner),
+                IrExpr::Idt(inner, ic) => {
+                    contains_ddt(inner) || ic.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::IdtMod {
+                    expr,
+                    ic,
+                    modulus,
+                    offset,
+                } => {
+                    contains_ddt(expr)
+                        || ic.as_deref().is_some_and(contains_ddt)
+                        || contains_ddt(modulus)
+                        || offset.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::Limit(inner, step) => {
+                    contains_ddt(inner) || step.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::Call(_, args) => args.iter().any(contains_ddt),
+                IrExpr::Conditional(c, t, e) => {
+                    contains_ddt(c) || contains_ddt(t) || contains_ddt(e)
+                }
+                IrExpr::TableLookup { input, .. }
+                | IrExpr::TableDerivative { input, .. } => contains_ddt(input),
+                IrExpr::AbsDelay { expr, delay_time } => {
+                    contains_ddt(expr) || contains_ddt(delay_time)
+                }
+                IrExpr::Transition { expr, .. }
+                | IrExpr::Slew { expr, .. }
+                | IrExpr::Cross { expr, .. }
+                | IrExpr::LaplaceZP { expr, .. }
+                | IrExpr::LaplaceND { expr, .. }
+                | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
+                IrExpr::WhiteNoise { power, .. } => contains_ddt(power),
+                IrExpr::FlickerNoise {
+                    power, exponent, ..
+                } => contains_ddt(power) || contains_ddt(exponent),
+                IrExpr::Above {
+                    expr, threshold, ..
+                } => contains_ddt(expr) || contains_ddt(threshold),
+                IrExpr::Timer { start_time, period } => {
+                    contains_ddt(start_time) || period.as_deref().is_some_and(contains_ddt)
+                }
+                IrExpr::Const(_)
+                | IrExpr::Param(_)
+                | IrExpr::ParamGiven(_)
+                | IrExpr::Var(_)
+                | IrExpr::Voltage(..)
+                | IrExpr::Current(..)
+                | IrExpr::BranchCurrent(_)
+                | IrExpr::Time
+                | IrExpr::Temperature
+                | IrExpr::Vt
+                | IrExpr::Analysis(_) => false,
+            }
+        }
+
+        match expr {
+            IrExpr::Ddt(q) => Some((**q).clone()),
+            IrExpr::Binary(op @ (BinaryOp::Add | BinaryOp::Sub), l, r) => {
+                let ql = Self::extract_charge(l);
+                let qr = Self::extract_charge(r);
+                if ql.is_none() && qr.is_none() {
+                    return None;
+                }
+                Some(IrExpr::Binary(
+                    *op,
+                    Box::new(ql.unwrap_or(IrExpr::Const(0.0))),
+                    Box::new(qr.unwrap_or(IrExpr::Const(0.0))),
+                ))
+            }
+            IrExpr::Binary(BinaryOp::Mul, l, r) => {
+                match (contains_ddt(l), contains_ddt(r)) {
+                    (false, false) => None,
+                    (false, true) => Self::extract_charge(r)
+                        .map(|q| IrExpr::Binary(BinaryOp::Mul, l.clone(), Box::new(q))),
+                    (true, false) => Self::extract_charge(l)
+                        .map(|q| IrExpr::Binary(BinaryOp::Mul, Box::new(q), r.clone())),
+                    (true, true) => {
+                        log::warn!(
+                            "ddt() on both sides of a product; reactive AC \
+                             contribution omitted"
+                        );
+                        None
+                    }
+                }
+            }
+            IrExpr::Binary(BinaryOp::Div, l, r) if !contains_ddt(r) => Self::extract_charge(l)
+                .map(|q| IrExpr::Binary(BinaryOp::Div, Box::new(q), r.clone())),
+            IrExpr::Unary(op @ (UnaryOp::Neg | UnaryOp::Pos), e) => {
+                Self::extract_charge(e).map(|q| IrExpr::Unary(*op, Box::new(q)))
+            }
+            IrExpr::Conditional(c, t, e) => {
+                let qt = Self::extract_charge(t);
+                let qe = Self::extract_charge(e);
+                if qt.is_none() && qe.is_none() {
+                    return None;
+                }
+                Some(IrExpr::Conditional(
+                    c.clone(),
+                    Box::new(qt.unwrap_or(IrExpr::Const(0.0))),
+                    Box::new(qe.unwrap_or(IrExpr::Const(0.0))),
+                ))
+            }
+            other => {
+                if contains_ddt(other) {
+                    log::warn!(
+                        "ddt() inside an unsupported expression shape; its \
+                         reactive contribution is omitted from AC analysis"
+                    );
+                }
+                None
+            }
+        }
     }
 
     /// Peel leading instance-static guards (`cond ? inner : 0` where cond
