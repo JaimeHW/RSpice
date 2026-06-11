@@ -149,9 +149,6 @@ impl TransferFunction {
 /// a discrete-time difference equation using the bilinear (Tustin) transform.
 #[derive(Debug, Clone)]
 pub struct DiscreteFilter {
-    /// Transfer function specification
-    #[allow(dead_code)]
-    tf: TransferFunction,
     /// Sample period (seconds)
     sample_period: Value,
     /// Numerator coefficients in z-domain
@@ -173,7 +170,6 @@ impl DiscreteFilter {
         let (b, a) = Self::bilinear_transform(&tf, sample_period);
 
         Self {
-            tf,
             sample_period,
             b,
             a,

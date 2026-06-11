@@ -228,8 +228,6 @@ pub struct OpAmpMacromodel {
 
     // State for slew rate limiting
     vout_prev: Value,
-    #[allow(dead_code)]
-    time_prev: Value,
 
     // Calculated values
     dominant_pole: Value, // ω_p in rad/s
@@ -248,7 +246,6 @@ impl OpAmpMacromodel {
             node_vcc: None,
             node_vee: None,
             vout_prev: 0.0,
-            time_prev: 0.0,
             dominant_pole,
         }
     }

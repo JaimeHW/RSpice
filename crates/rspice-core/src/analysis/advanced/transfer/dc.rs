@@ -92,9 +92,6 @@ impl TransferFunctionConfig {
 pub struct TransferAnalyzer {
     /// Number of nodes (excluding ground)
     num_nodes: usize,
-    /// Number of voltage source branches
-    #[allow(dead_code)]
-    num_branches: usize,
     /// Conductance matrix (linearized at OP)
     g_matrix: Vec<Vec<Value>>,
     /// Node name to index mapping
@@ -107,14 +104,12 @@ impl TransferAnalyzer {
     /// Create analyzer from linearized circuit matrices
     pub fn new(
         num_nodes: usize,
-        num_branches: usize,
         g_matrix: Vec<Vec<Value>>,
         node_map: std::collections::HashMap<String, usize>,
         source_map: std::collections::HashMap<String, usize>,
     ) -> Self {
         Self {
             num_nodes,
-            num_branches,
             g_matrix,
             node_map,
             source_map,
@@ -126,7 +121,6 @@ impl TransferAnalyzer {
         let n = g.len();
         Self {
             num_nodes: n,
-            num_branches: 0,
             g_matrix: g,
             node_map: std::collections::HashMap::new(),
             source_map: std::collections::HashMap::new(),

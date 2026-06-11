@@ -117,9 +117,6 @@ pub struct InstanceMetadata {
 pub struct Flattener<'a> {
     /// Subcircuit definitions indexed by name
     subcircuits: HashMap<&'a str, &'a SubcircuitDef>,
-    /// Counter for generating unique node names (when not preserving hierarchy)
-    #[allow(dead_code)]
-    node_counter: usize,
     /// Configuration options
     config: FlattenerConfig,
     /// Parameter resolver for scoped parameter lookup
@@ -155,7 +152,6 @@ impl<'a> Flattener<'a> {
 
         Self {
             subcircuits: subcircuit_map,
-            node_counter: 0,
             config,
             param_resolver,
             instance_metadata: Vec::new(),
