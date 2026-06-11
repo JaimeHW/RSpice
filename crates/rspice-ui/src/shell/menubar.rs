@@ -52,10 +52,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(10.0);
-                    let label = format!(
-                        "{} · checked out by you",
-                        app.state.workspace.active_view.library
-                    );
+                    let label = app.state.workspace.project.display_name().to_owned();
                     ui.label(
                         egui::RichText::new(label)
                             .font(theme::sans(tokens::FS_0, FontWeight::Regular))

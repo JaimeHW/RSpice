@@ -203,6 +203,8 @@ pub struct RSpiceApp {
     /// Theme last applied to the egui context (re-applied when the user
     /// changes the shell theme).
     applied_theme: Option<crate::ui::Theme>,
+    /// Window title last pushed to the OS (avoids a viewport command per frame).
+    last_window_title: String,
     /// SVG symbol library for component rendering
     pub(crate) symbol_library: Option<crate::schematic::symbols::SymbolLibrary>,
     /// Simulation controller for running analyses
@@ -266,6 +268,7 @@ impl RSpiceApp {
             state,
             first_frame: true,
             applied_theme: None,
+            last_window_title: String::new(),
             symbol_library,
             simulation_controller: crate::simulation::SimulationController::new(),
             file_workflow_io: Box::new(crate::common::file_workflow::NativeFileWorkflowIo),
@@ -287,6 +290,31 @@ impl RSpiceApp {
         self.state
             .workspace
             .set_active_dirty(self.state.schematic.is_dirty);
+        self.sync_window_title(ctx);
+    }
+
+    /// Keep the OS window title (or browser tab title) in sync with the
+    /// active document: `cell* — project — RSpice`.
+    fn sync_window_title(&mut self, ctx: &Context) {
+        let dirty = if self.state.schematic.is_dirty { "*" } else { "" };
+        let view = &self.state.workspace.active_view;
+        let title = format!(
+            "{}{dirty} — {} — RSpice",
+            view.cell,
+            self.state.workspace.project.display_name()
+        );
+        if self.last_window_title != title {
+            #[cfg(not(target_arch = "wasm32"))]
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = ctx;
+                if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+                    doc.set_title(&title);
+                }
+            }
+            self.last_window_title = title;
+        }
     }
 
     fn render_frame_chrome(&mut self, ctx: &Context) {

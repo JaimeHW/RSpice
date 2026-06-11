@@ -51,7 +51,9 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
                     segment(ui, &format!("{:.0} %", state.schematic.zoom * 100.0));
                     engine_pill(ui, state);
-                    segment(ui, &format!("{} threads", thread_count()));
+                    let threads = thread_count();
+                    let unit = if threads == 1 { "thread" } else { "threads" };
+                    segment(ui, &format!("{threads} {unit}"));
                     segment(ui, &state.shell.corner.clone());
                 });
             });
