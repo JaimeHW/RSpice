@@ -16,10 +16,13 @@ pub mod schematic;
 pub mod simulate;
 mod simulate_forms;
 
-/// Left panel width.
+/// Left panel default width.
 const LEFT_WIDTH: f32 = 264.0;
-/// Right panel width.
+/// Right panel default width.
 const RIGHT_WIDTH: f32 = 304.0;
+/// Resize bounds — narrow enough to tuck away, wide enough for ultrawides.
+const PANEL_MIN: f32 = 200.0;
+const PANEL_MAX: f32 = 520.0;
 
 /// Render both contextual side panels for the active view.
 pub fn show(
@@ -34,8 +37,9 @@ pub fn show(
     let c = t.color;
 
     SidePanel::left("volta.left")
-        .exact_width(LEFT_WIDTH)
-        .resizable(false)
+        .default_width(LEFT_WIDTH)
+        .width_range(PANEL_MIN..=PANEL_MAX)
+        .resizable(true)
         .frame(Frame::none().fill(c.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {
@@ -57,8 +61,9 @@ pub fn show(
         });
 
     SidePanel::right("volta.right")
-        .exact_width(RIGHT_WIDTH)
-        .resizable(false)
+        .default_width(RIGHT_WIDTH)
+        .width_range(PANEL_MIN..=PANEL_MAX)
+        .resizable(true)
         .frame(Frame::none().fill(c.bg_panel))
         .show_separator_line(false)
         .show(ctx, |ui| {

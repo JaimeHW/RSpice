@@ -172,16 +172,18 @@ pub fn show(
         let unit = painter.layout_no_wrap(spec.x.unit.to_owned(), tick_font.clone(), c.text_dim);
         plot_rect.right() - unit.size().x - 8.0
     };
+    // Labels skip when they would collide with the previous label (dense
+    // log decades at deep zoom) — every gridline still draws.
+    let mut last_label_right = f32::NEG_INFINITY;
     for (xv, label) in &spec.x.ticks {
         let px = mx(*xv);
         painter.vline(px, plot_rect.y_range(), grid);
         let galley = painter.layout_no_wrap(label.clone(), tick_font.clone(), c.text_dim);
-        if px + galley.size().x * 0.5 <= x_unit_left {
+        let half = galley.size().x * 0.5;
+        if px + half <= x_unit_left && px - half >= last_label_right + 6.0 {
+            last_label_right = px + half;
             painter.galley(
-                pos2(
-                    px - galley.size().x * 0.5,
-                    rect.bottom() - 9.0 - galley.size().y * 0.5,
-                ),
+                pos2(px - half, rect.bottom() - 9.0 - galley.size().y * 0.5),
                 galley,
                 c.text_dim,
             );
