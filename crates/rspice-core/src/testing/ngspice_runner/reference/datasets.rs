@@ -241,6 +241,12 @@ impl TestRunner {
         }
 
         let x_sim: Vec<f64> = results.iter().map(|point| point.frequency).collect();
+        // ngspice-46 emits noise vectors in root-spectral-density units by
+        // default: every output whose name starts with inoise/onoise gets
+        // sqrt() applied at emission (cktnoise.c N_CALC, squared_value[]),
+        // unless the legacy `sqrnoise` control variable is set — which batch
+        // decks cannot do. References regenerated from the official binary
+        // therefore carry V/sqrt(Hz), not the pre-2008 V^2/Hz convention.
         Ok(self.compare_reference_dataset(&reference, &x_sim, |var| {
             let normalized = Self::normalize_variable_name(var);
             if matches!(
@@ -251,7 +257,7 @@ impl TestRunner {
                 return Some(
                     results
                         .iter()
-                        .map(|point| point.output_noise_density)
+                        .map(|point| point.output_noise_rms())
                         .collect(),
                 );
             }
@@ -263,7 +269,7 @@ impl TestRunner {
                 return Some(
                     results
                         .iter()
-                        .map(|point| point.input_referred_density)
+                        .map(|point| point.input_referred_rms())
                         .collect(),
                 );
             }
