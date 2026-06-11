@@ -278,40 +278,7 @@ pub(super) fn generate_frequency_sweep(
     start_freq: f64,
     stop_freq: f64,
 ) -> Vec<f64> {
-    if points == 0 || start_freq <= 0.0 || stop_freq <= 0.0 {
-        return Vec::new();
-    }
-    if (stop_freq - start_freq).abs() < f64::EPSILON || points == 1 {
-        return vec![start_freq];
-    }
-
-    match variation {
-        rspice_core::netlist::FreqVariation::Lin => (0..points)
-            .map(|i| start_freq + (stop_freq - start_freq) * (i as f64) / ((points - 1) as f64))
-            .collect(),
-        rspice_core::netlist::FreqVariation::Oct => {
-            let octaves = (stop_freq / start_freq).log2().abs();
-            let total_points = (octaves * points as f64).ceil() as usize + 1;
-            (0..total_points)
-                .map(|i| {
-                    start_freq
-                        * (stop_freq / start_freq)
-                            .powf((i as f64) / ((total_points.saturating_sub(1)) as f64))
-                })
-                .collect()
-        }
-        rspice_core::netlist::FreqVariation::Dec => {
-            let decades = (stop_freq / start_freq).log10().abs();
-            let total_points = (decades * points as f64).ceil() as usize + 1;
-            (0..total_points)
-                .map(|i| {
-                    start_freq
-                        * (stop_freq / start_freq)
-                            .powf((i as f64) / ((total_points.saturating_sub(1)) as f64))
-                })
-                .collect()
-        }
-    }
+    rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start_freq, stop_freq)
 }
 
 pub(super) fn map_hdf5_output_error(path: &Path, err: crate::hdf5::Hdf5Error) -> CliError {
