@@ -588,8 +588,8 @@ impl<'a> Lexer<'a> {
 
     fn advance(&mut self) -> Option<(usize, char)> {
         let result = self.chars.next();
-        if let Some((i, _)) = result {
-            self.pos = i + 1;
+        if let Some((i, ch)) = result {
+            self.pos = i + ch.len_utf8();
         }
         result
     }
@@ -751,10 +751,14 @@ impl<'a> Lexer<'a> {
         {
             has_scale = true;
             self.advance();
-            // Handle 'meg' specifically
-            if (ch == 'm' || ch == 'M') && self.peek_char() == Some('e') {
-                self.advance();
-                if self.peek_char() == Some('g') {
+            // SPICE-compatible 'meg' suffix: only consume "eg" as a unit so
+            // that "1me" is never mangled into a phantom scale factor.
+            if ch == 'm' || ch == 'M' {
+                let mut lookahead = self.chars.clone();
+                let next1 = lookahead.next().map(|(_, c)| c);
+                let next2 = lookahead.next().map(|(_, c)| c);
+                if matches!(next1, Some('e' | 'E')) && matches!(next2, Some('g' | 'G')) {
+                    self.advance();
                     self.advance();
                 }
             }
@@ -787,7 +791,20 @@ impl<'a> Lexer<'a> {
                         Some((_, 'r')) => value.push('\r'),
                         Some((_, '\\')) => value.push('\\'),
                         Some((_, '"')) => value.push('"'),
-                        Some((_, '0')) => value.push('\0'),
+                        // Octal escape: \d, \dd, or \ddd (LRM 2.6.3)
+                        Some((_, ch @ '0'..='7')) => {
+                            let mut code = ch as u32 - '0' as u32;
+                            for _ in 0..2 {
+                                match self.peek_char() {
+                                    Some(next @ '0'..='7') => {
+                                        code = code * 8 + (next as u32 - '0' as u32);
+                                        self.advance();
+                                    }
+                                    _ => break,
+                                }
+                            }
+                            value.push(char::from_u32(code).unwrap_or('\0'));
+                        }
                         // Line continuation: backslash followed by newline
                         Some((_, '\n')) => {
                             // Skip the newline and continue on next line
@@ -841,5 +858,141 @@ impl<'a> Lexer<'a> {
         let text = &self.source[start..self.pos];
         let span = Span::new(self.source_id, start as u32, self.pos as u32);
         Ok(Token::with_text(TokenKind::Directive, span, text))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lex(source: &str) -> Vec<Token> {
+        Lexer::new(source, SourceId::new(0))
+            .collect_tokens()
+            .expect("lexing failed")
+    }
+
+    fn kinds(source: &str) -> Vec<TokenKind> {
+        lex(source).iter().map(|t| t.kind).collect()
+    }
+
+    #[test]
+    fn tokenizes_module_skeleton() {
+        let toks = kinds("module r(p, n); endmodule");
+        assert_eq!(
+            toks,
+            vec![
+                TokenKind::Module,
+                TokenKind::Identifier,
+                TokenKind::LParen,
+                TokenKind::Identifier,
+                TokenKind::Comma,
+                TokenKind::Identifier,
+                TokenKind::RParen,
+                TokenKind::Semicolon,
+                TokenKind::Endmodule,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn contribution_operator_lexes_before_le() {
+        assert_eq!(
+            kinds("<+ <= < <<"),
+            vec![
+                TokenKind::Contribute,
+                TokenKind::Le,
+                TokenKind::Lt,
+                TokenKind::Shl,
+                TokenKind::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn multibyte_comment_does_not_break_positions() {
+        // Non-ASCII text in comments (common in vendor model headers) must not
+        // desynchronize byte positions for following tokens.
+        let toks = lex("/* Modèle © Fabrikant µA */ module");
+        assert_eq!(toks[0].kind, TokenKind::Module);
+        assert_eq!(toks[0].text.as_deref(), Some("module"));
+    }
+
+    #[test]
+    fn multibyte_string_contents_round_trip() {
+        let toks = lex("\"héllo µ\" x");
+        assert_eq!(toks[0].kind, TokenKind::StringLiteral);
+        assert_eq!(toks[0].text.as_deref(), Some("héllo µ"));
+        assert_eq!(toks[1].text.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn scale_factors_lex_as_real_literals() {
+        for src in ["1.5k", "2u", "3n", "4p", "5f", "6a", "7T", "8G", "9M"] {
+            let toks = lex(src);
+            assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
+            assert_eq!(toks[0].text.as_deref(), Some(src), "for {src}");
+        }
+    }
+
+    #[test]
+    fn meg_suffix_consumed_only_as_unit() {
+        let toks = lex("1meg");
+        assert_eq!(toks[0].kind, TokenKind::RealLiteral);
+        assert_eq!(toks[0].text.as_deref(), Some("1meg"));
+
+        // "1m" followed by identifier must leave the identifier intact.
+        let toks = lex("1m eg");
+        assert_eq!(toks[0].text.as_deref(), Some("1m"));
+        assert_eq!(toks[1].kind, TokenKind::Identifier);
+        assert_eq!(toks[1].text.as_deref(), Some("eg"));
+
+        // "2me" is the real "2m" then the identifier "e".
+        let toks = lex("2me");
+        assert_eq!(toks[0].text.as_deref(), Some("2m"));
+        assert_eq!(toks[1].kind, TokenKind::Identifier);
+        assert_eq!(toks[1].text.as_deref(), Some("e"));
+    }
+
+    #[test]
+    fn exponent_notation_is_real() {
+        for src in ["1e3", "1.5e-12", "2E+6"] {
+            let toks = lex(src);
+            assert_eq!(toks[0].kind, TokenKind::RealLiteral, "for {src}");
+        }
+        assert_eq!(lex("42")[0].kind, TokenKind::IntegerLiteral);
+    }
+
+    #[test]
+    fn octal_escapes_in_strings() {
+        let toks = lex(r#""a\101b\0c""#);
+        assert_eq!(toks[0].text.as_deref(), Some("aAb\0c"));
+    }
+
+    #[test]
+    fn line_continuation_in_string() {
+        let toks = lex("\"ab\\\ncd\"");
+        assert_eq!(toks[0].text.as_deref(), Some("abcd"));
+    }
+
+    #[test]
+    fn system_identifiers_and_directives() {
+        let toks = lex("$temperature `include");
+        assert_eq!(toks[0].kind, TokenKind::SystemIdentifier);
+        assert_eq!(toks[0].text.as_deref(), Some("$temperature"));
+        assert_eq!(toks[1].kind, TokenKind::Directive);
+        assert_eq!(toks[1].text.as_deref(), Some("`include"));
+    }
+
+    #[test]
+    fn unterminated_block_comment_errors() {
+        let result = Lexer::new("/* never closed", SourceId::new(0)).collect_tokens();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn block_comment_with_stars_terminates() {
+        let toks = lex("/* ** stars ** */ x");
+        assert_eq!(toks[0].kind, TokenKind::Identifier);
     }
 }

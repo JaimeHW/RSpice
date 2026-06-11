@@ -1484,18 +1484,22 @@ fn parse_number(s: &str) -> f64 {
         )
     }) {
         let scale_str = &s[pos..];
-        let scale = match scale_str {
-            "T" => 1e12,
-            "G" => 1e9,
-            "M" | "meg" | "Meg" | "MEG" => 1e6,
-            "k" | "K" => 1e3,
-            "m" if !scale_str.starts_with("meg") => 1e-3,
-            "u" => 1e-6,
-            "n" => 1e-9,
-            "p" => 1e-12,
-            "f" => 1e-15,
-            "a" => 1e-18,
-            _ => 1.0,
+        let scale = if scale_str.eq_ignore_ascii_case("meg") {
+            1e6
+        } else {
+            match scale_str {
+                "T" => 1e12,
+                "G" => 1e9,
+                "M" => 1e6,
+                "k" | "K" => 1e3,
+                "m" => 1e-3,
+                "u" => 1e-6,
+                "n" => 1e-9,
+                "p" => 1e-12,
+                "f" => 1e-15,
+                "a" => 1e-18,
+                _ => 1.0,
+            }
         };
         (&s[..pos], scale)
     } else {
