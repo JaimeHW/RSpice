@@ -1,16 +1,14 @@
 //! Advanced analysis types
 //!
 //! Specialized analyses: noise, Fourier, sensitivity, pole-zero, S-parameters, Monte Carlo,
-//! PSS (Periodic Steady State), Harmonic Balance, Phase Noise, Envelope Transient, Multi-Rate,
+//! PSS (Periodic Steady State), Harmonic Balance, Phase Noise,
 //! PSTB (Periodic Stability), PXF (Periodic Transfer Function), and Corner Analysis.
 
 pub mod corner;
-pub mod envelope;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
 pub mod monte_carlo;
-pub mod multirate;
 pub mod noise;
 pub mod pac;
 pub mod parametric;
@@ -28,10 +26,6 @@ pub use corner::{
     CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
     ProcessCorner,
 };
-pub use envelope::{
-    AmSource, EnvelopeSignal, EnvelopeTransientConfig, EnvelopeTransientResult,
-    EnvelopeTransientSolver, EnvelopeTransientState, FmSource, IqSource, PulseShape,
-};
 pub use fourier::{FourierAnalysis, FourierConfig, FourierResult, HarmonicComponent};
 pub use harmonic_balance::{
     FrequencyMap, HarmonicData, HbConfig, HbFft, HbResult, HbSolver, HbTone, MultiToneConfig,
@@ -43,10 +37,6 @@ pub use measure::{
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
     VariableStatistics, VariationSet,
-};
-pub use multirate::{
-    AutoPartitioner, CircuitPartition, InterfaceHistory, MultiRateConfig, MultiRateResult,
-    MultiRateSolver, MultiRateState, NodeActivity, PartitionState, PartitionStats, RateClass,
 };
 pub use noise::{
     IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution, NoiseResult,
