@@ -12,6 +12,14 @@
 use clap::Parser;
 use std::process::ExitCode;
 
+/// mimalloc outperforms the Windows system heap substantially on the
+/// many small allocations of parsing, netlist expansion, and result
+/// recording. Scoped to the CLI binary: rspice-core stays
+/// allocator-agnostic and the Python module must not override the
+/// interpreter's allocator.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod cli;
 mod commands;
 mod hdf5;
