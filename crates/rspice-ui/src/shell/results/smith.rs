@@ -67,6 +67,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &legend,
         false,
         false,
+        false,
     );
 
     let mut spec = PlotSpec::new(

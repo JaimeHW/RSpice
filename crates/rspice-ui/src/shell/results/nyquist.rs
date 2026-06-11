@@ -93,6 +93,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &legend,
         false,
         false,
+        false,
     );
 
     // Equal-aspect ranges around the locus and the critical point.

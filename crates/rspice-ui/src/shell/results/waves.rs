@@ -237,6 +237,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut toggle_trace: Option<(usize, usize)> = None;
     let mut toggle_maximize: Option<usize> = None;
     let mut close_strip: Option<usize> = None;
+    let mut fit_strip: Option<usize> = None;
 
     let avail = ui.available_rect_before_wrap();
     let n = visible.len();
@@ -272,6 +273,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 on: trace.visible,
                             })
                             .collect();
+                        let zoomed = state
+                            .shell
+                            .results
+                            .plot_view(super::ResultViewer::Waves, model.analysis_index)
+                            .is_zoomed();
                         let header = strip::header(
                             ui,
                             &model.kind_tag,
@@ -279,6 +285,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             &legend,
                             maximized,
                             !maximized && n > 1,
+                            zoomed,
                         );
                         if let Some(chip_index) = header.legend_clicked {
                             if let Some(trace) = model.traces.get(chip_index) {
@@ -290,6 +297,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         }
                         if header.close_clicked {
                             close_strip = Some(model.analysis_index);
+                        }
+                        if header.fit_clicked {
+                            fit_strip = Some(model.analysis_index);
                         }
 
                         // Strips scrolled out of view skip the plot body
@@ -319,6 +329,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         if results.cursor_strip == Some(idx) {
             results.clear_cursors();
         }
+    }
+    if let Some(idx) = fit_strip {
+        results.reset_plot_view(super::ResultViewer::Waves, idx);
     }
 }
 
@@ -364,6 +377,14 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         return;
     };
 
+    // User zoom/pan overrides the automatic fit per axis.
+    let view = state
+        .shell
+        .results
+        .plot_view(super::ResultViewer::Waves, model.analysis_index);
+    let (x0, x1) = view.x.unwrap_or((x0, x1));
+    let (y0, y1) = view.y.unwrap_or((y0, y1));
+
     let x_axis = match model.x_scale {
         XScale::Log10 => Axis::log_decades(x0, x1, model.x_unit),
         XScale::Linear => Axis::linear(x0, x1, model.x_unit),
@@ -377,16 +398,21 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         .any(|trace| trace.kind == TraceKind::PhaseDeg && trace.visible);
     if has_phase {
         if let Some((p0, p1)) = y_range(&mut state.shell.results.derived, model, true) {
-            // Round phase bounds to 45° so ticks land on familiar angles.
-            let p0 = (p0 / 45.0).floor() * 45.0;
-            let p1 = (p1 / 45.0).ceil() * 45.0;
-            let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
-                .map(|i| p0 + i as f64 * 45.0)
-                .collect();
-            spec.y_right = Some((
-                Axis::with_ticks(p0, p1, "°", &ticks),
-                t.color.traces[2],
-            ));
+            let axis = match view.y_right {
+                // Zoomed: plain linear ticks — the 45° lattice would emit
+                // hundreds of gridlines (or none) at arbitrary zoom depths.
+                Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
+                None => {
+                    // Round phase bounds to 45° so ticks land on familiar angles.
+                    let p0 = (p0 / 45.0).floor() * 45.0;
+                    let p1 = (p1 / 45.0).ceil() * 45.0;
+                    let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
+                        .map(|i| p0 + i as f64 * 45.0)
+                        .collect();
+                    Axis::with_ticks(p0, p1, "°", &ticks)
+                }
+            };
+            spec.y_right = Some((axis, t.color.traces[2]));
         }
     }
     // 0 dB reference on log-magnitude strips.
@@ -433,6 +459,14 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
             results.cursor_strip = Some(model.analysis_index);
         }
         results.cursors.place(clicked_x);
+    }
+
+    if response.view.any() {
+        state
+            .shell
+            .results
+            .plot_view_mut(super::ResultViewer::Waves, model.analysis_index)
+            .apply(&response.view);
     }
 }
 

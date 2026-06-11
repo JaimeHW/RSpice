@@ -35,7 +35,7 @@ use crate::ui::widgets::{Button, chip, docbar};
 use crate::common::app::ActiveViewer;
 
 /// The result viewers, in tab order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub enum ResultViewer {
     /// Stacked waveform strips, one per analysis.
     #[default]
@@ -113,6 +113,43 @@ impl ResultViewer {
     ];
 }
 
+/// User zoom/pan override for one plot. `None` per axis means automatic
+/// fit-to-data; gestures in the plot engine populate the ranges and a
+/// double-click (or the strip's FIT action) clears them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlotView {
+    /// X range override (data space).
+    pub x: Option<(f64, f64)>,
+    /// Left-Y range override.
+    pub y: Option<(f64, f64)>,
+    /// Right-Y range override (dual-axis strips).
+    pub y_right: Option<(f64, f64)>,
+}
+
+impl PlotView {
+    /// Whether any axis is zoomed away from the automatic view.
+    pub fn is_zoomed(&self) -> bool {
+        self.x.is_some() || self.y.is_some() || self.y_right.is_some()
+    }
+
+    /// Fold one frame's gesture result into the override.
+    pub fn apply(&mut self, change: &crate::ui::plot::ViewChange) {
+        if change.reset {
+            *self = Self::default();
+            return;
+        }
+        if let Some(x) = change.x {
+            self.x = Some(x);
+        }
+        if let Some(y) = change.y {
+            self.y = Some(y);
+        }
+        if let Some(y_right) = change.y_right {
+            self.y_right = Some(y_right);
+        }
+    }
+}
+
 /// Per-session results-workspace state. Only the viewer selection persists;
 /// caches and cursors are transient.
 #[derive(Debug, Clone, Default)]
@@ -142,6 +179,10 @@ pub struct ResultsState {
     /// `simulation.data_version` last seen by the workspace; when it
     /// advances, cursors are cleared so they never report stale data.
     seen_version: u64,
+    /// Zoom/pan overrides per plot, keyed by (viewer, strip index). Survives
+    /// re-runs on purpose — keeping the zoomed window across parameter
+    /// tweaks is how engineers compare iterations.
+    pub views: std::collections::HashMap<(ResultViewer, usize), PlotView>,
 }
 
 impl ResultsState {
@@ -149,6 +190,21 @@ impl ResultsState {
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
         self.cursor_strip = None;
+    }
+
+    /// The zoom/pan override for one plot (copy; default = automatic view).
+    pub fn plot_view(&self, viewer: ResultViewer, index: usize) -> PlotView {
+        self.views.get(&(viewer, index)).copied().unwrap_or_default()
+    }
+
+    /// Mutable zoom/pan override for one plot.
+    pub fn plot_view_mut(&mut self, viewer: ResultViewer, index: usize) -> &mut PlotView {
+        self.views.entry((viewer, index)).or_default()
+    }
+
+    /// Drop the zoom/pan override for one plot (FIT action).
+    pub fn reset_plot_view(&mut self, viewer: ResultViewer, index: usize) {
+        self.views.remove(&(viewer, index));
     }
 }
 

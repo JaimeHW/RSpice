@@ -95,7 +95,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         color: c.traces[0],
         on: true,
     }];
-    strip::header(ui, "FFT", &model.subtitle, &legend, false, false);
+    let view = state.shell.results.plot_view(super::ResultViewer::Fft, 0);
+    let header = strip::header(
+        ui,
+        "FFT",
+        &model.subtitle,
+        &legend,
+        false,
+        false,
+        view.is_zoomed(),
+    );
+    if header.fit_clicked {
+        state
+            .shell
+            .results
+            .reset_plot_view(super::ResultViewer::Fft, 0);
+    }
 
     // X: linear; zoom to ~11 harmonics when a fundamental is known.
     let data_max = *model.frequency.last().unwrap_or(&1.0);
@@ -129,9 +144,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Degenerate spectrum");
         return;
     };
-    let y = Axis::linear_with((lo - 8.0).max(-200.0), hi + 12.0, "dBV", 7);
+    let (y_lo, y_hi) = view.y.unwrap_or(((lo - 8.0).max(-200.0), hi + 12.0));
+    let y = Axis::linear_with(y_lo, y_hi, "dBV", 7);
 
-    let mut spec = PlotSpec::new(Axis::linear(0.0, x1, "Hz"), XScale::Linear, y);
+    let (x_lo, x_hi) = view.x.unwrap_or((0.0, x1));
+    let mut spec = PlotSpec::new(Axis::linear(x_lo, x_hi, "Hz"), XScale::Linear, y);
     spec.left_margin = 60.0;
     spec.traces.push(
         Trace::new(&model.frequency, &model.magnitude_db, c.traces[0])
@@ -177,13 +194,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ]
     };
 
-    plot::show(
+    let response = plot::show(
         ui,
         &spec,
         &mut state.shell.results.cache,
         None,
         Some(&readout),
     );
+    if response.view.any() {
+        state
+            .shell
+            .results
+            .plot_view_mut(super::ResultViewer::Fft, 0)
+            .apply(&response.view);
+    }
 }
 
 // ---------------------------------------------------------------------------

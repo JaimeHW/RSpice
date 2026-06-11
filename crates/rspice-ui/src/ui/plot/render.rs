@@ -9,6 +9,28 @@ use super::cursor::CursorPair;
 use super::decimate::DecimationCache;
 use super::spec::{PlotSpec, YSide};
 
+/// A view-range change requested by a navigation gesture this frame.
+/// The caller owns the view state; the engine only reports what the
+/// gesture means in data space against the ranges it was handed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ViewChange {
+    /// New X range.
+    pub x: Option<(f64, f64)>,
+    /// New left-Y range.
+    pub y: Option<(f64, f64)>,
+    /// New right-Y range (only emitted when the spec had a right axis).
+    pub y_right: Option<(f64, f64)>,
+    /// Double-click: restore the automatic (fit-to-data) view.
+    pub reset: bool,
+}
+
+impl ViewChange {
+    /// Whether the gesture produced any change this frame.
+    pub fn any(&self) -> bool {
+        self.reset || self.x.is_some() || self.y.is_some() || self.y_right.is_some()
+    }
+}
+
 /// What the plot reported back for this frame.
 pub struct PlotResponse {
     /// The interaction response over the whole well.
@@ -19,6 +41,10 @@ pub struct PlotResponse {
     pub clicked_x: Option<f64>,
     /// The inner plot rectangle (inside margins), for overlays.
     pub plot_rect: Rect,
+    /// Zoom/pan/fit gesture result: wheel zooms X about the cursor
+    /// (Ctrl+wheel zooms Y), drag pans, Shift- or right-drag draws a
+    /// zoom box, double-click fits.
+    pub view: ViewChange,
 }
 
 /// A row of the hover readout: (label, value).
@@ -57,7 +83,7 @@ pub fn show(
     let c = t.color;
 
     let rect = ui.available_rect_before_wrap();
-    let response = ui.allocate_rect(rect, Sense::click());
+    let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let plot_rect = inner_rect(rect, spec);
 
     let mut out = PlotResponse {
@@ -65,6 +91,7 @@ pub fn show(
         hover_x: None,
         clicked_x: None,
         plot_rect,
+        view: ViewChange::default(),
     };
     if plot_rect.width() < 24.0
         || plot_rect.height() < 24.0
@@ -351,7 +378,143 @@ pub fn show(
         }
     }
 
+    // ---- navigation gestures: wheel zoom, drag pan, zoom box, fit
+    handle_navigation(ui, spec, &painter, plot_rect, &mut out, &t);
+
     out
+}
+
+/// Interpret wheel/drag gestures against the spec's current ranges and
+/// fill `out.view` with the resulting data-space ranges. The caller owns
+/// the view state (this engine is stateless across frames except for the
+/// zoom-box anchor, which lives in egui memory keyed by the widget id).
+fn handle_navigation(
+    ui: &mut Ui,
+    spec: &PlotSpec<'_>,
+    painter: &egui::Painter,
+    plot_rect: Rect,
+    out: &mut PlotResponse,
+    t: &Tokens,
+) {
+    let c = t.color;
+
+    // Fraction coordinates: fx in 0..1 left→right, fy in 0..1 bottom→top.
+    let fx_of = |px: f32| ((px - plot_rect.left()) / plot_rect.width()) as f64;
+    let fy_of = |py: f32| ((plot_rect.bottom() - py) / plot_rect.height()) as f64;
+    let denorm_x = |frac: f64| spec.x_scale.denormalize(frac, spec.x.min, spec.x.max);
+    let denorm_y = |frac: f64| spec.y.min + frac * (spec.y.max - spec.y.min);
+    let denorm_yr = |frac: f64| {
+        spec.y_right
+            .as_ref()
+            .map(|(axis, _)| axis.min + frac * (axis.max - axis.min))
+    };
+
+    // Double-click restores the automatic fit.
+    if out.response.double_clicked() {
+        out.view.reset = true;
+        return;
+    }
+
+    let shift = ui.input(|i| i.modifiers.shift);
+    let ctrl = ui.input(|i| i.modifiers.ctrl);
+    let box_id = out.response.id.with("plot.zoombox");
+
+    // Zoom box: Shift+primary drag or right drag. The anchor survives
+    // across frames in egui memory; the box zooms both axes on release.
+    let box_drag_started = (out.response.drag_started_by(egui::PointerButton::Primary) && shift)
+        || out.response.drag_started_by(egui::PointerButton::Secondary);
+    if box_drag_started
+        && let Some(pos) = out.response.interact_pointer_pos()
+        && plot_rect.contains(pos)
+    {
+        ui.memory_mut(|m| m.data.insert_temp(box_id, pos));
+    }
+    let anchor = ui.memory(|m| m.data.get_temp::<Pos2>(box_id));
+    if let Some(anchor) = anchor {
+        let dragging = out.response.dragged_by(egui::PointerButton::Primary)
+            || out.response.dragged_by(egui::PointerButton::Secondary);
+        let stopped = out.response.drag_stopped_by(egui::PointerButton::Primary)
+            || out.response.drag_stopped_by(egui::PointerButton::Secondary);
+        let corner = out
+            .response
+            .interact_pointer_pos()
+            .map(|p| plot_rect.clamp(p));
+
+        if dragging && let Some(corner) = corner {
+            let band = Rect::from_two_pos(anchor, corner);
+            painter.rect(
+                band,
+                0.0,
+                c.accent.gamma_multiply(0.08),
+                Stroke::new(1.0, c.accent),
+            );
+        }
+        if stopped {
+            ui.memory_mut(|m| m.data.remove::<Pos2>(box_id));
+            if let Some(corner) = corner {
+                let band = Rect::from_two_pos(anchor, corner);
+                if band.width() > 6.0 && band.height() > 6.0 {
+                    out.view.x = Some((fx_of(band.left()).max(0.0), fx_of(band.right()).min(1.0)))
+                        .map(|(a, b)| (denorm_x(a), denorm_x(b)));
+                    let (fy0, fy1) = (fy_of(band.bottom()).max(0.0), fy_of(band.top()).min(1.0));
+                    out.view.y = Some((denorm_y(fy0), denorm_y(fy1)));
+                    if let (Some(a), Some(b)) = (denorm_yr(fy0), denorm_yr(fy1)) {
+                        out.view.y_right = Some((a, b));
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // Drag pan (primary, unmodified): the content follows the pointer.
+    if out.response.dragged_by(egui::PointerButton::Primary) && !shift {
+        let delta = out.response.drag_delta();
+        if delta != egui::Vec2::ZERO {
+            let dfx = -f64::from(delta.x) / f64::from(plot_rect.width());
+            if dfx != 0.0 {
+                out.view.x = Some((denorm_x(dfx), denorm_x(1.0 + dfx)));
+            }
+            let dy = f64::from(delta.y) / f64::from(plot_rect.height());
+            if dy != 0.0 {
+                let span = spec.y.max - spec.y.min;
+                out.view.y = Some((spec.y.min + dy * span, spec.y.max + dy * span));
+                if let Some((axis, _)) = &spec.y_right {
+                    let span_r = axis.max - axis.min;
+                    out.view.y_right = Some((axis.min + dy * span_r, axis.max + dy * span_r));
+                }
+            }
+        }
+        return;
+    }
+
+    // Wheel zoom about the cursor: X by default, Y with Ctrl held.
+    if let Some(pointer) = out.response.hover_pos()
+        && plot_rect.contains(pointer)
+    {
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            // Consume the wheel so an enclosing ScrollArea doesn't also
+            // scroll the strip list while the user zooms a plot.
+            ui.input_mut(|i| {
+                i.raw_scroll_delta = egui::Vec2::ZERO;
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+            });
+            let factor = (f64::from(-scroll) * 0.002).exp().clamp(0.05, 20.0);
+            if ctrl {
+                let fy = fy_of(pointer.y);
+                let (f0, f1) = (fy * (1.0 - factor), fy + (1.0 - fy) * factor);
+                out.view.y = Some((denorm_y(f0), denorm_y(f1)));
+                if let (Some(a), Some(b)) = (denorm_yr(f0), denorm_yr(f1)) {
+                    out.view.y_right = Some((a, b));
+                }
+            } else {
+                let fx = fx_of(pointer.x);
+                let (f0, f1) = (fx * (1.0 - factor), fx + (1.0 - fx) * factor);
+                out.view.x = Some((denorm_x(f0), denorm_x(f1)));
+            }
+        }
+    }
 }
 
 /// The floating hover readout: elevated box, mono rows, k dim / v bright.

@@ -53,6 +53,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &legend,
         false,
         false,
+        false,
     );
 
     // Symmetric ranges around the roots.

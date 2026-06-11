@@ -30,9 +30,12 @@ pub struct StripHeaderResponse {
     pub maximize_clicked: bool,
     /// The close action was clicked.
     pub close_clicked: bool,
+    /// The FIT action (shown while zoomed) was clicked.
+    pub fit_clicked: bool,
 }
 
-/// Render a strip header across the available width.
+/// Render a strip header across the available width. `zoomed` shows the
+/// FIT action that restores the automatic view.
 pub fn header(
     ui: &mut Ui,
     kind: &str,
@@ -40,6 +43,7 @@ pub fn header(
     legend: &[LegendChip<'_>],
     maximized: bool,
     closable: bool,
+    zoomed: bool,
 ) -> StripHeaderResponse {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -121,9 +125,59 @@ pub fn header(
         {
             out.maximize_clicked = true;
         }
+        if zoomed {
+            ui.add_space(4.0);
+            if fit_chip(ui).clicked() {
+                out.fit_clicked = true;
+            }
+        }
     });
 
     out
+}
+
+/// The FIT chip: a small mono tag shown only while the plot is zoomed;
+/// clicking it restores the automatic fit-to-data view (as does a
+/// double-click on the plot itself).
+fn fit_chip(ui: &mut Ui) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    let galley = ui.fonts(|f| {
+        f.layout_no_wrap(
+            "FIT".to_owned(),
+            theme::mono(tokens::FS_0, FontWeight::Medium),
+            c.accent,
+        )
+    });
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(galley.size().x + 14.0, 18.0), Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, response.hovered(), 0.16);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        t.radius,
+        mix(c.bg_panel, c.bg_hover, hover),
+        Stroke::new(1.0, c.accent_dim),
+    );
+    painter.galley(
+        egui::pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        c.accent,
+    );
+
+    response
+        .on_hover_text("Restore automatic view (double-click the plot does the same)")
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A legend chip: 14×3 color swatch + mono name; dimmed when off.

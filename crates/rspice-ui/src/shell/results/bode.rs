@@ -151,14 +151,22 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             on: model.phase_deg.is_some(),
         },
     ];
-    strip::header(
+    let view = state.shell.results.plot_view(super::ResultViewer::Bode, 0);
+    let header = strip::header(
         ui,
         "STB",
         &format!("{} · margins from the simulated curves", model.signal),
         &legend,
         false,
         false,
+        view.is_zoomed(),
     );
+    if header.fit_clicked {
+        state
+            .shell
+            .results
+            .reset_plot_view(super::ResultViewer::Bode, 0);
+    }
 
     let x0 = model
         .frequency
@@ -171,22 +179,33 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         well_hint(ui, "Degenerate frequency axis");
         return;
     }
+    let (x0, x1) = view.x.unwrap_or((x0, x1));
 
     let (g_min, g_max) = model.margins.gain_extremes;
     let pad = ((g_max - g_min) * 0.1).max(3.0);
-    let y = Axis::linear((g_min - pad).min(-10.0), (g_max + pad).max(10.0), "dB");
+    let (y0, y1) = view
+        .y
+        .unwrap_or(((g_min - pad).min(-10.0), (g_max + pad).max(10.0)));
+    let y = Axis::linear(y0, y1, "dB");
 
     let mut spec = PlotSpec::new(Axis::log_decades(x0, x1, "Hz"), XScale::Log10, y);
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
     if let Some(phase) = &model.phase_deg {
         let (p_min, p_max) = model.margins.phase_extremes.unwrap_or((-180.0, 0.0));
-        let p0 = ((p_min.min(-180.0)) / 45.0).floor() * 45.0;
-        let p1 = (p_max.max(0.0) / 45.0).ceil() * 45.0;
-        let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
-            .map(|i| p0 + i as f64 * 45.0)
-            .collect();
-        spec.y_right = Some((Axis::with_ticks(p0, p1, "°", &ticks), c.traces[2]));
+        let axis = match view.y_right {
+            // Zoomed: plain linear ticks instead of the 45° lattice.
+            Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
+            None => {
+                let p0 = ((p_min.min(-180.0)) / 45.0).floor() * 45.0;
+                let p1 = (p_max.max(0.0) / 45.0).ceil() * 45.0;
+                let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
+                    .map(|i| p0 + i as f64 * 45.0)
+                    .collect();
+                Axis::with_ticks(p0, p1, "°", &ticks)
+            }
+        };
+        spec.y_right = Some((axis, c.traces[2]));
         spec.traces.push(
             Trace::new(&model.frequency, phase, c.traces[2])
                 .right()
@@ -251,13 +270,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         rows
     };
 
-    plot::show(
+    let response = plot::show(
         ui,
         &spec,
         &mut state.shell.results.cache,
         None,
         Some(&readout),
     );
+    if response.view.any() {
+        state
+            .shell
+            .results
+            .plot_view_mut(super::ResultViewer::Bode, 0)
+            .apply(&response.view);
+    }
 }
 
 // ---------------------------------------------------------------------------

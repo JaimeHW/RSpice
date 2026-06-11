@@ -38,13 +38,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         color: c.accent,
         on: true,
     }];
-    strip::header(ui, "MC", &subtitle, &legend, false, false);
+    let view = state.shell.results.plot_view(super::ResultViewer::Hist, 0);
+    let header = strip::header(
+        ui,
+        "MC",
+        &subtitle,
+        &legend,
+        false,
+        false,
+        view.is_zoomed(),
+    );
+    if header.fit_clicked {
+        state
+            .shell
+            .results
+            .reset_plot_view(super::ResultViewer::Hist, 0);
+    }
 
     let span = (histogram.data_max - histogram.data_min).abs().max(1e-12);
     let x0 = histogram.data_min - span * 0.06;
     let x1 = histogram.data_max + span * 0.06;
+    let (x0, x1) = view.x.unwrap_or((x0, x1));
     let max_count = histogram.bins.iter().map(|b| b.count).max().unwrap_or(1) as f64;
     let y1 = (max_count * 1.18).ceil().max(4.0);
+    let (y0, y1) = view.y.unwrap_or((0.0, y1));
 
     // Normal-fit overlay buffers — declared before the spec so the borrows
     // they hand to it outlive the plot call.
@@ -54,7 +71,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let mut spec = PlotSpec::new(
         Axis::linear(x0, x1, ""),
         XScale::Linear,
-        Axis::linear_with(0.0, y1, "n", 5),
+        Axis::linear_with(y0, y1, "n", 5),
     );
     spec.left_margin = 48.0;
 
@@ -155,13 +172,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ]
     };
 
-    plot::show(
+    let response = plot::show(
         ui,
         &spec,
         &mut state.shell.results.cache,
         None,
         Some(&readout),
     );
+    if response.view.any() {
+        state
+            .shell
+            .results
+            .plot_view_mut(super::ResultViewer::Hist, 0)
+            .apply(&response.view);
+    }
 }
 
 // ---------------------------------------------------------------------------
