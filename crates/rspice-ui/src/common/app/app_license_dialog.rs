@@ -212,7 +212,14 @@ fn summary_card(ui: &mut egui::Ui, info: &LicenseInfo) {
         ui.set_width(ui.available_width());
         row(ui, "Licensed to", &info.licensed_to, c.text);
         row(ui, "Tier", &info.tier, c.accent);
-        row(ui, "Updates until", &info.updates_until, c.text);
+        if info.updates_expired {
+            // Perpetual fallback: the key still activates; this build just
+            // postdates its updates window.
+            let label = format!("{} · updates ended", info.updates_until);
+            row(ui, "Updates until", &label, c.warn);
+        } else {
+            row(ui, "Updates until", &info.updates_until, c.text);
+        }
         row(ui, "License id", &info.license_id, c.text);
         ui.add_space(6.0);
         ui.horizontal_wrapped(|ui| {

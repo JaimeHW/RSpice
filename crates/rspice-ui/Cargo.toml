@@ -86,6 +86,14 @@ rfd = "0.15"
 # Cross-platform config directories
 dirs = "5.0"
 
+# License-key signature verification (docs/license-key-spec.md) — pure
+# Rust, works on wasm32; key generation lives in the license_tool example
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "rand_core"] }
+
+[dev-dependencies]
+# Keypair generation for the license_tool example only
+rand = "0.8"
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Default features on: faer-parallel/parallel/simd so the desktop app gets
 # the same fast solver paths as the CLI.
