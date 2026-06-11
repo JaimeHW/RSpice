@@ -101,6 +101,17 @@ pub(super) fn process_line(
     line_num: usize,
     state: &mut ParseState,
 ) -> Result<(), ParseError> {
+    // HSPICE table-driven sweeps resolve through multi-run expansion
+    // (`netlist::multi_run`); in a direct parse the analysis is skipped
+    // with a warning instead of failing, so unexpanded decks still load.
+    if crate::netlist::multi_run::references_data_table(line) {
+        log::warn!(
+            "line {line_num}: analysis references a .DATA table; table-driven sweeps \
+             run via multi-run expansion - analysis skipped in this parse"
+        );
+        return Ok(());
+    }
+
     let upper = line.to_uppercase();
 
     // Check for .SUBCKT start

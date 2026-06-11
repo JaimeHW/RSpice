@@ -18,6 +18,7 @@ mod flattener;
 pub mod hierarchy_path;
 pub mod include;
 pub mod lexer;
+pub mod multi_run;
 pub mod param_scope;
 mod parser;
 mod xspice_parser;
@@ -138,6 +139,13 @@ impl Netlist {
         Self::parse_with_path(&content, path)
     }
 
+    /// Read a deck file with the same encoding handling `parse_file` uses
+    /// (UTF-8 with fallbacks), without parsing — for callers that
+    /// preprocess the text first (multi-run expansion).
+    pub fn read_source(path: &std::path::Path) -> Result<String, ParseError> {
+        Ok(read_file_with_encoding(path)?)
+    }
+
     /// Parse a netlist from a file with additional include search directories
     ///
     /// Like [`Netlist::parse_file`], but `.include`/`.lib` references that do
@@ -148,11 +156,23 @@ impl Netlist {
         search_paths: &[std::path::PathBuf],
     ) -> Result<Self, ParseError> {
         let content = read_file_with_encoding(path)?;
+        Self::parse_with_search_paths(&content, path, search_paths)
+    }
+
+    /// Parse netlist source text as if it lived at `path`, with additional
+    /// include search directories — the source-text twin of
+    /// [`Netlist::parse_file_with_search_paths`], for callers that rewrite
+    /// the deck before parsing (multi-run expansion, parameter overrides).
+    pub fn parse_with_search_paths(
+        input: &str,
+        path: &std::path::Path,
+        search_paths: &[std::path::PathBuf],
+    ) -> Result<Self, ParseError> {
         let mut processor = IncludeProcessor::new(path);
         for dir in search_paths {
             processor.add_lib_path(dir.clone());
         }
-        let processed = processor.expand_content(&content, path)?;
+        let processed = processor.expand_content(input, path)?;
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, path);
         netlist.source_path = Some(path.to_path_buf());

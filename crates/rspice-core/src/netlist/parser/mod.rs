@@ -71,6 +71,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
     let mut line_num = 1;
     let mut continuation = String::new();
+    let mut skipping_data_block = false;
 
     for line in lines.iter().skip(1) {
         line_num += 1;
@@ -81,6 +82,16 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         let no_inline_comment = strip_inline_semicolon_comment(line);
         let trimmed = no_inline_comment.trim();
         if trimmed.is_empty() || trimmed.starts_with('*') {
+            continue;
+        }
+
+        // `.DATA` rows belong to multi-run expansion (`netlist::multi_run`),
+        // not the circuit; skip the block through `.ENDDATA`.
+        let head = trimmed.split_whitespace().next().unwrap_or("");
+        if skipping_data_block {
+            if head.eq_ignore_ascii_case(".enddata") {
+                skipping_data_block = false;
+            }
             continue;
         }
 
@@ -100,6 +111,20 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         // Check for .END
         if trimmed.eq_ignore_ascii_case(".end") {
             break;
+        }
+
+        // `.ALTER` ends the base deck; the variants expand textually
+        // before parsing (multi-run), so this parse stops here.
+        if head.eq_ignore_ascii_case(".alter") {
+            log::info!(
+                "line {line_num}: .ALTER present; this parse covers the base deck - \
+                 run multi-run expansion for the alter variants"
+            );
+            break;
+        }
+        if head.eq_ignore_ascii_case(".data") {
+            skipping_data_block = true;
+            continue;
         }
 
         // Handle .VERILOGA directive directly (before continuation handling)
