@@ -195,22 +195,50 @@ impl SimulationController {
             .iter()
             .map(|item| item.analysis_line.clone())
             .collect();
-        let result = crate::simulation::netlist_gen::generate_netlist_with_analysis(
-            &state.schematic,
-            &analysis_lines,
-        );
-        let mut netlist = result.netlist.clone();
 
-        if !result.errors.is_empty() {
-            for err in result.errors {
-                state.push_sim_message(ConsoleMessage::error(err));
+        // Manual netlist source (text-first mode): run the edited deck
+        // verbatim with the configured analyses appended. Otherwise
+        // regenerate from the schematic as usual.
+        let mut netlist = if let Some(source) = state.workspace.netlist_source.clone() {
+            state.push_sim_message(ConsoleMessage::info(
+                "Running manually edited netlist source".to_string(),
+            ));
+            Self::compose_manual_netlist(&source, &analysis_lines)
+        } else {
+            let result = crate::simulation::netlist_gen::generate_netlist_with_analysis(
+                &state.schematic,
+                &analysis_lines,
+            );
+
+            if !result.errors.is_empty() {
+                for err in result.errors {
+                    state.push_sim_message(ConsoleMessage::error(err));
+                }
+                state.simulation.status = "Netlist error".to_string();
+                return;
             }
-            state.simulation.status = "Netlist error".to_string();
-            return;
-        }
-        for warning in result.warnings {
-            state.push_sim_message(ConsoleMessage::warning(warning));
-        }
+            for warning in result.warnings {
+                state.push_sim_message(ConsoleMessage::warning(warning));
+            }
+
+            // Populate cross-probe mapping for probe mode. The schematic
+            // keeps its own copy so the inspector's terminal-net rows and
+            // the simulate panel's net count resolve without reaching
+            // simulation state (the node map is small — nodes only).
+            state.schematic.net_mapping = result.point_to_net.clone();
+            state.simulation.cross_probe.update(
+                result.point_to_net,
+                result.nets,
+                result.net_segments,
+            );
+            log::info!(
+                "Cross-probe mapping populated: {} points, {} nets",
+                state.simulation.cross_probe.point_to_net.len(),
+                state.simulation.cross_probe.net_to_points.len()
+            );
+
+            result.netlist
+        };
 
         netlist = Self::apply_simulation_options_to_netlist(
             &netlist,
@@ -218,25 +246,9 @@ impl SimulationController {
         );
 
         log::info!(
-            "Generated netlist ({} bytes):\n{}",
+            "Prepared netlist ({} bytes):\n{}",
             netlist.len(),
             &netlist[..netlist.len().min(500)]
-        );
-
-        // Populate cross-probe mapping for probe mode. The schematic keeps
-        // its own copy so the inspector's terminal-net rows and the
-        // simulate panel's net count resolve without reaching simulation
-        // state (the node map is small — nodes only, not pixels).
-        state.schematic.net_mapping = result.point_to_net.clone();
-        state.simulation.cross_probe.update(
-            result.point_to_net,
-            result.nets,
-            result.net_segments,
-        );
-        log::info!(
-            "Cross-probe mapping populated: {} points, {} nets",
-            state.simulation.cross_probe.point_to_net.len(),
-            state.simulation.cross_probe.net_to_points.len()
         );
 
         self.pending_analyses = queued.into_iter().collect();

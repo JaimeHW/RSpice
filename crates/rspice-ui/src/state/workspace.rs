@@ -163,6 +163,11 @@ pub struct ProjectWorkspace {
     /// design intent, so it persists with the workspace.
     #[serde(default)]
     pub specs: Vec<SpecEntry>,
+    /// Manually edited netlist source. When set, simulations run this
+    /// deck instead of regenerating from the schematic (text-first mode);
+    /// `None` means the netlist view shows the generated artifact.
+    #[serde(default)]
+    pub netlist_source: Option<String>,
 }
 
 impl Default for ProjectWorkspace {
@@ -178,6 +183,7 @@ impl Default for ProjectWorkspace {
             hierarchy_stack: vec![active_view],
             schematic_buffers,
             specs: Vec::new(),
+            netlist_source: None,
         }
     }
 }

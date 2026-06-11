@@ -253,6 +253,28 @@ impl SimulationController {
         }
     }
 
+    /// Compose the run deck from a manually edited netlist source: the
+    /// configured analysis lines slot in ahead of `.end` (added when the
+    /// deck lacks one). The deck's own dot-analyses stay — the runner
+    /// drives analyses from its explicit configs, so they are inert.
+    pub(super) fn compose_manual_netlist(source: &str, analysis_lines: &[String]) -> String {
+        let mut lines: Vec<String> = source
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                !(trimmed.eq_ignore_ascii_case(".end"))
+            })
+            .map(|line| line.to_string())
+            .collect();
+        for analysis in analysis_lines {
+            lines.push(analysis.clone());
+        }
+        lines.push(".end".to_string());
+        let mut merged = lines.join("\n");
+        merged.push('\n');
+        merged
+    }
+
     pub(super) fn apply_simulation_options_to_netlist(
         netlist: &str,
         options: &crate::simulation::dialog::SimulationOptions,
