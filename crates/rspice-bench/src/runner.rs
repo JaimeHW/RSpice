@@ -55,6 +55,12 @@ pub struct RunArgs {
     /// Directory scanned (non-recursively) for benchmark decks (*.cir).
     #[arg(long, default_value = "benchmarks/circuits", value_name = "DIR")]
     pub circuits: PathBuf,
+
+    /// Per-run wall-clock cap in seconds; a run that exceeds it is killed
+    /// and counted as failed. Keeps a pathological deck from wedging the
+    /// whole rig.
+    #[arg(long, default_value_t = 120, value_parser = clap::value_parser!(u64).range(1..))]
+    pub timeout_secs: u64,
 }
 
 /// Complete scoreboard document serialized to `--out`.
@@ -148,10 +154,11 @@ pub fn run(args: &RunArgs) -> Result<ExitCode, BenchError> {
         args.repeats
     );
 
+    let timeout = std::time::Duration::from_secs(args.timeout_secs);
     let mut results = Vec::with_capacity(decks.len());
     let mut any_failure = false;
     for deck in &decks {
-        let result = bench_deck(deck, &rspice, ngspice.as_deref(), args.repeats)?;
+        let result = bench_deck(deck, &rspice, ngspice.as_deref(), args.repeats, timeout)?;
         any_failure |= !result.rspice_all_ok || result.ngspice_all_ok == Some(false);
         results.push(result);
     }
@@ -190,6 +197,7 @@ fn bench_deck(
     rspice: &Path,
     ngspice: Option<&Path>,
     repeats: u32,
+    timeout: std::time::Duration,
 ) -> Result<DeckResult, BenchError> {
     let deck_file = deck
         .file_name()
@@ -201,13 +209,13 @@ fn bench_deck(
 
     println!("benchmarking {deck_name}");
     let rspice_args = [OsStr::new("run"), deck_file, OsStr::new("-q")];
-    let rspice_run = measure(rspice, &rspice_args, cwd, repeats)?;
+    let rspice_run = measure(rspice, &rspice_args, cwd, repeats, timeout)?;
     print_progress("rspice", &rspice_run);
 
     let ngspice_run = match ngspice {
         Some(exe) => {
             let ngspice_args = [OsStr::new("-b"), deck_file];
-            let measurement = measure(exe, &ngspice_args, cwd, repeats)?;
+            let measurement = measure(exe, &ngspice_args, cwd, repeats, timeout)?;
             print_progress("ngspice", &measurement);
             Some(measurement)
         }
@@ -246,19 +254,26 @@ fn print_progress(label: &str, measurement: &SimMeasurement) {
 }
 
 /// Runs one warmup plus `repeats` timed executions of `exe args` in `cwd`.
+/// A run that exceeds `timeout` is killed and the whole measurement is
+/// marked failed; the remaining repeats are skipped (they would only
+/// repeat the timeout).
 fn measure(
     exe: &Path,
     args: &[&OsStr],
     cwd: &Path,
     repeats: u32,
+    timeout: std::time::Duration,
 ) -> Result<SimMeasurement, BenchError> {
-    let (_, warmup_ok) = time_child(exe, args, cwd)?;
+    let (_, warmup_ok) = time_child(exe, args, cwd, timeout)?;
     let mut all_ok = warmup_ok;
     let mut samples_ms = Vec::with_capacity(repeats as usize);
     for _ in 0..repeats {
-        let (elapsed_ms, ok) = time_child(exe, args, cwd)?;
+        let (elapsed_ms, ok) = time_child(exe, args, cwd, timeout)?;
         all_ok &= ok;
         samples_ms.push(elapsed_ms);
+        if !ok {
+            break;
+        }
     }
     let stats =
         timing_stats(&samples_ms).ok_or(BenchError::Internal("timing sample set was empty"))?;
@@ -269,23 +284,52 @@ fn measure(
 ///
 /// stdin/stdout/stderr are attached to the null device so console throughput
 /// does not dominate the measurement; the elapsed time still includes the
-/// child's own parsing and output formatting work.
-fn time_child(exe: &Path, args: &[&OsStr], cwd: &Path) -> Result<(f64, bool), BenchError> {
+/// child's own parsing and output formatting work. A child that outlives
+/// `timeout` is killed and reported as failed.
+fn time_child(
+    exe: &Path,
+    args: &[&OsStr],
+    cwd: &Path,
+    timeout: std::time::Duration,
+) -> Result<(f64, bool), BenchError> {
     let start = Instant::now();
-    let status = Command::new(exe)
+    let mut child = Command::new(exe)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status()
+        .spawn()
         .map_err(|err| {
             BenchError::io(
                 format!("failed to launch `{}` for benchmarking", exe.display()),
                 err,
             )
         })?;
-    Ok((start.elapsed().as_secs_f64() * 1e3, status.success()))
+
+    loop {
+        match child.try_wait().map_err(|err| {
+            BenchError::io(
+                format!("failed to poll `{}` during benchmarking", exe.display()),
+                err,
+            )
+        })? {
+            Some(status) => {
+                return Ok((start.elapsed().as_secs_f64() * 1e3, status.success()));
+            }
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                eprintln!(
+                    "  TIMEOUT: `{}` exceeded {}s and was killed",
+                    exe.display(),
+                    timeout.as_secs()
+                );
+                return Ok((start.elapsed().as_secs_f64() * 1e3, false));
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(5)),
+        }
+    }
 }
 
 /// Computes min/median/mean over a non-empty sample set (milliseconds).
