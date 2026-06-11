@@ -841,6 +841,7 @@ impl<'a> Parser<'a> {
             name: name.into(),
             return_type,
             params,
+            locals: local_vars,
             body: AnalogBlock {
                 statements,
                 span: start.extend(self.previous_span()),
@@ -1285,28 +1286,26 @@ impl<'a> Parser<'a> {
         let start = self.current_span();
         let saved_pos = self.pos; // Save position for backtracking
 
-        // Check if current token is V or I followed by (
-        if self.check(TokenKind::Identifier) {
-            let name = self.current().text.as_deref().unwrap_or("");
-            if (name == "V" || name == "I") && self.peek_is(TokenKind::LParen) {
-                // Try to parse as branch access
-                if let Ok(access) = self.try_parse_branch_access() {
-                    if self.match_token(TokenKind::Contribute) {
-                        let value = self.parse_expression()?;
-                        self.expect(TokenKind::Semicolon)?;
-                        return Ok(AnalogStatement::Contribution(ContributionStmt {
-                            target: access,
-                            value,
-                            span: start.extend(self.previous_span()),
-                        }));
-                    } else {
-                        // Not a contribution, restore position and parse as normal
-                        self.pos = saved_pos;
-                    }
+        // Any access function (V, I, Pwr, Temp, ...) followed by a node list
+        // and `<+` is a contribution
+        if self.check(TokenKind::Identifier) && self.peek_is(TokenKind::LParen) {
+            // Try to parse as branch access
+            if let Ok(access) = self.try_parse_branch_access() {
+                if self.match_token(TokenKind::Contribute) {
+                    let value = self.parse_expression()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    return Ok(AnalogStatement::Contribution(ContributionStmt {
+                        target: access,
+                        value,
+                        span: start.extend(self.previous_span()),
+                    }));
                 } else {
-                    // Failed to parse branch access, restore position
+                    // Not a contribution, restore position and parse as normal
                     self.pos = saved_pos;
                 }
+            } else {
+                // Failed to parse branch access, restore position
+                self.pos = saved_pos;
             }
         }
 
@@ -1364,15 +1363,10 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// Try to parse a branch access (V(a,b) or I(a,b))
+    /// Try to parse a branch access (V(a,b), I(a,b), Pwr(t), ...)
     fn try_parse_branch_access(&mut self) -> Result<BranchAccess, ParseError> {
         let start = self.current_span();
         let access = self.expect_identifier("access function")?;
-
-        // Must be V or I
-        if access != "V" && access != "I" {
-            return Err(self.error(ParseErrorKind::InvalidBranchAccess));
-        }
 
         self.expect(TokenKind::LParen)?;
         let pos = self.expect_identifier("node")?;

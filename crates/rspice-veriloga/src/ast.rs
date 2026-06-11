@@ -439,6 +439,16 @@ pub struct AssignmentStmt {
     pub span: Span,
 }
 
+impl AssignmentStmt {
+    /// Name of the assignment target (array element targets return the
+    /// array name)
+    pub fn target_name(&self) -> &SmolStr {
+        match &self.target {
+            LValue::Variable { name, .. } | LValue::ArrayAccess { name, .. } => name,
+        }
+    }
+}
+
 /// Left-hand side of assignment
 #[derive(Debug, Clone)]
 pub enum LValue {
@@ -945,6 +955,8 @@ pub struct FunctionDef {
     pub name: SmolStr,
     pub return_type: VarType,
     pub params: Vec<FunctionParam>,
+    /// Function-local variable declarations
+    pub locals: Vec<VariableDecl>,
     pub body: AnalogBlock,
     pub span: Span,
 }
