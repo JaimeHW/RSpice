@@ -7,10 +7,11 @@ impl serde::Serialize for AppState {
     {
         // Serialize minimal state needed for session recovery.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 3)?;
+        let mut state = serializer.serialize_struct("AppState", 4)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
+        state.serialize_field("recent_files", &self.recent_files)?;
         state.end()
     }
 }
@@ -30,6 +31,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             library_manager: crate::state::LibraryManager,
             #[serde(default)]
             shell: crate::shell::ShellStateSer,
+            #[serde(default)]
+            recent_files: Vec<super::RecentFile>,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -46,6 +49,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             workspace: project_workspace,
             library_manager,
             shell: de.shell.into(),
+            recent_files: de.recent_files,
             ..Default::default()
         };
         state.workspace.save_active_schematic(&state.schematic);

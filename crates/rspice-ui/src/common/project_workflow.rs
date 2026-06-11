@@ -30,6 +30,7 @@ pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
             state.workspace = workspace;
             state.workspace.mark_all_clean();
             state.schematic.is_dirty = false;
+            state.remember_recent_file(crate::common::app::RecentKind::Project, path);
             state.push_user_message(ConsoleMessage::info(format!(
                 "Saved project: {}",
                 path.display()
@@ -87,6 +88,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
             state.workspace = project.workspace;
             state.restore_active_schematic_from_workspace();
             state.simulation.clear_runs();
+            state.remember_recent_file(crate::common::app::RecentKind::Project, path);
             state.push_user_message(ConsoleMessage::info(format!(
                 "Opened project: {}",
                 path.display()

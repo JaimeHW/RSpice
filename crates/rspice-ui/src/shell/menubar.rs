@@ -242,6 +242,7 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
 
     set(FileMenuAction::New, item(ui, "New cell…", Some("Ctrl+N")));
     set(FileMenuAction::Open, item(ui, "Open…", Some("Ctrl+O")));
+    open_recent_submenu(ui, app);
     set(FileMenuAction::Save, item(ui, "Save", Some("Ctrl+S")));
     set(
         FileMenuAction::SaveAs,
@@ -309,6 +310,44 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+/// File ▸ Open recent — the last 8 opened/saved schematics and projects,
+/// most recent first, plus a clear action. Grayed out while the list is
+/// empty so the menu shape stays stable.
+fn open_recent_submenu(ui: &mut Ui, app: &mut RSpiceApp) {
+    if app.state.recent_files.is_empty() {
+        item_disabled(ui, "Open recent", None);
+        return;
+    }
+
+    let recents = app.state.recent_files.clone();
+    let mut clicked: Option<crate::common::app::RecentFile> = None;
+    let mut clear = false;
+
+    submenu(ui, "Open recent", |ui| {
+        for recent in &recents {
+            let label = recent
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| recent.path.display().to_string());
+            if item(ui, &label, None) {
+                clicked = Some(recent.clone());
+            }
+        }
+        separator(ui);
+        if item(ui, "Clear recent files", None) {
+            clear = true;
+        }
+    });
+
+    if let Some(recent) = clicked {
+        app.open_recent_file(recent);
+    }
+    if clear {
+        app.state.recent_files.clear();
+    }
+}
+
 fn edit_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     let undo_label = match state.schematic.undo_description() {
         Some(desc) => format!("Undo {desc}"),
@@ -343,7 +382,8 @@ fn edit_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         item_disabled(ui, "Copy", Some("Ctrl+C"));
     }
     if item(ui, "Paste", Some("Ctrl+V")) {
-        state.schematic.paste_at(crate::state::Point::new(200, 200));
+        let anchor = state.schematic_paste_anchor();
+        state.schematic.paste_at(anchor);
     }
     if has_selection {
         if item(ui, "Delete", Some("Del")) {

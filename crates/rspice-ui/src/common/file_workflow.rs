@@ -61,6 +61,7 @@ pub(crate) fn load_schematic_from_path_with_io(
         Ok(schematic) => {
             state.schematic = schematic;
             state.sync_active_schematic_to_workspace();
+            state.remember_recent_file(crate::common::app::RecentKind::Schematic, path);
             state.push_user_message(ConsoleMessage::info(format!("Opened: {}", path.display())));
             true
         }
@@ -101,6 +102,7 @@ pub(crate) fn save_schematic_to_path_with_io(
             }
             state.schematic.is_dirty = false;
             state.sync_active_schematic_to_workspace();
+            state.remember_recent_file(crate::common::app::RecentKind::Schematic, path);
             state.push_user_message(ConsoleMessage::info(format!("Saved: {}", path.display())));
             true
         }

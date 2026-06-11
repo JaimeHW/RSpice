@@ -47,6 +47,7 @@ pub(super) fn default_app_state() -> AppState {
         model_library_manager: default_model_library_manager(),
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
+        recent_files: Vec::new(),
         analysis,
         shell: crate::shell::ShellState::new(),
     }

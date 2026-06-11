@@ -100,6 +100,22 @@ pub struct AnalysisWorkspaceState {
     pub(crate) histogram_state: crate::analysis::histogram::HistogramState,
 }
 
+/// What kind of document a recent-files entry points at. `.json` is a valid
+/// extension for both schematics and projects, so the kind is recorded at
+/// open/save time instead of being inferred from the path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum RecentKind {
+    Schematic,
+    Project,
+}
+
+/// One entry in the File ▸ Open recent list.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct RecentFile {
+    pub kind: RecentKind,
+    pub path: std::path::PathBuf,
+}
+
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
@@ -139,6 +155,9 @@ pub struct AppState {
     pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
     /// Flag to signal that application exit has been requested (after confirmation)
     pub(crate) exit_requested: bool,
+    /// Recently opened/saved schematic and project files, most recent first
+    /// (persisted across sessions; drives File ▸ Open recent).
+    pub(crate) recent_files: Vec<RecentFile>,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: AnalysisWorkspaceState,
     /// IDE shell state (workspace view, theme, console, toasts).
@@ -185,6 +204,19 @@ impl AppState {
 
     pub fn clear_primary_log(&mut self) {
         self.log_buffer.clear();
+    }
+
+    /// Record a file in the recent-files list (most recent first, deduped,
+    /// capped at 8 — the conventional depth for an EDA File menu).
+    pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
+        const MAX_RECENT_FILES: usize = 8;
+        let entry = RecentFile {
+            kind,
+            path: path.to_path_buf(),
+        };
+        self.recent_files.retain(|r| r.path != entry.path);
+        self.recent_files.insert(0, entry);
+        self.recent_files.truncate(MAX_RECENT_FILES);
     }
 
     /// Where a paste should land, snapped to the schematic grid: under the

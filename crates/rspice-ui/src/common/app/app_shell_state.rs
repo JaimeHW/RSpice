@@ -17,6 +17,9 @@ pub enum ConfirmationAction {
     FileNew,
     /// Open another schematic (discard current)
     FileOpen,
+    /// Open a file from the recent-files list (path stored alongside the
+    /// pending action in [`ConfirmationDialogState::pending_path`])
+    OpenRecent,
     /// Close the application
     Exit,
 }
@@ -29,6 +32,7 @@ impl ConfirmationAction {
             ConfirmationAction::ProjectOpen => "Open Project",
             ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
+            ConfirmationAction::OpenRecent => "Open Recent File",
             ConfirmationAction::Exit => "Exit RSpice",
         }
     }
@@ -41,6 +45,7 @@ impl ConfirmationAction {
             }
             ConfirmationAction::FileNew
             | ConfirmationAction::FileOpen
+            | ConfirmationAction::OpenRecent
             | ConfirmationAction::Exit => {
                 "The current schematic has unsaved changes.\nDo you want to save before continuing?"
             }
@@ -58,6 +63,8 @@ pub struct ConfirmationDialogState {
     pub visible: bool,
     /// The action pending user confirmation
     pub pending_action: Option<ConfirmationAction>,
+    /// Target path for path-carrying actions ([`ConfirmationAction::OpenRecent`]).
+    pub pending_path: Option<std::path::PathBuf>,
 }
 
 impl ConfirmationDialogState {
@@ -65,12 +72,21 @@ impl ConfirmationDialogState {
     pub fn show(&mut self, action: ConfirmationAction) {
         self.visible = true;
         self.pending_action = Some(action);
+        self.pending_path = None;
+    }
+
+    /// Open the confirmation dialog for an action that targets a known path.
+    pub fn show_with_path(&mut self, action: ConfirmationAction, path: std::path::PathBuf) {
+        self.visible = true;
+        self.pending_action = Some(action);
+        self.pending_path = Some(path);
     }
 
     /// Close the dialog and clear pending action
     pub fn close(&mut self) {
         self.visible = false;
         self.pending_action = None;
+        self.pending_path = None;
     }
 
     /// Check if dialog is open for a specific action
