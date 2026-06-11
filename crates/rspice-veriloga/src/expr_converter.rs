@@ -250,8 +250,22 @@ impl<'a> ExprConverter<'a> {
             "$abstime" => Ok(IrExpr::Time),
             "$realtime" => Ok(IrExpr::Time),
             "$simparam" => {
-                // Return default for now - real implementations would query simulator
-                Ok(IrExpr::Const(0.0))
+                // $simparam("name"[, default]) - simulator parameter query.
+                // The explicit default argument wins; otherwise return a
+                // sensible engine value for well-known names, else 0.
+                if let Some(default) = func.args.get(1) {
+                    return self.convert(default);
+                }
+                let value = match func.args.first() {
+                    Some(Expression::StringLit(s)) => match s.value.as_str() {
+                        "gmin" => 1e-12,
+                        "tnom" => 300.15,
+                        "simulatorVersion" => 1.0,
+                        _ => 0.0,
+                    },
+                    _ => 0.0,
+                };
+                Ok(IrExpr::Const(value))
             }
             "$param_given" => {
                 // $param_given(name) - whether the instance explicitly set

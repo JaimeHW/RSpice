@@ -57,7 +57,7 @@ impl CompileError {
 
 /// Lexer error with source location
 #[derive(Debug, Error)]
-#[error("Lexer error at {span:?}: {kind}")]
+#[error("Lexer error at offset {}: {kind}", span.start)]
 pub struct LexerError {
     pub kind: LexerErrorKind,
     pub span: Span,
@@ -96,7 +96,7 @@ pub enum LexerErrorKind {
 
 /// Parser error with source location
 #[derive(Debug, Error)]
-#[error("Parse error at {span:?}: {kind}")]
+#[error("Parse error at offset {}: {kind}", span.start)]
 pub struct ParseError {
     pub kind: ParseErrorKind,
     pub span: Span,
@@ -160,7 +160,7 @@ pub enum ParseErrorKind {
 
 /// Semantic analysis error
 #[derive(Debug, Error)]
-#[error("Semantic error at {span:?}: {kind}")]
+#[error("Semantic error at offset {}: {kind}", span.start)]
 pub struct SemanticError {
     pub kind: SemanticErrorKind,
     pub span: Span,

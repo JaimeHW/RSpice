@@ -32,25 +32,33 @@
 //! let model = compiler.compile(source)?;
 //! ```
 //!
-//! ## Verilog-A LRM 2.4 Compliance
+//! ## Verilog-A Language Support
 //!
-//! This compiler implements the full Verilog-A Language Reference Manual 2.4,
-//! including:
+//! Targets the Verilog-A subset of the Verilog-AMS LRM 2.4. Currently
+//! supported:
 //!
-//! - All analog operators (`ddt`, `idt`, `ddx`, `limexp`, `absdelay`, etc.)
-//! - Noise functions (`white_noise`, `flicker_noise`, `noise_table`)
-//! - All system functions (`$temperature`, `$vt`, `$abstime`, etc.)
-//! - Parameter declarations with ranges and defaults
-//! - Hierarchical modules and instances
-//! - Conditional and event-driven analog statements
+//! - Analog operators: `ddt`, `idt` (backward Euler), `ddx`, `limexp`,
+//!   `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`, `$limit`,
+//!   `$table_model`
+//! - Noise source declarations (`white_noise`, `flicker_noise`) - parsed
+//!   and carried in the IR; noise-analysis integration is pending
+//! - System functions: `$temperature`, `$vt`, `$abstime`, `$simparam`,
+//!   `$param_given`, `$port_connected`, `$mfactor`
+//! - Parameters with dependent defaults, ranges, and exclusions;
+//!   localparams; attribute instances (`(* desc, units *)`)
+//! - Internal nodes, named branches, ground nets, user disciplines
+//!   (thermal, mechanical, ...), ANSI and non-ANSI port styles
+//! - Control flow lowered to guarded dataflow: if/else, case,
+//!   compile-time-bounded for/repeat loops, event controls
+//!   (`initial_step`, `cross`, `above`, `timer`)
+//! - User-defined analog functions (inlined)
 //!
-//! ## Verilog-AMS Support
+//! Known limitations (clean compile errors, never silent):
 //!
-//! With the `ams` feature enabled, the compiler also supports:
-//!
-//! - Digital modules and primitives
-//! - Mixed-signal connect modules
-//! - Cross-domain event detection
+//! - Potential (voltage) contributions need branch-current unknowns
+//! - Loops with runtime-dependent bounds (e.g. BSIM4 `nf` finger loops)
+//! - `idtmod` with a modulus, Z-domain (`zi_*`) filters, `noise_table`,
+//!   indirect contributions, array-valued variables in expressions
 
 pub mod ast;
 pub mod codegen;
