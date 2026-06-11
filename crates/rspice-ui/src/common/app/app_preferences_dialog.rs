@@ -68,6 +68,11 @@ impl RSpiceApp {
                 if choice_row(ui, "Density", &density_labels, &mut density_index) {
                     state.shell.theme.density = Density::ALL[density_index];
                 }
+                check_row(
+                    ui,
+                    "Colorblind-safe trace colors",
+                    &mut state.shell.theme.colorblind_traces,
+                );
 
                 ui.add_space(tokens::SP_3);
                 section_label(ui, "Files");

@@ -59,7 +59,22 @@ pub(super) fn handle_tool_interactions(
         && let Some(pos) = response.interact_pointer_pos()
     {
         let grid_pos = screen_to_grid(viewport, grid_size, pos);
-        open_component_properties(state, grid_pos);
+        // Hierarchical instances descend on double-click (the Virtuoso
+        // gesture); the breadcrumb pops back out. Everything else opens
+        // its properties.
+        let cell_instance = state
+            .schematic
+            .component_at(grid_pos)
+            .and_then(|id| state.schematic.components.iter().find(|c| c.id == id))
+            .filter(|c| c.kind == ComponentType::CellInstance)
+            .map(|c| c.id);
+        if let Some(id) = cell_instance {
+            state.schematic.selection.clear();
+            state.schematic.selection.select_component(id);
+            state.open_selected_instance_master();
+        } else {
+            open_component_properties(state, grid_pos);
+        }
     }
 
     if response.clicked_by(egui::PointerButton::Secondary) && state.schematic.wire_drawing.active {

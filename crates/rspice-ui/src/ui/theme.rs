@@ -24,12 +24,31 @@ pub struct Theme {
     pub mode: Mode,
     /// Control density.
     pub density: Density,
+    /// Substitute the Okabe–Ito colorblind-safe set for the trace colors
+    /// (≈8 % of male engineers cannot separate the default red/green pairs).
+    #[serde(default)]
+    pub colorblind_traces: bool,
 }
+
+/// The Okabe–Ito colorblind-safe categorical set (less yellow/black/grey,
+/// which fail on one of the two surface modes).
+const OKABE_ITO_TRACES: [Color32; 6] = [
+    Color32::from_rgb(0x00, 0x72, 0xB2), // blue
+    Color32::from_rgb(0xE6, 0x9F, 0x00), // orange
+    Color32::from_rgb(0x00, 0x9E, 0x73), // bluish green
+    Color32::from_rgb(0xD5, 0x5E, 0x00), // vermillion
+    Color32::from_rgb(0x56, 0xB4, 0xE9), // sky blue
+    Color32::from_rgb(0xCC, 0x79, 0xA7), // reddish purple
+];
 
 impl Theme {
     /// Resolve this selection into a concrete token set.
     pub fn tokens(self) -> Tokens {
-        Tokens::new(self.direction, self.mode, self.density)
+        let mut tokens = Tokens::new(self.direction, self.mode, self.density);
+        if self.colorblind_traces {
+            tokens.color.traces = OKABE_ITO_TRACES;
+        }
+        tokens
     }
 
     /// Apply the theme to an egui context: install fonts (once), map tokens
