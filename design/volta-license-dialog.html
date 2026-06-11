@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOLTA — License activation dialog</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M 31 20 L 31 76 L 77 48 Z'/%3E%3Cpath d='M 11 32 H 30' fill='none'/%3E%3Cpath d='M 11 64 H 30' fill='none'/%3E%3Cpath d='M 77 48 H 88' fill='none'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-display: swap;
+    src: url("../crates/rspice-ui/assets/fonts/IBMPlexSans-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-display: swap;
+    src: url("../crates/rspice-ui/assets/fonts/IBMPlexSans-Medium.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-display: swap;
+    src: url("../crates/rspice-ui/assets/fonts/IBMPlexSans-SemiBold.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-display: swap;
+    src: url("../crates/rspice-ui/assets/fonts/IBMPlexMono-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-display: swap;
+    src: url("../crates/rspice-ui/assets/fonts/IBMPlexMono-Medium.ttf") format("truetype"); }
+
+  :root {
+    --font-ui: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+    --radius: 2px; --radius-lg: 3px; --t-fast: 0.16s;
+  }
+  body[data-theme="dark"] {
+    --bg-app: #11171B; --bg-panel: #1A2024; --bg-inset: #0B1115;
+    --bg-elevated: #20272C; --bg-hover: #262E33;
+    --border: #2B3136; --border-strong: #444C50;
+    --text: #D7DBDE; --text-dim: #93999E; --text-faint: #646A6E;
+    --shadow: 0 12px 44px rgba(0,0,0,0.55);
+    --accent-fill: #F2B824; --accent-fill-hover: #F7CB55; --accent-ink: #17181A;
+    --accent-line: #F2B824; --accent-dim: rgba(242,184,36,0.13);
+    --ok: #65D68A; --err: #E06C5A;
+  }
+  body[data-theme="light"] {
+    --bg-app: #E8ECEE; --bg-panel: #F5F7F8; --bg-inset: #E1E5E7;
+    --bg-elevated: #FBFCFD; --bg-hover: #E6EAED;
+    --border: #D1D5D8; --border-strong: #A6ACAF;
+    --text: #1F2528; --text-dim: #53595D; --text-faint: #7F8487;
+    --shadow: 0 12px 40px rgba(31,37,40,0.20);
+    --accent-fill: #F2B824; --accent-fill-hover: #E3A91C; --accent-ink: #17181A;
+    --accent-line: #8F6400; --accent-dim: rgba(161,97,0,0.10);
+    --ok: #007C3A; --err: #C03A28;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg-app); color: var(--text);
+    font: 400 13px/1.5 var(--font-ui);
+    display: flex; flex-direction: column;
+    transition: background 0.22s ease, color 0.22s ease;
+  }
+  :focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+
+  /* review bar — meta chrome, not product UI */
+  .review {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 8px 14px; background: #141414; color: #e8e6e2;
+    border-bottom: 1px solid #2a2a2a; font-size: 12px;
+  }
+  .review .title { font-weight: 600; letter-spacing: 0.04em; }
+  .review .grp { display: flex; gap: 4px; align-items: center; }
+  .review .lab { color: #8f8d89; margin-right: 2px; }
+  .review button {
+    appearance: none; cursor: pointer; font: 400 12px var(--font-ui);
+    padding: 3px 10px; border: 1px solid #3a3a3a; border-radius: 3px;
+    color: #c9c7c3; background: transparent;
+  }
+  .review button:hover { background: #222; color: #fff; }
+  .review button[aria-pressed="true"] { background: #e8e6e2; color: #141414; border-color: #e8e6e2; }
+  .review .note { color: #6f6d69; margin-left: auto; font-size: 11px; }
+
+  /* faux app behind the scrim */
+  .stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center;
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 7%, transparent) 1px, transparent 1.4px);
+    background-size: 26px 26px; }
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
+  body[data-theme="light"] .scrim { background: rgba(31,37,40,0.32); }
+
+  /* ---------- the Dialog primitive (ui/widgets/dialog.rs grammar) ---------- */
+  .dialog {
+    position: relative; width: 560px; max-width: calc(100vw - 32px);
+    background: var(--bg-elevated); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+  }
+  .dlg-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--border); }
+  .dlg-kicker {
+    font: 500 10px var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--text-faint); margin: 0 0 3px;
+  }
+  .dlg-title { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: -0.005em; }
+  .dlg-body { padding: 14px 18px 4px; }
+  .dlg-sub { color: var(--text-dim); margin: 0 0 12px; text-wrap: pretty; }
+
+  textarea.key {
+    width: 100%; min-height: 88px; resize: vertical;
+    background: var(--bg-inset); border: 1px solid var(--border-strong);
+    border-radius: var(--radius); color: var(--text);
+    font: 400 12px/1.7 var(--font-mono); letter-spacing: 0.04em;
+    padding: 10px 12px;
+  }
+  textarea.key:focus { border-color: var(--accent-line); outline: none; }
+  textarea.key[aria-invalid="true"] { border-color: var(--err); }
+  .field-note {
+    display: flex; gap: 8px; align-items: baseline;
+    font-size: 12px; color: var(--text-faint); margin: 8px 0 0; min-height: 18px;
+  }
+  .field-note.err { color: var(--err); }
+  .field-note .mono { font-family: var(--font-mono); font-size: 11px; }
+
+  /* verified summary card */
+  .summary {
+    border: 1px solid color-mix(in srgb, var(--accent-fill) 45%, var(--border));
+    background: var(--accent-dim); border-radius: var(--radius);
+    padding: 12px 14px; display: grid; gap: 6px;
+  }
+  .summary .row { display: flex; justify-content: space-between; gap: 16px; font-size: 12.5px; }
+  .summary .k { color: var(--text-dim); }
+  .summary .v { font-family: var(--font-mono); color: var(--text); }
+  .summary .tier {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 500 10px var(--font-mono); letter-spacing: 0.1em;
+    background: var(--accent-fill); color: var(--accent-ink);
+    border-radius: var(--radius); padding: 1px 7px;
+  }
+  .summary .feats { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+  .summary .feat {
+    font: 400 11px var(--font-mono); color: var(--text-dim);
+    border: 1px solid var(--border-strong); border-radius: var(--radius);
+    background: var(--bg-panel); padding: 1px 7px;
+  }
+  .offline-note {
+    margin: 10px 0 0; font-size: 11.5px; color: var(--text-faint);
+    font-family: var(--font-mono); letter-spacing: 0.02em;
+  }
+
+  /* footer: [ghost] spacer [secondary?] [primary] — Esc=cancel, Enter=primary */
+  .dlg-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 18px 14px; border-top: 1px solid var(--border); margin-top: 14px;
+  }
+  .dlg-foot .meta { font: 400 10.5px var(--font-mono); color: var(--text-faint); }
+  .dlg-foot .actions { margin-left: auto; display: flex; gap: 8px; }
+  .btn {
+    appearance: none; cursor: pointer; border-radius: var(--radius);
+    font: 500 12.5px var(--font-ui); min-height: 28px; padding: 4px 14px;
+    border: 1px solid transparent;
+    transition: background var(--t-fast) ease, border-color var(--t-fast) ease;
+  }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border-strong); }
+  .btn-ghost:hover { background: var(--bg-hover); }
+  .btn-primary {
+    background: var(--accent-fill); color: var(--accent-ink); border-color: var(--accent-fill);
+    font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em; font-size: 11px;
+  }
+  .btn-primary:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
+  .btn-primary[disabled] { opacity: 0.4; cursor: default; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+
+<div class="review">
+  <span class="title">VOLTA · License activation — Dialog grammar spec</span>
+  <span class="grp"><span class="lab">Theme</span>
+    <button type="button" data-theme-set="dark" aria-pressed="true">Dark</button>
+    <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
+  </span>
+  <span class="grp"><span class="lab">State</span>
+    <button type="button" data-state-set="entry" aria-pressed="true">Entry</button>
+    <button type="button" data-state-set="verified" aria-pressed="false">Verified</button>
+    <button type="button" data-state-set="error" aria-pressed="false">Error</button>
+  </span>
+  <span class="note">paste the sample key (button below) to walk the real flow · Esc=cancel · Enter=primary</span>
+</div>
+
+<div class="stage">
+  <div class="scrim" aria-hidden="true"></div>
+
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+    <div class="dlg-head">
+      <p class="dlg-kicker">License</p>
+      <h1 class="dlg-title" id="dlg-title">Enter license key</h1>
+    </div>
+
+    <div class="dlg-body">
+      <p class="dlg-sub" id="dlg-sub">Paste the key from your purchase email. Verification happens
+      on this machine — RSpice never phones home.</p>
+
+      <div id="pane-entry">
+        <textarea class="key" id="key-input" spellcheck="false" autocomplete="off"
+          aria-label="License key" aria-invalid="false"
+          placeholder="RSPICE-K1.XXXXX-XXXXX-…"></textarea>
+        <p class="field-note" id="key-note">Line breaks and grouping dashes are fine — the whole
+        string from the email works.</p>
+      </div>
+
+      <div id="pane-verified" class="summary" hidden>
+        <div class="row"><span class="k">Licensed to</span><span class="v" id="sum-name">—</span></div>
+        <div class="row"><span class="k">Tier</span><span class="v"><span class="tier" id="sum-tier">PRO</span></span></div>
+        <div class="row"><span class="k">Updates until</span><span class="v" id="sum-until">—</span></div>
+        <div class="row"><span class="k">License id</span><span class="v" id="sum-id">—</span></div>
+        <div class="feats" id="sum-feats"></div>
+      </div>
+      <p class="offline-note" id="offline-note" hidden>key will be stored at
+      %APPDATA%\rspice\license.key — yours to keep, works offline</p>
+    </div>
+
+    <div class="dlg-foot">
+      <span class="meta" id="foot-meta">signature: ed25519 · key id 01</span>
+      <span class="actions">
+        <button type="button" class="btn btn-ghost" id="btn-sample">Paste sample key</button>
+        <button type="button" class="btn btn-ghost">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-primary" disabled>Verify</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var body = document.body;
+  /* A well-formed (but cryptographically meaningless) sample key for the walkthrough. */
+  var SAMPLE = "RSPICE-K1.01A4G-K9PWD-3RT7M-ZB5RW-Q2XJH-66YVN-08CEF-LMA9S-D27TC-4UK3B" +
+               ".7HQGX-E5NMW-RA2VK-9JYPB-TC81D-ZS4FU-WQ6LH-XK0MR-G3VEC-N5JAT-PB7YW-D9QZK-2FHSL-M8XVG";
+
+  var input = document.getElementById("key-input");
+  var note = document.getElementById("key-note");
+  var primary = document.getElementById("btn-primary");
+  var paneEntry = document.getElementById("pane-entry");
+  var paneVerified = document.getElementById("pane-verified");
+  var offlineNote = document.getElementById("offline-note");
+  var sub = document.getElementById("dlg-sub");
+
+  function setState(state) {
+    document.querySelectorAll("[data-state-set]").forEach(function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.stateSet === state));
+    });
+    paneEntry.hidden = state === "verified";
+    paneVerified.hidden = state !== "verified";
+    offlineNote.hidden = state !== "verified";
+    input.setAttribute("aria-invalid", String(state === "error"));
+    note.classList.toggle("err", state === "error");
+    if (state === "entry") {
+      sub.textContent = "Paste the key from your purchase email. Verification happens on this machine — RSpice never phones home.";
+      note.innerHTML = "Line breaks and grouping dashes are fine — the whole string from the email works.";
+      primary.textContent = "Verify";
+      primary.disabled = input.value.trim().length === 0;
+      document.getElementById("foot-meta").textContent = "signature: ed25519 · key id 01";
+    } else if (state === "error") {
+      sub.textContent = "Paste the key from your purchase email. Verification happens on this machine — RSpice never phones home.";
+      note.innerHTML = "Signature check failed — the key looks truncated. Paste the <span class=\"mono\">RSPICE-K1.…</span> string in full, including both dot-separated parts.";
+      primary.textContent = "Verify";
+      primary.disabled = false;
+    } else {
+      sub.textContent = "Key verified on this machine. Activating stores it locally; nothing is sent anywhere.";
+      document.getElementById("sum-name").textContent = "Jaime Whitfield";
+      document.getElementById("sum-tier").textContent = "PRO";
+      document.getElementById("sum-until").textContent = "2027-06-10";
+      document.getElementById("sum-id").textContent = "9f3a-58c1-77d2-0b4e";
+      var feats = document.getElementById("sum-feats");
+      feats.textContent = "";
+      ["RF suite — HB · PSS · PNoise · PAC", "Python API", "Encrypted models"].forEach(function (f) {
+        var s = document.createElement("span");
+        s.className = "feat"; s.textContent = f; feats.appendChild(s);
+      });
+      primary.textContent = "Activate";
+      primary.disabled = false;
+      document.getElementById("foot-meta").textContent = "verified · ed25519 key id 01 · denylist clear";
+    }
+  }
+
+  /* live "verification" walkthrough: sample key verifies, anything else errors */
+  function verify() {
+    var cleaned = input.value.replace(/[\s-]/g, "");
+    var sampleCleaned = SAMPLE.replace(/[\s-]/g, "");
+    setState(cleaned === sampleCleaned ? "verified" : "error");
+  }
+  primary.addEventListener("click", function () {
+    if (primary.textContent === "Verify") { verify(); }
+    else { setState("entry"); input.value = ""; }   /* demo loops back */
+  });
+  input.addEventListener("input", function () {
+    primary.disabled = input.value.trim().length === 0;
+    if (note.classList.contains("err")) { setState("entry"); }
+  });
+  input.addEventListener("paste", function () {
+    setTimeout(verify, 60);   /* product behavior: validate on paste */
+  });
+  document.getElementById("btn-sample").addEventListener("click", function () {
+    input.value = SAMPLE;
+    verify();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && document.activeElement !== input && !primary.disabled) {
+      primary.click();
+    }
+    if (e.key === "Escape") { setState("entry"); input.value = ""; primary.disabled = true; }
+  });
+
+  document.querySelectorAll("[data-theme-set]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      body.dataset.theme = b.dataset.themeSet;
+      document.querySelectorAll("[data-theme-set]").forEach(function (x) {
+        x.setAttribute("aria-pressed", String(x === b));
+      });
+    });
+  });
+  document.querySelectorAll("[data-state-set]").forEach(function (b) {
+    b.addEventListener("click", function () { setState(b.dataset.stateSet); });
+  });
+
+  setState("entry");
+})();
+</script>
+</body>
+</html>

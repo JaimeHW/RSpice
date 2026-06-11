@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RSpice — OG card source (1200×630)</title>
+<style>
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 400;
+    src: url("../../crates/rspice-ui/assets/fonts/IBMPlexSans-Regular.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Sans"; font-weight: 600;
+    src: url("../../crates/rspice-ui/assets/fonts/IBMPlexSans-SemiBold.ttf") format("truetype"); }
+  @font-face { font-family: "IBM Plex Mono"; font-weight: 400;
+    src: url("../../crates/rspice-ui/assets/fonts/IBMPlexMono-Regular.ttf") format("truetype"); }
+
+  * { margin: 0; box-sizing: border-box; }
+  body { width: 1200px; height: 630px; overflow: hidden; }
+  .card {
+    width: 1200px; height: 630px; position: relative;
+    background: #101418;
+    background-image: radial-gradient(circle, rgba(215,219,222,0.07) 1.6px, transparent 2px);
+    background-size: 38px 38px;
+    font-family: "IBM Plex Sans", sans-serif;
+    color: #D7DBDE;
+    display: flex; align-items: center;
+    padding: 0 96px;
+  }
+  .tile {
+    width: 168px; height: 168px; border-radius: 22%;
+    background: #F2B824; flex: none;
+    display: flex; align-items: center; justify-content: center;
+    margin-right: 64px;
+  }
+  .tile svg { width: 70%; height: 70%; }
+  .copy { min-width: 0; }
+  .wm { height: 86px; width: 278px; display: block; margin-bottom: 26px; color: #F8FAFB; }
+  h1 { font-size: 46px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.1;
+    color: #D7DBDE; margin-bottom: 22px; }
+  h1 .y { color: #F2B824; }
+  .meta {
+    font-family: "IBM Plex Mono", monospace; font-size: 19px; letter-spacing: 0.08em;
+    text-transform: lowercase; color: #93999E;
+  }
+  .meta .dot { color: #F2B824; }
+  /* solved step-response footer trace */
+  .trace { position: absolute; left: 0; right: 0; bottom: 0; height: 110px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="tile">
+    <svg viewBox="0 0 96 96" aria-hidden="true">
+      <g fill="#17181A" stroke="#17181A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
+        <path d="M 9 34 H 30" fill="none"></path>
+        <path d="M 9 62 H 30" fill="none"></path>
+        <path d="M 77 48 H 87" fill="none"></path>
+      </g>
+    </svg>
+  </div>
+  <div class="copy">
+    <svg class="wm" viewBox="6 -10 456 144" aria-label="RSpice">
+      <path fill="currentColor" d="M30.66 100H11.75V0H56.88Q63.75 0 69.2 2.15Q74.64 4.3 78.44 8.38Q82.23 12.46 84.31 18.19Q86.39 23.93 86.39 30.95Q86.39 41.26 81.73 48.71Q77.08 56.16 67.77 59.31L88.25 100H67.19L48.57 61.46H30.66ZM55.01 45.56Q60.46 45.56 63.61 42.62Q66.76 39.68 66.76 34.24V27.65Q66.76 22.21 63.61 19.34Q60.46 16.48 55.01 16.48H30.66V45.56ZM137.97 101.72Q125.07 101.72 116.12 97.13Q107.16 92.55 100.72 85.1L113.47 72.78Q118.62 78.8 125 81.95Q131.38 85.1 139.11 85.1Q147.85 85.1 152.29 81.3Q156.73 77.51 156.73 71.06Q156.73 66.05 153.87 62.89Q151 59.74 143.12 58.31L133.67 56.88Q103.72 52.15 103.72 27.79Q103.72 21.06 106.23 15.62Q108.74 10.17 113.47 6.3Q118.19 2.44 124.86 0.36Q131.52 -1.72 139.97 -1.72Q151.29 -1.72 159.74 2.01Q168.19 5.73 174.21 13.04L161.32 25.21Q157.59 20.63 152.29 17.77Q146.99 14.9 138.97 14.9Q130.8 14.9 126.72 17.98Q122.64 21.06 122.64 26.65Q122.64 32.38 125.93 35.1Q129.23 37.82 136.53 39.11L145.85 40.83Q161.03 43.55 168.27 50.5Q175.5 57.45 175.5 69.91Q175.5 77.08 172.99 82.88Q170.49 88.68 165.69 92.91Q160.89 97.13 153.94 99.43Q146.99 101.72 137.97 101.72ZM193.27 25.21H211.6V37.54H212.18Q214.18 31.09 219.77 27.29Q225.36 23.5 232.81 23.5Q247.13 23.5 254.66 33.6Q262.18 43.7 262.18 62.46Q262.18 81.38 254.66 91.55Q247.13 101.72 232.81 101.72Q225.36 101.72 219.84 97.85Q214.33 93.98 212.18 87.54H211.6V128.65H193.27ZM226.93 86.53Q234.1 86.53 238.54 81.81Q242.98 77.08 242.98 69.05V56.16Q242.98 48.14 238.54 43.34Q234.1 38.54 226.93 38.54Q220.34 38.54 215.97 41.83Q211.6 45.13 211.6 50.57V74.36Q211.6 80.23 215.97 83.38Q220.34 86.53 226.93 86.53ZM288.4 14.33Q282.66 14.33 280.16 11.75Q277.65 9.17 277.65 5.16V2.29Q277.65 -1.72 280.16 -4.3Q282.66 -6.88 288.4 -6.88Q293.98 -6.88 296.56 -4.3Q299.14 -1.72 299.14 2.29V5.16Q299.14 9.17 296.56 11.75Q293.98 14.33 288.4 14.33ZM279.23 25.21H297.56V100H279.23ZM348.28 101.72Q339.97 101.72 333.52 99Q327.08 96.28 322.71 91.12Q318.34 85.96 316.05 78.72Q313.75 71.49 313.75 62.46Q313.75 53.44 316.05 46.28Q318.34 39.11 322.71 34.03Q327.08 28.94 333.52 26.22Q339.97 23.5 348.28 23.5Q359.6 23.5 366.98 28.51Q374.36 33.52 377.65 42.41L362.61 49.14Q361.32 44.41 357.81 41.33Q354.3 38.25 348.28 38.25Q340.54 38.25 336.75 43.12Q332.95 47.99 332.95 55.87V69.48Q332.95 77.36 336.75 82.16Q340.54 86.96 348.28 86.96Q354.87 86.96 358.45 83.6Q362.03 80.23 364.04 75.21L378.08 81.95Q374.36 91.83 366.76 96.78Q359.17 101.72 348.28 101.72ZM422.49 101.72Q414.18 101.72 407.66 98.93Q401.15 96.13 396.63 91.05Q392.12 85.96 389.68 78.72Q387.25 71.49 387.25 62.46Q387.25 53.58 389.61 46.42Q391.98 39.26 396.42 34.17Q400.86 29.08 407.31 26.29Q413.75 23.5 421.92 23.5Q430.66 23.5 437.11 26.5Q443.55 29.51 447.71 34.67Q451.86 39.83 453.94 46.63Q456.02 53.44 456.02 61.17V67.19H406.3V69.05Q406.3 77.22 410.89 82.16Q415.47 87.11 424.5 87.11Q431.38 87.11 435.74 84.24Q440.11 81.38 443.55 76.93L453.44 87.97Q448.85 94.41 440.9 98.07Q432.95 101.72 422.49 101.72ZM422.21 37.25Q414.9 37.25 410.6 42.12Q406.3 46.99 406.3 54.73V55.87H436.96V54.58Q436.96 46.85 433.17 42.05Q429.37 37.25 422.21 37.25Z"></path>
+    </svg>
+    <h1>The analog simulator, <span class="y">rebuilt.</span></h1>
+    <p class="meta">analog &amp; rf <span class="dot">·</span> native <span class="dot">·</span> browser
+      <span class="dot">·</span> oracle-validated</p>
+  </div>
+  <svg class="trace" viewBox="0 0 1200 110" preserveAspectRatio="none" aria-hidden="true" id="trace"></svg>
+</div>
+<script>
+/* solved second-order step response (zeta 0.28) as the footer trace — solved, not sketched */
+(function () {
+  var svg = document.getElementById("trace");
+  var NS = "http://www.w3.org/2000/svg";
+  var zeta = 0.28, w0 = 2 * Math.PI * 800, tEnd = 6e-3, N = 400;
+  var d = "";
+  for (var i = 0; i <= N; i++) {
+    var t = tEnd * i / N;
+    var wd = w0 * Math.sqrt(1 - zeta * zeta);
+    var y = 1 - Math.exp(-zeta * w0 * t) *
+      (Math.cos(wd * t) + zeta / Math.sqrt(1 - zeta * zeta) * Math.sin(wd * t));
+    var px = 1200 * i / N;
+    var py = 108 - 68 * y / 1.5;
+    d += (i === 0 ? "M" : "L") + px.toFixed(1) + " " + py.toFixed(1);
+  }
+  var base = document.createElementNS(NS, "line");
+  base.setAttribute("x1", 0); base.setAttribute("x2", 1200);
+  base.setAttribute("y1", 108 - 68 / 1.5); base.setAttribute("y2", 108 - 68 / 1.5);
+  base.setAttribute("stroke", "rgba(215,219,222,0.16)"); base.setAttribute("stroke-width", 1);
+  base.setAttribute("stroke-dasharray", "6 6");
+  svg.appendChild(base);
+  var p = document.createElementNS(NS, "path");
+  p.setAttribute("d", d); p.setAttribute("fill", "none");
+  p.setAttribute("stroke", "#F2B824"); p.setAttribute("stroke-width", 3);
+  p.setAttribute("stroke-linejoin", "round");
+  svg.appendChild(p);
+  var dot = document.createElementNS(NS, "circle");
+  dot.setAttribute("cx", 1188); dot.setAttribute("cy", 108 - 68 / 1.5); dot.setAttribute("r", 5.5);
+  dot.setAttribute("fill", "#F8DB8A");
+  svg.appendChild(dot);
+})();
+</script>
+</body>
+</html>
