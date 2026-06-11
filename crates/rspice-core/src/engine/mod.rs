@@ -52,6 +52,7 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use error::SimulationError;
+pub use pss::{PssAnalysisResult, PssError};
 pub use result::TransientResult;
 
 pub(crate) use source_values::{extract_ac_value, extract_dc_value};

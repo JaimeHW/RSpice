@@ -31,6 +31,18 @@ use crate::circuit::Circuit;
 use crate::solver::StaticMatrix;
 use crate::{Netlist, Value};
 
+/// Recover the monodromy matrix from a converged shooting Jacobian:
+/// the shooting residual is F(x0) = x(T) - x0, so J = dF/dx0 = M - I and
+/// M = J + I. Reusing the Jacobian saves N+1 full period integrations.
+fn monodromy_from_newton_jacobian(mut jacobian: Vec<Vec<Value>>) -> Vec<Vec<Value>> {
+    for (i, row) in jacobian.iter_mut().enumerate() {
+        if i < row.len() {
+            row[i] += 1.0;
+        }
+    }
+    jacobian
+}
+
 /// PSS-specific error types
 #[derive(Debug, Clone)]
 pub enum PssError {
@@ -163,6 +175,9 @@ impl Engine {
         let mut shooting_state = ShootingState::new(current_state.clone(), detected_period);
         let mut final_waveform: Option<TransientResult> = None;
         let mut iteration = 0;
+        // The most recent shooting Jacobian (J = M - I). At convergence it
+        // doubles as the monodromy source, saving N+1 period integrations.
+        let mut last_jacobian: Option<Vec<Vec<Value>>> = None;
 
         while iteration < config.max_iterations {
             // Simulate one period
@@ -180,16 +195,17 @@ impl Engine {
                 break;
             }
 
-            // Compute Newton step using finite-difference Jacobian
-            // Note: We can't clone circuit/matrix, so we use a simple update strategy
-            let delta = self.pss_compute_newton_step(
-                &mut circuit,
-                &mut matrix,
+            // Compute Newton step using a finite-difference Jacobian whose
+            // columns integrate perturbed periods in parallel on per-worker
+            // circuit clones (pure per-column work — deterministic).
+            let (delta, jacobian) = self.pss_compute_newton_step(
+                &circuit,
                 &shooting_state,
                 detected_period,
                 &config,
                 FD_STEP,
             )?;
+            last_jacobian = Some(jacobian);
 
             // Update state with damping
             shooting_state.update_x0(&delta, solver.damping);
@@ -212,15 +228,21 @@ impl Engine {
         // ==================================================================
         let waveform = final_waveform.unwrap();
 
-        // Compute Floquet multipliers for stability analysis
-        let monodromy = self.pss_compute_monodromy(
-            &mut circuit,
-            &mut matrix,
-            &shooting_state,
-            detected_period,
-            &config,
-            FD_STEP,
-        )?;
+        // Compute Floquet multipliers for stability analysis. The converged
+        // shooting Jacobian already contains the monodromy (J = M - I), so
+        // reuse it instead of re-integrating N+1 periods; the fresh-FD path
+        // remains for the zero-iteration case (initial state was already
+        // periodic, so no Jacobian was ever built).
+        let monodromy = match last_jacobian {
+            Some(jacobian) => monodromy_from_newton_jacobian(jacobian),
+            None => self.pss_compute_monodromy(
+                &circuit,
+                &shooting_state,
+                detected_period,
+                &config,
+                FD_STEP,
+            )?,
+        };
         let floquet_multipliers = solver.compute_floquet_multipliers(&monodromy);
         let is_stable = floquet_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
 
@@ -414,91 +436,161 @@ impl Engine {
         Ok((final_state, waveform))
     }
 
-    /// Compute Newton step using finite-difference Jacobian
+    /// Compute all finite-difference sensitivity columns
+    /// `(x_T(x0 + h*e_j) - base) / h` for `j = 0..n`, where `base` is the
+    /// caller's shared base point (the residual for Newton columns, the
+    /// converged `x_T(x0)` for monodromy columns).
+    ///
+    /// Columns are pure functions of `(x0, j)`, so they parallelize across
+    /// per-worker circuit clones with deterministic results. `CircuitData`
+    /// is Send-but-not-Sync (Cell-based device caches), so the work is
+    /// chunked AC-sweep-style: one owned clone per worker chunk, matrix
+    /// rebuilt per worker (StaticMatrix holds factorization workspaces and
+    /// is intentionally not Clone).
+    #[allow(clippy::too_many_arguments)]
+    fn pss_sensitivity_columns(
+        &self,
+        circuit: &Circuit,
+        x0: &[Value],
+        period: Value,
+        config: &PssConfig,
+        fd_step: Value,
+        subtract_identity: bool,
+        base: &[Value],
+    ) -> Result<Vec<Vec<Value>>, SimulationError> {
+        let n = x0.len();
+        if n == 0 {
+            return Ok(Vec::new());
+        }
+
+        let column = |worker_circuit: &mut Circuit,
+                      worker_matrix: &mut StaticMatrix,
+                      j: usize|
+         -> Result<Vec<Value>, SimulationError> {
+            let mut x_perturbed = x0.to_vec();
+            let h = fd_step * (1.0 + x0[j].abs());
+            x_perturbed[j] += h;
+
+            self.pss_set_reactive_state(worker_circuit, &x_perturbed);
+            let (x_t_perturbed, _) =
+                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config)?;
+
+            Ok((0..n)
+                .map(|i| {
+                    let f_perturbed = if subtract_identity {
+                        x_t_perturbed[i] - x_perturbed[i]
+                    } else {
+                        x_t_perturbed[i]
+                    };
+                    (f_perturbed - base[i]) / h
+                })
+                .collect())
+        };
+
+        #[cfg(feature = "parallel")]
+        if n >= 2 {
+            use rayon::prelude::*;
+
+            let workers = rayon::current_num_threads().clamp(1, n);
+            let chunk_len = n.div_ceil(workers);
+            let indices: Vec<usize> = (0..n).collect();
+            let work: Vec<(Circuit, Vec<usize>)> = indices
+                .chunks(chunk_len)
+                .map(|chunk| (circuit.clone(), chunk.to_vec()))
+                .collect();
+
+            let chunk_columns: Result<Vec<Vec<Vec<Value>>>, SimulationError> = work
+                .into_par_iter()
+                .map(|(mut worker_circuit, chunk)| {
+                    let matrix = self.build_matrix(&worker_circuit)?;
+                    worker_circuit.link_indices(&matrix);
+                    let mut worker_matrix = matrix;
+                    chunk
+                        .into_iter()
+                        .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
+                        .collect()
+                })
+                .collect();
+            return chunk_columns.map(|chunks| chunks.into_iter().flatten().collect());
+        }
+
+        let mut worker_circuit = circuit.clone();
+        let matrix = self.build_matrix(&worker_circuit)?;
+        worker_circuit.link_indices(&matrix);
+        let mut worker_matrix = matrix;
+        (0..n)
+            .map(|j| column(&mut worker_circuit, &mut worker_matrix, j))
+            .collect()
+    }
+
+    /// Compute Newton step using a finite-difference shooting Jacobian.
+    ///
+    /// One period integration per state (the unperturbed trajectory is the
+    /// shared base point), with columns evaluated in parallel on per-worker
+    /// circuit clones. Returns the step together with the Jacobian so the
+    /// caller can recycle it as the monodromy at convergence (J = M - I).
     fn pss_compute_newton_step(
         &self,
-        circuit: &mut Circuit,
-        matrix: &mut StaticMatrix,
+        circuit: &Circuit,
         state: &ShootingState,
         period: Value,
         config: &PssConfig,
         fd_step: Value,
-    ) -> Result<Vec<Value>, SimulationError> {
+    ) -> Result<(Vec<Value>, Vec<Vec<Value>>), SimulationError> {
         let n = state.dimension();
+        let columns = self.pss_sensitivity_columns(
+            circuit,
+            &state.x0,
+            period,
+            config,
+            fd_step,
+            true,
+            &state.residual,
+        )?;
+
         let mut jacobian = vec![vec![0.0; n]; n];
-        let x0 = &state.x0;
-        let f0 = &state.residual;
-
-        // Compute Jacobian columns via finite differences
-        for j in 0..n {
-            // Perturb state in direction j
-            let mut x_perturbed = x0.clone();
-            let h = fd_step * (1.0 + x0[j].abs());
-            x_perturbed[j] += h;
-
-            // Simulate with perturbed IC
-            self.pss_set_reactive_state(circuit, &x_perturbed);
-            let (x_t_perturbed, _) =
-                self.pss_simulate_one_period(circuit, matrix, period, config)?;
-
-            // Compute perturbed residual
-            let f_perturbed: Vec<Value> = x_t_perturbed
-                .iter()
-                .zip(x_perturbed.iter())
-                .map(|(xt, x0)| xt - x0)
-                .collect();
-
-            // Jacobian column: (f_perturbed - f0) / h
+        for (j, column) in columns.iter().enumerate() {
             for i in 0..n {
-                jacobian[i][j] = (f_perturbed[i] - f0[i]) / h;
+                jacobian[i][j] = column[i];
             }
         }
 
-        // Restore original state
-        self.pss_set_reactive_state(circuit, x0);
-
         // Solve: (J) * delta = -f0 using simple Gaussian elimination
-        let delta = self.pss_solve_linear_system(&jacobian, f0)?;
+        let delta = self.pss_solve_linear_system(&jacobian, &state.residual)?;
 
-        Ok(delta)
+        Ok((delta, jacobian))
     }
 
-    /// Compute Monodromy matrix via finite differences
+    /// Compute the monodromy matrix via finite differences — the fallback
+    /// for the zero-Newton-iteration case (otherwise the converged Newton
+    /// Jacobian is recycled as J + I). The converged trajectory endpoint
+    /// `state.x_t` is the shared base; columns run in parallel on private
+    /// circuit clones.
     fn pss_compute_monodromy(
         &self,
-        circuit: &mut Circuit,
-        matrix: &mut StaticMatrix,
+        circuit: &Circuit,
         state: &ShootingState,
         period: Value,
         config: &PssConfig,
         fd_step: Value,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let n = state.dimension();
+        let columns = self.pss_sensitivity_columns(
+            circuit,
+            &state.x0,
+            period,
+            config,
+            fd_step,
+            false,
+            &state.x_t,
+        )?;
+
         let mut monodromy = vec![vec![0.0; n]; n];
-        let x0 = &state.x0;
-
-        // Get unperturbed final state
-        self.pss_set_reactive_state(circuit, x0);
-        let (x_t_base, _) = self.pss_simulate_one_period(circuit, matrix, period, config)?;
-
-        // Compute Monodromy columns via finite differences
-        for j in 0..n {
-            let mut x_perturbed = x0.clone();
-            let h = fd_step * (1.0 + x0[j].abs());
-            x_perturbed[j] += h;
-
-            self.pss_set_reactive_state(circuit, &x_perturbed);
-            let (x_t_perturbed, _) =
-                self.pss_simulate_one_period(circuit, matrix, period, config)?;
-
-            // Monodromy column: d(x_T)/d(x_0) â‰ˆ (x_T_perturbed - x_T_base) / h
+        for (j, column) in columns.iter().enumerate() {
             for i in 0..n {
-                monodromy[i][j] = (x_t_perturbed[i] - x_t_base[i]) / h;
+                monodromy[i][j] = column[i];
             }
         }
-
-        // Restore original state
-        self.pss_set_reactive_state(circuit, x0);
 
         Ok(monodromy)
     }
@@ -620,6 +712,19 @@ impl Engine {
                 }
 
                 circuit.stamp_transient_linear_direct(matrix, &mut rhs);
+
+                // Time-varying independent sources: the static stamp wrote DC
+                // values; overwrite the source rows with their value at the
+                // end of this step. This is what makes driven PSS periodic —
+                // without it a SIN drive stamps as its DC offset and the
+                // "steady state" collapses to the DC solution.
+                let num_nodes = circuit.num_nodes();
+                circuit
+                    .voltage_sources
+                    .update_transient_rhs(&mut rhs, t + dt, |br_ordinal| num_nodes + br_ordinal);
+                circuit
+                    .current_sources
+                    .update_transient_rhs(&mut rhs, t + dt);
 
                 let current_method = trapgear.current_method();
                 let coeff = CompanionCoefficients::for_method(current_method);
