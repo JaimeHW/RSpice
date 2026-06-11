@@ -12,8 +12,9 @@ use egui::Ui;
 use crate::common::AppState;
 use crate::state::AnalysisType;
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
-use crate::ui::tokens::Tokens;
-use crate::ui::widgets::section_header;
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{chip, section_header};
 
 use super::strip::{self, LegendChip};
 use super::{BodeDerived, well_hint};
@@ -23,7 +24,12 @@ struct BodeModel {
     signal: String,
     frequency: Arc<[f64]>,
     gain_db: Arc<[f64]>,
+    /// The phase trace as displayed: raw ±180°-wrapped samples, or the
+    /// unwrapped series when the continuous toggle is on. The margins are
+    /// always computed from the raw arrays.
     phase_deg: Option<Arc<[f64]>>,
+    /// Finite (min, max) of the displayed phase curve.
+    phase_extremes: Option<(f64, f64)>,
     margins: BodeDerived,
 }
 
@@ -65,8 +71,9 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     let phase = analysis
         .waveforms
         .iter()
-        .find(|w| w.name == format!("phase({base})"))
-        .map(|w| Arc::clone(&w.y));
+        .enumerate()
+        .find(|(_, w)| w.name == format!("phase({base})"))
+        .map(|(phase_index, w)| (phase_index, Arc::clone(&w.y)));
 
     let gain_db = state.shell.results.derived.db(
         (analysis_index as u64) << 32 | mag_index as u64,
@@ -98,12 +105,14 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
                 gm_db: None,
                 f3db: None,
                 gain_extremes: super::finite_extremes(&gain_db).unwrap_or((0.0, 0.0)),
-                phase_extremes: phase.as_deref().and_then(super::finite_extremes),
+                phase_extremes: phase
+                    .as_ref()
+                    .and_then(|(_, y)| super::finite_extremes(y)),
             };
             if let Some(adc) = d.adc_db {
                 d.f3db = crossing(&frequency, &gain_db, adc - 3.0);
             }
-            if let Some(phase) = &phase {
+            if let Some((_, phase)) = &phase {
                 if let Some(ugf) = d.ugf {
                     d.pm_deg = Some(180.0 + sample_at(&frequency, phase, ugf));
                 }
@@ -117,11 +126,27 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
         }
     };
 
+    // Displayed phase: optionally unwrapped into a continuous curve. The
+    // margin computation above reads the raw wrapped arrays on purpose —
+    // only the displayed trace (and its axis range) changes.
+    let (phase_deg, phase_extremes) = match &phase {
+        Some((phase_index, raw)) if state.shell.results.phase_continuous => {
+            let key = (analysis_index as u64) << 32 | *phase_index as u64;
+            let derived = &mut state.shell.results.derived;
+            let series = derived.unwrapped(key, raw);
+            let extremes = derived.unwrapped_range(key, raw);
+            (Some(series), extremes)
+        }
+        Some((_, raw)) => (Some(Arc::clone(raw)), margins.phase_extremes),
+        None => (None, None),
+    };
+
     Some(BodeModel {
         signal: base.to_owned(),
         frequency,
         gain_db,
-        phase_deg: phase,
+        phase_deg,
+        phase_extremes,
         margins,
     })
 }
@@ -166,6 +191,36 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .reset_plot_view(super::ResultViewer::Bode, 0);
     }
 
+    // Phase-wrap selector, mirroring the FFT window-selector row: display
+    // only — the margins always read the raw wrapped arrays. The choice
+    // also drives the waves strips' phase traces. `continuous` is captured
+    // before the chips so this frame's trace keys match the model that was
+    // just built; a click re-renders next frame.
+    let continuous = state.shell.results.phase_continuous;
+    if model.phase_deg.is_some() {
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            ui.label(
+                egui::RichText::new("phase")
+                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
+                    .color(c.text_dim),
+            );
+            if chip(ui, "wrapped ±180°", !continuous)
+                .on_hover_text("Phase as simulated, wrapped to ±180°")
+                .clicked()
+            {
+                state.shell.results.phase_continuous = false;
+            }
+            if chip(ui, "continuous", continuous)
+                .on_hover_text("Unwrap the displayed phase into a continuous curve")
+                .clicked()
+            {
+                state.shell.results.phase_continuous = true;
+            }
+        });
+        ui.add_space(2.0);
+    }
+
     let x0 = model
         .frequency
         .iter()
@@ -190,7 +245,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
 
     if let Some(phase) = &model.phase_deg {
-        let (p_min, p_max) = model.margins.phase_extremes.unwrap_or((-180.0, 0.0));
+        // Displayed extremes — the unwrapped curve can leave ±180°, and the
+        // 45° lattice below handles the wider range.
+        let (p_min, p_max) = model.phase_extremes.unwrap_or((-180.0, 0.0));
         let axis = match view.y_right {
             // Zoomed: plain linear ticks instead of the 45° lattice.
             Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
@@ -208,7 +265,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             Trace::new(&model.frequency, phase, c.traces[2])
                 .right()
                 .dashed()
-                .cache_key(0xB0DE_0002),
+                // Wrapped and continuous series decimate differently.
+                .cache_key(if continuous { 0xB0DE_0003 } else { 0xB0DE_0002 }),
         );
     }
     spec.traces.push(

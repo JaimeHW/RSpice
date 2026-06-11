@@ -101,8 +101,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let [r, g, b, _] = c.err.to_array();
         egui::Color32::from_rgba_unmultiplied(r, g, b, 26)
     };
-    let mask_points: &[(f64, f64)] = &eye.mask.inner.points;
-    let v_cross = data.v_cross;
+    // The absolute mask mapped into display coordinates (unit intervals,
+    // volts): time is scaled by the UI ratio so the mask keeps its per-UI
+    // geometry at any data rate, voltage lands on the axis as stored.
+    let mask_points: Vec<(f64, f64)> = eye.mask.inner_in_ui_volts().points;
     let err = c.err;
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some(texture_id) = texture_id {
@@ -116,11 +118,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         if show_mask {
             let points: Vec<egui::Pos2> = mask_points
                 .iter()
-                .map(|&(tn, vn)| {
-                    let x = tn * ui_count;
-                    let v = eye_mask_v(vn, v_cross, swing);
-                    egui::pos2(mapper.x(x), mapper.y(v))
-                })
+                .map(|&(t_ui, volts)| egui::pos2(mapper.x(t_ui), mapper.y(volts)))
                 .collect();
             if points.len() >= 3 {
                 painter.add(egui::Shape::convex_polygon(
@@ -141,11 +139,6 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     }));
 
     plot::show(ui, &spec, &mut state.shell.results.cache, None, None);
-}
-
-/// Map a normalized mask voltage to volts around the crossing level.
-fn eye_mask_v(v_normalized: f64, v_cross: f64, swing: f64) -> f64 {
-    v_cross + v_normalized * swing
 }
 
 /// Rasterize every acquisition into an alpha-accumulated density image —
@@ -273,6 +266,20 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             ),
         ];
         super::stat_table(ui, &rows);
+        // The mask is stored in absolute units at its authoring rate; when
+        // the on-screen eye runs at a different rate, the mask time is
+        // scaled by the UI ratio (see `EyeMask::inner_in_ui_volts`) — say so.
+        let reference = mask.reference_data_rate;
+        let current = eye.data.data_rate;
+        if reference > 0.0 && (reference - current).abs() > reference * 1e-6 {
+            super::panel_note(
+                ui,
+                &format!(
+                    "Mask authored at {} — time scaled to the current UI.",
+                    fmt_si(reference, "b/s", 1)
+                ),
+            );
+        }
     }
     super::panel_note(
         ui,

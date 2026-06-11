@@ -120,22 +120,19 @@ impl EyeDiagramState {
         if !self.mask.enabled {
             return;
         }
-        let ui_count = self.ui_count.max(1) as f64;
 
         self.mask.violation_count = 0;
         self.mask.total_samples = 0;
 
+        // Trace samples are already display-space (unit intervals, volts) —
+        // the same space the absolute mask maps into. Map the polygon once,
+        // not per sample; the mask's time scales by the UI ratio and its
+        // voltages stay absolute (see `EyeMask::inner_in_ui_volts`).
+        let inner = self.mask.inner_in_ui_volts();
         for trace in &self.data.traces {
             let n = trace.time.len().min(trace.amplitude.len());
             for i in 0..n {
-                let t_norm = trace.time[i] / ui_count;
-                let v_norm = if self.data.swing > 0.0 {
-                    (trace.amplitude[i] - self.data.v_cross) / self.data.swing
-                } else {
-                    0.0
-                };
-
-                if self.mask.check_violation(t_norm, v_norm) {
+                if inner.contains(trace.time[i], trace.amplitude[i]) {
                     self.mask.violation_count += 1;
                 }
                 self.mask.total_samples += 1;

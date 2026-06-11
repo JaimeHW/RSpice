@@ -53,6 +53,9 @@ pub(super) struct StripModel {
     x_scale: XScale,
     x_unit: &'static str,
     y_unit: &'static str,
+    /// Phase traces carry the unwrapped (continuous) series instead of the
+    /// raw ±180°-wrapped samples. Folded into the cache keys.
+    phase_continuous: bool,
     traces: Vec<StripTrace>,
 }
 
@@ -84,10 +87,12 @@ impl StripModel {
 }
 
 /// Build strip models for every plottable analysis of the active run.
+/// `phase_continuous` swaps phase traces to their unwrapped series.
 pub(super) fn build_models(
     simulation: &SimulationState,
     derived: &mut DerivedSeries,
     tokens: &Tokens,
+    phase_continuous: bool,
 ) -> Vec<StripModel> {
     let Some(run) = simulation.active_run() else {
         return Vec::new();
@@ -122,6 +127,12 @@ pub(super) fn build_models(
                     (analysis_index as u64) << 32 | waveform_index as u64,
                     &waveform.y,
                 ),
+                // Continuous phase display: cached unwrapped copy of the
+                // wrapped samples, same key convention as `db`.
+                TraceKind::PhaseDeg if phase_continuous => derived.unwrapped(
+                    (analysis_index as u64) << 32 | waveform_index as u64,
+                    &waveform.y,
+                ),
                 _ => Arc::clone(&waveform.y),
             };
             traces.push(StripTrace {
@@ -142,6 +153,7 @@ pub(super) fn build_models(
             x_scale,
             x_unit,
             y_unit,
+            phase_continuous,
             traces,
         });
     }
@@ -149,9 +161,14 @@ pub(super) fn build_models(
 }
 
 /// Stable per-trace identity shared by the decimation, range, and
-/// measurement caches.
-fn trace_key(analysis_index: usize, trace: &StripTrace) -> u64 {
-    (analysis_index as u64) << 40 | (trace.waveform_index as u64) << 2 | trace.kind as u64
+/// measurement caches. Phase traces fold in the wrapped/continuous choice
+/// so a toggle never serves stale envelopes, ranges, or stats.
+fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
+    let continuous = (trace.kind == TraceKind::PhaseDeg && model.phase_continuous) as u64;
+    (model.analysis_index as u64) << 40
+        | continuous << 39
+        | (trace.waveform_index as u64) << 2
+        | trace.kind as u64
 }
 
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
@@ -164,7 +181,7 @@ fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Opti
         if is_phase != phase || !trace.visible {
             continue;
         }
-        let extremes = derived.range_or(trace_key(model.analysis_index, trace), || {
+        let extremes = derived.range_or(trace_key(model, trace), || {
             super::finite_extremes(&trace.y)
         });
         if let Some((lo, hi)) = extremes {
@@ -207,10 +224,12 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
 /// Render the strip stack.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
+    let phase_continuous = state.shell.results.phase_continuous;
     let models = build_models(
         &state.simulation,
         &mut state.shell.results.derived,
         &t,
+        phase_continuous,
     );
     if models.is_empty() {
         let hint = if state.simulation.active_run().is_none() {
@@ -793,7 +812,7 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
             continue;
         }
         let mut plot_trace = Trace::new(&trace.x, &trace.y, trace.color)
-            .cache_key(trace_key(model.analysis_index, trace));
+            .cache_key(trace_key(model, trace));
         if trace.kind == TraceKind::PhaseDeg {
             plot_trace = plot_trace.right().dashed();
         }
@@ -864,7 +883,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
-    let models = build_models(&state.simulation, &mut state.shell.results.derived, &t);
+    let phase_continuous = state.shell.results.phase_continuous;
+    let models = build_models(
+        &state.simulation,
+        &mut state.shell.results.derived,
+        &t,
+        phase_continuous,
+    );
     let cursor_model = state
         .shell
         .results
@@ -1067,7 +1092,7 @@ fn measurement_rows(
 
     let mut rows: Vec<(String, String)> = Vec::new();
     for trace in model.traces.iter().filter(|t| t.visible).take(4) {
-        let key = (trace_key(model.analysis_index, trace), a_bits, b_bits);
+        let key = (trace_key(model, trace), a_bits, b_bits);
         let stats = derived.stats_or(key, || {
             let (start, end) = match window {
                 Some((a, b)) => {

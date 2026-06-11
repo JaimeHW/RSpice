@@ -24,6 +24,7 @@ impl FunctionRegistry {
             "deriv" | "derivative" => deriv(args),
             "integ" | "integral" => integ(args),
             "clip" => clip(args),
+            "unwrap" => unwrap(args),
 
             _ => Err(EvaluationError::UnknownFunction(name.to_string())),
         }
@@ -234,6 +235,56 @@ fn clip(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
         CalcValue::Waveform(x, y) => {
             let new_y = y.iter().map(|v| v.clamp(min_val, max_val)).collect();
             Ok(CalcValue::create_waveform(x.clone(), new_y))
+        }
+    }
+}
+
+/// Unwrap a wrapped phase series given in degrees.
+///
+/// Standard single-pass unwrap: walk the samples and whenever the step
+/// between consecutive finite samples exceeds 180° in magnitude, shift the
+/// remainder of the series by the multiple of 360° that minimizes the step.
+///
+/// Invariants (no test module in this file, so they are stated here):
+/// - The output has the same length as the input.
+/// - Every output sample differs from its input sample by an exact multiple
+///   of 360°, so `out[i] ≡ in[i] (mod 360°)` — the unwrapped curve never
+///   changes the underlying phase, only its branch.
+/// - Consecutive finite output samples differ by at most 180°, provided the
+///   true signal moves less than 180° between samples (the usual sampling
+///   assumption for unwrapping).
+/// - Non-finite samples (NaN/±inf) pass through unchanged and are skipped
+///   when measuring jumps, so a gap does not poison the running offset.
+pub fn unwrap_phase_deg(phase: &[f64]) -> Vec<f64> {
+    let mut out = Vec::with_capacity(phase.len());
+    let mut offset = 0.0_f64;
+    let mut prev: Option<f64> = None;
+    for &sample in phase {
+        if !sample.is_finite() {
+            out.push(sample);
+            continue;
+        }
+        if let Some(prev) = prev {
+            let jump = sample - prev;
+            if jump.abs() > 180.0 {
+                // Nearest multiple of 360° that brings the step into ±180°.
+                offset -= 360.0 * (jump / 360.0).round();
+            }
+        }
+        prev = Some(sample);
+        out.push(sample + offset);
+    }
+    out
+}
+
+/// `unwrap(phase_waveform)` — continuous phase from a ±180°-wrapped trace.
+fn unwrap(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
+    check_arg_count("unwrap", &args, 1)?;
+    match &args[0] {
+        // A single sample has no jumps to unwrap.
+        CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
+        CalcValue::Waveform(x, y) => {
+            Ok(CalcValue::create_waveform(x.clone(), unwrap_phase_deg(y)))
         }
     }
 }

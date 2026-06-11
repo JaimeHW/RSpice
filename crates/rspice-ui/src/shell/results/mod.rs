@@ -195,6 +195,11 @@ pub struct ResultsState {
     /// Pinned data point per XY viewer (trace slot, point index) — the
     /// Smith/Nyquist/PZ click-to-pin readout.
     pub rf_pin: std::collections::HashMap<ResultViewer, (usize, usize)>,
+    /// Display AC phase traces unwrapped into a continuous curve instead of
+    /// wrapped to ±180°. Applies to the BODE phase trace and the waves
+    /// strips' phase traces; the margin math always reads the raw wrapped
+    /// arrays. Transient — not persisted with the session.
+    pub phase_continuous: bool,
 }
 
 /// One user expression trace on a waves strip.
@@ -394,6 +399,25 @@ impl DerivedSeries {
                 .map(|&m| 20.0 * m.max(1e-30).log10())
                 .collect()
         })
+    }
+
+    /// Key-space bit separating unwrapped-phase entries from the dB entries,
+    /// which share the `(analysis << 32 | waveform)` key convention.
+    const UNWRAP_KEY_BIT: u64 = 1 << 62;
+
+    /// Continuous (unwrapped) copy of a ±180°-wrapped phase-degree series,
+    /// cached under `key` like `db`.
+    pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> std::sync::Arc<[f64]> {
+        self.get_or(Self::UNWRAP_KEY_BIT | key, || {
+            crate::analysis::calculator::functions::unwrap_phase_deg(phase_deg).into()
+        })
+    }
+
+    /// Finite (min, max) of the unwrapped series for `key`, cached alongside
+    /// the per-trace ranges.
+    pub fn unwrapped_range(&mut self, key: u64, phase_deg: &[f64]) -> Option<(f64, f64)> {
+        let series = self.unwrapped(key, phase_deg);
+        self.range_or(Self::UNWRAP_KEY_BIT | key, || finite_extremes(&series))
     }
 }
 
