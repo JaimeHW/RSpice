@@ -1,0 +1,124 @@
+//! Numerical oracle pins for the Verilog-A BSIM4.8 model.
+//!
+//! Reference currents come from ngspice-46's native C BSIM4
+//! (`.model nch nmos level=14 version=4.8.1`, default parameters,
+//! W=1u L=0.1u, 27C) for the same bias points. The Verilog-A model is the
+//! Xyce-adapted BSIM4.8 with documented default deviations (igc-family
+//! defaults, junction trap model), so tolerances are percent-level rather
+//! than exact: observed agreement is 0.6-1% in strong inversion and ~5%
+//! in deep subthreshold across ten decades of current.
+//!
+//! These pins exercise the entire stack end to end: preprocessing, the
+//! full parser, guarded-dataflow lowering with snapshot guards, runtime
+//! nf loops, analog-function inlining, shadow-based Jacobians,
+//! branch-current unknowns for the collapse/impedance voltage
+//! contributions, companion stamping, and Newton convergence.
+#![cfg(feature = "veriloga")]
+
+use rspice_core::{Engine, Netlist};
+use std::path::{Path, PathBuf};
+
+fn bsim4_path() -> Option<PathBuf> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga")
+        .join("bsim4.va");
+    path.exists().then_some(path)
+}
+
+/// Solve the single-transistor bias circuit and return the drain current
+fn drain_current(model: &Path, vgs: f64, vds: f64) -> f64 {
+    let deck = format!(
+        "* bsim4 va bias point\n\
+         vg g 0 {vgs}\n\
+         vd d 0 {vds}\n\
+         XM1 d g 0 0 bsim4va l=1e-7 w=1e-6\n\
+         .va \"{}\" bsim4va\n\
+         .end\n",
+        model.display().to_string().replace('\\', "/")
+    );
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 2e-9, 1e-9)
+        .expect("bias point must converge");
+    let idx = result
+        .branch_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case("vd"))
+        .expect("vd branch");
+    -result.branch_currents[idx].last().copied().expect("samples")
+}
+
+fn assert_within(label: &str, got: f64, oracle: f64, rel_tol: f64) {
+    let rel = ((got - oracle) / oracle).abs();
+    assert!(
+        rel <= rel_tol,
+        "{label}: got {got:.6e}, ngspice oracle {oracle:.6e} (rel err {:.2}% > {:.1}%)",
+        rel * 100.0,
+        rel_tol * 100.0
+    );
+}
+
+#[test]
+fn bsim4_idvg_tracks_ngspice_oracle() {
+    let Some(model) = bsim4_path() else {
+        eprintln!("bsim4.va not present; skipping oracle pins");
+        return;
+    };
+
+    // ngspice-46: dc vg 0..1.2, vds=1.2
+    // Deep subthreshold (pA): the variant gap is largest here
+    assert_within(
+        "Id(vgs=0.0, vds=1.2)",
+        drain_current(&model, 0.0, 1.2),
+        1.82638199e-10,
+        0.08,
+    );
+    // Subthreshold decades
+    assert_within(
+        "Id(vgs=0.3, vds=1.2)",
+        drain_current(&model, 0.3, 1.2),
+        3.83881131e-6,
+        0.06,
+    );
+    // Moderate inversion
+    assert_within(
+        "Id(vgs=0.6, vds=1.2)",
+        drain_current(&model, 0.6, 1.2),
+        2.02222818e-4,
+        0.03,
+    );
+    // Strong inversion
+    assert_within(
+        "Id(vgs=1.2, vds=1.2)",
+        drain_current(&model, 1.2, 1.2),
+        7.12754641e-4,
+        0.03,
+    );
+}
+
+#[test]
+fn bsim4_idvd_tracks_ngspice_oracle() {
+    let Some(model) = bsim4_path() else {
+        eprintln!("bsim4.va not present; skipping oracle pins");
+        return;
+    };
+
+    // ngspice-46: dc vd 0..1.2, vgs=1.2
+    // Linear region
+    assert_within(
+        "Id(vgs=1.2, vds=0.1)",
+        drain_current(&model, 1.2, 0.1),
+        2.11832469e-4,
+        0.04,
+    );
+    // Onset of saturation
+    assert_within(
+        "Id(vgs=1.2, vds=0.6)",
+        drain_current(&model, 1.2, 0.6),
+        5.71243013e-4,
+        0.04,
+    );
+}
