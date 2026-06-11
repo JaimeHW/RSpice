@@ -28,9 +28,11 @@ use std::collections::BTreeSet;
 
 mod drive;
 mod pac;
+mod pnoise;
 mod stamping;
 
 pub use pac::PacAnalysisResult;
+pub use pnoise::PnoiseAnalysisResult;
 
 /// HB-specific error types
 #[derive(Debug, Clone)]

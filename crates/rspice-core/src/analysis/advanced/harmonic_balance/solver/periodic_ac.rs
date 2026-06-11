@@ -162,6 +162,52 @@ impl HbSolver {
         sideband_max: i32,
         excitations: &[PeriodicAcExcitation],
     ) -> Result<Vec<Vec<Vec<Complex64>>>, HbError> {
+        let y = self.assemble_conversion_matrix(state, offset_hz, sideband_min, sideband_max)?;
+        let n = self.num_nodes;
+        let s = (sideband_max - sideband_min + 1) as usize;
+        let size = n * s;
+
+        let mut results = Vec::with_capacity(excitations.len());
+        for excitation in excitations {
+            let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+            let m_idx = excitation.sideband - sideband_min;
+            if m_idx < 0 || m_idx >= s as i32 {
+                return Err(HbError::InvalidCircuit(format!(
+                    "PAC excitation sideband {} outside [{}, {}]",
+                    excitation.sideband, sideband_min, sideband_max
+                )));
+            }
+            for &(node, amp) in &excitation.injections {
+                if node < n {
+                    rhs[node * s + m_idx as usize] += amp;
+                }
+            }
+
+            let solution = self.solve_complex_linear_system(&y, &rhs)?;
+
+            let mut by_node = vec![vec![Complex64::new(0.0, 0.0); s]; n];
+            for node in 0..n {
+                for k_idx in 0..s {
+                    by_node[node][k_idx] = solution[node * s + k_idx];
+                }
+            }
+            results.push(by_node);
+        }
+
+        Ok(results)
+    }
+
+    /// Assemble the sideband-coupled small-signal admittance matrix at one
+    /// offset frequency: linear elements on the block diagonal at the signed
+    /// frequencies `offset + k*f0`, periodic conductance and capacitance
+    /// conversion coupling on the Toeplitz off-blocks.
+    fn assemble_conversion_matrix(
+        &mut self,
+        state: &HbSolverState,
+        offset_hz: Value,
+        sideband_min: i32,
+        sideband_max: i32,
+    ) -> Result<Vec<Vec<Complex64>>, HbError> {
         if sideband_max < sideband_min {
             return Err(HbError::InvalidCircuit(
                 "PAC sideband range is empty".to_string(),
@@ -263,33 +309,161 @@ impl HbSolver {
             }
         }
 
-        let mut results = Vec::with_capacity(excitations.len());
-        for excitation in excitations {
-            let mut rhs = vec![Complex64::new(0.0, 0.0); size];
-            let m_idx = excitation.sideband - sideband_min;
-            if m_idx < 0 || m_idx >= s as i32 {
-                return Err(HbError::InvalidCircuit(format!(
-                    "PAC excitation sideband {} outside [{}, {}]",
-                    excitation.sideband, sideband_min, sideband_max
-                )));
+        Ok(y)
+    }
+
+    /// Periodically modulated white-noise PSDs of the registered nonlinear
+    /// devices around the converged operating point.
+    ///
+    /// Each entry is a current-noise source between two nodes whose
+    /// time-varying intensity s(t) >= 0 (A^2/Hz) is returned as Fourier
+    /// coefficients on the HB grid: shot noise `2q|I(t)|` for junction
+    /// currents and channel thermal noise `(8/3)kT|gm(t)|` for FETs.
+    pub fn device_noise_sources(
+        &mut self,
+        state: &HbSolverState,
+        temperature: Value,
+    ) -> Vec<PeriodicNoiseSource> {
+        const Q_E: Value = 1.602176634e-19;
+        const K_B: Value = 1.380649e-23;
+
+        let n = self.num_nodes;
+        let n_time = self.fft.size();
+        let v_time: Vec<Vec<Value>> = (0..n)
+            .map(|node| self.fft.to_time_domain(&state.x[node]))
+            .collect();
+
+        // Accumulate per-source intensity waveforms keyed by node pair.
+        let mut intensities: Vec<((usize, usize), Vec<Value>)> = Vec::new();
+        let mut node_voltages = vec![0.0; n];
+
+        for device in &self.nonlinear_devices {
+            let branches = device.noise_branches();
+            if branches.is_empty() {
+                continue;
             }
-            for &(node, amp) in &excitation.injections {
-                if node < n {
-                    rhs[node * s + m_idx as usize] += amp;
+            let base = intensities.len();
+            for &(p, q) in &branches {
+                intensities.push(((p, q), vec![0.0; n_time]));
+            }
+            for t in 0..n_time {
+                for node in 0..n {
+                    node_voltages[node] = v_time[node][t];
+                }
+                let values = device.noise_intensities(&node_voltages, temperature, Q_E, K_B);
+                for (b, value) in values.iter().enumerate() {
+                    intensities[base + b].1[t] = *value;
                 }
             }
-
-            let solution = self.solve_complex_linear_system(&y, &rhs)?;
-
-            let mut by_node = vec![vec![Complex64::new(0.0, 0.0); s]; n];
-            for node in 0..n {
-                for k_idx in 0..s {
-                    by_node[node][k_idx] = solution[node * s + k_idx];
-                }
-            }
-            results.push(by_node);
         }
 
-        Ok(results)
+        intensities
+            .into_iter()
+            .map(|((p, q), waveform)| {
+                let psd = self.fft.to_frequency_domain(&waveform);
+                PeriodicNoiseSource {
+                    node_pos: p,
+                    node_neg: q,
+                    psd,
+                }
+            })
+            .collect()
     }
+
+    /// Output noise power spectral density (V^2/Hz) at one offset frequency.
+    ///
+    /// One adjoint solve `Y^T a = e_(out, 0)` gives the transfer from a unit
+    /// current injected at every (node, sideband) to the output at the
+    /// analysis frequency; each periodically-modulated white source then
+    /// contributes `sum_{k,m} conj(A_k) A_m S_{k-m}` with `A_k` the adjoint
+    /// gain across its terminals at sideband k and `S_d` the Fourier
+    /// coefficients of its intensity (`S_{-d} = conj(S_d)`). Stationary
+    /// sources reduce to the textbook folding `S0 * sum_k |A_k|^2`.
+    pub fn solve_periodic_noise(
+        &mut self,
+        state: &HbSolverState,
+        offset_hz: Value,
+        sideband_min: i32,
+        sideband_max: i32,
+        output_node: usize,
+        sources: &[PeriodicNoiseSource],
+    ) -> Result<Value, HbError> {
+        let n = self.num_nodes;
+        if output_node >= n {
+            return Err(HbError::InvalidCircuit(
+                "pnoise output node out of range".to_string(),
+            ));
+        }
+        if sideband_min > 0 || sideband_max < 0 {
+            return Err(HbError::InvalidCircuit(
+                "pnoise sideband range must include 0 (the analysis frequency)".to_string(),
+            ));
+        }
+        let y = self.assemble_conversion_matrix(state, offset_hz, sideband_min, sideband_max)?;
+        let s = (sideband_max - sideband_min + 1) as usize;
+        let size = n * s;
+
+        // Adjoint solve with the plain (unconjugated) transpose.
+        let mut yt = vec![vec![Complex64::new(0.0, 0.0); size]; size];
+        for r in 0..size {
+            for c in 0..size {
+                yt[c][r] = y[r][c];
+            }
+        }
+        let out_idx = (0 - sideband_min) as usize; // k = 0 entry
+        let mut e = vec![Complex64::new(0.0, 0.0); size];
+        e[output_node * s + out_idx] = Complex64::new(1.0, 0.0);
+        let adjoint = self.solve_complex_linear_system(&yt, &e)?;
+
+        let mut total = 0.0;
+        for source in sources {
+            // Adjoint gain across the source terminals per sideband.
+            let mut gains = vec![Complex64::new(0.0, 0.0); s];
+            for (k_idx, gain) in gains.iter_mut().enumerate() {
+                let mut a = Complex64::new(0.0, 0.0);
+                if source.node_pos < n {
+                    a += adjoint[source.node_pos * s + k_idx];
+                }
+                if source.node_neg < n {
+                    a -= adjoint[source.node_neg * s + k_idx];
+                }
+                *gain = a;
+            }
+
+            let mut contribution = Complex64::new(0.0, 0.0);
+            for k_idx in 0..s {
+                for m_idx in 0..s {
+                    let d = (k_idx as i32) - (m_idx as i32);
+                    let d_abs = d.unsigned_abs() as usize;
+                    if d_abs >= source.psd.len() {
+                        continue;
+                    }
+                    let s_d = if d >= 0 {
+                        source.psd[d_abs]
+                    } else {
+                        source.psd[d_abs].conj()
+                    };
+                    contribution += gains[k_idx].conj() * gains[m_idx] * s_d;
+                }
+            }
+            // The double sum is Hermitian by construction; numerical
+            // round-off leaves a vanishing imaginary part.
+            total += contribution.re.max(0.0);
+        }
+
+        Ok(total)
+    }
+}
+
+/// One periodically modulated white current-noise source.
+#[derive(Debug, Clone)]
+pub struct PeriodicNoiseSource {
+    /// Terminal the noise current flows into (solver node index; `usize::MAX`
+    /// or any out-of-range value means ground).
+    pub node_pos: usize,
+    /// Terminal the noise current flows out of.
+    pub node_neg: usize,
+    /// Fourier coefficients of the intensity s(t) >= 0 in A^2/Hz, indexed by
+    /// harmonic (c-convention; negative harmonics by conjugation).
+    pub psd: Vec<Complex64>,
 }

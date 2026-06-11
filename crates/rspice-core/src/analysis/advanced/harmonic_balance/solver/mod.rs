@@ -22,7 +22,7 @@ mod nonlinear_api;
 mod periodic_ac;
 mod result_builder;
 
-pub use periodic_ac::PeriodicAcExcitation;
+pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
 
 /// Conductance used to model an inductor as a DC short across every solve
 /// path (full-spectrum residual, Jacobian, DC seed, linear solve). One value

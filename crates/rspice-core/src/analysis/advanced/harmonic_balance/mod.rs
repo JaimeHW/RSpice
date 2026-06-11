@@ -47,5 +47,5 @@ pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbM
 pub use result::{HarmonicData, HbResult, SpectralVoltage};
 pub use solver::{
     DepletionCap, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance,
-    NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,
+    NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation, PeriodicNoiseSource,
 };

@@ -332,6 +332,88 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Noise branch terminal pairs, ordered to match `noise_intensities`:
+    /// the device injects a white current-noise source between each pair
+    /// whose intensity is periodically modulated by the operating point.
+    pub fn noise_branches(&self) -> Vec<(usize, usize)> {
+        match self.device_type {
+            NonlinearDeviceType::Diode => vec![(self.terminals[0], self.terminals[1])],
+            NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => vec![
+                (self.terminals[0], self.terminals[2]), // collector shot
+                (self.terminals[1], self.terminals[2]), // base shot
+            ],
+            NonlinearDeviceType::Nmos | NonlinearDeviceType::Pmos => {
+                vec![(self.terminals[0], self.terminals[2])] // channel thermal
+            }
+            NonlinearDeviceType::Njfet | NonlinearDeviceType::Pjfet => {
+                vec![(self.terminals[0], self.terminals[2])] // channel thermal
+            }
+            NonlinearDeviceType::VoltageSwitch | NonlinearDeviceType::CurrentSwitch => {
+                vec![(self.terminals[0], self.terminals[1])] // ON-resistance thermal
+            }
+        }
+    }
+
+    /// Instantaneous white-noise intensities s(t) >= 0 in A^2/Hz for each
+    /// branch of `noise_branches`, evaluated at one time sample: shot noise
+    /// `2q|I|` for junction and transport currents, channel thermal
+    /// `(8/3)kT(|gm| + gds)` for FETs, and `4kT g(t)` for switch resistance.
+    pub fn noise_intensities(
+        &self,
+        node_voltages: &[Value],
+        temperature: Value,
+        q_e: Value,
+        k_b: Value,
+    ) -> Vec<Value> {
+        let kt = k_b * temperature;
+        match self.device_type {
+            NonlinearDeviceType::Diode => {
+                let v_a = self.get_terminal_voltage(node_voltages, 0);
+                let v_c = self.get_terminal_voltage(node_voltages, 1);
+                let (id, _) =
+                    junction_current(self.params.is, v_a - v_c, self.params.n * self.params.vt);
+                vec![2.0 * q_e * id.abs()]
+            }
+            NonlinearDeviceType::NpnBjt => {
+                let op = self.bjt_core(1.0, node_voltages);
+                vec![2.0 * q_e * op.ic.abs(), 2.0 * q_e * op.ib.abs()]
+            }
+            NonlinearDeviceType::PnpBjt => {
+                let op = self.bjt_core(-1.0, node_voltages);
+                vec![2.0 * q_e * op.ic.abs(), 2.0 * q_e * op.ib.abs()]
+            }
+            NonlinearDeviceType::Nmos => {
+                let (_, _, _, gm, gds) = self.mos_operating_point(1.0, node_voltages);
+                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+            }
+            NonlinearDeviceType::Pmos => {
+                let (_, _, _, gm, gds) = self.mos_operating_point(-1.0, node_voltages);
+                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+            }
+            NonlinearDeviceType::Njfet => {
+                let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, 1.0);
+                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+            }
+            NonlinearDeviceType::Pjfet => {
+                let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, -1.0);
+                vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
+            }
+            NonlinearDeviceType::VoltageSwitch => {
+                let vcp = self.get_terminal_voltage(node_voltages, 2);
+                let vcn = self.get_terminal_voltage(node_voltages, 3);
+                let (g, _) = self.switch_conductance_and_derivative(vcp - vcn);
+                vec![4.0 * kt * g]
+            }
+            NonlinearDeviceType::CurrentSwitch => {
+                let vcp = self.get_terminal_voltage(node_voltages, 2);
+                let vcn = self.get_terminal_voltage(node_voltages, 3);
+                let ictrl = self.params.control_gain * (vcp - vcn);
+                let (g, _) = self.switch_conductance_and_derivative(ictrl);
+                vec![4.0 * kt * g]
+            }
+        }
+    }
+
     /// Attach junction charge parameters: `cap_a` is the primary junction
     /// (diode junction, BJT B-E, JFET G-S), `cap_b` the secondary (BJT B-C,
     /// JFET G-D); `tt_f`/`tt_r` are the forward/reverse transit times.
