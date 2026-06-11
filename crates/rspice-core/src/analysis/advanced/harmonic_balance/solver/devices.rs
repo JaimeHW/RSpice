@@ -2,6 +2,42 @@
 
 use super::*;
 
+/// Largest junction exponent evaluated exactly; beyond it the exponential is
+/// continued linearly so the current keeps responding to the voltage.
+const MAX_EXP_ARG: Value = 40.0;
+
+/// Ideal-junction current and conductance `Is*(exp(v/nvt) - 1)`.
+///
+/// Above `MAX_EXP_ARG` the exponential is replaced by its tangent line, which
+/// keeps current and conductance C1-continuous and mutually consistent; a hard
+/// clamp would flatten the current while the Jacobian still reported the full
+/// exponential slope, stalling Newton far from the solution. Deep reverse bias
+/// needs no guard: `exp` underflows gracefully.
+fn junction_current(is: Value, v: Value, nvt: Value) -> (Value, Value) {
+    let arg = v / nvt;
+    if arg > MAX_EXP_ARG {
+        let e = MAX_EXP_ARG.exp();
+        let g = is * e / nvt;
+        let i = is * (e - 1.0) + g * (v - MAX_EXP_ARG * nvt);
+        (i, g)
+    } else {
+        let e = arg.exp();
+        (is * (e - 1.0), is * e / nvt)
+    }
+}
+
+/// Currents and junction-frame partials of the Ebers-Moll transport core.
+struct BjtOperatingPoint {
+    /// Current absorbed at the collector terminal.
+    ic: Value,
+    /// Current absorbed at the base terminal.
+    ib: Value,
+    d_ic_d_vbe: Value,
+    d_ic_d_vbc: Value,
+    d_ib_d_vbe: Value,
+    d_ib_d_vbc: Value,
+}
+
 impl NonlinearDeviceParams {
     /// Create diode parameters
     pub fn diode(is: Value, n: Value) -> Self {
@@ -13,17 +49,22 @@ impl NonlinearDeviceParams {
     }
 
     /// Create BJT parameters
-    pub fn bjt(is: Value, bf: Value, br: Value, vaf: Value) -> Self {
+    pub fn bjt(is: Value, bf: Value, br: Value, nf: Value, nr: Value, vaf: Value) -> Self {
         Self {
             is,
             bf,
-            br,
+            br: br.max(1e-6),
+            nf: nf.max(1e-3),
+            nr: nr.max(1e-3),
             vaf,
             ..Default::default()
         }
     }
 
     /// Create MOSFET parameters
+    ///
+    /// `vth` is the effective polarity-frame threshold: pass VTO for NMOS and
+    /// -VTO for PMOS so depletion devices keep their sign.
     pub fn mosfet(vth: Value, kp: Value, lambda: Value) -> Self {
         Self {
             vth,
@@ -34,11 +75,12 @@ impl NonlinearDeviceParams {
     }
 
     /// Create JFET parameters
-    pub fn jfet(vto: Value, beta: Value, lambda: Value) -> Self {
+    pub fn jfet(vto: Value, beta: Value, lambda: Value, is: Value) -> Self {
         Self {
             vth: vto,
             kp: beta,
             lambda,
+            is: is.max(1e-30),
             ..Default::default()
         }
     }
@@ -87,24 +129,44 @@ impl NonlinearDeviceInstance {
     }
 
     /// Create an NPN BJT instance
-    pub fn npn_bjt(collector: usize, base: usize, emitter: usize, is: Value, bf: Value) -> Self {
+    pub fn npn_bjt(
+        collector: usize,
+        base: usize,
+        emitter: usize,
+        is: Value,
+        bf: Value,
+        br: Value,
+        nf: Value,
+        nr: Value,
+        vaf: Value,
+    ) -> Self {
         Self {
             device_type: NonlinearDeviceType::NpnBjt,
             terminals: vec![collector, base, emitter],
-            params: NonlinearDeviceParams::bjt(is, bf, 1.0, f64::INFINITY),
+            params: NonlinearDeviceParams::bjt(is, bf, br, nf, nr, vaf),
         }
     }
 
     /// Create a PNP BJT instance
-    pub fn pnp_bjt(collector: usize, base: usize, emitter: usize, is: Value, bf: Value) -> Self {
+    pub fn pnp_bjt(
+        collector: usize,
+        base: usize,
+        emitter: usize,
+        is: Value,
+        bf: Value,
+        br: Value,
+        nf: Value,
+        nr: Value,
+        vaf: Value,
+    ) -> Self {
         Self {
             device_type: NonlinearDeviceType::PnpBjt,
             terminals: vec![collector, base, emitter],
-            params: NonlinearDeviceParams::bjt(is, bf, 1.0, f64::INFINITY),
+            params: NonlinearDeviceParams::bjt(is, bf, br, nf, nr, vaf),
         }
     }
 
-    /// Create an NMOS instance
+    /// Create an NMOS instance (`vth` is VTO)
     pub fn nmos(
         drain: usize,
         gate: usize,
@@ -112,15 +174,16 @@ impl NonlinearDeviceInstance {
         bulk: usize,
         vth: Value,
         kp: Value,
+        lambda: Value,
     ) -> Self {
         Self {
             device_type: NonlinearDeviceType::Nmos,
             terminals: vec![drain, gate, source, bulk],
-            params: NonlinearDeviceParams::mosfet(vth, kp, 0.0),
+            params: NonlinearDeviceParams::mosfet(vth, kp, lambda),
         }
     }
 
-    /// Create a PMOS instance
+    /// Create a PMOS instance (`vth` is the effective threshold, i.e. -VTO)
     pub fn pmos(
         drain: usize,
         gate: usize,
@@ -128,11 +191,12 @@ impl NonlinearDeviceInstance {
         bulk: usize,
         vth: Value,
         kp: Value,
+        lambda: Value,
     ) -> Self {
         Self {
             device_type: NonlinearDeviceType::Pmos,
             terminals: vec![drain, gate, source, bulk],
-            params: NonlinearDeviceParams::mosfet(vth, kp, 0.0),
+            params: NonlinearDeviceParams::mosfet(vth, kp, lambda),
         }
     }
 
@@ -144,11 +208,12 @@ impl NonlinearDeviceInstance {
         vto: Value,
         beta: Value,
         lambda: Value,
+        is: Value,
     ) -> Self {
         Self {
             device_type: NonlinearDeviceType::Njfet,
             terminals: vec![drain, gate, source],
-            params: NonlinearDeviceParams::jfet(vto, beta, lambda),
+            params: NonlinearDeviceParams::jfet(vto, beta, lambda, is),
         }
     }
 
@@ -160,11 +225,12 @@ impl NonlinearDeviceInstance {
         vto: Value,
         beta: Value,
         lambda: Value,
+        is: Value,
     ) -> Self {
         Self {
             device_type: NonlinearDeviceType::Pjfet,
             terminals: vec![drain, gate, source],
-            params: NonlinearDeviceParams::jfet(vto, beta, lambda),
+            params: NonlinearDeviceParams::jfet(vto, beta, lambda, is),
         }
     }
 
@@ -251,9 +317,7 @@ impl NonlinearDeviceInstance {
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
-        // Shockley equation with limiting
-        let arg = (vd / (self.params.n * self.params.vt)).clamp(-40.0, 40.0);
-        let id = self.params.is * (arg.exp() - 1.0);
+        let (id, _) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
 
         // Return current contribution to each node equation (current INTO node convention)
         // Diode current id flows FROM anode TO cathode
@@ -269,9 +333,7 @@ impl NonlinearDeviceInstance {
         let v_c = self.get_terminal_voltage(node_voltages, 1);
         let vd = v_a - v_c;
 
-        // Conductance gd = dI_d/dV = Is/(n*Vt) * exp(Vd/(n*Vt))
-        let arg = (vd / (self.params.n * self.params.vt)).clamp(-40.0, 40.0);
-        let gd = (self.params.is / (self.params.n * self.params.vt)) * arg.exp();
+        let (_, gd) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
         let gd = gd.max(1e-12); // Minimum conductance for numerical stability
 
         let a = self.terminals[0];
@@ -283,307 +345,221 @@ impl NonlinearDeviceInstance {
         vec![((a, a), gd), ((a, c), -gd), ((c, a), -gd), ((c, c), gd)]
     }
 
-    fn eval_npn_bjt(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+    /// Ebers-Moll transport core shared by NPN and PNP.
+    ///
+    /// Works in the polarity frame (`vbe_eff = p*(Vb - Ve)`, `vbc_eff =
+    /// p*(Vb - Vc)`); because the polarity enters both the junction voltages
+    /// and the terminal currents, the node-space Jacobian is polarity-free.
+    ///
+    /// Returns `(ic, ib)` terminal currents (current absorbed at collector and
+    /// base) plus the four partials of the polarity-frame currents with respect
+    /// to the effective junction voltages.
+    fn bjt_core(&self, p: Value, node_voltages: &[Value]) -> BjtOperatingPoint {
         let v_c = self.get_terminal_voltage(node_voltages, 0);
         let v_b = self.get_terminal_voltage(node_voltages, 1);
         let v_e = self.get_terminal_voltage(node_voltages, 2);
 
-        let vbe = v_b - v_e;
-        let vbc = v_b - v_c;
+        let vbe = p * (v_b - v_e);
+        let vbc = p * (v_b - v_c);
 
-        // Ebers-Moll transport model
-        let arg_be = (vbe / self.params.vt).clamp(-40.0, 40.0);
-        let arg_bc = (vbc / self.params.vt).clamp(-40.0, 40.0);
+        let (i_f, gf) = junction_current(self.params.is, vbe, self.params.nf * self.params.vt);
+        let (i_r, gr) = junction_current(self.params.is, vbc, self.params.nr * self.params.vt);
 
-        let i_f = self.params.is * (arg_be.exp() - 1.0);
-        let i_r = self.params.is * (arg_bc.exp() - 1.0);
+        // Forward Early effect on the transport current (SPICE level-1 form).
+        let (early, d_early_d_vbc) =
+            if self.params.vaf.is_finite() && self.params.vaf > 0.0 {
+                ((1.0 - vbc / self.params.vaf).max(0.01), -1.0 / self.params.vaf)
+            } else {
+                (1.0, 0.0)
+            };
 
-        let ic = i_f - i_r / self.params.br;
-        let ib = i_f / self.params.bf + i_r / self.params.br;
-        let ie = -(ic + ib); // KCL
+        // Transport current Ict = Is*(exp(Vbe/NfVt) - exp(Vbc/NrVt)).
+        let i_ct = i_f - i_r;
+
+        let ic_int = i_ct * early - i_r / self.params.br;
+        let ib_int = i_f / self.params.bf + i_r / self.params.br;
+
+        BjtOperatingPoint {
+            ic: p * ic_int,
+            ib: p * ib_int,
+            d_ic_d_vbe: gf * early,
+            d_ic_d_vbc: -gr * early + i_ct * d_early_d_vbc - gr / self.params.br,
+            d_ib_d_vbe: gf / self.params.bf,
+            d_ib_d_vbc: gr / self.params.br,
+        }
+    }
+
+    fn eval_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let op = self.bjt_core(p, node_voltages);
+        let ie = -(op.ic + op.ib); // KCL
 
         vec![
-            (self.terminals[0], -ic), // Collector current out
-            (self.terminals[1], -ib), // Base current out
-            (self.terminals[2], -ie), // Emitter current out
+            (self.terminals[0], -op.ic), // Collector current out
+            (self.terminals[1], -op.ib), // Base current out
+            (self.terminals[2], -ie),    // Emitter current out
         ]
+    }
+
+    /// BJT conductance stamps from the exact partials of the transport core.
+    ///
+    /// Stamp convention: entry `((i, j), g)` is the derivative of the current
+    /// absorbed at terminal i with respect to node voltage j. In the polarity
+    /// frame the chain rule contributes p twice, so the stamps below hold for
+    /// NPN and PNP alike.
+    fn jac_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let op = self.bjt_core(p, node_voltages);
+
+        let c = self.terminals[0];
+        let b = self.terminals[1];
+        let e = self.terminals[2];
+
+        // Node-space partials: Vbe_eff and Vbc_eff both increase with Vb,
+        // decrease with Ve and Vc respectively.
+        let d_ic_d_vb = op.d_ic_d_vbe + op.d_ic_d_vbc;
+        let d_ic_d_vc = -op.d_ic_d_vbc;
+        let d_ic_d_ve = -op.d_ic_d_vbe;
+
+        let d_ib_d_vb = op.d_ib_d_vbe + op.d_ib_d_vbc;
+        let d_ib_d_vc = -op.d_ib_d_vbc;
+        let d_ib_d_ve = -op.d_ib_d_vbe;
+
+        vec![
+            ((c, b), d_ic_d_vb),
+            ((c, c), d_ic_d_vc),
+            ((c, e), d_ic_d_ve),
+            ((b, b), d_ib_d_vb),
+            ((b, c), d_ib_d_vc),
+            ((b, e), d_ib_d_ve),
+            // Emitter absorbs -(ic + ib).
+            ((e, b), -(d_ic_d_vb + d_ib_d_vb)),
+            ((e, c), -(d_ic_d_vc + d_ib_d_vc)),
+            ((e, e), -(d_ic_d_ve + d_ib_d_ve)),
+        ]
+    }
+
+    fn eval_npn_bjt(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.eval_bjt(1.0, node_voltages)
     }
 
     fn jac_npn_bjt(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let v_c = self.get_terminal_voltage(node_voltages, 0);
-        let v_b = self.get_terminal_voltage(node_voltages, 1);
-        let v_e = self.get_terminal_voltage(node_voltages, 2);
-
-        let vbe = v_b - v_e;
-        let vbc = v_b - v_c;
-
-        let arg_be = (vbe / self.params.vt).clamp(-40.0, 40.0);
-        let arg_bc = (vbc / self.params.vt).clamp(-40.0, 40.0);
-
-        // Transconductances
-        let gm_f = (self.params.is / self.params.vt) * arg_be.exp();
-        let gm_r = (self.params.is / self.params.vt) * arg_bc.exp();
-
-        let c = self.terminals[0];
-        let b = self.terminals[1];
-        let e = self.terminals[2];
-
-        // Simplified linearized model - gm stamps
-        let gbe = gm_f / self.params.bf;
-        let gbc = gm_r / self.params.br;
-
-        vec![
-            // Base-emitter conductance
-            ((b, b), gbe + gbc), // Combined: gbe from B-E + gbc from B-C
-            ((b, e), -gbe),
-            ((e, b), -gbe),
-            ((e, e), gbe),
-            // Base-collector conductance (gbc stamps)
-            ((b, c), -gbc),
-            ((c, b), gm_f - gbc), // Combined: gm_f transconductance + (-gbc) from B-C conductance
-            ((c, c), gbc),
-            // Transconductance gm stamps (collector controlled by Vbe)
-            // Note: (c, b) contribution from gm_f already combined above
-            ((c, e), -gm_f),
-        ]
+        self.jac_bjt(1.0, node_voltages)
     }
 
     fn eval_pnp_bjt(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        // PNP is NPN with inverted voltages and currents
-        let v_c = self.get_terminal_voltage(node_voltages, 0);
-        let v_b = self.get_terminal_voltage(node_voltages, 1);
-        let v_e = self.get_terminal_voltage(node_voltages, 2);
-
-        let veb = v_e - v_b; // Inverted from NPN
-        let vcb = v_c - v_b;
-
-        let arg_eb = (veb / self.params.vt).clamp(-40.0, 40.0);
-        let arg_cb = (vcb / self.params.vt).clamp(-40.0, 40.0);
-
-        let i_f = self.params.is * (arg_eb.exp() - 1.0);
-        let i_r = self.params.is * (arg_cb.exp() - 1.0);
-
-        let ic = -(i_f - i_r / self.params.br); // Inverted
-        let ib = -(i_f / self.params.bf + i_r / self.params.br);
-        let ie = -(ic + ib);
-
-        vec![
-            (self.terminals[0], -ic),
-            (self.terminals[1], -ib),
-            (self.terminals[2], -ie),
-        ]
+        self.eval_bjt(-1.0, node_voltages)
     }
 
     fn jac_pnp_bjt(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        // PNP Jacobian with proper polarity handling
-        // PNP uses Veb = Ve - Vb and Vcb = Vc - Vb
-        let v_c = self.get_terminal_voltage(node_voltages, 0);
-        let v_b = self.get_terminal_voltage(node_voltages, 1);
-        let v_e = self.get_terminal_voltage(node_voltages, 2);
+        self.jac_bjt(-1.0, node_voltages)
+    }
 
-        let veb = v_e - v_b;
-        let vcb = v_c - v_b;
+    /// Level-1 MOSFET core in the polarity frame after drain/source swap.
+    ///
+    /// `vgs`/`vds` are effective (polarity-resolved, `vds >= 0`) values;
+    /// channel-length modulation applies in triode and saturation so the
+    /// current and its derivatives are continuous across the region boundary
+    /// (ngspice MOS1 convention).
+    fn mos_ids(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
+        let vth = self.params.vth;
+        let kp = self.params.kp;
+        let lambda = self.params.lambda.max(0.0);
+        let vov = vgs - vth;
 
-        let arg_eb = (veb / self.params.vt).clamp(-40.0, 40.0);
-        let arg_cb = (vcb / self.params.vt).clamp(-40.0, 40.0);
+        if vov <= 0.0 {
+            (0.0, 0.0, 0.0)
+        } else if vds < vov {
+            // Triode
+            let clm = 1.0 + lambda * vds;
+            let ids = kp * (vov * vds - 0.5 * vds * vds) * clm;
+            let gm = kp * vds * clm;
+            let gds = kp * (vov - vds) * clm + kp * (vov * vds - 0.5 * vds * vds) * lambda;
+            (ids, gm, gds)
+        } else {
+            // Saturation
+            let clm = 1.0 + lambda * vds;
+            let ids = 0.5 * kp * vov * vov * clm;
+            let gm = kp * vov * clm;
+            let gds = 0.5 * kp * vov * vov * lambda;
+            (ids, gm, gds)
+        }
+    }
 
-        // Transconductances for PNP (based on Veb and Vcb)
-        let gm_f = (self.params.is / self.params.vt) * arg_eb.exp();
-        let gm_r = (self.params.is / self.params.vt) * arg_cb.exp();
+    /// Resolve the effective drain/source orientation and operating point.
+    ///
+    /// Returns `(eff_d, eff_s, ids, gm, gds)` where `ids`, `gm`, `gds` are in
+    /// the swapped polarity frame and the current absorbed at `eff_d` is
+    /// `p * ids`.
+    fn mos_operating_point(
+        &self,
+        p: Value,
+        node_voltages: &[Value],
+    ) -> (usize, usize, Value, Value, Value) {
+        let v_d = self.get_terminal_voltage(node_voltages, 0);
+        let v_g = self.get_terminal_voltage(node_voltages, 1);
+        let v_s = self.get_terminal_voltage(node_voltages, 2);
 
-        let c = self.terminals[0];
-        let b = self.terminals[1];
-        let e = self.terminals[2];
+        let d = self.terminals[0];
+        let s = self.terminals[2];
 
-        // PNP junction conductances
-        let geb = gm_f / self.params.bf; // Emitter-base conductance
-        let gcb = gm_r / self.params.br; // Collector-base conductance
+        // Symmetric device: swap drain/source when the effective Vds is negative.
+        let (vgs, vds, eff_d, eff_s) = if p * (v_d - v_s) >= 0.0 {
+            (p * (v_g - v_s), p * (v_d - v_s), d, s)
+        } else {
+            (p * (v_g - v_d), p * (v_s - v_d), s, d)
+        };
 
+        let (ids, gm, gds) = self.mos_ids(vgs, vds);
+        (eff_d, eff_s, ids, gm, gds)
+    }
+
+    fn eval_mos(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (eff_d, eff_s, ids, _, _) = self.mos_operating_point(p, node_voltages);
+        let absorbed = p * ids; // Current absorbed at the effective drain.
+        vec![(eff_d, -absorbed), (eff_s, absorbed)]
+    }
+
+    fn jac_mos(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (eff_d, eff_s, _, gm, gds) = self.mos_operating_point(p, node_voltages);
+        let g = self.terminals[1];
+
+        if gm == 0.0 && gds == 0.0 {
+            // Cutoff: tiny drain-source leak keeps the Jacobian regular without
+            // introducing a phantom path to ground.
+            let g_leak = 1e-12;
+            return vec![
+                ((eff_d, eff_d), g_leak),
+                ((eff_d, eff_s), -g_leak),
+                ((eff_s, eff_d), -g_leak),
+                ((eff_s, eff_s), g_leak),
+            ];
+        }
+
+        // The polarity factors cancel (p^2 = 1): the node-space stamps are the
+        // textbook MOS pattern in the effective frame for NMOS and PMOS alike.
         vec![
-            // Emitter-base junction conductance (geb)
-            // dI/dVeb stamps - note PNP has Ve > Vb for forward bias
-            ((e, e), geb),
-            ((e, b), -geb),
-            ((b, e), -geb),
-            ((b, b), geb + gcb), // Combined: geb from E-B + gcb from C-B
-            // Collector-base junction conductance (gcb)
-            ((c, c), gcb),
-            ((c, b), -(gcb + gm_f)), // Combined: -gcb from C-B conductance + (-gm_f) from transconductance
-            ((b, c), -gcb),
-            // Transconductance: collector controlled by Veb
-            // For PNP: Ic depends on Veb, so dIc/dVe
-            // Note: (c, b) contribution already combined above
-            ((c, e), gm_f),
+            ((eff_d, eff_d), gds),
+            ((eff_d, g), gm),
+            ((eff_d, eff_s), -(gm + gds)),
+            ((eff_s, eff_d), -gds),
+            ((eff_s, g), -gm),
+            ((eff_s, eff_s), gm + gds),
         ]
     }
 
     fn eval_nmos(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let v_d = self.get_terminal_voltage(node_voltages, 0);
-        let v_g = self.get_terminal_voltage(node_voltages, 1);
-        let v_s = self.get_terminal_voltage(node_voltages, 2);
-        // v_b = self.get_terminal_voltage(node_voltages, 3); // bulk, simplified for now
-
-        // MOSFET is symmetric - swap D/S when Vds < 0
-        let (vgs, vds, is_reversed) = if v_d >= v_s {
-            (v_g - v_s, v_d - v_s, false)
-        } else {
-            (v_g - v_d, v_s - v_d, true)
-        };
-
-        let id = if vgs <= self.params.vth {
-            // Cutoff
-            0.0
-        } else if vds < vgs - self.params.vth {
-            // Triode
-            self.params.kp * ((vgs - self.params.vth) * vds - 0.5 * vds * vds)
-        } else {
-            // Saturation
-            0.5 * self.params.kp
-                * (vgs - self.params.vth).powi(2)
-                * (1.0 + self.params.lambda * vds)
-        };
-
-        // Current direction depends on whether D/S were swapped
-        if is_reversed {
-            vec![
-                (self.terminals[0], id),  // "Drain" receives current
-                (self.terminals[2], -id), // "Source" supplies current
-            ]
-        } else {
-            vec![
-                (self.terminals[0], -id), // Drain current out
-                (self.terminals[2], id),  // Source current in
-            ]
-        }
+        self.eval_mos(1.0, node_voltages)
     }
 
     fn jac_nmos(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let v_d = self.get_terminal_voltage(node_voltages, 0);
-        let v_g = self.get_terminal_voltage(node_voltages, 1);
-        let v_s = self.get_terminal_voltage(node_voltages, 2);
-
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-
-        // MOSFET is symmetric - swap D/S when Vds < 0
-        let (vgs, vds, eff_d, eff_s) = if v_d >= v_s {
-            (v_g - v_s, v_d - v_s, d, s)
-        } else {
-            (v_g - v_d, v_s - v_d, s, d) // Swap effective drain/source
-        };
-
-        if vgs <= self.params.vth {
-            // Cutoff - small conductance
-            return vec![((d, d), 1e-12), ((s, s), 1e-12)];
-        }
-
-        let (gm, gds) = if vds < vgs - self.params.vth {
-            // Triode
-            let gm = self.params.kp * vds;
-            let gds = self.params.kp * (vgs - self.params.vth - vds);
-            (gm, gds.max(1e-12))
-        } else {
-            // Saturation
-            let gm = self.params.kp * (vgs - self.params.vth) * (1.0 + self.params.lambda * vds);
-            let gds = 0.5 * self.params.kp * (vgs - self.params.vth).powi(2) * self.params.lambda;
-            (gm, gds.max(1e-12))
-        };
-
-        // Use effective drain/source for stamps
-        vec![
-            // gds: D-S conductance
-            ((eff_d, eff_d), gds),
-            ((eff_d, eff_s), -(gds + gm)), // Combined: -gds from conductance, -gm from transconductance
-            ((eff_s, eff_d), -gds),
-            ((eff_s, eff_s), gds),
-            // gm: transconductance (D controlled by Vg)
-            ((eff_d, g), gm),
-        ]
+        self.jac_mos(1.0, node_voltages)
     }
 
     fn eval_pmos(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        // PMOS has inverted voltages
-        let v_d = self.get_terminal_voltage(node_voltages, 0);
-        let v_g = self.get_terminal_voltage(node_voltages, 1);
-        let v_s = self.get_terminal_voltage(node_voltages, 2);
-
-        // PMOS is symmetric - swap S/D when Vsd < 0
-        let (vsg, vsd, is_reversed) = if v_s >= v_d {
-            (v_s - v_g, v_s - v_d, false)
-        } else {
-            (v_d - v_g, v_d - v_s, true)
-        };
-
-        let vth = self.params.vth.abs();
-        let id = if vsg <= vth {
-            0.0
-        } else if vsd < vsg - vth {
-            // Triode
-            self.params.kp * ((vsg - vth) * vsd - 0.5 * vsd * vsd)
-        } else {
-            // Saturation
-            0.5 * self.params.kp * (vsg - vth).powi(2)
-        };
-
-        // Current direction depends on whether S/D were swapped
-        if is_reversed {
-            vec![
-                (self.terminals[0], -id), // "Drain" supplies current
-                (self.terminals[2], id),  // "Source" receives current
-            ]
-        } else {
-            vec![
-                (self.terminals[0], id),  // Drain current in (PMOS)
-                (self.terminals[2], -id), // Source current out
-            ]
-        }
+        self.eval_mos(-1.0, node_voltages)
     }
 
     fn jac_pmos(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let v_d = self.get_terminal_voltage(node_voltages, 0);
-        let v_g = self.get_terminal_voltage(node_voltages, 1);
-        let v_s = self.get_terminal_voltage(node_voltages, 2);
-
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-
-        // PMOS is symmetric - swap S/D when Vsd < 0
-        let (vsg, vsd, eff_s, eff_d) = if v_s >= v_d {
-            (v_s - v_g, v_s - v_d, s, d)
-        } else {
-            (v_d - v_g, v_d - v_s, d, s) // Swap effective source/drain
-        };
-
-        let vth = self.params.vth.abs();
-        if vsg <= vth {
-            // Cutoff - small conductance
-            return vec![((d, d), 1e-12), ((s, s), 1e-12)];
-        }
-
-        let (gm, gsd) = if vsd < vsg - vth {
-            // Triode
-            let gm = self.params.kp * vsd;
-            let gsd = self.params.kp * (vsg - vth - vsd);
-            (gm, gsd.max(1e-12))
-        } else {
-            // Saturation
-            let gm = self.params.kp * (vsg - vth);
-            let gsd = 1e-12; // Small output conductance (lambda=0 simplified)
-            (gm, gsd)
-        };
-
-        // Use effective source/drain for stamps (PMOS: current from S to D)
-        vec![
-            // gsd: S-D conductance
-            ((eff_s, eff_s), gsd),
-            ((eff_s, eff_d), -(gsd + gm)), // Combined
-            ((eff_d, eff_s), -gsd),
-            ((eff_d, eff_d), gsd),
-            // gm: transconductance (S controlled by Vg for PMOS)
-            ((eff_s, g), -gm), // PMOS: current decreases with increasing Vg
-        ]
+        self.jac_mos(-1.0, node_voltages)
     }
 
     fn jfet_ids_gm_gds(&self, node_voltages: &[Value], polarity: Value) -> (Value, Value, Value) {
@@ -640,50 +616,79 @@ impl NonlinearDeviceInstance {
         (polarity * ids_int, gm, gds.max(1e-12))
     }
 
-    fn eval_njfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, 1.0);
+    /// Gate junction currents `(igs, ggs, igd, ggd)` in the polarity frame.
+    ///
+    /// The SPICE JFET model conducts through the gate-source and gate-drain
+    /// junction diodes once they are driven into forward bias; ignoring them
+    /// leaves the gate node floating in self-biased large-signal circuits.
+    fn jfet_gate_junctions(
+        &self,
+        node_voltages: &[Value],
+        polarity: Value,
+    ) -> (Value, Value, Value, Value) {
+        let v_d = self.get_terminal_voltage(node_voltages, 0);
+        let v_g = self.get_terminal_voltage(node_voltages, 1);
+        let v_s = self.get_terminal_voltage(node_voltages, 2);
+
+        let (igs, ggs) =
+            junction_current(self.params.is, polarity * (v_g - v_s), self.params.vt);
+        let (igd, ggd) =
+            junction_current(self.params.is, polarity * (v_g - v_d), self.params.vt);
+        (igs, ggs, igd, ggd)
+    }
+
+    fn eval_jfet(&self, polarity: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, polarity);
+        let (igs, _, igd, _) = self.jfet_gate_junctions(node_voltages, polarity);
         vec![
-            (self.terminals[0], -id), // Drain current leaving
-            (self.terminals[2], id),  // Source current entering
+            (self.terminals[0], -id + polarity * igd), // Channel out, gate-drain junction in
+            (self.terminals[1], -polarity * (igs + igd)), // Gate junction current out
+            (self.terminals[2], id + polarity * igs),  // Channel in, gate-source junction in
         ]
+    }
+
+    fn jac_jfet(&self, polarity: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, polarity);
+        let (_, ggs, _, ggd) = self.jfet_gate_junctions(node_voltages, polarity);
+        let d = self.terminals[0];
+        let g = self.terminals[1];
+        let s = self.terminals[2];
+        vec![
+            // Channel: textbook FET stamps; the source row carries the full
+            // -(gm + gds) dependence mirrored from the drain row.
+            ((d, d), gds),
+            ((d, g), gm),
+            ((d, s), -(gds + gm)),
+            ((s, d), -gds),
+            ((s, g), -gm),
+            ((s, s), gds + gm),
+            // Gate-source junction (polarity factors cancel in node space).
+            ((g, g), ggs),
+            ((g, s), -ggs),
+            ((s, g), -ggs),
+            ((s, s), ggs),
+            // Gate-drain junction.
+            ((g, g), ggd),
+            ((g, d), -ggd),
+            ((d, g), -ggd),
+            ((d, d), ggd),
+        ]
+    }
+
+    fn eval_njfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        self.eval_jfet(1.0, node_voltages)
     }
 
     fn jac_njfet(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, 1.0);
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-        vec![
-            ((d, d), gds),
-            ((d, s), -(gds + gm)),
-            ((s, d), -gds),
-            ((s, s), gds),
-            ((d, g), gm),
-            ((s, g), -gm),
-        ]
+        self.jac_jfet(1.0, node_voltages)
     }
 
     fn eval_pjfet(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let (id, _, _) = self.jfet_ids_gm_gds(node_voltages, -1.0);
-        vec![
-            (self.terminals[0], -id), // Drain current leaving
-            (self.terminals[2], id),  // Source current entering
-        ]
+        self.eval_jfet(-1.0, node_voltages)
     }
 
     fn jac_pjfet(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let (_, gm, gds) = self.jfet_ids_gm_gds(node_voltages, -1.0);
-        let d = self.terminals[0];
-        let g = self.terminals[1];
-        let s = self.terminals[2];
-        vec![
-            ((d, d), gds),
-            ((d, s), -(gds + gm)),
-            ((s, d), -gds),
-            ((s, s), gds),
-            ((d, g), gm),
-            ((s, g), -gm),
-        ]
+        self.jac_jfet(-1.0, node_voltages)
     }
 
     fn switch_conductance_and_derivative(&self, vctrl: Value) -> (Value, Value) {
@@ -786,5 +791,188 @@ impl NonlinearDeviceInstance {
             ((n, cp), -g_ctrl),
             ((n, cn), g_ctrl),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic uniform sample in [lo, hi).
+    fn lcg(seed: &mut u64, lo: Value, hi: Value) -> Value {
+        *seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        let u = ((*seed >> 11) as f64) / ((1u64 << 53) as f64);
+        lo + u * (hi - lo)
+    }
+
+    /// Every conductance stamp must be the derivative of the evaluated
+    /// currents: stamp(i, j) == -d(current delivered into node i)/dV_j.
+    /// Central differences over deterministic operating points catch any
+    /// missing, mis-signed, or region-inconsistent entry.
+    fn assert_jacobian_matches_finite_difference(
+        device: &NonlinearDeviceInstance,
+        num_nodes: usize,
+        v_range: (Value, Value),
+        samples: usize,
+        seed: u64,
+    ) {
+        let mut seed = seed;
+        let h = 1e-7;
+        let tol_rel = 1e-4;
+        let tol_abs = 1e-8;
+
+        for sample in 0..samples {
+            let v: Vec<Value> = (0..num_nodes)
+                .map(|_| lcg(&mut seed, v_range.0, v_range.1))
+                .collect();
+
+            let mut stamps = vec![vec![0.0; num_nodes]; num_nodes];
+            for ((i, j), g) in device.jacobian(&v) {
+                if i < num_nodes && j < num_nodes {
+                    stamps[i][j] += g;
+                }
+            }
+
+            for j in 0..num_nodes {
+                let mut vp = v.clone();
+                vp[j] += h;
+                let mut vm = v.clone();
+                vm[j] -= h;
+
+                let mut into_p = vec![0.0; num_nodes];
+                let mut into_m = vec![0.0; num_nodes];
+                for (n, c) in device.evaluate(&vp) {
+                    if n < num_nodes {
+                        into_p[n] += c;
+                    }
+                }
+                for (n, c) in device.evaluate(&vm) {
+                    if n < num_nodes {
+                        into_m[n] += c;
+                    }
+                }
+
+                for i in 0..num_nodes {
+                    let fd = (into_p[i] - into_m[i]) / (2.0 * h);
+                    let expected = -fd;
+                    let got = stamps[i][j];
+                    let scale = expected.abs().max(got.abs());
+                    // Central differences cannot resolve derivatives below the
+                    // rounding floor of the evaluated currents themselves; the
+                    // junction linear-continuation region reaches ampere scales
+                    // where small cross-junction terms cancel out of f64 sums.
+                    let noise_floor =
+                        8.0 * f64::EPSILON * into_p[i].abs().max(into_m[i].abs()) / h;
+                    assert!(
+                        (got - expected).abs() <= tol_rel * scale + tol_abs + noise_floor,
+                        "{:?} sample {} stamp ({}, {}): jacobian {:.6e} vs finite-difference {:.6e} at V={:?}",
+                        device.device_type,
+                        sample,
+                        i,
+                        j,
+                        got,
+                        expected,
+                        v
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn diode_jacobian_matches_finite_difference() {
+        let device = NonlinearDeviceInstance::diode(0, 1, 1e-14, 1.0);
+        assert_jacobian_matches_finite_difference(&device, 2, (-1.0, 1.0), 40, 11);
+
+        let device = NonlinearDeviceInstance::diode(0, 1, 2.5e-9, 1.8);
+        assert_jacobian_matches_finite_difference(&device, 2, (-1.0, 1.0), 40, 13);
+    }
+
+    #[test]
+    fn bjt_jacobians_match_finite_difference() {
+        let npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, 1e-14, 120.0, 3.0, 1.1, 1.05, 80.0);
+        assert_jacobian_matches_finite_difference(&npn, 3, (-0.9, 0.9), 60, 17);
+
+        let pnp = NonlinearDeviceInstance::pnp_bjt(0, 1, 2, 2e-14, 80.0, 2.0, 1.0, 1.2, 60.0);
+        assert_jacobian_matches_finite_difference(&pnp, 3, (-0.9, 0.9), 60, 19);
+    }
+
+    #[test]
+    fn mosfet_jacobians_match_finite_difference() {
+        let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.04);
+        assert_jacobian_matches_finite_difference(&nmos, 4, (-3.0, 3.0), 80, 23);
+
+        let pmos = NonlinearDeviceInstance::pmos(0, 1, 2, 3, 0.7, 1.2e-5, 0.05);
+        assert_jacobian_matches_finite_difference(&pmos, 4, (-3.0, 3.0), 80, 29);
+    }
+
+    #[test]
+    fn jfet_jacobians_match_finite_difference() {
+        let njf = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1e-3, 0.02, 1e-14);
+        assert_jacobian_matches_finite_difference(&njf, 3, (-2.5, 2.5), 80, 31);
+
+        let pjf = NonlinearDeviceInstance::pjfet(0, 1, 2, -2.0, 1e-3, 0.02, 1e-14);
+        assert_jacobian_matches_finite_difference(&pjf, 3, (-2.5, 2.5), 80, 37);
+    }
+
+    #[test]
+    fn switch_jacobians_match_finite_difference() {
+        let vsw = NonlinearDeviceInstance::voltage_switch(0, 1, 2, 3, 0.5, 0.1, 1.0, 1e6, 0.1);
+        assert_jacobian_matches_finite_difference(&vsw, 4, (-2.0, 2.0), 60, 41);
+
+        let isw =
+            NonlinearDeviceInstance::current_switch(0, 1, 2, 3, 1e-3, 0.0, 1.0, 1e6, 1e-4, 1e-2);
+        assert_jacobian_matches_finite_difference(&isw, 4, (-2.0, 2.0), 60, 43);
+    }
+
+    /// At Vce = 0 the forward and reverse transport terms cancel exactly, so
+    /// the collector current must reduce to the reverse-recombination term
+    /// -Is*(exp(Vbe/Vt) - 1)/BR. The injection-style formula (i_f - i_r/br)
+    /// instead predicts a large positive residue, so this pins the transport
+    /// formulation through the saturation region.
+    #[test]
+    fn collector_current_vanishing_vce_reduces_to_recombination_term() {
+        let br = 2.0;
+        let is = 1e-14;
+        let npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, is, 100.0, br, 1.0, 1.0, f64::INFINITY);
+
+        // Vc = Ve = 0, Vb = 0.7: both junctions equally forward biased.
+        let v = vec![0.0, 0.7, 0.0];
+        let currents = npn.evaluate(&v);
+        let into_collector = currents
+            .iter()
+            .filter(|(node, _)| *node == 0)
+            .map(|(_, c)| *c)
+            .sum::<Value>();
+
+        let vt = 0.02585;
+        let i_r = is * ((0.7_f64 / vt).exp() - 1.0);
+        let expected_into_collector = i_r / br; // -ic with ic = -i_r/br
+
+        let err = (into_collector - expected_into_collector).abs();
+        assert!(
+            err <= 1e-9 * expected_into_collector.abs(),
+            "collector current at Vce=0 must be the recombination term: got {into_collector:.6e}, want {expected_into_collector:.6e}"
+        );
+    }
+
+    /// Level-1 channel-length modulation applies in triode and saturation;
+    /// the drain current must be continuous across the region boundary.
+    #[test]
+    fn mosfet_current_is_continuous_across_the_saturation_boundary() {
+        let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.08);
+        let vov = 1.3; // vgs = 2.0
+        for eps in [1e-9, 1e-6] {
+            let below = nmos.evaluate(&[vov - eps, 2.0, 0.0, 0.0]);
+            let above = nmos.evaluate(&[vov + eps, 2.0, 0.0, 0.0]);
+            let id_below: Value = below.iter().filter(|(n, _)| *n == 2).map(|(_, c)| c).sum();
+            let id_above: Value = above.iter().filter(|(n, _)| *n == 2).map(|(_, c)| c).sum();
+            assert!(
+                (id_below - id_above).abs() <= 1e-6 * id_below.abs().max(1e-12),
+                "drain current must be continuous at the triode/saturation boundary: {id_below:.9e} vs {id_above:.9e}"
+            );
+        }
     }
 }

@@ -294,6 +294,10 @@ pub struct NonlinearDeviceParams {
     pub is: Value,
     /// Ideality factor (n for diode)
     pub n: Value,
+    /// Forward emission coefficient (BJT B-E junction)
+    pub nf: Value,
+    /// Reverse emission coefficient (BJT B-C junction)
+    pub nr: Value,
     /// Thermal voltage
     pub vt: Value,
     /// Forward beta (BJT)
@@ -325,6 +329,8 @@ impl Default for NonlinearDeviceParams {
         Self {
             is: 1e-14,
             n: 1.0,
+            nf: 1.0,
+            nr: 1.0,
             vt: 0.02585,
             bf: 100.0,
             br: 1.0,

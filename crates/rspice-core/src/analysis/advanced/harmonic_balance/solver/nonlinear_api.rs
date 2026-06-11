@@ -20,9 +20,13 @@ impl HbSolver {
         emitter: usize,
         is: Value,
         bf: Value,
+        br: Value,
+        nf: Value,
+        nr: Value,
+        vaf: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::npn_bjt(
-            collector, base, emitter, is, bf,
+            collector, base, emitter, is, bf, br, nf, nr, vaf,
         ));
     }
 
@@ -34,9 +38,13 @@ impl HbSolver {
         emitter: usize,
         is: Value,
         bf: Value,
+        br: Value,
+        nf: Value,
+        nr: Value,
+        vaf: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::pnp_bjt(
-            collector, base, emitter, is, bf,
+            collector, base, emitter, is, bf, br, nf, nr, vaf,
         ));
     }
 
@@ -49,13 +57,14 @@ impl HbSolver {
         bulk: usize,
         kp: Value,
         vth: Value,
+        lambda: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::nmos(
-            drain, gate, source, bulk, vth, kp,
+            drain, gate, source, bulk, vth, kp, lambda,
         ));
     }
 
-    /// Add a PMOS for Newton iteration
+    /// Add a PMOS for Newton iteration (`vth` is the effective threshold, -VTO)
     pub fn add_pmos(
         &mut self,
         drain: usize,
@@ -64,9 +73,10 @@ impl HbSolver {
         bulk: usize,
         kp: Value,
         vth: Value,
+        lambda: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::pmos(
-            drain, gate, source, bulk, vth, kp,
+            drain, gate, source, bulk, vth, kp, lambda,
         ));
     }
 
@@ -79,9 +89,10 @@ impl HbSolver {
         vto: Value,
         beta: Value,
         lambda: Value,
+        is: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::njfet(
-            drain, gate, source, vto, beta, lambda,
+            drain, gate, source, vto, beta, lambda, is,
         ));
     }
 
@@ -94,9 +105,10 @@ impl HbSolver {
         vto: Value,
         beta: Value,
         lambda: Value,
+        is: Value,
     ) {
         self.add_nonlinear_device(NonlinearDeviceInstance::pjfet(
-            drain, gate, source, vto, beta, lambda,
+            drain, gate, source, vto, beta, lambda, is,
         ));
     }
 

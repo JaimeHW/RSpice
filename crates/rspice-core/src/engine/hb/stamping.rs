@@ -19,10 +19,14 @@ impl Engine {
             let emitter = Self::hb_node_to_solver_index(bjt.node_emitter, num_nodes);
             match bjt.bjt_type {
                 crate::device::BjtType::Npn => {
-                    solver.add_npn_bjt(collector, base, emitter, bjt.is, bjt.bf);
+                    solver.add_npn_bjt(
+                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                    );
                 }
                 crate::device::BjtType::Pnp => {
-                    solver.add_pnp_bjt(collector, base, emitter, bjt.is, bjt.bf);
+                    solver.add_pnp_bjt(
+                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                    );
                 }
             }
         }
@@ -35,10 +39,12 @@ impl Engine {
             let kp = mos.kp.max(1e-18);
             match mos.mos_type {
                 crate::device::MosType::Nmos => {
-                    solver.add_nmos(drain, gate, source, bulk, kp, mos.vto);
+                    solver.add_nmos(drain, gate, source, bulk, kp, mos.vto, mos.lambda);
                 }
                 crate::device::MosType::Pmos => {
-                    solver.add_pmos(drain, gate, source, bulk, kp, mos.vto.abs());
+                    // The solver works in the polarity frame: the effective
+                    // threshold is -VTO, which keeps depletion PMOS negative.
+                    solver.add_pmos(drain, gate, source, bulk, kp, -mos.vto, mos.lambda);
                 }
             }
         }
@@ -57,6 +63,7 @@ impl Engine {
                         jfet.params.vto,
                         beta,
                         jfet.params.lambda,
+                        jfet.params.is,
                     );
                 }
                 crate::device::JfetType::PJF => {
@@ -67,6 +74,7 @@ impl Engine {
                         jfet.params.vto,
                         beta,
                         jfet.params.lambda,
+                        jfet.params.is,
                     );
                 }
             }
