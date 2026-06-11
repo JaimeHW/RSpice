@@ -125,6 +125,14 @@ pub(super) fn parse_source_spec(
                 stream.advance();
                 return parse_exp_spec(stream, line_num, params);
             }
+            "SFFM" => {
+                stream.advance();
+                return parse_sffm_spec(stream, line_num, params);
+            }
+            "AM" => {
+                stream.advance();
+                return parse_am_spec(stream, line_num, params);
+            }
             _ => {}
         }
     }
@@ -172,8 +180,99 @@ fn parse_transient_source_spec_keyword(
             stream.advance();
             parse_exp_spec(stream, line_num, params).map(Some)
         }
+        "SFFM" => {
+            stream.advance();
+            parse_sffm_spec(stream, line_num, params).map(Some)
+        }
+        "AM" => {
+            stream.advance();
+            parse_am_spec(stream, line_num, params).map(Some)
+        }
         _ => Ok(None),
     }
+}
+
+/// Parse SFFM(VO VA FC MDI FM TD PHASEM PHASEC); omitted frequencies stay
+/// NaN so the transient runtime can resolve ngspice's tstop-based defaults.
+fn parse_sffm_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let offset = expect_value_default(stream, params, 0.0);
+    let amplitude = expect_value_default(stream, params, 1.0);
+    let carrier_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let modulation_index = try_value(stream, params).unwrap_or(Value::NAN);
+    let signal_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let delay = expect_value_default(stream, params, 0.0);
+    // SFFM/AM phases stay in degrees: the runtime converts exactly like
+    // ngspice's vsrcload.c so the stored spec mirrors the netlist text.
+    let phase_modulation = expect_value_default(stream, params, 0.0);
+    let phase_carrier = expect_value_default(stream, params, 0.0);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    if carrier_freq.is_finite()
+        && signal_freq.is_finite()
+        && signal_freq > 0.0
+        && modulation_index.is_finite()
+        && modulation_index > carrier_freq / signal_freq
+    {
+        log::warn!(
+            "line {line_num}: SFFM modulation index {modulation_index} exceeds FC/FM = {}; \
+             it will be limited during simulation (ngspice behavior)",
+            carrier_freq / signal_freq
+        );
+    }
+
+    Ok(SourceSpec::Sffm {
+        offset,
+        amplitude,
+        carrier_freq,
+        modulation_index,
+        signal_freq,
+        delay,
+        phase_modulation,
+        phase_carrier,
+    })
+}
+
+/// Parse AM(VO VMO VMA FM FC TD PHASEM PHASEC); omitted frequencies stay
+/// NaN so the transient runtime can resolve ngspice's tstop-based defaults.
+fn parse_am_spec(
+    stream: &mut TokenStream,
+    _line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let offset = expect_value_default(stream, params, 0.0);
+    let modulation_offset = expect_value_default(stream, params, 0.0);
+    let modulation_amplitude = expect_value_default(stream, params, 1.0);
+    let modulating_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let carrier_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let delay = expect_value_default(stream, params, 0.0);
+    let phase_modulation = expect_value_default(stream, params, 0.0);
+    let phase_carrier = expect_value_default(stream, params, 0.0);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    Ok(SourceSpec::Am {
+        offset,
+        modulation_offset,
+        modulation_amplitude,
+        modulating_freq,
+        carrier_freq,
+        delay,
+        phase_modulation,
+        phase_carrier,
+    })
 }
 
 fn parse_pulse_spec(

@@ -573,6 +573,56 @@ pub enum SourceSpec {
         td2: Value,
         tau2: Value,
     },
+
+    /// Single-frequency FM source: SFFM(VO VA FC MDI FM TD PHASEM PHASEC)
+    ///
+    /// `v(t) = VO + VA*sin(2*pi*FC*(t-TD) + PHASEC + MDI*sin(2*pi*FM*(t-TD) + PHASEM))`
+    /// for `t > TD`, and exactly 0 before (ngspice vsrcload.c semantics).
+    /// Omitted `carrier_freq`/`signal_freq` are stored as NaN and resolved
+    /// against the active transient's stop time at evaluation.
+    Sffm {
+        /// VO: output offset
+        offset: Value,
+        /// VA: carrier amplitude
+        amplitude: Value,
+        /// FC: carrier frequency in Hz (NaN = ngspice default 5/tstop)
+        carrier_freq: Value,
+        /// MDI: modulation index (clamped to `[0, FC/FM]` like ngspice)
+        modulation_index: Value,
+        /// FM: signal (modulating) frequency in Hz (NaN/0 = 500/tstop)
+        signal_freq: Value,
+        /// TD: delay before the waveform starts
+        delay: Value,
+        /// PHASEM: modulation phase in degrees
+        phase_modulation: Value,
+        /// PHASEC: carrier phase in degrees
+        phase_carrier: Value,
+    },
+
+    /// Amplitude-modulation source: AM(VO VMO VMA FM FC TD PHASEM PHASEC)
+    ///
+    /// `v(t) = VO + (VMO + VMA*sin(2*pi*FM*(t-TD) + PHASEM)) * sin(2*pi*FC*(t-TD) + PHASEC)`
+    /// for `t > TD`, and exactly 0 before (ngspice vsrcload.c semantics).
+    /// Omitted `modulating_freq`/`carrier_freq` are stored as NaN and
+    /// resolved against the active transient's stop time at evaluation.
+    Am {
+        /// VO: overall output offset
+        offset: Value,
+        /// VMO: modulation offset
+        modulation_offset: Value,
+        /// VMA: modulation amplitude (ngspice default 1)
+        modulation_amplitude: Value,
+        /// FM: modulating frequency in Hz (NaN = ngspice default 5/tstop)
+        modulating_freq: Value,
+        /// FC: carrier frequency in Hz (NaN = ngspice default 500/tstop)
+        carrier_freq: Value,
+        /// TD: delay before the waveform starts
+        delay: Value,
+        /// PHASEM: modulation phase in degrees
+        phase_modulation: Value,
+        /// PHASEC: carrier phase in degrees
+        phase_carrier: Value,
+    },
 }
 
 impl SourceSpec {

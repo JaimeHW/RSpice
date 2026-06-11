@@ -176,6 +176,12 @@ impl Engine {
                 Self::add_breakpoint_if_in_range(breakpoints, *td1, tstop);
                 Self::add_breakpoint_if_in_range(breakpoints, *td2, tstop);
             }
+            // SFFM/AM are exactly 0 until TD and generally discontinuous
+            // there (ngspice vsrcload.c), so the switch-on instant must be
+            // a timestep boundary.
+            SourceSpec::Sffm { delay, .. } | SourceSpec::Am { delay, .. } => {
+                Self::add_breakpoint_if_in_range(breakpoints, *delay, tstop);
+            }
         }
     }
 

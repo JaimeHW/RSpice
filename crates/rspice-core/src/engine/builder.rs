@@ -246,7 +246,9 @@ impl Engine {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
-                        | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
+                        | crate::netlist::SourceSpec::Exp { .. }
+                        | crate::netlist::SourceSpec::Sffm { .. }
+                        | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
                         _ => None,
                     };
                     circuit.voltage_sources.add_with_ac_and_spec(
@@ -272,7 +274,9 @@ impl Engine {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::DcTransient { .. }
                         | crate::netlist::SourceSpec::DcAcTransient { .. }
-                        | crate::netlist::SourceSpec::Exp { .. } => Some(spec.clone()),
+                        | crate::netlist::SourceSpec::Exp { .. }
+                        | crate::netlist::SourceSpec::Sffm { .. }
+                        | crate::netlist::SourceSpec::Am { .. } => Some(spec.clone()),
                         _ => None,
                     };
                     circuit.current_sources.add_with_ac_and_spec(

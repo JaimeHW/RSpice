@@ -358,6 +358,20 @@ impl VoltageSources {
             .unwrap_or(1e3)
     }
 
+    /// ngspice's analysis-scaled frequency defaults for SFFM/AM: an omitted
+    /// frequency becomes `cycles / tstop` (vsrcload.c uses 5 and 500).
+    #[inline]
+    fn modulated_frequency_default(
+        cycles: Value,
+        context: Option<TransientSourceContext>,
+    ) -> Value {
+        context
+            .map(|ctx| ctx.tstop)
+            .filter(|tstop| tstop.is_finite() && *tstop > 0.0)
+            .map(|tstop| cycles / tstop)
+            .unwrap_or(cycles * 1e3)
+    }
+
     #[inline]
     fn resolve_pulse_timing(
         delay: Value,
@@ -559,6 +573,79 @@ impl VoltageSources {
                 } else {
                     v1 + (v2 - v1) * (1.0 - (-(time - td1) / tau1).exp())
                         - (v2 - v1) * (1.0 - (-(time - td2) / tau2).exp())
+                }
+            }
+            SourceSpec::Sffm {
+                offset,
+                amplitude,
+                carrier_freq,
+                modulation_index,
+                signal_freq,
+                delay,
+                phase_modulation,
+                phase_carrier,
+            } => {
+                // ngspice vsrcload.c SFFM semantics, including the exact
+                // omitted-parameter defaults and the MDI clamp.
+                let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {
+                    *carrier_freq
+                } else {
+                    Self::modulated_frequency_default(5.0, context)
+                };
+                let fm = if signal_freq.is_finite() && *signal_freq != 0.0 {
+                    *signal_freq
+                } else {
+                    Self::modulated_frequency_default(500.0, context)
+                };
+                let mdi = if modulation_index.is_finite() {
+                    modulation_index.clamp(0.0, fc / fm)
+                } else {
+                    90.0_f64.min(fc / fm)
+                };
+                let t = time - delay;
+                if t <= 0.0 {
+                    0.0
+                } else {
+                    let phasec = phase_carrier.to_radians();
+                    let phasem = phase_modulation.to_radians();
+                    offset
+                        + amplitude
+                            * ((2.0 * PI * fc * t + phasec)
+                                + mdi * (2.0 * PI * fm * t + phasem).sin())
+                            .sin()
+                }
+            }
+            SourceSpec::Am {
+                offset,
+                modulation_offset,
+                modulation_amplitude,
+                modulating_freq,
+                carrier_freq,
+                delay,
+                phase_modulation,
+                phase_carrier,
+            } => {
+                // ngspice vsrcload.c AM semantics.
+                let fm = if modulating_freq.is_finite() && *modulating_freq > 0.0 {
+                    *modulating_freq
+                } else {
+                    Self::modulated_frequency_default(5.0, context)
+                };
+                let fc = if carrier_freq.is_finite() && *carrier_freq > 0.0 {
+                    *carrier_freq
+                } else {
+                    Self::modulated_frequency_default(500.0, context)
+                };
+                let t = time - delay;
+                if t <= 0.0 {
+                    0.0
+                } else {
+                    let phasec = phase_carrier.to_radians();
+                    let phasem = phase_modulation.to_radians();
+                    offset
+                        + (modulation_offset
+                            + modulation_amplitude * (2.0 * PI * fm * t + phasem).sin())
+                            * (2.0 * PI * fc * t + phasec).sin()
                 }
             }
         }

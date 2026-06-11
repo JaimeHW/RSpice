@@ -132,7 +132,9 @@ impl TestRunner {
                         | crate::netlist::SourceSpec::Sin { .. }
                         | crate::netlist::SourceSpec::Pwl { .. }
                         | crate::netlist::SourceSpec::PwlFile { .. }
-                        | crate::netlist::SourceSpec::Exp { .. } => 0.0,
+                        | crate::netlist::SourceSpec::Exp { .. }
+                        | crate::netlist::SourceSpec::Sffm { .. }
+                        | crate::netlist::SourceSpec::Am { .. } => 0.0,
                     });
                 }
                 _ => {

@@ -15,6 +15,9 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
         SourceSpec::PwlFile { value_offset, .. } => *value_offset, // Use value offset as DC
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
+        // ngspice's SFFM/AM evaluate to exactly 0 at t <= TD (vsrcload.c),
+        // which is what the operating point sees at time zero.
+        SourceSpec::Sffm { .. } | SourceSpec::Am { .. } => 0.0,
     }
 }
 
