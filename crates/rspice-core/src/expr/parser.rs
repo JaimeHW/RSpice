@@ -85,21 +85,69 @@ impl<'a> Lexer<'a> {
     fn read_number(&mut self) -> f64 {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
-            if c.is_ascii_digit()
-                || c == '.'
-                || c == 'e'
-                || c == 'E'
-                || c == '-' && s.ends_with('e')
-                || c == '-' && s.ends_with('E')
-                || c == '+' && s.ends_with('e')
-                || c == '+' && s.ends_with('E')
-            {
+            if c.is_ascii_digit() || c == '.' {
                 s.push(self.chars.next().unwrap());
             } else {
                 break;
             }
         }
-        s.parse().unwrap_or(0.0)
+
+        // A scientific exponent counts only when at least one digit
+        // follows; otherwise the `e` is a unit letter (`2e` = 2.0).
+        if matches!(self.chars.peek(), Some(&c) if c == 'e' || c == 'E') {
+            let mut probe = self.chars.clone();
+            probe.next();
+            let mut span = 1usize;
+            if matches!(probe.peek(), Some(&c) if c == '+' || c == '-') {
+                probe.next();
+                span += 1;
+            }
+            let mut digits = 0usize;
+            while matches!(probe.peek(), Some(c) if c.is_ascii_digit()) {
+                probe.next();
+                digits += 1;
+            }
+            if digits > 0 {
+                for _ in 0..span + digits {
+                    s.push(self.chars.next().unwrap());
+                }
+            }
+        }
+
+        let base: f64 = s.parse().unwrap_or(0.0);
+
+        // ngspice B-source numbers go through INPevaluate: an engineering
+        // suffix may follow the digits (even after an exponent, `1e3k` =
+        // 1e6) and any remaining letters are swallowed (`10kOhm`). Unlike
+        // parameter expressions, `mil` = 25.4e-6 exists here.
+        let mut multiplier = 1.0;
+        if matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
+            let mut tail = String::new();
+            while matches!(self.chars.peek(), Some(c) if c.is_ascii_alphabetic()) {
+                tail.push(self.chars.next().unwrap());
+            }
+            let upper = tail.to_ascii_uppercase();
+            multiplier = if upper.starts_with("MEG") {
+                1e6
+            } else if upper.starts_with("MIL") {
+                25.4e-6
+            } else {
+                match upper.as_bytes()[0] {
+                    b'T' => 1e12,
+                    b'G' => 1e9,
+                    b'K' => 1e3,
+                    b'M' => 1e-3,
+                    b'U' => 1e-6,
+                    b'N' => 1e-9,
+                    b'P' => 1e-12,
+                    b'F' => 1e-15,
+                    b'A' => 1e-18,
+                    _ => 1.0,
+                }
+            };
+        }
+
+        base * multiplier
     }
 
     fn read_ident(&mut self) -> String {
@@ -132,7 +180,12 @@ impl<'a> Lexer<'a> {
                 }
                 '*' => {
                     self.chars.next();
-                    Token::Star
+                    if self.chars.peek() == Some(&'*') {
+                        self.chars.next();
+                        Token::Caret // ngspice accepts ** as power
+                    } else {
+                        Token::Star
+                    }
                 }
                 '/' => {
                     self.chars.next();
@@ -384,18 +437,23 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_power(&mut self) -> Expr {
-        let left = self.parse_primary();
-        if self.current == Token::Caret {
+        let mut left = self.parse_primary();
+        while self.current == Token::Caret {
             self.advance();
-            let right = self.parse_unary(); // Right associative, but exponent binds tighter than unary.
-            Expr::Binary {
+            // ngspice's B-source parser folds power chains left
+            // (2^3^2 = (2^3)^2) but lets a signed exponent capture the
+            // whole following unary/power chain (2^-3^2 = 2^(-(3^2))).
+            let right = match self.current {
+                Token::Minus | Token::Plus | Token::Not => self.parse_unary(),
+                _ => self.parse_primary(),
+            };
+            left = Expr::Binary {
                 op: BinaryOp::Pow,
                 left: Box::new(left),
                 right: Box::new(right),
-            }
-        } else {
-            left
+            };
         }
+        left
     }
 
     fn parse_unary(&mut self) -> Expr {
@@ -601,5 +659,50 @@ pub fn parse_expression(input: &str) -> Expr {
             );
             Expr::Const(0.0)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::expr::{Context, Vm, compile};
+
+    fn eval_const(input: &str) -> f64 {
+        let ast = parse_expression_strict(input)
+            .unwrap_or_else(|e| panic!("parse `{input}` failed: {e}"));
+        let program = compile(&ast);
+        let mut vm = Vm::new();
+        vm.execute(&program, &Context::dc(&[], &[]))
+    }
+
+    #[test]
+    fn power_operator_matches_ngspice_b_sources() {
+        // Pinned against ngspice-46 B-source oracle runs: chains fold
+        // left, but a signed exponent captures the rest of the chain
+        // (inpptree gives 2^-3^2 = 2^(-(3^2)), unlike numparam).
+        assert_eq!(eval_const("2^3^2"), 64.0);
+        assert_eq!(eval_const("-2^2"), -4.0);
+        assert_eq!(eval_const("3-2^2"), -1.0);
+        assert_eq!(eval_const("2^-3^2"), 0.001953125);
+        assert_eq!(eval_const("2^-3^2*4"), 0.0078125);
+        assert_eq!(eval_const("3*-2^2"), -12.0);
+        assert_eq!(eval_const("2**-2"), 0.25);
+        assert_eq!(eval_const("-2**2"), -4.0);
+        assert_eq!(eval_const("2**3**2"), 64.0);
+    }
+
+    #[test]
+    fn numbers_accept_inpevaluate_suffixes() {
+        // B-source numbers go through INPevaluate in ngspice: engineering
+        // suffixes work (`2k`), `mil` is 25.4e-6 (unlike numparam), the
+        // scale applies after an exponent, and unit letters are swallowed.
+        assert_eq!(eval_const("2k"), 2000.0);
+        assert_eq!(eval_const("1mil*1e6"), 25.4e-6 * 1e6);
+        assert_eq!(eval_const("10kohm"), 10_000.0);
+        assert_eq!(eval_const("1e3k/1e6"), 1.0);
+        assert_eq!(eval_const("3meg"), 3e6);
+        assert_eq!(eval_const("100n"), 100.0 * 1e-9);
+        assert_eq!(eval_const("1a"), 1e-18);
+        assert_eq!(eval_const("5xyz"), 5.0);
     }
 }
