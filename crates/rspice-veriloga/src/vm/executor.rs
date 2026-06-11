@@ -102,6 +102,16 @@ impl<'a> Vm<'a> {
             Instruction::PushMfactor => {
                 self.stack.push(self.context.multiplicity);
             }
+            Instruction::ZiState(filter_id) => {
+                let input = self.pop()?;
+                let time = self.context.time;
+                let transient = self.context.analysis_type == 2;
+                let output = match self.context.zi_filters.get_mut(*filter_id) {
+                    Some(filter) => filter.eval(input, time, transient),
+                    None => 0.0,
+                };
+                self.stack.push(output);
+            }
             Instruction::PushTemperature => {
                 self.stack.push(self.context.temperature);
             }

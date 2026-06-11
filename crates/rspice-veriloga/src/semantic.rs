@@ -188,6 +188,9 @@ pub struct SemanticAnalyzer {
     runtime_loop_depth: usize,
     /// Array variables of the module under analysis (name -> layout)
     arrays: HashMap<SmolStr, AnalyzedArray>,
+    /// Hidden system-task variables ($bound_step, $discontinuity)
+    /// registered on first use
+    task_vars: HashMap<SmolStr, usize>,
 }
 
 /// Analyzed source file with resolved symbols
@@ -366,6 +369,7 @@ impl SemanticAnalyzer {
             inline_depth: 0,
             runtime_loop_depth: 0,
             arrays: HashMap::new(),
+            task_vars: HashMap::new(),
         }
     }
 
@@ -437,6 +441,7 @@ impl SemanticAnalyzer {
             .map(|f| (f.name.clone(), f.clone()))
             .collect();
         self.arrays.clear();
+        self.task_vars.clear();
 
         // Phase 1: Collect port names from module header
         let port_names: Vec<SmolStr> = module.ports.iter().map(|p| p.name.clone()).collect();
@@ -1319,9 +1324,15 @@ impl SemanticAnalyzer {
             AnalogStatement::IndirectContribution(stmt) => {
                 self.analyze_indirect_contribution(stmt, module)?;
             }
-            // System task calls ($strobe, $display, ...) have no effect on
-            // the device equations
-            AnalogStatement::Call(_) => {}
+            // $bound_step and $discontinuity steer the transient stepper
+            // through hidden per-evaluation variables; other system tasks
+            // ($strobe, $display, ...) have no effect on the device
+            // equations
+            AnalogStatement::Call(call) => match call.name.as_str() {
+                "$bound_step" => self.analyze_bound_step(call, module, sink)?,
+                "$discontinuity" => self.analyze_discontinuity(call, module, sink)?,
+                _ => {}
+            },
             AnalogStatement::Disable(_) | AnalogStatement::Null(_) => {}
         }
         Ok(())
@@ -1875,6 +1886,116 @@ impl SemanticAnalyzer {
         });
 
         Ok(())
+    }
+
+    /// `$bound_step(max_dt)`: cap the next transient step while the call
+    /// is active. Lowers to `$bound_step = min($bound_step, max_dt)` on a
+    /// hidden variable reset to +inf at the top of every evaluation, so
+    /// multiple calls and guards compose naturally.
+    fn analyze_bound_step(
+        &mut self,
+        call: &CallStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        let Some(arg) = call.args.first() else {
+            self.record_error_at(
+                SemanticErrorKind::MissingAttribute(
+                    "$bound_step requires a maximum-step argument".into(),
+                ),
+                call.span,
+            );
+            return Ok(());
+        };
+        let var_index = self.ensure_task_variable(
+            "$bound_step",
+            f64::INFINITY,
+            module,
+            sink,
+            call.span,
+        );
+        let bound = self.lower_expression(arg)?;
+        let current = Expression::Identifier(Identifier {
+            name: "$bound_step".into(),
+            span: call.span,
+        });
+        let min = Expression::Call(CallExpr {
+            name: "min".into(),
+            args: vec![current.clone(), bound],
+            span: call.span,
+        });
+        let expression = self.apply_guard(min, current);
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: "$bound_step".into(),
+            var_index,
+            index: None,
+            expression,
+            expr_type: ValueType::Real,
+            span: call.span,
+        }));
+        Ok(())
+    }
+
+    /// `$discontinuity(degree)`: flag a topology/regime change so the
+    /// transient stepper places a breakpoint. Lowers to a hidden flag
+    /// reset to 0 every evaluation and set to 1 while the call is active.
+    fn analyze_discontinuity(
+        &mut self,
+        call: &CallStmt,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<()> {
+        let var_index =
+            self.ensure_task_variable("$discontinuity", 0.0, module, sink, call.span);
+        let current = Expression::Identifier(Identifier {
+            name: "$discontinuity".into(),
+            span: call.span,
+        });
+        let expression = self.apply_guard(Self::number_expr(1.0, call.span), current);
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: "$discontinuity".into(),
+            var_index,
+            index: None,
+            expression,
+            expr_type: ValueType::Real,
+            span: call.span,
+        }));
+        Ok(())
+    }
+
+    /// Register a hidden system-task variable on first use and emit its
+    /// unguarded per-evaluation reset (the `$`-prefixed name cannot
+    /// collide with user identifiers)
+    fn ensure_task_variable(
+        &mut self,
+        name: &str,
+        reset: f64,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+        span: Span,
+    ) -> usize {
+        if let Some(&idx) = self.task_vars.get(name) {
+            return idx;
+        }
+        let var_index = module.variables.len();
+        module.variables.push(AnalyzedVariable {
+            name: name.into(),
+            var_type: VarType::Real,
+            value_type: ValueType::Real,
+            is_state: false,
+        });
+        self.task_vars.insert(name.into(), var_index);
+        // The reset runs unconditionally: every evaluation starts neutral
+        // and only active calls move the value
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: name.into(),
+            var_index,
+            index: None,
+            expression: Self::number_expr(reset, span),
+            expr_type: ValueType::Real,
+            span,
+        }));
+        var_index
     }
 
     /// Resolve a contribution target (node pair or named branch) to the

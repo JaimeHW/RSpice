@@ -338,6 +338,15 @@ pub enum IrExpr {
         numerator: Vec<f64>, // ascending powers of s
         denominator: Vec<f64>,
     },
+    /// zi_* - z-domain (sampled-data) filter: the input samples every
+    /// `period` seconds and the difference equation output holds between
+    /// samples. Coefficients ascend in z⁻¹.
+    ZiFilter {
+        expr: Box<IrExpr>,
+        numerator: Vec<f64>,
+        denominator: Vec<f64>,
+        period: f64,
+    },
     /// ddx(expr, V(node)) - symbolic partial derivative w.r.t. a node
     /// potential. Resolved to an explicit derivative expression during
     /// device IR construction (where assignment chains are known).
@@ -979,6 +988,7 @@ impl DeviceIR {
                 | IrExpr::Cross { expr, .. }
                 | IrExpr::LaplaceZP { expr, .. }
                 | IrExpr::LaplaceND { expr, .. }
+                | IrExpr::ZiFilter { expr, .. }
                 | IrExpr::Ddx { expr, .. } => contains_ddt(expr),
                 IrExpr::WhiteNoise { power, .. } => contains_ddt(power),
                 IrExpr::FlickerNoise {
@@ -1509,6 +1519,7 @@ pub mod autodiff {
             | IrExpr::Slew { expr, .. }
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
+            | IrExpr::ZiFilter { expr, .. }
             | IrExpr::Ddx { expr, .. } => recurse(expr),
             IrExpr::DdtCompanion(e) | IrExpr::IdtCompanion(e) => recurse(e),
             IrExpr::TableDerivative { input, .. } => recurse(input),
@@ -1928,6 +1939,17 @@ pub mod autodiff {
             IrExpr::Ddx { expr, node } => IrExpr::Ddx {
                 expr: Box::new(map_expr(expr, f)),
                 node: *node,
+            },
+            IrExpr::ZiFilter {
+                expr,
+                numerator,
+                denominator,
+                period,
+            } => IrExpr::ZiFilter {
+                expr: Box::new(map_expr(expr, f)),
+                numerator: numerator.clone(),
+                denominator: denominator.clone(),
+                period: *period,
             },
             IrExpr::VarIndexed {
                 array,
@@ -2358,6 +2380,26 @@ pub mod autodiff {
             IrExpr::Transition { expr, .. }
             | IrExpr::Slew { expr, .. }
             | IrExpr::AbsDelay { expr, .. } => differentiate(expr),
+
+            // Sampled-data filters: DC small-signal gain H(1) times the
+            // inner derivative (the residual stays exact; the held-output
+            // approximation only shapes convergence, like the laplace
+            // filters below)
+            IrExpr::ZiFilter {
+                expr,
+                numerator,
+                denominator,
+                ..
+            } => {
+                let num: f64 = numerator.iter().sum();
+                let den: f64 = denominator.iter().sum();
+                let gain = if den.abs() > 1e-300 { num / den } else { 0.0 };
+                IrExpr::Binary(
+                    BinaryOp::Mul,
+                    Box::new(IrExpr::Const(gain)),
+                    Box::new(differentiate(expr)),
+                )
+            }
 
             // Laplace filters: DC small-signal gain times the inner
             // derivative

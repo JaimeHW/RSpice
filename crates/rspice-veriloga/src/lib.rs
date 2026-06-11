@@ -39,11 +39,17 @@
 //!
 //! - Analog operators: `ddt`, `idt`, `idtmod` (backward Euler), `ddx`,
 //!   `limexp`, `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
-//!   `$limit`, `$table_model`
-//! - Noise source declarations (`white_noise`, `flicker_noise`) - parsed
-//!   and carried in the IR; noise-analysis integration is pending
+//!   `zi_nd/zp/zd/np` (sampled-data), `$limit`, `$table_model`
+//! - Noise sources (`white_noise`, `flicker_noise`, `noise_table`,
+//!   `noise_table_log`) injected into `.noise` with amplitude scaling and
+//!   mode gating
+//! - Indirect contributions (`V(x): lhs == rhs`) as constraint rows on a
+//!   branch unknown
 //! - System functions: `$temperature`, `$vt`, `$abstime`, `$simparam`,
-//!   `$param_given`, `$port_connected`, `$mfactor`
+//!   `$param_given`, `$port_connected`, `$mfactor` (with automatic
+//!   multiplicity scaling), `$bound_step`, `$discontinuity`
+//! - 1-D array variables (compile-time and runtime indexes, shadowed
+//!   derivatives), runtime-bounded loops
 //! - Parameters with dependent defaults, ranges, and exclusions;
 //!   localparams; attribute instances (`(* desc, units *)`)
 //! - Internal nodes, named branches, ground nets, user disciplines
@@ -55,9 +61,9 @@
 //!
 //! Known limitations (clean compile errors, never silent):
 //!
-//! - Noise-analysis integration of declared noise sources is pending
-//! - Z-domain (`zi_*`) filters, `noise_table`, indirect contributions,
-//!   array-valued variables in expressions
+//! - `noise_table` file input (inline the pair list), correlated noise
+//! - Parameter-dependent `zi_*` sample periods
+//! - Multi-dimensional arrays; array locals in analog functions
 
 pub mod ast;
 pub mod codegen;
@@ -75,6 +81,9 @@ pub mod types;
 
 /// Laplace (s-domain) filters for transient analysis
 pub mod laplace;
+
+/// Z-domain (sampled-data) filters for the zi_* operators
+pub mod zfilter;
 
 /// Virtual machine for bytecode execution
 pub mod vm;

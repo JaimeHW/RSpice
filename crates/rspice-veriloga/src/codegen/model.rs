@@ -20,6 +20,8 @@ pub struct CodeGenerator {
     pub(super) above_detector_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `timer`.
     pub(super) timer_state_count: std::cell::Cell<usize>,
+    /// Collected z-domain filters (`zi_*`).
+    pub(super) zi_filters: std::cell::RefCell<Vec<crate::zfilter::ZiFilter>>,
 }
 
 /// Compiled device model ready for simulation
@@ -52,6 +54,8 @@ pub struct CompiledModel {
     pub branch_sources: Vec<CompiledBranchSource>,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
+    /// Z-domain (sampled-data) filters
+    pub zi_filters: Vec<crate::zfilter::ZiFilter>,
     /// Small-signal noise sources extracted from contributions
     pub noise_sources: Vec<CompiledNoiseSource>,
 }
@@ -270,6 +274,8 @@ pub enum Instruction {
     PushTime,
     /// Push the instance multiplicity ($mfactor)
     PushMfactor,
+    /// Z-domain filter: pop the input, push the sampled-data output
+    ZiState(usize),
     /// Binary operations
     Add,
     Sub,

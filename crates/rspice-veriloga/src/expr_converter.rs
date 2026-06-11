@@ -24,6 +24,14 @@ fn autodiff_fold(expr: IrExpr) -> IrExpr {
     crate::ir::autodiff::simplify(expr)
 }
 
+/// Map a z-root expansion failure into a compile error
+fn zi_root_error(message: String) -> crate::error::CompileError {
+    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+        "zi filter roots: {message}"
+    )))
+    .into()
+}
+
 /// Sentinel node index for the global reference (ground) node.
 ///
 /// `V(a)` measures the potential of `a` against this reference, never
@@ -1075,13 +1083,67 @@ impl<'a> ExprConverter<'a> {
                     denominator,
                 })
             }
-            "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!(
-                    "Z-domain filter {} (use laplace_* instead)",
-                    call.name
-                )),
-            )
-            .into()),
+            // Z-domain filters: zi_xx(expr, num, den, T). Coefficient
+            // arrays ascend in z^-1; zero/pole pair lists expand into
+            // polynomials. The sample period must fold to a constant
+            // (per-instance periods would reshape the filter state).
+            "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let (numerator, denominator) = match call.name.as_str() {
+                    "zi_nd" => (
+                        self.const_real_array(require_arg(1)?)?,
+                        self.const_real_array(require_arg(2)?)?,
+                    ),
+                    "zi_zp" => (
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(1)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(2)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                    ),
+                    "zi_zd" => (
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(1)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                        self.const_real_array(require_arg(2)?)?,
+                    ),
+                    _ => (
+                        self.const_real_array(require_arg(1)?)?,
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(2)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                    ),
+                };
+                if denominator.first().copied().unwrap_or(0.0) == 0.0 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("{}: leading denominator coefficient must be nonzero", call.name),
+                    ))
+                    .into());
+                }
+                let period = match autodiff_fold(self.convert(require_arg(3)?)?) {
+                    IrExpr::Const(t) if t > 0.0 && t.is_finite() => t,
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                            format!(
+                                "{}: the sample period must be a positive compile-time constant",
+                                call.name
+                            ),
+                        ))
+                        .into());
+                    }
+                };
+                Ok(IrExpr::ZiFilter {
+                    expr: Box::new(expr),
+                    numerator,
+                    denominator,
+                    period,
+                })
+            }
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
                     "Function: {}",

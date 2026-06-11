@@ -19,6 +19,7 @@ pub(crate) fn program_is_jitable(program: &BytecodeProgram) -> bool {
                 | Instruction::CrossState(_)
                 | Instruction::TimerState(_)
                 | Instruction::LaplaceState(_)
+                | Instruction::ZiState(_)
         )
     })
 }
@@ -732,6 +733,11 @@ impl JitCompiler {
                 // interpreter (the helper mutated the shared model filters)
                 Instruction::LaplaceState(_) => {
                     return Err(JitError::UnsupportedInstruction("LaplaceState"));
+                }
+
+                // Sampled-data filters carry per-instance histories
+                Instruction::ZiState(_) => {
+                    return Err(JitError::UnsupportedInstruction("ZiState"));
                 }
             }
         }

@@ -19,6 +19,7 @@ impl CodeGenerator {
             cross_detector_count: std::cell::Cell::new(0),
             above_detector_count: std::cell::Cell::new(0),
             timer_state_count: std::cell::Cell::new(0),
+            zi_filters: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -40,6 +41,7 @@ impl CodeGenerator {
     fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
+        self.zi_filters.borrow_mut().clear();
         self.limit_state_count.set(0);
         self.delay_buffer_count.set(0);
         self.transition_filter_count.set(0);
@@ -88,6 +90,7 @@ impl CodeGenerator {
                 })
                 .collect(),
             laplace_filters: Vec::new(),
+            zi_filters: Vec::new(),
             noise_sources: Vec::new(),
         };
 
@@ -127,6 +130,7 @@ impl CodeGenerator {
 
         model.laplace_filters = self.laplace_filters.take();
         model.lookup_tables = self.lookup_tables.take();
+        model.zi_filters = self.zi_filters.take();
 
         Ok(model)
     }
@@ -758,6 +762,24 @@ impl CodeGenerator {
                 // Like the other noise functions, the large-signal value
                 // is zero; the table feeds the noise-analysis sources
                 program.instructions.push(Instruction::PushConst(0.0));
+            }
+            IrExpr::ZiFilter {
+                expr,
+                numerator,
+                denominator,
+                period,
+            } => {
+                self.emit_expr(expr, ir, program)?;
+                let filter_id = {
+                    let mut filters = self.zi_filters.borrow_mut();
+                    filters.push(crate::zfilter::ZiFilter::new(
+                        numerator.clone(),
+                        denominator.clone(),
+                        *period,
+                    ));
+                    filters.len() - 1
+                };
+                program.instructions.push(Instruction::ZiState(filter_id));
             }
             IrExpr::FlickerNoise {
                 power,

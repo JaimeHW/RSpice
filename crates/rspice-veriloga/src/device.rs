@@ -61,6 +61,8 @@ pub struct VerilogADevice {
     /// Native compiled model (if compilation succeeded)
     #[cfg(feature = "native")]
     native_model: Option<std::sync::Arc<NativeModel>>,
+    /// $discontinuity level at the last accepted timestep (edge detector)
+    prev_discontinuity: bool,
 }
 
 // NativeModel contains raw pointers but is safe to send across threads
@@ -147,6 +149,7 @@ impl VerilogADevice {
         // per-instance context (the model stays immutable and shared)
         context.lookup_tables = model.lookup_tables.clone();
         context.laplace_filters = model.laplace_filters.clone();
+        context.zi_filters = model.zi_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model);
 
         // Attempt native compilation (if feature enabled)
@@ -168,6 +171,7 @@ impl VerilogADevice {
             matrix_indices: MatrixIndices::default(),
             #[cfg(feature = "native")]
             native_model,
+            prev_discontinuity: false,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
@@ -334,6 +338,18 @@ impl VerilogADevice {
         self.context.multiplicity
     }
 
+    /// Maximum next transient step requested by `$bound_step` during the
+    /// latest evaluation (None when unbounded or the model never calls it)
+    pub fn transient_bound_step(&self) -> Option<f64> {
+        let bound = self.variable("$bound_step")?;
+        (bound.is_finite() && bound > 0.0).then_some(bound)
+    }
+
+    /// Whether `$discontinuity` fired during the latest evaluation
+    pub fn discontinuity_pending(&self) -> bool {
+        self.variable("$discontinuity").is_some_and(|v| v != 0.0)
+    }
+
     /// Number of native assignment chunks the JIT produced for this model
     #[cfg(feature = "native")]
     pub fn native_chunk_count(&self) -> usize {
@@ -462,7 +478,15 @@ impl VerilogADevice {
 
     /// Commit integrator state after an accepted timestep
     pub fn advance_state(&mut self) {
+        // Snapshot the $discontinuity level so the next step reports only
+        // rising edges (a level-true region must not pin tiny steps)
+        self.prev_discontinuity = self.discontinuity_pending();
         self.context.advance_state();
+    }
+
+    /// Whether `$discontinuity` newly fired since the last accepted step
+    pub fn discontinuity_rising(&self) -> bool {
+        self.discontinuity_pending() && !self.prev_discontinuity
     }
 
     /// Set the circuit node indices for internal nodes

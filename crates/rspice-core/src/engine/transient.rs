@@ -152,6 +152,21 @@ struct JfetTransientHistory {
     accepted_dt_prev_prev: Value,
 }
 
+/// Junction charge history for diodes (ngspice `DIOcapCharge` state):
+/// the depletion+diffusion charge is integrated with the same companion
+/// discipline as the JFET/MOSFET gate charges.
+#[derive(Debug, Clone, Default)]
+struct DiodeTransientHistory {
+    vd_prev: Vec<Value>,
+    vd_prev_prev: Vec<Value>,
+    qd_prev: Vec<Value>,
+    qd_prev_prev: Vec<Value>,
+    qd_prev_prev_prev: Vec<Value>,
+    cqd_prev: Vec<Value>,
+    accepted_dt_prev: Value,
+    accepted_dt_prev_prev: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 struct BjtTransientHistory {
     vbe_prev: Vec<Value>,
@@ -833,6 +848,9 @@ impl Engine {
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut diode_history = Self::initialize_diode_history(&circuit, &solution);
+        diode_history.accepted_dt_prev = hinted_max_step;
+        diode_history.accepted_dt_prev_prev = hinted_max_step;
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -916,6 +934,7 @@ impl Engine {
                         hinted_max_step,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
                     );
@@ -1223,6 +1242,7 @@ impl Engine {
                         trap_order: step_trap_order,
                         bjt_history: &bjt_history,
                         jfet_history: &jfet_history,
+                        diode_history: &diode_history,
                         mosfet_history: &mosfet_history,
                         b3soi_history: &b3soi_history,
                         suppress_gate_charge,
@@ -1551,6 +1571,7 @@ impl Engine {
                                 trap_order: step_trap_order,
                                 bjt_history: &bjt_history,
                                 jfet_history: &jfet_history,
+                                diode_history: &diode_history,
                                 mosfet_history: &mosfet_history,
                                 b3soi_history: &b3soi_history,
                                 suppress_gate_charge,
@@ -1633,6 +1654,7 @@ impl Engine {
                             trap_order: step_trap_order,
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
+                            diode_history: &diode_history,
                             mosfet_history: &mosfet_history,
                             b3soi_history: &b3soi_history,
                             suppress_gate_charge,
@@ -1915,6 +1937,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
+                        Self::diode_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &diode_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -1954,10 +1993,13 @@ impl Engine {
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
-                                    force_accept_capacitor_truncation_limit,
-                                    force_accept_bjt_truncation_limit,
+                                    Self::min_truncation_limit(
+                                        force_accept_capacitor_truncation_limit,
+                                        force_accept_bjt_truncation_limit,
+                                    ),
+                                    force_accept_jfet_truncation_limit,
                                 ),
-                                force_accept_jfet_truncation_limit,
+                                force_accept_diode_truncation_limit,
                             ),
                             force_accept_mosfet_truncation_limit,
                         ),
@@ -1980,6 +2022,7 @@ impl Engine {
                         accepted_step_trap_order,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
                         None,
@@ -2144,6 +2187,24 @@ impl Engine {
             } else {
                 None
             };
+            let diode_truncation_limit =
+                if !first_accepted_transient_step && !circuit.diodes.is_empty() {
+                    Self::diode_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &diode_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let mosfet_truncation_limit = if !first_accepted_transient_step
                 && !suppress_gate_charge
                 && !circuit.mosfets.is_empty()
@@ -2185,8 +2246,14 @@ impl Engine {
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
-                        Self::min_truncation_limit(capacitor_truncation_limit, bjt_truncation_limit),
-                        jfet_truncation_limit,
+                        Self::min_truncation_limit(
+                            Self::min_truncation_limit(
+                                capacitor_truncation_limit,
+                                bjt_truncation_limit,
+                            ),
+                            jfet_truncation_limit,
+                        ),
+                        diode_truncation_limit,
                     ),
                     mosfet_truncation_limit,
                 ),
@@ -2241,13 +2308,14 @@ impl Engine {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::warn!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
                             capacitor_truncation_limit,
                             bjt_truncation_limit,
                             jfet_truncation_limit,
+                            diode_truncation_limit,
                             mosfet_truncation_limit,
                             ltra_truncation_limit,
                             current_method,
@@ -2284,6 +2352,7 @@ impl Engine {
                     capacitor_truncation_limit,
                     bjt_truncation_limit,
                     jfet_truncation_limit,
+                    diode_truncation_limit,
                     mosfet_truncation_limit,
                 );
             let (lte, accept) = if locked_grid.is_some() {
@@ -2531,6 +2600,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
+                        Self::diode_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &diode_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -2570,10 +2656,13 @@ impl Engine {
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
-                                    force_accept_capacitor_truncation_limit,
-                                    force_accept_bjt_truncation_limit,
+                                    Self::min_truncation_limit(
+                                        force_accept_capacitor_truncation_limit,
+                                        force_accept_bjt_truncation_limit,
+                                    ),
+                                    force_accept_jfet_truncation_limit,
                                 ),
-                                force_accept_jfet_truncation_limit,
+                                force_accept_diode_truncation_limit,
                             ),
                             force_accept_mosfet_truncation_limit,
                         ),
@@ -2596,6 +2685,7 @@ impl Engine {
                         accepted_step_trap_order,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
                         None,
@@ -2734,6 +2824,7 @@ impl Engine {
                     is_strictly_linear_transient,
                     &bjt_history,
                     &jfet_history,
+                    &diode_history,
                     &mosfet_history,
                     &lte_estimator,
                     &vbic_snapshot_cache,
@@ -2756,6 +2847,7 @@ impl Engine {
                 step_trap_order,
                 &mut bjt_history,
                 &mut jfet_history,
+                &mut diode_history,
                 &mut mosfet_history,
                 &mut b3soi_history,
                 Some(&vbic_snapshot_cache),
@@ -2775,9 +2867,11 @@ impl Engine {
                 circuit.accept_xspice_timestep();
             }
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                circuit.accept_veriloga_timestep();
-            }
+            let veriloga_discontinuity = if circuit.has_veriloga_devices() {
+                circuit.accept_veriloga_timestep()
+            } else {
+                false
+            };
 
             solution.clone_from(&new_solution);
 
@@ -2835,6 +2929,23 @@ impl Engine {
                     );
                 }
                 timestep.force_step(limit);
+            }
+            // Verilog-A timestep control: $bound_step caps the next step;
+            // a newly raised $discontinuity restarts fine like a
+            // breakpoint so the corner resolves sharply
+            #[cfg(feature = "veriloga")]
+            if circuit.has_veriloga_devices() {
+                if let Some(bound) = circuit.veriloga_timestep_bound()
+                    && bound + 1e-18 < timestep.dt()
+                {
+                    timestep.force_step(bound.min(max_step));
+                }
+                if veriloga_discontinuity {
+                    let restart = (dt * 0.1).max(1e-15);
+                    if restart < timestep.dt() {
+                        timestep.force_step(restart.min(max_step));
+                    }
+                }
             }
             if first_accepted_transient_step
                 && matches!(
