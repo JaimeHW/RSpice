@@ -255,20 +255,24 @@ pub(super) fn run_noise(
                 println!("  Input source: {}", input_source);
                 if let (Some(first), Some(last)) = (results.first(), results.last()) {
                     println!(
-                        "  @ {:e} Hz: output_noise={:.6e} V^2/Hz",
-                        first.frequency, first.output_noise_density
+                        "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
+                        first.frequency,
+                        first.output_noise_rms()
                     );
                     println!(
-                        "  @ {:e} Hz: input_referred={:.6e}",
-                        first.frequency, first.input_referred_density
+                        "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
+                        first.frequency,
+                        first.input_referred_rms()
                     );
                     println!(
-                        "  @ {:e} Hz: output_noise={:.6e} V^2/Hz",
-                        last.frequency, last.output_noise_density
+                        "  @ {:e} Hz: output_noise={:.6e} V/sqrt(Hz)",
+                        last.frequency,
+                        last.output_noise_rms()
                     );
                     println!(
-                        "  @ {:e} Hz: input_referred={:.6e}",
-                        last.frequency, last.input_referred_density
+                        "  @ {:e} Hz: input_referred={:.6e} /sqrt(Hz)",
+                        last.frequency,
+                        last.input_referred_rms()
                     );
                 }
 
@@ -278,13 +282,17 @@ pub(super) fn run_noise(
             if let Some(ref output_path) = ctx.output_path_for("noise") {
                 let noise_frequencies: Vec<f64> =
                     results.iter().map(|result| result.frequency).collect();
+                // ngspice-46 emits the onoise/inoise vectors in
+                // root-spectral-density units (V/sqrt(Hz)) unless the legacy
+                // `sqrnoise` control variable is set; exported tables carry
+                // the modern convention so they diff cleanly against it.
                 let onoise: Vec<f64> = results
                     .iter()
-                    .map(|result| result.output_noise_density)
+                    .map(|result| result.output_noise_rms())
                     .collect();
                 let inoise: Vec<f64> = results
                     .iter()
-                    .map(|result| result.input_referred_density)
+                    .map(|result| result.input_referred_rms())
                     .collect();
 
                 if matches!(ctx.format, OutputFormat::Hdf5) {
