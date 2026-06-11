@@ -366,4 +366,74 @@ mod tests {
             name.eq_ignore_ascii_case("steplimit") && (*value - 1.0).abs() < f64::EPSILON
         }));
     }
+
+    fn first_source_spec(netlist: &Netlist) -> &SourceSpec {
+        netlist
+            .elements
+            .iter()
+            .find_map(|e| match &e.kind {
+                ElementKind::VoltageSource(spec) => Some(spec),
+                _ => None,
+            })
+            .expect("voltage source exists")
+    }
+
+    #[test]
+    fn source_terms_parse_in_any_order() {
+        // AC after the transient function (ngspice accepts any order).
+        let netlist = Netlist::parse(
+            "src order\n\
+             Vin 1 0 DC 1 SIN (0 1 100MEG 1NS 0.0) AC 1\n\
+             R1 1 0 1k\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        match first_source_spec(&netlist) {
+            SourceSpec::DcAcTransient {
+                dc_value,
+                ac_magnitude,
+                transient,
+                ..
+            } => {
+                assert_eq!(*dc_value, 1.0);
+                assert_eq!(*ac_magnitude, 1.0);
+                assert!(matches!(transient.as_ref(), SourceSpec::Sin { .. }));
+            }
+            other => panic!("expected DcAcTransient, got {other:?}"),
+        }
+
+        // Bare DC level followed by AC.
+        let netlist = Netlist::parse(
+            "src order\n\
+             Vin 1 0 5 AC 2 45\n\
+             R1 1 0 1k\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        match first_source_spec(&netlist) {
+            SourceSpec::DcAc {
+                dc_value,
+                ac_magnitude,
+                ac_phase,
+            } => {
+                assert_eq!(*dc_value, 5.0);
+                assert_eq!(*ac_magnitude, 2.0);
+                assert!((ac_phase - 45.0f64.to_radians()).abs() < 1e-12);
+            }
+            other => panic!("expected DcAc, got {other:?}"),
+        }
+
+        // Transient first, then AC.
+        let netlist = Netlist::parse(
+            "src order\n\
+             Vin 1 0 PULSE(0 1 0 1n 1n 5n 10n) AC 1\n\
+             R1 1 0 1k\n\
+             .end\n",
+        )
+        .expect("netlist parses");
+        assert!(matches!(
+            first_source_spec(&netlist),
+            SourceSpec::DcAcTransient { dc_value, .. } if *dc_value == 0.0
+        ));
+    }
 }
