@@ -9,7 +9,10 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["faer-parallel"]
+# parallel + simd ship in the default set so the CLI, Python bindings,
+# and the default test configuration all exercise the fast paths;
+# rspice-wasm opts out via default-features = false.
+default = ["faer-parallel", "parallel", "simd"]
 wasm = ["wasm-bindgen", "getrandom/js"]
 parallel = ["rayon", "portable-atomic"]
 faer-parallel = ["faer/rayon"]

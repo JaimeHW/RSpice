@@ -912,22 +912,14 @@ impl Engine {
             })
         };
 
-        // Use parallel iteration when feature is enabled and we have many frequencies
-        #[cfg(feature = "parallel")]
-        {
-            use rayon::prelude::*;
-
-            // Parallel threshold: use parallel for 10+ frequency points
-            if frequencies.len() >= 10 {
-                let results: Result<Vec<_>, _> = frequencies
-                    .par_iter()
-                    .map(|&freq| solve_at_freq(freq))
-                    .collect();
-                return results;
-            }
-        }
-
-        // Sequential fallback (or when parallel feature disabled)
+        // NOTE: the sweep is intentionally sequential. Device evaluation
+        // caches (BJT linearization/charge snapshots, transmission-line
+        // responses) use Cell/RefCell interior mutability, so CircuitData is
+        // not Sync and cannot be shared across a rayon frequency sweep.
+        // Restoring parallel sweeps requires per-thread circuit state (e.g.
+        // a Clone-able CircuitData or an extracted evaluation context);
+        // results per frequency point are independent, so that change is
+        // mechanical but belongs to the device-cache architecture.
         frequencies
             .iter()
             .map(|&freq| solve_at_freq(freq))
