@@ -248,12 +248,14 @@ impl Engine {
             let (ids, gm, _) = jfet.calculate(vgs, vds, temp);
             if gm.abs() > 1e-18 {
                 let resistance = 1.0 / ((2.0 / 3.0) * gm.abs()).max(1e-30);
-                noise_sources.push(NoiseSource::thermal(
+                let mut source = NoiseSource::thermal(
                     format!("{}:thermal", jfet.name),
                     jfet.drain,
                     jfet.source,
                     resistance,
-                ));
+                );
+                source.temperature_offset = jfet.noise_dtemp;
+                noise_sources.push(source);
             }
 
             let (igs, igd) = jfet.gate_current(vgs, vgd, temp);
@@ -1267,6 +1269,32 @@ J1 D G 0 JN M=2
 
 .END
 ";
+
+    /// onoise table of the DTEMP=150 variant of [`JFET_FLICKER_DECK`] from
+    /// the official ngspice-46 binary.
+    const JFET_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/jfet_dtemp_noise_ngspice46.dat");
+
+    /// Instance DTEMP must heat the JFET channel thermal source and the
+    /// externalized drain/source resistances exactly as jfetnoi.c does
+    /// (the flicker component is temperature-free, isolating the heating
+    /// to the white floor).
+    #[test]
+    fn jfet_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = JFET_FLICKER_DECK.replace("J1 D G 0 JN M=2", "J1 D G 0 JN M=2 DTEMP=150");
+        assert_ne!(deck, JFET_FLICKER_DECK);
+        assert_onoise_matches(
+            &deck,
+            JFET_DTEMP_NOISE_ORACLE,
+            "d",
+            "VIN",
+            5,
+            10.0,
+            1e5,
+            1e-2,
+            "jfet-dtemp",
+        );
+    }
 
     /// The jfetnoi.c flicker law (per-finger current with an explicit
     /// multiplicity factor) must reproduce the official binary under this

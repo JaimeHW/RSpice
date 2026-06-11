@@ -16,6 +16,7 @@ impl Jfet {
             length: 1e-6,
             instance_temp: None,
             instance_dtemp: 0.0,
+            noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
             // Leave branch-state uninitialized until the first Newton update so
@@ -68,6 +69,7 @@ impl Jfet {
             length: 1e-6,
             instance_temp: None,
             instance_dtemp: 0.0,
+            noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
             // Leave branch-state uninitialized until the first Newton update so

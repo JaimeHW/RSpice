@@ -953,6 +953,14 @@ impl Engine {
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_model_order(model_order);
 
+                    // jfetnoi.c heats the thermal sources by the instance
+                    // offset; resolve it once for the channel source and the
+                    // externalized resistors below.
+                    jfet.noise_dtemp = jfet.noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+
                     // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
                     // inserting explicit linear resistors and connecting the intrinsic JFET
                     // to generated internal drain/source nodes.
@@ -970,6 +978,11 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
                     if rs > 0.0 {
                         let sint_name = format!("{}.__sint", element.name);
@@ -978,6 +991,11 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
 
                     circuit.jfets.push(jfet);
@@ -1069,6 +1087,14 @@ impl Engine {
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_model_order(model_order);
 
+                    // jfetnoi.c heats the thermal sources by the instance
+                    // offset; resolve it once for the channel source and the
+                    // externalized resistors below.
+                    jfet.noise_dtemp = jfet.noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+
                     // ngspice stamps model RD/RS as conductance scaled by the
                     // instance area/multiplicity. Explicit resistors therefore
                     // use the reciprocal equivalent, R / scale.
@@ -1083,6 +1109,11 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
                     if rs > 0.0 {
                         let sint_name = format!("{}.__sint", element.name);
@@ -1091,6 +1122,11 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
 
                     circuit.jfets.push(jfet);
