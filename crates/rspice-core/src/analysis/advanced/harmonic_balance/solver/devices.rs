@@ -26,6 +26,33 @@ fn junction_current(is: Value, v: Value, nvt: Value) -> (Value, Value) {
     }
 }
 
+/// Depletion charge and capacitance of a graded junction.
+///
+/// SPICE convention: below the forward knee `fc*vj` the textbook power-law
+/// holds; above it both charge and capacitance continue with the standard
+/// linearized form, C1-continuous at the knee.
+fn depletion_charge(cap: &DepletionCap, v: Value) -> (Value, Value) {
+    if cap.cj0 <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let (cj0, vj, m, fc) = (cap.cj0, cap.vj, cap.m, cap.fc);
+    let knee = fc * vj;
+
+    if v < knee {
+        let x = 1.0 - v / vj;
+        let q = cj0 * vj / (1.0 - m) * (1.0 - x.powf(1.0 - m));
+        let c = cj0 * x.powf(-m);
+        (q, c)
+    } else {
+        let f1 = vj / (1.0 - m) * (1.0 - (1.0 - fc).powf(1.0 - m));
+        let f2 = (1.0 - fc).powf(1.0 + m);
+        let f3 = 1.0 - fc * (1.0 + m);
+        let q = cj0 * (f1 + (f3 * (v - knee) + m / (2.0 * vj) * (v * v - knee * knee)) / f2);
+        let c = cj0 * (f3 + m * v / vj) / f2;
+        (q, c)
+    }
+}
+
 /// Currents and junction-frame partials of the Ebers-Moll transport core.
 struct BjtOperatingPoint {
     /// Current absorbed at the collector terminal.
@@ -302,6 +329,51 @@ impl NonlinearDeviceInstance {
             NonlinearDeviceType::Pjfet => self.jac_pjfet(node_voltages),
             NonlinearDeviceType::VoltageSwitch => self.jac_voltage_switch(node_voltages),
             NonlinearDeviceType::CurrentSwitch => self.jac_current_switch(node_voltages),
+        }
+    }
+
+    /// Whether this device stores charge (junction or diffusion capacitance).
+    pub fn has_charge_storage(&self) -> bool {
+        self.params.cap_a.cj0 > 0.0
+            || self.params.cap_b.cj0 > 0.0
+            || self.params.tt_f > 0.0
+            || self.params.tt_r > 0.0
+    }
+
+    /// Stored charge delivered INTO each node.
+    ///
+    /// Same sign convention as `evaluate`: the returned value is minus the
+    /// charge absorbed at the terminal, so the capacitive current delivered
+    /// into the node is d/dt of the returned charge. Devices without charge
+    /// storage return an empty vector.
+    pub fn charge(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        if !self.has_charge_storage() {
+            return Vec::new();
+        }
+        match self.device_type {
+            NonlinearDeviceType::Diode => self.charge_diode(node_voltages),
+            NonlinearDeviceType::NpnBjt => self.charge_bjt(1.0, node_voltages),
+            NonlinearDeviceType::PnpBjt => self.charge_bjt(-1.0, node_voltages),
+            NonlinearDeviceType::Njfet => self.charge_jfet(1.0, node_voltages),
+            NonlinearDeviceType::Pjfet => self.charge_jfet(-1.0, node_voltages),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Capacitance stamps: derivative of the charge ABSORBED at each
+    /// terminal with respect to node voltage, mirroring the `jacobian`
+    /// conductance-stamp convention.
+    pub fn charge_jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        if !self.has_charge_storage() {
+            return Vec::new();
+        }
+        match self.device_type {
+            NonlinearDeviceType::Diode => self.cap_diode(node_voltages),
+            NonlinearDeviceType::NpnBjt => self.cap_bjt(1.0, node_voltages),
+            NonlinearDeviceType::PnpBjt => self.cap_bjt(-1.0, node_voltages),
+            NonlinearDeviceType::Njfet => self.cap_jfet(1.0, node_voltages),
+            NonlinearDeviceType::Pjfet => self.cap_jfet(-1.0, node_voltages),
+            _ => Vec::new(),
         }
     }
 
@@ -754,6 +826,124 @@ impl NonlinearDeviceInstance {
         ]
     }
 
+    /// Diode stored charge: depletion plus diffusion `TT * Id`.
+    fn charge_diode(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let v_a = self.get_terminal_voltage(node_voltages, 0);
+        let v_c = self.get_terminal_voltage(node_voltages, 1);
+        let vd = v_a - v_c;
+
+        let (q_dep, _) = depletion_charge(&self.params.cap_a, vd);
+        let (id, _) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let q = q_dep + self.params.tt_f * id;
+
+        vec![(self.terminals[0], -q), (self.terminals[1], q)]
+    }
+
+    fn cap_diode(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let v_a = self.get_terminal_voltage(node_voltages, 0);
+        let v_c = self.get_terminal_voltage(node_voltages, 1);
+        let vd = v_a - v_c;
+
+        let (_, c_dep) = depletion_charge(&self.params.cap_a, vd);
+        let (_, gd) = junction_current(self.params.is, vd, self.params.n * self.params.vt);
+        let c = c_dep + self.params.tt_f * gd;
+
+        let a = self.terminals[0];
+        let k = self.terminals[1];
+        vec![((a, a), c), ((a, k), -c), ((k, a), -c), ((k, k), c)]
+    }
+
+    /// BJT junction charges in the polarity frame: B-E depletion plus
+    /// forward diffusion `TF * i_f`, B-C depletion plus reverse diffusion
+    /// `TR * i_r`. The polarity factors cancel in node space exactly as for
+    /// the transport currents.
+    fn bjt_junction_charges(&self, p: Value, node_voltages: &[Value]) -> (Value, Value, Value, Value) {
+        let v_c = self.get_terminal_voltage(node_voltages, 0);
+        let v_b = self.get_terminal_voltage(node_voltages, 1);
+        let v_e = self.get_terminal_voltage(node_voltages, 2);
+
+        let vbe = p * (v_b - v_e);
+        let vbc = p * (v_b - v_c);
+
+        let (q_dep_be, c_dep_be) = depletion_charge(&self.params.cap_a, vbe);
+        let (q_dep_bc, c_dep_bc) = depletion_charge(&self.params.cap_b, vbc);
+        let (i_f, gf) = junction_current(self.params.is, vbe, self.params.nf * self.params.vt);
+        let (i_r, gr) = junction_current(self.params.is, vbc, self.params.nr * self.params.vt);
+
+        let q_be = q_dep_be + self.params.tt_f * i_f;
+        let c_be = c_dep_be + self.params.tt_f * gf;
+        let q_bc = q_dep_bc + self.params.tt_r * i_r;
+        let c_bc = c_dep_bc + self.params.tt_r * gr;
+        (q_be, c_be, q_bc, c_bc)
+    }
+
+    fn charge_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (q_be, _, q_bc, _) = self.bjt_junction_charges(p, node_voltages);
+        let c = self.terminals[0];
+        let b = self.terminals[1];
+        let e = self.terminals[2];
+        vec![
+            (b, -p * (q_be + q_bc)),
+            (c, p * q_bc),
+            (e, p * q_be),
+        ]
+    }
+
+    fn cap_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (_, c_be, _, c_bc) = self.bjt_junction_charges(p, node_voltages);
+        let c = self.terminals[0];
+        let b = self.terminals[1];
+        let e = self.terminals[2];
+        vec![
+            ((b, b), c_be + c_bc),
+            ((b, e), -c_be),
+            ((e, b), -c_be),
+            ((e, e), c_be),
+            ((b, c), -c_bc),
+            ((c, b), -c_bc),
+            ((c, c), c_bc),
+        ]
+    }
+
+    /// JFET gate junction depletion charges in the polarity frame.
+    fn jfet_junction_charges(&self, p: Value, node_voltages: &[Value]) -> (Value, Value, Value, Value) {
+        let v_d = self.get_terminal_voltage(node_voltages, 0);
+        let v_g = self.get_terminal_voltage(node_voltages, 1);
+        let v_s = self.get_terminal_voltage(node_voltages, 2);
+
+        let (q_gs, c_gs) = depletion_charge(&self.params.cap_a, p * (v_g - v_s));
+        let (q_gd, c_gd) = depletion_charge(&self.params.cap_b, p * (v_g - v_d));
+        (q_gs, c_gs, q_gd, c_gd)
+    }
+
+    fn charge_jfet(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
+        let (q_gs, _, q_gd, _) = self.jfet_junction_charges(p, node_voltages);
+        let d = self.terminals[0];
+        let g = self.terminals[1];
+        let s = self.terminals[2];
+        vec![
+            (g, -p * (q_gs + q_gd)),
+            (s, p * q_gs),
+            (d, p * q_gd),
+        ]
+    }
+
+    fn cap_jfet(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
+        let (_, c_gs, _, c_gd) = self.jfet_junction_charges(p, node_voltages);
+        let d = self.terminals[0];
+        let g = self.terminals[1];
+        let s = self.terminals[2];
+        vec![
+            ((g, g), c_gs + c_gd),
+            ((g, s), -c_gs),
+            ((s, g), -c_gs),
+            ((s, s), c_gs),
+            ((g, d), -c_gd),
+            ((d, g), -c_gd),
+            ((d, d), c_gd),
+        ]
+    }
+
     fn eval_current_switch(&self, node_voltages: &[Value]) -> Vec<(usize, Value)> {
         let vp = self.get_terminal_voltage(node_voltages, 0);
         let vn = self.get_terminal_voltage(node_voltages, 1);
@@ -807,21 +997,25 @@ mod tests {
         lo + u * (hi - lo)
     }
 
-    /// Every conductance stamp must be the derivative of the evaluated
-    /// currents: stamp(i, j) == -d(current delivered into node i)/dV_j.
+    /// Every stamp must be the derivative of the evaluated per-node
+    /// quantity: stamp(i, j) == -d(quantity delivered into node i)/dV_j.
     /// Central differences over deterministic operating points catch any
-    /// missing, mis-signed, or region-inconsistent entry.
-    fn assert_jacobian_matches_finite_difference(
-        device: &NonlinearDeviceInstance,
+    /// missing, mis-signed, or region-inconsistent entry. Shared by the
+    /// conductance (current) and capacitance (charge) layers.
+    #[allow(clippy::too_many_arguments)]
+    fn assert_stamps_match_finite_difference(
+        label: &str,
         num_nodes: usize,
         v_range: (Value, Value),
         samples: usize,
         seed: u64,
+        tol_abs: Value,
+        deliver: &dyn Fn(&[Value]) -> Vec<(usize, Value)>,
+        stamp_fn: &dyn Fn(&[Value]) -> Vec<((usize, usize), Value)>,
     ) {
         let mut seed = seed;
         let h = 1e-7;
         let tol_rel = 1e-4;
-        let tol_abs = 1e-8;
 
         for sample in 0..samples {
             let v: Vec<Value> = (0..num_nodes)
@@ -829,7 +1023,7 @@ mod tests {
                 .collect();
 
             let mut stamps = vec![vec![0.0; num_nodes]; num_nodes];
-            for ((i, j), g) in device.jacobian(&v) {
+            for ((i, j), g) in stamp_fn(&v) {
                 if i < num_nodes && j < num_nodes {
                     stamps[i][j] += g;
                 }
@@ -843,12 +1037,12 @@ mod tests {
 
                 let mut into_p = vec![0.0; num_nodes];
                 let mut into_m = vec![0.0; num_nodes];
-                for (n, c) in device.evaluate(&vp) {
+                for (n, c) in deliver(&vp) {
                     if n < num_nodes {
                         into_p[n] += c;
                     }
                 }
-                for (n, c) in device.evaluate(&vm) {
+                for (n, c) in deliver(&vm) {
                     if n < num_nodes {
                         into_m[n] += c;
                     }
@@ -867,8 +1061,8 @@ mod tests {
                         8.0 * f64::EPSILON * into_p[i].abs().max(into_m[i].abs()) / h;
                     assert!(
                         (got - expected).abs() <= tol_rel * scale + tol_abs + noise_floor,
-                        "{:?} sample {} stamp ({}, {}): jacobian {:.6e} vs finite-difference {:.6e} at V={:?}",
-                        device.device_type,
+                        "{} sample {} stamp ({}, {}): jacobian {:.6e} vs finite-difference {:.6e} at V={:?}",
+                        label,
                         sample,
                         i,
                         j,
@@ -879,6 +1073,46 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn assert_jacobian_matches_finite_difference(
+        device: &NonlinearDeviceInstance,
+        num_nodes: usize,
+        v_range: (Value, Value),
+        samples: usize,
+        seed: u64,
+    ) {
+        assert_stamps_match_finite_difference(
+            &format!("{:?} current", device.device_type),
+            num_nodes,
+            v_range,
+            samples,
+            seed,
+            1e-8,
+            &|v| device.evaluate(v),
+            &|v| device.jacobian(v),
+        );
+    }
+
+    /// Capacitance stamps live at the 1e-12 F scale, so the absolute floor
+    /// shrinks accordingly.
+    fn assert_charge_jacobian_matches_finite_difference(
+        device: &NonlinearDeviceInstance,
+        num_nodes: usize,
+        v_range: (Value, Value),
+        samples: usize,
+        seed: u64,
+    ) {
+        assert_stamps_match_finite_difference(
+            &format!("{:?} charge", device.device_type),
+            num_nodes,
+            v_range,
+            samples,
+            seed,
+            1e-20,
+            &|v| device.charge(v),
+            &|v| device.charge_jacobian(v),
+        );
     }
 
     #[test]
@@ -956,6 +1190,70 @@ mod tests {
             err <= 1e-9 * expected_into_collector.abs(),
             "collector current at Vce=0 must be the recombination term: got {into_collector:.6e}, want {expected_into_collector:.6e}"
         );
+    }
+
+    #[test]
+    fn charge_jacobians_match_finite_difference() {
+        let mut diode = NonlinearDeviceInstance::diode(0, 1, 1e-14, 1.0);
+        diode.params.cap_a = DepletionCap::new(10e-12, 0.7, 0.5, 0.5);
+        diode.params.tt_f = 5e-9;
+        assert_charge_jacobian_matches_finite_difference(&diode, 2, (-5.0, 0.8), 60, 51);
+
+        let mut npn = NonlinearDeviceInstance::npn_bjt(0, 1, 2, 1e-14, 120.0, 3.0, 1.0, 1.0, 80.0);
+        npn.params.cap_a = DepletionCap::new(2e-12, 0.75, 0.33, 0.5);
+        npn.params.cap_b = DepletionCap::new(1e-12, 0.6, 0.4, 0.5);
+        npn.params.tt_f = 300e-12;
+        npn.params.tt_r = 10e-9;
+        assert_charge_jacobian_matches_finite_difference(&npn, 3, (-0.9, 0.8), 60, 53);
+
+        let mut pnp = NonlinearDeviceInstance::pnp_bjt(0, 1, 2, 2e-14, 80.0, 2.0, 1.0, 1.0, 60.0);
+        pnp.params.cap_a = DepletionCap::new(2e-12, 0.75, 0.33, 0.5);
+        pnp.params.cap_b = DepletionCap::new(1e-12, 0.6, 0.4, 0.5);
+        pnp.params.tt_f = 500e-12;
+        pnp.params.tt_r = 20e-9;
+        assert_charge_jacobian_matches_finite_difference(&pnp, 3, (-0.9, 0.8), 60, 57);
+
+        let mut njf = NonlinearDeviceInstance::njfet(0, 1, 2, -2.0, 1e-3, 0.02, 1e-14);
+        njf.params.cap_a = DepletionCap::new(4e-12, 0.8, 0.5, 0.5);
+        njf.params.cap_b = DepletionCap::new(4e-12, 0.8, 0.5, 0.5);
+        assert_charge_jacobian_matches_finite_difference(&njf, 3, (-2.5, 0.6), 60, 59);
+
+        let mut pjf = NonlinearDeviceInstance::pjfet(0, 1, 2, -2.0, 1e-3, 0.02, 1e-14);
+        pjf.params.cap_a = DepletionCap::new(4e-12, 0.8, 0.5, 0.5);
+        pjf.params.cap_b = DepletionCap::new(4e-12, 0.8, 0.5, 0.5);
+        assert_charge_jacobian_matches_finite_difference(&pjf, 3, (-2.5, 0.6), 60, 61);
+    }
+
+    /// Depletion charge and capacitance must be C1-continuous at the
+    /// forward-bias linearization knee fc*vj, and the capacitance must match
+    /// the textbook power law in reverse bias.
+    #[test]
+    fn depletion_charge_is_continuous_at_the_knee_and_exact_in_reverse() {
+        let cap = DepletionCap::new(10e-12, 0.7, 0.5, 0.5);
+        let knee = cap.fc * cap.vj;
+
+        for eps in [1e-9, 1e-7] {
+            let (q_below, c_below) = depletion_charge(&cap, knee - eps);
+            let (q_above, c_above) = depletion_charge(&cap, knee + eps);
+            assert!(
+                (q_below - q_above).abs() < 1e-6 * q_below.abs().max(1e-15),
+                "depletion charge continuous at the knee: {q_below:.6e} vs {q_above:.6e}"
+            );
+            assert!(
+                (c_below - c_above).abs() < 1e-4 * c_below.abs(),
+                "depletion capacitance continuous at the knee: {c_below:.6e} vs {c_above:.6e}"
+            );
+        }
+
+        // Reverse bias: C = CJ0*(1 - v/vj)^-m exactly.
+        for v in [-5.0, -2.0, -0.5] {
+            let (_, c) = depletion_charge(&cap, v);
+            let expected = cap.cj0 * (1.0 - v / cap.vj).powf(-cap.m);
+            assert!(
+                (c - expected).abs() < 1e-12 * expected,
+                "reverse-bias capacitance at {v} V: got {c:.6e}, want {expected:.6e}"
+            );
+        }
     }
 
     /// Level-1 channel-length modulation applies in triode and saturation;

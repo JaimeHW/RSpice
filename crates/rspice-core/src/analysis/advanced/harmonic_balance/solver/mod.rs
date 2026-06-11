@@ -296,6 +296,50 @@ pub enum NonlinearDeviceType {
     CurrentSwitch,
 }
 
+/// Depletion-capacitance parameter set for one junction.
+///
+/// `cj0 = 0` disables the junction charge entirely; `fc` is the forward-bias
+/// linearization knee (SPICE FC, default 0.5).
+#[derive(Debug, Clone, Copy)]
+pub struct DepletionCap {
+    /// Zero-bias junction capacitance (F)
+    pub cj0: Value,
+    /// Built-in potential (V)
+    pub vj: Value,
+    /// Grading coefficient
+    pub m: Value,
+    /// Forward-bias depletion linearization coefficient
+    pub fc: Value,
+}
+
+impl DepletionCap {
+    /// A disabled junction (no charge).
+    pub fn none() -> Self {
+        Self {
+            cj0: 0.0,
+            vj: 1.0,
+            m: 0.5,
+            fc: 0.5,
+        }
+    }
+
+    /// Junction parameters with SPICE-standard clamping.
+    pub fn new(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
+        Self {
+            cj0: cj0.max(0.0),
+            vj: vj.max(0.01),
+            m: m.clamp(0.01, 0.95),
+            fc: fc.clamp(0.0, 0.99),
+        }
+    }
+}
+
+impl Default for DepletionCap {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 /// Device parameters for nonlinear devices
 #[derive(Debug, Clone)]
 pub struct NonlinearDeviceParams {
@@ -331,6 +375,15 @@ pub struct NonlinearDeviceParams {
     pub smooth: Value,
     /// Control conversion gain (e.g. sense conductance A/V)
     pub control_gain: Value,
+    /// Primary junction depletion capacitance (diode junction, BJT B-E,
+    /// JFET G-S)
+    pub cap_a: DepletionCap,
+    /// Secondary junction depletion capacitance (BJT B-C, JFET G-D)
+    pub cap_b: DepletionCap,
+    /// Forward transit time: diode TT / BJT TF (diffusion charge tau_f * i_f)
+    pub tt_f: Value,
+    /// Reverse transit time: BJT TR (diffusion charge tau_r * i_r)
+    pub tt_r: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -352,6 +405,10 @@ impl Default for NonlinearDeviceParams {
             vh: 0.0,
             smooth: 0.1,
             control_gain: 1.0,
+            cap_a: DepletionCap::none(),
+            cap_b: DepletionCap::none(),
+            tt_f: 0.0,
+            tt_r: 0.0,
         }
     }
 }
