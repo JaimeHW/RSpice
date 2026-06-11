@@ -10,7 +10,14 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
         SourceSpec::DcTransient { dc_value, .. } => *dc_value,
         SourceSpec::DcAcTransient { dc_value, .. } => *dc_value,
         SourceSpec::Pulse { v1, .. } => *v1, // Use initial value
-        SourceSpec::Sin { offset, .. } => *offset, // Use DC offset
+        // ngspice's TRANOP evaluates the waveform at t=0, where SIN holds
+        // VO + VA*sin(PHASE) (vsrcload.c); phase is stored in radians.
+        SourceSpec::Sin {
+            offset,
+            amplitude,
+            phase,
+            ..
+        } => offset + amplitude * phase.sin(),
         SourceSpec::Pwl { points } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
         SourceSpec::PwlFile { value_offset, .. } => *value_offset, // Use value offset as DC
         SourceSpec::Exp { v1, .. } => *v1,
