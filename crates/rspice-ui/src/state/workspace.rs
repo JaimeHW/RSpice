@@ -122,6 +122,35 @@ impl OpenCellView {
     }
 }
 
+/// One specification bound for a `.MEAS` result — a row of the specs
+/// matrix. At least one of `min`/`max` is normally set; a spec with
+/// neither still pins the measurement as a tracked row (value-only).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpecEntry {
+    /// `.MEAS` result name this spec bounds (case-insensitive match).
+    pub measurement: String,
+    /// Lower bound (pass when value ≥ min).
+    pub min: Option<f64>,
+    /// Upper bound (pass when value ≤ max).
+    pub max: Option<f64>,
+    /// Display unit, purely cosmetic (e.g. "V", "s", "dB").
+    pub unit: String,
+}
+
+impl SpecEntry {
+    /// Spec verdict for one measured value.
+    pub fn passes(&self, value: f64) -> bool {
+        self.min.is_none_or(|min| value >= min) && self.max.is_none_or(|max| value <= max)
+    }
+
+    /// Violation magnitude (how far outside the bounds), 0 when passing.
+    pub fn violation(&self, value: f64) -> f64 {
+        let below = self.min.map_or(0.0, |min| (min - value).max(0.0));
+        let above = self.max.map_or(0.0, |max| (value - max).max(0.0));
+        below.max(above)
+    }
+}
+
 /// Project-level workspace state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectWorkspace {
@@ -130,6 +159,10 @@ pub struct ProjectWorkspace {
     pub open_views: Vec<OpenCellView>,
     pub hierarchy_stack: Vec<CellViewRef>,
     pub schematic_buffers: HashMap<String, SchematicState>,
+    /// Measurement specifications for the results specs matrix. Project
+    /// design intent, so it persists with the workspace.
+    #[serde(default)]
+    pub specs: Vec<SpecEntry>,
 }
 
 impl Default for ProjectWorkspace {
@@ -144,6 +177,7 @@ impl Default for ProjectWorkspace {
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],
             schematic_buffers,
+            specs: Vec::new(),
         }
     }
 }

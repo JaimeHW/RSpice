@@ -23,4 +23,4 @@ pub use simulation::{
     AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, NoiseContributorRow,
     NoiseSummary, OperatingPointValue, SimulationRun, SimulationState, WaveformData,
 };
-pub use workspace::{CellViewRef, OpenCellView, ProjectDescriptor, ProjectWorkspace};
+pub use workspace::{CellViewRef, OpenCellView, ProjectDescriptor, ProjectWorkspace, SpecEntry};

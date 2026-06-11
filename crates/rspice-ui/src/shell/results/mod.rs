@@ -16,6 +16,7 @@ mod nyquist;
 mod op_inspector;
 mod pz;
 mod smith;
+mod specs;
 mod strip;
 mod waves;
 
@@ -54,6 +55,8 @@ pub enum ResultViewer {
     Op,
     /// Ranked band-integrated noise contributors.
     NoiseContrib,
+    /// Measurements × runs matrix against spec bounds.
+    Specs,
     /// Legacy Nyquist surface (pre-redesign chrome).
     Nyquist,
     /// Legacy Smith chart surface.
@@ -73,6 +76,7 @@ impl ResultViewer {
             ResultViewer::Hist => "HIST",
             ResultViewer::Op => "OP",
             ResultViewer::NoiseContrib => "NOISE",
+            ResultViewer::Specs => "SPECS",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::PoleZero => "PZ",
@@ -89,6 +93,7 @@ impl ResultViewer {
             ResultViewer::Hist => "mc",
             ResultViewer::Op => "op info",
             ResultViewer::NoiseContrib => "noise contributors",
+            ResultViewer::Specs => "specs matrix",
             ResultViewer::Nyquist => "nyquist",
             ResultViewer::Smith => "smith",
             ResultViewer::PoleZero => "pole-zero",
@@ -108,11 +113,12 @@ impl ResultViewer {
             ResultViewer::Waves
             | ResultViewer::Bode
             | ResultViewer::Op
-            | ResultViewer::NoiseContrib => None,
+            | ResultViewer::NoiseContrib
+            | ResultViewer::Specs => None,
         }
     }
 
-    const PRIMARY: [ResultViewer; 7] = [
+    const PRIMARY: [ResultViewer; 8] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
         ResultViewer::Fft,
@@ -120,6 +126,7 @@ impl ResultViewer {
         ResultViewer::Hist,
         ResultViewer::Op,
         ResultViewer::NoiseContrib,
+        ResultViewer::Specs,
     ];
     const LEGACY: [ResultViewer; 3] = [
         ResultViewer::Nyquist,
@@ -222,6 +229,8 @@ pub struct ResultsState {
     pub op_filter: String,
     /// OP inspector sort: (column key, descending). Transient.
     pub op_sort: Option<(String, bool)>,
+    /// Open spec-editor rows (None = matrix view). Transient.
+    pub spec_drafts: Option<Vec<specs::SpecDraft>>,
 }
 
 /// One user expression trace on a waves strip.
@@ -678,6 +687,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ResultViewer::Hist => hist::show(ui, &mut app.state),
         ResultViewer::Op => op_inspector::show(ui, &mut app.state),
         ResultViewer::NoiseContrib => noise_contrib::show(ui, &mut app.state),
+        ResultViewer::Specs => specs::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
@@ -754,6 +764,22 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                             .font(theme::mono(tokens::FS_1, FontWeight::Regular))
                             .hint_text("filter devices…"),
                     );
+                }
+                ResultViewer::Specs => {
+                    if state.shell.results.spec_drafts.is_some() {
+                        if ui.button("Discard").clicked() {
+                            state.shell.results.spec_drafts = None;
+                        }
+                        if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
+                            state.push_sim_message(
+                                crate::common::app::ConsoleMessage::warning(
+                                    "Specs not applied — fix the invalid bound first",
+                                ),
+                            );
+                        }
+                    } else if ui.button("Edit specs…").clicked() {
+                        specs::open_editor(state);
+                    }
                 }
                 _ => {}
             }
@@ -1033,6 +1059,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Hist => hist::right_panel(ui, state),
         ResultViewer::Op => op_inspector::right_panel(ui, state),
         ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
+        ResultViewer::Specs => specs::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
