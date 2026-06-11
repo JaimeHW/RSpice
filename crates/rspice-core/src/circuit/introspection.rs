@@ -93,6 +93,28 @@ impl CircuitData {
             });
         }
 
+        for jfet in &self.jfets {
+            let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
+            let device_kind = match jfet.params.channel_model {
+                crate::device::JfetChannelModel::ShichmanHodges => "JFET",
+                _ => "MESFET",
+            };
+            entries.push(DeviceOpEntry {
+                name: jfet.name.clone(),
+                device_kind,
+                region: None,
+                params: vec![
+                    ("id", ids),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("gm", gm),
+                    ("gds", gds),
+                    ("igs", igs),
+                    ("igd", igd),
+                ],
+            });
+        }
+
         DeviceOpReport { entries }
     }
 

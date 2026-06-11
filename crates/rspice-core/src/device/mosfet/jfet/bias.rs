@@ -319,6 +319,20 @@ impl Jfet {
     }
 
     #[inline]
+    /// Cached operating-point values from the last accepted Newton
+    /// solution: `(vgs, vds, ids, gm, gds, igs, igd)`.
+    pub fn op_values(&self) -> (Value, Value, Value, Value, Value, Value, Value) {
+        (
+            self.vgs,
+            self.vds,
+            self.eval_ids,
+            self.eval_gm,
+            self.eval_gds,
+            self.eval_igs,
+            self.eval_igd,
+        )
+    }
+
     pub(crate) fn set_hfet_legacy_inverse_active(&mut self, active: bool) {
         let active = self.uses_hfet_legacy_inverse_mode() && active;
         if self.hfet_legacy_inverse_active != active {
