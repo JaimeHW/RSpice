@@ -1012,23 +1012,60 @@ pub mod autodiff {
     use super::*;
     use std::collections::{HashMap, HashSet};
 
+    /// Bitmask over differentiation axes (node voltages first, then
+    /// branch-current unknowns). Devices with more than 128 axes saturate
+    /// to "all axes" — dense but always correct.
+    pub(crate) type AxisMask = u128;
+
+    /// All-axes mask (saturation value)
+    const ALL_AXES: AxisMask = !0;
+
+    /// Bit for one differentiation axis
+    fn axis_bit(wrt: &DerivativeWrt, num_nodes: usize) -> AxisMask {
+        let ordinal = match wrt {
+            DerivativeWrt::Voltage(node) => *node,
+            DerivativeWrt::BranchCurrent(k) => num_nodes + k,
+        };
+        if ordinal >= 128 {
+            ALL_AXES
+        } else {
+            1 << ordinal
+        }
+    }
+
+    /// Bit for a unified node index appearing in a probe (the ground
+    /// sentinel is not an axis)
+    fn node_bit(node: usize) -> AxisMask {
+        if node == usize::MAX {
+            0
+        } else if node >= 128 {
+            ALL_AXES
+        } else {
+            1 << node
+        }
+    }
+
     /// Shadow-variable context for forward-mode AD through assignment
     /// sequences.
     ///
     /// For every variable whose value depends (transitively) on node
-    /// voltages, a shadow variable per node holds d(var)/dV(node). The
-    /// shadows are updated by generated assignments placed immediately
-    /// before each original assignment.
+    /// voltages, a shadow variable holds d(var)/d(axis) — but only along
+    /// the axes the variable can actually vary with (its dependency mask):
+    /// a variable computed from V(g) and V(s) never carries shadows along
+    /// the drain or any branch-current axis. The shadows are updated by
+    /// generated assignments placed immediately before each original
+    /// assignment.
     #[derive(Debug, Default)]
     pub struct ShadowContext {
-        /// Variables with voltage-dependent values. For arrays, the array
-        /// name and every element name join together: one voltage-dependent
-        /// element shadows the whole array (a runtime index may select any
-        /// slot).
-        shadowed: HashSet<SmolStr>,
+        /// Dependency axes per voltage-dependent variable. For arrays, the
+        /// array name and every element name share one mask: a runtime
+        /// index may select any slot.
+        shadowed: HashMap<SmolStr, AxisMask>,
         /// First slot of the contiguous shadow run per shadow-array name
         /// (`shadow_name(array, wrt)` -> variable index of element `lower`)
         array_shadow_base: HashMap<SmolStr, usize>,
+        /// Node-axis count (axis ordinals of branch unknowns start here)
+        num_nodes: usize,
     }
 
     impl ShadowContext {
@@ -1046,7 +1083,19 @@ pub mod autodiff {
         }
 
         pub fn is_shadowed(&self, name: &str) -> bool {
-            self.shadowed.contains(name)
+            self.shadowed.get(name).is_some_and(|mask| *mask != 0)
+        }
+
+        /// Whether `name` carries a shadow along the given axis
+        pub fn is_shadowed_on(&self, name: &str, wrt: &DerivativeWrt) -> bool {
+            self.shadowed
+                .get(name)
+                .is_some_and(|mask| mask & axis_bit(wrt, self.num_nodes) != 0)
+        }
+
+        /// Dependency mask of a variable (0 when not shadowed)
+        fn axes_of(&self, name: &str) -> AxisMask {
+            self.shadowed.get(name).copied().unwrap_or(0)
         }
 
         /// First variable slot of an array's shadow run along an axis
@@ -1068,30 +1117,39 @@ pub mod autodiff {
     /// Check whether an expression can have a nonzero derivative along any
     /// node/branch axis, directly or through already-shadowed variables.
     ///
+    /// Axes along which an expression can have a nonzero derivative,
+    /// directly (probes) or through already-shadowed variables.
+    ///
     /// Comparisons, logical operations, and event detectors differentiate
     /// to exactly zero regardless of their operands, so variables holding
     /// only such results (e.g. snapshotted branch guards) never need
-    /// shadow slots.
-    fn has_nonzero_derivative(expr: &IrExpr, shadowed: &HashSet<SmolStr>) -> bool {
-        let recurse = |e: &IrExpr| has_nonzero_derivative(e, shadowed);
+    /// shadow slots; current probes are treated as constants in the DC
+    /// Jacobian (matching [`differentiate_with_shadows`]).
+    fn derivative_axes(expr: &IrExpr, deps: &HashMap<SmolStr, AxisMask>, num_nodes: usize) -> AxisMask {
+        let recurse = |e: &IrExpr| derivative_axes(e, deps, num_nodes);
         match expr {
-            IrExpr::Voltage(..) | IrExpr::Current(..) | IrExpr::BranchCurrent(_) => true,
-            IrExpr::Var(name) => shadowed.contains(name),
+            IrExpr::Voltage(p, n) => node_bit(*p) | node_bit(*n),
+            IrExpr::BranchCurrent(k) => {
+                axis_bit(&DerivativeWrt::BranchCurrent(*k), num_nodes)
+            }
+            // Current probes differentiate to zero in the DC Jacobian
+            IrExpr::Current(..) => 0,
+            IrExpr::Var(name) => deps.get(name).copied().unwrap_or(0),
             // The index only selects; the elements carry the slope
-            IrExpr::VarIndexed { array, .. } => shadowed.contains(array),
+            IrExpr::VarIndexed { array, .. } => deps.get(array).copied().unwrap_or(0),
             IrExpr::Const(_)
             | IrExpr::Param(_)
             | IrExpr::ParamGiven(_)
             | IrExpr::Time
             | IrExpr::Temperature
             | IrExpr::Vt
-            | IrExpr::Analysis(_) => false,
+            | IrExpr::Analysis(_) => 0,
             IrExpr::Binary(op, l, r) => match op {
                 BinaryOp::Add
                 | BinaryOp::Sub
                 | BinaryOp::Mul
                 | BinaryOp::Div
-                | BinaryOp::Pow => recurse(l) || recurse(r),
+                | BinaryOp::Pow => recurse(l) | recurse(r),
                 // Piecewise-constant results: derivative identically zero
                 BinaryOp::Mod
                 | BinaryOp::Eq
@@ -1106,20 +1164,20 @@ pub mod autodiff {
                 | BinaryOp::BitOr
                 | BinaryOp::BitXor
                 | BinaryOp::Shl
-                | BinaryOp::Shr => false,
+                | BinaryOp::Shr => 0,
             },
             IrExpr::Unary(UnaryOp::Neg | UnaryOp::Pos, e) => recurse(e),
-            IrExpr::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => false,
+            IrExpr::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => 0,
             IrExpr::Limexp(e) | IrExpr::Ddt(e) => recurse(e),
             IrExpr::Idt(e, _) => recurse(e),
             IrExpr::IdtMod { expr, .. } => recurse(expr),
             IrExpr::Limit(e, _) => recurse(e),
             IrExpr::Call(func, args) => match func {
-                IrFunction::Floor | IrFunction::Ceil => false,
-                _ => args.iter().any(recurse),
+                IrFunction::Floor | IrFunction::Ceil => 0,
+                _ => args.iter().map(recurse).fold(0, |acc, m| acc | m),
             },
             // The condition only selects; the branches carry the slope
-            IrExpr::Conditional(_, t, e) => recurse(t) || recurse(e),
+            IrExpr::Conditional(_, t, e) => recurse(t) | recurse(e),
             IrExpr::TableLookup { input, .. } => recurse(input),
             IrExpr::AbsDelay { expr, .. } => recurse(expr),
             IrExpr::Transition { expr, .. }
@@ -1135,50 +1193,56 @@ pub mod autodiff {
             | IrExpr::Above { .. }
             | IrExpr::Timer { .. }
             | IrExpr::WhiteNoise { .. }
-            | IrExpr::FlickerNoise { .. } => false,
+            | IrExpr::FlickerNoise { .. } => 0,
         }
     }
 
-    /// Collect voltage-dependent variable names over an item tree
+    /// Accumulate per-variable dependency axes over an item tree
     /// (fixpoint helper for [`build_shadow_assignments`]).
     ///
     /// A voltage-dependent write into any array element shadows the whole
     /// array: a runtime index may route the value to any slot, so every
-    /// element (and the array name itself, checked by indexed reads) joins
-    /// the set together.
+    /// element (and the array name itself, checked by indexed reads)
+    /// shares one mask.
     fn scan_shadowed(
         items: &[IrAssignmentItem],
         variables: &[VarDef],
         arrays: &[ArrayDef],
-        shadowed: &mut HashSet<SmolStr>,
+        num_nodes: usize,
+        deps: &mut HashMap<SmolStr, AxisMask>,
         changed: &mut bool,
     ) {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
-                    if !has_nonzero_derivative(&assign.expr, shadowed) {
+                    let mask = derivative_axes(&assign.expr, deps, num_nodes);
+                    if mask == 0 {
                         continue;
                     }
                     let enclosing = arrays.iter().find(|a| {
                         assign.var_index >= a.base && assign.var_index < a.base + a.len
                     });
                     if let Some(array) = enclosing {
-                        if shadowed.insert(array.name.clone()) {
+                        let current = deps.get(&array.name).copied().unwrap_or(0);
+                        if current | mask != current {
+                            let merged = current | mask;
+                            deps.insert(array.name.clone(), merged);
                             for k in array.lower..array.lower + array.len as i64 {
-                                shadowed.insert(format!("{}[{k}]", array.name).into());
+                                deps.insert(format!("{}[{k}]", array.name).into(), merged);
                             }
                             *changed = true;
                         }
                     } else {
                         let name = &variables[assign.var_index].name;
-                        if !shadowed.contains(name) {
-                            shadowed.insert(name.clone());
+                        let current = deps.get(name).copied().unwrap_or(0);
+                        if current | mask != current {
+                            deps.insert(name.clone(), current | mask);
                             *changed = true;
                         }
                     }
                 }
                 IrAssignmentItem::Loop { body, .. } => {
-                    scan_shadowed(body, variables, arrays, shadowed, changed);
+                    scan_shadowed(body, variables, arrays, num_nodes, deps, changed);
                 }
             }
         }
@@ -1201,9 +1265,14 @@ pub mod autodiff {
                 IrAssignmentItem::Assign(assign) => {
                     if let Some(target) = &assign.index {
                         // Indexed write: the shadow run receives an indexed
-                        // write of the value's derivative at the same slot
-                        if ctx.is_shadowed(&target.array) {
+                        // write of the value's derivative at the same slot,
+                        // along the array's live axes only
+                        let mask = ctx.axes_of(&target.array);
+                        if mask != 0 {
                             for wrt in axes(num_nodes, num_branches) {
+                                if mask & axis_bit(&wrt, num_nodes) == 0 {
+                                    continue;
+                                }
                                 let deriv =
                                     simplify(differentiate_with_shadows(&assign.expr, &wrt, ctx));
                                 let shadow_array = ShadowContext::shadow_name(&target.array, &wrt);
@@ -1226,8 +1295,12 @@ pub mod autodiff {
                         continue;
                     }
                     let target = variables[assign.var_index].name.clone();
-                    if ctx.is_shadowed(&target) {
+                    let mask = ctx.axes_of(&target);
+                    if mask != 0 {
                         for wrt in axes(num_nodes, num_branches) {
+                            if mask & axis_bit(&wrt, num_nodes) == 0 {
+                                continue;
+                            }
                             let deriv =
                                 simplify(differentiate_with_shadows(&assign.expr, &wrt, ctx));
                             let shadow = ShadowContext::shadow_name(&target, &wrt);
@@ -1268,16 +1341,17 @@ pub mod autodiff {
         num_nodes: usize,
         num_branches: usize,
     ) -> ShadowContext {
-        // Fixpoint: a variable is voltage-dependent if any assignment to it
-        // depends on node quantities or on another shadowed variable.
-        let mut shadowed: HashSet<SmolStr> = HashSet::new();
+        // Fixpoint: a variable depends on an axis if any assignment to it
+        // reads a probe of that axis or another variable depending on it.
+        let mut deps: HashMap<SmolStr, AxisMask> = HashMap::new();
         loop {
             let mut changed = false;
             scan_shadowed(
                 &ir.assignments,
                 &ir.variables,
                 &ir.arrays,
-                &mut shadowed,
+                num_nodes,
+                &mut deps,
                 &mut changed,
             );
             if !changed {
@@ -1285,18 +1359,21 @@ pub mod autodiff {
             }
         }
 
-        if shadowed.is_empty() {
+        if deps.is_empty() {
             return ShadowContext::default();
         }
 
-        // Register shadow variables. Array elements get their slots in
-        // contiguous runs (allocated below) so runtime-indexed reads and
-        // writes can address d(arr[i]) as shadow_base + (i - lower); the
-        // scalar loop must skip them.
+        // Register shadow variables along each variable's live axes only:
+        // a value computed from V(g) and V(s) never varies with the drain
+        // or any branch unknown, so those slots (and their update
+        // assignments downstream) never exist. Array elements get their
+        // slots in contiguous runs (allocated below) so runtime-indexed
+        // reads and writes can address d(arr[i]) as
+        // shadow_base + (i - lower); the scalar loop must skip them.
         let array_member: HashSet<SmolStr> = ir
             .arrays
             .iter()
-            .filter(|a| shadowed.contains(&a.name))
+            .filter(|a| deps.get(&a.name).copied().unwrap_or(0) != 0)
             .flat_map(|a| {
                 std::iter::once(a.name.clone()).chain(
                     ir.variables[a.base..a.base + a.len]
@@ -1306,11 +1383,14 @@ pub mod autodiff {
             })
             .collect();
         let mut shadow_index: HashMap<SmolStr, usize> = HashMap::new();
-        for name in &shadowed {
+        for (name, mask) in &deps {
             if array_member.contains(name) {
                 continue;
             }
             for wrt in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&wrt, num_nodes) == 0 {
+                    continue;
+                }
                 let shadow = ShadowContext::shadow_name(name, &wrt);
                 shadow_index.insert(shadow.clone(), ir.variables.len());
                 ir.variables.push(VarDef {
@@ -1320,11 +1400,18 @@ pub mod autodiff {
             }
         }
 
-        // Contiguous shadow runs per (array, axis)
+        // Contiguous shadow runs per (array, live axis)
         let mut array_shadow_base: HashMap<SmolStr, usize> = HashMap::new();
         let mut shadow_runs: Vec<VarDef> = Vec::new();
-        for array in ir.arrays.iter().filter(|a| shadowed.contains(&a.name)) {
+        for array in ir.arrays.iter() {
+            let mask = deps.get(&array.name).copied().unwrap_or(0);
+            if mask == 0 {
+                continue;
+            }
             for wrt in axes(num_nodes, num_branches) {
+                if mask & axis_bit(&wrt, num_nodes) == 0 {
+                    continue;
+                }
                 let run_base = ir.variables.len() + shadow_runs.len();
                 array_shadow_base
                     .insert(ShadowContext::shadow_name(&array.name, &wrt), run_base);
@@ -1342,8 +1429,9 @@ pub mod autodiff {
         ir.variables.extend(shadow_runs);
 
         let ctx = ShadowContext {
-            shadowed: shadowed.clone(),
+            shadowed: deps,
             array_shadow_base,
+            num_nodes,
         };
 
         // Interleave shadow updates before each original assignment.
@@ -1564,9 +1652,11 @@ pub mod autodiff {
             }
 
             // Chain rule through intermediate variables: the shadow
-            // variable carries the derivative along the active axis
+            // variable carries the derivative along the active axis. A
+            // variable that cannot vary along this axis differentiates to
+            // zero without a shadow slot ever existing.
             IrExpr::Var(name) => {
-                if shadows.is_shadowed(name) {
+                if shadows.is_shadowed_on(name, wrt) {
                     IrExpr::Var(ShadowContext::shadow_name(name, wrt))
                 } else {
                     IrExpr::Const(0.0)
