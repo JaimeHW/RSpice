@@ -72,4 +72,12 @@ pub struct SimulationState {
 
     /// Currently selected analysis index within the active run
     pub active_analysis_idx: Option<usize>,
+
+    /// Run IDs overlaid onto the active run in the results viewers.
+    ///
+    /// Overlay grammar: *signal owns hue, run owns weight* — a signal keeps
+    /// one trace color across every run; the active run draws at full
+    /// strength and overlaid runs at reduced alpha/stroke. IDs that leave
+    /// the history are pruned automatically.
+    pub overlay_run_ids: Vec<u64>,
 }

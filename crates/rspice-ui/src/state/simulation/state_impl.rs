@@ -167,6 +167,7 @@ impl SimulationState {
 
         // Prune history if needed
         self.prune_runs_history();
+        self.prune_overlay_ids();
 
         // Return mutable reference to the new run
         &mut self.runs[0]
@@ -250,6 +251,71 @@ impl SimulationState {
     /// Get the currently active run (if any)
     pub fn active_run(&self) -> Option<&SimulationRun> {
         self.active_run_idx.and_then(|idx| self.runs.get(idx))
+    }
+
+    // =========================================================================
+    // Run overlay (signal owns hue, run owns weight)
+    // =========================================================================
+
+    /// Look up a run by its stable ID.
+    pub fn run_by_id(&self, run_id: u64) -> Option<&SimulationRun> {
+        self.runs.iter().find(|run| run.id == run_id)
+    }
+
+    /// Whether a run is currently overlaid onto the active run.
+    pub fn is_run_overlaid(&self, run_id: u64) -> bool {
+        self.overlay_run_ids.contains(&run_id)
+    }
+
+    /// Toggle a run in or out of the overlay set. The active run is always
+    /// drawn and cannot be overlaid onto itself; toggling it is a no-op.
+    /// Returns the new membership state.
+    pub fn toggle_run_overlay(&mut self, run_id: u64) -> bool {
+        if self.active_run().is_some_and(|run| run.id == run_id) {
+            return false;
+        }
+        if let Some(pos) = self.overlay_run_ids.iter().position(|id| *id == run_id) {
+            self.overlay_run_ids.remove(pos);
+            self.data_version += 1;
+            false
+        } else if self.run_by_id(run_id).is_some() {
+            self.overlay_run_ids.push(run_id);
+            self.data_version += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove every overlay toggle in one action.
+    pub fn clear_run_overlays(&mut self) {
+        if !self.overlay_run_ids.is_empty() {
+            self.overlay_run_ids.clear();
+            self.data_version += 1;
+        }
+    }
+
+    /// The runs to draw: the active run first (full weight), then every
+    /// overlaid run in history order (reduced weight). The active run never
+    /// repeats even when its ID is also in the overlay set.
+    pub fn display_runs(&self) -> Vec<&SimulationRun> {
+        let mut out = Vec::new();
+        let active_id = self.active_run().map(|run| run.id);
+        if let Some(run) = self.active_run() {
+            out.push(run);
+        }
+        for run in &self.runs {
+            if Some(run.id) != active_id && self.overlay_run_ids.contains(&run.id) {
+                out.push(run);
+            }
+        }
+        out
+    }
+
+    /// Drop overlay IDs whose runs have left the history.
+    fn prune_overlay_ids(&mut self) {
+        self.overlay_run_ids
+            .retain(|id| self.runs.iter().any(|run| run.id == *id));
     }
 
     /// Get the currently active analysis (if any)

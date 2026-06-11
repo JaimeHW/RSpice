@@ -43,6 +43,11 @@ struct StripTrace {
     y: Arc<[f64]>,
     kind: TraceKind,
     visible: bool,
+    /// The run this trace belongs to (cache-key discriminator).
+    run_id: u64,
+    /// Overlay traces come from a non-active run: same signal hue, reduced
+    /// weight, visibility slaved to the active run's matching signal.
+    overlay: bool,
 }
 
 /// One strip (== one analysis of the active run).
@@ -56,7 +61,21 @@ pub(super) struct StripModel {
     /// Phase traces carry the unwrapped (continuous) series instead of the
     /// raw ±180°-wrapped samples. Folded into the cache keys.
     phase_continuous: bool,
+    /// Number of active-run traces at the front of `traces`; everything
+    /// after is overlay. The legend lists only this prefix (signal owns
+    /// hue — one chip per signal, all runs).
+    signal_trace_count: usize,
     traces: Vec<StripTrace>,
+}
+
+/// Fold a run identity into a cache key for overlay traces. Active-run
+/// keys stay unchanged so existing envelopes/ranges remain warm.
+fn run_mixed_key(base: u64, run_id: u64, overlay: bool) -> u64 {
+    if overlay {
+        base ^ run_id.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    } else {
+        base
+    }
 }
 
 impl StripModel {
@@ -94,7 +113,8 @@ pub(super) fn build_models(
     tokens: &Tokens,
     phase_continuous: bool,
 ) -> Vec<StripModel> {
-    let Some(run) = simulation.active_run() else {
+    let display_runs = simulation.display_runs();
+    let Some((&run, overlay_runs)) = display_runs.split_first() else {
         return Vec::new();
     };
     let mut models = Vec::new();
@@ -143,17 +163,94 @@ pub(super) fn build_models(
                 y,
                 kind,
                 visible: waveform.visible,
+                run_id: run.id,
+                overlay: false,
             });
+        }
+        let signal_trace_count = traces.len();
+
+        // Overlay runs: match the same analysis (type, then label when it
+        // disambiguates) and merge traces by signal name. Signal owns hue —
+        // overlay traces reuse the active trace's color and visibility —
+        // run owns weight (applied at draw time).
+        let mut overlaid_run_count = 0usize;
+        for overlay_run in overlay_runs {
+            let overlay_analysis = overlay_run
+                .analyses
+                .iter()
+                .find(|candidate| {
+                    candidate.analysis_type == analysis.analysis_type
+                        && candidate.label == analysis.label
+                })
+                .or_else(|| {
+                    overlay_run
+                        .analyses
+                        .iter()
+                        .find(|candidate| candidate.analysis_type == analysis.analysis_type)
+                });
+            let Some(overlay_analysis) = overlay_analysis else {
+                continue;
+            };
+
+            let mut contributed = false;
+            for signal_index in 0..signal_trace_count {
+                let (signal_name, signal_color, signal_kind, signal_visible) = {
+                    let signal = &traces[signal_index];
+                    (signal.name.clone(), signal.color, signal.kind, signal.visible)
+                };
+                let Some((overlay_index, overlay_waveform)) = overlay_analysis
+                    .waveforms
+                    .iter()
+                    .enumerate()
+                    .find(|(_, waveform)| waveform.name == signal_name)
+                else {
+                    continue;
+                };
+
+                let base_key = (analysis_index as u64) << 32 | overlay_index as u64;
+                let derived_key = run_mixed_key(base_key, overlay_run.id, true);
+                let y = match signal_kind {
+                    TraceKind::MagnitudeDb => derived.db(derived_key, &overlay_waveform.y),
+                    TraceKind::PhaseDeg if phase_continuous => {
+                        derived.unwrapped(derived_key, &overlay_waveform.y)
+                    }
+                    _ => Arc::clone(&overlay_waveform.y),
+                };
+                traces.push(StripTrace {
+                    waveform_index: overlay_index,
+                    name: signal_name,
+                    color: signal_color,
+                    x: Arc::clone(&overlay_waveform.x),
+                    y,
+                    kind: signal_kind,
+                    visible: signal_visible,
+                    run_id: overlay_run.id,
+                    overlay: true,
+                });
+                contributed = true;
+            }
+            if contributed {
+                overlaid_run_count += 1;
+            }
+        }
+
+        let mut subtitle = analysis.label.clone();
+        if overlaid_run_count > 0 {
+            subtitle = format!(
+                "{subtitle} · +{overlaid_run_count} run{} overlaid",
+                if overlaid_run_count == 1 { "" } else { "s" }
+            );
         }
 
         models.push(StripModel {
             analysis_index,
             kind_tag: analysis.analysis_type.short_label().to_uppercase(),
-            subtitle: analysis.label.clone(),
+            subtitle,
             x_scale,
             x_unit,
             y_unit,
             phase_continuous,
+            signal_trace_count,
             traces,
         });
     }
@@ -165,10 +262,11 @@ pub(super) fn build_models(
 /// so a toggle never serves stale envelopes, ranges, or stats.
 fn trace_key(model: &StripModel, trace: &StripTrace) -> u64 {
     let continuous = (trace.kind == TraceKind::PhaseDeg && model.phase_continuous) as u64;
-    (model.analysis_index as u64) << 40
+    let base = (model.analysis_index as u64) << 40
         | continuous << 39
         | (trace.waveform_index as u64) << 2
-        | trace.kind as u64
+        | trace.kind as u64;
+    run_mixed_key(base, trace.run_id, trace.overlay)
 }
 
 /// Y range of the visible traces on one axis side, padded 8 %. Per-trace
@@ -292,9 +390,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.set_min_height(strip_height);
+                        // Legend chips list signals only (the active-run
+                        // prefix): one chip per signal toggles it across
+                        // every overlaid run.
                         let legend: Vec<LegendChip<'_>> = model
                             .traces
                             .iter()
+                            .take(model.signal_trace_count)
                             .map(|trace| LegendChip {
                                 name: &trace.name,
                                 color: trace.color,
@@ -316,7 +418,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         for (i, expr) in strip_exprs.iter().enumerate() {
                             legend.push(LegendChip {
                                 name: &expr_labels[i],
-                                color: expr_color(&t, model.traces.len() + i),
+                                color: expr_color(&t, model.signal_trace_count + i),
                                 on: expr.visible,
                             });
                         }
@@ -331,20 +433,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             .closable(!maximized && n > 1)
                             .zoomed(zoomed)
                             .expr_action(true)
-                            .removable_from(model.traces.len())
+                            .removable_from(model.signal_trace_count)
                             .show(ui);
                         if let Some(chip_index) = header.legend_clicked {
-                            if let Some(trace) = model.traces.get(chip_index) {
-                                toggle_trace = Some((model.analysis_index, trace.waveform_index));
+                            if chip_index < model.signal_trace_count {
+                                if let Some(trace) = model.traces.get(chip_index) {
+                                    toggle_trace =
+                                        Some((model.analysis_index, trace.waveform_index));
+                                }
                             } else {
-                                toggle_expr =
-                                    Some((model.analysis_index, chip_index - model.traces.len()));
+                                toggle_expr = Some((
+                                    model.analysis_index,
+                                    chip_index - model.signal_trace_count,
+                                ));
                             }
                         }
                         if let Some(chip_index) = header.legend_removed {
-                            if chip_index >= model.traces.len() {
-                                remove_expr =
-                                    Some((model.analysis_index, chip_index - model.traces.len()));
+                            if chip_index >= model.signal_trace_count {
+                                remove_expr = Some((
+                                    model.analysis_index,
+                                    chip_index - model.signal_trace_count,
+                                ));
                             }
                         }
                         if header.maximize_clicked {
@@ -807,12 +916,28 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         spec.ref_lines.push(plot::RefLine { y: 0.0 });
     }
 
-    for trace in &model.traces {
+    // Run owns weight: overlay traces keep the signal hue at reduced alpha
+    // and stroke, painted first so the active run draws at full strength
+    // on top.
+    let draw_order = model
+        .traces
+        .iter()
+        .filter(|trace| trace.overlay)
+        .chain(model.traces.iter().filter(|trace| !trace.overlay));
+    for trace in draw_order {
         if !trace.visible {
             continue;
         }
-        let mut plot_trace = Trace::new(&trace.x, &trace.y, trace.color)
-            .cache_key(trace_key(model, trace));
+        let color = if trace.overlay {
+            trace.color.gamma_multiply(0.40)
+        } else {
+            trace.color
+        };
+        let mut plot_trace =
+            Trace::new(&trace.x, &trace.y, color).cache_key(trace_key(model, trace));
+        if trace.overlay {
+            plot_trace = plot_trace.thin();
+        }
         if trace.kind == TraceKind::PhaseDeg {
             plot_trace = plot_trace.right().dashed();
         }
