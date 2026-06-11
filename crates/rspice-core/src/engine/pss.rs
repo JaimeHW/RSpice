@@ -89,6 +89,18 @@ impl From<PssError> for SimulationError {
     }
 }
 
+/// Reactive-state and node-solution trajectory recorded on the fixed
+/// integration grid, used by the oscillator phase-noise (PPV) machinery.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PssStateTrace {
+    /// Grid times, starting at 0.
+    pub times: Vec<Value>,
+    /// Reactive state (cap voltages then inductor currents) per grid point.
+    pub states: Vec<Vec<Value>>,
+    /// Full node/branch solution per grid point.
+    pub solutions: Vec<Vec<Value>>,
+}
+
 /// PSS analysis result with detailed convergence info
 #[derive(Debug)]
 pub struct PssAnalysisResult {
@@ -129,6 +141,17 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
     ) -> Result<PssAnalysisResult, SimulationError> {
+        self.run_pss_with_state(netlist, config).map(|(result, _, _, _)| result)
+    }
+
+    /// `run_pss` plus the converged artifacts the oscillator phase-noise
+    /// machinery needs: the prepared circuit/matrix pair and the converged
+    /// shooting state x0.
+    pub(in crate::engine) fn run_pss_with_state(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+    ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
         // Build and prepare circuit
         let mut circuit = self.build_circuit(netlist)?;
         let mut matrix = self.build_matrix(&circuit)?;
@@ -289,15 +312,20 @@ impl Engine {
             shooting_state.residual_norm(),
         );
 
-        Ok(PssAnalysisResult {
-            result: pss_result,
-            iterations: iteration,
-            final_residual: shooting_state.residual_norm(),
-            period: detected_period,
-            monodromy,
-            floquet_multipliers,
-            is_stable,
-        })
+        Ok((
+            PssAnalysisResult {
+                result: pss_result,
+                iterations: iteration,
+                final_residual: shooting_state.residual_norm(),
+                period: detected_period,
+                monodromy,
+                floquet_multipliers,
+                is_stable,
+            },
+            circuit,
+            matrix,
+            shooting_state.x0.clone(),
+        ))
     }
 
     /// Initialize reactive element state from DC solution
@@ -370,7 +398,7 @@ impl Engine {
     /// function of the shooting state. Leaving stale history in place would
     /// leak the previous trajectory into the next one and corrupt both the
     /// shooting residual and the finite-difference Jacobian columns.
-    fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
+    pub(in crate::engine) fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
         let n_caps = circuit.capacitors.len();
 
         // Set capacitor voltages
@@ -409,6 +437,7 @@ impl Engine {
                     tstab,
                     max_step,
                     false,
+                    None,
                 )?;
 
             let final_state = self.pss_extract_reactive_state(circuit);
@@ -485,7 +514,7 @@ impl Engine {
         // The period map must vary smoothly with the shooting state: run on
         // the fixed grid (see pss_run_tran_internal).
         let waveform =
-            self.pss_run_tran_internal(circuit, matrix, solution, period, max_step, true)?;
+            self.pss_run_tran_internal(circuit, matrix, solution, period, max_step, true, None)?;
 
         let final_state = self.pss_extract_reactive_state(circuit);
         Ok((final_state, waveform))
@@ -499,7 +528,7 @@ impl Engine {
     /// the nonlinear devices settle to node voltages consistent with that
     /// state. Without this, the waveform's first sample and the Newton seed
     /// were all zeros.
-    fn pss_initial_node_solution(
+    pub(in crate::engine) fn pss_initial_node_solution(
         &self,
         circuit: &mut Circuit,
         matrix: &mut StaticMatrix,
@@ -741,7 +770,7 @@ impl Engine {
     }
 
     /// Solve linear system using Gaussian elimination
-    fn pss_solve_linear_system(
+    pub(in crate::engine) fn pss_solve_linear_system(
         &self,
         a: &[Vec<Value>],
         b: &[Value],
@@ -824,98 +853,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
 
         for _iter in 0..self.config.max_iterations {
-            matrix.clear_values();
-            rhs.fill(0.0);
-
-            for i in 0..size {
-                matrix.add(i, i, 1e-12);
-            }
-
-            circuit.stamp_transient_linear_direct(matrix, &mut rhs);
-
-            // Time-varying independent sources: the static stamp wrote DC
-            // values; overwrite the source rows with their value at the
-            // end of this step. This is what makes driven PSS periodic —
-            // without it a SIN drive stamps as its DC offset and the
-            // "steady state" collapses to the DC solution.
-            let num_nodes = circuit.num_nodes();
-            circuit
-                .voltage_sources
-                .update_transient_rhs(&mut rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
-            circuit.current_sources.update_transient_rhs(&mut rhs, t_next);
-
-            // Stamp capacitors
-            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                let capacitance = circuit.capacitors.capacitances[cap_idx];
-                let np = cap.pp.row;
-                let nn = cap.nn.row;
-                let v_n = circuit.capacitors.v_prev[cap_idx];
-                let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
-
-                let geq = coeff.capacitor_geq(capacitance, dt);
-                let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
-
-                if np > 0 {
-                    matrix.add(np - 1, np - 1, geq);
-                    if nn > 0 {
-                        matrix.add(np - 1, nn - 1, -geq);
-                    }
-                }
-                if nn > 0 {
-                    if np > 0 {
-                        matrix.add(nn - 1, np - 1, -geq);
-                    }
-                    matrix.add(nn - 1, nn - 1, geq);
-                }
-                if np > 0 {
-                    rhs[np - 1] += ieq;
-                }
-                if nn > 0 {
-                    rhs[nn - 1] -= ieq;
-                }
-            }
-
-            // Stamp inductors
-            for l_idx in 0..circuit.inductors.names.len() {
-                let np = circuit.inductors.node_pos[l_idx];
-                let nn = circuit.inductors.node_neg[l_idx];
-                let br = circuit.inductors.branch_indices[l_idx];
-                let inductance = circuit.inductors.inductances[l_idx];
-                let i_n = circuit.inductors.i_prev[l_idx];
-                let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
-                let v_n = circuit.inductors.v_prev[l_idx];
-
-                let req = coeff.inductor_req(inductance, dt);
-                let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
-
-                if np > 0 && br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, np - 1, 1.0);
-                    matrix.add(np - 1, br_idx, 1.0);
-                }
-                if nn > 0 && br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, nn - 1, -1.0);
-                    matrix.add(nn - 1, br_idx, -1.0);
-                }
-                if br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, br_idx, -req);
-                    // Branch row sign convention: v - r_eq*i = -v_eq (see
-                    // Inductors::stamp_transient_companion).
-                    rhs[br_idx] = -veq;
-                }
-            }
-
-            // Mutual coupling overlays on top of the standalone inductors.
-            circuit.stamp_coupled_inductor_pairs_transient(matrix, &mut rhs, dt, coeff);
-
-            if circuit.has_nonlinear_devices() {
-                circuit.update_nonlinear(&new_solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &new_solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &new_solution, t_next);
-            }
+            self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution);
 
             match matrix.solve(&rhs) {
                 Ok(sol) => {
@@ -944,6 +882,119 @@ impl Engine {
         Ok(None)
     }
 
+    /// Stamp the full companion-linearized system at one time point:
+    /// linear network, time-varying sources, reactive companions for the
+    /// given coefficients, and the nonlinear Jacobian linearized at
+    /// `linearize_at`. Shared by the Newton iteration and by the
+    /// injection-sensitivity solves of the oscillator noise machinery,
+    /// which ignore the RHS and solve the stamped matrix against unit
+    /// current injections.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine) fn pss_stamp_system(
+        &self,
+        circuit: &mut Circuit,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        coeff: &CompanionCoefficients,
+        t_next: Value,
+        dt: Value,
+        linearize_at: &[Value],
+    ) {
+        let size = circuit.matrix_size();
+        matrix.clear_values();
+        rhs.fill(0.0);
+
+        for i in 0..size {
+            matrix.add(i, i, 1e-12);
+        }
+
+        circuit.stamp_transient_linear_direct(matrix, rhs);
+
+        // Time-varying independent sources: the static stamp wrote DC
+        // values; overwrite the source rows with their value at the
+        // end of this step. This is what makes driven PSS periodic —
+        // without it a SIN drive stamps as its DC offset and the
+        // "steady state" collapses to the DC solution.
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .voltage_sources
+            .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
+        circuit.current_sources.update_transient_rhs(rhs, t_next);
+
+        // Stamp capacitors
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let capacitance = circuit.capacitors.capacitances[cap_idx];
+            let np = cap.pp.row;
+            let nn = cap.nn.row;
+            let v_n = circuit.capacitors.v_prev[cap_idx];
+            let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
+
+            let geq = coeff.capacitor_geq(capacitance, dt);
+            let i_n_cap = circuit.capacitors.i_prev[cap_idx];
+            let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
+
+            if np > 0 {
+                matrix.add(np - 1, np - 1, geq);
+                if nn > 0 {
+                    matrix.add(np - 1, nn - 1, -geq);
+                }
+            }
+            if nn > 0 {
+                if np > 0 {
+                    matrix.add(nn - 1, np - 1, -geq);
+                }
+                matrix.add(nn - 1, nn - 1, geq);
+            }
+            if np > 0 {
+                rhs[np - 1] += ieq;
+            }
+            if nn > 0 {
+                rhs[nn - 1] -= ieq;
+            }
+        }
+
+        // Stamp inductors
+        for l_idx in 0..circuit.inductors.names.len() {
+            let np = circuit.inductors.node_pos[l_idx];
+            let nn = circuit.inductors.node_neg[l_idx];
+            let br = circuit.inductors.branch_indices[l_idx];
+            let inductance = circuit.inductors.inductances[l_idx];
+            let i_n = circuit.inductors.i_prev[l_idx];
+            let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
+            let v_n = circuit.inductors.v_prev[l_idx];
+
+            let req = coeff.inductor_req(inductance, dt);
+            let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
+
+            if np > 0 && br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, np - 1, 1.0);
+                matrix.add(np - 1, br_idx, 1.0);
+            }
+            if nn > 0 && br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, nn - 1, -1.0);
+                matrix.add(nn - 1, br_idx, -1.0);
+            }
+            if br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, br_idx, -req);
+                // Branch row sign convention: v - r_eq*i = -v_eq (see
+                // Inductors::stamp_transient_companion).
+                rhs[br_idx] = -veq;
+            }
+        }
+
+        // Mutual coupling overlays on top of the standalone inductors.
+        circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, coeff);
+
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(linearize_at);
+            circuit.stamp_nonlinear(matrix, rhs, linearize_at);
+            circuit.stamp_behavioral(matrix, rhs, linearize_at, t_next);
+        }
+    }
+
     /// Internal transient simulation
     /// `fixed_grid` integrates on a uniform time grid with a deterministic
     /// method sequence (backward Euler first step, trapezoidal after): the
@@ -952,7 +1003,7 @@ impl Engine {
     /// accurate — an LTE-adaptive grid changes its step decisions
     /// discontinuously under perturbation and floors the achievable
     /// derivative accuracy.
-    fn pss_run_tran_internal(
+    pub(in crate::engine) fn pss_run_tran_internal(
         &self,
         circuit: &mut Circuit,
         matrix: &mut StaticMatrix,
@@ -960,6 +1011,7 @@ impl Engine {
         tstop: Value,
         max_step: Value,
         fixed_grid: bool,
+        mut trace: Option<&mut PssStateTrace>,
     ) -> Result<TransientResult, SimulationError> {
         let num_nodes = circuit.num_nodes();
 
@@ -995,6 +1047,12 @@ impl Engine {
         const MAX_ITERATIONS: usize = 100_000;
         let mut total_iterations = 0;
         let mut first_step = true;
+
+        if let Some(tr) = trace.as_deref_mut() {
+            tr.times.push(0.0);
+            tr.states.push(self.pss_extract_reactive_state(circuit));
+            tr.solutions.push(solution.clone());
+        }
 
         let mut fixed_index = 0usize;
         while t < tstop && total_iterations < MAX_ITERATIONS {
@@ -1086,6 +1144,12 @@ impl Engine {
             }
 
             solution = new_solution;
+
+            if let Some(tr) = trace.as_deref_mut() {
+                tr.times.push(t);
+                tr.states.push(self.pss_extract_reactive_state(circuit));
+                tr.solutions.push(solution.clone());
+            }
 
             result.time.push(t);
             for (i, voltages) in result.voltages.iter_mut().enumerate() {
