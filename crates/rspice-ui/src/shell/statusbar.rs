@@ -92,6 +92,14 @@ fn coords_text(state: &AppState) -> String {
 }
 
 fn selection_text(state: &AppState) -> String {
+    // An armed placement tool owns this slot: placement repeats until
+    // Esc, and the hint is what makes that discoverable.
+    if let crate::state::Tool::Place(kind) = state.schematic.tool {
+        return format!(
+            "Placing {} — click to drop, R rotates, Esc finishes",
+            kind.display_name()
+        );
+    }
     let selection = &state.schematic.selection;
     if let Some(id) = selection.single_component() {
         if let Some(component) = state.schematic.components.iter().find(|c| c.id == id) {

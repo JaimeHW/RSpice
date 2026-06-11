@@ -142,6 +142,9 @@ pub(super) fn draw_component(
             ComponentType::Cccs => {
                 draw_cccs_symbol(painter, pos, scale, rotation_index, stroke);
             }
+            ComponentType::CellInstance => {
+                draw_cell_instance_symbol(painter, pos, scale, rotation_index, component, stroke);
+            }
             _ => {
                 // Generic component: draw a rectangle
                 let rect = Rect::from_center_size(pos, Vec2::splat(30.0 * scale));
@@ -154,6 +157,71 @@ pub(super) fn draw_component(
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
     draw_component_labels(painter, pos, scale, component);
+}
+
+/// Hierarchical cell instance: a block body with pin stubs matching the
+/// declared terminal offsets, and the master cell's name inside — the
+/// symbol must read as "descend into me", not as an anonymous square.
+fn draw_cell_instance_symbol(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    rotation_index: i32,
+    component: &Component,
+    stroke: Stroke,
+) {
+    // Local geometry per symbol_dimensions (60 × 40): body ±20 × ±15,
+    // pin stubs out to the ±30 terminals.
+    let rotate = |dx: f32, dy: f32| -> Pos2 {
+        let (x, y) = match rotation_index.rem_euclid(4) {
+            0 => (dx, dy),
+            1 => (-dy, dx),
+            2 => (-dx, -dy),
+            _ => (dy, -dx),
+        };
+        Pos2::new(pos.x + x * scale, pos.y + y * scale)
+    };
+
+    let corners = [
+        rotate(-20.0, -15.0),
+        rotate(20.0, -15.0),
+        rotate(20.0, 15.0),
+        rotate(-20.0, 15.0),
+    ];
+    for i in 0..4 {
+        painter.line_segment([corners[i], corners[(i + 1) % 4]], stroke);
+    }
+    // Pin stubs with a small connection dot at the terminal.
+    for side in [-1.0f32, 1.0] {
+        painter.line_segment([rotate(side * 30.0, 0.0), rotate(side * 20.0, 0.0)], stroke);
+        painter.circle_filled(rotate(side * 30.0, 0.0), 1.6 * scale, stroke.color);
+    }
+
+    // Master cell name inside the body, elided to fit; legible from ~60 %
+    // zoom like the component labels.
+    let cell_name = component
+        .library_cell
+        .as_ref()
+        .map(|binding| binding.cell.as_str())
+        .unwrap_or("cell");
+    let font_size = 9.0 * scale;
+    if font_size >= 4.0 {
+        let max_chars = 8usize;
+        let display: String = if cell_name.chars().count() > max_chars {
+            let mut text: String = cell_name.chars().take(max_chars - 1).collect();
+            text.push('…');
+            text
+        } else {
+            cell_name.to_owned()
+        };
+        painter.text(
+            pos,
+            egui::Align2::CENTER_CENTER,
+            display,
+            crate::ui::theme::mono(font_size, crate::ui::theme::FontWeight::Medium),
+            stroke.color,
+        );
+    }
 }
 
 /// Smart label placement for components
