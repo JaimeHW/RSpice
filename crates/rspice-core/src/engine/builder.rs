@@ -219,6 +219,25 @@ impl Engine {
                         resistance,
                         small_signal_resistance,
                     );
+                    // Per-instance thermal-noise temperature, resnoise.c
+                    // semantics: with TEMP given the offset is
+                    // temp − CKTtemp + tnom (in Celsius terms, ngspice's
+                    // own quirk); otherwise DTEMP is the offset directly.
+                    let noise_dtemp = if let Some(temp) =
+                        instance_param(instance_params, &["TEMP"])
+                    {
+                        let temp_k =
+                            crate::analysis::temperature::celsius_to_kelvin(temp);
+                        let tnom_c = netlist.options.tnom.unwrap_or(27.0);
+                        temp_k - self.config.temperature + tnom_c
+                    } else {
+                        instance_param(instance_params, &["DTEMP"]).unwrap_or(0.0)
+                    };
+                    if noise_dtemp != 0.0 {
+                        circuit
+                            .resistors
+                            .set_last_noise_temperature_offset(noise_dtemp);
+                    }
                 }
                 ElementKind::Capacitor {
                     value,

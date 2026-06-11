@@ -11,6 +11,9 @@ pub struct Resistors {
     pub conductances: Vec<Value>,
     /// Small-signal conductances used by AC/PZ/noise analyses.
     pub small_signal_conductances: Vec<Value>,
+    /// Per-instance thermal-noise temperature offsets in kelvin (ngspice
+    /// `dtemp` semantics: noise runs at the analysis temperature plus this).
+    pub noise_temperature_offsets: Vec<Value>,
 }
 
 impl Resistors {
@@ -35,6 +38,24 @@ impl Resistors {
         self.conductances.push(1.0 / resistance);
         self.small_signal_conductances
             .push(1.0 / small_signal_resistance);
+        self.noise_temperature_offsets.push(0.0);
+    }
+
+    /// Set the thermal-noise temperature offset of the most recently added
+    /// resistor (the builder applies instance TEMP/DTEMP right after `add`).
+    pub fn set_last_noise_temperature_offset(&mut self, offset_kelvin: Value) {
+        if let Some(slot) = self.noise_temperature_offsets.last_mut() {
+            *slot = offset_kelvin;
+        }
+    }
+
+    /// Thermal-noise temperature offset (kelvin) for a resistor index.
+    #[inline]
+    pub fn noise_temperature_offset(&self, index: usize) -> Value {
+        self.noise_temperature_offsets
+            .get(index)
+            .copied()
+            .unwrap_or(0.0)
     }
 
     #[inline]

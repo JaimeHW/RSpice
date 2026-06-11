@@ -73,6 +73,10 @@ pub struct NoiseSource {
     pub current: Value,
     /// Corner frequency for burst noise (FB, Hz)
     pub corner_freq: Value,
+    /// Thermal-noise temperature offset in kelvin: ngspice `dtemp`
+    /// semantics, where the source runs at the analysis temperature plus
+    /// this per-instance offset (nevalsrc.c THERMNOISE).
+    pub temperature_offset: Value,
 }
 
 impl NoiseSource {
@@ -93,6 +97,7 @@ impl NoiseSource {
             ef: 1.0,
             current: 0.0,
             corner_freq: 1.0,
+            temperature_offset: 0.0,
         }
     }
 
@@ -108,6 +113,7 @@ impl NoiseSource {
             ef: 1.0,
             current: 0.0,
             corner_freq: 1.0,
+            temperature_offset: 0.0,
         }
     }
 
@@ -143,6 +149,7 @@ impl NoiseSource {
             ef,
             current,
             corner_freq: 1.0,
+            temperature_offset: 0.0,
         }
     }
 
@@ -170,6 +177,7 @@ impl NoiseSource {
             ef: 1.0,
             current,
             corner_freq,
+            temperature_offset: 0.0,
         }
     }
 
@@ -178,9 +186,10 @@ impl NoiseSource {
         match self.noise_type {
             NoiseSourceType::Thermal => {
                 // Thermal noise: Si = 4kT/R (current noise spectral density)
-                // For resistor R: current noise = 4kT/R A²/Hz
+                // at the instance temperature, ngspice nevalsrc.c THERMNOISE:
+                // 4k·(CKTtemp + dtemp)·g.
                 if self.parameter > 0.0 {
-                    4.0 * K_BOLTZMANN * temperature / self.parameter
+                    4.0 * K_BOLTZMANN * (temperature + self.temperature_offset) / self.parameter
                 } else {
                     0.0
                 }
