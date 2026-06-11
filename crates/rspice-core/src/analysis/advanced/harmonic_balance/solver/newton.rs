@@ -630,9 +630,14 @@ impl HbSolver {
         }
     }
 
-    /// Solve the Jacobian system: J * Î”X = -R
+    /// Solve the Jacobian system: J * ΔX = -R
     ///
-    /// Uses LU factorization with partial pivoting.
+    /// Large systems use restarted GMRES with a per-harmonic block-Jacobi
+    /// preconditioner (O(size²) per Krylov iteration instead of the dense
+    /// solve's O(size³)); small systems and any Krylov stagnation take the
+    /// exact dense elimination, so the Krylov path can change only speed,
+    /// never convergence.
+    ///
     /// Returns flattened delta_x vector that maps back to [node][harmonic].
     fn solve_jacobian_system(
         &self,
@@ -651,8 +656,16 @@ impl HbSolver {
             }
         }
 
-        // Solve system
-        let flat_solution = self.solve_complex_linear_system(jac, &rhs)?;
+        let try_krylov =
+            self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let flat_solution = if try_krylov && n > 0 && h > 0 {
+            match self.solve_jacobian_krylov(jac, &rhs, n, h) {
+                Some(solution) => solution,
+                None => self.solve_complex_linear_system(jac, &rhs)?,
+            }
+        } else {
+            self.solve_complex_linear_system(jac, &rhs)?
+        };
 
         // Reshape to [node][harmonic]
         let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
@@ -665,6 +678,49 @@ impl HbSolver {
         }
 
         Ok(delta_x)
+    }
+
+    /// Attempt the Newton-step solve via block-Jacobi-preconditioned GMRES.
+    ///
+    /// Returns `None` when GMRES stagnates or fails to reach the inner
+    /// tolerance — the caller then takes the exact dense path.
+    fn solve_jacobian_krylov(
+        &self,
+        jac: &[Vec<Complex64>],
+        rhs: &[Complex64],
+        num_nodes: usize,
+        num_components: usize,
+    ) -> Option<Vec<Complex64>> {
+        use super::krylov::{BlockJacobiPreconditioner, gmres};
+
+        let preconditioner = BlockJacobiPreconditioner::build(jac, num_nodes, num_components);
+        let matvec = |x: &[Complex64]| -> Vec<Complex64> {
+            jac.iter()
+                .map(|row| row.iter().zip(x).map(|(m, v)| m * v).sum())
+                .collect()
+        };
+
+        let restart = self.config.gmres_restart.clamp(8, rhs.len().max(8));
+        let outcome = gmres(&matvec, &preconditioner, rhs, restart, 4);
+
+        if outcome.converged {
+            if self.config.verbose {
+                log::debug!(
+                    "HB Krylov solve: {} iterations, relative residual {:.2e}",
+                    outcome.iterations,
+                    outcome.relative_residual
+                );
+            }
+            Some(outcome.solution)
+        } else {
+            log::debug!(
+                "HB Krylov solve stagnated after {} iterations (relative residual {:.2e}); \
+                 falling back to dense elimination",
+                outcome.iterations,
+                outcome.relative_residual
+            );
+            None
+        }
     }
 
     /// Apply Armijo line search for robust convergence

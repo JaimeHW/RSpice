@@ -52,6 +52,7 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use error::SimulationError;
+pub use hb::HbAnalysisResult;
 pub use pss::{PssAnalysisResult, PssError};
 pub use result::TransientResult;
 

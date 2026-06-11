@@ -14,6 +14,7 @@ use num_complex::Complex64;
 
 mod dc;
 mod devices;
+mod krylov;
 mod linear;
 mod linear_algebra;
 mod newton;

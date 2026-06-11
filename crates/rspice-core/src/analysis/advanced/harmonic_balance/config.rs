@@ -116,11 +116,15 @@ pub struct HbConfig {
     /// Limits the number of mixing products considered
     pub max_mixing_order: usize,
 
-    /// Use Krylov subspace solver for large systems
-    /// More efficient for circuits with many nodes
+    /// Force the Krylov (GMRES + block-Jacobi) Newton-step solver.
+    ///
+    /// `false` is automatic: systems with ≥ 256 unknowns (nodes × spectral
+    /// components) use Krylov, smaller systems use exact dense elimination.
+    /// Krylov stagnation always falls back to the dense solve, so this
+    /// switch affects speed only, never convergence.
     pub use_krylov: bool,
 
-    /// GMRES restart parameter (if using Krylov)
+    /// GMRES restart parameter for the Krylov Newton-step solver.
     pub gmres_restart: usize,
 
     /// Enable source stepping for difficult convergence
