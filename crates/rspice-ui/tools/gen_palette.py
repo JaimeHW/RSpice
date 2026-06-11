@@ -6,6 +6,14 @@ The token values are transcribed verbatim from the professionally designed
 performs the oklch -> sRGB conversion using the CSS Color 4 reference math and
 emits a Rust module with one `Palette` const per (direction, mode).
 
+Exception: the Instrument accent family follows the Run brand sheet and the
+public site (gh-pages index.html tokens) instead of the original phosphor
+green. Those entries are exact sRGB hex constants ("#RRGGBB"), not oklch —
+the brand yellow #F2B824 must round-trip exactly. The site splits the accent
+into fill vs line roles; the app has a single `accent` token, so dark mode
+uses the shared #F2B824 and light mode uses the site's line accent #8F6400
+(yellow text on light surfaces would be illegible).
+
 Run from the crate root:  py tools/gen_palette.py
 """
 
@@ -40,8 +48,23 @@ def oklch_to_srgb(lightness: float, chroma: float, hue_deg: float):
     return encode(r_lin), encode(g_lin), encode(b_lin)
 
 
+def parse_hex(s: str):
+    s = s.lstrip("#")
+    return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+
+
 def rgba(spec):
-    """spec = (L%, C, H) or (L%, C, H, alpha). Returns (r, g, b, a) unmultiplied."""
+    """spec = (L%, C, H), (L%, C, H, alpha), "#RRGGBB", or ("#RRGGBB", alpha).
+
+    Hex forms are exact sRGB pass-throughs for brand constants; oklch forms
+    go through the CSS Color 4 conversion. Returns (r, g, b, a) unmultiplied.
+    """
+    if isinstance(spec, str):
+        r, g, b = parse_hex(spec)
+        return r, g, b, 255
+    if isinstance(spec[0], str):
+        r, g, b = parse_hex(spec[0])
+        return r, g, b, round(spec[1] * 255)
     lightness, chroma, hue = spec[0] / 100.0, spec[1], spec[2]
     alpha = spec[3] if len(spec) > 3 else 1.0
     r, g, b = oklch_to_srgb(lightness, chroma, hue)
@@ -72,13 +95,18 @@ PALETTES = {
         "bg_hover": (29.5, 0.014, 235), "bg_active": (34, 0.02, 235),
         "border": (31, 0.012, 235), "border_strong": (41, 0.012, 235),
         "text": (89, 0.006, 235), "text_dim": (68, 0.01, 235), "text_faint": (52, 0.01, 235),
-        "accent": (79, 0.15, 152), "accent_ink": (20, 0.04, 152),
-        "accent_dim": (79, 0.15, 152, 0.14),
-        "ok": (75, 0.14, 152), "warn": (80, 0.13, 85), "err": (68, 0.17, 25),
+        # Run brand accent (site --accent-fill/--accent-ink/--accent-dim, dark)
+        "accent": "#F2B824", "accent_ink": "#17181A",
+        "accent_dim": ("#F2B824", 0.13),
+        # ok/err from the site; warn re-hued to orange so it reads apart
+        # from the yellow accent (spec amber sat at the same hue).
+        "ok": "#65D68A", "warn": (74, 0.14, 60), "err": "#E06C5A",
         "canvas_bg": (15, 0.012, 235), "canvas_grid": (25, 0.012, 235),
-        "wire": (79, 0.08, 152), "symbol": (86, 0.01, 235), "net_label": (78, 0.12, 152),
-        "trace_1": (78, 0.16, 152), "trace_2": (78, 0.12, 220), "trace_3": (80, 0.14, 85),
-        "trace_4": (72, 0.17, 345), "trace_5": (72, 0.12, 260), "trace_6": (70, 0.16, 25),
+        # schematic tints keep spec L/C, re-hued phosphor green -> brand yellow (h 84)
+        "wire": (79, 0.08, 84), "symbol": (86, 0.01, 235), "net_label": (78, 0.12, 84),
+        # site trace order: out=yellow, in=blue, ph=pink; spec green moves to 4
+        "trace_1": "#F2B824", "trace_2": "#7CB8E8", "trace_3": "#D984B0",
+        "trace_4": (78, 0.16, 152), "trace_5": (72, 0.12, 260), "trace_6": (70, 0.16, 25),
         "shadow": (0, 0, 0, 0.45), "shadow_geom": (6, 24),
     },
     # ---------------- A: Instrument · light
@@ -88,13 +116,17 @@ PALETTES = {
         "bg_hover": (93.5, 0.006, 235), "bg_active": (89, 0.012, 235),
         "border": (87, 0.006, 235), "border_strong": (74, 0.008, 235),
         "text": (26, 0.01, 235), "text_dim": (46, 0.01, 235), "text_faint": (61, 0.008, 235),
-        "accent": (51, 0.14, 152), "accent_ink": (98.5, 0.005, 152),
-        "accent_dim": (51, 0.14, 152, 0.12),
-        "ok": (54, 0.13, 152), "warn": (60, 0.13, 80), "err": (54, 0.17, 25),
+        # Run brand accent, light: the site's *line* accent (#8F6400) — the
+        # single app token mostly draws text/lines, where #F2B824 fails AA.
+        "accent": "#8F6400", "accent_ink": (98.5, 0.005, 84),
+        "accent_dim": ("#A16100", 0.10),
+        "ok": "#007C3A", "warn": (62, 0.14, 60), "err": "#C03A28",
         "canvas_bg": (99.3, 0.002, 235), "canvas_grid": (91.5, 0.004, 235),
-        "wire": (45, 0.11, 152), "symbol": (31, 0.01, 235), "net_label": (47, 0.13, 152),
-        "trace_1": (55, 0.15, 152), "trace_2": (55, 0.12, 220), "trace_3": (60, 0.13, 80),
-        "trace_4": (54, 0.17, 345), "trace_5": (52, 0.15, 260), "trace_6": (54, 0.17, 25),
+        # schematic tints keep spec L/C, re-hued phosphor green -> brand yellow (h 84)
+        "wire": (45, 0.11, 84), "symbol": (31, 0.01, 235), "net_label": (47, 0.13, 84),
+        # site light traces: out/in/ph darkened variants; spec green moves to 4
+        "trace_1": "#A16100", "trace_2": "#3D72A8", "trace_3": "#A8537E",
+        "trace_4": (55, 0.15, 152), "trace_5": (52, 0.15, 260), "trace_6": (54, 0.17, 25),
         "shadow": (20, 0.01, 235, 0.18), "shadow_geom": (6, 24),
     },
     # ---------------- B: Meridian · dark
