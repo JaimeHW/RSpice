@@ -652,6 +652,23 @@ impl Engine {
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
 
+        // Floor-dt livelock detection: dozens of consecutive accepted points
+        // at the hard-minimum timestep mean the step controller is trapped —
+        // forced accepts feed the truncation estimators garbage history,
+        // which pins the next dt right back at the floor (observed on
+        // diode-bridge dead-zone crossings, where the cap-companion/bleeder
+        // conductance ratio also exceeds f64 conditioning below ~1e-13 s).
+        // The streak triggers a breakpoint-style integration restart;
+        // re-triggering shortly after fails the run instead of spinning.
+        const LIVELOCK_STREAK_RESTART: usize = 32;
+        let livelock_dt_ceiling = (timestep.hard_min_dt() * 64.0).max(1e-22);
+        // Two restarts at the same wall mean the restart cannot escape it;
+        // a wall further along the time axis gets its own fresh attempt.
+        let livelock_restart_spacing = (tstop * 1e-6).max(timestep.hard_min_dt() * 1e4);
+        let mut livelock_streak = 0_usize;
+        let mut livelock_last_restart_t: Option<Value> = None;
+        let mut lte_warmup_skips = 0_u8;
+
         // Integration method selection:
         // - TrapGear => adaptive trap/gear switching
         // - Other modes => fixed method (honor SimulationConfig exactly)
@@ -838,6 +855,79 @@ impl Engine {
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
+
+        // Runs after every accepted point (all acceptance paths): counts the
+        // floor-dt streak and performs the livelock restart when it trips.
+        // A macro rather than a helper because the restart touches a dozen
+        // loop locals (histories, controller, estimator, order).
+        macro_rules! livelock_check {
+            ($dt:expr) => {
+                if locked_grid.is_none() {
+                    if $dt <= livelock_dt_ceiling {
+                        livelock_streak += 1;
+                    } else {
+                        livelock_streak = 0;
+                    }
+                    if livelock_streak >= LIVELOCK_STREAK_RESTART {
+                        livelock_streak = 0;
+                        if !livelock_restart!() {
+                            return Err(SimulationError::Circuit(format!(
+                                "transient timestep pinned at the minimum near t={:.6e}s \
+                                 (dt={:.3e}s, delmin={:.3e}s): integration restart did not \
+                                 escape; the circuit is numerically ill-conditioned at this \
+                                 operating point",
+                                t,
+                                $dt,
+                                timestep.hard_min_dt()
+                            )));
+                        }
+                    }
+                }
+            };
+        }
+
+        // Perform one breakpoint-style integration restart at `t`, unless
+        // the previous restart happened within the spacing window (same
+        // wall — restarting again cannot help). Returns whether it ran.
+        macro_rules! livelock_restart {
+            () => {{
+                let same_wall = livelock_last_restart_t
+                    .is_some_and(|prev| t - prev < livelock_restart_spacing);
+                if same_wall {
+                    false
+                } else {
+                    livelock_last_restart_t = Some(t);
+                    Self::reseed_reactive_histories_for_restart(
+                        &mut circuit,
+                        &solution,
+                        hinted_max_step,
+                        &mut bjt_history,
+                        &mut jfet_history,
+                        &mut mosfet_history,
+                        &mut b3soi_history,
+                    );
+                    lte_estimator = LteEstimator::with_tolerances(
+                        self.voltage_reltol(),
+                        self.voltage_abstol(),
+                    );
+                    let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
+                        Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
+                        breakpoints.next_after(t),
+                    );
+                    timestep
+                        .force_step(restart_dt.max(timestep.preferred_min_dt()).min(max_step));
+                    trap_order = 1;
+                    lte_warmup_skips = 2;
+                    log::warn!(
+                        "Transient stall at t={:.6e}s: integration restarted \
+                         (histories re-seeded, dt -> {:.3e})",
+                        t,
+                        timestep.dt()
+                    );
+                    true
+                }
+            }};
+        }
 
         while t < tstop && total_iterations < max_total_iterations {
             // Progress logging every 2 seconds
@@ -1696,6 +1786,17 @@ impl Engine {
                                     t
                                 );
                             }
+                            // The same dead-zone walls that defeat the
+                            // force-accept envelope also poison the
+                            // truncation history; one clean restart at a
+                            // fresh ramp dt escapes them. Only when the
+                            // restart already ran at this wall is the run
+                            // genuinely dead.
+                            if livelock_restart!() {
+                                stale_accept_count = 0;
+                                retry_count = 0;
+                                continue;
+                            }
                             return Err(SimulationError::ConvergenceFailed(total_iterations));
                         }
                         continue;
@@ -1937,12 +2038,17 @@ impl Engine {
                     ) {
                         trap_order = 1;
                     }
+                    livelock_check!(dt);
                 }
                 continue;
             }
 
             let first_accepted_transient_step =
-                Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len());
+                Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
+                    // Post-livelock-restart warmup: the re-seeded histories
+                    // need two clean accepted points before the truncation
+                    // estimators can difference them meaningfully.
+                    || lte_warmup_skips > 0;
             let vbic_truncation_limit = if !first_accepted_transient_step
                 && has_vbic_dynamic_charges
             {
@@ -2537,6 +2643,7 @@ impl Engine {
                     ) {
                         trap_order = 1;
                     }
+                    livelock_check!(dt);
                 }
                 continue;
             }
@@ -2741,6 +2848,9 @@ impl Engine {
                     timestep.force_step(trial.limit);
                 }
             }
+
+            lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
+            livelock_check!(dt);
         }
 
         if t < tstop {

@@ -54,6 +54,60 @@ impl Engine {
         }
     }
 
+    /// Breakpoint-style integration restart after a floor-dt livelock.
+    ///
+    /// Re-seeds every reactive history from the accepted solution exactly
+    /// like transient startup (flat capacitor/inductor history, zeroed
+    /// capacitor current, maxstep-seeded dt chains) so the truncation
+    /// estimators stop differencing the poisoned floor-dt trail. The
+    /// transmission-line delay buffers are deliberately left alone — they
+    /// hold genuine propagating state, not integrator history.
+    pub(super) fn reseed_reactive_histories_for_restart(
+        circuit: &mut crate::circuit::Circuit,
+        solution: &[Value],
+        hinted_max_step: Value,
+        bjt_history: &mut BjtTransientHistory,
+        jfet_history: &mut JfetTransientHistory,
+        mosfet_history: &mut MosfetTransientHistory,
+        b3soi_history: &mut B3SoiTransientHistory,
+    ) {
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let v = Self::differential_voltage(solution, cap.pp.row, cap.nn.row);
+            circuit.capacitors.v_prev[cap_idx] = v;
+            circuit.capacitors.v_prev_prev[cap_idx] = v;
+            circuit.capacitors.v_prev_prev_prev[cap_idx] = v;
+            circuit.capacitors.i_prev[cap_idx] = 0.0;
+        }
+
+        for l_idx in 0..circuit.inductors.names.len() {
+            let np = circuit.inductors.node_pos[l_idx];
+            let nn = circuit.inductors.node_neg[l_idx];
+            let v = if np == 0 { 0.0 } else { solution[np - 1] }
+                - if nn == 0 { 0.0 } else { solution[nn - 1] };
+            circuit.inductors.v_prev[l_idx] = v;
+            let br = circuit.inductors.branch_indices[l_idx];
+            if br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                let i = solution.get(br_idx).copied().unwrap_or(0.0);
+                circuit.inductors.i_prev[l_idx] = i;
+                circuit.inductors.i_prev_prev[l_idx] = i;
+            }
+        }
+        circuit.update_coupled_inductor_pair_state(solution);
+        circuit.update_multi_winding_transformer_state(solution);
+
+        *bjt_history = Self::initialize_bjt_history(circuit, solution);
+        bjt_history.accepted_dt_prev = hinted_max_step;
+        bjt_history.accepted_dt_prev_prev = hinted_max_step;
+        *jfet_history = Self::initialize_jfet_history(circuit, solution);
+        jfet_history.accepted_dt_prev = hinted_max_step;
+        jfet_history.accepted_dt_prev_prev = hinted_max_step;
+        *mosfet_history = Self::initialize_mosfet_history(circuit, solution);
+        mosfet_history.accepted_dt_prev = hinted_max_step;
+        mosfet_history.accepted_dt_prev_prev = hinted_max_step;
+        *b3soi_history = Self::initialize_b3soi_history(circuit, solution);
+    }
+
     #[inline]
     pub(super) fn initialize_bjt_history(
         circuit: &crate::circuit::Circuit,
