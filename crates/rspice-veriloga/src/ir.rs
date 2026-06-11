@@ -700,9 +700,15 @@ pub mod autodiff {
             .chain((0..num_branches).map(DerivativeWrt::BranchCurrent))
     }
 
-    /// Check whether an expression depends on node quantities, directly or
-    /// through already-shadowed variables.
-    fn depends_on_nodes(expr: &IrExpr, shadowed: &HashSet<SmolStr>) -> bool {
+    /// Check whether an expression can have a nonzero derivative along any
+    /// node/branch axis, directly or through already-shadowed variables.
+    ///
+    /// Comparisons, logical operations, and event detectors differentiate
+    /// to exactly zero regardless of their operands, so variables holding
+    /// only such results (e.g. snapshotted branch guards) never need
+    /// shadow slots.
+    fn has_nonzero_derivative(expr: &IrExpr, shadowed: &HashSet<SmolStr>) -> bool {
+        let recurse = |e: &IrExpr| has_nonzero_derivative(e, shadowed);
         match expr {
             IrExpr::Voltage(..) | IrExpr::Current(..) | IrExpr::BranchCurrent(_) => true,
             IrExpr::Var(name) => shadowed.contains(name),
@@ -713,53 +719,55 @@ pub mod autodiff {
             | IrExpr::Temperature
             | IrExpr::Vt
             | IrExpr::Analysis(_) => false,
-            IrExpr::Binary(_, l, r) => {
-                depends_on_nodes(l, shadowed) || depends_on_nodes(r, shadowed)
-            }
-            IrExpr::Unary(_, e) | IrExpr::Limexp(e) | IrExpr::Ddt(e) => {
-                depends_on_nodes(e, shadowed)
-            }
-            IrExpr::Idt(e, ic) => {
-                depends_on_nodes(e, shadowed)
-                    || ic.as_ref().is_some_and(|e| depends_on_nodes(e, shadowed))
-            }
-            IrExpr::Limit(e, step) => {
-                depends_on_nodes(e, shadowed)
-                    || step
-                        .as_ref()
-                        .is_some_and(|e| depends_on_nodes(e, shadowed))
-            }
-            IrExpr::Call(_, args) => args.iter().any(|a| depends_on_nodes(a, shadowed)),
-            IrExpr::Conditional(c, t, e) => {
-                depends_on_nodes(c, shadowed)
-                    || depends_on_nodes(t, shadowed)
-                    || depends_on_nodes(e, shadowed)
-            }
-            IrExpr::TableLookup { input, .. } => depends_on_nodes(input, shadowed),
-            IrExpr::AbsDelay { expr, delay_time } => {
-                depends_on_nodes(expr, shadowed) || depends_on_nodes(delay_time, shadowed)
-            }
+            IrExpr::Binary(op, l, r) => match op {
+                BinaryOp::Add
+                | BinaryOp::Sub
+                | BinaryOp::Mul
+                | BinaryOp::Div
+                | BinaryOp::Pow => recurse(l) || recurse(r),
+                // Piecewise-constant results: derivative identically zero
+                BinaryOp::Mod
+                | BinaryOp::Eq
+                | BinaryOp::Ne
+                | BinaryOp::Lt
+                | BinaryOp::Le
+                | BinaryOp::Gt
+                | BinaryOp::Ge
+                | BinaryOp::And
+                | BinaryOp::Or
+                | BinaryOp::BitAnd
+                | BinaryOp::BitOr
+                | BinaryOp::BitXor
+                | BinaryOp::Shl
+                | BinaryOp::Shr => false,
+            },
+            IrExpr::Unary(UnaryOp::Neg | UnaryOp::Pos, e) => recurse(e),
+            IrExpr::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => false,
+            IrExpr::Limexp(e) | IrExpr::Ddt(e) => recurse(e),
+            IrExpr::Idt(e, _) => recurse(e),
+            IrExpr::Limit(e, _) => recurse(e),
+            IrExpr::Call(func, args) => match func {
+                IrFunction::Floor | IrFunction::Ceil => false,
+                _ => args.iter().any(recurse),
+            },
+            // The condition only selects; the branches carry the slope
+            IrExpr::Conditional(_, t, e) => recurse(t) || recurse(e),
+            IrExpr::TableLookup { input, .. } => recurse(input),
+            IrExpr::AbsDelay { expr, .. } => recurse(expr),
             IrExpr::Transition { expr, .. }
             | IrExpr::Slew { expr, .. }
-            | IrExpr::Cross { expr, .. }
             | IrExpr::LaplaceZP { expr, .. }
             | IrExpr::LaplaceND { expr, .. }
-            | IrExpr::Ddx { expr, .. } => depends_on_nodes(expr, shadowed),
-            IrExpr::DdtCompanion(e) | IrExpr::IdtCompanion(e) => depends_on_nodes(e, shadowed),
-            IrExpr::TableDerivative { input, .. } => depends_on_nodes(input, shadowed),
-            IrExpr::WhiteNoise { power, .. } => depends_on_nodes(power, shadowed),
-            IrExpr::FlickerNoise {
-                power, exponent, ..
-            } => depends_on_nodes(power, shadowed) || depends_on_nodes(exponent, shadowed),
-            IrExpr::Above {
-                expr, threshold, ..
-            } => depends_on_nodes(expr, shadowed) || depends_on_nodes(threshold, shadowed),
-            IrExpr::Timer { start_time, period } => {
-                depends_on_nodes(start_time, shadowed)
-                    || period
-                        .as_ref()
-                        .is_some_and(|e| depends_on_nodes(e, shadowed))
-            }
+            | IrExpr::Ddx { expr, .. } => recurse(expr),
+            IrExpr::DdtCompanion(e) | IrExpr::IdtCompanion(e) => recurse(e),
+            IrExpr::TableDerivative { input, .. } => recurse(input),
+            // Event detectors and noise sources are piecewise constant
+            // (or zero) in the DC Jacobian
+            IrExpr::Cross { .. }
+            | IrExpr::Above { .. }
+            | IrExpr::Timer { .. }
+            | IrExpr::WhiteNoise { .. }
+            | IrExpr::FlickerNoise { .. } => false,
         }
     }
 
@@ -775,7 +783,7 @@ pub mod autodiff {
             match item {
                 IrAssignmentItem::Assign(assign) => {
                     let name = &variables[assign.var_index].name;
-                    if !shadowed.contains(name) && depends_on_nodes(&assign.expr, shadowed) {
+                    if !shadowed.contains(name) && has_nonzero_derivative(&assign.expr, shadowed) {
                         shadowed.insert(name.clone());
                         *changed = true;
                     }

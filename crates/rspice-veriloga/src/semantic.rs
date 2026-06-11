@@ -941,6 +941,12 @@ impl SemanticAnalyzer {
                     );
                 }
 
+                // Snapshot the condition into a temporary BEFORE either
+                // branch runs: the then-branch may assign variables the
+                // condition reads, and a re-evaluated else-guard would then
+                // see the mutated state and fire as well.
+                let condition = self.snapshot_guard(condition, cond.span, module, sink)?;
+
                 self.guard_stack.push(condition.clone());
                 self.analyze_statement(&cond.then_branch, module, sink)?;
                 self.guard_stack.pop();
@@ -952,11 +958,14 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogStatement::Case(case_stmt) => {
+                // The selector and ALL match comparisons are evaluated
+                // before any arm executes (LRM case semantics); snapshot
+                // them so arm bodies cannot perturb later guards.
                 let selector = self.lower_expression(&case_stmt.expr)?;
-                // OR of all guards matched so far (case items are priority
-                // ordered: the first matching item wins)
-                let mut prior_match: Option<Expression> = None;
+                let selector =
+                    self.snapshot_guard(selector, case_stmt.span, module, sink)?;
 
+                let mut item_guards: Vec<Option<Expression>> = Vec::new();
                 for item in &case_stmt.items {
                     let mut item_match: Option<Expression> = None;
                     for m in &item.matches {
@@ -968,6 +977,20 @@ impl SemanticAnalyzer {
                             None => eq,
                         });
                     }
+                    let snapshotted = match item_match {
+                        Some(expr) => {
+                            Some(self.snapshot_guard(expr, case_stmt.span, module, sink)?)
+                        }
+                        None => None,
+                    };
+                    item_guards.push(snapshotted);
+                }
+
+                // OR of all guards matched so far (case items are priority
+                // ordered: the first matching item wins)
+                let mut prior_match: Option<Expression> = None;
+
+                for (item, item_match) in case_stmt.items.iter().zip(item_guards) {
                     let Some(item_match) = item_match else { continue };
 
                     let guard = match &prior_match {
@@ -1061,6 +1084,9 @@ impl SemanticAnalyzer {
             AnalogStatement::EventControl(event_ctrl) => {
                 match self.event_guard(&event_ctrl.event)? {
                     EventLowering::Guard(guard) => {
+                        // Snapshot: the body must not perturb its own guard
+                        let guard =
+                            self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
                         self.guard_stack.push(guard);
                         self.analyze_statement(&event_ctrl.statement, module, sink)?;
                         self.guard_stack.pop();
@@ -1206,6 +1232,61 @@ impl SemanticAnalyzer {
         }
 
         Ok(())
+    }
+
+    /// Materialize a guard expression into a synthesized variable assigned
+    /// once at this point in the statement stream.
+    ///
+    /// Guards must capture the state at evaluation time: branch bodies may
+    /// assign variables their own guard reads, and re-evaluating the raw
+    /// expression inside each guarded assignment would observe the
+    /// mutation (e.g. `if (x == UNSET) x = a; else x = x + b;` must never
+    /// run both arms). Trivial guards (literals, identifiers) pass through.
+    fn snapshot_guard(
+        &mut self,
+        condition: Expression,
+        span: Span,
+        module: &mut AnalyzedModule,
+        sink: &mut Vec<AnalyzedStatement>,
+    ) -> CompileResult<Expression> {
+        // Identifiers and literals are stable by construction
+        if matches!(
+            condition,
+            Expression::Identifier(_) | Expression::Number(_)
+        ) {
+            return Ok(condition);
+        }
+
+        self.local_counter += 1;
+        let name: SmolStr = format!("__guard{}", self.local_counter).into();
+
+        let var_index = module.variables.len();
+        module.variables.push(AnalyzedVariable {
+            name: name.clone(),
+            var_type: VarType::Real,
+            value_type: ValueType::Real,
+            is_state: false,
+        });
+        self.define_symbol(Symbol {
+            name: name.clone(),
+            kind: SymbolKind::Variable,
+            value_type: ValueType::Real,
+            span,
+            attrs: Default::default(),
+        })?;
+
+        // The snapshot assignment itself is unconditional: guard
+        // expressions are pure, and enclosing guards already gate every
+        // consumer of this variable.
+        sink.push(AnalyzedStatement::Assignment(AnalyzedAssignment {
+            target: name.clone(),
+            var_index,
+            expression: condition,
+            expr_type: ValueType::Real,
+            span,
+        }));
+
+        Ok(Expression::Identifier(Identifier { name, span }))
     }
 
     /// AND the enclosing guard into a runtime loop condition so a guarded
@@ -2330,21 +2411,92 @@ mod tests {
             end
             "#,
         ));
-        assert_eq!(flat_assignments(&m).len(), 2);
+        // Guard snapshot + the two guarded branch assignments
+        assert_eq!(flat_assignments(&m).len(), 3);
+        // The condition is snapshotted once so branch bodies cannot
+        // perturb it
+        assert!(flat_assignments(&m)[0].target.starts_with("__guard"));
         // Both branch assignments must be guarded conditionals, not raw values
-        assert!(matches!(
-            flat_assignments(&m)[0].expression,
-            Expression::Conditional(_)
-        ));
         assert!(matches!(
             flat_assignments(&m)[1].expression,
             Expression::Conditional(_)
         ));
+        assert!(matches!(
+            flat_assignments(&m)[2].expression,
+            Expression::Conditional(_)
+        ));
         // The else-branch guard preserves the previous value via the variable
-        let Expression::Conditional(c) = &flat_assignments(&m)[1].expression else {
+        let Expression::Conditional(c) = &flat_assignments(&m)[2].expression else {
             unreachable!()
         };
         assert!(matches!(*c.else_expr, Expression::Identifier(_)));
+    }
+
+    #[test]
+    fn branch_body_cannot_perturb_its_own_guard() {
+        // The classic NOT_GIVEN defaulting idiom: only ONE arm may run.
+        // Without condition snapshotting the then-branch assignment makes
+        // the re-evaluated else-guard true as well.
+        let m = analyze_one(&module_src(
+            r#"
+            real t;
+            analog begin
+                t = -1.0;
+                if (t < 0.0)
+                    t = 25.0;
+                else
+                    t = t + 273.15;
+                I(p, n) <+ t * 1e-6 * V(p, n);
+            end
+            "#,
+        ));
+
+        // Emulate the VM: execute assignments in order over a variable map
+        let mut vars: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
+        fn eval(expr: &Expression, vars: &std::collections::HashMap<&str, f64>) -> f64 {
+            match expr {
+                Expression::Number(n) => n.value,
+                Expression::Identifier(id) => vars.get(id.name.as_str()).copied().unwrap_or(0.0),
+                Expression::Unary(u) => {
+                    let v = eval(&u.operand, vars);
+                    match u.op {
+                        UnaryOp::Neg => -v,
+                        UnaryOp::Pos => v,
+                        UnaryOp::Not => f64::from(v == 0.0),
+                        UnaryOp::BitNot => !(v as i64) as f64,
+                    }
+                }
+                Expression::Binary(b) => {
+                    let l = eval(&b.left, vars);
+                    let r = eval(&b.right, vars);
+                    match b.op {
+                        BinaryOp::Add => l + r,
+                        BinaryOp::Lt => f64::from(l < r),
+                        BinaryOp::And => f64::from(l != 0.0 && r != 0.0),
+                        _ => f64::NAN,
+                    }
+                }
+                Expression::Conditional(c) => {
+                    if eval(&c.condition, vars) != 0.0 {
+                        eval(&c.then_expr, vars)
+                    } else {
+                        eval(&c.else_expr, vars)
+                    }
+                }
+                _ => f64::NAN,
+            }
+        }
+        for assign in flat_assignments(&m) {
+            let value = eval(&assign.expression, &vars);
+            // Keys live as long as the module borrow
+            let key: &str = Box::leak(assign.target.to_string().into_boxed_str());
+            vars.insert(key, value);
+        }
+        assert_eq!(
+            vars.get("t").copied(),
+            Some(25.0),
+            "only the then-arm may execute; got {vars:?}"
+        );
     }
 
     #[test]
@@ -2586,13 +2738,17 @@ mod tests {
             end
             "#,
         ));
-        let Expression::Conditional(c) = &flat_assignments(&m)[0].expression else {
-            panic!("expected guarded assignment");
-        };
-        let Expression::Call(call) = &*c.condition else {
-            panic!("expected analysis() guard");
+        // [0] is the snapshotted analysis() guard, [1] the guarded seed
+        let snapshot = flat_assignments(&m)[0];
+        assert!(snapshot.target.starts_with("__guard"));
+        let Expression::Call(call) = &snapshot.expression else {
+            panic!("expected analysis() snapshot, got {:?}", snapshot.expression);
         };
         assert_eq!(call.name.as_str(), "analysis");
+        let Expression::Conditional(c) = &flat_assignments(&m)[1].expression else {
+            panic!("expected guarded assignment");
+        };
+        assert!(matches!(*c.condition, Expression::Identifier(_)));
     }
 
     #[test]
