@@ -63,6 +63,7 @@ pub mod parser;
 pub mod preprocessor;
 pub mod semantic;
 pub mod source;
+pub mod stdlib;
 pub mod types;
 
 /// Laplace (s-domain) filters for transient analysis
@@ -137,8 +138,36 @@ impl VerilogACompiler {
         Self { options }
     }
 
+    /// Build a preprocessor configured from the compiler options.
+    fn configured_preprocessor(&self) -> Preprocessor {
+        let mut pp = Preprocessor::new();
+
+        for inc_path in &self.options.include_paths {
+            pp.add_include_path(inc_path);
+        }
+
+        for (name, value) in &self.options.defines {
+            let def = preprocessor::MacroDef::simple(value.as_deref().unwrap_or(""));
+            pp.define(name, def);
+        }
+
+        pp
+    }
+
     /// Compile Verilog-A source code to a device model
+    ///
+    /// The source is preprocessed first, so `include/`define/`ifdef work
+    /// identically whether compiling from a string or from a file.
     pub fn compile(&self, source: &str) -> CompileResult<CompiledModel> {
+        let mut pp = self.configured_preprocessor();
+        let preprocessed = pp
+            .preprocess_source(source)
+            .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
+        self.compile_preprocessed(&preprocessed)
+    }
+
+    /// Compile already-preprocessed Verilog-A source.
+    fn compile_preprocessed(&self, source: &str) -> CompileResult<CompiledModel> {
         // Phase 1: Lexical analysis
         let source_map = SourceMap::new();
         let source_id = source_map.add_source("<input>", source);
@@ -161,19 +190,7 @@ impl VerilogACompiler {
         &self,
         path: &std::path::Path,
     ) -> CompileResult<CompiledFile> {
-        // Create preprocessor with options
-        let mut pp = Preprocessor::new();
-
-        // Add include paths from options
-        for inc_path in &self.options.include_paths {
-            pp.add_include_path(inc_path);
-        }
-
-        // Add defines from options
-        for (name, value) in &self.options.defines {
-            let def = preprocessor::MacroDef::simple(value.as_deref().unwrap_or(""));
-            pp.define(name, def);
-        }
+        let mut pp = self.configured_preprocessor();
 
         // Preprocess the file (handles `include, `define, `ifdef, etc.)
         let preprocessed = pp
@@ -192,7 +209,7 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        let model = self.compile(&preprocessed)?;
+        let model = self.compile_preprocessed(&preprocessed)?;
         Ok(CompiledFile {
             model,
             dependencies,

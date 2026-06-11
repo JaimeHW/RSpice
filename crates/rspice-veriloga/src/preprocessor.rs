@@ -680,17 +680,19 @@ impl Preprocessor {
             ));
         };
 
-        // Search for the file
-        let path = self.find_include(filename).ok_or_else(|| {
-            PreprocessorError::new(
-                format!("Include file not found: {}", filename),
-                self.current_file.clone(),
-                line_num,
-            )
-        })?;
-
-        // Recursively preprocess
-        self.preprocess_file(&path)
+        // Search for the file; fall back to the built-in standard headers
+        // (disciplines.vams, constants.vams) when not found on disk.
+        match self.find_include(filename) {
+            Some(path) => self.preprocess_file(&path),
+            None => match crate::stdlib::builtin_include(filename) {
+                Some(content) => self.preprocess_source(content),
+                None => Err(PreprocessorError::new(
+                    format!("Include file not found: {}", filename),
+                    self.current_file.clone(),
+                    line_num,
+                )),
+            },
+        }
     }
 
     /// Find an include file in search paths
