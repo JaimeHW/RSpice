@@ -50,6 +50,9 @@ pub enum NoiseSourceType {
     /// Burst (popcorn) noise: KB * I^AB / (1 + (f/FB)^2)
     /// Lorentzian spectrum with corner frequency FB
     Burst,
+    /// Frequency-flat source with an explicitly given spectral density
+    /// (Verilog-A `white_noise(pwr)`): Si = pwr, temperature-independent
+    White,
 }
 
 /// A noise source in the circuit
@@ -153,6 +156,35 @@ impl NoiseSource {
         }
     }
 
+    /// Create a frequency-flat source from an explicit spectral density
+    /// (A²/Hz for current injection, V²/Hz when injected at a branch row)
+    pub fn white(device_name: String, node_pos: usize, node_neg: usize, psd: Value) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::White,
+            node_pos,
+            node_neg,
+            parameter: psd,
+            af: 1.0,
+            ef: 1.0,
+            current: 0.0,
+            corner_freq: 1.0,
+            temperature_offset: 0.0,
+        }
+    }
+
+    /// Create a 1/f^EF source from an explicit spectral density at 1 Hz:
+    /// Si(f) = psd / f^ef (Verilog-A `flicker_noise(pwr, exp)`)
+    pub fn flicker_psd(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        psd: Value,
+        ef: Value,
+    ) -> Self {
+        Self::flicker_with_frequency_exponent(device_name, node_pos, node_neg, psd, 1.0, ef, 1.0)
+    }
+
     /// Create a burst (popcorn) noise source
     ///
     /// Burst noise has a Lorentzian spectrum: Si = KB * I^AB / (1 + (f/FB)^2)
@@ -215,6 +247,8 @@ impl NoiseSource {
                 let f_ratio = frequency / fb;
                 kb * self.current.abs().powf(ab) / (1.0 + f_ratio * f_ratio)
             }
+            // Explicit spectral density evaluated at the operating point
+            NoiseSourceType::White => self.parameter.max(0.0),
         }
     }
 }
@@ -354,6 +388,7 @@ impl NoiseSourceType {
             NoiseSourceType::Shot => "shot",
             NoiseSourceType::Flicker => "flicker",
             NoiseSourceType::Burst => "burst",
+            NoiseSourceType::White => "white",
         }
     }
 }
@@ -481,7 +516,7 @@ impl IntegratedNoise {
                 let power = 0.5 * (contribution.output_contribution + s_right) * df;
                 let entry = totals
                     .entry((contribution.device_name.clone(), contribution.noise_type.label()))
-                    .or_insert((contribution.noise_type.clone(), 0.0));
+                    .or_insert((contribution.noise_type, 0.0));
                 entry.1 += power;
             }
         }
