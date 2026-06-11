@@ -49,7 +49,7 @@ impl Mosfet {
             kp: 110e-6,     // Transconductance (NMOS typical)
             gamma: 0.4,     // Body effect
             phi: 0.65,      // Surface potential
-            lambda: 0.01,   // Channel-length modulation
+            lambda: 0.0, // Channel-length modulation (mos1set.c default)
             is_bulk: 1e-14, // Bulk diode saturation current
             js_bulk: 0.0,
             cox: 7e-4, // Oxide capacitance
@@ -107,6 +107,9 @@ impl Mosfet {
             af: 1.0,
             ef: 1.0,
             thermal_noise_gamma: 2.0 / 3.0,
+            nlev: 2,
+            gdsnoi: 1.0,
+            multiplicity: 1.0,
 
             // Level 6 parameters (double-exponent model)
             kc: 110e-6,    // Current gain (similar to KP)
@@ -869,6 +872,20 @@ impl Mosfet {
         {
             self.thermal_noise_gamma = v;
         }
+        if let Some(v) = params
+            .get("NLEV")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.nlev = v as i32;
+        }
+        if let Some(v) = params
+            .get("GDSNOI")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.gdsnoi = v;
+        }
         // Level 6 parameters
         if let Some(v) = kc_explicit {
             self.kc = v;
@@ -1087,6 +1104,7 @@ impl Mosfet {
         let scale = multiplier * nf;
         if scale.is_finite() && scale > 0.0 {
             self.w *= scale;
+            self.multiplicity = scale;
         }
 
         self.refresh_legacy_bsim_size_params();
