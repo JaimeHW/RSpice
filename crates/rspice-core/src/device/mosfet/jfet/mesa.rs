@@ -2,6 +2,19 @@
 
 use super::*;
 
+/// GATEMOD=1 gate-branch evaluation in the internal (polarity-folded)
+/// frame: Schottky gate-source current/conductance and the thermally
+/// self-consistent gate-drain current with its vgs/vds sensitivities
+/// (the gate-drain branch carries no vgd conductance in this model).
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Hfet1GateEval {
+    pub cgs: Value,
+    pub ggs: Value,
+    pub cgd: Value,
+    pub gmg: Value,
+    pub gmd: Value,
+}
+
 impl Jfet {
     #[inline]
     pub(super) fn exp_limited(x: Value) -> Value {
@@ -680,6 +693,32 @@ impl Jfet {
         vds: Value,
         temp: Value,
     ) -> (Value, Value, Value) {
+        let (ids, gm, gds, _) = self.calculate_hfet1_core(vgs, vds, temp);
+        (ids, gm, gds)
+    }
+
+    /// HFET1 GATEMOD=1 channel + gate evaluation; see
+    /// [`Jfet::calculate_hfet1_core`].
+    pub(super) fn calculate_hfet1_gatemod(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp: Value,
+    ) -> (Value, Value, Value, Option<Hfet1GateEval>) {
+        self.calculate_hfet1_core(vgs, vds, temp)
+    }
+
+    /// HFET1 channel evaluation, optionally with the GATEMOD=1 thermal
+    /// gate model (hfetload.c hfeta, `gatemod != 0` sections). The gate
+    /// branch values are returned in the internal (polarity-folded)
+    /// frame, like `hfet_gate_branch`; with GATEMOD=1 the A1/A2
+    /// correction currents are already folded into the channel terms.
+    pub(super) fn calculate_hfet1_core(
+        &self,
+        vgs: Value,
+        vds: Value,
+        temp: Value,
+    ) -> (Value, Value, Value, Option<Hfet1GateEval>) {
         const Q_ELECTRON: Value = 1.602176634e-19;
         let pol = self.jfet_type.polarity();
         let p = &self.params;
@@ -737,7 +776,7 @@ impl Jfet {
         let b = (vgt / etavth).clamp(-80.0, 80.0).exp();
         let nsm = 2.0 * n0 * (1.0 + 0.5 * b).ln();
         if !nsm.is_finite() || nsm < 1e-38 {
-            return (0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, None);
         }
 
         let c = (nsm / nmax).max(0.0).powf(gamma);
@@ -746,21 +785,21 @@ impl Jfet {
         let gchi = gchi0 * ns;
         let gch = gchi / (1.0 + gchi * rt);
         if !gch.is_finite() || gch <= 0.0 {
-            return (0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, None);
         }
 
         let gchim = gchi0 * nsm;
         let h = (1.0 + 2.0 * gchim * rsi + vgte * vgte / (vl * vl)).sqrt();
         let p_denom = 1.0 + gchim * rsi + h;
         if !p_denom.is_finite() || p_denom <= 0.0 {
-            return (0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, None);
         }
 
         let isatm = gchim * vgte / p_denom;
         let g = (isatm / imax).max(0.0).powf(gamma);
         let isat = isatm / (1.0 + g).powf(1.0 / gamma);
         if !isat.is_finite() {
-            return (0.0, 0.0, 0.0);
+            return (0.0, 0.0, 0.0, None);
         }
 
         let vsate = (isat / gch).abs().max(1e-30);
@@ -798,8 +837,114 @@ impl Jfet {
             * (delisatmvgte * delvgtevgt + delisatmgchim * gchi0 * delnsmvgt)
             + delvsategch * p_chain;
         let g_total = delidgch * p_chain + delidvsate * delvsatevgt;
-        let gm_fwd = g_total * delvgtvgs;
-        let gds_fwd = delidvds + g_total * sigma;
+        let mut ids_fwd = ids_fwd;
+        let mut gm_fwd = g_total * delvgtvgs;
+        let mut gds_fwd = delidvds + g_total * sigma;
+
+        // GATEMOD=1: thermally self-consistent gate model
+        // (hfetload.c hfeta, gatemod != 0 sections), evaluated at the
+        // internal forward bias like the C reference.
+        let gate = if self.params.hfet_gatemod {
+            let astar = p.mesa_astar.max(0.0);
+            let iso = astar * w * l / 2.0;
+            let phib = p.hfet_phib.max(0.0);
+            let k_boltzmann = crate::constants::K_BOLTZMANN;
+            let temp_dev = temp_k;
+            let csat = iso * temp_dev * temp_dev * (-phib / (k_boltzmann * temp_dev)).exp();
+            let gmin = self.junction_gmin.max(0.0);
+
+            // Gate-drain branch with channel-temperature feedback.
+            let ck1 = p.hfet_ck1;
+            let ck2 = p.hfet_ck2;
+            let cm1 = p.hfet_cm1;
+            let cm2 = p.hfet_cm2;
+            let mt1 = p.hfet_mt1.max(1e-9);
+            let mt2 = p.hfet_mt2.max(1e-9);
+            let talpha = p.hfet_talpha;
+            let m2d = p.hfet_m2d.max(1e-12);
+            let m2s = p.hfet_m2s.max(1e-12);
+            let koverq = k_boltzmann / crate::constants::Q_ELECTRON;
+
+            let vkneet = (ck1 * vsate + ck2).max(1e-30);
+            let vmax_t = (cm1 * vsate + cm2).max(1e-30);
+            let a = (vds_int / vmax_t).max(0.0).powf(mt2);
+            let b_fold = (1.0 + a).powf(1.0 / mt2);
+            let vdse_t = vds_int / b_fold;
+            let c_knee = (vdse_t / vkneet).max(0.0).powf(mt1);
+            let d_knee = (1.0 + c_knee).powf(1.0 / mt1);
+            let td = temp_dev + talpha * vdse_t * vdse_t / d_knee;
+            let e_th = koverq * td * m2d;
+            let p_th = phib / (k_boltzmann * td);
+            let f_th = (-p_th).exp();
+            let q_th = (vgs_int - vdse_t) / e_th;
+            let g_th = q_th.clamp(-700.0, 700.0).exp();
+            let h_th = iso * td * td * f_th * g_th;
+            let cgd = h_th - csat;
+
+            let delcgdvgs = h_th / e_th;
+            let delcgdtd = h_th * (p_th - q_th + 2.0) / td;
+            let deltdvdse = talpha * vdse_t * (2.0 - c_knee / (1.0 + c_knee)) / d_knee;
+            let deltdvkneet = (td - temp_dev) * c_knee / ((1.0 + c_knee) * vkneet);
+            let delvdsevmax = vdse_t * a / ((1.0 + a) * vmax_t);
+            let delvdsevds = (1.0 - a / (1.0 + a)) / b_fold;
+            let chain_g = delvsatevgt * delvgtvgs;
+            let dvdsevgs = delvdsevmax * cm1 * chain_g;
+            let dtdvgs = deltdvdse * dvdsevgs + deltdvkneet * ck1 * chain_g;
+            let gmg = delcgdvgs + delcgdtd * dtdvgs;
+            let chain_d = delvsatevgt * sigma;
+            let dvdsevds_t = delvdsevds + delvdsevmax * cm1 * chain_d;
+            let dtdvds = deltdvdse * dvdsevds_t + deltdvkneet * ck1 * chain_d;
+            let gmd = -delcgdvgs * dvdsevds_t + delcgdtd * dtdvds;
+
+            // Gate-source Schottky branch.
+            let vtn = (vt * m2s).max(1e-30);
+            let (cgs_g, ggs_g) = if vgs_int <= -5.0 * vt {
+                let ggs_g = -csat / vgs_int + gmin;
+                (ggs_g * vgs_int, ggs_g)
+            } else {
+                let evgs = (vgs_int / vtn).clamp(-700.0, 700.0).exp();
+                (
+                    csat * (evgs - 1.0) + gmin * vgs_int,
+                    csat * evgs / vtn + gmin,
+                )
+            };
+
+            // A1/A2 correction currents folded into the channel.
+            let a1 = p.hfet_a1;
+            let a2 = p.hfet_a2;
+            if a1 != 0.0 || a2 != 0.0 {
+                let mv1 = p.hfet_mv1.max(1e-9);
+                let cm3 = p.hfet_cm3;
+                let vmax_c = (cm3 * vsate).max(1e-30);
+                let a_c = (vds_int / vmax_c).max(0.0).powf(mv1);
+                let b_c = (1.0 + a_c).powf(1.0 / mv1);
+                let vdse_c = vds_int / b_c;
+                let delvdsevmax_c = vdse_c * a_c / ((1.0 + a_c) * vmax_c);
+                let delvdsevds_c = (1.0 - a_c / (1.0 + a_c)) / b_c;
+                let dvdsevgs_c = delvdsevmax_c * cm3 * delvsatevgt * delvgtvgs;
+                let dvdsevds_c = delvdsevds_c + delvdsevmax_c * cm3 * delvsatevgt * sigma;
+                let c_corr = vgte * vdse_c;
+                let d_corr = 1.0 + a2 * c_corr;
+                let e_corr = vdse_c * delvgtevgt;
+                let f_corr = a2 * cgd;
+                ids_fwd += a1 * (d_corr * cgd - cgs_g);
+                gds_fwd += a1 * (d_corr * gmd + f_corr * (vgte * dvdsevds_c + e_corr * sigma));
+                gm_fwd +=
+                    a1 * (d_corr * gmg + f_corr * (vgte * dvdsevgs_c + e_corr * delvgtvgs)
+                        - ggs_g);
+            }
+
+            Some(Hfet1GateEval {
+                cgs: cgs_g,
+                ggs: ggs_g,
+                cgd,
+                gmg,
+                gmd,
+            })
+        } else {
+            None
+        };
+
         let (mut ids, mut gm, mut gds) = if inverse {
             (-ids_fwd, gm_fwd, gds_fwd)
         } else {
@@ -816,7 +961,7 @@ impl Jfet {
             gds = 0.0;
         }
 
-        (pol * ids, gm, gds)
+        (pol * ids, gm, gds, gate)
     }
 
     /// Calculate drain current and conductances
@@ -855,6 +1000,34 @@ mod hfet1_tests {
             (ids - 2.68269e-4).abs() <= 2.68269e-4 * 1.0e-3,
             "ids={ids:e} expected 2.68269e-4 (gm={gm:e} gds={gds:e})"
         );
+    }
+
+    #[test]
+    fn hfet1_gatemod_internals_match_the_gdb_oracle() {
+        // gdb on the ngspice debug build, break hfetload.c:736 running the
+        // gatemod=1 pin deck (20u/1u, vto=0.1, a1=0.1, a2=0.01): at the
+        // iterate vgs=0.6, vds=0.8 the reference computes
+        // csat=1.4497771298665816e-10 (= ISO*T^2*exp(-PHIB/kT), ISO=4e-7),
+        // cgd=1.2943481726683374e-7, gmg=1.8446754447778568e-6,
+        // gmd=2.4718887023647735e-8 (all pre-correction).
+        let mut jfet = Jfet::njf("z1", 1, 2, 3).enable_hfet_model();
+        jfet.params.vto = 0.1;
+        jfet.params.hfet_gatemod = true;
+        jfet.params.hfet_a1 = 0.1;
+        jfet.params.hfet_a2 = 0.01;
+
+        let (_, _, _, gate) = jfet.calculate_hfet1_gatemod(0.6, 0.8, 300.15);
+        let gate = gate.expect("gatemod evaluation present");
+
+        let assert_close = |actual: Value, expected: Value, what: &str| {
+            assert!(
+                (actual - expected).abs() <= expected.abs() * 1.0e-5,
+                "{what}: actual={actual:e} expected={expected:e}"
+            );
+        };
+        assert_close(gate.cgd, 1.2943481726683374e-7, "cgd");
+        assert_close(gate.gmg, 1.8446754447778568e-6, "gmg");
+        assert_close(gate.gmd, 2.4718887023647735e-8, "gmd");
     }
 
     #[test]
