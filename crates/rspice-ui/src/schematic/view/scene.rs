@@ -23,6 +23,12 @@ pub(super) fn draw_scene(
     painter.rect_filled(available, 0.0, crate::ui::tokens::active_palette().canvas_bg);
     draw_grid(painter, available, state);
 
+    // First-run guidance: an empty sheet says what to do next instead of
+    // presenting a silent dot field.
+    if state.schematic.components.is_empty() && state.schematic.wires.is_empty() {
+        draw_empty_hint(painter, available);
+    }
+
     let preview_bounds = if state.schematic.selection_rect.is_active() {
         let (min_x, min_y, max_x, max_y) = state.schematic.selection_rect.bounds();
         Some((min_x, min_y, max_x, max_y))
@@ -102,4 +108,33 @@ pub(super) fn draw_scene(
 
     // Check results last — violation badges annotate everything below.
     super::violations::draw_violation_markers(painter, viewport, state);
+}
+
+/// Centered get-started hint for an empty sheet.
+fn draw_empty_hint(painter: &Painter, available: Rect) {
+    use crate::ui::theme::{self, FontWeight};
+
+    let palette = crate::ui::tokens::active_palette();
+    let center = available.center();
+    painter.text(
+        center - egui::vec2(0.0, 22.0),
+        egui::Align2::CENTER_CENTER,
+        "Empty schematic",
+        theme::sans(15.0, FontWeight::Medium),
+        palette.text_dim,
+    );
+    painter.text(
+        center + egui::vec2(0.0, 2.0),
+        egui::Align2::CENTER_CENTER,
+        "Pick a part from the left panel, or press R · C · L · V · G to place one",
+        theme::sans(12.0, FontWeight::Regular),
+        palette.text_faint,
+    );
+    painter.text(
+        center + egui::vec2(0.0, 22.0),
+        egui::Align2::CENTER_CENTER,
+        "File ▸ Open example loads a ready-to-run circuit",
+        theme::sans(12.0, FontWeight::Regular),
+        palette.text_faint,
+    );
 }

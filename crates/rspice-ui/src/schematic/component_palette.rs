@@ -139,6 +139,10 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
 
 const CONTROLLED: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
+        kind: ComponentType::OpAmp,
+        label: "Op-Amp",
+    },
+    ComponentPaletteEntry {
         kind: ComponentType::Vcvs,
         label: "VCVS (E)",
     },

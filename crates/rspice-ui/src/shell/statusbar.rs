@@ -32,16 +32,27 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 ui.add_space(10.0);
                 ui.spacing_mut().item_spacing.x = 18.0;
 
+                // Segments drop by priority as the window narrows (the web
+                // build has no minimum size) — overlapping text is worse
+                // than missing text.
+                let width = ui.available_width();
+
                 if state.shell.view == crate::shell::WorkspaceView::Results {
                     segment(ui, &crate::shell::results::status_summary(state));
-                    if state.shell.results.cursors.any() {
-                        segment(ui, "cursors active · Esc clears");
-                    } else {
-                        segment(ui, "cursors: click a plot for A · B");
+                    if width > 560.0 {
+                        if state.shell.results.cursors.any() {
+                            segment(ui, "cursors active · Esc clears");
+                        } else {
+                            segment(ui, "cursors: click a plot for A · B");
+                        }
                     }
                 } else {
-                    segment(ui, &coords_text(state));
-                    segment(ui, &format!("Grid {} · Snap on", state.schematic.grid_size));
+                    if width > 640.0 {
+                        segment(ui, &coords_text(state));
+                    }
+                    if width > 520.0 {
+                        segment(ui, &format!("Grid {} · Snap on", state.schematic.grid_size));
+                    }
                     segment(ui, &selection_text(state));
                 }
 
@@ -51,10 +62,14 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
                     segment(ui, &format!("{:.0} %", state.schematic.zoom * 100.0));
                     engine_pill(ui, state);
-                    let threads = thread_count();
-                    let unit = if threads == 1 { "thread" } else { "threads" };
-                    segment(ui, &format!("{threads} {unit}"));
-                    segment(ui, &state.shell.corner.clone());
+                    if width > 600.0 {
+                        let threads = thread_count();
+                        let unit = if threads == 1 { "thread" } else { "threads" };
+                        segment(ui, &format!("{threads} {unit}"));
+                    }
+                    if width > 430.0 {
+                        segment(ui, &state.shell.corner.clone());
+                    }
                 });
             });
         });

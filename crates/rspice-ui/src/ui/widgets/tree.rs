@@ -219,14 +219,21 @@ impl<'a> TreeRow<'a> {
         // Lay out with the placeholder color and tint at paint time: the
         // hover animation sweeps `text_color` through ten shades, and a
         // color-keyed galley would miss egui's cache on every one.
+        // Truncate (never wrap): rows are fixed-height, and a long name
+        // spilling onto a second line corrupts the list rhythm. The full
+        // name surfaces as a tooltip instead.
         let label_galley = ui.fonts(|f| {
-            f.layout(
+            let mut job = egui::text::LayoutJob::simple_singleline(
                 self.label.to_owned(),
                 label_font,
                 egui::Color32::PLACEHOLDER,
+            );
+            job.wrap = egui::text::TextWrapping::truncate_at_width(
                 (rect.right() - 6.0 - meta_w - x).max(8.0),
-            )
+            );
+            f.layout_job(job)
         });
+        let label_elided = label_galley.elided;
         painter.galley(
             egui::pos2(x, cy - label_galley.size().y * 0.5),
             label_galley,
@@ -244,8 +251,12 @@ impl<'a> TreeRow<'a> {
             );
         }
 
+        let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        if label_elided {
+            response = response.on_hover_text(self.label);
+        }
         TreeRowResult {
-            response: response.on_hover_cursor(egui::CursorIcon::PointingHand),
+            response,
             checkbox_changed,
         }
     }

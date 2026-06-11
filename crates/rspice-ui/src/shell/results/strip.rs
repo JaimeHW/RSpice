@@ -146,28 +146,51 @@ impl<'a> StripHeader<'a> {
 
         ui.add_space(2.0);
         ui.spacing_mut().item_spacing.x = 4.0;
-        for (index, chip) in self.legend.iter().enumerate() {
-            let response = legend_chip(ui, chip);
-            if response.clicked() {
-                out.legend_clicked = Some(index);
-            }
-            if index >= self.removable_from {
-                response.context_menu(|ui| {
-                    if ui.button("Remove expression").clicked() {
-                        out.legend_removed = Some(index);
-                        ui.close_menu();
+
+        // Chips live in a hidden-scrollbar horizontal scroller so a crowded
+        // legend never collides with the right-side actions; the wheel (or a
+        // drag) reaches the overflow.
+        let actions_width =
+            56.0 + if self.closable { 23.0 } else { 0.0 } + if self.zoomed { 44.0 } else { 0.0 };
+        let chips_width = (ui.available_width() - actions_width).max(60.0);
+        let removable_from = self.removable_from;
+        let legend = self.legend;
+        let expr_action = self.expr_action;
+        egui::ScrollArea::horizontal()
+            .id_salt(ui.id().with("strip.legend"))
+            .max_width(chips_width)
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    for (index, chip) in legend.iter().enumerate() {
+                        let response = legend_chip(ui, chip);
+                        if response.clicked() {
+                            out.legend_clicked = Some(index);
+                        }
+                        if index >= removable_from {
+                            response.context_menu(|ui| {
+                                if ui.button("Remove expression").clicked() {
+                                    out.legend_removed = Some(index);
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    }
+                    if expr_action {
+                        ui.add_space(2.0);
+                        if action_chip(
+                            ui,
+                            "+ expr",
+                            "Add an expression trace — V(out)/V(in), dB(), deriv()…",
+                        )
+                        .clicked()
+                        {
+                            out.add_expr_clicked = true;
+                        }
                     }
                 });
-            }
-        }
-        if self.expr_action {
-            ui.add_space(2.0);
-            if action_chip(ui, "+ expr", "Add an expression trace — V(out)/V(in), dB(), deriv()…")
-                .clicked()
-            {
-                out.add_expr_clicked = true;
-            }
-        }
+            });
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 1.0;

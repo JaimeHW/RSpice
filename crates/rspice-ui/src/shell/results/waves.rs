@@ -213,7 +213,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &t,
     );
     if models.is_empty() {
-        well_hint(ui, "The active run has no plottable analyses");
+        let hint = if state.simulation.active_run().is_none() {
+            "No results yet — press F5 or the Run button to simulate"
+        } else {
+            "The active run has no plottable analyses"
+        };
+        well_hint(ui, hint);
         return;
     }
 
