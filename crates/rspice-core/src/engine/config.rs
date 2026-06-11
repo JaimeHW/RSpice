@@ -34,6 +34,17 @@ pub struct SimulationConfig {
     pub bypass_config: BypassConfig,
     /// Convergence configuration for DC operating point
     pub convergence_config: ConvergenceConfig,
+    /// Grid-locked transient stepping: when set, accepted timepoints are
+    /// exactly these strictly-increasing times — the dt sequence is the
+    /// successive grid deltas, with no intermediate adaptive points, no
+    /// breakpoint-restart re-seeding, and LTE control disabled (the grid is
+    /// given). Newton-only acceptance per step; a step that cannot converge
+    /// on its imposed dt fails the run rather than sub-stepping, because
+    /// history-coupled devices (TXL/CPL/LTRA convolutions) sample accepted
+    /// points and internal sub-steps would change the trajectory being
+    /// validated. Built for oracle comparison: replaying a reference's
+    /// recorded grid isolates physics parity from step-control parity.
+    pub locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
 }
 
 /// Configuration for DC convergence algorithms
@@ -232,6 +243,7 @@ impl Default for SimulationConfig {
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
             bypass_config: BypassConfig::default(),
             convergence_config: ConvergenceConfig::default(),
+            locked_time_grid: None,
         }
     }
 }

@@ -709,6 +709,33 @@ impl Engine {
         };
         let mut t = resume_time;
 
+        // Grid-locked stepping: the accepted times are exactly the
+        // configured grid (filtered to points after the start), the dt
+        // sequence is the successive deltas, and the run ends at the last
+        // grid point. Breakpoints, source-activity biasing, LTE control,
+        // and every timestep-controller proposal are bypassed while locked;
+        // Newton (with its dt-preserving rescue) is the sole acceptance
+        // authority, and a step that cannot converge on its imposed dt
+        // fails the run instead of sub-stepping, because history-coupled
+        // devices sample accepted points and internal sub-steps would
+        // perturb the trajectory under validation.
+        let locked_grid: Option<Vec<Value>> = self.config.locked_time_grid.as_ref().map(|grid| {
+            let mut points: Vec<Value> = grid
+                .iter()
+                .copied()
+                .filter(|&point| point.is_finite() && point > t + 1e-30)
+                .collect();
+            points.sort_by(|a, b| a.total_cmp(b));
+            points.dedup_by(|a, b| (*a - *b).abs() <= 1e-12 * a.abs().max(*b).max(1e-30));
+            points
+        });
+        let mut locked_cursor = 0usize;
+        let tstop = match locked_grid.as_ref().and_then(|grid| grid.last()) {
+            Some(&last) => last.min(tstop),
+            None => tstop,
+        };
+        const LOCKED_MAX_RETRIES: usize = 8;
+
         // Initialize capacitor voltage history from DC solution
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let np = cap.pp.row;
@@ -840,29 +867,39 @@ impl Engine {
             }
 
             total_iterations += 1;
-            let (dt, mut at_breakpoint) = breakpoints.limit_step(t, timestep.dt());
+            let (dt, mut at_breakpoint) = match locked_grid.as_ref() {
+                Some(grid) => {
+                    let Some(&target) = grid.get(locked_cursor) else {
+                        break;
+                    };
+                    (target - t, false)
+                }
+                None => breakpoints.limit_step(t, timestep.dt()),
+            };
             let mut dt = dt.min(tstop - t); // Don't overshoot tstop
             let mut expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
-            let interior_source_delta = if at_breakpoint && dt.is_finite() && dt > 0.0 {
-                Self::max_expected_source_delta(&circuit, t, t + 0.5 * dt)
-            } else {
-                expected_source_delta
-            };
-            let biased_dt = Self::bias_transient_step_for_source_activity(
-                dt,
-                tstop - t,
-                at_breakpoint,
-                expected_source_delta,
-                interior_source_delta,
-                practical_min,
-                timestep.preferred_min_dt(),
-                Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
-                nonlinear_source_ramp_cap_enabled,
-            );
-            if biased_dt + 1e-30 < dt {
-                dt = biased_dt;
-                at_breakpoint = breakpoints.at_breakpoint(t + dt);
-                expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+            if locked_grid.is_none() {
+                let interior_source_delta = if at_breakpoint && dt.is_finite() && dt > 0.0 {
+                    Self::max_expected_source_delta(&circuit, t, t + 0.5 * dt)
+                } else {
+                    expected_source_delta
+                };
+                let biased_dt = Self::bias_transient_step_for_source_activity(
+                    dt,
+                    tstop - t,
+                    at_breakpoint,
+                    expected_source_delta,
+                    interior_source_delta,
+                    practical_min,
+                    timestep.preferred_min_dt(),
+                    Self::should_apply_active_source_recovery_cap(force_accept_cooldown),
+                    nonlinear_source_ramp_cap_enabled,
+                );
+                if biased_dt + 1e-30 < dt {
+                    dt = biased_dt;
+                    at_breakpoint = breakpoints.at_breakpoint(t + dt);
+                    expected_source_delta = Self::max_expected_source_delta(&circuit, t, t + dt);
+                }
             }
             if fixed_method.is_none() {
                 trapgear.set_at_breakpoint(at_breakpoint);
@@ -1522,6 +1559,24 @@ impl Engine {
                     );
                 }
 
+                // Grid-locked steps never change dt and never force-accept:
+                // the dt-preserving Newton retries above (junction limiting,
+                // gmin rescue) are the whole recovery budget, and exhausting
+                // it fails the run with the offending grid time — committing
+                // a non-converged point would poison the locked trajectory.
+                if locked_grid.is_some() {
+                    if retry_count >= LOCKED_MAX_RETRIES {
+                        log::error!(
+                            "Grid-locked step to t={:.12e}s (dt={:.3e}) failed Newton after {} retries",
+                            t + dt,
+                            dt,
+                            retry_count
+                        );
+                        return Err(SimulationError::ConvergenceFailed(total_iterations));
+                    }
+                    continue;
+                }
+
                 // Match ngspice's non-convergence recovery: retry at one eighth
                 // of the rejected timestep, unless a force-accept cooldown is
                 // temporarily holding dt steady to avoid ping-pong.
@@ -2028,7 +2083,8 @@ impl Engine {
                 activity_limit,
             );
 
-            if let Some(limit) = candidate_truncation_limit
+            if locked_grid.is_none()
+                && let Some(limit) = candidate_truncation_limit
                 && Self::should_retry_ngspice_charge_truncation(limit, dt)
             {
                 let retry_dt = limit.clamp(timestep.hard_min_dt(), max_step);
@@ -2100,7 +2156,11 @@ impl Engine {
                     jfet_truncation_limit,
                     mosfet_truncation_limit,
                 );
-            let (lte, accept) = if first_accepted_transient_step {
+            let (lte, accept) = if locked_grid.is_some() {
+                // The grid is given: a converged Newton solution at the
+                // imposed dt is the acceptance criterion, full stop.
+                (0.0, true)
+            } else if first_accepted_transient_step {
                 (0.0, true)
             } else if linearized_startup_recovery_points {
                 (0.0, true)
@@ -2481,7 +2541,9 @@ impl Engine {
                 nonlinear_state_matches_new_solution = false;
             }
 
-            if Self::is_stale_step(&solution, &new_solution, expected_source_delta, num_nodes) {
+            if locked_grid.is_none()
+                && Self::is_stale_step(&solution, &new_solution, expected_source_delta, num_nodes)
+            {
                 stale_accept_count += 1;
                 let boosted = (dt * 2.0).min(max_step);
                 if boosted > dt {
@@ -2501,7 +2563,15 @@ impl Engine {
 
             // Accept this timestep
             t += dt;
-            let hit_breakpoint = at_breakpoint || breakpoints.at_breakpoint(t);
+            let hit_breakpoint = if let Some(grid) = locked_grid.as_ref() {
+                // Land exactly on the grid point (no floating-point drift)
+                // and never engage breakpoint-restart dynamics.
+                t = grid[locked_cursor];
+                locked_cursor += 1;
+                false
+            } else {
+                at_breakpoint || breakpoints.at_breakpoint(t)
+            };
             if hit_breakpoint {
                 t = breakpoints.snap_to_breakpoint(t);
             }
