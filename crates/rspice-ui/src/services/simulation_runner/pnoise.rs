@@ -319,12 +319,43 @@ fn run_pnoise_analysis_with_config_typed(
     )
     .map_err(PnoiseRunError::Data)?;
 
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
 
     let mut output_noise = folded_output_noise.clone();
+    // The primary output curve comes from the engine's cyclostationary
+    // conversion-matrix pnoise when the output is single-ended: it carries
+    // the LO-modulated transfers and modulated shot/thermal intensities the
+    // stationary sideband fold cannot represent. The fold remains as the
+    // differential-output fallback and for the secondary breakdowns below.
+    if output_ref_idx.is_none() {
+        match engine.run_pnoise(
+            &netlist,
+            pss_data.frequency,
+            &frequencies,
+            config.output_node.trim(),
+            config.max_sideband.max(1) as i32,
+        ) {
+            Ok(exact) => output_noise = exact.output_noise,
+            Err(e) => warnings.push(format!(
+                "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
+            )),
+        }
+        if config.noise_summary {
+            warnings.push(
+                "PNOISE contributor breakdown uses the stationary sideband approximation"
+                    .to_string(),
+            );
+        }
+        if config.noise_ref == PnoiseReference::Input {
+            warnings.push(
+                "PNOISE input-referred estimate uses the stationary sideband approximation"
+                    .to_string(),
+            );
+        }
+    }
     let mut input_noise = None;
     let total_output_noise = if config.integrated_noise {
-        Some(integrate_noise_rms(&frequencies, &folded_output_noise))
+        Some(integrate_noise_rms(&frequencies, &output_noise))
     } else {
         None
     };
