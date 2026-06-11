@@ -237,6 +237,17 @@ impl DisciplineDb {
         self.natures.values().find(|n| n.access == access)
     }
 
+    /// Check whether an access function refers to a flow quantity
+    /// (current-like, e.g. I or Pwr) rather than a potential (V, Temp, ...)
+    pub fn is_flow_access(&self, access: &str) -> bool {
+        let Some(nature) = self.resolve_access(access) else {
+            return false;
+        };
+        self.disciplines
+            .values()
+            .any(|d| d.flow.as_deref() == Some(nature.name.as_str()))
+    }
+
     /// Check if two disciplines are compatible for connection
     pub fn are_compatible(&self, d1: &str, d2: &str) -> bool {
         if d1 == d2 {

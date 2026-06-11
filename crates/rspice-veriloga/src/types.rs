@@ -36,9 +36,14 @@ impl ValueType {
         match (self, target) {
             // Integer can coerce to Real
             (ValueType::Integer, ValueType::Real) => true,
+            // Integer-valued reals truncate to integer per LRM 4.2.1.1
+            (ValueType::Real, ValueType::Integer) => true,
             // Boolean can coerce to Integer (0/1) then to Real
             (ValueType::Boolean, ValueType::Integer) => true,
             (ValueType::Boolean, ValueType::Real) => true,
+            // Branch quantities (V, I, ...) are real-valued
+            (ValueType::NatureAccess, ValueType::Real) => true,
+            (ValueType::NatureAccess, ValueType::Integer) => true,
             // Error and Unknown are compatible with anything
             (ValueType::Error, _) | (_, ValueType::Error) => true,
             (ValueType::Unknown, _) | (_, ValueType::Unknown) => true,
@@ -68,6 +73,12 @@ impl ValueType {
             (ValueType::Boolean, ValueType::Real) | (ValueType::Real, ValueType::Boolean) => {
                 ValueType::Real
             }
+            // Branch quantities (V, I, ...) behave as reals in arithmetic
+            (ValueType::NatureAccess, other) | (other, ValueType::NatureAccess)
+                if other.is_numeric() =>
+            {
+                ValueType::Real
+            }
             // Incompatible types
             _ => ValueType::Error,
         }
@@ -88,6 +99,7 @@ impl ValueType {
             ValueType::Boolean
                 | ValueType::Real
                 | ValueType::Integer
+                | ValueType::NatureAccess
                 | ValueType::Unknown
                 | ValueType::Error
         )

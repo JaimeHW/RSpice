@@ -68,6 +68,8 @@ pub struct SymbolAttrs {
     pub used: bool,
     /// Whether this is an internal node (not in port list)
     pub is_internal: bool,
+    /// Whether this node is declared ground
+    pub is_ground: bool,
     /// Index in internal nodes array (for VM access)
     pub internal_node_index: Option<usize>,
 }
@@ -162,6 +164,21 @@ pub struct SemanticAnalyzer {
     functions: FunctionRegistry,
     symbols: SymbolTable,
     errors: Vec<SemanticError>,
+    /// User-defined analog functions of the module under analysis
+    user_functions: HashMap<SmolStr, FunctionDef>,
+    /// Stack of active guard conditions (innermost last)
+    guard_stack: Vec<Expression>,
+    /// Stack of identifier substitution frames (innermost last). Used for
+    /// hoisted block locals, unrolled loop variables, and inlined function
+    /// locals.
+    subst_stack: Vec<HashMap<SmolStr, Expression>>,
+    /// Counter for generating unique hoisted local names
+    local_counter: usize,
+    /// Constant parameter values known so far (for range evaluation and
+    /// loop-bound folding)
+    param_consts: HashMap<SmolStr, f64>,
+    /// Current function inlining depth (recursion guard)
+    inline_depth: usize,
 }
 
 /// Analyzed source file with resolved symbols
@@ -169,6 +186,16 @@ pub struct SemanticAnalyzer {
 pub struct AnalyzedFile {
     pub source: SourceFile,
     pub modules: HashMap<SmolStr, AnalyzedModule>,
+}
+
+/// How an event expression lowers into the dataflow representation
+enum EventLowering {
+    /// Body executes when this runtime guard is nonzero
+    Guard(Expression),
+    /// Body executes unconditionally
+    Always,
+    /// Body never affects the device equations (e.g. final_step)
+    Never,
 }
 
 /// Analyzed module with resolved types
@@ -182,6 +209,8 @@ pub struct AnalyzedModule {
     pub contributions: Vec<AnalyzedContribution>,
     pub assignments: Vec<AnalyzedAssignment>,
     pub internal_nodes: Vec<AnalyzedInternalNode>,
+    /// Names of nets declared `ground` (they map to the global reference)
+    pub ground_nodes: Vec<SmolStr>,
     pub symbol_table: SymbolTable,
 }
 
@@ -201,7 +230,10 @@ pub struct AnalyzedParameter {
     pub name: SmolStr,
     pub param_type: ParamType,
     pub value_type: ValueType,
+    /// Constant default value, when the default expression folds to a constant
     pub default: Option<f64>,
+    /// Full default expression (may reference previously declared parameters)
+    pub default_expr: Option<Expression>,
     pub range: Option<TypedParameterRange>,
 }
 
@@ -269,6 +301,12 @@ impl SemanticAnalyzer {
             functions: FunctionRegistry::new(),
             symbols: SymbolTable::new(),
             errors: Vec::new(),
+            user_functions: HashMap::new(),
+            guard_stack: Vec::new(),
+            subst_stack: Vec::new(),
+            local_counter: 0,
+            param_consts: HashMap::new(),
+            inline_depth: 0,
         }
     }
 
@@ -293,6 +331,12 @@ impl SemanticAnalyzer {
             if let Item::Module(module) = item {
                 self.symbols = SymbolTable::new();
                 self.errors.clear();
+                self.user_functions.clear();
+                self.guard_stack.clear();
+                self.subst_stack.clear();
+                self.local_counter = 0;
+                self.param_consts.clear();
+                self.inline_depth = 0;
 
                 match self.analyze_module(module) {
                     Ok(analyzed) => {
@@ -319,8 +363,14 @@ impl SemanticAnalyzer {
             contributions: Vec::new(),
             assignments: Vec::new(),
             internal_nodes: Vec::new(),
+            ground_nodes: Vec::new(),
             symbol_table: SymbolTable::new(),
         };
+        self.user_functions = module
+            .functions
+            .iter()
+            .map(|f| (f.name.clone(), f.clone()))
+            .collect();
 
         // Phase 1: Collect port names from module header
         let port_names: Vec<SmolStr> = module.ports.iter().map(|p| p.name.clone()).collect();
@@ -385,7 +435,7 @@ impl SemanticAnalyzer {
             })?;
         }
 
-        // Phase 5: Define internal nodes (nets that aren't ports)
+        // Phase 5: Define internal and ground nodes (nets that aren't ports)
         let mut internal_node_idx = 0usize;
         for net in &module.nets {
             let discipline = net.discipline.clone();
@@ -394,6 +444,25 @@ impl SemanticAnalyzer {
                 if self.symbols.lookup_local(name).is_some() {
                     continue;
                 }
+
+                if net.is_ground {
+                    // Ground nets reference the global reference node and
+                    // must not consume an internal node slot.
+                    self.define_symbol(Symbol {
+                        name: name.clone(),
+                        kind: SymbolKind::Node,
+                        value_type: ValueType::NatureAccess,
+                        span: net.span,
+                        attrs: SymbolAttrs {
+                            discipline: Some(discipline.clone()),
+                            is_ground: true,
+                            ..Default::default()
+                        },
+                    })?;
+                    analyzed.ground_nodes.push(name.clone());
+                    continue;
+                }
+
                 // Define as internal node
                 self.define_symbol(Symbol {
                     name: name.clone(),
@@ -418,7 +487,35 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Phase 5: Analyze parameters
+        // Phase 6: Named branch declarations
+        for branch in &module.branches {
+            self.validate_node(&branch.pos, branch.span)?;
+            if !branch.neg.is_empty() {
+                self.validate_node(&branch.neg, branch.span)?;
+            }
+            let discipline = self
+                .symbols
+                .lookup(&branch.pos)
+                .and_then(|s| s.attrs.discipline.clone())
+                .unwrap_or_else(|| "electrical".into());
+
+            analyzed.branches.push(AnalyzedBranch {
+                name: branch.name.clone(),
+                pos_node: branch.pos.clone(),
+                neg_node: branch.neg.clone(),
+                discipline,
+            });
+
+            self.define_symbol(Symbol {
+                name: branch.name.clone(),
+                kind: SymbolKind::Branch,
+                value_type: ValueType::NatureAccess,
+                span: branch.span,
+                attrs: Default::default(),
+            })?;
+        }
+
+        // Phase 7: Analyze parameters (defaults may reference earlier ones)
         for param in &module.parameters {
             let value_type = match param.param_type {
                 ParamType::Real => ValueType::Real,
@@ -435,11 +532,18 @@ impl SemanticAnalyzer {
             if let (Some(default_val), Some(range_constraint)) = (default, &range)
                 && !range_constraint.contains(default_val)
             {
-                self.record_error(SemanticErrorKind::ParameterOutOfRange {
-                    name: param.name.clone(),
-                    value: default_val,
-                    range: format!("{}", range_constraint),
-                });
+                self.record_error_at(
+                    SemanticErrorKind::ParameterOutOfRange {
+                        name: param.name.clone(),
+                        value: default_val,
+                        range: format!("{}", range_constraint),
+                    },
+                    param.span,
+                );
+            }
+
+            if let Some(value) = default {
+                self.param_consts.insert(param.name.clone(), value);
             }
 
             analyzed.parameters.push(AnalyzedParameter {
@@ -447,6 +551,7 @@ impl SemanticAnalyzer {
                 param_type: param.param_type,
                 value_type,
                 default,
+                default_expr: param.default.clone(),
                 range: range.clone(),
             });
 
@@ -462,7 +567,7 @@ impl SemanticAnalyzer {
             })?;
         }
 
-        // Phase 6: Analyze variables
+        // Phase 8: Analyze variables
         for var_decl in &module.variables {
             let value_type = match var_decl.var_type {
                 VarType::Real => ValueType::Real,
@@ -488,11 +593,106 @@ impl SemanticAnalyzer {
             }
         }
 
-        // Phase 7: Analyze analog block
+        // Phase 9: Lower localparams to computed variables. Their values may
+        // depend on parameters, so they are evaluated at runtime before any
+        // analog-block assignment, in declaration order.
+        for localparam in &module.localparams {
+            let value_type = match localparam.param_type {
+                ParamType::Real => ValueType::Real,
+                ParamType::Integer => ValueType::Integer,
+                ParamType::String => ValueType::String,
+            };
+
+            let Some(default) = &localparam.default else {
+                self.record_error_at(
+                    SemanticErrorKind::MissingAttribute(format!(
+                        "localparam '{}' requires a value",
+                        localparam.name
+                    )),
+                    localparam.span,
+                );
+                continue;
+            };
+
+            if let Some(value) = self.eval_const(default) {
+                self.param_consts.insert(localparam.name.clone(), value);
+            }
+
+            let var_index = analyzed.variables.len();
+            analyzed.variables.push(AnalyzedVariable {
+                name: localparam.name.clone(),
+                var_type: match localparam.param_type {
+                    ParamType::Real => VarType::Real,
+                    ParamType::Integer => VarType::Integer,
+                    ParamType::String => VarType::String,
+                },
+                value_type,
+                is_state: false,
+            });
+
+            self.define_symbol(Symbol {
+                name: localparam.name.clone(),
+                kind: SymbolKind::Parameter,
+                value_type,
+                span: localparam.span,
+                attrs: Default::default(),
+            })?;
+
+            let expression = self.lower_expression(default)?;
+            let expr_type = self.infer_type(&expression)?;
+            analyzed.assignments.push(AnalyzedAssignment {
+                target: localparam.name.clone(),
+                var_index,
+                expression,
+                expr_type,
+                span: localparam.span,
+            });
+        }
+
+        // Phase 10: Module-level variable initializers run before the
+        // analog block, in declaration order.
+        for var_decl in &module.variables {
+            for item in &var_decl.items {
+                if let Some(init) = &item.init {
+                    let var_index = analyzed
+                        .variables
+                        .iter()
+                        .position(|v| v.name == item.name)
+                        .expect("variable registered above");
+                    let expression = self.lower_expression(init)?;
+                    let expr_type = self.infer_type(&expression)?;
+                    analyzed.assignments.push(AnalyzedAssignment {
+                        target: item.name.clone(),
+                        var_index,
+                        expression,
+                        expr_type,
+                        span: item.span,
+                    });
+                }
+            }
+        }
+
+        // Phase 11: analog initial runs before the main analog block
+        if let Some(block) = &module.analog_initial {
+            for stmt in &block.statements {
+                self.analyze_statement(stmt, &mut analyzed)?;
+            }
+        }
+
+        // Phase 12: Analyze analog block
         if let Some(block) = &module.analog_block {
             for stmt in &block.statements {
                 self.analyze_statement(stmt, &mut analyzed)?;
             }
+        }
+
+        // Surface every recorded diagnostic instead of silently succeeding
+        if !self.errors.is_empty() {
+            let errors = std::mem::take(&mut self.errors)
+                .into_iter()
+                .map(CompileError::Semantic)
+                .collect();
+            return Err(CompileError::multiple(errors));
         }
 
         analyzed.symbol_table = self.symbols.clone();
@@ -512,6 +712,70 @@ impl SemanticAnalyzer {
         Ok(())
     }
 
+    /// Fold the active guard stack into a single condition expression
+    fn current_guard(&self) -> Option<Expression> {
+        let mut guards = self.guard_stack.iter();
+        let first = guards.next()?.clone();
+        Some(guards.fold(first, |acc, g| {
+            let span = g.span();
+            Expression::Binary(BinaryExpr {
+                op: BinaryOp::And,
+                left: Box::new(acc),
+                right: Box::new(g.clone()),
+                span,
+            })
+        }))
+    }
+
+    /// Build `guard ? value : fallback` under the active guard (or `value`
+    /// when unguarded)
+    fn apply_guard(&self, value: Expression, fallback: Expression) -> Expression {
+        match self.current_guard() {
+            Some(guard) => {
+                let span = value.span();
+                Expression::Conditional(ConditionalExpr {
+                    condition: Box::new(guard),
+                    then_expr: Box::new(value),
+                    else_expr: Box::new(fallback),
+                    span,
+                })
+            }
+            None => value,
+        }
+    }
+
+    fn not_expr(expr: Expression) -> Expression {
+        let span = expr.span();
+        Expression::Unary(UnaryExpr {
+            op: UnaryOp::Not,
+            operand: Box::new(expr),
+            span,
+        })
+    }
+
+    fn binary_expr(op: BinaryOp, left: Expression, right: Expression) -> Expression {
+        let span = left.span();
+        Expression::Binary(BinaryExpr {
+            op,
+            left: Box::new(left),
+            right: Box::new(right),
+            span,
+        })
+    }
+
+    fn number_expr(value: f64, span: Span) -> Expression {
+        Expression::Number(NumberLit {
+            value,
+            raw: SmolStr::default(),
+            span,
+        })
+    }
+
+    /// Analyze a statement, lowering control flow into guarded dataflow.
+    ///
+    /// Assignments and contributions inside conditionals become conditional
+    /// expressions (`guard ? value : previous`), so the recorded flat lists
+    /// preserve branch semantics exactly.
     fn analyze_statement(
         &mut self,
         stmt: &AnalogStatement,
@@ -526,62 +790,393 @@ impl SemanticAnalyzer {
             }
             AnalogStatement::Block(block) => {
                 self.symbols.enter_scope();
+                self.subst_stack.push(HashMap::new());
+
+                // Hoist block-local variables to module scope under unique
+                // names; expressions are rewritten through the subst frame.
+                for var_decl in &block.variables {
+                    let value_type = match var_decl.var_type {
+                        VarType::Real => ValueType::Real,
+                        VarType::Integer => ValueType::Integer,
+                        VarType::String => ValueType::String,
+                    };
+                    for item in &var_decl.items {
+                        self.local_counter += 1;
+                        let hoisted: SmolStr = if module
+                            .variables
+                            .iter()
+                            .any(|v| v.name == item.name)
+                        {
+                            format!("{}__blk{}", item.name, self.local_counter).into()
+                        } else {
+                            item.name.clone()
+                        };
+
+                        module.variables.push(AnalyzedVariable {
+                            name: hoisted.clone(),
+                            var_type: var_decl.var_type,
+                            value_type,
+                            is_state: false,
+                        });
+                        self.define_symbol(Symbol {
+                            name: hoisted.clone(),
+                            kind: SymbolKind::Variable,
+                            value_type,
+                            span: item.span,
+                            attrs: Default::default(),
+                        })?;
+                        self.subst_stack.last_mut().unwrap().insert(
+                            item.name.clone(),
+                            Expression::Identifier(Identifier {
+                                name: hoisted.clone(),
+                                span: item.span,
+                            }),
+                        );
+
+                        if let Some(init) = &item.init {
+                            let expression = self.lower_expression(init)?;
+                            let expression =
+                                self.apply_guard(expression, Self::number_expr(0.0, item.span));
+                            let expr_type = self.infer_type(&expression)?;
+                            let var_index = module
+                                .variables
+                                .iter()
+                                .position(|v| v.name == hoisted)
+                                .expect("just registered");
+                            module.assignments.push(AnalyzedAssignment {
+                                target: hoisted.clone(),
+                                var_index,
+                                expression,
+                                expr_type,
+                                span: item.span,
+                            });
+                        }
+                    }
+                }
+
                 for s in &block.statements {
                     self.analyze_statement(s, module)?;
                 }
+
+                self.subst_stack.pop();
                 self.symbols.exit_scope();
             }
             AnalogStatement::Conditional(cond) => {
-                let cond_type = self.infer_type(&cond.condition)?;
+                let condition = self.lower_expression(&cond.condition)?;
+                let cond_type = self.infer_type(&condition)?;
                 if !cond_type.is_condition() {
-                    self.record_error(SemanticErrorKind::InvalidCondition {
-                        found: cond_type.to_string(),
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidCondition {
+                            found: cond_type.to_string(),
+                        },
+                        cond.span,
+                    );
+                }
+
+                self.guard_stack.push(condition.clone());
+                self.analyze_statement(&cond.then_branch, module)?;
+                self.guard_stack.pop();
+
+                if let Some(else_branch) = &cond.else_branch {
+                    self.guard_stack.push(Self::not_expr(condition));
+                    self.analyze_statement(else_branch, module)?;
+                    self.guard_stack.pop();
+                }
+            }
+            AnalogStatement::Case(case_stmt) => {
+                let selector = self.lower_expression(&case_stmt.expr)?;
+                // OR of all guards matched so far (case items are priority
+                // ordered: the first matching item wins)
+                let mut prior_match: Option<Expression> = None;
+
+                for item in &case_stmt.items {
+                    let mut item_match: Option<Expression> = None;
+                    for m in &item.matches {
+                        let m_lowered = self.lower_expression(m)?;
+                        let eq =
+                            Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered);
+                        item_match = Some(match item_match {
+                            Some(acc) => Self::binary_expr(BinaryOp::Or, acc, eq),
+                            None => eq,
+                        });
+                    }
+                    let Some(item_match) = item_match else { continue };
+
+                    let guard = match &prior_match {
+                        Some(prior) => Self::binary_expr(
+                            BinaryOp::And,
+                            item_match.clone(),
+                            Self::not_expr(prior.clone()),
+                        ),
+                        None => item_match.clone(),
+                    };
+
+                    self.guard_stack.push(guard);
+                    self.analyze_statement(&item.statement, module)?;
+                    self.guard_stack.pop();
+
+                    prior_match = Some(match prior_match {
+                        Some(prior) => Self::binary_expr(BinaryOp::Or, prior, item_match),
+                        None => item_match,
                     });
                 }
-                self.analyze_statement(&cond.then_branch, module)?;
-                if let Some(else_branch) = &cond.else_branch {
-                    self.analyze_statement(else_branch, module)?;
+
+                if let Some(default) = &case_stmt.default {
+                    match prior_match {
+                        Some(prior) => {
+                            self.guard_stack.push(Self::not_expr(prior));
+                            self.analyze_statement(default, module)?;
+                            self.guard_stack.pop();
+                        }
+                        None => self.analyze_statement(default, module)?,
+                    }
                 }
             }
             AnalogStatement::For(for_stmt) => {
-                self.symbols.enter_scope();
-
-                // Check condition type
-                let cond_type = self.infer_type(&for_stmt.condition)?;
-                if !cond_type.is_condition() {
-                    self.record_error(SemanticErrorKind::InvalidCondition {
-                        found: cond_type.to_string(),
-                    });
+                self.analyze_for(for_stmt, module)?;
+            }
+            AnalogStatement::Repeat(repeat) => {
+                let count_expr = self.lower_expression(&repeat.count)?;
+                let Some(count) = self.eval_const(&count_expr) else {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(
+                            "repeat count must be a compile-time constant".into(),
+                        ),
+                        repeat.span,
+                    )));
+                };
+                let count = count as usize;
+                if count > Self::MAX_UNROLL_ITERATIONS {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(format!(
+                            "repeat count {count} exceeds the unroll limit"
+                        )),
+                        repeat.span,
+                    )));
                 }
-
-                self.analyze_statement(&for_stmt.body, module)?;
-                self.symbols.exit_scope();
+                for _ in 0..count {
+                    self.analyze_statement(&repeat.body, module)?;
+                }
             }
             AnalogStatement::While(while_stmt) => {
-                self.symbols.enter_scope();
-
-                let cond_type = self.infer_type(&while_stmt.condition)?;
-                if !cond_type.is_condition() {
-                    self.record_error(SemanticErrorKind::InvalidCondition {
-                        found: cond_type.to_string(),
-                    });
-                }
-
-                self.analyze_statement(&while_stmt.body, module)?;
-                self.symbols.exit_scope();
-            }
-            AnalogStatement::Case(case_stmt) => {
-                let _selector_type = self.infer_type(&case_stmt.expr)?;
-                for item in &case_stmt.items {
-                    self.analyze_statement(&item.statement, module)?;
-                }
-                if let Some(default) = &case_stmt.default {
-                    self.analyze_statement(default, module)?;
+                let condition = self.lower_expression(&while_stmt.condition)?;
+                match self.eval_const(&condition) {
+                    Some(v) if v == 0.0 => {} // statically dead loop
+                    _ => {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidAnalogOperator(
+                                "while loops with non-constant conditions are not supported"
+                                    .into(),
+                            ),
+                            while_stmt.span,
+                        )));
+                    }
                 }
             }
-            _ => {}
+            AnalogStatement::EventControl(event_ctrl) => {
+                match self.event_guard(&event_ctrl.event)? {
+                    EventLowering::Guard(guard) => {
+                        self.guard_stack.push(guard);
+                        self.analyze_statement(&event_ctrl.statement, module)?;
+                        self.guard_stack.pop();
+                    }
+                    EventLowering::Always => {
+                        self.analyze_statement(&event_ctrl.statement, module)?;
+                    }
+                    EventLowering::Never => {} // e.g. final_step bodies
+                }
+            }
+            AnalogStatement::IndirectContribution(stmt) => {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidContribution(
+                        "indirect contributions (V(x): f == g) are not supported yet".into(),
+                    ),
+                    stmt.span,
+                );
+            }
+            // System task calls ($strobe, $display, ...) have no effect on
+            // the device equations
+            AnalogStatement::Call(_) => {}
+            AnalogStatement::Disable(_) | AnalogStatement::Null(_) => {}
         }
         Ok(())
+    }
+
+    const MAX_UNROLL_ITERATIONS: usize = 65536;
+
+    /// Statically unroll a for loop with compile-time-constant bounds
+    fn analyze_for(&mut self, for_stmt: &ForStmt, module: &mut AnalyzedModule) -> CompileResult<()> {
+        let loop_var = self.resolve_substituted_name(&for_stmt.var);
+        if self.symbols.lookup(&loop_var).is_none() {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::UndeclaredSymbol {
+                    name: loop_var.clone(),
+                },
+                for_stmt.span,
+            )));
+        }
+
+        let init = self.lower_expression(&for_stmt.init)?;
+        let Some(mut value) = self.eval_const(&init) else {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(
+                    "for-loop bounds must be compile-time constants".into(),
+                ),
+                for_stmt.span,
+            )));
+        };
+
+        if *for_stmt.update.target_name() != for_stmt.var {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(
+                    "for-loop update must assign the loop variable".into(),
+                ),
+                for_stmt.span,
+            )));
+        }
+
+        let mut iterations = 0usize;
+        loop {
+            // Bind the loop variable to its current constant value
+            self.subst_stack.push(HashMap::from([(
+                for_stmt.var.clone(),
+                Self::number_expr(value, for_stmt.span),
+            )]));
+
+            let condition = self.lower_expression(&for_stmt.condition)?;
+            let Some(cond_value) = self.eval_const(&condition) else {
+                self.subst_stack.pop();
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(
+                        "for-loop condition must be a compile-time constant".into(),
+                    ),
+                    for_stmt.span,
+                )));
+            };
+            if cond_value == 0.0 {
+                self.subst_stack.pop();
+                break;
+            }
+
+            self.analyze_statement(&for_stmt.body, module)?;
+
+            let update = self.lower_expression(&for_stmt.update.value)?;
+            let Some(next_value) = self.eval_const(&update) else {
+                self.subst_stack.pop();
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(
+                        "for-loop update must be a compile-time constant step".into(),
+                    ),
+                    for_stmt.span,
+                )));
+            };
+            self.subst_stack.pop();
+
+            value = next_value;
+            iterations += 1;
+            if iterations > Self::MAX_UNROLL_ITERATIONS {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "for-loop exceeds the unroll limit of {} iterations",
+                        Self::MAX_UNROLL_ITERATIONS
+                    )),
+                    for_stmt.span,
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Lower an event expression into a runtime guard
+    fn event_guard(&mut self, event: &EventExpr) -> CompileResult<EventLowering> {
+        Ok(match event {
+            EventExpr::InitialStep { span } => {
+                // Approximation: initial_step is active during static
+                // (DC / IC) analyses. Assignments latched there persist
+                // into the following transient.
+                let dc = Expression::Call(CallExpr {
+                    name: "analysis".into(),
+                    args: vec![Expression::StringLit(StringLit {
+                        value: "static".into(),
+                        span: *span,
+                    })],
+                    span: *span,
+                });
+                EventLowering::Guard(dc)
+            }
+            EventExpr::FinalStep { .. } => EventLowering::Never,
+            EventExpr::Cross {
+                signal,
+                direction,
+                span,
+                ..
+            } => {
+                let signal = self.lower_expression(signal)?;
+                let dir_value = match direction {
+                    Some(CrossDirection::Rising) => 1.0,
+                    Some(CrossDirection::Falling) => -1.0,
+                    Some(CrossDirection::Both) | None => 0.0,
+                };
+                EventLowering::Guard(Expression::Call(CallExpr {
+                    name: "cross".into(),
+                    args: vec![signal, Self::number_expr(dir_value, *span)],
+                    span: *span,
+                }))
+            }
+            EventExpr::Posedge { signal, span } => {
+                let signal = self.lower_expression(signal)?;
+                EventLowering::Guard(Expression::Call(CallExpr {
+                    name: "cross".into(),
+                    args: vec![signal, Self::number_expr(1.0, *span)],
+                    span: *span,
+                }))
+            }
+            EventExpr::Negedge { signal, span } => {
+                let signal = self.lower_expression(signal)?;
+                EventLowering::Guard(Expression::Call(CallExpr {
+                    name: "cross".into(),
+                    args: vec![signal, Self::number_expr(-1.0, *span)],
+                    span: *span,
+                }))
+            }
+            EventExpr::Above { signal, span } => {
+                let signal = self.lower_expression(signal)?;
+                EventLowering::Guard(Expression::Call(CallExpr {
+                    name: "above".into(),
+                    args: vec![signal, Self::number_expr(0.0, *span)],
+                    span: *span,
+                }))
+            }
+            EventExpr::Timer {
+                start,
+                period,
+                span,
+            } => {
+                let mut args = vec![self.lower_expression(start)?];
+                if let Some(period) = period {
+                    args.push(self.lower_expression(period)?);
+                }
+                EventLowering::Guard(Expression::Call(CallExpr {
+                    name: "timer".into(),
+                    args,
+                    span: *span,
+                }))
+            }
+            EventExpr::Or { left, right, .. } => {
+                let left = self.event_guard(left)?;
+                let right = self.event_guard(right)?;
+                match (left, right) {
+                    (EventLowering::Guard(l), EventLowering::Guard(r)) => {
+                        EventLowering::Guard(Self::binary_expr(BinaryOp::Or, l, r))
+                    }
+                    (EventLowering::Always, _) | (_, EventLowering::Always) => {
+                        EventLowering::Always
+                    }
+                    (EventLowering::Never, other) | (other, EventLowering::Never) => other,
+                }
+            }
+        })
     }
 
     fn analyze_contribution(
@@ -593,40 +1188,90 @@ impl SemanticAnalyzer {
             BranchAccess::Nodes {
                 access, pos, neg, ..
             } => {
-                let is_current = access.as_str() == "I";
-                self.validate_node(pos, contrib.span)?;
-                if let Some(n) = neg {
-                    self.validate_node(n, contrib.span)?;
-                }
-                // Format as "pos,neg" for IR parser compatibility
-                let branch = if neg.is_some() {
-                    format!("{},{}", pos, neg.as_deref().unwrap())
+                let is_current = self.is_flow_access(access);
+
+                // V(name)/I(name) where `name` is a declared branch resolves
+                // through the branch table
+                if neg.is_none()
+                    && let Some(branch) = module.branches.iter().find(|b| b.name == *pos)
+                {
+                    let branch_str = if branch.neg_node.is_empty() {
+                        branch.pos_node.to_string()
+                    } else {
+                        format!("{},{}", branch.pos_node, branch.neg_node)
+                    };
+                    (SmolStr::from(branch_str), is_current)
                 } else {
-                    pos.to_string()
-                };
-                (branch.into(), is_current)
+                    self.validate_node(pos, contrib.span)?;
+                    if let Some(n) = neg {
+                        self.validate_node(n, contrib.span)?;
+                    }
+                    // Format as "pos,neg" for IR parser compatibility
+                    let branch = if neg.is_some() {
+                        format!("{},{}", pos, neg.as_deref().unwrap())
+                    } else {
+                        pos.to_string()
+                    };
+                    (branch.into(), is_current)
+                }
             }
-            BranchAccess::Branch { name, access, .. } => (name.clone(), access.as_str() == "I"),
+            BranchAccess::Branch { name, access, .. } => {
+                let is_current = self.is_flow_access(access);
+                match module.branches.iter().find(|b| b.name == *name) {
+                    Some(branch) => {
+                        let branch_str = if branch.neg_node.is_empty() {
+                            branch.pos_node.to_string()
+                        } else {
+                            format!("{},{}", branch.pos_node, branch.neg_node)
+                        };
+                        (SmolStr::from(branch_str), is_current)
+                    }
+                    None => {
+                        return Err(CompileError::Semantic(SemanticError::new(
+                            SemanticErrorKind::InvalidBranch(format!(
+                                "undeclared branch '{}'",
+                                name
+                            )),
+                            contrib.span,
+                        )));
+                    }
+                }
+            }
         };
 
-        let expr_type = self.infer_type(&contrib.value)?;
-        if !expr_type.is_numeric() {
-            self.record_error(SemanticErrorKind::TypeMismatch {
-                expected: "numeric".to_string(),
-                found: expr_type.to_string(),
-                context: "contribution expression".to_string(),
-            });
+        let expression = self.lower_expression(&contrib.value)?;
+        let expr_type = self.infer_type(&expression)?;
+        if !expr_type.is_numeric() && expr_type != ValueType::Unknown {
+            self.record_error_at(
+                SemanticErrorKind::TypeMismatch {
+                    expected: "numeric".to_string(),
+                    found: expr_type.to_string(),
+                    context: "contribution expression".to_string(),
+                },
+                contrib.span,
+            );
         }
+
+        // A guarded contribution contributes zero when inactive
+        let expression = self.apply_guard(expression, Self::number_expr(0.0, contrib.span));
 
         module.contributions.push(AnalyzedContribution {
             branch: branch_name,
             is_current,
-            expression: contrib.value.clone(),
+            expression,
             expr_type,
             span: contrib.span,
         });
 
         Ok(())
+    }
+
+    /// Whether the access function refers to a flow (current-like) quantity
+    fn is_flow_access(&self, access: &str) -> bool {
+        if access == "I" {
+            return true;
+        }
+        self.disciplines.is_flow_access(access)
     }
 
     fn analyze_assignment(
@@ -636,55 +1281,437 @@ impl SemanticAnalyzer {
     ) -> CompileResult<()> {
         let (target_name, span) = match &assign.target {
             LValue::Variable { name, span } => {
-                if self.symbols.lookup(name).is_none() {
+                let resolved = self.resolve_substituted_name(name);
+                if self.symbols.lookup(&resolved).is_none() {
                     return Err(CompileError::Semantic(SemanticError::new(
                         SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
                         *span,
                     )));
                 }
-                self.symbols.mark_used(name);
-                (name.clone(), *span)
+                self.symbols.mark_used(&resolved);
+                (resolved, *span)
             }
             LValue::ArrayAccess { name, span, .. } => {
-                if self.symbols.lookup(name).is_none() {
-                    return Err(CompileError::Semantic(SemanticError::new(
-                        SemanticErrorKind::UndeclaredSymbol { name: name.clone() },
-                        *span,
-                    )));
-                }
-                self.symbols.mark_used(name);
-                (name.clone(), *span)
+                self.record_error_at(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "array element assignment to '{}' is not supported yet",
+                        name
+                    )),
+                    *span,
+                );
+                return Ok(());
             }
         };
 
-        let value_type = self.infer_type(&assign.value)?;
+        // Assignments may only target variables
+        if let Some(sym) = self.symbols.lookup(&target_name)
+            && !matches!(sym.kind, SymbolKind::Variable | SymbolKind::LoopVar)
+        {
+            self.record_error_at(
+                SemanticErrorKind::TypeMismatch {
+                    expected: "variable".to_string(),
+                    found: format!("{:?}", sym.kind).to_lowercase(),
+                    context: format!("assignment to '{}'", target_name),
+                },
+                span,
+            );
+            return Ok(());
+        }
+
+        let expression = self.lower_expression(&assign.value)?;
+        let value_type = self.infer_type(&expression)?;
 
         if let Some(sym) = self.symbols.lookup(&target_name)
             && !value_type.can_coerce_to(&sym.value_type)
         {
-            self.record_error(SemanticErrorKind::TypeMismatch {
-                expected: sym.value_type.to_string(),
-                found: value_type.to_string(),
-                context: format!("assignment to '{}'", target_name),
-            });
+            self.record_error_at(
+                SemanticErrorKind::TypeMismatch {
+                    expected: sym.value_type.to_string(),
+                    found: value_type.to_string(),
+                    context: format!("assignment to '{}'", target_name),
+                },
+                span,
+            );
         }
 
-        // Find variable index
-        let var_index = module
+        // Find variable index; assignments to unknown storage are an error
+        let Some(var_index) = module
             .variables
             .iter()
             .position(|v| v.name == target_name)
-            .unwrap_or(0);
+        else {
+            self.record_error_at(
+                SemanticErrorKind::UndeclaredSymbol {
+                    name: target_name.clone(),
+                },
+                span,
+            );
+            return Ok(());
+        };
+
+        // Under a guard, the variable keeps its previous value when the
+        // guard is inactive
+        let fallback = Expression::Identifier(Identifier {
+            name: target_name.clone(),
+            span,
+        });
+        let expression = self.apply_guard(expression, fallback);
 
         // Record the assignment for code generation
         module.assignments.push(AnalyzedAssignment {
             target: target_name,
             var_index,
-            expression: assign.value.clone(),
+            expression,
             expr_type: value_type,
             span,
         });
 
+        Ok(())
+    }
+
+    /// Resolve a name through the substitution stack (innermost first).
+    /// Only identity renames (identifier-to-identifier) are returned; other
+    /// substitutions keep the original name.
+    fn resolve_substituted_name(&self, name: &SmolStr) -> SmolStr {
+        for frame in self.subst_stack.iter().rev() {
+            if let Some(expr) = frame.get(name) {
+                if let Expression::Identifier(id) = expr {
+                    return id.name.clone();
+                }
+                return name.clone();
+            }
+        }
+        name.clone()
+    }
+
+    /// Look up a substitution for an identifier
+    fn lookup_substitution(&self, name: &SmolStr) -> Option<Expression> {
+        for frame in self.subst_stack.iter().rev() {
+            if let Some(expr) = frame.get(name) {
+                return Some(expr.clone());
+            }
+        }
+        None
+    }
+
+    /// Rewrite an expression: apply substitutions (block locals, loop
+    /// variables) and inline calls to user-defined analog functions.
+    fn lower_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
+        Ok(match expr {
+            Expression::Identifier(id) => match self.lookup_substitution(&id.name) {
+                Some(subst) => subst,
+                None => expr.clone(),
+            },
+            Expression::Number(_) | Expression::StringLit(_) | Expression::BranchAccess(_) => {
+                expr.clone()
+            }
+            Expression::Binary(b) => Expression::Binary(BinaryExpr {
+                op: b.op,
+                left: Box::new(self.lower_expression(&b.left)?),
+                right: Box::new(self.lower_expression(&b.right)?),
+                span: b.span,
+            }),
+            Expression::Unary(u) => Expression::Unary(UnaryExpr {
+                op: u.op,
+                operand: Box::new(self.lower_expression(&u.operand)?),
+                span: u.span,
+            }),
+            Expression::Conditional(c) => Expression::Conditional(ConditionalExpr {
+                condition: Box::new(self.lower_expression(&c.condition)?),
+                then_expr: Box::new(self.lower_expression(&c.then_expr)?),
+                else_expr: Box::new(self.lower_expression(&c.else_expr)?),
+                span: c.span,
+            }),
+            Expression::SystemFunction(f) => {
+                let args = f
+                    .args
+                    .iter()
+                    .map(|a| self.lower_expression(a))
+                    .collect::<CompileResult<Vec<_>>>()?;
+                Expression::SystemFunction(SystemFunction {
+                    name: f.name.clone(),
+                    args,
+                    span: f.span,
+                })
+            }
+            Expression::Call(call) => {
+                // Nature access functions other than V/I (Pwr, Temp, ...)
+                // parse as calls; rewrite them into branch accesses.
+                if !self.user_functions.contains_key(&call.name)
+                    && self.disciplines.resolve_access(&call.name).is_some()
+                    && matches!(call.args.len(), 1 | 2)
+                    && call.args.iter().all(|a| {
+                        matches!(a, Expression::Identifier(id)
+                            if self.symbols.lookup(&id.name).is_some_and(|s| matches!(
+                                s.kind,
+                                SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch
+                            )))
+                    })
+                {
+                    let mut nodes = call.args.iter().map(|a| match a {
+                        Expression::Identifier(id) => id.name.clone(),
+                        _ => unreachable!(),
+                    });
+                    return Ok(Expression::BranchAccess(BranchAccess::Nodes {
+                        access: call.name.clone(),
+                        pos: nodes.next().unwrap(),
+                        neg: nodes.next(),
+                        span: call.span,
+                    }));
+                }
+
+                let args = call
+                    .args
+                    .iter()
+                    .map(|a| self.lower_expression(a))
+                    .collect::<CompileResult<Vec<_>>>()?;
+                if self.user_functions.contains_key(&call.name) {
+                    self.inline_function(&call.name, args, call.span)?
+                } else {
+                    Expression::Call(CallExpr {
+                        name: call.name.clone(),
+                        args,
+                        span: call.span,
+                    })
+                }
+            }
+            Expression::ArrayAccess(a) => Expression::ArrayAccess(ArrayAccessExpr {
+                array: a.array.clone(),
+                index: Box::new(self.lower_expression(&a.index)?),
+                span: a.span,
+            }),
+            Expression::ArrayLiteral(a) => {
+                let elements = a
+                    .elements
+                    .iter()
+                    .map(|e| self.lower_expression(e))
+                    .collect::<CompileResult<Vec<_>>>()?;
+                Expression::ArrayLiteral(ArrayLiteralExpr {
+                    elements,
+                    span: a.span,
+                })
+            }
+            Expression::AnalogOperator(_) | Expression::NoiseSource(_) => expr.clone(),
+        })
+    }
+
+    const MAX_INLINE_DEPTH: usize = 16;
+
+    /// Inline a call to a user-defined analog function by symbolically
+    /// executing its body. The return value is the final expression bound
+    /// to the function-name variable.
+    fn inline_function(
+        &mut self,
+        name: &SmolStr,
+        args: Vec<Expression>,
+        span: Span,
+    ) -> CompileResult<Expression> {
+        if self.inline_depth >= Self::MAX_INLINE_DEPTH {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::CircularDependency(format!(
+                    "analog function '{}' (recursive call chain?)",
+                    name
+                )),
+                span,
+            )));
+        }
+
+        let func = self
+            .user_functions
+            .get(name)
+            .cloned()
+            .expect("checked by caller");
+
+        let inputs: Vec<_> = func
+            .params
+            .iter()
+            .filter(|p| p.direction == ParamDirection::Input)
+            .collect();
+        if func.params.len() != inputs.len() {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidAnalogOperator(format!(
+                    "analog function '{}': output/inout arguments are not supported yet",
+                    name
+                )),
+                span,
+            )));
+        }
+        if args.len() != inputs.len() {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::ArgumentCountMismatch {
+                    name: name.to_string(),
+                    expected: inputs.len().to_string(),
+                    got: args.len(),
+                },
+                span,
+            )));
+        }
+
+        // Bind parameters and locals in a fresh substitution frame
+        let mut frame = HashMap::new();
+        for (param, arg) in inputs.iter().zip(args) {
+            frame.insert(param.name.clone(), arg);
+        }
+        for var_decl in &func.locals {
+            for item in &var_decl.items {
+                let init = match &item.init {
+                    Some(init) => init.clone(),
+                    None => Self::number_expr(0.0, item.span),
+                };
+                frame.insert(item.name.clone(), init);
+            }
+        }
+        // The return value accumulates in a variable named after the function
+        frame.insert(func.name.clone(), Self::number_expr(0.0, span));
+
+        self.subst_stack.push(frame);
+        self.inline_depth += 1;
+        let result = self.exec_function_body(&func.body.statements, None);
+        self.inline_depth -= 1;
+        let frame = self.subst_stack.pop().expect("pushed above");
+        result?;
+
+        Ok(frame
+            .get(&func.name)
+            .cloned()
+            .unwrap_or_else(|| Self::number_expr(0.0, span)))
+    }
+
+    /// Symbolically execute function-body statements, updating the topmost
+    /// substitution frame.
+    fn exec_function_body(
+        &mut self,
+        statements: &[AnalogStatement],
+        guard: Option<&Expression>,
+    ) -> CompileResult<()> {
+        for stmt in statements {
+            self.exec_function_statement(stmt, guard)?;
+        }
+        Ok(())
+    }
+
+    fn exec_function_statement(
+        &mut self,
+        stmt: &AnalogStatement,
+        guard: Option<&Expression>,
+    ) -> CompileResult<()> {
+        match stmt {
+            AnalogStatement::Assignment(assign) => {
+                let LValue::Variable { name, span } = &assign.target else {
+                    return Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidAnalogOperator(
+                            "array assignment inside analog functions is not supported".into(),
+                        ),
+                        assign.span,
+                    )));
+                };
+                let value = self.lower_expression(&assign.value)?;
+                let prev = self
+                    .lookup_substitution(name)
+                    .unwrap_or_else(|| Self::number_expr(0.0, *span));
+                let new_value = match guard {
+                    Some(g) => Expression::Conditional(ConditionalExpr {
+                        condition: Box::new(g.clone()),
+                        then_expr: Box::new(value),
+                        else_expr: Box::new(prev),
+                        span: *span,
+                    }),
+                    None => value,
+                };
+                self.subst_stack
+                    .last_mut()
+                    .expect("function frame")
+                    .insert(name.clone(), new_value);
+            }
+            AnalogStatement::Conditional(cond) => {
+                let condition = self.lower_expression(&cond.condition)?;
+                let then_guard = match guard {
+                    Some(g) => Self::binary_expr(BinaryOp::And, g.clone(), condition.clone()),
+                    None => condition.clone(),
+                };
+                self.exec_function_statement(&cond.then_branch, Some(&then_guard))?;
+                if let Some(else_branch) = &cond.else_branch {
+                    let not_cond = Self::not_expr(condition);
+                    let else_guard = match guard {
+                        Some(g) => Self::binary_expr(BinaryOp::And, g.clone(), not_cond),
+                        None => not_cond,
+                    };
+                    self.exec_function_statement(else_branch, Some(&else_guard))?;
+                }
+            }
+            AnalogStatement::Case(case_stmt) => {
+                let selector = self.lower_expression(&case_stmt.expr)?;
+                let mut prior_match: Option<Expression> = None;
+                for item in &case_stmt.items {
+                    let mut item_match: Option<Expression> = None;
+                    for m in &item.matches {
+                        let m_lowered = self.lower_expression(m)?;
+                        let eq = Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered);
+                        item_match = Some(match item_match {
+                            Some(acc) => Self::binary_expr(BinaryOp::Or, acc, eq),
+                            None => eq,
+                        });
+                    }
+                    let Some(item_match) = item_match else { continue };
+                    let mut item_guard = match &prior_match {
+                        Some(prior) => Self::binary_expr(
+                            BinaryOp::And,
+                            item_match.clone(),
+                            Self::not_expr(prior.clone()),
+                        ),
+                        None => item_match.clone(),
+                    };
+                    if let Some(g) = guard {
+                        item_guard = Self::binary_expr(BinaryOp::And, g.clone(), item_guard);
+                    }
+                    self.exec_function_statement(&item.statement, Some(&item_guard))?;
+                    prior_match = Some(match prior_match {
+                        Some(prior) => Self::binary_expr(BinaryOp::Or, prior, item_match),
+                        None => item_match,
+                    });
+                }
+                if let Some(default) = &case_stmt.default {
+                    let default_guard = match (guard, prior_match) {
+                        (Some(g), Some(prior)) => Some(Self::binary_expr(
+                            BinaryOp::And,
+                            g.clone(),
+                            Self::not_expr(prior),
+                        )),
+                        (None, Some(prior)) => Some(Self::not_expr(prior)),
+                        (Some(g), None) => Some(g.clone()),
+                        (None, None) => None,
+                    };
+                    self.exec_function_statement(default, default_guard.as_ref())?;
+                }
+            }
+            AnalogStatement::Block(block) => {
+                // Function-internal blocks share the function frame; local
+                // declarations bind into it
+                for var_decl in &block.variables {
+                    for item in &var_decl.items {
+                        let init = match &item.init {
+                            Some(init) => self.lower_expression(init)?,
+                            None => Self::number_expr(0.0, item.span),
+                        };
+                        self.subst_stack
+                            .last_mut()
+                            .expect("function frame")
+                            .insert(item.name.clone(), init);
+                    }
+                }
+                self.exec_function_body(&block.statements, guard)?;
+            }
+            AnalogStatement::Null(_) | AnalogStatement::Call(_) => {}
+            other => {
+                return Err(CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidAnalogOperator(format!(
+                        "statement not supported inside analog functions: {:?}",
+                        std::mem::discriminant(other)
+                    )),
+                    Span::dummy(),
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -776,7 +1803,21 @@ impl SemanticAnalyzer {
     fn eval_const(&self, expr: &Expression) -> Option<f64> {
         match expr {
             Expression::Number(n) => Some(n.value),
-            Expression::Unary(u) if u.op == UnaryOp::Neg => self.eval_const(&u.operand).map(|v| -v),
+            Expression::Unary(u) => {
+                let v = self.eval_const(&u.operand)?;
+                Some(match u.op {
+                    UnaryOp::Neg => -v,
+                    UnaryOp::Pos => v,
+                    UnaryOp::Not => {
+                        if v == 0.0 {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    }
+                    UnaryOp::BitNot => !(v as i64) as f64,
+                })
+            }
             Expression::Binary(b) => {
                 let l = self.eval_const(&b.left)?;
                 let r = self.eval_const(&b.right)?;
@@ -785,13 +1826,52 @@ impl SemanticAnalyzer {
                     BinaryOp::Sub => l - r,
                     BinaryOp::Mul => l * r,
                     BinaryOp::Div => l / r,
+                    BinaryOp::Mod => l % r,
                     BinaryOp::Pow => l.powf(r),
-                    _ => return None,
+                    BinaryOp::Eq => f64::from(l == r),
+                    BinaryOp::Ne => f64::from(l != r),
+                    BinaryOp::Lt => f64::from(l < r),
+                    BinaryOp::Le => f64::from(l <= r),
+                    BinaryOp::Gt => f64::from(l > r),
+                    BinaryOp::Ge => f64::from(l >= r),
+                    BinaryOp::And => f64::from(l != 0.0 && r != 0.0),
+                    BinaryOp::Or => f64::from(l != 0.0 || r != 0.0),
+                    BinaryOp::Shl => ((l as i64) << (r as i64)) as f64,
+                    BinaryOp::Shr => ((l as i64) >> (r as i64)) as f64,
+                    BinaryOp::BitAnd => ((l as i64) & (r as i64)) as f64,
+                    BinaryOp::BitOr => ((l as i64) | (r as i64)) as f64,
+                    BinaryOp::BitXor => ((l as i64) ^ (r as i64)) as f64,
                 })
+            }
+            Expression::Conditional(c) => {
+                let cond = self.eval_const(&c.condition)?;
+                if cond != 0.0 {
+                    self.eval_const(&c.then_expr)
+                } else {
+                    self.eval_const(&c.else_expr)
+                }
+            }
+            Expression::Call(call) => {
+                let args: Option<Vec<f64>> =
+                    call.args.iter().map(|a| self.eval_const(a)).collect();
+                let args = args?;
+                match (call.name.as_str(), args.as_slice()) {
+                    ("abs", [x]) => Some(x.abs()),
+                    ("sqrt", [x]) => Some(x.sqrt()),
+                    ("exp", [x]) => Some(x.exp()),
+                    ("ln" | "log", [x]) => Some(x.ln()),
+                    ("log10", [x]) => Some(x.log10()),
+                    ("floor", [x]) => Some(x.floor()),
+                    ("ceil", [x]) => Some(x.ceil()),
+                    ("min", [a, b]) => Some(a.min(*b)),
+                    ("max", [a, b]) => Some(a.max(*b)),
+                    ("pow", [a, b]) => Some(a.powf(*b)),
+                    _ => None,
+                }
             }
             Expression::Identifier(ident) => match ident.name.as_str() {
                 "inf" => Some(f64::INFINITY),
-                _ => None,
+                name => self.param_consts.get(name).copied(),
             },
             _ => None,
         }
@@ -820,14 +1900,335 @@ impl SemanticAnalyzer {
         }
     }
 
-    fn record_error(&mut self, kind: SemanticErrorKind) {
-        self.errors.push(SemanticError::new(
-            kind,
-            Span::new(crate::source::SourceId::new(0), 0, 0),
-        ));
+    fn record_error_at(&mut self, kind: SemanticErrorKind, span: Span) {
+        self.errors.push(SemanticError::new(kind, span));
     }
 }
 
 // ============================================================================
 // Tests
 // ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::Lexer;
+    use crate::parser::Parser;
+    use crate::source::SourceId;
+
+    fn analyze(source: &str) -> CompileResult<AnalyzedFile> {
+        let tokens = Lexer::new(source, SourceId::new(0))
+            .collect_tokens()
+            .expect("lex failed");
+        let file = Parser::new(&tokens).parse().expect("parse failed");
+        SemanticAnalyzer::new().analyze(&file)
+    }
+
+    fn analyze_one(source: &str) -> AnalyzedModule {
+        let analyzed = analyze(source).expect("semantic analysis failed");
+        analyzed.modules.into_values().next().expect("one module")
+    }
+
+    const PREAMBLE: &str = r#"
+        module dut(p, n);
+        inout p, n;
+        electrical p, n;
+    "#;
+
+    fn module_src(body: &str) -> String {
+        format!("{PREAMBLE}{body}\nendmodule")
+    }
+
+    #[test]
+    fn conditional_assignment_lowered_to_guarded_expression() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter integer mode = 0;
+            real x;
+            analog begin
+                if (mode > 0)
+                    x = 1.0;
+                else
+                    x = 2.0;
+                I(p, n) <+ x * V(p, n);
+            end
+            "#,
+        ));
+        assert_eq!(m.assignments.len(), 2);
+        // Both branch assignments must be guarded conditionals, not raw values
+        assert!(matches!(
+            m.assignments[0].expression,
+            Expression::Conditional(_)
+        ));
+        assert!(matches!(
+            m.assignments[1].expression,
+            Expression::Conditional(_)
+        ));
+        // The else-branch guard preserves the previous value via the variable
+        let Expression::Conditional(c) = &m.assignments[1].expression else {
+            unreachable!()
+        };
+        assert!(matches!(*c.else_expr, Expression::Identifier(_)));
+    }
+
+    #[test]
+    fn conditional_contribution_contributes_zero_when_inactive() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter integer on = 1;
+            analog begin
+                if (on)
+                    I(p, n) <+ V(p, n);
+            end
+            "#,
+        ));
+        assert_eq!(m.contributions.len(), 1);
+        let Expression::Conditional(c) = &m.contributions[0].expression else {
+            panic!("expected guarded contribution");
+        };
+        let Expression::Number(zero) = &*c.else_expr else {
+            panic!("expected zero fallback");
+        };
+        assert_eq!(zero.value, 0.0);
+    }
+
+    #[test]
+    fn for_loop_unrolls_statically() {
+        let m = analyze_one(&module_src(
+            r#"
+            integer i;
+            real x;
+            analog begin
+                for (i = 0; i < 3; i = i + 1)
+                    x = x + 1.0;
+            end
+            "#,
+        ));
+        assert_eq!(m.assignments.len(), 3);
+    }
+
+    #[test]
+    fn localparam_becomes_computed_variable() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter real w = 2.0;
+            localparam real area = w * 3.0;
+            analog I(p, n) <+ area * V(p, n);
+            "#,
+        ));
+        assert!(m.variables.iter().any(|v| v.name == "area"));
+        assert_eq!(m.assignments.len(), 1);
+        assert_eq!(m.assignments[0].target.as_str(), "area");
+    }
+
+    #[test]
+    fn variable_initializer_recorded() {
+        let m = analyze_one(&module_src(
+            r#"
+            real x = 4.5;
+            analog I(p, n) <+ x * V(p, n);
+            "#,
+        ));
+        assert_eq!(m.assignments.len(), 1);
+        assert_eq!(m.assignments[0].target.as_str(), "x");
+    }
+
+    #[test]
+    fn named_branch_contribution_resolves_nodes() {
+        let m = analyze_one(&module_src(
+            r#"
+            branch (p, n) res;
+            analog I(res) <+ V(res) / 2.0;
+            "#,
+        ));
+        assert_eq!(m.contributions.len(), 1);
+        assert_eq!(m.contributions[0].branch.as_str(), "p,n");
+        assert!(m.contributions[0].is_current);
+    }
+
+    #[test]
+    fn parameter_default_out_of_range_is_an_error() {
+        let result = analyze(&module_src(
+            r#"
+            parameter real r = -1.0 from (0:inf);
+            analog I(p, n) <+ V(p, n) / r;
+            "#,
+        ));
+        assert!(result.is_err(), "out-of-range default must fail");
+    }
+
+    #[test]
+    fn assignment_to_parameter_is_an_error() {
+        let result = analyze(&module_src(
+            r#"
+            parameter real r = 1.0;
+            analog begin
+                r = 2.0;
+                I(p, n) <+ V(p, n) / r;
+            end
+            "#,
+        ));
+        assert!(result.is_err(), "assigning a parameter must fail");
+    }
+
+    #[test]
+    fn undeclared_node_in_contribution_is_an_error() {
+        let result = analyze(&module_src(
+            r#"
+            analog I(p, ghost) <+ V(p, n);
+            "#,
+        ));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn block_local_variable_shadowing_is_hoisted() {
+        let m = analyze_one(&module_src(
+            r#"
+            real tmp;
+            analog begin : outer
+                real tmp;
+                tmp = V(p, n);
+                I(p, n) <+ tmp;
+            end
+            "#,
+        ));
+        // Module-level tmp plus a hoisted (renamed) block-local tmp
+        assert_eq!(
+            m.variables
+                .iter()
+                .filter(|v| v.name.starts_with("tmp"))
+                .count(),
+            2
+        );
+        // The block assignment targets the hoisted name, not the outer tmp
+        assert_ne!(m.assignments[0].target.as_str(), "tmp");
+    }
+
+    #[test]
+    fn user_function_is_inlined() {
+        let m = analyze_one(&module_src(
+            r#"
+            parameter real gain = 2.0;
+            analog function real double_it;
+                input v;
+                real scratch;
+                begin
+                    scratch = 2.0 * v;
+                    double_it = scratch;
+                end
+            endfunction
+            analog I(p, n) <+ double_it(V(p, n)) * gain;
+            "#,
+        ));
+        assert_eq!(m.contributions.len(), 1);
+        // No residual user-function calls may remain after inlining
+        fn has_user_call(expr: &Expression) -> bool {
+            match expr {
+                Expression::Call(c) => {
+                    c.name == "double_it" || c.args.iter().any(has_user_call)
+                }
+                Expression::Binary(b) => has_user_call(&b.left) || has_user_call(&b.right),
+                Expression::Unary(u) => has_user_call(&u.operand),
+                Expression::Conditional(c) => {
+                    has_user_call(&c.condition)
+                        || has_user_call(&c.then_expr)
+                        || has_user_call(&c.else_expr)
+                }
+                _ => false,
+            }
+        }
+        assert!(!has_user_call(&m.contributions[0].expression));
+    }
+
+    #[test]
+    fn function_with_conditional_inlines_to_ternary() {
+        let m = analyze_one(&module_src(
+            r#"
+            analog function real clip;
+                input v;
+                begin
+                    if (v > 1.0)
+                        clip = 1.0;
+                    else
+                        clip = v;
+                end
+            endfunction
+            analog I(p, n) <+ clip(V(p, n));
+            "#,
+        ));
+        assert!(matches!(
+            m.contributions[0].expression,
+            Expression::Conditional(_)
+        ));
+    }
+
+    #[test]
+    fn thermal_contribution_is_flow() {
+        let m = analyze_one(
+            r#"
+            module heater(p, n, t);
+            inout p, n, t;
+            electrical p, n;
+            thermal t;
+            analog Pwr(t) <+ V(p, n) * V(p, n) / 10.0;
+            endmodule
+            "#,
+        );
+        assert_eq!(m.contributions.len(), 1);
+        assert!(
+            m.contributions[0].is_current,
+            "power into a thermal node is a flow contribution"
+        );
+    }
+
+    #[test]
+    fn ground_net_does_not_allocate_internal_node() {
+        let m = analyze_one(&module_src(
+            r#"
+            ground gnd;
+            electrical mid;
+            analog begin
+                I(p, mid) <+ V(p, mid);
+                I(mid, gnd) <+ V(mid, gnd);
+            end
+            "#,
+        ));
+        assert_eq!(m.internal_nodes.len(), 1);
+        assert_eq!(m.internal_nodes[0].name.as_str(), "mid");
+        assert_eq!(m.ground_nodes, vec![SmolStr::from("gnd")]);
+    }
+
+    #[test]
+    fn initial_step_lowered_to_static_analysis_guard() {
+        let m = analyze_one(&module_src(
+            r#"
+            real seed;
+            analog begin
+                @(initial_step) seed = 1.0;
+                I(p, n) <+ seed * V(p, n);
+            end
+            "#,
+        ));
+        let Expression::Conditional(c) = &m.assignments[0].expression else {
+            panic!("expected guarded assignment");
+        };
+        let Expression::Call(call) = &*c.condition else {
+            panic!("expected analysis() guard");
+        };
+        assert_eq!(call.name.as_str(), "analysis");
+    }
+
+    #[test]
+    fn while_loop_with_runtime_condition_errors() {
+        let result = analyze(&module_src(
+            r#"
+            real x;
+            analog begin
+                while (V(p, n) > 0) x = x + 1.0;
+            end
+            "#,
+        ));
+        assert!(result.is_err());
+    }
+}
