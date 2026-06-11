@@ -1828,7 +1828,9 @@ impl<'a> Parser<'a> {
             base = Some(self.expect_identifier("base nature")?.into());
         }
 
-        self.expect(TokenKind::Semicolon)?;
+        // The semicolon after the nature name is optional (pre-LRM-2.2
+        // headers like the EKV2.6 distribution omit it)
+        self.match_token(TokenKind::Semicolon);
 
         while !self.check(TokenKind::Endnature) && !self.at_end() {
             if self.match_token(TokenKind::Access) {
