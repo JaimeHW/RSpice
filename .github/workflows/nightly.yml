@@ -1,0 +1,59 @@
+# Nightly depth: the full release-mode test suite, the ngspice conformance
+# report (non-gating until the conformance program reaches 113/113 — the
+# pass-rate log is the artifact), and a release build of the shipped
+# binaries on Windows to catch LTO/release-only breakage.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  conformance:
+    name: Conformance & full suite (Linux, release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly
+      - name: Full test suite (release)
+        run: >-
+          cargo test --workspace --exclude rspice-python --exclude rspice-wasm
+          --release -- --skip ngspice
+      - name: ngspice conformance report (non-gating until 113/113)
+        # Serial test threads: each deck spawns a case-runner subprocess with
+        # a hard per-case timeout; parallel threads oversubscribe the runner
+        # and trip the caps.
+        continue-on-error: true
+        run: >-
+          cargo test -p rspice-core --release --test ngspice_regression
+          -- --nocapture --test-threads 1 | tee conformance.log
+      - name: Upload conformance log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-log
+          path: conformance.log
+          if-no-files-found: ignore
+
+  release-build:
+    name: Release build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-release
+      - name: Build shipped binaries
+        run: cargo build --release -p rspice-ui -p rspice-cli

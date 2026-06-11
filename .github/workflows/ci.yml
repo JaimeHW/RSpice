@@ -1,0 +1,77 @@
+# Per-commit gate: build the workspace warning-clean and run the fast test
+# tier on Linux and Windows. The ngspice conformance suites are excluded
+# here (they gate in nightly.yml until the conformance program reaches
+# 113/113); the live-oracle audit is `#[ignore]` and never runs in CI.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  test-linux:
+    name: Build & test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check (warnings denied)
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Test (fast tier)
+        run: >-
+          cargo test --workspace --exclude rspice-python --exclude rspice-wasm
+          -- --skip ngspice
+
+  test-windows:
+    name: Build & unit test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Unit tests
+        run: cargo test -p rspice-core --lib
+
+  wasm:
+    name: Check (wasm32)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check rspice-wasm
+        run: cargo check -p rspice-wasm --target wasm32-unknown-unknown
+
+  python:
+    name: Check (Python bindings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check rspice-python
+        run: cargo check -p rspice-python
