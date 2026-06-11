@@ -27,22 +27,22 @@ RSPICE_BENCH_NGSPICE=/path/to/ngspice target/release/rspice-bench run
 
 ## Linear-solver backends
 
-The default solver is faer's sparse LU with a cached symbolic
-factorization. An experimental KLU-class backend is selectable per
-process:
+The default real-valued solver is a KLU-class backend built for the
+circuit-simulation workload — one frozen sparsity pattern factored many
+times with changing values: minimum-degree ordering, Gilbert-Peierls
+factorization with diagonal-preference threshold pivoting, and a
+values-only refactorization that reuses the stored pivot sequence (a
+pivot-growth alarm re-pivots automatically, and any backend failure
+falls through to the faer path transparently). On the published
+scoreboards it improves solver-bound decks 14-15% end-to-end while the
+full conformance suite reproduces the previous baseline exactly.
 
 ```sh
-RSPICE_SOLVER=klu rspice run big_postlayout.cir
+RSPICE_SOLVER=faer rspice run deck.cir    # opt out to the faer backend
 ```
 
-It exploits the circuit-simulation workload — one frozen sparsity
-pattern factored many times with changing values — with a stored pivot
-sequence and values-only refactorization (minimum-degree ordering,
-Gilbert-Peierls factorization, diagonal-preference threshold pivoting,
-pivot-growth alarm with automatic re-pivoting, and a transparent
-fallback to the default path on any backend failure). Conformance
-suites run identically under either backend; the scoreboard decides
-when it becomes the default.
+AC and other complex-valued solves use faer's sparse LU with a cached
+symbolic factorization shared from the real matrix.
 
 ## Parallelism
 
