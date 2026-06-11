@@ -509,6 +509,78 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// ngspice `DIOtrunc` (CKTterr on the `DIOcapCharge` state): the diode
+    /// junction depletion+diffusion charge drives the timestep through the
+    /// same divided-difference truncation law as the other junction devices.
+    #[inline]
+    pub(super) fn diode_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &DiodeTransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
+            let vd = Self::differential_voltage(
+                candidate_solution,
+                diode.node_anode,
+                diode.node_cathode,
+            );
+            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
+            if !capd.is_finite() || capd <= 0.0 {
+                continue;
+            }
+
+            let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
+                effective_method,
+                trap_order,
+                dt,
+                capd,
+                vd,
+                qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            );
+            let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                q_curr,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.qd_prev_prev_prev[idx],
+                cq_curr,
+                history.cqd_prev[idx],
+                dt,
+                history.accepted_dt_prev,
+                history.accepted_dt_prev_prev,
+                effective_method,
+                trap_order,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            ) else {
+                continue;
+            };
+            found_branch = true;
+            limit = limit.min(branch_limit);
+        }
+
+        found_branch.then_some(limit)
+    }
+
     #[inline]
     pub(super) fn mosfet_ngspice_truncation_limit(
         circuit: &crate::circuit::Circuit,
@@ -865,6 +937,7 @@ impl Engine {
         bjt_history: &BjtTransientHistory,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         jfet_history: &JfetTransientHistory,
+        diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
         voltage_abstol: Value,
@@ -927,6 +1000,23 @@ impl Engine {
         } else {
             None
         };
+        let diode_limit = if !circuit.diodes.is_empty() {
+            Self::diode_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                diode_history,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
         let mosfet_limit = if !suppress_gate_charge && !circuit.mosfets.is_empty() {
             Self::mosfet_ngspice_truncation_limit(
                 circuit,
@@ -947,8 +1037,11 @@ impl Engine {
 
         Self::min_truncation_limit(
             Self::min_truncation_limit(
-                Self::min_truncation_limit(capacitor_limit, bjt_limit),
-                jfet_limit,
+                Self::min_truncation_limit(
+                    Self::min_truncation_limit(capacitor_limit, bjt_limit),
+                    jfet_limit,
+                ),
+                diode_limit,
             ),
             mosfet_limit,
         )
@@ -1050,10 +1143,10 @@ impl Engine {
         capacitor_truncation_limit: Option<Value>,
         bjt_truncation_limit: Option<Value>,
         jfet_truncation_limit: Option<Value>,
+        diode_truncation_limit: Option<Value>,
         mosfet_truncation_limit: Option<Value>,
     ) -> bool {
         if circuit.has_xspice_devices()
-            || !circuit.diodes.is_empty()
             || !circuit.inductors.is_empty()
             || !circuit.coupled_inductor_pairs.is_empty()
             || !circuit.multi_winding_transformers.is_empty()
@@ -1066,9 +1159,17 @@ impl Engine {
             circuit.capacitors.is_empty() || capacitor_truncation_limit.is_some();
         let bjt_controlled = circuit.bjts.devices.is_empty() || bjt_truncation_limit.is_some();
         let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
+        // Zero-charge diodes (CJO=0, TT=0) report no truncation limit; the
+        // generic node-voltage estimator stays in charge for those decks.
+        let diode_controlled =
+            circuit.diodes.is_empty() || diode_truncation_limit.is_some();
         let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
 
-        capacitor_controlled && bjt_controlled && jfet_controlled && mosfet_controlled
+        capacitor_controlled
+            && bjt_controlled
+            && jfet_controlled
+            && diode_controlled
+            && mosfet_controlled
     }
 
     #[inline]
@@ -1095,6 +1196,7 @@ impl Engine {
         is_strictly_linear_transient: bool,
         history: &BjtTransientHistory,
         jfet_history: &JfetTransientHistory,
+        diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
         voltage_lte_estimator: &LteEstimator,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
@@ -1129,6 +1231,7 @@ impl Engine {
             history,
             vbic_snapshot_cache,
             jfet_history,
+            diode_history,
             mosfet_history,
             false,
             voltage_abstol,

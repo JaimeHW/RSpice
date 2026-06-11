@@ -68,6 +68,7 @@ impl Engine {
         hinted_max_step: Value,
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
+        diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
     ) {
@@ -102,6 +103,9 @@ impl Engine {
         *jfet_history = Self::initialize_jfet_history(circuit, solution);
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
+        *diode_history = Self::initialize_diode_history(circuit, solution);
+        diode_history.accepted_dt_prev = hinted_max_step;
+        diode_history.accepted_dt_prev_prev = hinted_max_step;
         *mosfet_history = Self::initialize_mosfet_history(circuit, solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -274,6 +278,36 @@ impl Engine {
             history.qds_prev.push(qds);
             history.qds_prev_prev.push(qds);
             history.cqds_prev.push(0.0);
+        }
+
+        history
+    }
+
+    pub(super) fn initialize_diode_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+    ) -> DiodeTransientHistory {
+        let n = circuit.diodes.devices.len();
+        let mut history = DiodeTransientHistory {
+            vd_prev: Vec::with_capacity(n),
+            vd_prev_prev: Vec::with_capacity(n),
+            qd_prev: Vec::with_capacity(n),
+            qd_prev_prev: Vec::with_capacity(n),
+            qd_prev_prev_prev: Vec::with_capacity(n),
+            cqd_prev: Vec::with_capacity(n),
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
+        };
+
+        for diode in &circuit.diodes.devices {
+            let vd = Self::differential_voltage(solution, diode.node_anode, diode.node_cathode);
+            let (qd, _capd) = diode.junction_charge_and_capacitance(vd);
+            history.vd_prev.push(vd);
+            history.vd_prev_prev.push(vd);
+            history.qd_prev.push(qd);
+            history.qd_prev_prev.push(qd);
+            history.qd_prev_prev_prev.push(qd);
+            history.cqd_prev.push(0.0);
         }
 
         history
@@ -635,6 +669,51 @@ impl Engine {
                 );
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.drain, jfet.source, geq, ieq);
             }
+        }
+    }
+
+    /// Stamp the diode junction-charge companions (ngspice dioload.c's
+    /// `DIOcapCharge` integration). The charge is evaluated from the raw
+    /// junction voltage: the conduction stamp's pnjlim limiting is a Newton
+    /// iteration aid that leaves converged points untouched, and the
+    /// charge-form companion (`nonlinear_charge_companion_terms`) needs the
+    /// charge history tracked against one consistent voltage.
+    pub(super) fn stamp_diode_transient_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &DiodeTransientHistory,
+    ) {
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
+            let vd = Self::differential_voltage(voltages, diode.node_anode, diode.node_cathode);
+            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
+            if !capd.is_finite() || capd <= 0.0 {
+                continue;
+            }
+            let (geq, ieq, _q_curr, _cq_curr) = Self::nonlinear_charge_companion_terms(
+                effective_method,
+                trap_order,
+                dt,
+                capd,
+                vd,
+                qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            );
+            Self::stamp_two_terminal_companion(
+                matrix,
+                rhs,
+                diode.node_anode,
+                diode.node_cathode,
+                geq,
+                ieq,
+            );
         }
     }
 
@@ -1655,6 +1734,7 @@ impl Engine {
         trap_order: u8,
         bjt_history: &mut BjtTransientHistory,
         jfet_history: &mut JfetTransientHistory,
+        diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
@@ -2073,6 +2153,33 @@ impl Engine {
         }
         jfet_history.accepted_dt_prev_prev = jfet_history.accepted_dt_prev;
         jfet_history.accepted_dt_prev = dt;
+
+        for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
+            let vd =
+                Self::differential_voltage(accepted_solution, diode.node_anode, diode.node_cathode);
+            let (qd, capd) = diode.junction_charge_and_capacitance(vd);
+            diode_history.vd_prev_prev[idx] = diode_history.vd_prev[idx];
+            diode_history.vd_prev[idx] = vd;
+            if capd.is_finite() && capd > 0.0 {
+                let (_geq, _ieq, qd_curr, cqd_curr) = Self::nonlinear_charge_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    capd,
+                    vd,
+                    qd,
+                    diode_history.qd_prev[idx],
+                    diode_history.qd_prev_prev[idx],
+                    diode_history.cqd_prev[idx],
+                );
+                diode_history.qd_prev_prev_prev[idx] = diode_history.qd_prev_prev[idx];
+                diode_history.qd_prev_prev[idx] = diode_history.qd_prev[idx];
+                diode_history.qd_prev[idx] = qd_curr;
+                diode_history.cqd_prev[idx] = cqd_curr;
+            }
+        }
+        diode_history.accepted_dt_prev_prev = diode_history.accepted_dt_prev;
+        diode_history.accepted_dt_prev = dt;
 
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);

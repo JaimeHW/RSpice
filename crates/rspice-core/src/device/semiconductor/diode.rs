@@ -48,6 +48,8 @@ pub struct Diode {
     pub m: Value,
     /// Transit time for diffusion capacitance (TT)
     pub tt: Value,
+    /// Forward-bias depletion capacitance coefficient (FC)
+    pub fc: Value,
 
     // Temperature parameters
     /// Saturation-current temperature exponent (XTI)
@@ -105,6 +107,7 @@ impl Diode {
             vj: 0.7,    // Built-in potential
             m: 0.5,     // Grading coefficient
             tt: 8e-9,   // Transit time (8ns)
+            fc: 0.5,    // Forward-bias depletion coefficient (SPICE default)
 
             // SPICE temperature defaults
             xti: 3.0,
@@ -277,6 +280,12 @@ impl Diode {
         if let Some(&v) = params.get("TT") {
             self.tt = v;
         }
+        if let Some(&v) = params.get("FC")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.fc = v;
+        }
         if let Some(&v) = params.get("XTI") {
             self.xti = v;
         }
@@ -383,6 +392,47 @@ impl Diode {
         self.m = m;
         self.tt = tt;
         self
+    }
+
+    /// Junction charge and capacitance at `vd` for transient integration
+    /// (dioload.c): depletion charge with the F1/F2/F3 polynomial
+    /// continuation above `FC·VJ`, plus diffusion charge `TT·id` riding the
+    /// conduction current. Returns `(qd, capd)`.
+    ///
+    /// `vj`/`cj0` are already temperature-adjusted by `set_temperature`, so
+    /// the F-coefficients computed here match ngspice's `DIOtF1`/`DIOf2`/
+    /// `DIOf3` (diotemp.c evaluates them from the adjusted junction
+    /// potential).
+    pub fn junction_charge_and_capacitance(&self, vd: Value) -> (Value, Value) {
+        let mut qd = 0.0;
+        let mut capd = 0.0;
+        if self.cj0 > 0.0 && self.vj > 0.0 && self.m < 1.0 {
+            let fc = self.fc.clamp(0.0, 0.95);
+            let dep_cap_knee = fc * self.vj;
+            if vd < dep_cap_knee {
+                let arg = 1.0 - vd / self.vj;
+                let sarg = (-self.m * arg.ln()).exp();
+                qd += self.vj * self.cj0 * (1.0 - arg * sarg) / (1.0 - self.m);
+                capd += self.cj0 * sarg;
+            } else {
+                let f1 = self.vj * (1.0 - (1.0 - fc).powf(1.0 - self.m)) / (1.0 - self.m);
+                let f2 = (1.0 - fc).powf(1.0 + self.m);
+                let f3 = 1.0 - fc * (1.0 + self.m);
+                let czof2 = self.cj0 / f2;
+                qd += self.cj0 * f1
+                    + czof2
+                        * (f3 * (vd - dep_cap_knee)
+                            + (self.m / (2.0 * self.vj))
+                                * (vd * vd - dep_cap_knee * dep_cap_knee));
+                capd += czof2 * (f3 + self.m * vd / self.vj);
+            }
+        }
+        if self.tt > 0.0 {
+            let (id, gd) = self.current_and_conductance(vd);
+            qd += self.tt * id;
+            capd += self.tt * gd;
+        }
+        (qd, capd)
     }
 
     /// Calculate junction capacitance: Cj = CJ0 / (1 - Vd/VJ)^M
