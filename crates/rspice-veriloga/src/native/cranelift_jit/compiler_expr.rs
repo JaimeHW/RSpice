@@ -1,5 +1,28 @@
 use super::*;
 
+/// Whether every instruction of a program is compilable by
+/// [`JitCompiler::compile_expression`]. Mirrors the bail arms below — kept
+/// adjacent so the two stay in sync. A stale entry here only costs
+/// performance: the chunk compiler degrades a refused chunk back to the
+/// interpreter, never correctness.
+pub(crate) fn program_is_jitable(program: &BytecodeProgram) -> bool {
+    program.instructions.iter().all(|instr| {
+        !matches!(
+            instr,
+            Instruction::PushVariableDyn { .. }
+                | Instruction::IdtModState(_)
+                | Instruction::TableDerivative(_)
+                | Instruction::LimitState(_)
+                | Instruction::AbsDelayState(_)
+                | Instruction::TransitionState(_)
+                | Instruction::SlewState(_)
+                | Instruction::CrossState(_)
+                | Instruction::TimerState(_)
+                | Instruction::LaplaceState(_)
+        )
+    })
+}
+
 impl JitCompiler {
     /// Compile a bytecode program to Cranelift IR, returning the result value
     #[allow(clippy::too_many_arguments)]
@@ -428,24 +451,83 @@ impl JitCompiler {
                     stack.push(result);
                 }
 
-                // Stateful operators mutate per-instance history; compiling
-                // them with DC-only semantics silently diverged from the
-                // interpreter in transient analysis. Refuse instead - the
-                // device falls back to the bytecode interpreter.
-                Instruction::DdtState(_) => {
-                    return Err(JitError::UnsupportedInstruction("DdtState"));
+                // ddt(): record the operand in the state slot, return
+                // (operand - prev) / dt during transient and 0 at DC,
+                // exactly mirroring the interpreter (same state arrays)
+                Instruction::DdtState(idx) => {
+                    let q = stack.pop().unwrap();
+                    let state_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_STATE_VALUES,
+                    );
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), q, state_ptr, (*idx * 8) as i32);
+                    let prev = self.load_state_prev_or(builder, ctx_ptr, *idx, q);
+                    let dt = builder.ins().load(
+                        types::F64,
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TIMESTEP,
+                    );
+                    let dt_live = Self::timestep_is_live(builder, dt);
+                    let diff = builder.ins().fsub(q, prev);
+                    let deriv = builder.ins().fdiv(diff, dt);
+                    let zero = builder.ins().f64const(0.0);
+                    let result = builder.ins().select(dt_live, deriv, zero);
+                    stack.push(result);
                 }
-                Instruction::IdtState(_) => {
-                    return Err(JitError::UnsupportedInstruction("IdtState"));
+                // idt(): integral = prev + operand * dt during transient,
+                // pinned to the initial condition at DC; the result seeds
+                // the state slot either way
+                Instruction::IdtState(idx) => {
+                    let ic = stack.pop().unwrap();
+                    let q = stack.pop().unwrap();
+                    let prev = self.load_state_prev_or(builder, ctx_ptr, *idx, ic);
+                    let dt = builder.ins().load(
+                        types::F64,
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TIMESTEP,
+                    );
+                    let dt_live = Self::timestep_is_live(builder, dt);
+                    let step = builder.ins().fmul(q, dt);
+                    let advanced = builder.ins().fadd(prev, step);
+                    let result = builder.ins().select(dt_live, advanced, ic);
+                    let state_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_STATE_VALUES,
+                    );
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), result, state_ptr, (*idx * 8) as i32);
+                    stack.push(result);
                 }
                 Instruction::IdtModState(_) => {
                     return Err(JitError::UnsupportedInstruction("IdtModState"));
                 }
-                Instruction::DdtJacobian => {
-                    return Err(JitError::UnsupportedInstruction("DdtJacobian"));
-                }
-                Instruction::IdtJacobian => {
-                    return Err(JitError::UnsupportedInstruction("IdtJacobian"));
+                // Companion Jacobian factors: operand / dt (ddt) or
+                // operand * dt (idt) during transient, 0 at DC
+                Instruction::DdtJacobian | Instruction::IdtJacobian => {
+                    let a = stack.pop().unwrap();
+                    let dt = builder.ins().load(
+                        types::F64,
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_TIMESTEP,
+                    );
+                    let dt_live = Self::timestep_is_live(builder, dt);
+                    let factor = match instr {
+                        Instruction::DdtJacobian => builder.ins().fdiv(a, dt),
+                        _ => builder.ins().fmul(a, dt),
+                    };
+                    let zero = builder.ins().f64const(0.0);
+                    let result = builder.ins().select(dt_live, factor, zero);
+                    stack.push(result);
                 }
                 Instruction::TableDerivative(_) => {
                     return Err(JitError::UnsupportedInstruction("TableDerivative"));
@@ -520,34 +602,102 @@ impl JitCompiler {
                     stack.push(builder.ins().f64const(0.0));
                 }
 
-                // The evaluation context does not expose the analysis type
-                // to native code yet; assuming DC silently diverged from the
-                // interpreter during transient analysis
-                Instruction::Analysis(_) => {
-                    return Err(JitError::UnsupportedInstruction("Analysis"));
+                // analysis("..."): compare the context's analysis type code
+                // (0=dc, 1=ac, 2=tran, 3=noise, 4=ic; 5 queries "static" =
+                // dc or ic), mirroring the interpreter's table
+                Instruction::Analysis(query_id) => {
+                    let current = builder.ins().load(
+                        types::I8,
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_ANALYSIS_TYPE,
+                    );
+                    let current = builder.ins().uextend(types::I32, current);
+                    let one = builder.ins().f64const(1.0);
+                    let zero = builder.ins().f64const(0.0);
+                    let result = match *query_id {
+                        0..=4 => {
+                            let cmp =
+                                builder.ins().icmp_imm(IntCC::Equal, current, *query_id as i64);
+                            builder.ins().select(cmp, one, zero)
+                        }
+                        5 => {
+                            let is_dc = builder.ins().icmp_imm(IntCC::Equal, current, 0);
+                            let is_ic = builder.ins().icmp_imm(IntCC::Equal, current, 4);
+                            let either = builder.ins().bor(is_dc, is_ic);
+                            builder.ins().select(either, one, zero)
+                        }
+                        _ => zero,
+                    };
+                    stack.push(result);
                 }
 
-                // Given-ness flags are not part of the native ABI yet
-                Instruction::PushParamGiven(_) => {
-                    return Err(JitError::UnsupportedInstruction("PushParamGiven"));
+                // $param_given: one byte per parameter in the context
+                Instruction::PushParamGiven(idx) => {
+                    let flags_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_PARAM_GIVEN,
+                    );
+                    let flag =
+                        builder
+                            .ins()
+                            .load(types::I8, MemFlags::new(), flags_ptr, *idx as i32);
+                    let cmp = builder.ins().icmp_imm(IntCC::NotEqual, flag, 0);
+                    let one = builder.ins().f64const(1.0);
+                    let zero = builder.ins().f64const(0.0);
+                    let result = builder.ins().select(cmp, one, zero);
+                    stack.push(result);
                 }
 
-                // Branch-current unknowns are not part of the native ABI yet
-                Instruction::PushBranchCurrent(_) => {
-                    return Err(JitError::UnsupportedInstruction("PushBranchCurrent"));
+                // Branch-current unknown values (the device sizes the array
+                // to the model's branch unknown count before native calls)
+                Instruction::PushBranchCurrent(k) => {
+                    let unknowns_ptr = builder.ins().load(
+                        self.isa.pointer_type(),
+                        MemFlags::new(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_BRANCH_UNKNOWNS,
+                    );
+                    let val = builder.ins().load(
+                        types::F64,
+                        MemFlags::new(),
+                        unknowns_ptr,
+                        (*k * 8) as i32,
+                    );
+                    stack.push(val);
                 }
 
-                // Modulus and integer bit operations are rare in hot model
-                // paths; not worth native lowering yet
+                // Modulus follows fmod semantics on reals (LRM 4.2.3)
                 Instruction::Mod => {
-                    return Err(JitError::UnsupportedInstruction("Mod"));
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    let result = self.call_math2(builder, module, math_funcs, "fmod", a, b)?;
+                    stack.push(result);
                 }
+                // Bitwise/shift operations truncate the operands to i64
+                // (saturating, matching Rust `as i64` in the interpreter)
+                // and convert the result back
                 Instruction::Shl
                 | Instruction::Shr
                 | Instruction::BitAnd
                 | Instruction::BitOr
                 | Instruction::BitXor => {
-                    return Err(JitError::UnsupportedInstruction("bitwise op"));
+                    let b = stack.pop().unwrap();
+                    let a = stack.pop().unwrap();
+                    let ia = builder.ins().fcvt_to_sint_sat(types::I64, a);
+                    let ib = builder.ins().fcvt_to_sint_sat(types::I64, b);
+                    let res = match instr {
+                        Instruction::Shl => builder.ins().ishl(ia, ib),
+                        Instruction::Shr => builder.ins().sshr(ia, ib),
+                        Instruction::BitAnd => builder.ins().band(ia, ib),
+                        Instruction::BitOr => builder.ins().bor(ia, ib),
+                        Instruction::BitXor => builder.ins().bxor(ia, ib),
+                        _ => unreachable!(),
+                    };
+                    let result = builder.ins().fcvt_from_sint(types::F64, res);
+                    stack.push(result);
                 }
 
                 // AboveState: level crossing event
@@ -579,6 +729,54 @@ impl JitCompiler {
 
         // Return the top of stack (or 0 if empty)
         Ok(stack.pop().unwrap_or_else(|| builder.ins().f64const(0.0)))
+    }
+
+    /// `|dt| > 1e-20`: whether a transient timestep is active (matches the
+    /// interpreter's DC gate on stateful operators)
+    fn timestep_is_live(builder: &mut FunctionBuilder, dt: Value) -> Value {
+        let dt_abs = builder.ins().fabs(dt);
+        let tiny = builder.ins().f64const(1e-20);
+        builder.ins().fcmp(FloatCC::GreaterThan, dt_abs, tiny)
+    }
+
+    /// Load `state_prev[idx]`, falling back to `fallback` when no previous
+    /// state exists yet (null pointer before the first accepted step) —
+    /// mirroring the interpreter's `.get(idx).unwrap_or(fallback)`
+    fn load_state_prev_or(
+        &self,
+        builder: &mut FunctionBuilder,
+        ctx_ptr: Value,
+        idx: usize,
+        fallback: Value,
+    ) -> Value {
+        let prev_ptr = builder.ins().load(
+            self.isa.pointer_type(),
+            MemFlags::trusted(),
+            ctx_ptr,
+            EVAL_CTX_OFFSET_STATE_PREV,
+        );
+        let null = builder.ins().iconst(self.isa.pointer_type(), 0);
+        let is_null = builder.ins().icmp(IntCC::Equal, prev_ptr, null);
+
+        let load_block = builder.create_block();
+        let merge_block = builder.create_block();
+        builder.append_block_param(merge_block, types::F64);
+
+        builder
+            .ins()
+            .brif(is_null, merge_block, &[fallback], load_block, &[]);
+
+        builder.switch_to_block(load_block);
+        builder.seal_block(load_block);
+        let loaded =
+            builder
+                .ins()
+                .load(types::F64, MemFlags::new(), prev_ptr, (idx * 8) as i32);
+        builder.ins().jump(merge_block, &[loaded]);
+
+        builder.switch_to_block(merge_block);
+        builder.seal_block(merge_block);
+        builder.block_params(merge_block)[0]
     }
 
     /// Call a single-argument math function

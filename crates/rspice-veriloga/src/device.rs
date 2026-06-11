@@ -61,9 +61,6 @@ pub struct VerilogADevice {
     /// Native compiled model (if compilation succeeded)
     #[cfg(feature = "native")]
     native_model: Option<std::sync::Arc<NativeModel>>,
-    /// Variable storage for native execution
-    #[cfg(feature = "native")]
-    native_vars: Vec<f64>,
 }
 
 // NativeModel contains raw pointers but is safe to send across threads
@@ -115,9 +112,16 @@ impl VerilogADevice {
     ///
     /// # Arguments
     /// * `name` - Instance name (e.g., "D1")
-    /// * `model` - Compiled Verilog-A model
+    /// * `model` - Compiled Verilog-A model. Pass an `Arc<CompiledModel>`
+    ///   when instantiating a model many times: instances then share the
+    ///   program and one JIT compilation.
     /// * `nodes` - Circuit node IDs for each terminal (0 = ground)
-    pub fn new(name: impl Into<SmolStr>, model: CompiledModel, nodes: &[usize]) -> Self {
+    pub fn new(
+        name: impl Into<SmolStr>,
+        model: impl Into<std::sync::Arc<CompiledModel>>,
+        nodes: &[usize],
+    ) -> Self {
+        let model: std::sync::Arc<CompiledModel> = model.into();
         let num_terminals = model.num_terminals;
 
         // Build node mapping
@@ -147,13 +151,13 @@ impl VerilogADevice {
 
         // Attempt native compilation (if feature enabled)
         #[cfg(feature = "native")]
-        let (native_model, native_vars) = Self::try_native_compile(&model);
+        let native_model = Self::try_native_compile(&model);
 
         let num_branch_unknowns = model.branch_sources.len();
         let num_stamp_programs = model.stamp_programs.len();
         let mut device = Self {
             name: name.into(),
-            model: std::sync::Arc::new(model),
+            model,
             context,
             node_mapping,
             internal_node_indices: vec![0; num_internal_nodes],
@@ -164,8 +168,6 @@ impl VerilogADevice {
             matrix_indices: MatrixIndices::default(),
             #[cfg(feature = "native")]
             native_model,
-            #[cfg(feature = "native")]
-            native_vars,
         };
         device.context.branch_current_values = vec![0.0; num_branch_unknowns];
         device.rebuild_matrix_indices();
@@ -254,29 +256,47 @@ impl VerilogADevice {
         }
     }
 
-    /// Attempt to compile the model to native code using Cranelift JIT
+    /// Attempt to compile the model to native code using Cranelift JIT.
+    ///
+    /// Compilations are shared process-wide per model `Arc`: a thousand
+    /// instances of one model compile once. The result (including a
+    /// failed attempt) is cached so construction stays O(1) after the
+    /// first instance.
     #[cfg(feature = "native")]
     fn try_native_compile(
-        model: &CompiledModel,
-    ) -> (Option<std::sync::Arc<NativeModel>>, Vec<f64>) {
+        model: &std::sync::Arc<CompiledModel>,
+    ) -> Option<std::sync::Arc<NativeModel>> {
         use crate::native::try_compile_native;
+        use std::sync::{Arc, Mutex, Weak};
 
-        let num_vars = model.num_variables;
+        type CacheEntry = (Weak<CompiledModel>, Option<Arc<NativeModel>>);
+        static NATIVE_CACHE: Mutex<Vec<CacheEntry>> = Mutex::new(Vec::new());
 
-        match try_compile_native(model) {
+        let mut cache = NATIVE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        cache.retain(|(weak, _)| weak.strong_count() > 0);
+        if let Some((_, cached)) = cache
+            .iter()
+            .find(|(weak, _)| weak.as_ptr() == Arc::as_ptr(model))
+        {
+            return cached.clone();
+        }
+
+        let compiled = match try_compile_native(model) {
             Some(native) => {
                 log::info!("[JIT] Model '{}' compiled to native code", model.name);
                 #[cfg(debug_assertions)]
                 eprintln!("[JIT] Model '{}' compiled to native code", model.name);
-                (Some(std::sync::Arc::new(native)), vec![0.0; num_vars])
+                Some(std::sync::Arc::new(native))
             }
             None => {
                 log::debug!("[JIT] Model '{}' using interpreter", model.name);
                 #[cfg(debug_assertions)]
                 eprintln!("[JIT] Model '{}' using interpreter", model.name);
-                (None, vec![0.0; num_vars])
+                None
             }
-        }
+        };
+        cache.push((Arc::downgrade(model), compiled.clone()));
+        compiled
     }
 
     /// Check if this device is using native compiled code
@@ -287,6 +307,28 @@ impl VerilogADevice {
     #[cfg(feature = "native")]
     pub fn is_using_native(&self) -> bool {
         self.native_model.is_some()
+    }
+
+    /// Drop the native code path so every program runs on the bytecode
+    /// interpreter (used to pin native/interpreter equivalence in tests)
+    #[cfg(feature = "native")]
+    pub fn force_interpreter(&mut self) {
+        self.native_model = None;
+    }
+
+    /// Number of native assignment chunks the JIT produced for this model
+    #[cfg(feature = "native")]
+    pub fn native_chunk_count(&self) -> usize {
+        self.native_model.as_ref().map_or(0, |n| n.chunk_count())
+    }
+
+    /// Hybrid-plan composition (diagnostics; zeroes when interpreted)
+    #[cfg(feature = "native")]
+    pub fn native_plan_stats(&self) -> crate::native::PlanStats {
+        self.native_model
+            .as_ref()
+            .map(|n| n.plan_stats())
+            .unwrap_or_default()
     }
 
     /// Check if this device is using native compiled code
@@ -613,11 +655,18 @@ impl VerilogADevice {
         let model = &self.model;
         let matrix_indices = &self.matrix_indices;
         let program_active = &self.program_active;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_deref();
 
         context.clear_currents();
 
         let mut vm = Vm::new(context);
-        Self::execute_assignment_programs(&mut vm, model);
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+        );
 
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             if !program_active.get(program_idx).copied().unwrap_or(true) {
@@ -693,26 +742,28 @@ impl VerilogADevice {
 
     /// Evaluate the device: compute branch current
     ///
-    /// Returns the current for each branch equation.
-    /// Uses native compiled code if available, otherwise falls back to VM interpreter.
+    /// Returns the current for each branch equation. Assignments and stamp
+    /// values run on native code where it compiled, the interpreter
+    /// everywhere else — both paths share the same variable storage and
+    /// activation guards.
     pub fn evaluate(&mut self) -> Vec<f64> {
-        // Try native evaluation if available
-        #[cfg(feature = "native")]
-        if self.native_model.is_some() {
-            return self.evaluate_native();
-        }
-
-        // Fall back to VM interpreter
-        self.evaluate_interpreter()
-    }
-
-    /// Evaluate using the bytecode VM interpreter
-    fn evaluate_interpreter(&mut self) -> Vec<f64> {
         self.context.clear_currents();
+        // Pre-reserve so the currents pointer stays stable while native
+        // snapshots reference it across pushes
+        self.context
+            .currents
+            .reserve(self.model.stamp_programs.len());
 
         let program_active = &self.program_active;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_deref();
         let mut vm = Vm::new(&mut self.context);
-        Self::execute_assignment_programs(&mut vm, &self.model);
+        Self::run_assignment_pass(
+            &mut vm,
+            &self.model,
+            #[cfg(feature = "native")]
+            native,
+        );
         let mut currents = Vec::with_capacity(self.model.stamp_programs.len());
 
         for (program_idx, program) in self.model.stamp_programs.iter().enumerate() {
@@ -721,8 +772,14 @@ impl VerilogADevice {
                 vm.context.currents.push(0.0);
                 continue;
             }
-            match vm.execute(&program.value_program) {
-                Ok(value) => {
+            let value = Self::run_value_program(
+                &mut vm,
+                &program.value_program,
+                #[cfg(feature = "native")]
+                native.and_then(|n| n.stamp_value_fn(program_idx)),
+            );
+            match value {
+                Some(value) => {
                     currents.push(value);
                     vm.context.currents.push(value);
                     if program.branch_ordinal.is_none()
@@ -731,7 +788,7 @@ impl VerilogADevice {
                         vm.context.set_branch_current(pos, neg, value);
                     }
                 }
-                Err(_) => {
+                None => {
                     currents.push(0.0);
                     vm.context.currents.push(0.0);
                 }
@@ -741,72 +798,146 @@ impl VerilogADevice {
         currents
     }
 
-    /// Build a native evaluation context snapshot.
+    /// Build a native evaluation-context snapshot over the VM context.
+    /// Raw pointers only — rebuild it after anything that may reallocate
+    /// the underlying vectors.
     #[cfg(feature = "native")]
-    fn native_eval_context(&mut self) -> crate::native::EvalContext {
+    fn eval_context_from(context: &mut VmContext) -> crate::native::EvalContext {
         crate::native::EvalContext {
-            voltages: self.context.voltages.as_ptr(),
-            internal_voltages: self.context.internal_voltages.as_ptr(),
-            params: self.context.parameters.as_ptr(),
-            branch_currents: self.context.terminal_pair_currents_ptr(),
-            branch_currents_len: self.context.terminal_pair_currents_len(),
-            currents: self.context.currents.as_ptr(),
-            currents_len: self.context.currents.len(),
-            num_terminals: self.context.terminal_count(),
-            temperature: self.context.temperature,
-            time: self.context.time,
-            timestep: self.context.timestep,
+            voltages: context.voltages.as_ptr(),
+            internal_voltages: context.internal_voltages.as_ptr(),
+            params: context.parameters.as_ptr(),
+            branch_currents: context.terminal_pair_currents_ptr(),
+            branch_currents_len: context.terminal_pair_currents_len(),
+            currents: context.currents.as_ptr(),
+            currents_len: context.currents.len(),
+            num_terminals: context.terminal_count(),
+            temperature: context.temperature,
+            time: context.time,
+            timestep: context.timestep,
             // Pass null for empty vecs - as_ptr() on empty vec gives dangling non-null pointer
-            state_prev: if self.context.state_values_prev.is_empty() {
+            state_prev: if context.state_values_prev.is_empty() {
                 std::ptr::null()
             } else {
-                self.context.state_values_prev.as_ptr()
+                context.state_values_prev.as_ptr()
             },
-            lookup_tables: if self.context.lookup_tables.is_empty() {
-                std::ptr::null()
-            } else {
-                self.context.lookup_tables.as_ptr()
-            },
-            lookup_tables_len: self.context.lookup_tables.len(),
-            laplace_filters: if self.context.laplace_filters.is_empty() {
+            state_values: if context.state_values.is_empty() {
                 std::ptr::null_mut()
             } else {
-                self.context.laplace_filters.as_mut_ptr()
+                context.state_values.as_mut_ptr()
             },
-            laplace_filters_len: self.context.laplace_filters.len(),
+            lookup_tables: if context.lookup_tables.is_empty() {
+                std::ptr::null()
+            } else {
+                context.lookup_tables.as_ptr()
+            },
+            lookup_tables_len: context.lookup_tables.len(),
+            laplace_filters: if context.laplace_filters.is_empty() {
+                std::ptr::null_mut()
+            } else {
+                context.laplace_filters.as_mut_ptr()
+            },
+            laplace_filters_len: context.laplace_filters.len(),
+            param_given: context.param_given.as_ptr() as *const u8,
+            branch_unknowns: if context.branch_current_values.is_empty() {
+                std::ptr::null()
+            } else {
+                context.branch_current_values.as_ptr()
+            },
+            analysis_type: context.analysis_type,
         }
     }
 
-    /// Evaluate using Cranelift JIT compiled code
+    /// Run one value-returning program: native function when one compiled,
+    /// otherwise the interpreter. Returns None when evaluation failed.
+    fn run_value_program(
+        vm: &mut Vm<'_>,
+        program: &crate::codegen::BytecodeProgram,
+        #[cfg(feature = "native")] native_fn: Option<crate::native::StampFn>,
+    ) -> Option<f64> {
+        #[cfg(feature = "native")]
+        if let Some(f) = native_fn {
+            let ctx = Self::eval_context_from(vm.context);
+            let vars_ptr = vm.context.variables.as_ptr();
+            return Some(f(&ctx, vars_ptr));
+        }
+        vm.execute(program).ok()
+    }
+
+    /// Execute the assignment pass: the native hybrid plan when one
+    /// exists, the interpreter otherwise.
+    fn run_assignment_pass(
+        vm: &mut Vm<'_>,
+        model: &CompiledModel,
+        #[cfg(feature = "native")] native: Option<&NativeModel>,
+    ) {
+        if vm.context.variables.len() < model.num_variables {
+            vm.context.variables.resize(model.num_variables, 0.0);
+        }
+        #[cfg(feature = "native")]
+        if let Some(native) = native {
+            Self::execute_assignment_plan(
+                vm,
+                native,
+                &native.plan,
+                &model.assignment_steps,
+                &model.name,
+            );
+            return;
+        }
+        Self::execute_assignment_steps(vm, &model.assignment_steps, &model.name);
+    }
+
+    /// Walk the hybrid plan: native chunks write straight into the shared
+    /// variable storage; refused steps and loop conditions interpret.
     #[cfg(feature = "native")]
-    fn evaluate_native(&mut self) -> Vec<f64> {
-        let native = std::sync::Arc::clone(self.native_model.as_ref().unwrap());
-
-        self.context.clear_currents();
-        // Pre-reserve so currents pointer remains stable across stamp pushes.
-        self.context
-            .currents
-            .reserve(self.model.stamp_programs.len());
-
-        // First, compute all variable assignments
-        let assignment_ctx = self.native_eval_context();
-        native.evaluate_assignments(&assignment_ctx, &mut self.native_vars);
-
-        // Then evaluate each stamp program
-        let mut stamp_values = Vec::with_capacity(native.num_stamps);
-        for i in 0..native.num_stamps {
-            let stamp_ctx = self.native_eval_context();
-            let value = native.evaluate_stamp(i, &stamp_ctx, &self.native_vars);
-            stamp_values.push(value);
-            self.context.currents.push(value);
-            if let Some(program) = self.model.stamp_programs.get(i)
-                && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
-            {
-                self.context.set_branch_current(pos, neg, value);
+    fn execute_assignment_plan(
+        vm: &mut Vm<'_>,
+        native: &NativeModel,
+        plan: &[crate::native::PlanStep],
+        steps: &[crate::codegen::AssignmentStep],
+        model_name: &str,
+    ) {
+        use crate::native::PlanStep;
+        for step in plan {
+            match step {
+                PlanStep::Chunk { id, .. } => {
+                    let ctx = Self::eval_context_from(vm.context);
+                    let vars_ptr = vm.context.variables.as_mut_ptr();
+                    native.run_chunk(*id, &ctx, vars_ptr);
+                }
+                PlanStep::Interpret { from, to } => {
+                    Self::execute_assignment_steps(vm, &steps[*from..*to], model_name);
+                }
+                PlanStep::Loop { index, body } => {
+                    let Some(crate::codegen::AssignmentStep::Loop {
+                        condition,
+                        body: body_steps,
+                    }) = steps.get(*index)
+                    else {
+                        continue;
+                    };
+                    let mut iterations = 0usize;
+                    loop {
+                        let active = vm.execute(condition).unwrap_or(0.0);
+                        if active == 0.0 {
+                            break;
+                        }
+                        Self::execute_assignment_plan(vm, native, body, body_steps, model_name);
+                        iterations += 1;
+                        if iterations >= Self::MAX_RUNTIME_LOOP_ITERATIONS {
+                            log::warn!(
+                                "Verilog-A model '{}': runtime loop exceeded {} iterations; \
+                                 aborting the loop (check the loop bounds)",
+                                model_name,
+                                Self::MAX_RUNTIME_LOOP_ITERATIONS
+                            );
+                            break;
+                        }
+                    }
+                }
             }
         }
-
-        stamp_values
     }
 
     /// Safety cap on runtime-loop iterations per evaluation (a model bug
@@ -892,12 +1023,19 @@ impl VerilogADevice {
     pub fn compute_jacobian(&mut self) -> Vec<JacobianEntry> {
         let context = &mut self.context;
         let model = &self.model;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_deref();
 
         context.clear_currents();
 
         let program_active = &self.program_active;
         let mut vm = Vm::new(context);
-        Self::execute_assignment_programs(&mut vm, model);
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+        );
         let mut entries = Vec::new();
 
         for (prog_idx, program) in model.stamp_programs.iter().enumerate() {
@@ -950,11 +1088,21 @@ impl VerilogADevice {
         let context = &mut self.context;
         let model = &self.model;
         let matrix_indices = &self.matrix_indices;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_deref();
 
         context.clear_currents();
+        // Native snapshots hold a raw pointer into `currents` while values
+        // push; pre-reserve so it never reallocates mid-pass
+        context.currents.reserve(model.stamp_programs.len());
 
         let mut vm = Vm::new(context);
-        Self::execute_assignment_programs(&mut vm, model);
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+        );
 
         // Structural stamps of the branch-current unknowns: the KCL rows of
         // the source nodes couple to the branch column, and the branch row
@@ -1007,8 +1155,14 @@ impl VerilogADevice {
             // contributions, source voltage for potential contributions).
             // Non-finite values would poison the whole system; skip the
             // program and let Newton damping recover.
-            let value = match vm.execute(&program.value_program) {
-                Ok(v) if v.is_finite() => v,
+            let value = Self::run_value_program(
+                &mut vm,
+                &program.value_program,
+                #[cfg(feature = "native")]
+                native.and_then(|n| n.stamp_value_fn(program_idx)),
+            );
+            let value = match value {
+                Some(v) if v.is_finite() => v,
                 _ => continue,
             };
 
@@ -1037,8 +1191,14 @@ impl VerilogADevice {
                 // A non-finite derivative (a model kink such as
                 // d(sqrt(x))/dx at x=0) is treated as zero: the residual
                 // stays exact and Newton proceeds on the remaining slope.
-                let deriv = match vm.execute(&model_entry.program) {
-                    Ok(v) if v.is_finite() => v,
+                let deriv = Self::run_value_program(
+                    &mut vm,
+                    &model_entry.program,
+                    #[cfg(feature = "native")]
+                    native.and_then(|n| n.jacobian_fn(program_idx, jacobian_entry.jacobian_idx)),
+                );
+                let deriv = match deriv {
+                    Some(v) if v.is_finite() => v,
                     _ => continue,
                 };
 
