@@ -48,20 +48,30 @@ impl CodeGenerator {
         self.above_detector_count.set(0);
         self.timer_state_count.set(0);
 
+        let parameters = ir
+            .parameters
+            .iter()
+            .map(|p| {
+                let default_program = p
+                    .default_expr
+                    .as_ref()
+                    .map(|expr| self.compile_expr(expr, ir))
+                    .transpose()?;
+                Ok(CompiledParameter {
+                    name: p.name.clone(),
+                    default: p.default,
+                    default_program,
+                    min: p.min,
+                    max: p.max,
+                })
+            })
+            .collect::<CompileResult<Vec<_>>>()?;
+
         let mut model = CompiledModel {
             name: ir.name.clone(),
             num_terminals: ir.terminals.len(),
             terminal_names: ir.terminals.iter().map(|t| t.name.clone()).collect(),
-            parameters: ir
-                .parameters
-                .iter()
-                .map(|p| CompiledParameter {
-                    name: p.name.clone(),
-                    default: p.default,
-                    min: p.min,
-                    max: p.max,
-                })
-                .collect(),
+            parameters,
             num_variables: ir.variables.len(),
             assignment_programs: Vec::new(),
             stamp_programs: Vec::new(),
@@ -220,6 +230,19 @@ impl CodeGenerator {
                         )))
                     })?;
                 program.instructions.push(Instruction::PushParam(idx));
+            }
+            IrExpr::ParamGiven(name) => {
+                let idx = ir
+                    .parameters
+                    .iter()
+                    .position(|p| &p.name == name)
+                    .ok_or_else(|| {
+                        CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                            "Unknown parameter: {}",
+                            name
+                        )))
+                    })?;
+                program.instructions.push(Instruction::PushParamGiven(idx));
             }
             IrExpr::Var(name) => {
                 let idx = ir

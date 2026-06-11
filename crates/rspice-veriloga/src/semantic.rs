@@ -516,6 +516,11 @@ impl SemanticAnalyzer {
         }
 
         // Phase 7: Analyze parameters (defaults may reference earlier ones)
+        let param_names: std::collections::HashSet<SmolStr> = module
+            .parameters
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
         for param in &module.parameters {
             let value_type = match param.param_type {
                 ParamType::Real => ValueType::Real,
@@ -523,7 +528,18 @@ impl SemanticAnalyzer {
                 ParamType::String => ValueType::String,
             };
 
-            let default = param.default.as_ref().and_then(|e| self.eval_const(e));
+            // A default that references other parameters must stay
+            // symbolic: instance overrides of those parameters change it,
+            // so it is evaluated per instance at setup time.
+            let default = if param
+                .default
+                .as_ref()
+                .is_some_and(|e| Self::references_identifiers(e, &param_names))
+            {
+                None
+            } else {
+                param.default.as_ref().and_then(|e| self.eval_const(e))
+            };
 
             // Parse parameter range if present
             let range = param.range.as_ref().map(|r| self.parse_range(r));
@@ -1902,6 +1918,43 @@ impl SemanticAnalyzer {
 
     fn record_error_at(&mut self, kind: SemanticErrorKind, span: Span) {
         self.errors.push(SemanticError::new(kind, span));
+    }
+
+    /// Whether an expression references any identifier from the given set
+    fn references_identifiers(
+        expr: &Expression,
+        names: &std::collections::HashSet<SmolStr>,
+    ) -> bool {
+        match expr {
+            Expression::Identifier(id) => names.contains(&id.name),
+            Expression::Number(_) | Expression::StringLit(_) => false,
+            Expression::Binary(b) => {
+                Self::references_identifiers(&b.left, names)
+                    || Self::references_identifiers(&b.right, names)
+            }
+            Expression::Unary(u) => Self::references_identifiers(&u.operand, names),
+            Expression::Conditional(c) => {
+                Self::references_identifiers(&c.condition, names)
+                    || Self::references_identifiers(&c.then_expr, names)
+                    || Self::references_identifiers(&c.else_expr, names)
+            }
+            Expression::Call(call) => call
+                .args
+                .iter()
+                .any(|a| Self::references_identifiers(a, names)),
+            Expression::SystemFunction(f) => f
+                .args
+                .iter()
+                .any(|a| Self::references_identifiers(a, names)),
+            Expression::ArrayAccess(a) => Self::references_identifiers(&a.index, names),
+            Expression::ArrayLiteral(a) => a
+                .elements
+                .iter()
+                .any(|e| Self::references_identifiers(e, names)),
+            Expression::BranchAccess(_)
+            | Expression::AnalogOperator(_)
+            | Expression::NoiseSource(_) => false,
+        }
     }
 }
 

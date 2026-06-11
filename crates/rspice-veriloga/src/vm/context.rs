@@ -15,6 +15,8 @@ pub struct VmContext {
     terminal_pair_currents: Vec<f64>,
     /// Parameter values (indexed by parameter)
     pub parameters: Vec<f64>,
+    /// Whether each parameter was explicitly set on the instance
+    pub param_given: Vec<bool>,
     /// Variable values (indexed by variable)
     pub variables: Vec<f64>,
     /// Current simulation time
@@ -55,6 +57,7 @@ impl Default for VmContext {
             currents: Vec::new(),
             terminal_pair_currents: Vec::new(),
             parameters: Vec::new(),
+            param_given: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15, // 27C default
@@ -82,6 +85,7 @@ impl VmContext {
             currents: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
+            param_given: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
@@ -107,6 +111,7 @@ impl VmContext {
             currents: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
+            param_given: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
@@ -132,6 +137,7 @@ impl VmContext {
             currents: Vec::new(),
             terminal_pair_currents: vec![f64::NAN; num_terminals.saturating_mul(num_terminals)],
             parameters: Vec::new(),
+            param_given: Vec::new(),
             variables: Vec::new(),
             time: 0.0,
             temperature: 300.15,
@@ -296,6 +302,20 @@ impl VmContext {
             self.parameters.resize(index + 1, 0.0);
         }
         self.parameters[index] = value;
+    }
+
+    /// Mark a parameter as explicitly given by the instance.
+    pub fn mark_param_given(&mut self, index: usize) {
+        if index >= self.param_given.len() {
+            self.param_given.resize(index + 1, false);
+        }
+        self.param_given[index] = true;
+    }
+
+    /// Whether a parameter was explicitly given by the instance.
+    #[inline]
+    pub fn is_param_given(&self, index: usize) -> bool {
+        self.param_given.get(index).copied().unwrap_or(false)
     }
 
     /// Set a variable value.

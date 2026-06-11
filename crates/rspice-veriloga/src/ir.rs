@@ -48,6 +48,9 @@ pub struct InternalNodeDef {
 pub struct ParamDef {
     pub name: SmolStr,
     pub default: f64,
+    /// Default expression when it does not fold to a constant (may
+    /// reference previously declared parameters)
+    pub default_expr: Option<IrExpr>,
     pub min: Option<f64>,
     pub max: Option<f64>,
 }
@@ -115,6 +118,9 @@ pub enum IrExpr {
     Const(f64),
     /// Parameter reference
     Param(SmolStr),
+    /// Whether a parameter was explicitly set on the instance
+    /// ($param_given)
+    ParamGiven(SmolStr),
     /// Variable reference
     Var(SmolStr),
     /// Voltage at terminal pair
@@ -335,6 +341,7 @@ impl DeviceIR {
             ir.parameters.push(ParamDef {
                 name: param.name.clone(),
                 default: param.default.unwrap_or(0.0),
+                default_expr: None,
                 min,
                 max,
             });
@@ -352,6 +359,27 @@ impl DeviceIR {
         let ctx = ConversionContext::from_module(module);
         let converter = ExprConverter::new(&ctx);
         let num_nodes = ctx.num_nodes();
+
+        // Compile non-constant parameter defaults. They may reference
+        // previously declared parameters and are evaluated per instance,
+        // in declaration order, for parameters not explicitly given.
+        for (idx, param) in module.parameters.iter().enumerate() {
+            if param.default.is_none()
+                && let Some(default_expr) = &param.default_expr
+            {
+                let converted = converter.convert(default_expr)?;
+                if !Self::is_static_param_expr(&converted) {
+                    return Err(crate::error::CodeGenError::new(
+                        crate::error::CodeGenErrorKind::InvalidExpression(format!(
+                            "default of parameter '{}' must depend only on parameters",
+                            param.name
+                        )),
+                    )
+                    .into());
+                }
+                ir.parameters[idx].default_expr = Some(converted);
+            }
+        }
 
         // Convert assignments to IR (in order)
         for assign in &module.assignments {
@@ -458,6 +486,29 @@ impl DeviceIR {
     fn is_zero(expr: &IrExpr) -> bool {
         matches!(expr, IrExpr::Const(v) if v.abs() < 1e-30)
     }
+
+    /// Check whether an expression depends only on parameters and constants
+    /// (valid for instance-time parameter default evaluation)
+    fn is_static_param_expr(expr: &IrExpr) -> bool {
+        match expr {
+            IrExpr::Const(_)
+            | IrExpr::Param(_)
+            | IrExpr::ParamGiven(_)
+            | IrExpr::Temperature
+            | IrExpr::Vt => true,
+            IrExpr::Binary(_, l, r) => {
+                Self::is_static_param_expr(l) && Self::is_static_param_expr(r)
+            }
+            IrExpr::Unary(_, e) | IrExpr::Limexp(e) => Self::is_static_param_expr(e),
+            IrExpr::Call(_, args) => args.iter().all(Self::is_static_param_expr),
+            IrExpr::Conditional(c, t, e) => {
+                Self::is_static_param_expr(c)
+                    && Self::is_static_param_expr(t)
+                    && Self::is_static_param_expr(e)
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Automatic differentiation for Jacobian generation
@@ -501,6 +552,7 @@ pub mod autodiff {
             IrExpr::Var(name) => shadowed.contains(name),
             IrExpr::Const(_)
             | IrExpr::Param(_)
+            | IrExpr::ParamGiven(_)
             | IrExpr::Time
             | IrExpr::Temperature
             | IrExpr::Vt

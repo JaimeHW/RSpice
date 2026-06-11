@@ -518,6 +518,11 @@ impl JitCompiler {
                     return Err(JitError::UnsupportedInstruction("Analysis"));
                 }
 
+                // Given-ness flags are not part of the native ABI yet
+                Instruction::PushParamGiven(_) => {
+                    return Err(JitError::UnsupportedInstruction("PushParamGiven"));
+                }
+
                 // AboveState: level crossing event
                 // In DC, compare value > threshold
                 Instruction::AboveState(_detector_id) => {

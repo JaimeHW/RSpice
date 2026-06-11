@@ -324,6 +324,75 @@ endmodule
 }
 
 #[test]
+fn dependent_parameter_defaults_track_overrides() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module wres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real w = 1.0 from (0:inf);
+    parameter real rs = 10.0 / w from (0:inf);
+    analog I(p, n) <+ V(p, n) / rs;
+endmodule
+"#,
+    );
+
+    // Default w=1 => rs defaults to 10; I = V/10
+    let mut device = VerilogADevice::new("W1", model.clone(), &[1, 0]);
+    device.update_voltages(&[5.0]);
+    assert!((device.evaluate()[0] - 0.5).abs() < 1e-12);
+
+    // Override w=2 => rs default must recompute to 5; I = V/5
+    let mut device = VerilogADevice::new("W2", model.clone(), &[1, 0]);
+    device.set_parameter("w", 2.0);
+    device.resolve_parameter_defaults();
+    device.update_voltages(&[5.0]);
+    assert!((device.evaluate()[0] - 1.0).abs() < 1e-12);
+
+    // Explicit rs wins over its default regardless of w
+    let mut device = VerilogADevice::new("W3", model, &[1, 0]);
+    device.set_parameter("w", 2.0);
+    device.set_parameter("rs", 50.0);
+    device.resolve_parameter_defaults();
+    device.update_voltages(&[5.0]);
+    assert!((device.evaluate()[0] - 0.1).abs() < 1e-12);
+}
+
+#[test]
+fn param_given_reflects_instance_overrides() {
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module pg(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real rknob = 1.0 from (0:inf);
+    real geff;
+    analog begin
+        if ($param_given(rknob))
+            geff = 1.0 / rknob;
+        else
+            geff = 0.25;
+        I(p, n) <+ geff * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    // Not given: the model's fallback conductance applies
+    let mut device = VerilogADevice::new("P1", model.clone(), &[1, 0]);
+    device.update_voltages(&[2.0]);
+    assert!((device.evaluate()[0] - 0.5).abs() < 1e-12);
+
+    // Given: the explicit value applies even though it equals the default
+    let mut device = VerilogADevice::new("P2", model, &[1, 0]);
+    device.set_parameter("rknob", 1.0);
+    device.update_voltages(&[2.0]);
+    assert!((device.evaluate()[0] - 2.0).abs() < 1e-12);
+}
+
+#[test]
 fn jacobian_matches_finite_difference_for_diode() {
     let model = compile(
         r#"

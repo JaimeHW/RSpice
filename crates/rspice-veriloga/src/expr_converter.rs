@@ -254,8 +254,19 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Const(0.0))
             }
             "$param_given" => {
-                // Check if parameter was explicitly set (always true for now)
-                Ok(IrExpr::Const(1.0))
+                // $param_given(name) - whether the instance explicitly set
+                // the parameter
+                match func.args.first() {
+                    Some(Expression::Identifier(id))
+                        if self.ctx.param_index(&id.name).is_some() =>
+                    {
+                        Ok(IrExpr::ParamGiven(id.name.clone()))
+                    }
+                    _ => Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "$param_given requires a parameter name argument".into(),
+                    ))
+                    .into()),
+                }
             }
             "$port_connected" => {
                 // Check if port is connected (always true for now)

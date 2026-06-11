@@ -70,6 +70,9 @@ pub struct LookupTable {
 pub struct CompiledParameter {
     pub name: SmolStr,
     pub default: f64,
+    /// Program computing the default from other parameters (evaluated in
+    /// declaration order for parameters the instance did not set)
+    pub default_program: Option<BytecodeProgram>,
     pub min: Option<f64>,
     pub max: Option<f64>,
 }
@@ -136,6 +139,8 @@ pub enum Instruction {
     PushConst(f64),
     /// Push parameter value
     PushParam(usize),
+    /// Push 1.0 if the parameter was explicitly set on the instance
+    PushParamGiven(usize),
     /// Push voltage V(i, j)
     PushVoltage(usize, usize),
     /// Push current I(i, j)

@@ -118,10 +118,12 @@ impl VerilogADevice {
         let num_internal_nodes = model.internal_nodes;
         let mut context = VmContext::with_internal_nodes(num_terminals, num_internal_nodes);
 
-        // Initialize parameters to defaults
+        // Initialize parameters to their constant defaults; dependent
+        // defaults are resolved after instance parameters are applied
         for (i, param) in model.parameters.iter().enumerate() {
             context.set_param(i, param.default);
         }
+        context.param_given = vec![false; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
         Self::preallocate_vm_runtime_state(&mut context, &model);
 
@@ -143,6 +145,7 @@ impl VerilogADevice {
             native_vars,
         };
         device.rebuild_matrix_indices();
+        device.resolve_parameter_defaults();
         device
     }
 
@@ -279,11 +282,53 @@ impl VerilogADevice {
                     (None, Some(max)) => value.min(max),
                     (None, None) => value,
                 };
+                if (clamped - value).abs() > 0.0 {
+                    log::warn!(
+                        "Parameter '{}' of '{}' clamped from {} to {} (range bound)",
+                        name,
+                        self.name,
+                        value,
+                        clamped
+                    );
+                }
                 self.context.set_param(i, clamped);
+                self.context.mark_param_given(i);
                 return true;
             }
         }
         false
+    }
+
+    /// Evaluate dependent parameter defaults for parameters the instance
+    /// did not set, in declaration order.
+    ///
+    /// Must be called after all instance parameters have been applied;
+    /// calling it again is harmless (it is idempotent for a fixed set of
+    /// given parameters).
+    pub fn resolve_parameter_defaults(&mut self) {
+        for i in 0..self.model.parameters.len() {
+            if self.context.is_param_given(i) {
+                continue;
+            }
+            let Some(program) = self.model.parameters[i].default_program.clone() else {
+                continue;
+            };
+            let value = {
+                let mut vm = Vm::new(&mut self.context);
+                vm.execute(&program).unwrap_or(0.0)
+            };
+            let (min, max) = (
+                self.model.parameters[i].min,
+                self.model.parameters[i].max,
+            );
+            let clamped = match (min, max) {
+                (Some(min), Some(max)) => value.clamp(min, max),
+                (Some(min), None) => value.max(min),
+                (None, Some(max)) => value.min(max),
+                (None, None) => value,
+            };
+            self.context.set_param(i, clamped);
+        }
     }
 
     /// Set simulation temperature in Kelvin
@@ -828,6 +873,7 @@ impl DeviceBuilder {
         for (name, value) in self.params {
             device.set_parameter(&name, value);
         }
+        device.resolve_parameter_defaults();
 
         device
     }

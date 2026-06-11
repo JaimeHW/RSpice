@@ -42,6 +42,14 @@ impl<'a> Vm<'a> {
                 let v = self.context.parameters.get(*idx).copied().unwrap_or(0.0);
                 self.stack.push(v);
             }
+            Instruction::PushParamGiven(idx) => {
+                let v = if self.context.is_param_given(*idx) {
+                    1.0
+                } else {
+                    0.0
+                };
+                self.stack.push(v);
+            }
             Instruction::PushVoltage(pos, neg) => {
                 self.stack.push(self.context.voltage(*pos, *neg));
             }
