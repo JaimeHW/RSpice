@@ -215,6 +215,61 @@ rh h_out 0 1k
 }
 
 #[test]
+fn value_form_matches_linear_gain_in_ac() {
+    // Behavioral lowering must be exact in AC as well: E VALUE={2*v(in)}
+    // and the dedicated linear VCVS with gain 2 see identical small-signal
+    // magnitudes across the band.
+    let value_form = "\
+* e value ac
+vin in 0 dc 1 ac 1
+e1 out 0 value={2*v(in)}
+rl out 0 1k
+cl out 0 1n
+.end
+";
+    let linear_form = "\
+* e linear ac
+vin in 0 dc 1 ac 1
+e1 out 0 in 0 2
+rl out 0 1k
+cl out 0 1n
+.end
+";
+    let engine = Engine::new(SimulationConfig::default());
+    let freqs = [1e3, 1e5, 1e7];
+    let value_results = engine
+        .run_ac(&Netlist::parse(value_form).expect("parse"), &freqs)
+        .expect("value-form AC runs");
+    let linear_results = engine
+        .run_ac(&Netlist::parse(linear_form).expect("parse"), &freqs)
+        .expect("linear-form AC runs");
+
+    for (value_result, linear_result) in value_results.iter().zip(&linear_results) {
+        let out_v = value_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("out node (value form)");
+        let out_l = linear_result
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("out"))
+            .expect("out node (linear form)");
+        let a = value_result.voltages[out_v];
+        let b = linear_result.voltages[out_l];
+        assert!(
+            (a - b).norm() < 1e-9,
+            "VALUE vs linear VCVS in AC at {} Hz: {a} vs {b}",
+            value_result.frequency
+        );
+        assert!(
+            a.norm() > 0.1,
+            "behavioral source must actually drive the AC solution"
+        );
+    }
+}
+
+#[test]
 fn vccs_value_form_matches_linear_equivalent() {
     // G VALUE={gm*V(in)} must match the dedicated linear VCCS at the OP.
     let value_form = "\

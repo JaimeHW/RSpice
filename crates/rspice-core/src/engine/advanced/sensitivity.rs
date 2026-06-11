@@ -96,6 +96,7 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
+        circuit.prepare_behavioral_small_signal(&dc_solution);
 
         let dense_g = Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, 0.0)
             .to_dense_real();

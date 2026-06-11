@@ -775,6 +775,47 @@ impl Engine {
             ac_matrix.add_real(br - 1, cb - 1, -rm);
         }
 
+        // Behavioral sources: small-signal linearization at the DC
+        // operating point. Partials are frequency-independent and were
+        // cached by `prepare_behavioral_small_signal` after the DC solve;
+        // sign conventions mirror the DC stamps exactly.
+        for source in &circuit.behavioral_sources.voltage_sources {
+            let np = source.node_pos;
+            let nn = source.node_neg;
+            let br = circuit.get_branch_matrix_index(source.branch_ordinal);
+
+            if np > 0 {
+                ac_matrix.add_real(br - 1, np - 1, 1.0);
+                ac_matrix.add_real(np - 1, br - 1, 1.0);
+            }
+            if nn > 0 {
+                ac_matrix.add_real(br - 1, nn - 1, -1.0);
+                ac_matrix.add_real(nn - 1, br - 1, -1.0);
+            }
+            // Branch row: V(np) - V(nn) - Σ (df/dx)·x = 0
+            for (global_idx, df) in source.linearized_partials() {
+                if df != 0.0 {
+                    ac_matrix.add_real(br - 1, global_idx, -df);
+                }
+            }
+        }
+        for source in &circuit.behavioral_sources.current_sources {
+            let np = source.node_pos;
+            let nn = source.node_neg;
+            // KCL rows: I flows np -> nn, linearized I ≈ Σ (df/dx)·x.
+            for (global_idx, df) in source.linearized_partials() {
+                if df == 0.0 {
+                    continue;
+                }
+                if np > 0 {
+                    ac_matrix.add_real(np - 1, global_idx, df);
+                }
+                if nn > 0 {
+                    ac_matrix.add_real(nn - 1, global_idx, -df);
+                }
+            }
+        }
+
         // Add small diagonal for numerical stability
         for i in 0..size {
             ac_matrix.add_real(i, i, 1e-15);
@@ -895,6 +936,9 @@ impl Engine {
             // with the final converged operating-point solution before AC linearization.
             circuit.update_nonlinear(&dc_solution);
         }
+        // Cache behavioral-source partials at the operating point so the
+        // (immutable, per-frequency) small-signal assembly can stamp them.
+        circuit.prepare_behavioral_small_signal(&dc_solution);
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();

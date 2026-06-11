@@ -241,6 +241,23 @@ impl BehavioralVoltageSource {
         if !affine.is_finite() { 0.0 } else { affine }
     }
 
+    /// Refresh the linearization (value and partials) at the given
+    /// operating point for small-signal assembly. AC has no time axis;
+    /// expressions see t = 0.
+    pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    /// Visit the cached linearized partials as `(solution_index, df/dx)`
+    /// pairs. Valid after `linearize_at` (or any stamp call).
+    pub(crate) fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
+        self.node_bindings
+            .iter()
+            .zip(&self.node_partials)
+            .chain(self.branch_bindings.iter().zip(&self.branch_partials))
+            .filter_map(|(binding, df)| binding.map(|idx| (idx, *df)))
+    }
+
     /// Stamp into the matrix (MNA voltage source with computed value)
     pub fn stamp(
         &mut self,
@@ -514,6 +531,23 @@ impl BehavioralCurrentSource {
             }
         }
         if !affine.is_finite() { 0.0 } else { affine }
+    }
+
+    /// Refresh the linearization (value and partials) at the given
+    /// operating point for small-signal assembly. AC has no time axis;
+    /// expressions see t = 0.
+    pub(crate) fn linearize_at(&mut self, solution: &[Value]) {
+        let _ = self.linearize_expression(solution, 0.0);
+    }
+
+    /// Visit the cached linearized partials as `(solution_index, df/dx)`
+    /// pairs. Valid after `linearize_at` (or any stamp call).
+    pub(crate) fn linearized_partials(&self) -> impl Iterator<Item = (usize, Value)> + '_ {
+        self.node_bindings
+            .iter()
+            .zip(&self.node_partials)
+            .chain(self.branch_bindings.iter().zip(&self.branch_partials))
+            .filter_map(|(binding, df)| binding.map(|idx| (idx, *df)))
     }
 
     /// Stamp linearized behavioral current source into matrix and RHS.

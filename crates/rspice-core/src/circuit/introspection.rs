@@ -27,6 +27,19 @@ impl DeviceOpReport {
 }
 
 impl CircuitData {
+    /// Linearize every behavioral source at the DC operating point so the
+    /// small-signal (AC/noise/sensitivity) assembly can read the cached
+    /// partials immutably. One-shot per analysis: the partials are
+    /// frequency-independent, and per-worker circuit clones carry them.
+    pub(crate) fn prepare_behavioral_small_signal(&mut self, dc_solution: &[Value]) {
+        for source in &mut self.behavioral_sources.voltage_sources {
+            source.linearize_at(dc_solution);
+        }
+        for source in &mut self.behavioral_sources.current_sources {
+            source.linearize_at(dc_solution);
+        }
+    }
+
     /// Build the per-device operating-point report from the device state
     /// cached by the last accepted Newton solution. Call after a DC
     /// operating point (or any analysis that leaves devices at a solution).

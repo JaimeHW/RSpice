@@ -293,6 +293,7 @@ impl Engine {
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&dc_solution);
         }
+        circuit.prepare_behavioral_small_signal(&dc_solution);
         let noise_sources = Self::collect_noise_sources(&circuit, &dc_solution);
 
         // Compute noise at each frequency

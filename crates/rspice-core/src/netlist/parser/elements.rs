@@ -1323,7 +1323,23 @@ fn parse_voltage_controlled_source(
             });
         }
         Some(ControlledSourceForm::Laplace) => {
-            return Err(unsupported_form_error(line_num, element_label, "LAPLACE"));
+            // LAPLACE {input} = {N(s)/D(s)} — synthesized at parse time into
+            // an exact state-space realization (grounded caps + behavioral
+            // sources), so every analysis handles it with existing devices.
+            let input_expr =
+                collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
+            stream.consume(&TokenKind::Equals);
+            let rational_text = collect_expression_argument(stream, line_num, None)?;
+            let synthesized = synthesize_laplace(
+                &name,
+                &node_pos,
+                &node_neg,
+                &input_expr,
+                &rational_text,
+                is_voltage_output,
+                line_num,
+            )?;
+            elements.extend(synthesized);
         }
         Some(ControlledSourceForm::Freq) => {
             return Err(unsupported_form_error(line_num, element_label, "FREQ"));
