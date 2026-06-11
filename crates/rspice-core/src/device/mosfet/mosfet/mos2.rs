@@ -793,7 +793,7 @@ impl Mosfet {
         let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
         let cdonco = -(gamasd * dsrgdb + dgddvb * sarg) + factor;
         let xn = 1.0 + cfs / cox + cdonco;
-        let thermal_slope = VT_REFERENCE * xn;
+        let thermal_slope = self.vt * xn;
         if thermal_slope.is_finite() && thermal_slope > 0.0 {
             Some((thermal_slope, 1.0 / thermal_slope))
         } else {
@@ -817,7 +817,7 @@ impl Mosfet {
         let cfs = CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
         let cdonco = -(gamasd.value * dsrgdb + gamasd.derivative[2] * sarg.value) + factor;
         let xn = 1.0 + cfs / cox + cdonco;
-        let thermal_slope = VT_REFERENCE * xn;
+        let thermal_slope = self.vt * xn;
         if thermal_slope.is_finite() && thermal_slope > 0.0 {
             let slope = Dual3::constant(thermal_slope);
             Some((slope, 1.0 / slope))

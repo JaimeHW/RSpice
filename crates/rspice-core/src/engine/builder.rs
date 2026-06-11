@@ -717,6 +717,28 @@ impl Engine {
 
                     mosfet = mosfet.with_instance_params(instance_params);
 
+                    // Device temperature: instance TEMP is absolute (C),
+                    // DTEMP offsets the circuit temperature; model TNOM
+                    // (or .options tnom) anchors the scaling.
+                    let tnom_k = params_map
+                        .as_ref()
+                        .and_then(|params| params.get("TNOM").copied())
+                        .filter(|v| v.is_finite())
+                        .map(crate::analysis::temperature::celsius_to_kelvin)
+                        .unwrap_or_else(|| {
+                            crate::analysis::temperature::celsius_to_kelvin(
+                                netlist.options.tnom.unwrap_or(27.0),
+                            )
+                        });
+                    let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
+                        crate::analysis::temperature::celsius_to_kelvin(t)
+                    } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
+                        self.config.temperature + dt
+                    } else {
+                        self.config.temperature
+                    };
+                    mosfet.set_temperature(temp_k, tnom_k);
+
                     circuit.mosfets.add(mosfet);
                 }
                 ElementKind::Jfet {

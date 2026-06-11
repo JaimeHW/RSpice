@@ -125,6 +125,9 @@ pub struct Mosfet {
     pub source_perimeter: Value,
     /// Device-local junction GMIN used by ngspice-style bulk diode loading.
     pub junction_gmin: Value,
+    /// Thermal voltage kT/q at the device operating temperature.
+    /// Set by `set_temperature`; defaults to the 27C reference value.
+    pub vt: Value,
 
     // BSIM3-like parameters for short-channel effects
     /// Model level (1 = Level 1, 3 = BSIM3-like)

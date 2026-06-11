@@ -66,6 +66,7 @@ impl Mosfet {
             drain_perimeter: 0.0,
             source_perimeter: 0.0,
             junction_gmin: 0.0,
+            vt: VT_REFERENCE,
 
             // BSIM3-like parameters
             level: 1, // Default to Level 1
@@ -220,8 +221,8 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_junction_vcrit(isat: Value) -> Value {
-        let vt = Self::body_junction_thermal_voltage();
+    pub(in crate::device::mosfet::mosfet) fn body_junction_vcrit(&self, isat: Value) -> Value {
+        let vt = self.body_junction_thermal_voltage();
         if !isat.is_finite() || isat <= 0.0 {
             return vt * 40.0;
         }
@@ -233,13 +234,13 @@ impl Mosfet {
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn source_body_vcrit(&self) -> Value {
         let isat = self.effective_body_junction_saturation_current(self.source_area);
-        Self::body_junction_vcrit(isat)
+        self.body_junction_vcrit(isat)
     }
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn drain_body_vcrit(&self) -> Value {
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
-        Self::body_junction_vcrit(isat)
+        self.body_junction_vcrit(isat)
     }
 
     #[inline]
@@ -372,7 +373,7 @@ impl Mosfet {
             vgs_m = vgd_m + vds_m;
         }
 
-        let vt = Self::body_junction_thermal_voltage();
+        let vt = self.body_junction_thermal_voltage();
         if vds_m >= 0.0 {
             vbs_m = Self::dev_pnjlim(vbs_m, vold_vbs, vt, self.source_body_vcrit());
         } else {
@@ -916,6 +917,105 @@ impl Mosfet {
     ///
     /// Model-card parameters are expected to be applied first via `with_params`.
     /// Instance parameters then override geometry and optional multiplicity.
+    /// Scale the device to the operating temperature, ngspice
+    /// mos1temp.c semantics (mos2/mos3/mos6 share the same law; level 6
+    /// scales KC like KP). The formulas reduce to identity at
+    /// `temp == tnom`. Legacy BSIM1/2 cards are extracted at measurement
+    /// temperature and carry no SPICE3 temperature law, so they only get
+    /// the thermal-voltage update.
+    ///
+    /// Call once, after model and instance parameters are applied.
+    pub fn set_temperature(&mut self, temp_kelvin: Value, tnom_kelvin: Value) {
+        use crate::constants::{K_BOLTZMANN, Q_ELECTRON, TEMP_REFERENCE};
+        const KOVERQ: Value = K_BOLTZMANN / Q_ELECTRON;
+
+        let temp = temp_kelvin;
+        let tnom = tnom_kelvin;
+        if !(temp > 0.0) || !(tnom > 0.0) {
+            return;
+        }
+
+        let vt = KOVERQ * temp;
+        self.vt = vt;
+        if self.legacy_bsim_model.is_some() {
+            return;
+        }
+
+        let vtnom = KOVERQ * tnom;
+        let ratio = temp / tnom;
+        let fact1 = tnom / TEMP_REFERENCE;
+        let fact2 = temp / TEMP_REFERENCE;
+        let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
+        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
+        // ngspice's CHARGE*arg terms, folded through k/q to stay in volts.
+        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * KOVERQ * TEMP_REFERENCE);
+        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * KOVERQ * TEMP_REFERENCE);
+        let pbfact = -2.0 * vt * (1.5 * fact2.ln() + arg);
+        let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + arg1);
+        let ratio4 = ratio * ratio.sqrt();
+
+        // Transconductance and mobility follow T^-1.5.
+        self.kp /= ratio4;
+        self.kc /= ratio4;
+        self.u0 /= ratio4;
+
+        // Surface potential, built-in voltage, and threshold.
+        let p = self.polarity();
+        if self.phi > 0.0 {
+            let phio = (self.phi - pbfact1) / fact1;
+            let t_phi = fact2 * phio + pbfact;
+            if t_phi > 0.0 {
+                let t_vbi = self.vto - p * (self.gamma * self.phi.sqrt())
+                    + 0.5 * (egfet1 - egfet)
+                    + p * 0.5 * (t_phi - self.phi);
+                self.vto = t_vbi + p * self.gamma * t_phi.sqrt();
+                self.phi = t_phi;
+            }
+        }
+
+        // Bulk junction saturation currents (EG activation law).
+        let is_factor = (-egfet / vt + egfet1 / vtnom).exp();
+        if is_factor.is_finite() && is_factor > 0.0 {
+            self.is_bulk *= is_factor;
+            self.js_bulk *= is_factor;
+        }
+
+        // Bulk junction potential and depletion capacitances.
+        if self.pb > 0.0 {
+            let pbo = (self.pb - pbfact1) / fact1;
+            if pbo > 0.0 {
+                let gmaold = (self.pb - pbo) / pbo;
+                let t_bulk_pot = fact2 * pbo + pbfact;
+                let gmanew = (t_bulk_pot - pbo) / pbo;
+                let cap_factor = |grading: Value| -> Value {
+                    let denom = 1.0 + grading * (4e-4 * (tnom - TEMP_REFERENCE) - gmaold);
+                    if denom == 0.0 {
+                        return 1.0;
+                    }
+                    let factor = (1.0 + grading * (4e-4 * (temp - TEMP_REFERENCE) - gmanew)) / denom;
+                    if factor.is_finite() && factor > 0.0 {
+                        factor
+                    } else {
+                        1.0
+                    }
+                };
+                if t_bulk_pot > 0.0 {
+                    let bottom = cap_factor(self.mj);
+                    let sidewall = cap_factor(self.mjsw);
+                    self.cj *= bottom;
+                    self.cjsw *= sidewall;
+                    if let Some(c) = self.drain_bulk_cap_zero_bias.as_mut() {
+                        *c *= bottom;
+                    }
+                    if let Some(c) = self.source_bulk_cap_zero_bias.as_mut() {
+                        *c *= bottom;
+                    }
+                    self.pb = t_bulk_pot;
+                }
+            }
+        }
+    }
+
     pub fn with_instance_params(mut self, params: &[(String, Value)]) -> Self {
         let mut width_override: Option<Value> = None;
         let mut length_override: Option<Value> = None;
@@ -994,6 +1094,53 @@ impl Mosfet {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn temperature_scaling_is_identity_at_tnom() {
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.cj = 1e-4;
+        mos.cjsw = 1e-10;
+        let (kp0, vto0, phi0, pb0, is0, cj0) =
+            (mos.kp, mos.vto, mos.phi, mos.pb, mos.is_bulk, mos.cj);
+
+        mos.set_temperature(crate::constants::TEMP_REFERENCE, crate::constants::TEMP_REFERENCE);
+
+        assert_eq!(mos.vt, crate::constants::VT_REFERENCE);
+        assert!((mos.kp - kp0).abs() <= kp0 * 1e-12);
+        assert!((mos.vto - vto0).abs() <= 1e-12, "vto={} vs {}", mos.vto, vto0);
+        assert!((mos.phi - phi0).abs() <= phi0 * 1e-12);
+        assert!((mos.pb - pb0).abs() <= pb0 * 1e-12);
+        assert!((mos.is_bulk - is0).abs() <= is0 * 1e-12);
+        assert!((mos.cj - cj0).abs() <= cj0 * 1e-12);
+    }
+
+    #[test]
+    fn transconductance_follows_ratio_to_minus_three_halves() {
+        // mos1temp.c: tTransconductance = KP / (T/TNOM)^1.5.
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        let kp0 = mos.kp;
+        let u00 = mos.u0;
+        let temp = 273.15 + 85.0;
+        let tnom = crate::constants::TEMP_REFERENCE;
+        mos.set_temperature(temp, tnom);
+
+        let ratio4 = (temp / tnom) * (temp / tnom).sqrt();
+        assert!((mos.kp - kp0 / ratio4).abs() <= kp0 * 1e-12);
+        assert!((mos.u0 - u00 / ratio4).abs() <= u00 * 1e-12);
+    }
+
+    #[test]
+    fn threshold_drops_with_temperature_for_nmos() {
+        // The bandgap mapping lowers PHI and VTO as silicon heats up, and
+        // the bulk junction saturation current rises steeply.
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        let (vto0, phi0, is0) = (mos.vto, mos.phi, mos.is_bulk);
+        mos.set_temperature(273.15 + 85.0, crate::constants::TEMP_REFERENCE);
+        assert!(mos.vto < vto0, "vto={} should drop at 85C", mos.vto);
+        assert!(mos.phi < phi0, "phi={} should drop at 85C", mos.phi);
+        assert!(mos.is_bulk > 100.0 * is0, "is={} should rise", mos.is_bulk);
+        assert!(mos.vt > crate::constants::VT_REFERENCE);
+    }
 
     #[test]
     fn level2_model_defaults_match_berkeley_mos2_baseline() {

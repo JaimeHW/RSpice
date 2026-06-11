@@ -2,12 +2,13 @@ use super::*;
 
 impl Mosfet {
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn body_junction_thermal_voltage() -> Value {
-        VT_REFERENCE.max(1e-12)
+    pub(in crate::device::mosfet::mosfet) fn body_junction_thermal_voltage(&self) -> Value {
+        self.vt.max(1e-12)
     }
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn junction_diode_current(
+        &self,
         isat: Value,
         v: Value,
         gmin: Value,
@@ -18,7 +19,7 @@ impl Mosfet {
             0.0
         };
         let gmin = gmin.max(0.0);
-        let nvt = Self::body_junction_thermal_voltage();
+        let nvt = self.body_junction_thermal_voltage();
         if v <= -3.0 * nvt {
             gmin * v - isat
         } else {
@@ -29,6 +30,7 @@ impl Mosfet {
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn junction_diode_conductance(
+        &self,
         isat: Value,
         v: Value,
         gmin: Value,
@@ -39,7 +41,7 @@ impl Mosfet {
             0.0
         };
         let gmin = gmin.max(0.0);
-        let nvt = Self::body_junction_thermal_voltage();
+        let nvt = self.body_junction_thermal_voltage();
         if v <= -3.0 * nvt {
             gmin
         } else {
@@ -271,8 +273,8 @@ impl Mosfet {
         let vd = self.body_source_diode_voltage(vbs);
         let isat = self.effective_body_junction_saturation_current(self.source_area);
         (
-            Self::junction_diode_current(isat, vd, self.junction_gmin),
-            Self::junction_diode_conductance(isat, vd, self.junction_gmin),
+            self.junction_diode_current(isat, vd, self.junction_gmin),
+            self.junction_diode_conductance(isat, vd, self.junction_gmin),
         )
     }
 
@@ -285,8 +287,8 @@ impl Mosfet {
         let vd = self.body_drain_diode_voltage(vds, vbs);
         let isat = self.effective_body_junction_saturation_current(self.drain_area);
         (
-            Self::junction_diode_current(isat, vd, self.junction_gmin),
-            Self::junction_diode_conductance(isat, vd, self.junction_gmin),
+            self.junction_diode_current(isat, vd, self.junction_gmin),
+            self.junction_diode_conductance(isat, vd, self.junction_gmin),
         )
     }
 
