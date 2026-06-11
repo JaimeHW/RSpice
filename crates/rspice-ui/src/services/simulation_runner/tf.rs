@@ -335,6 +335,8 @@ fn source_dc_bias(spec: &SourceSpec) -> Value {
         SourceSpec::Pwl { points } => points.first().map(|(_, value)| *value).unwrap_or(0.0),
         SourceSpec::PwlFile { .. } => 0.0,
         SourceSpec::Exp { v1, .. } => *v1,
+        SourceSpec::Sffm { offset, .. } => *offset,
+        SourceSpec::Am { offset, .. } => *offset,
     }
 }
 
