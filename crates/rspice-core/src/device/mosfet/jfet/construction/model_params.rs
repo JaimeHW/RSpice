@@ -427,6 +427,60 @@ impl Jfet {
         {
             p.hfet_ggr = v;
         }
+        // GATEMOD=1 thermal gate-model parameters (ngspice hfetsetup.c
+        // names and defaults).
+        if let Some(v) = params.get("CK1").copied().filter(|v| v.is_finite()) {
+            p.hfet_ck1 = v;
+        }
+        if let Some(v) = params.get("CK2").copied().filter(|v| v.is_finite()) {
+            p.hfet_ck2 = v;
+        }
+        if let Some(v) = params.get("CM1").copied().filter(|v| v.is_finite()) {
+            p.hfet_cm1 = v;
+        }
+        if let Some(v) = params.get("CM2").copied().filter(|v| v.is_finite()) {
+            p.hfet_cm2 = v;
+        }
+        if let Some(v) = params.get("CM3").copied().filter(|v| v.is_finite()) {
+            p.hfet_cm3 = v;
+        }
+        if let Some(v) = params
+            .get("MT1")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_mt1 = v;
+        }
+        if let Some(v) = params
+            .get("MT2")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_mt2 = v;
+        }
+        if let Some(v) = params
+            .get("MV1")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_mv1 = v;
+        }
+        if let Some(v) = params.get("TALPHA").copied().filter(|v| v.is_finite()) {
+            p.hfet_talpha = v;
+        }
+        if let Some(v) = params
+            .get("PHIB")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            p.hfet_phib = v;
+        }
+        if let Some(v) = params.get("A1").copied().filter(|v| v.is_finite()) {
+            p.hfet_a1 = v;
+        }
+        if let Some(v) = params.get("A2").copied().filter(|v| v.is_finite()) {
+            p.hfet_a2 = v;
+        }
         if let Some(v) = params.get("DEL").copied().filter(|v| v.is_finite()) {
             p.hfet_del = v;
         }

@@ -229,6 +229,30 @@ pub struct JfetParams {
     pub hfet_ggr: Value,
     /// HFET/MESFET gate leakage exponential coefficient `DEL`.
     pub hfet_del: Value,
+    /// HFET1 GATEMOD=1 knee-voltage slope `CK1`.
+    pub hfet_ck1: Value,
+    /// HFET1 GATEMOD=1 knee-voltage offset `CK2` (V).
+    pub hfet_ck2: Value,
+    /// HFET1 GATEMOD=1 critical-voltage slope `CM1`.
+    pub hfet_cm1: Value,
+    /// HFET1 GATEMOD=1 critical-voltage offset `CM2` (V).
+    pub hfet_cm2: Value,
+    /// HFET1 GATEMOD=1 correction critical-voltage slope `CM3`.
+    pub hfet_cm3: Value,
+    /// HFET1 GATEMOD=1 knee shape exponent `MT1`.
+    pub hfet_mt1: Value,
+    /// HFET1 GATEMOD=1 drain-voltage fold exponent `MT2`.
+    pub hfet_mt2: Value,
+    /// HFET1 GATEMOD=1 correction fold exponent `MV1`.
+    pub hfet_mv1: Value,
+    /// HFET1 GATEMOD=1 channel-heating coefficient `TALPHA` (K/V^2).
+    pub hfet_talpha: Value,
+    /// HFET1 GATEMOD=1 Schottky barrier height `PHIB` (J).
+    pub hfet_phib: Value,
+    /// HFET1 GATEMOD=1 drain-current correction gain `A1`.
+    pub hfet_a1: Value,
+    /// HFET1 GATEMOD=1 drain-current correction coefficient `A2` (1/V^2).
+    pub hfet_a2: Value,
     /// HFET1 capacitance branch ideality parameter `ETA1`.
     pub hfet_eta1: Value,
     /// HFET1 capacitance depth parameter `D1`.
