@@ -290,8 +290,26 @@ impl Engine {
             {
                 return false;
             }
-            Self::contains_identifier(&upper, &param_upper)
+            Self::contains_identifier(Self::binding_search_span(&upper), &param_upper)
         })
+    }
+
+    /// The slice of a logical line in which an identifier occurrence can bind
+    /// a parameter.
+    ///
+    /// On an element line the leading token is the device's own name
+    /// (`R1 1 2 {rval}`), so a match there is a device-name collision rather
+    /// than a parameter reference — searching it made `run_sensitivity` and
+    /// `.STEP` silently no-op when handed an element name. Dot commands have
+    /// no such token and are searched whole.
+    pub(in crate::engine::advanced) fn binding_search_span(line_upper: &str) -> &str {
+        let trimmed = line_upper.trim_start();
+        if trimmed.starts_with('.') {
+            return trimmed;
+        }
+        trimmed
+            .find(|c: char| c.is_ascii_whitespace() || c == ',')
+            .map_or("", |idx| &trimmed[idx..])
     }
 
     pub(in crate::engine::advanced) fn build_overridden_source_multi(
@@ -403,5 +421,137 @@ impl Engine {
                 (p.voltage_magnitude(output_node) - m.voltage_magnitude(output_node)) / (2.0 * h)
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::Engine;
+    use crate::Netlist;
+
+    const PARAMETRIC_DIVIDER: &str = "\
+Parametric divider
+.param rval=1k
+V1 1 0 10
+R1 1 2 {rval}
+R2 2 0 1k
+.end
+";
+
+    /// Same divider but with `rval` referenced bare in the value position
+    /// instead of inside a brace expression.
+    const BARE_REFERENCE_DIVIDER: &str = "\
+Parametric divider, bare reference
+.param rval=1k
+V1 1 0 10
+R1 1 2 rval
+R2 2 0 1k
+.end
+";
+
+    const ORPHAN_PARAM_DIVIDER: &str = "\
+Divider with an unreferenced parameter
+.param rval=1k
+.param orphan=42
+V1 1 0 10
+R1 1 2 {rval}
+R2 2 0 1k
+.end
+";
+
+    /// Analytic dV(2)/drval for the divider at rval=1k: -10*1k/(1k+1k)^2.
+    const EXPECTED_DIVIDER_SENSITIVITY: f64 = -2.5e-3;
+
+    /// An element name is not a parameter binding: before the fix, the
+    /// `R1 1 2 {rval}` line itself made "R1" look referenced, and the run
+    /// silently returned a sensitivity of 0.0 instead of erroring.
+    #[test]
+    fn sensitivity_rejects_element_name_lookalike() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity(&netlist, 2, "R1", 1000.0, None)
+            .expect_err("element name must not count as a parameter binding");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("'R1'") && msg.contains("is not bound to any netlist expression"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn sensitivity_perturbs_brace_bound_parameter() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let dv = Engine::default()
+            .run_sensitivity(&netlist, 2, "rval", 1000.0, None)
+            .expect("rval is bound through a brace expression");
+        assert!(
+            (dv - EXPECTED_DIVIDER_SENSITIVITY).abs() < 1e-6,
+            "dV(2)/drval = {dv}, expected ~{EXPECTED_DIVIDER_SENSITIVITY}"
+        );
+    }
+
+    /// Bare identifiers in value positions are parameter references too;
+    /// excluding the leading element-name token must not break them.
+    #[test]
+    fn sensitivity_perturbs_bare_value_position_parameter() {
+        let netlist = Netlist::parse(BARE_REFERENCE_DIVIDER).expect("deck parses");
+        let dv = Engine::default()
+            .run_sensitivity(&netlist, 2, "rval", 1000.0, None)
+            .expect("rval is bound through a bare value reference");
+        assert!(
+            (dv - EXPECTED_DIVIDER_SENSITIVITY).abs() < 1e-6,
+            "dV(2)/drval = {dv}, expected ~{EXPECTED_DIVIDER_SENSITIVITY}"
+        );
+    }
+
+    #[test]
+    fn sensitivity_rejects_param_defined_but_never_referenced() {
+        let netlist = Netlist::parse(ORPHAN_PARAM_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity(&netlist, 2, "orphan", 42.0, None)
+            .expect_err("a .param defined but never referenced must raise");
+        assert!(
+            err.to_string()
+                .contains("is not bound to any netlist expression"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ac_sensitivity_rejects_element_name_lookalike() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_sensitivity_ac(&netlist, 2, "R1", 1000.0, &[1e3], None)
+            .expect_err("element name must not count as a parameter binding");
+        assert!(
+            err.to_string()
+                .contains("is not bound to any netlist expression"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn step_rejects_element_name_lookalike() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let err = Engine::default()
+            .run_step(&netlist, "R1", &[500.0, 2000.0])
+            .expect_err("element name must not count as a parameter binding");
+        assert!(
+            err.to_string()
+                .contains("is not bound to any netlist expression"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn step_sweeps_a_genuinely_bound_parameter() {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let results = Engine::default()
+            .run_step(&netlist, "rval", &[1000.0, 4000.0])
+            .expect("rval is bound");
+        assert_eq!(results.len(), 2);
+        // V(2) = 10 * 1k / (rval + 1k): 5 V at 1k, 2 V at 4k.
+        assert!((results[0].1.voltage(2) - 5.0).abs() < 1e-9);
+        assert!((results[1].1.voltage(2) - 2.0).abs() < 1e-9);
     }
 }
