@@ -8,7 +8,6 @@ bsim3soidd/ring51.cir	smoke
 bsim3soifd/ring51.cir	smoke
 bsim3soipd/ring51.cir	smoke
 general/diffpair.cir	smoke
-general/fourbitadder.cir	smoke
 general/mosmem.cir	smoke
 general/rc.cir	smoke
 general/rca3040.cir	smoke
@@ -16,7 +15,6 @@ mesa/mesa-12.cir	scripted_control
 mesa/mesa12.cir	smoke
 mesa/mesa13.cir	smoke
 mesa/mesa21.cir	smoke
-mos6/simpleinv.cir	smoke
 regression/lib-processing/ex1a.cir	smoke
 regression/lib-processing/ex1b.cir	smoke
 regression/lib-processing/ex2a.cir	smoke

@@ -1,13 +1,41 @@
 use super::*;
 
 impl TestRunner {
+    /// Load the comparison table for `axis_candidates`, distinguishing a
+    /// legitimately absent reference (no `.out` at all — nothing to compare,
+    /// vacuous pass is honest) from a reference that exists but yields no
+    /// table on the analysis axis — which previously also passed vacuously,
+    /// silently skipping every waveform comparison for the deck. Decks whose
+    /// validation-manifest contract declares execution-only coverage keep
+    /// the vacuous pass by design (no-output smoke decks, .control-scripted
+    /// upstream decks).
+    fn reference_table_or_absence(
+        &self,
+        cir_path: &Path,
+        axis_candidates: &[&str],
+    ) -> Result<Option<ReferenceTable>, String> {
+        if let Some(table) = self.load_reference_table_for_axis(cir_path, axis_candidates)? {
+            return Ok(Some(table));
+        }
+        if self.load_reference_output(cir_path)?.is_some() {
+            if self.validation_contract_for(cir_path).is_some() {
+                return Ok(None);
+            }
+            return Err(format!(
+                "reference output exists but contains no comparable table on axis {:?} -- refusing a vacuous pass",
+                axis_candidates
+            ));
+        }
+        Ok(None)
+    }
+
     pub(in crate::testing::ngspice_runner) fn compare_dc_sweep_reference(
         &self,
         cir_path: &Path,
         netlist: &Netlist,
         results: &[(Value, crate::SimulationResult)],
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["v-sweep"])? else {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["v-sweep"])? else {
             return Ok(Vec::new());
         };
         if results.is_empty() {
@@ -88,7 +116,7 @@ impl TestRunner {
         netlist: &Netlist,
         result: &crate::engine::TransientResult,
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["time"])? else {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["time"])? else {
             return Ok(Vec::new());
         };
 
@@ -137,7 +165,7 @@ impl TestRunner {
         netlist: &Netlist,
         results: &[crate::analysis::AcResult],
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["frequency"])? else {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["frequency"])? else {
             return Ok(Vec::new());
         };
         if results.is_empty() {
@@ -233,7 +261,7 @@ impl TestRunner {
         cir_path: &Path,
         results: &[crate::analysis::NoiseResult],
     ) -> Result<Vec<ValueMismatch>, String> {
-        let Some(reference) = self.load_reference_table_for_axis(cir_path, &["frequency"])? else {
+        let Some(reference) = self.reference_table_or_absence(cir_path, &["frequency"])? else {
             return Ok(Vec::new());
         };
         if results.is_empty() {
