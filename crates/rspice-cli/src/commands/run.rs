@@ -60,11 +60,17 @@ impl<'a> RunContext<'a> {
         config: &Config,
         verbose: bool,
         quiet: bool,
+        run_label: Option<&str>,
     ) -> Result<Self, CliError> {
         let format = args
             .format
             .unwrap_or_else(|| parse_format_name(&config.output.format));
-        let output = resolve_output_path(args.output.clone(), config)?;
+        let mut output = resolve_output_path(args.output.clone(), config)?;
+        // Multi-run decks tag each run's output so later runs cannot
+        // silently overwrite earlier ones: `out.csv` -> `out.hot.csv`.
+        if let (Some(label), Some(path)) = (run_label, output.as_mut()) {
+            *path = tag_output_path(path, &sanitize_run_tag(label));
+        }
 
         Ok(Self {
             engine,
@@ -223,20 +229,102 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     log::info!("Loading netlist: {}", args.input.display());
-    let netlist = load_netlist(&args, config)?;
+    let source = Netlist::read_source(&args.input).map_err(|e| CliError::ParseError {
+        message: e.to_string(),
+        line: None,
+        suggestion: None,
+    })?;
 
+    // HSPICE `.ALTER` / `.DATA` constructs expand into several concrete
+    // runs; a plain deck passes through as a single unlabeled run.
+    let plan = rspice_core::netlist::multi_run::expand_multi_run(&source);
+    let multi_run = plan.len() > 1;
+    if multi_run && !quiet {
+        println!("Multi-run deck: {} runs (.alter/.data expansion)", plan.len());
+    }
+
+    let start_time = Instant::now();
+    let mut reports = Vec::with_capacity(plan.len());
+    let mut first_error: Option<String> = None;
+
+    for deck in &plan {
+        if multi_run && !quiet {
+            println!(
+                "\n=== run: {} ===",
+                deck.label.as_deref().unwrap_or("base")
+            );
+        }
+        let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+        let report = run_deck(
+            &netlist,
+            &args,
+            config,
+            verbose,
+            quiet,
+            deck.label.as_deref(),
+        )?;
+        if first_error.is_none() {
+            first_error = report.error.clone();
+        }
+        reports.push(report);
+    }
+
+    let duration = start_time.elapsed().as_secs_f64();
+    write_report_files(&reports, &args, verbose)?;
+
+    if !quiet {
+        println!("\nSimulation complete in {:.3}s.", duration);
+    }
+
+    if let Some(err_msg) = first_error {
+        return Err(CliError::simulation_error(err_msg));
+    }
+
+    Ok(())
+}
+
+/// Run one concrete deck (all of its analyses) and assemble its report.
+/// Multi-run failures don't abort the remaining runs — HSPICE semantics —
+/// so errors land in the report instead of bubbling, except for setup
+/// errors (bad output paths, alternate-mode failures).
+fn run_deck(
+    netlist: &Netlist,
+    args: &RunArgs,
+    config: &Config,
+    verbose: bool,
+    quiet: bool,
+    run_label: Option<&str>,
+) -> Result<SimulationReport, CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
         println!("Elements: {}", netlist.elements.len());
         println!("Analyses: {}", netlist.analyses.len());
     }
 
-    let sim_config = build_sim_config(&args, config, &netlist);
+    let sim_config = build_sim_config(args, config, netlist);
     let engine = Engine::new(sim_config);
-    let ctx = RunContext::new(&engine, &netlist, &args, config, verbose, quiet)?;
+    let ctx = RunContext::new(&engine, netlist, args, config, verbose, quiet, run_label)?;
+
+    let base_name = args
+        .input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("simulation")
+        .to_string();
+    let name = match run_label {
+        Some(label) => format!("{base_name} [{label}]"),
+        None => base_name,
+    };
 
     if run_requested_mode(&ctx, config)? {
-        return Ok(());
+        return Ok(SimulationReport {
+            name,
+            netlist: args.input.display().to_string(),
+            passed: true,
+            duration_secs: 0.0,
+            error: None,
+            measurements: Vec::new(),
+        });
     }
 
     let mut ran_analysis = false;
@@ -273,31 +361,32 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let passed = simulation_error.is_none();
     let measurements = ctx.measurements.borrow().clone();
 
-    let report = SimulationReport {
-        name: args
-            .input
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("simulation")
-            .to_string(),
+    Ok(SimulationReport {
+        name,
         netlist: args.input.display().to_string(),
         passed,
         duration_secs: duration,
-        error: simulation_error.clone(),
+        error: simulation_error,
         measurements,
-    };
+    })
+}
 
+/// Write the CI/CD report artifacts covering every run.
+fn write_report_files(
+    reports: &[SimulationReport],
+    args: &RunArgs,
+    verbose: bool,
+) -> Result<(), CliError> {
     if let Some(ref report_file) = args.report_file {
-        let reports = vec![report.clone()];
         match args.report_format {
             Some(crate::cli::ReportFormat::Junit) | None => {
-                JUnitReporter::write(&reports, report_file)?;
+                JUnitReporter::write(reports, report_file)?;
                 if verbose {
                     println!("JUnit report written to: {}", report_file.display());
                 }
             }
             Some(crate::cli::ReportFormat::Tap) => {
-                TapReporter::write(&reports, report_file)?;
+                TapReporter::write(reports, report_file)?;
                 if verbose {
                     println!("TAP report written to: {}", report_file.display());
                 }
@@ -306,36 +395,63 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     if let Some(ref meas_file) = args.meas_file {
-        let reports = vec![report.clone()];
         match args.meas_format {
-            Some(MeasFormat::Csv) => CsvMeasReporter::write(&reports, meas_file)?,
-            Some(MeasFormat::Json) | None => JsonMeasReporter::write(&reports, meas_file)?,
+            Some(MeasFormat::Csv) => CsvMeasReporter::write(reports, meas_file)?,
+            Some(MeasFormat::Json) | None => JsonMeasReporter::write(reports, meas_file)?,
         }
         if verbose {
             println!("Measurement report written to: {}", meas_file.display());
         }
     }
-
-    if !quiet {
-        println!("\nSimulation complete in {:.3}s.", duration);
-    }
-
-    if let Some(err_msg) = simulation_error {
-        return Err(CliError::simulation_error(err_msg));
-    }
-
     Ok(())
 }
 
-fn load_netlist(args: &RunArgs, config: &Config) -> Result<Netlist, CliError> {
+/// `out.csv` + `hot` -> `out.hot.csv` (run-level analog of the
+/// per-analysis tagging in `output_path_for`).
+fn tag_output_path(path: &std::path::Path, tag: &str) -> PathBuf {
+    let mut file_name = path
+        .file_stem()
+        .map(|stem| stem.to_os_string())
+        .unwrap_or_default();
+    file_name.push(format!(".{tag}"));
+    if let Some(ext) = path.extension() {
+        file_name.push(".");
+        file_name.push(ext);
+    }
+    path.with_file_name(file_name)
+}
+
+/// Reduce a run label to a file-name-safe tag.
+fn sanitize_run_tag(label: &str) -> String {
+    let mut tag: String = label
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    while tag.contains("__") {
+        tag = tag.replace("__", "_");
+    }
+    tag.trim_matches('_').to_string()
+}
+
+fn load_netlist_from_source(
+    source: &str,
+    args: &RunArgs,
+    config: &Config,
+) -> Result<Netlist, CliError> {
     let mut search_paths: Vec<PathBuf> = args.includes.clone();
     search_paths.extend(config.paths.include_paths.iter().cloned());
     search_paths.extend(config.paths.library_paths.iter().cloned());
 
     let parsed = if search_paths.is_empty() {
-        Netlist::parse_file(&args.input)
+        Netlist::parse_with_path(source, &args.input)
     } else {
-        Netlist::parse_file_with_search_paths(&args.input, &search_paths)
+        Netlist::parse_with_search_paths(source, &args.input, &search_paths)
     };
     let map_parse_error = |e: rspice_core::error::ParseError| CliError::ParseError {
         message: e.to_string(),
