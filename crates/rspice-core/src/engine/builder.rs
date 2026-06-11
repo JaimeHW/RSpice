@@ -238,6 +238,23 @@ impl Engine {
                             .resistors
                             .set_last_noise_temperature_offset(noise_dtemp);
                     }
+                    // ngspice `noisy` instance switch (default on): a quiet
+                    // resistor produces no noise at all.
+                    if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
+                        circuit.resistors.set_last_noisy(noisy != 0.0);
+                    }
+                    // Model-card flicker noise (resnoise.c), folded with the
+                    // effective noise area at build time.
+                    if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+                        netlist,
+                        model.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )? {
+                        circuit
+                            .resistors
+                            .set_last_flicker_noise(coefficient, af, ef);
+                    }
                 }
                 ElementKind::Capacitor {
                     value,

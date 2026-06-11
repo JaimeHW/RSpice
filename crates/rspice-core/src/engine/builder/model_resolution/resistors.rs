@@ -1,5 +1,71 @@
 use super::*;
 
+/// Resolve the resnoise.c flicker-noise terms for a resistor instance:
+/// `(coefficient, AF, EF)` where the density is
+/// `coefficient·|I|^AF / f^EF`, with the model KF and the effective noise
+/// area `(L − 2·SHORT)^LF · (W − 2·NARROW)^WF` (1.0 when no geometry is
+/// given, per ressetup.c) folded into the coefficient. Returns `None`
+/// when the model carries no KF.
+pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
+    netlist: &Netlist,
+    model_name: Option<&str>,
+    instance_params: &[(String, f64)],
+    temperature_kelvin: f64,
+) -> Result<Option<(f64, f64, f64)>, SimulationError> {
+    let Some(model_name) = model_name else {
+        return Ok(None);
+    };
+    let Some(model_def) = find_model_def(netlist, model_name) else {
+        return Ok(None);
+    };
+    let (eval_ctx, _, _) =
+        resolve_resistor_eval_context(netlist, Some(model_def), instance_params, temperature_kelvin)?;
+    let Some(kf) = resolve_model_param(model_def, &["KF"], &eval_ctx)?
+        .filter(|v| v.is_finite() && *v > 0.0)
+    else {
+        return Ok(None);
+    };
+    let af = resolve_model_param(model_def, &["AF"], &eval_ctx)?
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(1.0);
+    let ef = resolve_model_param(model_def, &["EF"], &eval_ctx)?
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .unwrap_or(1.0);
+    let lf = resolve_model_param(model_def, &["LF"], &eval_ctx)?
+        .filter(|v| v.is_finite())
+        .unwrap_or(1.0);
+    let wf = resolve_model_param(model_def, &["WF"], &eval_ctx)?
+        .filter(|v| v.is_finite())
+        .unwrap_or(1.0);
+    let short = resolve_model_param(model_def, &["SHORT"], &eval_ctx)?.unwrap_or(0.0);
+    let narrow = resolve_model_param(model_def, &["NARROW"], &eval_ctx)?.unwrap_or(0.0);
+
+    let length = instance_param(instance_params, &["L", "LENGTH"]).or_else(|| {
+        resolve_model_param(model_def, &["L", "LENGTH"], &eval_ctx)
+            .ok()
+            .flatten()
+    });
+    let width = instance_param(instance_params, &["W", "WIDTH"]).or_else(|| {
+        resolve_model_param(model_def, &["W", "WIDTH", "DEFW"], &eval_ctx)
+            .ok()
+            .flatten()
+    });
+    let eff_noise_area = if length.is_some() || width.is_some() {
+        let l_eff = (length.unwrap_or(0.0) - 2.0 * short).max(0.0);
+        let w_eff = (width.unwrap_or(0.0) - 2.0 * narrow).max(0.0);
+        let area = l_eff.powf(lf) * w_eff.powf(wf);
+        if area.is_finite() && area > 0.0 {
+            area
+        } else {
+            return Ok(None);
+        }
+    } else {
+        1.0
+    };
+
+    Ok(Some((kf / eff_noise_area, af, ef)))
+}
+
 fn resolve_resistor_eval_context(
     netlist: &Netlist,
     model_def: Option<&crate::netlist::ModelDef>,

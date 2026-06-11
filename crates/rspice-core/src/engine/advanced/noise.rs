@@ -38,8 +38,12 @@ impl Engine {
     ) -> Vec<NoiseSource> {
         let mut noise_sources = Vec::new();
 
-        // Thermal noise from resistors (4kT/R).
+        // Resistor thermal noise (4kT/R) and model-card flicker noise
+        // (resnoise.c), both gated by the per-instance `noisy` switch.
         for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            if !circuit.resistors.noisy.get(i).copied().unwrap_or(true) {
+                continue;
+            }
             let conductance = circuit.resistors.small_signal_conductance(i);
             let resistance = if conductance.abs() > 0.0 {
                 1.0 / conductance
@@ -56,9 +60,28 @@ impl Engine {
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| format!("R{}", i + 1));
-            let mut source = NoiseSource::thermal(name, stamp.pp.row, stamp.nn.row, resistance);
+            let mut source =
+                NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
             noise_sources.push(source);
+
+            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
+                let v_pos = Self::noise_node_voltage(dc_solution, stamp.pp.row);
+                let v_neg = Self::noise_node_voltage(dc_solution, stamp.nn.row);
+                let current = circuit.resistors.conductances.get(i).copied().unwrap_or(0.0)
+                    * (v_pos - v_neg);
+                if current.abs() > 1e-18 {
+                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                        format!("{}:flicker", name),
+                        stamp.pp.row,
+                        stamp.nn.row,
+                        coefficient,
+                        af,
+                        ef,
+                        current,
+                    ));
+                }
+            }
         }
 
         // Diode shot noise (2qI) and KF flicker, both across the junction
@@ -1269,6 +1292,69 @@ J1 D G 0 JN M=2
 
 .END
 ";
+
+    /// onoise tables of [`RES_FLICKER_DECK`] and its quiet-R2 variant from
+    /// the official ngspice-46 binary.
+    const RES_FLICKER_ORACLE: &str =
+        include_str!("../../../tests/testdata/res_flicker_ngspice46.dat");
+    const RES_QUIET_ORACLE: &str =
+        include_str!("../../../tests/testdata/res_quiet_ngspice46.dat");
+
+    /// A current-carrying semiconductor resistor with model-card flicker:
+    /// KF at AF=1.5 over the effective noise area
+    /// `(L−2·SHORT)^LF·(W−2·NARROW)^WF`, lifting the low-frequency rows
+    /// well above the thermal floor.
+    const RES_FLICKER_DECK: &str = "\
+Resistor flicker noise testbench
+
+V1 IN 0 DC 2 AC 1
+R1 IN OUT RMOD L=20u W=2u
+R2 OUT 0 1k
+
+.OPTIONS NOACCT
+
+.NOISE v(out) V1 DEC 5 10 100k
+
+.MODEL RMOD R RSH=100 KF=1e-22 AF=1.5 SHORT=0.5u NARROW=0.2u
+
+.END
+";
+
+    /// resnoise.c flicker (with the effective-noise-area folding) must
+    /// reproduce the official binary.
+    #[test]
+    fn resistor_flicker_noise_matches_the_ngspice46_oracle() {
+        assert_onoise_matches(
+            RES_FLICKER_DECK,
+            RES_FLICKER_ORACLE,
+            "out",
+            "V1",
+            5,
+            10.0,
+            1e5,
+            5e-3,
+            "res-flicker",
+        );
+    }
+
+    /// The `noisy=0` instance switch must silence a resistor's thermal and
+    /// flicker noise exactly as resnoise.c skips quiet instances.
+    #[test]
+    fn quiet_resistor_noise_matches_the_ngspice46_oracle() {
+        let deck = RES_FLICKER_DECK.replace("R2 OUT 0 1k", "R2 OUT 0 1k NOISY=0");
+        assert_ne!(deck, RES_FLICKER_DECK);
+        assert_onoise_matches(
+            &deck,
+            RES_QUIET_ORACLE,
+            "out",
+            "V1",
+            5,
+            10.0,
+            1e5,
+            5e-3,
+            "res-quiet",
+        );
+    }
 
     /// onoise table of the DTEMP=150 variant of [`JFET_FLICKER_DECK`] from
     /// the official ngspice-46 binary.
