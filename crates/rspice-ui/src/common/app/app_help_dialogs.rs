@@ -53,15 +53,59 @@ impl RSpiceApp {
             return;
         }
 
-        let choice = Dialog::new("Results", "Waveform calculator", "Close")
-            .size(DialogSize::Md)
+        let hint = self
+            .state
+            .calculator_panel
+            .context_hint(&self.state.simulation);
+
+        let state = &mut self.state;
+        let choice = Dialog::new("Results", "Waveform calculator", "Evaluate")
+            .size(DialogSize::Lg)
+            .secondary("Plot result")
+            .ghost("Clear")
+            .hint(&hint)
             .show(ctx, |ui| {
-                self.state.calculator_panel.show(ui, &self.state.simulation);
+                let (panel, simulation) = (&mut state.calculator_panel, &state.simulation);
+                panel.show_body(ui, simulation);
             });
 
-        if choice != DialogChoice::None {
-            self.state.dialogs.waveform_calculator_dialog = false;
+        match choice {
+            DialogChoice::None => {}
+            DialogChoice::Primary => {
+                let (panel, simulation) =
+                    (&mut self.state.calculator_panel, &self.state.simulation);
+                panel.evaluate(simulation);
+            }
+            DialogChoice::Ghost => self.state.calculator_panel.clear(),
+            DialogChoice::Secondary => self.plot_calculator_expression(ctx),
+            DialogChoice::Cancelled => {
+                self.state.dialogs.waveform_calculator_dialog = false;
+            }
         }
+    }
+
+    /// "Plot result": hand the calculator expression to the waves strips as
+    /// an expression trace on the active analysis and jump to Results.
+    fn plot_calculator_expression(&mut self, ctx: &Context) {
+        let expression = self.state.calculator_panel.expression.trim().to_owned();
+        if expression.is_empty() {
+            return;
+        }
+        let analysis = self.state.simulation.active_analysis_idx.unwrap_or(0);
+        let traces = self.state.shell.results.exprs.entry(analysis).or_default();
+        if !traces.iter().any(|t| t.text == expression) {
+            traces.push(crate::shell::results::ExprTrace {
+                text: expression.clone(),
+                visible: true,
+            });
+        }
+        self.state.shell.results.viewer = crate::shell::results::ResultViewer::Waves;
+        self.state.shell.view = crate::shell::WorkspaceView::Results;
+        self.state.dialogs.waveform_calculator_dialog = false;
+        self.state
+            .shell
+            .toasts
+            .info(ctx, &format!("Plotted {expression}"));
     }
 
     pub(super) fn render_shortcuts_help_dialog(&mut self, ctx: &Context) {

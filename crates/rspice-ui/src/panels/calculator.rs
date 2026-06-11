@@ -1,28 +1,42 @@
-//! Calculator Panel
+//! Waveform calculator — the egui implementation of
+//! `design/volta-dialogs-v2.html` §1.
 //!
-//! Commercial-grade waveform calculator UI.
-//! Features:
-//! - Expression editor with history
-//! - Scientific keypad
-//! - Function browser
-//! - Signal list (drag & drop target)
+//! Keyboard-first: there is no keypad — the two things a calculator over
+//! simulation data actually needs are the active run's signals and the
+//! function reference, both click-to-insert at the caret. The result (or
+//! error) renders inline under the expression; the dialog footer's
+//! "Plot result" hands the expression to the waves strips as an
+//! expression trace.
+
+use egui::Ui;
 
 use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
 use crate::state::SimulationState;
-use egui::{Button, ScrollArea, TextEdit, Ui, Vec2};
+use crate::ui::plot::fmt_si;
+use crate::ui::theme::{self, FontWeight, mix};
+use crate::ui::tokens::{self, Tokens};
+
+/// Height of the signal/function panes.
+const PANE_HEIGHT: f32 = 264.0;
+/// Width of the signals rail.
+const RAIL_WIDTH: f32 = 232.0;
 
 #[derive(Default, Clone)]
 pub struct CalculatorPanel {
-    /// Current expression string
-    expression: String,
-    /// Expression history
+    /// Current expression text.
+    pub expression: String,
+    /// Successful expressions, most recent first.
     history: Vec<String>,
-    /// Last result (formatted string for scalars)
-    last_result: Option<String>,
-    /// Error message if last eval failed
-    error_msg: Option<String>,
-    /// Selected function category in browser
-    selected_category: FunctionCategory,
+    /// Position while cycling history with ↑/↓ (None = live text).
+    history_at: Option<usize>,
+    /// Live text stashed while cycling history.
+    stash: String,
+    /// Last evaluation outcome.
+    outcome: Option<Result<String, String>>,
+    /// Selected function category.
+    category: FunctionCategory,
+    /// Signal list filter.
+    signal_filter: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
@@ -33,277 +47,570 @@ enum FunctionCategory {
     Measure,
 }
 
+/// One function-reference row: label, one-line hint, what to insert, and
+/// how many characters the caret steps back into the inserted text.
+struct FunctionEntry {
+    label: &'static str,
+    hint: &'static str,
+    insert: &'static str,
+    caret_back: usize,
+}
+
+const MATH_FUNCTIONS: &[FunctionEntry] = &[
+    FunctionEntry { label: "abs(x)", hint: "absolute value", insert: "abs()", caret_back: 1 },
+    FunctionEntry { label: "sqrt(x)", hint: "square root", insert: "sqrt()", caret_back: 1 },
+    FunctionEntry { label: "log(x)", hint: "natural log", insert: "log()", caret_back: 1 },
+    FunctionEntry { label: "log10(x)", hint: "log base 10", insert: "log10()", caret_back: 1 },
+    FunctionEntry { label: "exp(x)", hint: "eˣ", insert: "exp()", caret_back: 1 },
+    FunctionEntry { label: "x ^ n", hint: "power", insert: " ^ ", caret_back: 0 },
+];
+
+const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
+    FunctionEntry { label: "dB(x)", hint: "20·log₁₀|x|", insert: "dB()", caret_back: 1 },
+    FunctionEntry { label: "deriv(x)", hint: "d/dt", insert: "deriv()", caret_back: 1 },
+    FunctionEntry { label: "integ(x)", hint: "∫ dt", insert: "integ()", caret_back: 1 },
+    FunctionEntry {
+        label: "clip(x, lo, hi)",
+        hint: "limit range",
+        insert: "clip(, , )",
+        caret_back: 5,
+    },
+];
+
+const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
+    FunctionEntry { label: "avg(x)", hint: "mean over the window", insert: "avg()", caret_back: 1 },
+    FunctionEntry { label: "rms(x)", hint: "root mean square", insert: "rms()", caret_back: 1 },
+];
+
+impl FunctionCategory {
+    fn entries(self) -> &'static [FunctionEntry] {
+        match self {
+            FunctionCategory::Math => MATH_FUNCTIONS,
+            FunctionCategory::Signal => SIGNAL_FUNCTIONS,
+            FunctionCategory::Measure => MEASURE_FUNCTIONS,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            FunctionCategory::Math => "Math",
+            FunctionCategory::Signal => "Signal",
+            FunctionCategory::Measure => "Measure",
+        }
+    }
+
+    const ALL: [FunctionCategory; 3] = [
+        FunctionCategory::Math,
+        FunctionCategory::Signal,
+        FunctionCategory::Measure,
+    ];
+}
+
+/// One signal row of the rail.
+struct SignalRow {
+    name: String,
+    unit: &'static str,
+    color: egui::Color32,
+}
+
 impl CalculatorPanel {
     pub fn new() -> Self {
-        Self {
-            expression: String::new(),
-            history: Vec::new(),
-            last_result: None,
-            error_msg: None,
-            selected_category: FunctionCategory::Math,
+        Self::default()
+    }
+
+    /// Stable id for the expression editor (caret state lives in egui memory).
+    fn editor_id(ui: &Ui) -> egui::Id {
+        ui.id().with("volta.calc.editor")
+    }
+
+    /// The dialog body. The footer (Evaluate / Plot result / Clear) is the
+    /// caller's — it owns the dialog and the cross-state plot action.
+    pub fn show_body(&mut self, ui: &mut Ui, simulation: &SimulationState) {
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+
+        caption(ui, "Expression");
+        let editor_id = Self::editor_id(ui);
+        let response = ui.add(
+            egui::TextEdit::singleline(&mut self.expression)
+                .id(editor_id)
+                .font(theme::mono(tokens::FS_2, FontWeight::Regular))
+                .hint_text("dB(V(out) / V(in))")
+                .desired_width(f32::INFINITY),
+        );
+        if response.changed() {
+            self.history_at = None;
+        }
+        self.handle_history_keys(ui, &response);
+
+        // Inline outcome row — result in ok, error in err, hint otherwise.
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let (text, color) = match &self.outcome {
+                Some(Ok(value)) => (value.as_str(), c.ok),
+                Some(Err(error)) => (error.as_str(), c.err),
+                None => ("evaluate to see the result here", c.text_faint),
+            };
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                    .color(color),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !self.history.is_empty() {
+                    ui.label(
+                        egui::RichText::new("↑/↓ recall history")
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
+                    );
+                }
+            });
+        });
+        ui.add_space(8.0);
+
+        // Two panes: signals rail + function reference.
+        let mut insert: Option<(String, usize)> = None;
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            pane(ui, RAIL_WIDTH, |ui| {
+                self.signals_pane(ui, simulation, &mut insert);
+            });
+            let remaining = ui.available_width();
+            pane(ui, remaining, |ui| {
+                self.functions_pane(ui, &mut insert);
+            });
+        });
+
+        if let Some((text, caret_back)) = insert {
+            self.insert_at_caret(ui.ctx(), editor_id, &text, caret_back);
+            ui.ctx().memory_mut(|m| m.request_focus(editor_id));
         }
     }
 
-    /// Show the calculator panel UI
-    ///
-    /// # Arguments
-    /// * `ui` - The egui UI context
-    /// * `simulation` - Reference to simulation state for waveform access
-    pub fn show(&mut self, ui: &mut Ui, simulation: &SimulationState) {
-        ui.vertical(|ui| {
-            // 1. Display / Editor Area
-            self.show_display_area(ui, simulation);
-
-            ui.separator();
-
-            // 2. Main Controls (Keypad + Browser)
-            ui.horizontal(|ui| {
-                // Left: Keypad
-                ui.vertical(|ui| {
-                    self.show_keypad(ui, simulation);
-                });
-
-                ui.separator();
-
-                // Right: Function/Signal Browser
-                ui.vertical(|ui| {
-                    self.show_browser(ui);
-                });
-            });
-        });
-    }
-
-    fn show_display_area(&mut self, ui: &mut Ui, simulation: &SimulationState) {
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                // Expression Editor
-                ui.label("Expression:");
-                let response = ui.add(
-                    TextEdit::multiline(&mut self.expression)
-                        .font(egui::TextStyle::Monospace)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(3),
-                );
-
-                if response.changed() {
-                    self.error_msg = None;
-                }
-
-                // Error / Result Display
-                let c = crate::ui::tokens::Tokens::get(ui.ctx()).color;
-                if let Some(err) = &self.error_msg {
-                    ui.colored_label(c.err, format!("Error: {}", err));
-                } else if let Some(res) = &self.last_result {
-                    ui.colored_label(c.ok, format!("Result: {}", res));
-                }
-
-                ui.horizontal(|ui| {
-                    if ui.button("Evaluate").clicked() {
-                        self.evaluate(simulation);
-                    }
-                    if ui.button("Clear").clicked() {
-                        self.expression.clear();
-                        self.last_result = None;
-                        self.error_msg = None;
-                    }
-                });
-            });
-        });
-    }
-
-    fn show_keypad(&mut self, ui: &mut Ui, _simulation: &SimulationState) {
-        let button_size = Vec2::new(40.0, 30.0);
-
-        // Row 1: Common Ops
-        ui.horizontal(|ui| {
-            if ui.add(Button::new("+").min_size(button_size)).clicked() {
-                self.append(" + ");
-            }
-            if ui.add(Button::new("-").min_size(button_size)).clicked() {
-                self.append(" - ");
-            }
-            if ui.add(Button::new("*").min_size(button_size)).clicked() {
-                self.append(" * ");
-            }
-            if ui.add(Button::new("/").min_size(button_size)).clicked() {
-                self.append(" / ");
-            }
-        });
-
-        // Row 2: Numbers 7-9
-        ui.horizontal(|ui| {
-            if ui.add(Button::new("7").min_size(button_size)).clicked() {
-                self.append("7");
-            }
-            if ui.add(Button::new("8").min_size(button_size)).clicked() {
-                self.append("8");
-            }
-            if ui.add(Button::new("9").min_size(button_size)).clicked() {
-                self.append("9");
-            }
-            if ui.add(Button::new("^").min_size(button_size)).clicked() {
-                self.append("^");
-            }
-        });
-
-        // Row 3: Numbers 4-6
-        ui.horizontal(|ui| {
-            if ui.add(Button::new("4").min_size(button_size)).clicked() {
-                self.append("4");
-            }
-            if ui.add(Button::new("5").min_size(button_size)).clicked() {
-                self.append("5");
-            }
-            if ui.add(Button::new("6").min_size(button_size)).clicked() {
-                self.append("6");
-            }
-            if ui.add(Button::new("(").min_size(button_size)).clicked() {
-                self.append("(");
-            }
-        });
-
-        // Row 4: Numbers 1-3
-        ui.horizontal(|ui| {
-            if ui.add(Button::new("1").min_size(button_size)).clicked() {
-                self.append("1");
-            }
-            if ui.add(Button::new("2").min_size(button_size)).clicked() {
-                self.append("2");
-            }
-            if ui.add(Button::new("3").min_size(button_size)).clicked() {
-                self.append("3");
-            }
-            if ui.add(Button::new(")").min_size(button_size)).clicked() {
-                self.append(")");
-            }
-        });
-
-        // Row 5: 0 .
-        ui.horizontal(|ui| {
-            if ui
-                .add(Button::new("0").min_size(Vec2::new(88.0, 30.0)))
-                .clicked()
-            {
-                self.append("0");
-            }
-            if ui.add(Button::new(".").min_size(button_size)).clicked() {
-                self.append(".");
-            }
-            if ui.add(Button::new("Exp").min_size(button_size)).clicked() {
-                self.append("e");
-            }
-        });
-    }
-
-    fn show_browser(&mut self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.selected_category, FunctionCategory::Math, "Math");
-            ui.selectable_value(
-                &mut self.selected_category,
-                FunctionCategory::Signal,
-                "Signal",
-            );
-            ui.selectable_value(
-                &mut self.selected_category,
-                FunctionCategory::Measure,
-                "Measure",
-            );
-        });
-
-        ui.separator();
-
-        ScrollArea::vertical().max_height(150.0).show(ui, |ui| {
-            match self.selected_category {
-                FunctionCategory::Math => {
-                    self.func_item(ui, "abs(x)", "Absolute value");
-                    self.func_item(ui, "sqrt(x)", "Square root");
-                    self.func_item(ui, "log(x)", "Natural logarithm");
-                    self.func_item(ui, "log10(x)", "Log base 10");
-                    self.func_item(ui, "exp(x)", "Exponential e^x");
-                }
-                FunctionCategory::Signal => {
-                    self.func_item(ui, "deriv(x)", "Derivative");
-                    self.func_item(ui, "integ(x)", "Integral");
-                    self.func_item(ui, "clip(x, min, max)", "Clip signal");
-                }
-                FunctionCategory::Measure => {
-                    self.func_item(ui, "avg(x)", "Average value");
-                    self.func_item(ui, "rms(x)", "RMS value");
-                    // Future: rise_time, bandwidth, etc.
-                }
-            }
-        });
-    }
-
-    fn func_item(&mut self, ui: &mut Ui, signature: &str, tooltip: &str) {
-        let name = signature.split('(').next().unwrap_or(signature);
-        if ui.button(signature).on_hover_text(tooltip).clicked() {
-            // Logic to insert function with parens and move cursor?
-            // Simple append for now
-            self.append(&format!("{}(", name));
+    /// Footer hint for the dialog: what the expression evaluates against.
+    pub fn context_hint(&self, simulation: &SimulationState) -> String {
+        match simulation.active_run() {
+            Some(run) => format!("evaluates against run #{}", run.id),
+            None => "no run yet — signals resolve after a simulation".to_owned(),
         }
     }
 
-    fn append(&mut self, text: &str) {
-        self.expression.push_str(text);
-    }
-
-    /// Evaluate the current expression against simulation data
-    ///
-    /// Uses the SimulationContext to resolve waveform references like V(out)
-    /// and performs full expression evaluation with vector arithmetic.
-    fn evaluate(&mut self, simulation: &SimulationState) {
-        // Clear previous error
-        self.error_msg = None;
-
-        // Parse the expression
-        let expr = parser::parse(&self.expression);
-
-        // Create evaluation context from simulation state
+    /// Evaluate the current expression against the live waveform set.
+    pub fn evaluate(&mut self, simulation: &SimulationState) {
+        let text = self.expression.trim();
+        if text.is_empty() {
+            self.outcome = None;
+            return;
+        }
+        let expr = parser::parse(text);
         let ctx = SimulationContext::new(simulation);
+        self.outcome = Some(match evaluator::evaluate(&expr, &ctx) {
+            Ok(CalcValue::Scalar(value)) => Ok(format!("= {}", fmt_si(value, "", 4))),
+            Ok(CalcValue::Waveform(x, y)) => {
+                let last = y.last().copied().unwrap_or(0.0);
+                Ok(format!(
+                    "= waveform · {} pts · last {}",
+                    x.len(),
+                    fmt_si(last, "", 3)
+                ))
+            }
+            Err(error) => Err(error.to_string()),
+        });
+        if matches!(self.outcome, Some(Ok(_))) {
+            let owned = text.to_owned();
+            self.history.retain(|h| h != &owned);
+            self.history.insert(0, owned);
+            self.history.truncate(16);
+        }
+    }
 
-        // Evaluate
-        match evaluator::evaluate(&expr, &ctx) {
-            Ok(value) => {
-                // Add to history
-                if !self.expression.is_empty() && !self.history.contains(&self.expression) {
-                    self.history.push(self.expression.clone());
-                    // Limit history size
-                    if self.history.len() > 50 {
-                        self.history.remove(0);
-                    }
-                }
+    /// Clear the editor and outcome.
+    pub fn clear(&mut self) {
+        self.expression.clear();
+        self.outcome = None;
+        self.history_at = None;
+    }
 
-                // Format result
-                self.last_result = Some(match value {
-                    CalcValue::Scalar(v) => {
-                        // Use engineering notation for large/small values
-                        if v.abs() >= 1e6 || (v.abs() < 1e-3 && v != 0.0) {
-                            format!("{:.4e}", v)
-                        } else {
-                            format!("{:.6}", v)
+    // -----------------------------------------------------------------
+    // panes
+    // -----------------------------------------------------------------
+
+    fn signals_pane(
+        &mut self,
+        ui: &mut Ui,
+        simulation: &SimulationState,
+        insert: &mut Option<(String, usize)>,
+    ) {
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+
+        pane_header(ui, |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.signal_filter)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .hint_text("Filter signals…")
+                    .desired_width(f32::INFINITY),
+            );
+        });
+
+        egui::ScrollArea::vertical()
+            .id_salt("volta.calc.signals")
+            .max_height(PANE_HEIGHT - 64.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let filter = self.signal_filter.to_lowercase();
+                let mut any = false;
+                if let Some(run) = simulation.active_run() {
+                    for analysis in &run.analyses {
+                        let rows: Vec<SignalRow> = analysis
+                            .waveforms
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, w)| {
+                                filter.is_empty() || w.name.to_lowercase().contains(&filter)
+                            })
+                            .map(|(index, w)| SignalRow {
+                                unit: signal_unit(&w.name),
+                                color: crate::shell::results::waveform_color(w, index, &t),
+                                name: w.name.clone(),
+                            })
+                            .collect();
+                        if rows.is_empty() {
+                            continue;
+                        }
+                        any = true;
+                        section_label(ui, &format!("run #{} · {}", run.id, analysis.label));
+                        for row in rows {
+                            if signal_row(ui, &row).clicked() {
+                                *insert = Some((row.name.clone(), 0));
+                            }
                         }
                     }
-                    CalcValue::Waveform(x, y) => {
-                        let x_min = x.iter().copied().fold(f64::INFINITY, f64::min);
-                        let x_max = x.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                        let y_min = y.iter().copied().fold(f64::INFINITY, f64::min);
-                        let y_max = y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-                        format!(
-                            "Waveform ({} pts)\nX: [{:.3e}, {:.3e}]\nY: [{:.3e}, {:.3e}]",
-                            x.len(),
-                            x_min,
-                            x_max,
-                            y_min,
-                            y_max
-                        )
-                    }
-                });
+                }
+                if !any {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(10.0);
+                        ui.label(
+                            egui::RichText::new(if filter.is_empty() {
+                                "Run a simulation to list its signals"
+                            } else {
+                                "No signal matches the filter"
+                            })
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_faint),
+                        );
+                    });
+                }
+            });
+
+        pane_footer(ui, "click inserts at the caret");
+    }
+
+    fn functions_pane(&mut self, ui: &mut Ui, insert: &mut Option<(String, usize)>) {
+        let t = Tokens::get(ui.ctx());
+        let c = t.color;
+
+        pane_header(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for category in FunctionCategory::ALL {
+                if crate::ui::widgets::chip(ui, category.label(), self.category == category)
+                    .clicked()
+                {
+                    self.category = category;
+                }
             }
-            Err(e) => {
-                self.error_msg = Some(format!("Error: {}", e));
-                self.last_result = None;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    egui::RichText::new("click inserts · caret lands in the parens")
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(c.text_faint),
+                );
+            });
+        });
+
+        egui::ScrollArea::vertical()
+            .id_salt("volta.calc.functions")
+            .max_height(PANE_HEIGHT - 40.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for entry in self.category.entries() {
+                    if function_row(ui, entry).clicked() {
+                        *insert = Some((entry.insert.to_owned(), entry.caret_back));
+                    }
+                }
+            });
+    }
+
+    // -----------------------------------------------------------------
+    // editing helpers
+    // -----------------------------------------------------------------
+
+    /// Insert at the caret (or append), then place the caret `caret_back`
+    /// characters before the end of the inserted text — function templates
+    /// land the caret inside their parentheses.
+    fn insert_at_caret(
+        &mut self,
+        ctx: &egui::Context,
+        editor_id: egui::Id,
+        text: &str,
+        caret_back: usize,
+    ) {
+        let mut state = egui::text_edit::TextEditState::load(ctx, editor_id).unwrap_or_default();
+        let total_chars = self.expression.chars().count();
+        let at = state
+            .cursor
+            .char_range()
+            .map(|range| range.primary.index.min(total_chars))
+            .unwrap_or(total_chars);
+        let byte = char_to_byte(&self.expression, at);
+        self.expression.insert_str(byte, text);
+
+        let caret = at + text.chars().count() - caret_back.min(text.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+            egui::text::CCursor::new(caret),
+        )));
+        state.store(ctx, editor_id);
+        self.outcome = None;
+    }
+
+    /// ↑/↓ recall while the editor has focus.
+    fn handle_history_keys(&mut self, ui: &Ui, response: &egui::Response) {
+        if !response.has_focus() || self.history.is_empty() {
+            return;
+        }
+        let (up, down) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+            )
+        });
+        if up {
+            let next = match self.history_at {
+                None => {
+                    self.stash = self.expression.clone();
+                    0
+                }
+                Some(at) => (at + 1).min(self.history.len() - 1),
+            };
+            self.history_at = Some(next);
+            self.expression = self.history[next].clone();
+        } else if down {
+            match self.history_at {
+                Some(0) | None => {
+                    if self.history_at.take().is_some() {
+                        self.expression = std::mem::take(&mut self.stash);
+                    }
+                }
+                Some(at) => {
+                    self.history_at = Some(at - 1);
+                    self.expression = self.history[at - 1].clone();
+                }
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// row + chrome primitives (the spec's .panes / .it vocabulary)
+// ---------------------------------------------------------------------------
+
+fn caption(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &text.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Medium),
+            color: t.color.text_faint,
+            extra_letter_spacing: 0.12 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    ui.label(job);
+    ui.add_space(3.0);
+}
+
+/// A bordered pane of the fixed two-pane layout.
+fn pane(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    egui::Frame::none()
+        .fill(c.bg_panel)
+        .stroke(egui::Stroke::new(1.0, c.border))
+        .rounding(t.radius)
+        .show(ui, |ui| {
+            ui.set_width(width);
+            ui.set_height(PANE_HEIGHT);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            add_contents(ui);
+        });
+}
+
+fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let response = ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), 34.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.add_space(8.0);
+            add_contents(ui);
+            ui.add_space(8.0);
+        },
+    );
+    ui.painter().hline(
+        response.response.rect.x_range(),
+        response.response.rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+}
+
+fn pane_footer(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 26.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(text)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(c.text_faint),
+                );
+            },
+        );
+        ui.painter().hline(
+            ui.min_rect().x_range(),
+            ui.min_rect().top() + 0.5,
+            egui::Stroke::new(1.0, c.border),
+        );
+    });
+}
+
+fn section_label(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 22.0),
+        egui::Sense::hover(),
+    );
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        &text.to_uppercase(),
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(9.5, FontWeight::Medium),
+            color: t.color.text_faint,
+            extra_letter_spacing: 0.1 * 9.5,
+            ..Default::default()
+        },
+    );
+    let galley = ui.fonts(|f| f.layout_job(job));
+    ui.painter().galley(
+        egui::pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 2.0),
+        galley,
+        t.color.text_faint,
+    );
+}
+
+fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 26.0),
+        egui::Sense::click(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let painter = ui.painter();
+    if hover > 0.0 {
+        painter.rect_filled(rect, 0.0, mix(egui::Color32::TRANSPARENT, c.bg_hover, hover));
+    }
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 14.0, rect.center().y),
+            egui::vec2(7.0, 7.0),
+        ),
+        2.0,
+        row.color,
+    );
+    painter.text(
+        egui::pos2(rect.left() + 26.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        &row.name,
+        theme::mono(tokens::FS_1, FontWeight::Regular),
+        mix(c.text_dim, c.text, hover),
+    );
+    painter.text(
+        egui::pos2(rect.right() - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        row.unit,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 26.0),
+        egui::Sense::click(),
+    );
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let hover = ui
+        .ctx()
+        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+    let painter = ui.painter();
+    if hover > 0.0 {
+        painter.rect_filled(rect, 0.0, mix(egui::Color32::TRANSPARENT, c.bg_hover, hover));
+    }
+    painter.text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        entry.label,
+        theme::mono(tokens::FS_1, FontWeight::Regular),
+        mix(c.text_dim, c.text, hover),
+    );
+    painter.text(
+        egui::pos2(rect.right() - 10.0, rect.center().y),
+        egui::Align2::RIGHT_CENTER,
+        entry.hint,
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Display unit for a waveform name.
+fn signal_unit(name: &str) -> &'static str {
+    if name.starts_with("I(") || name.starts_with("i(") {
+        "A"
+    } else if name.starts_with('|') {
+        "mag"
+    } else if name.starts_with("phase(") {
+        "°"
+    } else {
+        "V"
+    }
+}
+
+/// Char index → byte index.
+fn char_to_byte(text: &str, at: usize) -> usize {
+    text.char_indices()
+        .nth(at)
+        .map(|(byte, _)| byte)
+        .unwrap_or(text.len())
 }
