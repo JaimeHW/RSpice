@@ -337,6 +337,8 @@ fn source_dc_bias(spec: &SourceSpec) -> Value {
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Sffm { offset, .. } => *offset,
         SourceSpec::Am { offset, .. } => *offset,
+        // Zero-mean noise contributes nothing to the operating point.
+        SourceSpec::TrNoise { .. } => 0.0,
     }
 }
 
