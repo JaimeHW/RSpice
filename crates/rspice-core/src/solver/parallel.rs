@@ -3,6 +3,18 @@
 //! Provides thread-safe matrix operations for parallel device stamping.
 //! Uses atomic floating-point operations for lock-free concurrent writes.
 //!
+//! # Reproducibility — do not use for production stamping
+//!
+//! Atomic float accumulation commits additions in scheduler order, so the
+//! rounding of `a + b + c` varies run to run. That violates the program's
+//! bit-reproducibility policy (fixed thread count must reproduce results
+//! bit-identically). No engine path uses this type today — every parallel
+//! path (AC frequency chunks, PSS sensitivity columns, Monte-Carlo runs)
+//! clones per worker and assembles results in index order, which is
+//! deterministic by construction. Future parallel device evaluation must
+//! use per-thread stamp buffers merged in a fixed order (the buffered-merge
+//! design), not this type. It remains only as a benchmark yardstick.
+//!
 //! # Usage
 //! ```ignore
 //! // Create atomic matrix from static structure
