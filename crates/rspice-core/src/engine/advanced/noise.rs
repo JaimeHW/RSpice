@@ -353,6 +353,9 @@ impl Engine {
             }
         };
 
+        // One excitation vector reused across every source and frequency:
+        // each use zeroes it and sets one or two entries.
+        let mut rhs = vec![Complex64::new(0.0, 0.0); size];
         let results: Result<Vec<NoiseResult>, SimulationError> = frequencies
             .iter()
             .map(|&freq| {
@@ -361,7 +364,7 @@ impl Engine {
                     Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
 
                 let input_gain_sq = if let Some(excitation) = input_excitation {
-                    let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+                    rhs.fill(Complex64::new(0.0, 0.0));
                     match excitation {
                         InputExcitation::VoltageSource {
                             branch_matrix_index,
@@ -407,7 +410,7 @@ impl Engine {
                         continue;
                     }
 
-                    let mut rhs = vec![Complex64::new(0.0, 0.0); size];
+                    rhs.fill(Complex64::new(0.0, 0.0));
                     if source.node_pos > 0 && source.node_pos <= num_nodes {
                         rhs[source.node_pos - 1] += Complex64::new(1.0, 0.0);
                     }
