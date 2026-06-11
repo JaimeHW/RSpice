@@ -190,6 +190,9 @@ impl Bjt {
         self.selft_given = false;
         self.kf = 0.0;
         self.af = 1.0;
+        self.kfn = 0.0;
+        self.afn = 1.0;
+        self.bfn = 1.0;
         self.xre = 0.0;
         self.xrbi = 0.0;
         self.xrci = 0.0;
@@ -813,6 +816,29 @@ impl Bjt {
             .filter(|v| v.is_finite() && *v > 0.0)
         {
             self.ef = v;
+        }
+        // VBIC flicker noise: KFN/AFN/BFN ride on the intrinsic B-E current
+        // (vbicnoise.c FLBENOIZ). Defaults 0/1/1 per vbicsetup.c:230-238.
+        if let Some(v) = params
+            .get("KFN")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.kfn = v;
+        }
+        if let Some(v) = params
+            .get("AFN")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.afn = v;
+        }
+        if let Some(v) = params
+            .get("BFN")
+            .copied()
+            .filter(|v| v.is_finite() && *v > 0.0)
+        {
+            self.bfn = v;
         }
         // VBIC aliases used in ngspice level=4 decks.
         if !has_vaf

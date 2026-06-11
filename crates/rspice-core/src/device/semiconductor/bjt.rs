@@ -746,6 +746,12 @@ pub struct Bjt {
     pub af: Value,
     /// Flicker noise frequency exponent (EF)
     pub ef: Value,
+    /// VBIC base-emitter flicker noise coefficient (KFN)
+    pub kfn: Value,
+    /// VBIC base-emitter flicker noise current exponent (AFN)
+    pub afn: Value,
+    /// VBIC base-emitter flicker noise frequency exponent (BFN)
+    pub bfn: Value,
     /// Active ideal base-emitter saturation current.
     ibei: Value,
     /// Active non-ideal base-emitter saturation current.
@@ -1065,6 +1071,9 @@ impl Bjt {
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
+            kfn: 0.0,
+            afn: 1.0,
+            bfn: 1.0,
             ibei: 5e-17, // Derived from IS/BF defaults
             iben: 0.0,
             ibci: 1e-14, // Derived from IS/BR defaults

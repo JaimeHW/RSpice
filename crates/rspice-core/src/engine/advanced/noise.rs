@@ -121,6 +121,33 @@ impl Engine {
                     ));
                 }
             }
+
+            // VBIC base-emitter flicker noise (vbicnoise.c FLBENOIZ):
+            // S = m·KFN·|Ibe/m|^AFN / f^BFN across the intrinsic B-E
+            // junction, where Ibe is the m-folded junction current. The
+            // multiplicity folds into the coefficient as KFN·m^(1−AFN);
+            // injection lands on the promoted internal nodes so the base
+            // and emitter resistances shape the transfer like the oracle.
+            if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
+                let (_, ibe, _) = bjt.noise_branch_currents();
+                if ibe > 1e-18 {
+                    let m = bjt.m.max(1.0);
+                    let (node_pos, node_neg) = if bjt.vbic_mna_promoted() {
+                        (bjt.node_bi, bjt.node_ei)
+                    } else {
+                        (bjt.node_base, bjt.node_emitter)
+                    };
+                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                        format!("{}:flicker", bjt.name),
+                        node_pos,
+                        node_neg,
+                        kfn * m.powf(1.0 - afn),
+                        afn,
+                        bfn,
+                        ibe,
+                    ));
+                }
+            }
         }
 
         // MOS channel thermal noise and 1/f noise.
@@ -457,5 +484,79 @@ impl Engine {
             .collect();
 
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::super::Engine;
+    use crate::Netlist;
+
+    /// VBIC KFN/AFN/BFN flicker noise must ride the intrinsic B-E junction
+    /// with vbicnoise.c's multiplicity folding: `m·KFN·|Ibe/m|^AFN / f^BFN`,
+    /// i.e. an effective coefficient of `KFN·m^(1−AFN)` on the m-folded
+    /// junction current. The regression deck only exercises AFN=1 (where m
+    /// cancels), so the folding is pinned here at AFN≠1.
+    #[test]
+    fn vbic_flicker_source_follows_vbicnoise_multiplicity_folding() {
+        let deck = "\
+VBIC flicker source construction
+
+V1 VCC 0 3.3
+VIN B 0 DC 0.8
+RC VCC C 1k
+RE E 0 100
+Q1 C B E 0 N1 M=3
+
+.MODEL N1 NPN LEVEL=4
++ IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 RCX=10
++ RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2e-3
++ CJE=1e-13 CJC=2e-14 TF=10e-12 TR=100e-12
++ KFN=2e-14 AFN=1.5 BFN=0.8
+
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        circuit.update_nonlinear(&solution);
+
+        let sources = Engine::collect_noise_sources(&circuit, &solution);
+        let flicker = sources
+            .iter()
+            .find(|source| source.device_name.ends_with(":flicker"))
+            .expect("VBIC KFN card must produce a flicker source");
+
+        let m: f64 = 3.0;
+        let kfn = 2e-14;
+        let afn = 1.5;
+        let bfn = 0.8;
+        let expected_coefficient = kfn * m.powf(1.0 - afn);
+        assert!(
+            (flicker.parameter - expected_coefficient).abs() <= 1e-9 * expected_coefficient,
+            "coefficient must fold multiplicity as KFN*m^(1-AFN): got {:e}, want {:e}",
+            flicker.parameter,
+            expected_coefficient,
+        );
+        assert_eq!(flicker.af, afn);
+        assert_eq!(flicker.ef, bfn);
+        assert!(
+            flicker.current > 1e-12,
+            "flicker rides the m-folded forward B-E junction current, got {:e}",
+            flicker.current,
+        );
+
+        // Injection lands on the promoted internal base/emitter nodes, which
+        // exist apart from the externals because RBI and RE are nonzero.
+        let bjt = &circuit.bjts.devices[0];
+        assert_eq!(flicker.node_pos, bjt.node_bi);
+        assert_eq!(flicker.node_neg, bjt.node_ei);
+        assert_ne!(flicker.node_pos, bjt.node_base);
+        assert_ne!(flicker.node_neg, bjt.node_emitter);
     }
 }
