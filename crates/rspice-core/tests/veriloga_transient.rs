@@ -135,6 +135,143 @@ endmodule
     let _ = std::fs::remove_file(model);
 }
 
+/// A Verilog-A voltage contribution drives a node through a branch-current
+/// unknown: V(p,n) <+ level must force v(out) = level.
+#[test]
+fn veriloga_voltage_source_drives_node() {
+    let model = write_model(
+        "vsrc",
+        r#"
+`include "disciplines.vams"
+module va_vsrc(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real level = 1.0;
+    analog V(p, n) <+ level;
+endmodule
+"#,
+    );
+
+    let deck = format!(
+        "* veriloga voltage source\n\
+         XV1 out 0 va_vsrc level=2.5\n\
+         R1 out 0 1k\n\
+         .va \"{}\" va_vsrc\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-4, 1e-5)
+        .expect("transient run");
+
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    let v_final = *out.last().expect("samples");
+    assert!(
+        (v_final - 2.5).abs() < 1e-9,
+        "Verilog-A voltage source must pin the node, got {v_final}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// An impedance-form resistor (V <+ I*r, the BSIM4 substrate-network
+/// pattern) divides correctly against a native resistor.
+#[test]
+fn veriloga_impedance_resistor_divider() {
+    let model = write_model(
+        "zres",
+        r#"
+`include "disciplines.vams"
+module va_zres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real r = 1.0 from (0:inf);
+    analog V(p, n) <+ I(p, n) * r;
+endmodule
+"#,
+    );
+
+    // 1 V through native 1k on top, impedance-form 2k on the bottom:
+    // v(out) = 2/3 V
+    let deck = format!(
+        "* veriloga impedance divider\n\
+         V1 in 0 1.0\n\
+         R1 in out 1k\n\
+         XZ1 out 0 va_zres r=2k\n\
+         .va \"{}\" va_zres\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-4, 1e-5)
+        .expect("transient run");
+
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    let v_final = *out.last().expect("samples");
+    let expected = 2.0 / 3.0;
+    assert!(
+        (v_final - expected).abs() < 1e-6,
+        "impedance-form resistor divider: got {v_final}, want {expected}"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
+/// Runtime (parameter-bounded) loops evaluate correctly through the
+/// engine: conductance accumulated over nf iterations.
+#[test]
+fn veriloga_runtime_loop_conductance() {
+    let model = write_model(
+        "nfres",
+        r#"
+`include "disciplines.vams"
+module va_nfres(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter integer nf = 1 from [1:inf);
+    integer i;
+    real g;
+    analog begin
+        g = 0.0;
+        for (i = 0; i < nf; i = i + 1)
+            g = g + 1.0e-3;
+        I(p, n) <+ g * V(p, n);
+    end
+endmodule
+"#,
+    );
+
+    // nf=4 fingers of 1mS each = 4mS = 250 ohm against 1k:
+    // v(out) = 1 * 250/(1000+250) = 0.2 V
+    let deck = format!(
+        "* veriloga runtime loop\n\
+         V1 in 0 1.0\n\
+         R1 in out 1k\n\
+         XN1 out 0 va_nfres nf=4\n\
+         .va \"{}\" va_nfres\n\
+         .end\n",
+        deck_path(&model)
+    );
+
+    let netlist = Netlist::parse(&deck).expect("parse");
+    let result = Engine::default()
+        .run_tran(&netlist, 1e-4, 1e-5)
+        .expect("transient run");
+
+    let out = node_series(&result.node_names, &result.voltages, "out");
+    let v_final = *out.last().expect("samples");
+    assert!(
+        (v_final - 0.2).abs() < 1e-9,
+        "nf=4 runtime loop conductance: got {v_final}, want 0.2"
+    );
+
+    let _ = std::fs::remove_file(model);
+}
+
 /// Nonlinear Verilog-A conductance in a feedback divider converges via
 /// Newton with the companion stamps: I = g*V^2 against a series resistor.
 #[test]

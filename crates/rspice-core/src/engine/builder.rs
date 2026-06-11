@@ -1111,6 +1111,18 @@ impl Engine {
                             device.set_internal_node_indices(&internal_nodes);
                         }
 
+                        // Allocate system unknowns for branch currents of
+                        // potential (voltage) contributions.
+                        if device.num_branch_unknowns() > 0 {
+                            let mut branch_nodes =
+                                Vec::with_capacity(device.num_branch_unknowns());
+                            for idx in 0..device.num_branch_unknowns() {
+                                let node_name = format!("{}.__br{}", element.name, idx + 1);
+                                branch_nodes.push(circuit.get_or_create_node(&node_name));
+                            }
+                            device.set_branch_current_indices(&branch_nodes);
+                        }
+
                         for (name, value) in params {
                             let resolved = match value {
                                 crate::netlist::ParametricValue::Resolved(v) => *v,

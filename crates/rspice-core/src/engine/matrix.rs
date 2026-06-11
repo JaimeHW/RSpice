@@ -674,6 +674,15 @@ impl Engine {
                     device_nodes.push(node);
                 }
             }
+            // Branch-current unknowns of potential contributions couple to
+            // the same block (structural +-1 stamps plus dE/dx entries)
+            for idx in 0..device.num_branch_unknowns() {
+                if let Some(node) = device.branch_current_index(idx)
+                    && node > 0
+                {
+                    device_nodes.push(node);
+                }
+            }
             device_nodes.sort_unstable();
             device_nodes.dedup();
 
