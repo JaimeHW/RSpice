@@ -204,6 +204,13 @@ pub struct Mosfet {
     pub ef: Value,
     /// Channel thermal-noise coefficient (gamma)
     pub thermal_noise_gamma: Value,
+    /// Noise model selector (NLEV); mos1set.c defaults it to 2.
+    pub nlev: i32,
+    /// NLEV=3 channel thermal-noise scale (GDSNOI)
+    pub gdsnoi: Value,
+    /// Instance multiplicity (M·NF). Geometry folds it into the width, but
+    /// the SPICE noise laws keep per-finger factors, so it is retained.
+    pub multiplicity: Value,
 
     // Level 6 (double-exponent/simplified) MOSFET parameters
     /// Current gain coefficient (KC) - drain current multiplier

@@ -216,19 +216,22 @@ impl Engine {
                 ));
             }
 
-            if let Some((kf, af, ef)) = mos.flicker_noise_coefficients() {
-                let id = mos.drain_current();
-                if id.abs() > 1e-18 {
-                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", mos.name),
-                        mos.node_drain,
-                        mos.node_source,
-                        kf,
-                        af,
-                        ef,
-                        id,
-                    ));
-                }
+            // SPICE NLEV flicker laws (mos1noi.c; NLEV defaults to 2, whose
+            // gm²-based density is bias-dependent through the coefficient
+            // rather than the current term).
+            if let Some((coefficient, current, af, ef)) = mos.flicker_noise_source_terms()
+                && coefficient > 0.0
+                && current.abs() > 1e-18
+            {
+                noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                    format!("{}:flicker", mos.name),
+                    mos.node_drain,
+                    mos.node_source,
+                    coefficient,
+                    af,
+                    ef,
+                    current,
+                ));
             }
         }
 
@@ -646,6 +649,87 @@ D1 A 0 DM M=3
                 relative,
             );
         }
+    }
+
+    /// onoise tables of [`MOS_FLICKER_DECK`] (default NLEV) and its NLEV=0
+    /// variant from the official ngspice-46 binary.
+    const MOS_FLICKER_NLEV2_ORACLE: &str =
+        include_str!("../../../tests/testdata/mos_flicker_nlev2_ngspice46.dat");
+    const MOS_FLICKER_NLEV0_ORACLE: &str =
+        include_str!("../../../tests/testdata/mos_flicker_nlev0_ngspice46.dat");
+
+    /// A common-source stage whose low-frequency output noise is flicker
+    /// dominated, with AF=1.2 and instance M=2 so both the geometry
+    /// normalization and the multiplicity recombination under the folded
+    /// width are oracle-observable. The default card exercises the NLEV=2
+    /// gm²-law mos1set.c selects when NLEV is not given.
+    const MOS_FLICKER_DECK: &str = "\
+MOS flicker noise testbench
+
+V1 VDD 0 5
+VIN G 0 DC 1.5 AC 1
+RD VDD D 10k
+M1 D G 0 0 NM W=20u L=2u M=2
+
+.OPTIONS NOACCT
+
+.NOISE v(d) VIN DEC 5 10 100k
+
+.MODEL NM NMOS LEVEL=1 VTO=1.0 KP=60u TOX=20n LD=0.2u
++ CGSO=2e-10 CGDO=2e-10 KF=2e-26 AF=1.2
+
+.END
+";
+
+    fn assert_noise_matches_oracle(deck: &str, oracle_table: &str, label: &str) {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            5,
+            10.0,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = oracle_table
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// The default (NLEV=2) gm²-based flicker law and the NLEV=0 legacy law
+    /// must both reproduce the official binary.
+    #[test]
+    fn mos_flicker_noise_matches_the_ngspice46_oracle() {
+        assert_noise_matches_oracle(MOS_FLICKER_DECK, MOS_FLICKER_NLEV2_ORACLE, "nlev2");
+        let nlev0_deck = MOS_FLICKER_DECK.replace("AF=1.2", "AF=1.2 NLEV=0");
+        assert_ne!(nlev0_deck, MOS_FLICKER_DECK);
+        assert_noise_matches_oracle(&nlev0_deck, MOS_FLICKER_NLEV0_ORACLE, "nlev0");
     }
 
     /// The VBIC parasitic-resistance thermal sources and internal-node shot

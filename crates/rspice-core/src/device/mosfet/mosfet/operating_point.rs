@@ -64,14 +64,53 @@ impl Mosfet {
         self.thermal_noise_gamma.max(0.0)
     }
 
-    /// Return the effective flicker-noise coefficients, normalized by active area.
-    pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
+    /// Flicker-noise source terms `(coefficient, current, af, ef)` for a
+    /// density of `coefficient·|current|^af / f^ef`, following the SPICE
+    /// NLEV laws of mos1noi.c (mos2/mos3 are identical; NLEV defaults to 2
+    /// per mos1set.c) under this model's folded-width representation: the
+    /// instance multiplicity is folded into `w`, so ngspice's per-finger
+    /// width `W/m` and its explicit `m`/`Id/m` factors recombine into the
+    /// `m`-power on the coefficient shown at each arm.
+    ///
+    /// `Leff = L − 2·LATD`; a zero oxide capacitance falls back to the
+    /// 100 nm-oxide default exactly as mos1noi.c does.
+    pub fn flicker_noise_source_terms(&self) -> Option<(Value, Value, Value, Value)> {
         if self.kf <= 0.0 || !self.kf.is_finite() {
             return None;
         }
 
-        let area = (self.cox * self.w.max(1e-18) * self.l.max(1e-18)).max(1e-30);
-        Some((self.kf / area, self.af.max(1e-12), self.ef.max(1e-12)))
+        let cox = if self.cox > 0.0 {
+            self.cox
+        } else {
+            3.9 * 8.854214871e-12 / 1e-7
+        };
+        let leff = (self.l - 2.0 * self.ld).max(1e-18);
+        let width = self.w.max(1e-18);
+        let m = self.multiplicity.max(1e-12);
+        let af = self.af.max(1e-12);
+        let ef = self.ef.max(1e-12);
+
+        match self.nlev {
+            0 => Some((
+                self.kf * m.powf(1.0 - af) / (leff * leff * cox),
+                self.drain_current().abs(),
+                af,
+                ef,
+            )),
+            1 => Some((
+                self.kf * m.powf(2.0 - af) / (width * leff * cox),
+                self.drain_current().abs(),
+                af,
+                ef,
+            )),
+            // NLEV 2 and 3 share the gm²-based law; AF moves onto the
+            // frequency exponent and the explicit m cancels against the
+            // folded width.
+            _ => {
+                let gm = self.transconductance();
+                Some((self.kf * gm * gm / (width * leff * cox), 1.0, 1.0, af))
+            }
+        }
     }
 
     //=========================================================================
