@@ -191,6 +191,7 @@ impl SymbolLibrary {
             ),
             (ComponentType::NpnBjt, "bjt_npn.svg", "NPN BJT"),
             (ComponentType::PnpBjt, "bjt_pnp.svg", "PNP BJT"),
+            (ComponentType::OpAmp, "opamp.svg", "Op-Amp"),
             (ComponentType::Vcvs, "vcvs.svg", "VCVS (E)"),
             (ComponentType::Vccs, "vccs.svg", "VCCS (G)"),
             (ComponentType::Ccvs, "ccvs.svg", "CCVS (H)"),

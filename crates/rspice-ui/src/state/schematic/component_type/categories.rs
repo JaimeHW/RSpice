@@ -51,6 +51,7 @@ impl ComponentType {
                 | ComponentType::Vccs
                 | ComponentType::Ccvs
                 | ComponentType::Cccs
+                | ComponentType::OpAmp
         )
     }
 

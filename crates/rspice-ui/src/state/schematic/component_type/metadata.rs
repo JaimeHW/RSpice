@@ -31,7 +31,7 @@ impl ComponentType {
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
             | ComponentType::CurrentSourceNoise => "I",
-            ComponentType::Vcvs => "E",
+            ComponentType::Vcvs | ComponentType::OpAmp => "E",
             ComponentType::Vccs => "G",
             ComponentType::Ccvs => "H",
             ComponentType::Cccs => "F",
@@ -93,6 +93,7 @@ impl ComponentType {
             ComponentType::CurrentSourceExp => "I Exp",
             ComponentType::CurrentSourceNoise => "I Noise",
             ComponentType::Vcvs => "VCVS (E)",
+            ComponentType::OpAmp => "Op-Amp",
             ComponentType::Vccs => "VCCS (G)",
             ComponentType::Ccvs => "CCVS (H)",
             ComponentType::Cccs => "CCCS (F)",
@@ -133,6 +134,8 @@ impl ComponentType {
             | ComponentType::VoltageSourcePulse
             | ComponentType::VoltageSourceSin => "5",
             ComponentType::CurrentSource => "1m",
+            // Open-loop gain of the ideal stage.
+            ComponentType::OpAmp => "100k",
             ComponentType::CellInstance => "",
             _ => "",
         }

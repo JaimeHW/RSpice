@@ -10,6 +10,7 @@ impl ComponentType {
             ComponentType::Transformer => 4,
             ComponentType::NpnBjt | ComponentType::PnpBjt => 3,
             ComponentType::Njfet | ComponentType::Pjfet => 3,
+            ComponentType::OpAmp => 3,
             ComponentType::Nmos
             | ComponentType::Pmos
             | ComponentType::NVdmos
@@ -111,6 +112,12 @@ impl ComponentType {
                 ("C+", Point { x: 20, y: -10 }),
                 ("C-", Point { x: 20, y: 10 }),
             ],
+            // (40, 40): hw 20, inputs at ±10, output centered
+            ComponentType::OpAmp => &[
+                ("in+", Point { x: -20, y: -10 }),
+                ("in-", Point { x: -20, y: 10 }),
+                ("out", Point { x: 20, y: 0 }),
+            ],
             ComponentType::CoupledInductor => &[],
             // (60, 40): hw 30
             ComponentType::CellInstance => {
@@ -209,6 +216,7 @@ impl ComponentType {
             | ComponentType::Vccs
             | ComponentType::Ccvs
             | ComponentType::Cccs => (40, 40),
+            ComponentType::OpAmp => (40, 40),
             ComponentType::CoupledInductor => (0, 0),
             ComponentType::XspiceGain
             | ComponentType::XspiceSummer
@@ -270,6 +278,7 @@ mod tests {
         ComponentType::Vccs,
         ComponentType::Ccvs,
         ComponentType::Cccs,
+        ComponentType::OpAmp,
         ComponentType::CoupledInductor,
         ComponentType::CellInstance,
         ComponentType::Ground,

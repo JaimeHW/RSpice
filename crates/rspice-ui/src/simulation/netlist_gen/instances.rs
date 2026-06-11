@@ -128,6 +128,20 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}{}", instance_name, nodes, model, params))
             }
 
+            // Ideal op-amp (3 terminals: in+ in- out) — emitted as a
+            // ground-referenced VCVS: E<name> <out> 0 <in+> <in-> <gain>
+            ComponentType::OpAmp => {
+                let gain_with_params =
+                    self.format_value_with_params(&component.value, &component.params);
+                (node_names.len() >= 3).then(|| {
+                    format!(
+                        "{} {} 0 {} {} {}",
+                        instance_name, node_names[2], node_names[0], node_names[1],
+                        gain_with_params
+                    )
+                })
+            }
+
             // Controlled sources (4 terminals: + - control+ control-)
             // Spectre format: E1 out+ out- in+ in- gain [params]
             ComponentType::Vcvs => {

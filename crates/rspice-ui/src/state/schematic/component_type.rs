@@ -78,6 +78,9 @@ pub enum ComponentType {
     Ccvs,
     /// Current-Controlled Current Source (SPICE prefix: F)
     Cccs,
+    /// Ideal operational amplifier — emitted as a ground-referenced VCVS
+    /// (SPICE prefix: E)
+    OpAmp,
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
     /// Generic hierarchical/library cell instance (SPICE prefix: X)

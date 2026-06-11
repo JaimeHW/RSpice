@@ -2,6 +2,35 @@ use std::fmt::Write;
 
 use super::SvgExportConfig;
 
+pub(super) fn write_opamp_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
+    // Ideal op-amp: IEEE triangle with + (top) and − (bottom) input marks.
+    writeln!(
+        svg,
+        r#"<polygon class="component" fill="none" points="{},{} {},{} {},{}"/>"#,
+        cx - 12.0,
+        cy - 16.0, // top-left
+        cx + 12.0,
+        cy, // apex (output)
+        cx - 12.0,
+        cy + 16.0 // bottom-left
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<text class="text" x="{}" y="{}" font-size="11">+</text>"#,
+        cx - 9.0,
+        cy - 6.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<text class="text" x="{}" y="{}" font-size="11">−</text>"#,
+        cx - 9.0,
+        cy + 14.0
+    )
+    .unwrap();
+}
+
 pub(super) fn write_vcvs_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
     // Voltage-Controlled Voltage Source - diamond with + and -
     // Standard controlled source symbol (diamond shape)

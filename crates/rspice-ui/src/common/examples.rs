@@ -562,21 +562,20 @@ fn build_differential_pair(state: &mut SchematicState) {
     add_label(state, Point::new(300, 140), "outp");
 }
 
-/// Opamp Inverting Amplifier (VCVS as the gain element)
+/// Opamp Inverting Amplifier (ideal op-amp triangle)
 /// ```text
 ///            ┌──/\RF\──┐
 ///            │  10k    │
-///  VIN──/\RIN\──┬──[C− ]   [O+]──┬──o Vout
-///         1k    │   E1 (×1e6)    │
-///              [C+]─⏚  [O−]──────┘ to GND
+///  VIN──/\RIN\──┬──[in−]\
+///         1k    │        >──┬──o Vout
+///              [in+]─⏚ ────/
 /// ```
 fn build_opamp_inverter(state: &mut SchematicState) {
     let mut id = 1u64;
 
-    // VCVS, mirrored so the output faces right:
-    // C+ (260,150), C− (260,170), O+ (300,150), O− (300,170).
-    let opamp = Component::new(id, ComponentType::Vcvs, Point::new(280, 160))
-        .with_mirror_h(true)
+    // Ideal op-amp triangle:
+    // in+ (260,150), in− (260,170), out (300,160).
+    let opamp = Component::new(id, ComponentType::OpAmp, Point::new(280, 160))
         .with_name_value("E1", "1e6");
     id += 1;
     state.components.push(opamp);
@@ -643,9 +642,9 @@ fn build_opamp_inverter(state: &mut SchematicState) {
     add_wire(
         state,
         vec![
-            Point::new(300, 150),
-            Point::new(340, 150),
-            Point::new(380, 150),
+            Point::new(300, 160),
+            Point::new(340, 160),
+            Point::new(380, 160),
         ],
     );
     // RF right, down into the output (tee at x=340).
@@ -654,14 +653,14 @@ fn build_opamp_inverter(state: &mut SchematicState) {
         vec![
             Point::new(300, 100),
             Point::new(340, 100),
-            Point::new(340, 150),
+            Point::new(340, 160),
         ],
     );
-    // Output reference and source return to the ground rail.
-    add_wire(state, vec![Point::new(300, 170), Point::new(300, 300)]);
+    // Source return to the ground rail (the ideal op-amp's output is
+    // ground-referenced internally).
     add_wire(state, vec![Point::new(80, 230), Point::new(80, 300)]);
-    add_wire(state, vec![Point::new(80, 300), Point::new(300, 300)]);
-    add_label(state, Point::new(380, 150), "vout");
+    add_wire(state, vec![Point::new(80, 300), Point::new(200, 300)]);
+    add_label(state, Point::new(380, 160), "vout");
 }
 
 // =============================================================================

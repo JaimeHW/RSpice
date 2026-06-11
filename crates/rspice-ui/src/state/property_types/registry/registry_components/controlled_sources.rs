@@ -6,6 +6,34 @@ impl PropertyRegistry {
         self.register_vccs();
         self.register_ccvs();
         self.register_cccs();
+        self.register_opamp();
+    }
+
+    /// Register the ideal op-amp (ground-referenced VCVS behind a triangle).
+    pub(in super::super) fn register_opamp(&mut self) {
+        let mut sheet = PropertySheet::new();
+
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Instance Name")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("E1"))
+                .with_order(0)
+                .with_category("Instance")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("gain")
+                .with_display_name("Open-Loop Gain")
+                .with_description("Output voltage / differential input voltage (linear)")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(100_000.0))
+                .with_order(10)
+                .with_category("Electrical")
+                .required(),
+        );
+
+        self.sheets.insert(ComponentType::OpAmp, sheet);
     }
 
     /// Register VCVS (Voltage-Controlled Voltage Source) with commercial parameters
