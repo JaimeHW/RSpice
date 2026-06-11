@@ -102,6 +102,52 @@ impl HbSolver {
         spectra
     }
 
+    /// Periodic small-signal capacitance spectra around the operating
+    /// point: sparse `(i, j, C)` entries from the device charge Jacobians,
+    /// in the same conventions as `conductance_spectra`.
+    pub(super) fn capacitance_spectra(
+        &mut self,
+        state: &HbSolverState,
+    ) -> Vec<(usize, usize, Vec<Complex64>)> {
+        let n = self.num_nodes;
+        if !self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+            return Vec::new();
+        }
+        let n_time = self.fft.size();
+
+        let v_time: Vec<Vec<Value>> = (0..n)
+            .map(|node| self.fft.to_time_domain(&state.x[node]))
+            .collect();
+
+        let mut c_time = vec![vec![vec![0.0; n_time]; n]; n];
+        let mut node_voltages = vec![0.0; n];
+        for t in 0..n_time {
+            for node in 0..n {
+                node_voltages[node] = v_time[node][t];
+            }
+            for device in &self.nonlinear_devices {
+                for ((i, j), c) in device.charge_jacobian(&node_voltages) {
+                    if i < n && j < n {
+                        c_time[i][j][t] += c;
+                    }
+                }
+            }
+        }
+
+        let mut spectra = Vec::new();
+        for i in 0..n {
+            for j in 0..n {
+                let max_c: Value = c_time[i][j].iter().fold(0.0, |a, &b| a.max(b.abs()));
+                if max_c < 1e-30 {
+                    continue;
+                }
+                let spectrum = self.fft.to_frequency_domain(&c_time[i][j]);
+                spectra.push((i, j, spectrum));
+            }
+        }
+        spectra
+    }
+
     /// Solve the sideband-coupled small-signal system at one offset frequency.
     ///
     /// Unknowns are `V[(node, k)]` for k in `[sideband_min, sideband_max]` at
@@ -131,6 +177,11 @@ impl HbSolver {
 
         let spectra = if self.has_nonlinear_devices() {
             self.conductance_spectra(state)
+        } else {
+            Vec::new()
+        };
+        let cap_spectra = if self.has_nonlinear_devices() {
+            self.capacitance_spectra(state)
         } else {
             Vec::new()
         };
@@ -184,6 +235,30 @@ impl HbSolver {
                         spectrum[d_abs].conj()
                     };
                     y[i * s + k_idx][j * s + m_idx] += g;
+                }
+            }
+        }
+
+        // Charge-storage coupling: Y[(i,k),(j,m)] += jw_k * C_ij[k-m] with
+        // the signed output-sideband frequency in front, mirroring the
+        // linear capacitors' block-diagonal jw_k entries.
+        for (i, j, spectrum) in &cap_spectra {
+            for k_idx in 0..s {
+                let k = sideband_min + k_idx as i32;
+                let omega_k = 2.0 * PI * offset_hz + (k as f64) * omega0;
+                let jw = Complex64::new(0.0, omega_k);
+                for m_idx in 0..s {
+                    let d = (k_idx as i32) - (m_idx as i32);
+                    let d_abs = d.unsigned_abs() as usize;
+                    if d_abs >= spectrum.len() {
+                        continue;
+                    }
+                    let c = if d >= 0 {
+                        spectrum[d_abs]
+                    } else {
+                        spectrum[d_abs].conj()
+                    };
+                    y[i * s + k_idx][j * s + m_idx] += jw * c;
                 }
             }
         }

@@ -45,4 +45,7 @@ pub use fft::HbFft;
 pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
 pub use nonlinear::{HbBjt, HbBjtType, HbDevice, HbDeviceCollection, HbDiode, HbMosType, HbMosfet};
 pub use result::{HarmonicData, HbResult, SpectralVoltage};
-pub use solver::{HbError, HbSolver, HbSolverState, PeriodicAcExcitation};
+pub use solver::{
+    DepletionCap, HbError, HbSolver, HbSolverState, NonlinearDeviceInstance,
+    NonlinearDeviceParams, NonlinearDeviceType, PeriodicAcExcitation,
+};

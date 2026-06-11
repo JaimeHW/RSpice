@@ -94,12 +94,13 @@ fn devices_see_the_physical_voltage_swing() {
     // drive (an effective 0.9 V swing), which clips hard and parks tens of
     // millivolts of DC and HD2 here.
     let deck = "\
-* clipper swing pin
+* clipper swing pin (conduction only: junction charge pinned off so this
+* test isolates the amplitude convention through the exponential)
 v1 in 0 sin(0 0.45 1meg)
 r1 in d 1k
 d1 d 0 dmod
 c1 d 0 1p
-.model dmod D IS=1e-14 N=1.0
+.model dmod D IS=1e-14 N=1.0 CJ0=0 TT=0
 .end
 ";
     let result = run_hb(deck, 1.0e6, 8);

@@ -332,6 +332,23 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Attach junction charge parameters: `cap_a` is the primary junction
+    /// (diode junction, BJT B-E, JFET G-S), `cap_b` the secondary (BJT B-C,
+    /// JFET G-D); `tt_f`/`tt_r` are the forward/reverse transit times.
+    pub fn with_junction_caps(
+        mut self,
+        cap_a: DepletionCap,
+        cap_b: DepletionCap,
+        tt_f: Value,
+        tt_r: Value,
+    ) -> Self {
+        self.params.cap_a = cap_a;
+        self.params.cap_b = cap_b;
+        self.params.tt_f = tt_f.max(0.0);
+        self.params.tt_r = tt_r.max(0.0);
+        self
+    }
+
     /// Whether this device stores charge (junction or diffusion capacitance).
     pub fn has_charge_storage(&self) -> bool {
         self.params.cap_a.cj0 > 0.0

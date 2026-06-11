@@ -7,28 +7,40 @@ impl Engine {
         solver: &mut HbSolver,
         num_nodes: usize,
     ) {
+        use crate::analysis::advanced::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
+
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
             let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);
-            solver.add_diode(anode, cathode, diode.is, diode.n);
+            solver.add_nonlinear_device(
+                NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
+                    .with_junction_caps(
+                        DepletionCap::new(diode.cj0, diode.vj, diode.m, 0.5),
+                        DepletionCap::none(),
+                        diode.tt,
+                        0.0,
+                    ),
+            );
         }
 
         for bjt in &circuit.bjts.devices {
             let collector = Self::hb_node_to_solver_index(bjt.node_collector, num_nodes);
             let base = Self::hb_node_to_solver_index(bjt.node_base, num_nodes);
             let emitter = Self::hb_node_to_solver_index(bjt.node_emitter, num_nodes);
-            match bjt.bjt_type {
-                crate::device::BjtType::Npn => {
-                    solver.add_npn_bjt(
-                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                    );
-                }
-                crate::device::BjtType::Pnp => {
-                    solver.add_pnp_bjt(
-                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                    );
-                }
-            }
+            let instance = match bjt.bjt_type {
+                crate::device::BjtType::Npn => NonlinearDeviceInstance::npn_bjt(
+                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                ),
+                crate::device::BjtType::Pnp => NonlinearDeviceInstance::pnp_bjt(
+                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                ),
+            };
+            solver.add_nonlinear_device(instance.with_junction_caps(
+                DepletionCap::new(bjt.cje, bjt.vje, bjt.mje, bjt.fc),
+                DepletionCap::new(bjt.cjc, bjt.vjc, bjt.mjc, bjt.fc),
+                bjt.tf,
+                bjt.tr,
+            ));
         }
 
         for mos in &circuit.mosfets.devices {
@@ -54,30 +66,32 @@ impl Engine {
             let gate = Self::hb_node_to_solver_index(jfet.gate, num_nodes);
             let source = Self::hb_node_to_solver_index(jfet.source, num_nodes);
             let beta = jfet.params.beta.max(1e-18);
-            match jfet.jfet_type {
-                crate::device::JfetType::NJF => {
-                    solver.add_njfet(
-                        drain,
-                        gate,
-                        source,
-                        jfet.params.vto,
-                        beta,
-                        jfet.params.lambda,
-                        jfet.params.is,
-                    );
-                }
-                crate::device::JfetType::PJF => {
-                    solver.add_pjfet(
-                        drain,
-                        gate,
-                        source,
-                        jfet.params.vto,
-                        beta,
-                        jfet.params.lambda,
-                        jfet.params.is,
-                    );
-                }
-            }
+            let instance = match jfet.jfet_type {
+                crate::device::JfetType::NJF => NonlinearDeviceInstance::njfet(
+                    drain,
+                    gate,
+                    source,
+                    jfet.params.vto,
+                    beta,
+                    jfet.params.lambda,
+                    jfet.params.is,
+                ),
+                crate::device::JfetType::PJF => NonlinearDeviceInstance::pjfet(
+                    drain,
+                    gate,
+                    source,
+                    jfet.params.vto,
+                    beta,
+                    jfet.params.lambda,
+                    jfet.params.is,
+                ),
+            };
+            solver.add_nonlinear_device(instance.with_junction_caps(
+                DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
+                DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
+                0.0,
+                0.0,
+            ));
         }
 
         for sw in &circuit.vswitches {

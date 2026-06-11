@@ -456,6 +456,38 @@ impl HbSolver {
             }
         }
 
+        // Charge storage: the capacitive current delivered into a node is
+        // d/dt of the delivered charge, i.e. jw_k * Q_k per harmonic. The
+        // charge waveform comes from the same time grid as the resistive
+        // currents, so charge and current stay phase-consistent.
+        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+            let omega0 = 2.0 * PI * self.config.fundamental_freq;
+            let mut q_time = vec![vec![0.0; n_time]; self.num_nodes];
+            let mut node_voltages = vec![0.0; self.num_nodes];
+            for t in 0..n_time {
+                for node in 0..self.num_nodes {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for (node, charge) in device.charge(&node_voltages) {
+                        if node < q_time.len() {
+                            q_time[node][t] += charge;
+                        }
+                    }
+                }
+            }
+
+            for node in 0..self.num_nodes {
+                let q_spectrum = self.fft.to_frequency_domain(&q_time[node]);
+                for (k, &q_k) in q_spectrum.iter().enumerate() {
+                    if k <= self.num_harmonics && node < state.residual.len() {
+                        let omega_k = (k as f64) * omega0;
+                        state.residual[node][k] += Complex64::new(0.0, omega_k) * q_k;
+                    }
+                }
+            }
+        }
+
         state.compute_residual_norm();
     }
 
@@ -626,6 +658,60 @@ impl HbSolver {
                             // SUBTRACT device Jacobian for KCL: residual = I_source - I_device
                             // So J = âˆ‚res/âˆ‚V = -âˆ‚I_device/âˆ‚V = -gd
                             jac[row][col] -= g_val;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Charge-storage coupling: the residual carries jw_k * Q_k, so its
+        // derivative is jw_k * C[k-m] - the same Toeplitz structure as the
+        // conductances with the ROW harmonic's frequency in front.
+        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+            let omega0 = 2.0 * PI * self.config.fundamental_freq;
+            let mut c_time = vec![vec![vec![0.0; n_time]; n]; n];
+            let mut node_voltages = vec![0.0; n];
+            for t in 0..n_time {
+                for node in 0..n {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for ((i, j), c) in device.charge_jacobian(&node_voltages) {
+                        if i < n && j < n {
+                            c_time[i][j][t] += c;
+                        }
+                    }
+                }
+            }
+
+            for i in 0..n {
+                for j in 0..n {
+                    let max_c: Value = c_time[i][j].iter().fold(0.0, |a, &b| a.max(b.abs()));
+                    if max_c < 1e-30 {
+                        continue;
+                    }
+
+                    let c_spectrum = self.fft.to_frequency_domain(&c_time[i][j]);
+
+                    for k in 0..h {
+                        let omega_k = (k as f64) * omega0;
+                        let jw = Complex64::new(0.0, omega_k);
+                        for l in 0..h {
+                            let row = i * h + k;
+                            let col = j * h + l;
+
+                            let diff = k as isize - l as isize;
+                            let c_idx = diff.unsigned_abs();
+                            if c_idx < c_spectrum.len() {
+                                let c_val = if diff >= 0 {
+                                    c_spectrum[c_idx]
+                                } else {
+                                    c_spectrum[c_idx].conj()
+                                };
+                                // Residual carries +jw_k*Q_k; J = d(res)/dV
+                                // gets -(jw_k * dQ/dV) like the linear caps.
+                                jac[row][col] -= jw * c_val;
+                            }
                         }
                     }
                 }

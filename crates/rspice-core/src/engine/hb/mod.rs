@@ -179,11 +179,9 @@ impl Engine {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
 
-        // Check for reactive elements (capacitors or inductors)
-        let has_reactive = !circuit.capacitors.is_empty() || !circuit.inductors.names.is_empty();
-        if !has_reactive {
-            return Err(HbError::NoReactiveElements.into());
-        }
+        // No reactive-element gate: junction devices carry their own charge
+        // storage, and HB on a resistive nonlinear circuit is legitimate
+        // distortion analysis (every harmonic system is solvable regardless).
         if let Some(summary) = Self::hb_unsupported_nonlinear_device_summary(&circuit, num_nodes) {
             return Err(HbError::UnsupportedNonlinearDevices(summary).into());
         }
