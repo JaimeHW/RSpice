@@ -229,6 +229,84 @@ fn amplitude_squares_into_psd_and_guards_gate_it() {
     );
 }
 
+const TABLE_SOURCE: &str = r#"
+`include "disciplines.vams"
+module tblsrc(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ noise_table('{1.0, 1.0e-18, 100.0, 3.0e-18}, "tbl");
+endmodule
+"#;
+
+const TABLE_LOG_SOURCE: &str = r#"
+`include "disciplines.vams"
+module tbllog(p, n);
+    inout p, n;
+    electrical p, n;
+    analog I(p, n) <+ noise_table_log('{1.0, 1.0e-18, 100.0, 1.0e-16}, "tbl");
+endmodule
+"#;
+
+#[test]
+fn noise_table_interpolates_and_clamps() {
+    let tbl = write_model("tblsrc.va", TABLE_SOURCE);
+    let quiet = write_model("qres3.va", QUIET_RES);
+    // Endpoints, the linear midpoint of [1, 100] at 50.5 Hz, and a
+    // clamped point beyond the table
+    let frequencies = [1.0, 50.5, 100.0, 1.0e4];
+    let onoise = output_noise(
+        &format!(
+            "* table noise into quiet load\n\
+             i1 0 out dc 0\n\
+             X1 out 0 tblsrc\n\
+             X2 out 0 qres r=1k\n\
+             .va \"{tbl}\" tblsrc\n\
+             .va \"{quiet}\" qres\n\
+             .end\n"
+        ),
+        "out",
+        &frequencies,
+    );
+    let r_sq = 1.0e6;
+    let expected = [1.0e-18, 2.0e-18, 3.0e-18, 3.0e-18];
+    for i in 0..frequencies.len() {
+        let analytic = expected[i] * r_sq;
+        assert!(
+            ((onoise[i] - analytic) / analytic).abs() < 1e-9,
+            "table at {} Hz: {:.6e} vs {analytic:.6e}",
+            frequencies[i],
+            onoise[i]
+        );
+    }
+}
+
+#[test]
+fn noise_table_log_interpolates_in_log_coordinates() {
+    let tbl = write_model("tbllog.va", TABLE_LOG_SOURCE);
+    let quiet = write_model("qres4.va", QUIET_RES);
+    // Two decades from 1e-18 to 1e-16: the log-log midpoint at 10 Hz is
+    // exactly 1e-17
+    let onoise = output_noise(
+        &format!(
+            "* log table noise\n\
+             i1 0 out dc 0\n\
+             X1 out 0 tbllog\n\
+             X2 out 0 qres r=1k\n\
+             .va \"{tbl}\" tbllog\n\
+             .va \"{quiet}\" qres\n\
+             .end\n"
+        ),
+        "out",
+        &[10.0],
+    );
+    let analytic = 1.0e-17 * 1.0e6;
+    assert!(
+        ((onoise[0] - analytic) / analytic).abs() < 1e-9,
+        "log-log midpoint: {:.6e} vs {analytic:.6e}",
+        onoise[0]
+    );
+}
+
 const SERIES_VNOISE: &str = r#"
 `include "disciplines.vams"
 module vn(p, n);
