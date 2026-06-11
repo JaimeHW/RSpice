@@ -273,14 +273,20 @@ impl Engine {
                 ));
             }
 
+            // jfetnoi.c rides flicker on the per-finger channel current with
+            // an explicit multiplicity factor: m·KF·|cd|^AF / f. This model
+            // folds m into beta, so the per-finger current and the factor
+            // recombine into KF·m^(1−AF) on the folded current — exact at
+            // AF=1, which is why the bare coefficient never showed.
             if let Some((kf, af, ef)) = jfet.flicker_noise_coefficients()
                 && ids.abs() > 1e-18
             {
+                let m = jfet.m.max(1e-12);
                 noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
                     format!("{}:flicker", jfet.name),
                     jfet.drain,
                     jfet.source,
-                    kf,
+                    kf * m.powf(1.0 - af),
                     af,
                     ef,
                     ids,
@@ -714,6 +720,77 @@ M1 D G 0 0 NM W=20u L=2u M=2
             assert!(
                 relative <= 5e-3,
                 "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// onoise table of [`JFET_FLICKER_DECK`] from the official ngspice-46
+    /// binary.
+    const JFET_FLICKER_ORACLE: &str =
+        include_str!("../../../tests/testdata/jfet_flicker_ngspice46.dat");
+
+    /// A common-source JFET stage with flicker-dominated low-frequency
+    /// noise; AF=1.4 with instance M=2 makes the per-finger multiplicity
+    /// recombination observable against the binary.
+    const JFET_FLICKER_DECK: &str = "\
+JFET flicker noise testbench
+
+V1 VDD 0 12
+VIN G 0 DC -0.5 AC 1
+RD VDD D 2k
+J1 D G 0 JN M=2
+
+.OPTIONS NOACCT
+
+.NOISE v(d) VIN DEC 5 10 100k
+
+.MODEL JN NJF VTO=-2 BETA=1m LAMBDA=0 RD=10 RS=10 CGS=2p CGD=2p
++ KF=1e-16 AF=1.4
+
+.END
+";
+
+    /// The jfetnoi.c flicker law (per-finger current with an explicit
+    /// multiplicity factor) must reproduce the official binary under this
+    /// model's folded-beta representation.
+    #[test]
+    fn jfet_flicker_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(JFET_FLICKER_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            5,
+            10.0,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = JFET_FLICKER_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
                 freq_ref,
                 onoise,
                 onoise_ref,

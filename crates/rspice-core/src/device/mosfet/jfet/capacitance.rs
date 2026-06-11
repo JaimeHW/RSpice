@@ -266,15 +266,17 @@ impl Jfet {
         (igs, igd)
     }
 
-    /// Return flicker-noise coefficients normalized by active area.
+    /// Return the flicker-noise coefficients `(KF, AF, EF)`.
+    ///
+    /// jfetnoi.c applies KF directly — `m·KF·|cd|^AF / f` — with no
+    /// geometry normalization; the caller folds the multiplicity.
     pub fn flicker_noise_coefficients(&self) -> Option<(Value, Value, Value)> {
         if self.params.kf <= 0.0 || !self.params.kf.is_finite() {
             return None;
         }
 
-        let area = (self.width.max(1e-18) * self.length.max(1e-18)).max(1e-30);
         Some((
-            self.params.kf / area,
+            self.params.kf,
             self.params.af.max(1e-12),
             self.params.ef.max(1e-12),
         ))
