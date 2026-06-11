@@ -179,7 +179,7 @@ impl Engine {
         }
     }
 
-    pub(super) fn collect_transient_source_breakpoints(
+    pub(in crate::engine) fn collect_transient_source_breakpoints(
         circuit: &crate::circuit::Circuit,
         tstop: Value,
         tstep_hint: Value,

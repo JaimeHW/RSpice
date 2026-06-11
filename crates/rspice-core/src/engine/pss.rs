@@ -848,7 +848,12 @@ impl Engine {
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep =
             TimestepController::new(initial_step, self.config.min_timestep, max_step);
+        // Register source-waveform breakpoints (PULSE edges, PWL corners,
+        // SIN delay starts) so the integrator lands on them instead of
+        // stepping across; without this, hard-edged drives shift the PSS
+        // orbit by up to one LTE-sized step per edge.
         let mut breakpoints = BreakpointManager::new();
+        Self::collect_transient_source_breakpoints(circuit, tstop, max_step, &mut breakpoints);
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
