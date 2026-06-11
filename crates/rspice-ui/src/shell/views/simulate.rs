@@ -459,7 +459,7 @@ fn picker_body(ui: &mut Ui, setup: &mut crate::common::app::SimSetupState, add_a
                                 query.is_empty()
                                     || label.to_lowercase().contains(&query)
                                     || id.contains(query.as_str())
-                                    || description.contains(query.as_str())
+                                    || description.to_lowercase().contains(&query)
                             })
                             .copied()
                             .collect();
