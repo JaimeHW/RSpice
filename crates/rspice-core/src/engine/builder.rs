@@ -425,7 +425,11 @@ impl Engine {
                 } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
-                    let mut diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
+                    // Model cards start from ngspice's defaults: parameters a
+                    // card omits must mean what they mean in SPICE, not
+                    // inherit the 1N4148-like convenience values.
+                    let mut diode =
+                        crate::device::Diode::spice_defaults(element.name.clone(), anode, cathode);
 
                     // Look up model and apply parameters
                     let rs_given;

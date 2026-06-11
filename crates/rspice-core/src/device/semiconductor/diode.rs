@@ -196,6 +196,27 @@ impl Diode {
         }
     }
 
+    /// Create a diode carrying ngspice's model-card defaults.
+    ///
+    /// `.model` parsing must start from these (IS=1e-14, N=1, RS=0, CJO=0,
+    /// VJ=1, M=0.5, TT=0, IBV=1mA) so a card that omits a parameter gets
+    /// SPICE semantics; `new()` keeps its 1N4148-like values as a standalone
+    /// convenience, but seeding model cards from it silently gave every bare
+    /// card 4 pF of junction capacitance, 8 ns of transit time, and half an
+    /// ohm of series resistance that ngspice does not have.
+    pub fn spice_defaults(name: String, node_anode: usize, node_cathode: usize) -> Self {
+        let mut diode = Self::new(name, node_anode, node_cathode);
+        diode.is = 1e-14;
+        diode.n = 1.0;
+        diode.rs = 0.0;
+        diode.ibv = 1e-3;
+        diode.cj0 = 0.0;
+        diode.vj = 1.0;
+        diode.m = 0.5;
+        diode.tt = 0.0;
+        diode
+    }
+
     /// Create diode with custom DC model parameters
     pub fn with_params(mut self, is: Value, n: Value, rs: Value) -> Self {
         self.is = is;
