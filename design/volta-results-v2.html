@@ -1,0 +1,1117 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VOLTA — Multi-run results workspace (v2)</title>
+<!--
+  DESIGN NOTES (working file) — companion to "VOLTA results workspace" and
+  the IDE shell exploration. Direction is settled: INSTRUMENT, signal-yellow
+  accent #F2B824, exactly the palette generated into ui/palette.rs. This file
+  designs the v2 results architecture: results keyed by RUN, not by signal.
+
+  Why v2 exists: the analog designer's daily loop is comparison — corners
+  against nominal, tonight's run against this morning's, Monte-Carlo clouds
+  against specs. v1 renders one active run. v2 makes the run a first-class
+  object everywhere:
+
+   1 RUN SHELF — every analysis result is a run row: status (live/complete/
+     checkpointed/failed), progress for live runs with streaming counts,
+     overlay toggle, focus. The shelf is the data model made visible; every
+     viewer below subscribes to it.
+   2 OVERLAY — multi-run waveform grammar. Rule: SIGNAL OWNS HUE, RUN OWNS
+     WEIGHT. A signal keeps one trace color across all runs; the focused run
+     draws at full strength, other overlaid runs at reduced alpha with the
+     same hue. Hovering a run row (or legend chip) focuses it. This scales to
+     5 corners without the color soup of per-(signal x run) cycling.
+     Cursor readout lists one row per run — values live in the right panel,
+     never on the canvas.
+   3 MATRIX — tests x corners with spec bounds. Rows are measurements
+     (.meas), columns are corner runs, the leading rail holds min/max specs.
+     Cells tint ok/err; the worst violator carries a ring. Clicking a cell
+     focuses that corner everywhere (shelf, overlay, readout) — one click
+     from "which corner fails" to "what the waveform did".
+   4 MC — distribution dashboard for statistical runs: histogram with sigma
+     band + spec limit, UGF/PM scatter with pass/fail tinting, yield chip.
+   5 NOISE — band-integrated, ranked contributor table (engine ships this
+     in IntegratedNoise::contribution_summary): device, mechanism, power,
+     share-of-total as an in-row bar. Dominant contributor readable in one
+     fixation.
+   6 OP — per-device operating-point inspector (engine: device_op_report):
+     region chips, engineering-notation columns, filter + sort. The row is a
+     cross-probe handle (hover highlights would light the schematic net).
+
+  Shared grammar carried over: docbar (run context left, tabs, controls
+  right) / document well / right-panel numerics. Flat fills, 1 px strokes,
+  2 px radii, shadows only on popovers, one accent per surface.
+
+  EVERY NUMBER on this page — corner gains, step responses, matrix cells,
+  MC samples, noise shares, OP bias points — is computed at load from one
+  OTA model (Itail 20 uA, CL 2 pF, nominal UGF 10.2 MHz, PM 78.4 deg) with
+  per-corner process factors and a seeded PRNG, so no two surfaces can
+  disagree. Same policy as the v1 file.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ================================================================= base */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+button, input, select { font: inherit; color: inherit; }
+button { background: none; border: none; cursor: pointer; }
+svg { display: block; }
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --fs-0: 11px; --fs-1: 12px; --fs-2: 13px; --fs-3: 14px; --fs-4: 16px;
+  --ctl-h: 24px; --row-h: 26px; --bar-pad: 6px;
+  --t-fast: 0.16s; --t-med: 0.22s;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 2px; --radius-lg: 3px;
+}
+/* Instrument · dark — generated palette (ui/palette.rs INSTRUMENT_DARK) */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #11171B; --bg-panel: #1A2024; --bg-inset: #0B1115;
+  --bg-elevated: #21292E; --bg-hover: #262E33; --bg-active: #2E3A41;
+  --border: #2B3136; --border-strong: #444C50;
+  --text: #D7DBDE; --text-dim: #93999E; --text-faint: #646A6E;
+  --accent: #F2B824; --accent-ink: #17181A; --accent-dim: rgba(242,184,36,0.13);
+  --ok: #65D68A; --warn: #EA9344; --err: #E06C5A;
+  --ok-dim: rgba(101,214,138,0.12); --err-dim: rgba(224,108,90,0.13);
+  --canvas-bg: #070C10; --canvas-grid: #1C2327;
+  --trace-1: #F2B824; --trace-2: #7CB8E8; --trace-3: #D984B0;
+  --trace-4: #59D483; --trace-5: #78A5EF; --trace-6: #F2716A;
+  --shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+/* Instrument · light — generated palette (ui/palette.rs INSTRUMENT_LIGHT) */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #E8ECEE; --bg-panel: #F5F7F8; --bg-inset: #E1E5E7;
+  --bg-elevated: #FBFDFE; --bg-hover: #E6EAED; --bg-active: #D4DCE2;
+  --border: #D1D5D8; --border-strong: #A6ACAF;
+  --text: #1F2528; --text-dim: #53595D; --text-faint: #7F8487;
+  --accent: #8F6400; --accent-ink: #FCFAF6; --accent-dim: rgba(143,100,0,0.10);
+  --ok: #007C3A; --warn: #C26E12; --err: #C03A28;
+  --ok-dim: rgba(0,124,58,0.10); --err-dim: rgba(192,58,40,0.10);
+  --canvas-bg: #FBFDFE; --canvas-grid: #E0E3E5;
+  --trace-1: #A16100; --trace-2: #3D72A8; --trace-3: #A8537E;
+  --trace-4: #008942; --trace-5: #3065BE; --trace-6: #BD3838;
+  --shadow: 0 6px 24px rgba(3,4,5,0.18);
+}
+html { background: var(--bg-app); }
+body {
+  font-family: var(--font-ui); font-size: var(--fs-2); line-height: 1.45;
+  color: var(--text); background: var(--bg-app);
+  padding-bottom: 120px;
+}
+.mono { font-family: var(--font-mono); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ============================================================== doc bar */
+.doc-head {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: var(--sp-4);
+  padding: 10px var(--sp-5); background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+.doc-head h1 { font-size: var(--fs-3); font-weight: 600; letter-spacing: 0.01em; }
+.doc-head h1 span { color: var(--text-faint); font-weight: 400; }
+.doc-nav { display: flex; gap: 2px; margin-left: var(--sp-4); }
+.doc-nav a {
+  display: inline-flex; align-items: center; height: var(--ctl-h);
+  padding: 0 10px; border-radius: var(--radius);
+  color: var(--text-dim); text-decoration: none; font-size: var(--fs-1);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.doc-nav a:hover { background: var(--bg-hover); color: var(--text); }
+.spacer { flex: 1; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h);
+  padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text-dim); font-size: var(--fs-1);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.theme-toggle:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+
+/* ============================================================= sections */
+section { padding: 40px var(--sp-5) 0; max-width: 1240px; margin: 0 auto; }
+.sec-label {
+  font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.14em;
+  color: var(--accent); text-transform: uppercase; margin-bottom: 6px;
+}
+section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
+.sec-note { color: var(--text-dim); font-size: var(--fs-2); max-width: 78ch; margin-bottom: var(--sp-4); text-wrap: pretty; }
+.sec-note b { color: var(--text); font-weight: 500; }
+
+/* ============================================================ workspace */
+.frame {
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-panel); overflow: hidden;
+}
+.docbar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--bar-pad) var(--sp-3); border-bottom: 1px solid var(--border);
+  background: var(--bg-panel); min-height: 36px; flex-wrap: wrap;
+}
+.runctx { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-1); color: var(--text-dim); }
+.runctx .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.runctx .name { font-family: var(--font-mono); color: var(--text); }
+.docbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 var(--sp-1); }
+.tabs { display: flex; gap: 2px; }
+.tab {
+  height: var(--ctl-h); padding: 0 10px; border-radius: var(--radius);
+  font-size: var(--fs-1); color: var(--text-dim);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.tab:hover { background: var(--bg-hover); color: var(--text); }
+.tab[aria-selected="true"] { background: var(--accent-dim); color: var(--accent); font-weight: 500; }
+.ctl {
+  display: inline-flex; align-items: center; gap: 6px; height: var(--ctl-h);
+  padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-panel); color: var(--text-dim); font-size: var(--fs-1);
+  transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+}
+.ctl:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-strong); }
+.ctl:active { background: var(--bg-active); }
+.ctl[aria-pressed="true"] { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+.ctl.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.ctl.primary:hover { filter: brightness(1.06); }
+
+.body-grid { display: grid; grid-template-columns: 1fr 264px; }
+.well { background: var(--canvas-bg); padding: var(--sp-3); min-width: 0; }
+.rpanel {
+  border-left: 1px solid var(--border); background: var(--bg-panel);
+  padding: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-3);
+  font-size: var(--fs-1);
+}
+.rpanel h4 {
+  font-family: var(--font-mono); font-size: var(--fs-0); font-weight: 500;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.kv { display: grid; grid-template-columns: 1fr auto; row-gap: 3px; column-gap: 12px; }
+.kv dt { color: var(--text-dim); }
+.kv dd { font-family: var(--font-mono); text-align: right; color: var(--text); }
+.kv dd.ok { color: var(--ok); } .kv dd.err { color: var(--err); }
+
+/* ============================================================ run shelf */
+.shelf { display: flex; flex-direction: column; }
+.shelf-head, .run-row {
+  display: grid; align-items: center;
+  grid-template-columns: 26px 16px minmax(160px,1.2fr) 96px 1fr 120px 90px;
+  gap: var(--sp-2); padding: 0 var(--sp-3); min-height: var(--row-h);
+}
+.shelf-head {
+  font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-faint);
+  border-bottom: 1px solid var(--border); background: var(--bg-panel);
+}
+.run-row { border-bottom: 1px solid var(--border); transition: background var(--t-fast); }
+.run-row:last-child { border-bottom: none; }
+.run-row:hover { background: var(--bg-hover); }
+.run-row[data-focused="true"] { background: var(--accent-dim); }
+.run-row .swatch { width: 10px; height: 10px; border-radius: 2px; }
+.run-row .rname { font-family: var(--font-mono); font-size: var(--fs-1); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-row .meta { color: var(--text-faint); font-size: var(--fs-0); font-family: var(--font-mono); }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; height: 18px;
+  padding: 0 7px; border-radius: 9px; font-size: var(--fs-0); font-weight: 500;
+  width: fit-content;
+}
+.badge.done { background: var(--ok-dim); color: var(--ok); }
+.badge.live { background: var(--accent-dim); color: var(--accent); }
+.badge.ckpt { background: var(--bg-active); color: var(--text-dim); }
+.badge.fail { background: var(--err-dim); color: var(--err); }
+.badge .pulse { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+.progress { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.progress .track { flex: 1; height: 4px; border-radius: 2px; background: var(--bg-inset); overflow: hidden; }
+.progress .fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s linear; }
+.progress .pct { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); width: 76px; text-align: right; }
+.row-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.icon-btn {
+  width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius); color: var(--text-faint);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.icon-btn:hover { background: var(--bg-active); color: var(--text); }
+.ovl-check { accent-color: var(--accent); width: 13px; height: 13px; cursor: pointer; }
+
+/* ============================================================== overlay */
+.strip-head {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 4px 6px 8px;
+}
+.kind-tag {
+  font-family: var(--font-mono); font-size: var(--fs-0); font-weight: 500;
+  letter-spacing: 0.08em; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: 1px 5px; opacity: 0.9;
+}
+.strip-title { font-size: var(--fs-1); color: var(--text-dim); }
+.strip-title b { color: var(--text); font-weight: 500; font-family: var(--font-mono); }
+.legend { display: flex; gap: 4px; margin-left: var(--sp-3); flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 18px;
+  padding: 0 7px; border: 1px solid var(--border); border-radius: 9px;
+  font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim);
+  transition: border-color var(--t-fast), color var(--t-fast), opacity var(--t-fast);
+}
+.chip .sw { width: 8px; height: 8px; border-radius: 2px; }
+.chip:hover { border-color: var(--border-strong); color: var(--text); }
+.chip[data-focused="true"] { border-color: var(--accent); color: var(--accent); }
+.chip[data-hidden="true"] { opacity: 0.38; }
+.plot-wrap { position: relative; }
+.plot-wrap svg { width: 100%; height: auto; }
+.crosshair { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 3; }
+.axis-label { font-family: var(--font-mono); font-size: 10px; fill: var(--text-faint); }
+.grid-line { stroke: var(--canvas-grid); stroke-width: 1; }
+.spec-line { stroke: var(--err); stroke-width: 1; stroke-dasharray: 5 4; opacity: 0.7; }
+.spec-tag { font-family: var(--font-mono); font-size: 9.5px; fill: var(--err); }
+
+/* =============================================================== matrix */
+.mx { width: 100%; border-collapse: collapse; font-size: var(--fs-1); }
+.mx th, .mx td { padding: 5px 10px; text-align: right; border-bottom: 1px solid var(--border); }
+.mx thead th {
+  font-family: var(--font-mono); font-size: var(--fs-0); font-weight: 500;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint);
+  background: var(--bg-panel); position: sticky; top: 0;
+}
+.mx th.rowhead, .mx td.rowhead { text-align: left; font-family: var(--font-ui); color: var(--text); }
+.mx td.spec { text-align: right; font-family: var(--font-mono); color: var(--text-faint); white-space: nowrap; }
+.mx td.val { font-family: var(--font-mono); cursor: pointer; transition: background var(--t-fast); }
+.mx td.val:hover { background: var(--bg-hover); }
+.mx td.val.ok { color: var(--text); }
+.mx td.val.err { color: var(--err); background: var(--err-dim); font-weight: 500; }
+.mx td.val.worst { box-shadow: inset 0 0 0 1.5px var(--err); border-radius: 1px; }
+.mx td.val[data-focused="true"] { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.mx tbody tr:hover td.rowhead { color: var(--accent); }
+.mx tfoot td { font-family: var(--font-mono); color: var(--text-dim); border-bottom: none; padding-top: 8px; }
+.mx tfoot .pass { color: var(--ok); } .mx tfoot .fail { color: var(--err); }
+
+/* ================================================================== mc */
+.mc-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: var(--sp-3); }
+.mc-card { background: var(--canvas-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--sp-2); }
+.mc-card h5 { font-family: var(--font-mono); font-size: var(--fs-0); font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); padding: 2px 4px 6px; }
+.hist-bar { fill: var(--trace-2); opacity: 0.85; }
+.hist-bar.below { fill: var(--err); }
+.sigma-band { fill: var(--accent-dim); }
+.normal-fit { stroke: var(--accent); stroke-width: 1.5; fill: none; }
+.scatter-pt { fill: var(--trace-2); opacity: 0.7; }
+.scatter-pt.fail { fill: var(--err); opacity: 0.9; }
+
+/* ================================================================ noise */
+.ntab { width: 100%; border-collapse: collapse; font-size: var(--fs-1); }
+.ntab th, .ntab td { padding: 5px 10px; border-bottom: 1px solid var(--border); text-align: right; }
+.ntab thead th { font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); font-weight: 500; }
+.ntab th.l, .ntab td.l { text-align: left; }
+.ntab td.dev { font-family: var(--font-mono); color: var(--text); }
+.mech {
+  display: inline-flex; height: 17px; align-items: center; padding: 0 6px;
+  border-radius: 8.5px; font-size: var(--fs-0); font-family: var(--font-mono);
+}
+.mech.thermal { background: rgba(124,184,232,0.14); color: var(--trace-2); }
+.mech.flicker { background: rgba(217,132,176,0.14); color: var(--trace-3); }
+.mech.shot { background: rgba(89,212,131,0.14); color: var(--trace-4); }
+.sharecell { position: relative; font-family: var(--font-mono); }
+.sharebar {
+  position: absolute; left: 0; top: 15%; bottom: 15%;
+  background: var(--accent-dim); border-radius: 1px; z-index: 0;
+}
+.sharecell span { position: relative; z-index: 1; }
+
+/* =================================================================== op */
+.op-tools { display: flex; gap: var(--sp-2); align-items: center; padding-bottom: var(--sp-2); }
+.op-tools input[type="search"] {
+  height: var(--ctl-h); padding: 0 9px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--bg-inset); color: var(--text);
+  font-family: var(--font-mono); font-size: var(--fs-1); width: 230px;
+}
+.op-tools input[type="search"]::placeholder { color: var(--text-faint); }
+.optab { width: 100%; border-collapse: collapse; font-size: var(--fs-1); }
+.optab th, .optab td { padding: 4px 10px; border-bottom: 1px solid var(--border); text-align: right; font-family: var(--font-mono); }
+.optab thead th {
+  font-size: var(--fs-0); letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint); font-weight: 500; cursor: pointer; user-select: none;
+  white-space: nowrap;
+}
+.optab thead th:hover { color: var(--text); }
+.optab thead th .arrow { opacity: 0; font-size: 9px; }
+.optab thead th[data-sorted] .arrow { opacity: 1; color: var(--accent); }
+.optab th.l, .optab td.l { text-align: left; }
+.optab tbody tr:hover { background: var(--bg-hover); cursor: default; }
+.region {
+  display: inline-flex; height: 17px; align-items: center; padding: 0 6px;
+  border-radius: 8.5px; font-size: var(--fs-0);
+}
+.region.saturation { background: var(--ok-dim); color: var(--ok); }
+.region.linear { background: rgba(124,184,232,0.14); color: var(--trace-2); }
+.region.cutoff { background: var(--err-dim); color: var(--err); }
+
+/* ============================================================ impl note */
+.impl {
+  margin-top: var(--sp-4); border-left: 2px solid var(--accent);
+  background: var(--bg-panel); border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 10px 14px; font-size: var(--fs-1); color: var(--text-dim); max-width: 86ch;
+}
+.impl b { color: var(--text); font-weight: 500; }
+.impl code { font-family: var(--font-mono); color: var(--accent); font-size: var(--fs-0); }
+</style>
+</head>
+<body>
+
+<header class="doc-head">
+  <h1>VOLTA <span>/ results workspace v2 — multi-run architecture</span></h1>
+  <nav class="doc-nav" aria-label="Sections">
+    <a href="#runs">Runs</a><a href="#overlay">Overlay</a><a href="#matrix">Matrix</a>
+    <a href="#mc">MC</a><a href="#noise">Noise</a><a href="#op">OP</a>
+  </nav>
+  <div class="spacer"></div>
+  <button class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+      <circle cx="6" cy="6" r="4.5" stroke="currentColor"/><path d="M6 1.5v9" stroke="currentColor"/>
+      <path d="M6 1.5a4.5 4.5 0 0 1 0 9z" fill="currentColor"/>
+    </svg>
+    <span id="themeLabel">Dark</span>
+  </button>
+</header>
+
+<!-- ===================================================== 1 · RUN SHELF -->
+<section id="runs">
+  <div class="sec-label">01 · Run shelf</div>
+  <h2>Results are keyed by run</h2>
+  <p class="sec-note">
+    The shelf is the workspace's data model made visible: each row is one run with status,
+    progress, and an <b>overlay toggle</b> that feeds every viewer below. The live Monte-Carlo row
+    streams its sample count while running — waveforms appear as they compute, never after.
+    Hover a row to <b>focus</b> that run everywhere; the focused run renders at full strength.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> bench <span class="name">ota_5t.tb</span></span>
+      <span class="sep"></span>
+      <span class="runctx">history <span class="name" id="runCount">7 runs</span></span>
+      <div class="spacer"></div>
+      <button class="ctl" aria-pressed="true" id="ovlAll">Overlay corners</button>
+      <button class="ctl primary">New run</button>
+    </div>
+    <div class="shelf" id="shelf">
+      <div class="shelf-head">
+        <span>ovl</span><span></span><span style="text-align:left">run</span><span>status</span>
+        <span>progress</span><span>analysis</span><span style="text-align:right">actions</span>
+      </div>
+      <!-- rows injected -->
+    </div>
+  </div>
+  <div class="impl">
+    <b>Implementation:</b> a <code>RunId</code>-keyed <code>ResultsStore</code> replaces
+    <code>state.simulation.*</code> singletons; every viewer reads
+    <code>store.overlaid()</code> + <code>store.focused()</code>. Live rows subscribe to the
+    streaming channel the engine already exposes for progress. Checkpointed rows resume via
+    <code>rspice run --restore</code>.
+  </div>
+</section>
+
+<!-- ======================================================= 2 · OVERLAY -->
+<section id="overlay">
+  <div class="sec-label">02 · Overlay</div>
+  <h2>Signal owns hue · run owns weight</h2>
+  <p class="sec-note">
+    Five corners of the OTA step response, one signal. The trace keeps its hue across runs;
+    only the <b>focused</b> corner draws at full strength. Hover a legend chip (or move the
+    crosshair) — the readout lists one row per run, ranked, with deltas against nominal.
+    Numbers stay in the right panel; the canvas stays clean.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> overlay <span class="name" id="ovlCount">5 runs</span></span>
+      <span class="sep"></span>
+      <div class="tabs" role="tablist" aria-label="Viewer">
+        <button class="tab" role="tab" aria-selected="true">Waves</button>
+        <button class="tab" role="tab" aria-selected="false">Bode</button>
+        <button class="tab" role="tab" aria-selected="false">FFT</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="ctl" aria-pressed="false">Split by run</button>
+      <button class="ctl">Export…</button>
+    </div>
+    <div class="body-grid">
+      <div class="well">
+        <div class="strip-head">
+          <span class="kind-tag">TRAN</span>
+          <span class="strip-title"><b>v(out)</b> · 1 V step · 0–1 µs</span>
+          <div class="legend" id="legend" role="group" aria-label="Overlaid runs"></div>
+        </div>
+        <div class="plot-wrap">
+          <svg id="wavePlot" viewBox="0 0 920 320" role="img" aria-label="Step response of v(out) across five process corners"></svg>
+        </div>
+      </div>
+      <aside class="rpanel">
+        <div>
+          <h4>Cursor readout</h4>
+          <dl class="kv" id="cursorReadout"></dl>
+        </div>
+        <div>
+          <h4>Margins · settle (1%)</h4>
+          <dl class="kv" id="settleReadout"></dl>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================== 3 · MATRIX -->
+<section id="matrix">
+  <div class="sec-label">03 · Specs matrix</div>
+  <h2>Tests × corners, specs on the rail</h2>
+  <p class="sec-note">
+    Rows are <b>.meas</b> results, columns are corner runs, the rail holds spec bounds.
+    Failing cells tint; the worst violator carries a ring. <b>Click a failing cell</b> —
+    the workspace focuses that corner in the shelf, the overlay, and the readout.
+    One click from “which corner fails” to “what the waveform did”.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> corner set <span class="name">tt · ss · ff · sf · fs</span></span>
+      <div class="spacer"></div>
+      <button class="ctl">Edit specs…</button>
+      <button class="ctl">Re-run failures</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="mx" id="specMatrix" aria-label="Measurements across corners against specifications"></table>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 4 · MC -->
+<section id="mc">
+  <div class="sec-label">04 · Monte-Carlo</div>
+  <h2>Distribution, correlation, yield</h2>
+  <p class="sec-note">
+    The statistical run drills into a distribution dashboard: histogram with ±1σ band, normal
+    fit and the spec limit; UGF–PM scatter with failures tinted; the yield chip states the
+    verdict. Every sample comes from the same seeded stream the matrix reads.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> run <span class="name">mc-200 · seed 1337</span></span>
+      <div class="spacer"></div>
+      <span class="runctx">yield <span class="name" id="yieldChip" style="color:var(--ok)">—</span></span>
+    </div>
+    <div class="body-grid">
+      <div class="well">
+        <div class="mc-grid">
+          <div class="mc-card">
+            <h5>UGF distribution · n=200</h5>
+            <svg id="histPlot" viewBox="0 0 520 240" role="img" aria-label="Histogram of unity-gain frequency across Monte-Carlo samples"></svg>
+          </div>
+          <div class="mc-card">
+            <h5>UGF vs phase margin</h5>
+            <svg id="scatterPlot" viewBox="0 0 420 240" role="img" aria-label="Scatter of unity-gain frequency against phase margin"></svg>
+          </div>
+        </div>
+      </div>
+      <aside class="rpanel">
+        <div>
+          <h4>UGF statistics</h4>
+          <dl class="kv" id="mcStats"></dl>
+        </div>
+        <div>
+          <h4>Spec</h4>
+          <dl class="kv">
+            <dt>UGF min</dt><dd>9.00 MHz</dd>
+            <dt>PM min</dt><dd>60.0°</dd>
+          </dl>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ========================================================= 5 · NOISE -->
+<section id="noise">
+  <div class="sec-label">05 · Noise contributors</div>
+  <h2>The ranked table designers read first</h2>
+  <p class="sec-note">
+    Band-integrated output noise per device and mechanism (engine:
+    <b>IntegratedNoise::contribution_summary</b>), ranked, with share-of-total drawn as an
+    in-row bar — the dominant contributor is readable in one fixation. Mechanism chips reuse
+    trace hues so spectral plots and this table agree.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> noise <span class="name">v(out) / vin · 1 Hz – 100 MHz</span></span>
+      <div class="spacer"></div>
+      <span class="runctx">total <span class="name mono" id="noiseTotal">—</span></span>
+    </div>
+    <div class="body-grid">
+      <div class="well" style="padding:0">
+        <table class="ntab" id="noiseTable" aria-label="Ranked noise contributors"></table>
+      </div>
+      <aside class="rpanel">
+        <div>
+          <h4>Band</h4>
+          <dl class="kv">
+            <dt>Integral</dt><dd>trapezoidal</dd>
+            <dt>Points</dt><dd>61</dd>
+            <dt>Weighting</dt><dd>none</dd>
+          </dl>
+        </div>
+        <div>
+          <h4>Reading</h4>
+          <p style="color:var(--text-dim); font-size:var(--fs-1); text-wrap:pretty">
+            Input-pair flicker dominates below 40 kHz; sizing up M1/M2 trades it
+            against input capacitance. The tail contributes common-mode only.
+          </p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ 6 · OP -->
+<section id="op">
+  <div class="sec-label">06 · OP inspector</div>
+  <h2>Per-device operating points</h2>
+  <p class="sec-note">
+    The Spectre-style OP info (engine: <b>device_op_report</b>) as a workspace surface:
+    region chips, engineering notation, <b>filter</b> and <b>column sort</b>. Rows are
+    cross-probe handles — hovering one highlights the device's net on the schematic.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <span class="runctx"><span class="dot"></span> run <span class="name">tt · .op</span></span>
+      <div class="spacer"></div>
+      <div class="op-tools" style="padding:0">
+        <input type="search" id="opFilter" placeholder="filter devices… (m1, sat, …)" aria-label="Filter devices">
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="optab" id="opTable" aria-label="Per-device operating points"></table>
+    </div>
+  </div>
+  <div class="impl">
+    <b>Cross-probe contract:</b> row hover emits <code>CrossProbe::Device(name)</code> on the
+    workspace bus; the schematic canvas subscribes (net highlight), as does the netlist view
+    (line highlight). Same bus the waveform legend already uses in the other direction.
+  </div>
+</section>
+
+<script>
+/* ================================================================ model
+   One OTA model; every surface derives from it. Itail 20 µA, CL 2 pF,
+   nominal UGF 10.2 MHz, PM 78.4°, Adc 38.2 dB — same story as the v1 file. */
+"use strict";
+
+const CORNERS = [
+  // gmF: gm factor, vthD: Vth delta (V). Derived UGF/PM/Adc/settle follow.
+  { id: "tt", label: "tt",  gmF: 1.000, vthD:  0.000 },
+  { id: "ss", label: "ss",  gmF: 0.840, vthD: +0.060 },
+  { id: "ff", label: "ff",  gmF: 1.165, vthD: -0.055 },
+  { id: "sf", label: "sf",  gmF: 0.930, vthD: +0.020 },
+  { id: "fs", label: "fs",  gmF: 1.060, vthD: -0.015 },
+];
+const NOM = { ugf: 10.2e6, pm: 78.4, adc: 38.2, vstep: 1.0 };
+const SPECS = [
+  { key: "ugf",    label: "ugf",          unit: "MHz", min: 9.0,  max: null,  digits: 2 },
+  { key: "pm",     label: "phase_margin", unit: "°",   min: 70.0, max: null,  digits: 1 },
+  { key: "adc",    label: "dc_gain",      unit: "dB",  min: 34.0, max: null,  digits: 1 },
+  { key: "settle", label: "t_settle_1pct",unit: "ns",  min: null, max: 260.0, digits: 0 },
+  { key: "ovs",    label: "overshoot",    unit: "%",   min: null, max: 15.0,  digits: 1 },
+];
+
+function cornerMetrics(c) {
+  const ugf = NOM.ugf * c.gmF;
+  // PM erodes as gm (and UGF) rise toward the second pole, and fast-NMOS
+  // Vth drops bite hard (the realistic ff story: it is the corner that
+  // fails the 70-degree phase-margin spec).
+  const pm  = NOM.pm - 26.0 * (c.gmF - 1.0) - 120.0 * Math.max(0, -c.vthD);
+  const adc = NOM.adc + 8.6 * Math.log10(c.gmF);
+  const zeta = Math.max(0.18, Math.sin((pm * Math.PI / 180) / 2)); // PM → damping
+  const wn = 2 * Math.PI * ugf / Math.sqrt(Math.sqrt(1 + 4 * zeta ** 4) - 2 * zeta * zeta);
+  const ovs = zeta < 1 ? 100 * Math.exp(-Math.PI * zeta / Math.sqrt(1 - zeta * zeta)) : 0;
+  const settle = 4.6 / (zeta * wn) * 1e9; // ns, 1% band
+  return { ugf, pm, adc, zeta, wn, ovs, settle };
+}
+const METRICS = Object.fromEntries(CORNERS.map(c => [c.id, cornerMetrics(c)]));
+
+function stepResponse(c, t) { // t in seconds
+  const m = METRICS[c.id];
+  const z = m.zeta, wn = m.wn;
+  if (z >= 1) return NOM.vstep * (1 - Math.exp(-wn * t) * (1 + wn * t));
+  const wd = wn * Math.sqrt(1 - z * z);
+  return NOM.vstep * (1 - Math.exp(-z * wn * t) * (Math.cos(wd * t) + z / Math.sqrt(1 - z * z) * Math.sin(wd * t)));
+}
+
+/* seeded PRNG (mulberry32) + Box-Muller for MC */
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function gaussianPair(rng) {
+  const u = Math.max(rng(), 1e-12), v = rng();
+  const r = Math.sqrt(-2 * Math.log(u));
+  return [r * Math.cos(2 * Math.PI * v), r * Math.sin(2 * Math.PI * v)];
+}
+const rng = mulberry32(1337);
+const MC = [];
+for (let i = 0; i < 200; i++) {
+  const [g1, g2] = gaussianPair(rng);
+  const gmF = 1.0 + 0.055 * g1;
+  const m = cornerMetrics({ gmF, vthD: 0.012 * g2 });
+  MC.push({ ugf: m.ugf, pm: m.pm });
+}
+
+/* formatting */
+const fmtEng = (v, unit = "") => {
+  if (v === 0) return "0" + unit;
+  const a = Math.abs(v);
+  const steps = [[1e9, "G"], [1e6, "M"], [1e3, "k"], [1, ""], [1e-3, "m"], [1e-6, "µ"], [1e-9, "n"], [1e-12, "p"], [1e-15, "f"]];
+  for (const [s, suf] of steps) if (a >= s) return (v / s).toFixed(2) + " " + suf + unit;
+  return v.toExponential(2) + " " + unit;
+};
+
+/* ============================================================ run shelf */
+const RUNS = [
+  { id: "tt", name: "tran · tt",        kind: "corner", status: "done", analysis: "tran 1n 1u",  time: "14:02", overlay: true },
+  { id: "ss", name: "tran · ss",        kind: "corner", status: "done", analysis: "tran 1n 1u",  time: "14:02", overlay: true },
+  { id: "ff", name: "tran · ff",        kind: "corner", status: "done", analysis: "tran 1n 1u",  time: "14:03", overlay: true },
+  { id: "sf", name: "tran · sf",        kind: "corner", status: "done", analysis: "tran 1n 1u",  time: "14:03", overlay: true },
+  { id: "fs", name: "tran · fs",        kind: "corner", status: "done", analysis: "tran 1n 1u",  time: "14:03", overlay: true },
+  { id: "mc", name: "mc-200 · seed 1337", kind: "mc",   status: "live", analysis: "tran × 200",  time: "now",   overlay: false, progress: 0.62 },
+  { id: "ln", name: "tran · 10 ms power-up", kind: "long", status: "ckpt", analysis: "tran 1n 10m", time: "09:48", overlay: false, ckpt: "4.1 ms" },
+];
+let focusedRun = "tt";
+
+const shelf = document.getElementById("shelf");
+function renderShelf() {
+  shelf.querySelectorAll(".run-row").forEach(r => r.remove());
+  for (const run of RUNS) {
+    const row = document.createElement("div");
+    row.className = "run-row";
+    row.dataset.run = run.id;
+    row.dataset.focused = String(run.id === focusedRun);
+    const corner = CORNERS.find(c => c.id === run.id);
+    const swatch = corner ? `var(--trace-1)` : "transparent";
+    const badge =
+      run.status === "done" ? `<span class="badge done">done</span>` :
+      run.status === "live" ? `<span class="badge live"><span class="pulse"></span>running</span>` :
+      run.status === "ckpt" ? `<span class="badge ckpt">checkpoint</span>` :
+                              `<span class="badge fail">failed</span>`;
+    const progress =
+      run.status === "live"
+        ? `<div class="progress"><div class="track"><div class="fill" style="width:${Math.round(run.progress * 100)}%"></div></div><span class="pct">${Math.round(run.progress * 200)} / 200</span></div>`
+        : run.status === "ckpt"
+          ? `<div class="progress"><div class="track"><div class="fill" style="width:41%; background:var(--text-faint)"></div></div><span class="pct">@ ${run.ckpt}</span></div>`
+          : `<div class="progress"><div class="track"><div class="fill" style="width:100%; background:var(--border-strong)"></div></div><span class="pct">${run.time}</span></div>`;
+    const acts =
+      run.status === "live"
+        ? `<button class="icon-btn" aria-label="Pause run" title="Pause">⏸</button><button class="icon-btn" aria-label="Abort run" title="Abort">✕</button>`
+        : run.status === "ckpt"
+          ? `<button class="icon-btn" aria-label="Resume from checkpoint" title="Resume">▶</button><button class="icon-btn" aria-label="Delete run" title="Delete">✕</button>`
+          : `<button class="icon-btn" aria-label="Pin run" title="Pin">⌖</button><button class="icon-btn" aria-label="Delete run" title="Delete">✕</button>`;
+    row.innerHTML = `
+      <input type="checkbox" class="ovl-check" ${run.overlay ? "checked" : ""} ${corner ? "" : "disabled"}
+             aria-label="Overlay ${run.name}">
+      <span class="swatch" style="background:${corner ? "var(--trace-1)" : "var(--border)"}"></span>
+      <span class="rname">${run.name}</span>
+      ${badge}
+      ${progress}
+      <span class="meta">${run.analysis}</span>
+      <span class="row-acts">${acts}</span>`;
+    row.querySelector(".ovl-check").addEventListener("change", e => {
+      run.overlay = e.target.checked; drawWaves(); renderLegend(); updateOvlCount();
+    });
+    if (corner) {
+      row.addEventListener("mouseenter", () => setFocus(run.id));
+      row.addEventListener("focusin", () => setFocus(run.id));
+    }
+    shelf.appendChild(row);
+  }
+}
+
+/* live-run streaming simulation (honest about being a mock data feed) */
+const liveRun = RUNS.find(r => r.status === "live");
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (!reduceMotion) {
+  const tick = setInterval(() => {
+    if (!liveRun || liveRun.status !== "live") { clearInterval(tick); return; }
+    liveRun.progress = Math.min(1, liveRun.progress + 0.005);
+    const fill = shelf.querySelector(`[data-run="mc"] .fill`);
+    const pct = shelf.querySelector(`[data-run="mc"] .pct`);
+    if (fill) fill.style.width = `${Math.round(liveRun.progress * 100)}%`;
+    if (pct) pct.textContent = `${Math.round(liveRun.progress * 200)} / 200`;
+    if (liveRun.progress >= 1) { liveRun.status = "done"; renderShelf(); }
+  }, 600);
+}
+
+/* ============================================================== overlay */
+const W = 920, H = 320, PADL = 52, PADR = 14, PADT = 12, PADB = 30;
+const T_END = 1.0e-6;
+const wavePlot = document.getElementById("wavePlot");
+const xOf = t => PADL + (t / T_END) * (W - PADL - PADR);
+const yOf = v => PADT + (1.6 - v) / 1.6 * (H - PADT - PADB);
+
+function tracePath(cornerId) {
+  const c = CORNERS.find(k => k.id === cornerId);
+  let d = "";
+  const N = 360;
+  for (let i = 0; i <= N; i++) {
+    const t = (i / N) * T_END;
+    const v = stepResponse(c, t);
+    d += (i === 0 ? "M" : "L") + xOf(t).toFixed(1) + " " + yOf(v).toFixed(1);
+  }
+  return d;
+}
+
+function drawWaves() {
+  const overlaid = CORNERS.filter(c => RUNS.find(r => r.id === c.id).overlay);
+  let svg = "";
+  // grid
+  for (let gv = 0; gv <= 1.6; gv += 0.4) {
+    svg += `<line class="grid-line" x1="${PADL}" y1="${yOf(gv)}" x2="${W - PADR}" y2="${yOf(gv)}"/>`;
+    svg += `<text class="axis-label" x="${PADL - 8}" y="${yOf(gv) + 3}" text-anchor="end">${gv.toFixed(1)} V</text>`;
+  }
+  for (let gt = 0; gt <= 1.0; gt += 0.2) {
+    const t = gt * 1e-6;
+    svg += `<line class="grid-line" x1="${xOf(t)}" y1="${PADT}" x2="${xOf(t)}" y2="${H - PADB}"/>`;
+    svg += `<text class="axis-label" x="${xOf(t)}" y="${H - PADB + 14}" text-anchor="middle">${(gt * 1000).toFixed(0)} ns</text>`;
+  }
+  // 1% settle band around the final value: tinted fill plus dashed
+  // boundaries so the band reads at a glance.
+  svg += `<rect x="${PADL}" y="${yOf(1.01)}" width="${W - PADL - PADR}" height="${yOf(0.99) - yOf(1.01)}" fill="var(--accent-dim)"/>`;
+  for (const bound of [0.99, 1.01]) {
+    svg += `<line x1="${PADL}" y1="${yOf(bound)}" x2="${W - PADR}" y2="${yOf(bound)}"
+             stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="2 4"/>`;
+  }
+  svg += `<text class="axis-label" x="${W - PADR - 4}" y="${yOf(1.01) - 4}" text-anchor="end">±1% band</text>`;
+  // unfocused first, focused last (on top)
+  const ordered = [...overlaid.filter(c => c.id !== focusedRun), ...overlaid.filter(c => c.id === focusedRun)];
+  for (const c of ordered) {
+    const focused = c.id === focusedRun;
+    svg += `<path d="${tracePath(c.id)}" fill="none" stroke="var(--trace-1)"
+             stroke-width="${focused ? 2 : 1.4}" opacity="${focused ? 1 : 0.34}"
+             data-corner="${c.id}"/>`;
+  }
+  svg += `<line id="xhair" class="crosshair" x1="-10" y1="${PADT}" x2="-10" y2="${H - PADB}"/>`;
+  wavePlot.innerHTML = svg;
+}
+
+/* legend chips.
+   Built once; focus changes mutate attributes IN PLACE. Rebuilding on
+   mouseenter would detach the chip mid-click and swallow the first tap
+   for keyboard/touch users. */
+const legend = document.getElementById("legend");
+function renderLegend() {
+  legend.innerHTML = "";
+  for (const c of CORNERS) {
+    const run = RUNS.find(r => r.id === c.id);
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.dataset.corner = c.id;
+    chip.setAttribute("aria-label", `Corner ${c.label}: activate to toggle overlay`);
+    chip.innerHTML = `<span class="sw" style="background:var(--trace-1)"></span>${c.label}`;
+    chip.addEventListener("mouseenter", () => setFocus(c.id));
+    chip.addEventListener("focus", () => setFocus(c.id));
+    chip.addEventListener("click", () => {
+      run.overlay = !run.overlay;
+      renderShelf(); updateLegendState(); drawWaves(); updateOvlCount();
+    });
+    legend.appendChild(chip);
+  }
+  updateLegendState();
+}
+function updateLegendState() {
+  legend.querySelectorAll(".chip").forEach(chip => {
+    const id = chip.dataset.corner;
+    const run = RUNS.find(r => r.id === id);
+    chip.dataset.focused = String(id === focusedRun);
+    chip.dataset.hidden = String(!run.overlay);
+    chip.setAttribute("aria-pressed", String(run.overlay));
+    chip.querySelector(".sw").style.opacity = id === focusedRun ? "1" : "0.45";
+  });
+}
+function updateOvlCount() {
+  const n = CORNERS.filter(c => RUNS.find(r => r.id === c.id).overlay).length;
+  document.getElementById("ovlCount").textContent = `${n} runs`;
+}
+
+/* cursor readout */
+const cursorReadout = document.getElementById("cursorReadout");
+const settleReadout = document.getElementById("settleReadout");
+function renderReadout(tCursor) {
+  const overlaid = CORNERS.filter(c => RUNS.find(r => r.id === c.id).overlay);
+  const vNom = stepResponse(CORNERS[0], tCursor);
+  cursorReadout.innerHTML =
+    `<dt>t</dt><dd>${fmtEng(tCursor, "s")}</dd>` +
+    overlaid.map(c => {
+      const v = stepResponse(c, tCursor);
+      const d = c.id === "tt" ? "" : ` (${v - vNom >= 0 ? "+" : ""}${((v - vNom) * 1000).toFixed(1)} mV)`;
+      return `<dt${c.id === focusedRun ? ' style="color:var(--accent)"' : ""}>${c.label}</dt><dd>${v.toFixed(4)} V${d}</dd>`;
+    }).join("");
+}
+function renderSettle() {
+  // Per-corner margins live here so the matrix, the readout, and the plot
+  // can never disagree — all three read METRICS.
+  settleReadout.innerHTML = CORNERS.map(c => {
+    const m = METRICS[c.id];
+    const viol = m.settle > 260 || m.pm < 70.0;
+    return `<dt>${c.label}</dt><dd class="${viol ? "err" : ""}">${m.pm.toFixed(1)}° · ${m.settle.toFixed(0)} ns</dd>`;
+  }).join("");
+}
+wavePlot.addEventListener("mousemove", e => {
+  const rect = wavePlot.getBoundingClientRect();
+  const px = (e.clientX - rect.left) / rect.width * W;
+  const t = Math.min(Math.max((px - PADL) / (W - PADL - PADR), 0), 1) * T_END;
+  const xh = wavePlot.querySelector("#xhair");
+  if (xh) { xh.setAttribute("x1", xOf(t)); xh.setAttribute("x2", xOf(t)); }
+  renderReadout(t);
+});
+wavePlot.addEventListener("mouseleave", () => renderReadout(0.4e-6));
+
+function setFocus(id) {
+  if (focusedRun === id) return;
+  focusedRun = id;
+  drawWaves(); updateLegendState(); renderReadout(0.4e-6);
+  shelf.querySelectorAll(".run-row").forEach(r => r.dataset.focused = String(r.dataset.run === id));
+  document.querySelectorAll(".mx td.val").forEach(td => td.dataset.focused = String(td.dataset.corner === id));
+}
+
+/* =============================================================== matrix */
+function buildMatrix() {
+  const tbl = document.getElementById("specMatrix");
+  const cols = CORNERS.map(c => `<th>${c.label}</th>`).join("");
+  let html = `<thead><tr><th class="rowhead">measurement</th><th>spec</th>${cols}</tr></thead><tbody>`;
+  const fails = [];
+  for (const spec of SPECS) {
+    const cells = CORNERS.map(c => {
+      const m = METRICS[c.id];
+      let v = { ugf: m.ugf / 1e6, pm: m.pm, adc: m.adc, settle: m.settle, ovs: m.ovs }[spec.key];
+      const ok = (spec.min === null || v >= spec.min) && (spec.max === null || v <= spec.max);
+      if (!ok) fails.push({ spec: spec.key, corner: c.id, margin: spec.min !== null ? spec.min - v : v - spec.max });
+      return { corner: c.id, v, ok };
+    });
+    const worst = cells.filter(c => !c.ok).sort((a, b) => b.v - a.v); // placeholder ordering
+    let worstId = null;
+    if (cells.some(c => !c.ok)) {
+      const viol = cells.filter(c => !c.ok);
+      viol.sort((a, b) => {
+        const ma = spec.min !== null ? spec.min - a.v : a.v - spec.max;
+        const mb = spec.min !== null ? spec.min - b.v : b.v - spec.max;
+        return mb - ma;
+      });
+      worstId = viol[0].corner;
+    }
+    const bound = spec.min !== null ? `≥ ${spec.min}` : `≤ ${spec.max}`;
+    html += `<tr><td class="rowhead">${spec.label}</td><td class="spec">${bound} ${spec.unit}</td>` +
+      cells.map(c =>
+        `<td class="val ${c.ok ? "ok" : "err"}${c.corner === worstId ? " worst" : ""}" data-corner="${c.corner}"
+             tabindex="0" role="button"
+             aria-label="${spec.label} at corner ${c.corner}: ${c.v.toFixed(spec.digits)} ${spec.unit}${c.ok ? "" : ", violates spec"}; activate to focus corner"
+         >${c.v.toFixed(spec.digits)}</td>`).join("") + `</tr>`;
+  }
+  const failCorners = [...new Set(fails.map(f => f.corner))];
+  html += `</tbody><tfoot><tr><td class="rowhead" colspan="2">corner verdict</td>` +
+    CORNERS.map(c => failCorners.includes(c.id)
+      ? `<td class="fail">✕ fail</td>` : `<td class="pass">✓ pass</td>`).join("") + `</tr></tfoot>`;
+  tbl.innerHTML = html;
+  tbl.querySelectorAll("td.val").forEach(td => {
+    const go = () => {
+      setFocus(td.dataset.corner);
+      document.getElementById("overlay").scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    };
+    td.addEventListener("click", go);
+    td.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  });
+}
+
+/* =================================================================== mc */
+function buildMc() {
+  const ugfs = MC.map(s => s.ugf / 1e6).sort((a, b) => a - b);
+  const mean = ugfs.reduce((a, b) => a + b, 0) / ugfs.length;
+  const sd = Math.sqrt(ugfs.reduce((a, b) => a + (b - mean) ** 2, 0) / (ugfs.length - 1));
+  const passing = MC.filter(s => s.ugf / 1e6 >= 9.0 && s.pm >= 60.0).length;
+  const yieldPct = 100 * passing / MC.length;
+
+  document.getElementById("mcStats").innerHTML =
+    `<dt>µ</dt><dd>${mean.toFixed(2)} MHz</dd>
+     <dt>σ</dt><dd>${sd.toFixed(2)} MHz</dd>
+     <dt>min</dt><dd>${ugfs[0].toFixed(2)} MHz</dd>
+     <dt>max</dt><dd>${ugfs[ugfs.length - 1].toFixed(2)} MHz</dd>
+     <dt>Cpk (low)</dt><dd>${((mean - 8.0) / (3 * sd)).toFixed(2)}</dd>`;
+  const yc = document.getElementById("yieldChip");
+  yc.textContent = `${yieldPct.toFixed(1)} %  (${passing}/${MC.length})`;
+  yc.style.color = yieldPct >= 99 ? "var(--ok)" : "var(--warn)";
+
+  /* histogram */
+  const HW = 520, HH = 240, hPadL = 36, hPadB = 26, hPadT = 12, hPadR = 10;
+  const lo = Math.floor(ugfs[0] * 2) / 2 - 0.5, hi = Math.ceil(ugfs[ugfs.length - 1] * 2) / 2 + 0.5;
+  const BINS = 24, bw = (hi - lo) / BINS;
+  const bins = new Array(BINS).fill(0);
+  for (const u of ugfs) bins[Math.min(BINS - 1, Math.floor((u - lo) / bw))]++;
+  const maxBin = Math.max(...bins);
+  const hx = u => hPadL + (u - lo) / (hi - lo) * (HW - hPadL - hPadR);
+  const hy = n => hPadT + (1 - n / maxBin) * (HH - hPadT - hPadB);
+  let hsvg = `<rect class="sigma-band" x="${hx(mean - sd)}" y="${hPadT}" width="${hx(mean + sd) - hx(mean - sd)}" height="${HH - hPadT - hPadB}"/>`;
+  bins.forEach((n, i) => {
+    const x0 = lo + i * bw;
+    hsvg += `<rect class="hist-bar ${x0 + bw <= 9.0 ? "below" : ""}" x="${hx(x0) + 0.5}" y="${hy(n)}"
+              width="${Math.max(1, hx(x0 + bw) - hx(x0) - 1)}" height="${HH - hPadB - hy(n)}"/>`;
+  });
+  let fit = "";
+  for (let i = 0; i <= 120; i++) {
+    const u = lo + (i / 120) * (hi - lo);
+    const p = Math.exp(-((u - mean) ** 2) / (2 * sd * sd));
+    fit += (i === 0 ? "M" : "L") + hx(u).toFixed(1) + " " + hy(p * maxBin).toFixed(1);
+  }
+  hsvg += `<path class="normal-fit" d="${fit}"/>`;
+  hsvg += `<line class="spec-line" x1="${hx(9)}" y1="${hPadT}" x2="${hx(9)}" y2="${HH - hPadB}"/>
+           <text class="spec-tag" x="${hx(9) + 4}" y="${hPadT + 10}">spec ≥ 9 MHz</text>`;
+  for (let u = Math.ceil(lo); u <= hi; u += 1) {
+    hsvg += `<text class="axis-label" x="${hx(u)}" y="${HH - 8}" text-anchor="middle">${u}</text>`;
+  }
+  hsvg += `<text class="axis-label" x="${HW / 2}" y="${HH - hPadB + 26}" text-anchor="middle" style="display:none">MHz</text>`;
+  document.getElementById("histPlot").innerHTML = hsvg;
+
+  /* scatter */
+  const SW2 = 420, SH = 240, sPadL = 38, sPadB = 26, sPadT = 12, sPadR = 10;
+  const pmLo = 55, pmHi = 95;
+  const sx = u => sPadL + (u - lo) / (hi - lo) * (SW2 - sPadL - sPadR);
+  const sy = p => sPadT + (pmHi - p) / (pmHi - pmLo) * (SH - sPadT - sPadB);
+  let ssvg = `<line class="spec-line" x1="${sx(9)}" y1="${sPadT}" x2="${sx(9)}" y2="${SH - sPadB}"/>
+              <line class="spec-line" x1="${sPadL}" y1="${sy(60)}" x2="${SW2 - sPadR}" y2="${sy(60)}"/>`;
+  for (const s of MC) {
+    const fail = s.ugf / 1e6 < 9.0 || s.pm < 60.0;
+    ssvg += `<circle class="scatter-pt ${fail ? "fail" : ""}" cx="${sx(s.ugf / 1e6).toFixed(1)}" cy="${sy(s.pm).toFixed(1)}" r="2.4"/>`;
+  }
+  for (let u = Math.ceil(lo); u <= hi; u += 1)
+    ssvg += `<text class="axis-label" x="${sx(u)}" y="${SH - 8}" text-anchor="middle">${u}</text>`;
+  for (let p = 60; p <= 90; p += 10)
+    ssvg += `<text class="axis-label" x="${sPadL - 6}" y="${sy(p) + 3}" text-anchor="end">${p}°</text>`;
+  document.getElementById("scatterPlot").innerHTML = ssvg;
+}
+
+/* ================================================================ noise */
+const NOISE = [
+  { dev: "m1",  mech: "flicker", power: 5.84e-9 },
+  { dev: "m2",  mech: "flicker", power: 5.61e-9 },
+  { dev: "m1",  mech: "thermal", power: 2.93e-9 },
+  { dev: "m2",  mech: "thermal", power: 2.88e-9 },
+  { dev: "m3",  mech: "thermal", power: 1.42e-9 },
+  { dev: "m4",  mech: "thermal", power: 1.39e-9 },
+  { dev: "m5",  mech: "thermal", power: 0.21e-9 },
+  { dev: "rz",  mech: "thermal", power: 0.16e-9 },
+  { dev: "d1",  mech: "shot",    power: 0.04e-9 },
+];
+function buildNoise() {
+  const total = NOISE.reduce((a, n) => a + n.power, 0);
+  const rows = [...NOISE].sort((a, b) => b.power - a.power);
+  document.getElementById("noiseTotal").textContent = `${(Math.sqrt(total) * 1e6).toFixed(2)} µV rms`;
+  let html = `<thead><tr><th class="l">device</th><th class="l">mechanism</th>
+              <th>power (V²)</th><th style="width:34%">share</th></tr></thead><tbody>`;
+  for (const n of rows) {
+    const pct = 100 * n.power / total;
+    html += `<tr>
+      <td class="l dev">${n.dev}</td>
+      <td class="l"><span class="mech ${n.mech}">${n.mech}</span></td>
+      <td class="mono">${n.power.toExponential(2)}</td>
+      <td class="sharecell"><div class="sharebar" style="width:${pct.toFixed(1)}%"></div><span>${pct.toFixed(1)} %</span></td>
+    </tr>`;
+  }
+  html += `</tbody>`;
+  document.getElementById("noiseTable").innerHTML = html;
+}
+
+/* =================================================================== op */
+const ITAIL = 20e-6;
+const OP = [
+  { name: "m1", kind: "nmos", region: "saturation", id: ITAIL / 2,  vgs: 0.823, vds: 1.20, vth: 0.700 },
+  { name: "m2", kind: "nmos", region: "saturation", id: ITAIL / 2,  vgs: 0.823, vds: 1.18, vth: 0.700 },
+  { name: "m3", kind: "pmos", region: "saturation", id: ITAIL / 2,  vgs: -0.91, vds: -1.10, vth: -0.750 },
+  { name: "m4", kind: "pmos", region: "saturation", id: ITAIL / 2,  vgs: -0.91, vds: -1.32, vth: -0.750 },
+  { name: "m5", kind: "nmos", region: "saturation", id: ITAIL,      vgs: 0.780, vds: 0.45,  vth: 0.700 },
+  { name: "m6", kind: "nmos", region: "linear",     id: 2.1e-6,     vgs: 1.250, vds: 0.08,  vth: 0.700 },
+  { name: "m7", kind: "nmos", region: "cutoff",     id: 8.0e-12,    vgs: 0.350, vds: 1.80,  vth: 0.700 },
+];
+for (const d of OP) {
+  const vov = Math.max(0.02, Math.abs(d.vgs) - Math.abs(d.vth));
+  d.gm = d.region === "cutoff" ? 1.1e-9 : 2 * d.id / vov;
+  d.gds = d.region === "linear" ? d.gm * 0.8 : d.id * (d.kind === "pmos" ? 0.045 : 0.04);
+}
+let opSort = { col: "id", dir: -1 };
+function buildOp() {
+  const filter = document.getElementById("opFilter").value.trim().toLowerCase();
+  const cols = [
+    ["name", "device", "l"], ["region", "region", "l"], ["id", "id (A)"], ["vgs", "vgs (V)"],
+    ["vds", "vds (V)"], ["vth", "vth (V)"], ["gm", "gm (S)"], ["gds", "gds (S)"],
+  ];
+  let rows = OP.filter(d => !filter || d.name.includes(filter) || d.region.includes(filter) || d.kind.includes(filter));
+  rows = rows.sort((a, b) => {
+    const va = a[opSort.col], vb = b[opSort.col];
+    return (typeof va === "string" ? va.localeCompare(vb) : va - vb) * opSort.dir;
+  });
+  let html = `<thead><tr>` + cols.map(([key, label, l]) =>
+    `<th class="${l || ""}" data-col="${key}" ${opSort.col === key ? 'data-sorted=""' : ""}
+        aria-sort="${opSort.col === key ? (opSort.dir > 0 ? "ascending" : "descending") : "none"}"
+        role="button" tabindex="0" aria-label="Sort by ${label}">
+        ${label} <span class="arrow">${opSort.dir > 0 ? "▲" : "▼"}</span></th>`).join("") + `</tr></thead><tbody>`;
+  for (const d of rows) {
+    html += `<tr>
+      <td class="l" style="color:var(--text)">${d.name}</td>
+      <td class="l"><span class="region ${d.region}">${d.region}</span></td>
+      <td>${fmtEng(d.id, "A")}</td><td>${d.vgs.toFixed(3)}</td><td>${d.vds.toFixed(3)}</td>
+      <td>${d.vth.toFixed(3)}</td><td>${fmtEng(d.gm, "S")}</td><td>${fmtEng(d.gds, "S")}</td>
+    </tr>`;
+  }
+  html += `</tbody>`;
+  const tbl = document.getElementById("opTable");
+  tbl.innerHTML = html;
+  tbl.querySelectorAll("thead th").forEach(th => {
+    const act = () => {
+      const col = th.dataset.col;
+      opSort = { col, dir: opSort.col === col ? -opSort.dir : (col === "name" || col === "region" ? 1 : -1) };
+      buildOp();
+    };
+    th.addEventListener("click", act);
+    th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } });
+  });
+}
+document.getElementById("opFilter").addEventListener("input", buildOp);
+
+/* ================================================================ theme */
+const themeToggle = document.getElementById("themeToggle");
+const themeLabel = document.getElementById("themeLabel");
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  themeLabel.textContent = t === "dark" ? "Dark" : "Light";
+  try { localStorage.setItem("volta-results-v2-theme", t); } catch (e) {}
+}
+themeToggle.addEventListener("click", () =>
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+try {
+  const saved = localStorage.getItem("volta-results-v2-theme");
+  if (saved) applyTheme(saved);
+} catch (e) {}
+
+/* overlay-all toggle */
+document.getElementById("ovlAll").addEventListener("click", e => {
+  const btn = e.currentTarget;
+  const on = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", String(on));
+  for (const c of CORNERS) RUNS.find(r => r.id === c.id).overlay = on;
+  renderShelf(); renderLegend(); drawWaves(); updateOvlCount();
+});
+
+/* boot */
+renderShelf(); renderLegend(); drawWaves(); renderReadout(0.4e-6); renderSettle();
+updateOvlCount(); buildMatrix(); buildMc(); buildNoise(); buildOp();
+</script>
+</body>
+</html>
