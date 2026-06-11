@@ -357,7 +357,7 @@ impl Engine {
             .iter()
             .map(|&freq| {
                 let omega = 2.0 * PI * freq;
-                let ac_matrix =
+                let mut ac_matrix =
                     Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
 
                 let input_gain_sq = if let Some(excitation) = input_excitation {

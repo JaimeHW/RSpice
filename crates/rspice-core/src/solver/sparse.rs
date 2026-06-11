@@ -421,6 +421,15 @@ impl StaticMatrix {
 
 use num_complex::Complex64;
 
+/// Reusable complex sparse-LU workspace (see [`LuWorkspace`]).
+struct ComplexLuWorkspace {
+    symbolic: Arc<sparse_lu::SymbolicLu<usize>>,
+    numeric: sparse_lu::NumericLu<usize, Complex64>,
+    factor_mem: MemBuffer,
+    solve_mem: MemBuffer,
+    rhs: Mat<Complex64>,
+}
+
 /// ComplexMatrix for AC small-signal analysis
 ///
 /// Shares the same sparsity structure as a StaticMatrix but uses Complex64 values.
@@ -429,34 +438,67 @@ pub struct ComplexMatrix {
     /// Matrix dimensions
     pub nrows: usize,
     pub ncols: usize,
-    /// CSC column pointers (cloned from real matrix)
-    col_ptrs: Vec<usize>,
-    /// CSC row indices (cloned from real matrix)
-    row_indices: Vec<usize>,
+    /// Frozen CSC sparsity pattern (cloned from the real matrix once)
+    csc: SymbolicSparseColMat<usize>,
     /// Complex values (updated for each frequency)
     values: Vec<Complex64>,
     /// Mapping from (row, col) to index in values array
     position_map: std::collections::HashMap<(usize, usize), usize>,
+    /// Reusable LU workspace; the symbolic part is shared with the real
+    /// matrix when available (symbolic LU is scalar-type independent).
+    lu: Option<ComplexLuWorkspace>,
+    /// True while `lu.numeric` holds the factorization of the current
+    /// `values`. Consecutive solves against unchanged values (noise analysis
+    /// solves one matrix against many excitation vectors) skip refactorizing.
+    factorization_valid: bool,
 }
 
 impl ComplexMatrix {
     /// Create a ComplexMatrix with the same structure as a StaticMatrix
     pub fn from_real_structure(real_matrix: &StaticMatrix) -> Self {
         let nnz = real_matrix.values.len();
-        Self {
+        let mut this = Self {
             nrows: real_matrix.nrows,
             ncols: real_matrix.ncols,
-            col_ptrs: real_matrix.csc.col_ptr().to_vec(),
-            row_indices: real_matrix.csc.row_idx().to_vec(),
+            csc: real_matrix.csc.clone(),
             values: vec![Complex64::new(0.0, 0.0); nnz],
             position_map: real_matrix.position_map.clone(),
+            lu: None,
+            factorization_valid: false,
+        };
+        // Reuse the real matrix's symbolic analysis when it has already been
+        // computed (any DC solve does so); AC sweeps then never repeat it.
+        if let Some(symbolic) = real_matrix.lu.as_ref().map(|ws| ws.symbolic.clone()) {
+            this.lu = Self::workspace_from_symbolic(this.nrows, symbolic).ok();
         }
+        this
+    }
+
+    fn workspace_from_symbolic(
+        nrows: usize,
+        symbolic: Arc<sparse_lu::SymbolicLu<usize>>,
+    ) -> Result<ComplexLuWorkspace, SolverError> {
+        let par = get_global_parallelism();
+        let factor_mem = MemBuffer::try_new(
+            symbolic.factorize_numeric_lu_scratch::<Complex64>(par, Default::default()),
+        )
+        .map_err(|_| SolverError::SingularMatrix)?;
+        let solve_mem = MemBuffer::try_new(symbolic.solve_in_place_scratch::<Complex64>(1, par))
+            .map_err(|_| SolverError::SingularMatrix)?;
+        Ok(ComplexLuWorkspace {
+            symbolic,
+            numeric: sparse_lu::NumericLu::new(),
+            factor_mem,
+            solve_mem,
+            rhs: Mat::zeros(nrows, 1),
+        })
     }
 
     /// Zero all values
     #[inline]
     pub fn clear_values(&mut self) {
         self.values.fill(Complex64::new(0.0, 0.0));
+        self.factorization_valid = false;
     }
 
     /// Add real value at (row, col)
@@ -464,6 +506,7 @@ impl ComplexMatrix {
     pub fn add_real(&mut self, row: usize, col: usize, value: Value) {
         if let Some(&idx) = self.position_map.get(&(row, col)) {
             self.values[idx] += Complex64::new(value, 0.0);
+            self.factorization_valid = false;
         }
     }
 
@@ -472,6 +515,7 @@ impl ComplexMatrix {
     pub fn add(&mut self, row: usize, col: usize, value: Complex64) {
         if let Some(&idx) = self.position_map.get(&(row, col)) {
             self.values[idx] += value;
+            self.factorization_valid = false;
         }
     }
 
@@ -480,15 +524,18 @@ impl ComplexMatrix {
     pub fn add_imag(&mut self, row: usize, col: usize, value: Value) {
         if let Some(&idx) = self.position_map.get(&(row, col)) {
             self.values[idx] += Complex64::new(0.0, value);
+            self.factorization_valid = false;
         }
     }
 
     /// Materialize the real part of the sparse matrix as a dense matrix.
     pub fn to_dense_real(&self) -> Vec<Vec<Value>> {
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[idx];
                 dense[row][col] = self.values[idx].re;
             }
         }
@@ -497,18 +544,24 @@ impl ComplexMatrix {
 
     /// Materialize the imaginary part of the sparse matrix as a dense matrix.
     pub fn to_dense_imag(&self) -> Vec<Vec<Value>> {
+        let col_ptr = self.csc.col_ptr();
+        let row_idx = self.csc.row_idx();
         let mut dense = vec![vec![0.0; self.ncols]; self.nrows];
         for col in 0..self.ncols {
-            for idx in self.col_ptrs[col]..self.col_ptrs[col + 1] {
-                let row = self.row_indices[idx];
+            for idx in col_ptr[col]..col_ptr[col + 1] {
+                let row = row_idx[idx];
                 dense[row][col] = self.values[idx].im;
             }
         }
         dense
     }
 
-    /// Solve Ax = b for complex values
-    pub fn solve(&self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
+    /// Solve Ax = b for complex values.
+    ///
+    /// The symbolic analysis is computed once per structure (or inherited
+    /// from the real matrix) and the numeric factorization is reused across
+    /// consecutive solves with unchanged values.
+    pub fn solve(&mut self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
         let n = self.nrows;
 
         if n != rhs.len() {
@@ -519,34 +572,52 @@ impl ComplexMatrix {
             )));
         }
 
-        // Build faer complex sparse matrix using Complex64 directly
-        let symbolic = SymbolicSparseColMat::new_checked(
-            self.nrows,
-            self.ncols,
-            self.col_ptrs.clone(),
-            None,
-            self.row_indices.clone(),
-        );
-
-        let sparse_mat = SparseColMat::new(symbolic, self.values.clone());
-
-        // Factorize
-        let symbolic_lu =
-            SymbolicLu::try_new(sparse_mat.symbolic()).map_err(|_| SolverError::SingularMatrix)?;
-        let lu = Lu::try_new_with_symbolic(symbolic_lu, sparse_mat.as_ref())
-            .map_err(|_| SolverError::SingularMatrix)?;
-
-        // Create RHS as column vector
-        let mut b = Mat::<Complex64>::zeros(n, 1);
-        for (i, &val) in rhs.iter().enumerate() {
-            b[(i, 0)] = val;
+        if self.lu.is_none() {
+            let symbolic =
+                sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
+                    .map_err(|_| SolverError::SingularMatrix)?;
+            self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
+            self.factorization_valid = false;
         }
 
-        // Solve in-place
-        lu.solve_in_place(b.as_mut());
+        let par = get_global_parallelism();
+        let Self {
+            csc,
+            values,
+            lu,
+            factorization_valid,
+            ..
+        } = self;
+        let ws = lu.as_mut().expect("LU workspace initialized above");
 
-        // Extract solution
-        Ok((0..n).map(|i| b[(i, 0)]).collect())
+        if !*factorization_valid {
+            let mat = SparseColMatRef::new(csc.as_ref(), values.as_slice());
+            ws.symbolic
+                .factorize_numeric_lu(
+                    &mut ws.numeric,
+                    mat,
+                    par,
+                    MemStack::new(&mut ws.factor_mem),
+                    Default::default(),
+                )
+                .map_err(|_| SolverError::SingularMatrix)?;
+            *factorization_valid = true;
+        }
+
+        // SAFETY: `ws.numeric` was produced by `ws.symbolic.factorize_numeric_lu`
+        // on this matrix's pattern, and `factorization_valid` guarantees the
+        // values have not been mutated since (every mutator clears the flag).
+        let lu_ref = unsafe { sparse_lu::LuRef::new_unchecked(&ws.symbolic, &ws.numeric) };
+
+        ws.rhs.col_as_slice_mut(0).copy_from_slice(rhs);
+        lu_ref.solve_in_place_with_conj(
+            Conj::No,
+            ws.rhs.as_mut(),
+            par,
+            MemStack::new(&mut ws.solve_mem),
+        );
+
+        Ok(ws.rhs.col_as_slice(0).to_vec())
     }
 }
 

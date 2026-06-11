@@ -894,7 +894,7 @@ impl Engine {
         // Closure to solve at a single frequency
         let solve_at_freq = |freq: Value| -> Result<AcResult, SimulationError> {
             let omega = 2.0 * PI * freq;
-            let ac_matrix =
+            let mut ac_matrix =
                 Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
             let rhs = Self::build_ac_excitation_rhs(&circuit);
             let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
