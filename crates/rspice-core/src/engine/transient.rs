@@ -1210,7 +1210,7 @@ impl Engine {
                             self.voltage_reltol(),
                         );
                         let residual_converged =
-                            self.residual_convergence_met(&matrix, &sol, &rhs);
+                            self.residual_convergence_met(&mut matrix, &sol, &rhs);
                         // CRITICAL: Update new_solution BEFORE checking device convergence
                         // Otherwise, BJT vbe/vbc are based on old guess, not new solve
                         new_solution = sol;
@@ -1258,7 +1258,7 @@ impl Engine {
                         self.node_voltage_convergence_met(&solution, &new_solution, num_nodes);
                     let d_conv = !circuit.has_nonlinear_devices()
                         || self.transient_static_device_convergence_met(&circuit);
-                    let r_conv = self.residual_convergence_met(&matrix, &new_solution, &rhs);
+                    let r_conv = self.residual_convergence_met(&mut matrix, &new_solution, &rhs);
                     let max_dv = Self::max_abs_delta_prefix(&solution, &new_solution, num_nodes);
                     log::warn!(
                         "Newton non-converge at t={:.6e}, dt={:.3e}: voltage_conv={}, device_conv={}, residual_conv={}, max_dv={:.3e}, iter={}",

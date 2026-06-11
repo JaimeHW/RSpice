@@ -6,7 +6,7 @@ impl Engine {
     #[inline]
     pub(crate) fn residual_convergence_met(
         &self,
-        matrix: &StaticMatrix,
+        matrix: &mut StaticMatrix,
         solution: &[Value],
         rhs: &[Value],
     ) -> bool {
@@ -61,17 +61,17 @@ impl Engine {
         }
 
         let snapshot = circuit.nonlinear_state_snapshot();
-        let mut rhs = vec![0.0; size];
-        let mut residual_matrix = matrix.clone_structure();
-        linear_stamp(circuit, &mut residual_matrix, &mut rhs);
-        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
-            circuit,
-            &mut residual_matrix,
-            &mut rhs,
-            solution,
-            junction_gmin,
-        );
-        let converged = self.residual_convergence_met(&residual_matrix, solution, &rhs);
+        let converged = matrix.with_probe_values(|probe, rhs| {
+            linear_stamp(circuit, probe, rhs);
+            self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                circuit,
+                probe,
+                rhs,
+                solution,
+                junction_gmin,
+            );
+            self.residual_convergence_met(probe, solution, rhs)
+        });
         circuit.restore_nonlinear_state(snapshot);
         converged
     }
@@ -202,26 +202,26 @@ impl Engine {
         }
 
         let snapshot = circuit.nonlinear_state_snapshot();
-        let mut rhs = vec![0.0; size];
-        let mut residual_matrix = matrix.clone_structure();
-        linear_stamp(circuit, &mut residual_matrix, &mut rhs);
-        self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
-            circuit,
-            &mut residual_matrix,
-            &mut rhs,
-            solution,
-            junction_gmin,
-        );
-
-        let merit = residual_matrix
-            .scaled_residual_inf_norm(
+        let merit = matrix.with_probe_values(|probe, rhs| {
+            linear_stamp(circuit, probe, rhs);
+            self.stamp_static_probe_nonlinear_devices_for_dc_with_junction_gmin(
+                circuit,
+                probe,
+                rhs,
                 solution,
-                &rhs,
-                self.current_abstol(),
-                self.residual_reltol(),
-            )
-            .ok()
-            .filter(|norm| norm.is_finite());
+                junction_gmin,
+            );
+
+            probe
+                .scaled_residual_inf_norm(
+                    solution,
+                    rhs,
+                    self.current_abstol(),
+                    self.residual_reltol(),
+                )
+                .ok()
+                .filter(|norm| norm.is_finite())
+        });
         circuit.restore_nonlinear_state(snapshot);
         merit
     }

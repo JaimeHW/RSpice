@@ -59,6 +59,12 @@ pub struct StaticMatrix {
     position_map: std::collections::HashMap<(usize, usize), usize>,
     /// Reusable LU workspace (lazily initialized on first solve)
     lu: Option<LuWorkspace>,
+    /// Scratch values + RHS retained between residual probes (see
+    /// [`StaticMatrix::with_probe_values`]).
+    probe_values: Option<Vec<Value>>,
+    probe_rhs: Option<Vec<Value>>,
+    /// Scratch for the A*x product inside residual norms.
+    residual_scratch: Vec<Value>,
 }
 
 impl StaticMatrix {
@@ -74,7 +80,37 @@ impl StaticMatrix {
             values: vec![0.0; self.values.len()],
             position_map: self.position_map.clone(),
             lu: None,
+            probe_values: None,
+            probe_rhs: None,
+            residual_scratch: Vec::new(),
         }
+    }
+
+    /// Run `f` against this matrix with zeroed scratch values and RHS swapped
+    /// in, restoring the live values afterwards.
+    ///
+    /// Residual probes need to stamp a trial linearization without disturbing
+    /// the in-flight Newton system. Since the structure, position map, and LU
+    /// workspace are all valid for any values array, swapping the values
+    /// buffer gives the probe a free matrix: no structure clones, no
+    /// position-map rehash, and probe solves reuse the cached symbolic
+    /// analysis and numeric workspace. (A subsequent live solve refactorizes
+    /// from the restored values, so workspace sharing is safe.)
+    pub fn with_probe_values<R>(&mut self, f: impl FnOnce(&mut Self, &mut [Value]) -> R) -> R {
+        let mut scratch = self.probe_values.take().unwrap_or_default();
+        scratch.resize(self.values.len(), 0.0);
+        scratch.fill(0.0);
+        let mut rhs = self.probe_rhs.take().unwrap_or_default();
+        rhs.resize(self.nrows, 0.0);
+        rhs.fill(0.0);
+
+        std::mem::swap(&mut self.values, &mut scratch);
+        let result = f(self, &mut rhs);
+        std::mem::swap(&mut self.values, &mut scratch);
+
+        self.probe_values = Some(scratch);
+        self.probe_rhs = Some(rhs);
+        result
     }
 
     fn to_dense_real(&self) -> Vec<Vec<Value>> {
@@ -156,6 +192,9 @@ impl StaticMatrix {
             values,
             position_map,
             lu: None,
+            probe_values: None,
+            probe_rhs: None,
+            residual_scratch: Vec::new(),
         })
     }
 
@@ -224,8 +263,11 @@ impl StaticMatrix {
     /// Each row is normalized with a SPICE-like tolerance scale:
     /// `abstol + reltol * max(|A*x|, |b|)`.
     /// Returns `inf` when input vectors contain non-finite values.
+    ///
+    /// Takes `&mut self` to reuse the internal A*x scratch buffer; this is
+    /// evaluated once or twice per Newton iteration (merit + convergence).
     pub fn scaled_residual_inf_norm(
-        &self,
+        &mut self,
         solution: &[Value],
         rhs: &[Value],
         abstol: Value,
@@ -259,7 +301,9 @@ impl StaticMatrix {
 
         let col_ptr = self.csc.col_ptr();
         let row_idx = self.csc.row_idx();
-        let mut ax = vec![0.0; self.nrows];
+        self.residual_scratch.resize(self.nrows, 0.0);
+        self.residual_scratch.fill(0.0);
+        let ax = &mut self.residual_scratch;
         for col in 0..self.ncols {
             let x = solution[col];
             if !x.is_finite() {

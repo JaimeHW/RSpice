@@ -340,42 +340,37 @@ impl Engine {
         // residual and fixed-point update, not by the previous device history
         // used to protect Newton steps while finding them.
         let snapshot = circuit.nonlinear_state_snapshot();
-        let mut rhs = vec![0.0; size];
-        let mut validation_matrix = matrix.clone_structure();
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         let node_count = circuit.num_nodes().min(size);
-        for i in 0..node_count {
-            validation_matrix.add(i, i, gmin_floor);
-        }
-        circuit.stamp_dc_direct(&mut validation_matrix, &mut rhs);
-        self.stamp_static_probe_nonlinear_devices_for_dc(
-            circuit,
-            &mut validation_matrix,
-            &mut rhs,
-            solution,
-        );
-        let residual_norm = validation_matrix
-            .scaled_residual_inf_norm(
-                solution,
-                &rhs,
-                self.current_abstol(),
-                self.residual_reltol(),
-            )
-            .unwrap_or(Value::INFINITY);
-        let residual_converged = residual_norm.is_finite() && residual_norm <= 1.0;
+        let verdict = matrix.with_probe_values(|probe, rhs| {
+            for i in 0..node_count {
+                probe.add(i, i, gmin_floor);
+            }
+            circuit.stamp_dc_direct(probe, rhs);
+            self.stamp_static_probe_nonlinear_devices_for_dc(circuit, probe, rhs, solution);
+            let residual_norm = probe
+                .scaled_residual_inf_norm(
+                    solution,
+                    rhs,
+                    self.current_abstol(),
+                    self.residual_reltol(),
+                )
+                .unwrap_or(Value::INFINITY);
+            let residual_converged = residual_norm.is_finite() && residual_norm <= 1.0;
 
-        let Ok(next_solution) = validation_matrix.solve(&rhs) else {
-            circuit.restore_nonlinear_state(snapshot);
-            return false;
-        };
+            let Ok(next_solution) = probe.solve(rhs) else {
+                return false;
+            };
 
-        let fixed_point_converged =
-            self.node_voltage_convergence_met(solution, &next_solution, circuit.num_nodes());
-        let residual_only_acceptable =
-            residual_converged && circuit.has_jfet_gate_generation_branches();
+            let fixed_point_converged =
+                self.node_voltage_convergence_met(solution, &next_solution, circuit.num_nodes());
+            let residual_only_acceptable =
+                residual_converged && circuit.has_jfet_gate_generation_branches();
+
+            residual_converged && (fixed_point_converged || residual_only_acceptable)
+        });
         circuit.restore_nonlinear_state(snapshot);
-
-        residual_converged && (fixed_point_converged || residual_only_acceptable)
+        verdict
     }
 }
 
