@@ -117,6 +117,12 @@ pub struct RunArgs {
     #[arg(long, value_name = "TOL", requires = "compress")]
     pub compress_tol: Option<f64>,
 
+    /// Parallel workers for multi-run plans (.alter/.data variants);
+    /// 0 = all cores. With more than one worker, per-run console output
+    /// reduces to status lines (files and reports carry the data)
+    #[arg(short = 'j', long, value_name = "N", default_value_t = 1)]
+    pub jobs: usize,
+
     /// Save the end-of-run transient state to a checkpoint file
     /// (segmented long runs; continue later with --restore)
     #[arg(long, value_name = "FILE")]

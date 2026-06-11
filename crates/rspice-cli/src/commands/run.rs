@@ -247,26 +247,69 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let mut reports = Vec::with_capacity(plan.len());
     let mut first_error: Option<String> = None;
 
-    for deck in &plan {
-        if multi_run && !quiet {
-            println!(
-                "\n=== run: {} ===",
-                deck.label.as_deref().unwrap_or("base")
-            );
+    let workers = effective_jobs(args.jobs, plan.len());
+    if workers > 1 {
+        // Parallel multi-run execution: every run is independent (own
+        // parse, own engine, tagged output files). Per-run console
+        // output is silenced — interleaved analysis chatter from N
+        // workers is noise — and replaced by ordered status lines.
+        if !quiet {
+            println!("Running {} runs on {workers} workers", plan.len());
         }
-        let netlist = load_netlist_from_source(&deck.source, &args, config)?;
-        let report = run_deck(
-            &netlist,
-            &args,
-            config,
-            verbose,
-            quiet,
-            deck.label.as_deref(),
-        )?;
-        if first_error.is_none() {
-            first_error = report.error.clone();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(workers)
+            .build()
+            .map_err(|e| CliError::InternalError {
+                message: format!("failed to build the multi-run worker pool: {e}"),
+            })?;
+        let outcomes: Vec<Result<SimulationReport, CliError>> = pool.install(|| {
+            use rayon::prelude::*;
+            plan.par_iter()
+                .map(|deck| {
+                    let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+                    run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
+                })
+                .collect()
+        });
+        for (deck, outcome) in plan.iter().zip(outcomes) {
+            let label = deck.label.as_deref().unwrap_or("base");
+            let report = outcome?;
+            if !quiet {
+                match &report.error {
+                    None => println!(
+                        "  ✓ {label} ({:.3}s)",
+                        report.duration_secs
+                    ),
+                    Some(error) => println!("  ✗ {label}: {error}"),
+                }
+            }
+            if first_error.is_none() {
+                first_error = report.error.clone();
+            }
+            reports.push(report);
         }
-        reports.push(report);
+    } else {
+        for deck in &plan {
+            if multi_run && !quiet {
+                println!(
+                    "\n=== run: {} ===",
+                    deck.label.as_deref().unwrap_or("base")
+                );
+            }
+            let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+            let report = run_deck(
+                &netlist,
+                &args,
+                config,
+                verbose,
+                quiet,
+                deck.label.as_deref(),
+            )?;
+            if first_error.is_none() {
+                first_error = report.error.clone();
+            }
+            reports.push(report);
+        }
     }
 
     let duration = start_time.elapsed().as_secs_f64();
@@ -404,6 +447,19 @@ fn write_report_files(
         }
     }
     Ok(())
+}
+
+/// Worker count for a multi-run plan: `--jobs 0` = all cores, never
+/// more workers than runs, and single-run plans stay serial.
+fn effective_jobs(requested: usize, runs: usize) -> usize {
+    if runs <= 1 {
+        return 1;
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let workers = if requested == 0 { cores } else { requested };
+    workers.min(runs).max(1)
 }
 
 /// `out.csv` + `hot` -> `out.hot.csv` (run-level analog of the

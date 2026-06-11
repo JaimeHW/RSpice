@@ -4043,6 +4043,7 @@ dependencies = [
  "indicatif",
  "log",
  "mimalloc",
+ "rayon",
  "rspice-core",
  "rspice-veriloga",
  "rustyhdf5",
