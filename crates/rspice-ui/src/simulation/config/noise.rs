@@ -78,62 +78,15 @@ impl NoiseAnalysisConfig {
 
     /// Generate array of frequency points based on sweep configuration
     ///
-    /// Uses same logic as AcAnalysisConfig for consistency.
+    /// Delegates to the core ngspice-exact generator so interactive runs
+    /// match what the exported .noise deck produces in the CLI or ngspice.
     pub fn generate_frequencies(&self) -> Vec<f64> {
-        match self.sweep_type {
-            AcSweepType::Decade => self.generate_logarithmic_sweep(10.0),
-            AcSweepType::Octave => self.generate_logarithmic_sweep(2.0),
-            AcSweepType::Linear => self.generate_linear_sweep(),
-        }
-    }
-
-    /// Generate logarithmic frequency sweep
-    fn generate_logarithmic_sweep(&self, base: f64) -> Vec<f64> {
-        if self.start_freq <= 0.0 || self.stop_freq <= 0.0 || self.start_freq >= self.stop_freq {
-            return vec![];
-        }
-
-        let log_start = self.start_freq.log(base);
-        let log_stop = self.stop_freq.log(base);
-        let num_units = log_stop - log_start;
-
-        let total_points = ((num_units * self.num_points as f64) as usize).max(1) + 1;
-
-        let mut frequencies = Vec::with_capacity(total_points);
-        for i in 0..total_points {
-            let t = i as f64 / (total_points - 1).max(1) as f64;
-            let log_freq = log_start + t * (log_stop - log_start);
-            frequencies.push(base.powf(log_freq));
-        }
-
-        if let Some(first) = frequencies.first_mut() {
-            *first = self.start_freq;
-        }
-        if let Some(last) = frequencies.last_mut() {
-            *last = self.stop_freq;
-        }
-
-        frequencies
-    }
-
-    /// Generate linear frequency sweep
-    fn generate_linear_sweep(&self) -> Vec<f64> {
-        if self.start_freq >= self.stop_freq || self.num_points == 0 {
-            return vec![];
-        }
-
-        let mut frequencies = Vec::with_capacity(self.num_points);
-        let step = (self.stop_freq - self.start_freq) / (self.num_points - 1).max(1) as f64;
-
-        for i in 0..self.num_points {
-            frequencies.push(self.start_freq + i as f64 * step);
-        }
-
-        if let Some(last) = frequencies.last_mut() {
-            *last = self.stop_freq;
-        }
-
-        frequencies
+        rspice_core::analysis::ac::ac_sweep_frequencies(
+            self.sweep_type.freq_variation(),
+            self.num_points,
+            self.start_freq,
+            self.stop_freq,
+        )
     }
 
     /// Get default temperature for noise analysis (300K = 27°C)
