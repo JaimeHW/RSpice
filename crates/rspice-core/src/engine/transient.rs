@@ -490,6 +490,19 @@ impl Engine {
         let hinted_max_step = circuit
             .transient_max_step_hint
             .map_or(max_step, |hint| max_step.min(hint));
+        // Honor an explicitly configured maximum timestep (CLI --max-step,
+        // netlist options, bindings). The default constant is a sentinel for
+        // "not set" -- the same convention the CLI TOML merge uses -- so
+        // default configs keep the caller-provided step unchanged.
+        let config_max_step = self.config.max_timestep;
+        let hinted_max_step = if config_max_step.is_finite()
+            && config_max_step > 0.0
+            && config_max_step != crate::constants::MAX_TIMESTEP
+        {
+            hinted_max_step.min(config_max_step)
+        } else {
+            hinted_max_step
+        };
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -3002,5 +3015,48 @@ mod tests {
         );
         assert_eq!(Engine::transient_newton_iteration_budget(250, false), 250);
         assert_eq!(Engine::transient_newton_iteration_budget(250, true), 128);
+    }
+
+    /// An explicitly configured `max_timestep` must cap the accepted step
+    /// even when the caller passes a coarser per-run maximum (the CLI
+    /// --max-step path resolves into the config, not the argument).
+    #[test]
+    fn configured_max_timestep_caps_accepted_steps() {
+        let deck = "RC step\n\
+                    V1 1 0 DC 1\n\
+                    R1 1 2 1k\n\
+                    C1 2 0 1u\n\
+                    .end\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+
+        let mut config = crate::SimulationConfig::default();
+        config.max_timestep = 2.0e-6;
+        let engine = Engine::new(config);
+        let result = engine
+            .run_tran(&netlist, 100.0e-6, 20.0e-6)
+            .expect("transient runs");
+
+        let mut worst_dt: Value = 0.0;
+        for pair in result.time.windows(2) {
+            worst_dt = worst_dt.max(pair[1] - pair[0]);
+        }
+        assert!(
+            worst_dt <= 2.0e-6 + 1e-12,
+            "configured max_timestep ignored: worst accepted dt {worst_dt:.3e}"
+        );
+
+        // Default config: the caller-provided maximum governs unchanged.
+        let default_engine = Engine::new(crate::SimulationConfig::default());
+        let free = default_engine
+            .run_tran(&netlist, 100.0e-6, 20.0e-6)
+            .expect("transient runs");
+        let mut free_worst: Value = 0.0;
+        for pair in free.time.windows(2) {
+            free_worst = free_worst.max(pair[1] - pair[0]);
+        }
+        assert!(
+            free_worst > 2.0e-6,
+            "default config must not silently cap the caller's max step (worst dt {free_worst:.3e})"
+        );
     }
 }
