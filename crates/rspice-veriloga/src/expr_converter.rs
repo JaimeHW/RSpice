@@ -46,6 +46,8 @@ pub struct ConversionContext {
     param_map: HashMap<SmolStr, usize>,
     /// Map from variable name to index
     var_map: HashMap<SmolStr, usize>,
+    /// Array layouts: name -> (base, lower, len)
+    arrays: HashMap<SmolStr, (usize, i64, usize)>,
     /// Number of external terminals (ports)
     num_terminals: usize,
     /// Number of internal nodes
@@ -100,11 +102,18 @@ impl ConversionContext {
             var_map.insert(var.name.clone(), idx);
         }
 
+        // Array layouts (elements occupy contiguous variable slots)
+        let mut arrays = HashMap::new();
+        for (name, layout) in &module.arrays {
+            arrays.insert(name.clone(), (layout.base, layout.lower, layout.len));
+        }
+
         Self {
             node_map,
             branch_map,
             param_map,
             var_map,
+            arrays,
             num_terminals,
             num_internal,
         }
@@ -128,6 +137,11 @@ impl ConversionContext {
     /// Get variable index by name
     pub fn var_index(&self, name: &str) -> Option<usize> {
         self.var_map.get(name).copied()
+    }
+
+    /// Get an array layout (base, lower, len) by name
+    pub fn array(&self, name: &str) -> Option<(usize, i64, usize)> {
+        self.arrays.get(name).copied()
     }
 
     /// Global ground (reference) node index
@@ -159,6 +173,11 @@ impl<'a> ExprConverter<'a> {
         Self { ctx }
     }
 
+    /// Array layout (base, lower, len) by name
+    pub fn array_layout(&self, name: &str) -> Option<(usize, i64, usize)> {
+        self.ctx.array(name)
+    }
+
     /// Convert an AST expression to an IR expression
     pub fn convert(&self, expr: &Expression) -> CompileResult<IrExpr> {
         match expr {
@@ -174,10 +193,22 @@ impl<'a> ExprConverter<'a> {
             Expression::Conditional(cond) => self.convert_conditional(cond),
             Expression::Call(call) => self.convert_call(call),
             Expression::BranchAccess(access) => self.convert_branch_access(access),
-            Expression::ArrayAccess(_) => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature("Array access in expressions".into()),
-            )
-            .into()),
+            Expression::ArrayAccess(access) => {
+                let Some((base, lower, len)) = self.ctx.array(&access.array) else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("'{}' is not a declared array variable", access.array),
+                    ))
+                    .into());
+                };
+                let index = self.convert(&access.index)?;
+                Ok(IrExpr::VarIndexed {
+                    array: access.array.clone(),
+                    base,
+                    len,
+                    lower,
+                    index: Box::new(index),
+                })
+            }
             Expression::ArrayLiteral(_) => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(
                     "Array literals are only supported as analog filter coefficient lists".into(),

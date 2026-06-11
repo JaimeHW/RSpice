@@ -31,6 +31,21 @@ impl<'a> Vm<'a> {
             .ok_or(VmError::StackUnderflow("No result on stack"))
     }
 
+    /// Resolve a runtime array index (declared-bounds space) to a variable
+    /// slot of the contiguous element run at `base`
+    pub fn array_slot(raw: f64, base: usize, len: usize, lower: i64) -> Result<usize, VmError> {
+        let index = raw.round() as i64;
+        let offset = index - lower;
+        if offset < 0 || offset >= len as i64 {
+            return Err(VmError::IndexOutOfBounds {
+                index,
+                lower,
+                upper: lower + len as i64 - 1,
+            });
+        }
+        Ok(base + offset as usize)
+    }
+
     /// Execute a single instruction.
     #[inline]
     fn execute_instruction(&mut self, instruction: &Instruction) -> Result<(), VmError> {
@@ -70,6 +85,15 @@ impl<'a> Vm<'a> {
             }
             Instruction::PushVariable(idx) => {
                 let v = self.context.variables.get(*idx).copied().unwrap_or(0.0);
+                self.stack.push(v);
+            }
+            Instruction::PushVariableDyn { base, len, lower } => {
+                let raw = self
+                    .stack
+                    .pop()
+                    .ok_or(VmError::StackUnderflow("PushVariableDyn"))?;
+                let slot = Self::array_slot(raw, *base, *len, *lower)?;
+                let v = self.context.variables.get(slot).copied().unwrap_or(0.0);
                 self.stack.push(v);
             }
             Instruction::PushTime => {

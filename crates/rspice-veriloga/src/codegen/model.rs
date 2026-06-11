@@ -118,6 +118,21 @@ pub struct AssignmentProgram {
 pub enum AssignmentStep {
     /// Compute a value and store it in a variable
     Assign(AssignmentProgram),
+    /// Compute an element index and a value, then store the value in
+    /// element `index - lower` of the contiguous variable run at `base`.
+    /// Out-of-range indexes are a runtime error (never a silent skip).
+    AssignIndexed {
+        /// First element's variable slot
+        base: usize,
+        /// Number of elements
+        len: usize,
+        /// Declared lower bound
+        lower: i64,
+        /// Element index program
+        index: BytecodeProgram,
+        /// Value program
+        value: BytecodeProgram,
+    },
     /// Execute the body steps while the condition program evaluates
     /// nonzero (re-checked before every iteration)
     Loop {
@@ -200,6 +215,14 @@ pub enum Instruction {
     PushInternalVoltage(usize),
     /// Push variable value
     PushVariable(usize),
+    /// Pop an element index, then push the value of element
+    /// `index - lower` from the contiguous variable run at `base`.
+    /// Out-of-range indexes are a runtime error.
+    PushVariableDyn {
+        base: usize,
+        len: usize,
+        lower: i64,
+    },
     /// Push temperature
     PushTemperature,
     /// Push thermal voltage

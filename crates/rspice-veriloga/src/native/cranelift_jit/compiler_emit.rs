@@ -40,6 +40,11 @@ impl JitCompiler {
         for step in &model.assignment_steps {
             let assign = match step {
                 crate::codegen::AssignmentStep::Assign(assign) => assign,
+                crate::codegen::AssignmentStep::AssignIndexed { .. } => {
+                    return Err(JitError::UnsupportedInstruction(
+                        "runtime-indexed array assignment",
+                    ));
+                }
                 crate::codegen::AssignmentStep::Loop { .. } => {
                     return Err(JitError::UnsupportedInstruction("runtime loop"));
                 }

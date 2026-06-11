@@ -216,6 +216,10 @@ impl VerilogADevice {
                     crate::codegen::AssignmentStep::Assign(assignment) => {
                         scan_program(&assignment.program);
                     }
+                    crate::codegen::AssignmentStep::AssignIndexed { index, value, .. } => {
+                        scan_program(index);
+                        scan_program(value);
+                    }
                     crate::codegen::AssignmentStep::Loop { condition, body } => {
                         scan_program(condition);
                         scan_steps(body, scan_program);
@@ -831,6 +835,31 @@ impl VerilogADevice {
                     let value = vm.execute(&assignment.program).unwrap_or(0.0);
                     if assignment.var_index < vm.context.variables.len() {
                         vm.context.variables[assignment.var_index] = value;
+                    }
+                }
+                crate::codegen::AssignmentStep::AssignIndexed {
+                    base,
+                    len,
+                    lower,
+                    index,
+                    value,
+                } => {
+                    let slot = vm
+                        .execute(index)
+                        .and_then(|raw| Vm::array_slot(raw, *base, *len, *lower));
+                    match slot {
+                        Ok(slot) => {
+                            let value = vm.execute(value).unwrap_or(0.0);
+                            if slot < vm.context.variables.len() {
+                                vm.context.variables[slot] = value;
+                            }
+                        }
+                        Err(err) => {
+                            log::warn!(
+                                "Verilog-A model '{model_name}': skipping array element \
+                                 assignment: {err}"
+                            );
+                        }
                     }
                 }
                 crate::codegen::AssignmentStep::Loop { condition, body } => {

@@ -115,10 +115,19 @@ impl CodeGenerator {
             .map(|item| match item {
                 crate::ir::IrAssignmentItem::Assign(assign) => {
                     let program = self.compile_expr(&assign.expr, ir)?;
-                    Ok(AssignmentStep::Assign(AssignmentProgram {
-                        var_index: assign.var_index,
-                        program,
-                    }))
+                    match &assign.index {
+                        Some(target) => Ok(AssignmentStep::AssignIndexed {
+                            base: assign.var_index,
+                            len: target.len,
+                            lower: target.lower,
+                            index: self.compile_expr(&target.index, ir)?,
+                            value: program,
+                        }),
+                        None => Ok(AssignmentStep::Assign(AssignmentProgram {
+                            var_index: assign.var_index,
+                            program,
+                        })),
+                    }
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
                     let condition = self.compile_expr(condition, ir)?;
@@ -362,6 +371,20 @@ impl CodeGenerator {
                         )))
                     })?;
                 program.instructions.push(Instruction::PushVariable(idx));
+            }
+            IrExpr::VarIndexed {
+                base,
+                len,
+                lower,
+                index,
+                ..
+            } => {
+                self.emit_expr(index, ir, program)?;
+                program.instructions.push(Instruction::PushVariableDyn {
+                    base: *base,
+                    len: *len,
+                    lower: *lower,
+                });
             }
             IrExpr::Voltage(p, n) => {
                 program.instructions.push(Instruction::PushVoltage(*p, *n));

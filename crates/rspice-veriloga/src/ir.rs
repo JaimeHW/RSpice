@@ -24,6 +24,8 @@ pub struct DeviceIR {
     pub variables: Vec<VarDef>,
     /// Variable assignments and runtime loops (in execution order)
     pub assignments: Vec<IrAssignmentItem>,
+    /// Array variables (elements are contiguous slots in `variables`)
+    pub arrays: Vec<ArrayDef>,
     /// Branch equations
     pub equations: Vec<BranchEquation>,
     /// Branch-current unknowns introduced by potential contributions
@@ -68,10 +70,39 @@ pub struct VarDef {
 /// Variable assignment in IR form
 #[derive(Debug, Clone)]
 pub struct VarAssignment {
-    /// Index of variable being assigned
+    /// Index of variable being assigned (for indexed writes: the array's
+    /// first element)
     pub var_index: usize,
+    /// Runtime-indexed array element write (None for scalar targets)
+    pub index: Option<IndexedTarget>,
     /// The expression to assign
     pub expr: IrExpr,
+}
+
+/// Runtime-indexed array write target: the element `index - lower` of the
+/// contiguous run starting at the assignment's `var_index`
+#[derive(Debug, Clone)]
+pub struct IndexedTarget {
+    /// Array name (for diagnostics and shadow naming)
+    pub array: SmolStr,
+    /// Number of elements
+    pub len: usize,
+    /// Declared lower bound
+    pub lower: i64,
+    /// Element index expression (evaluated against declared bounds)
+    pub index: IrExpr,
+}
+
+/// Array variable layout: elements occupy contiguous variable slots
+#[derive(Debug, Clone)]
+pub struct ArrayDef {
+    pub name: SmolStr,
+    /// First element's variable index
+    pub base: usize,
+    /// Declared lower bound
+    pub lower: i64,
+    /// Number of elements
+    pub len: usize,
 }
 
 /// An ordered evaluation step: a plain assignment or a runtime-bounded loop
@@ -154,6 +185,20 @@ pub enum IrExpr {
     ParamGiven(SmolStr),
     /// Variable reference
     Var(SmolStr),
+    /// Runtime-indexed array element read: element `index - lower` of the
+    /// contiguous variable run starting at `base`
+    VarIndexed {
+        /// Array name (for shadow naming)
+        array: SmolStr,
+        /// First element's variable index
+        base: usize,
+        /// Number of elements
+        len: usize,
+        /// Declared lower bound
+        lower: i64,
+        /// Element index expression
+        index: Box<IrExpr>,
+    },
     /// Voltage at terminal pair
     Voltage(usize, usize),
     /// Current through branch
@@ -351,6 +396,7 @@ impl DeviceIR {
             parameters: Vec::new(),
             variables: Vec::new(),
             assignments: Vec::new(),
+            arrays: Vec::new(),
             equations: Vec::new(),
             branch_unknowns: Vec::new(),
             noise_sources: Vec::new(),
@@ -394,6 +440,16 @@ impl DeviceIR {
             ir.variables.push(VarDef {
                 name: var.name.clone(),
                 is_state: var.is_state,
+            });
+        }
+
+        // Array layouts (element slots are already in `variables`)
+        for (name, layout) in &module.arrays {
+            ir.arrays.push(ArrayDef {
+                name: name.clone(),
+                base: layout.base,
+                lower: layout.lower,
+                len: layout.len,
             });
         }
 
@@ -613,6 +669,9 @@ impl DeviceIR {
                 IrExpr::Timer { start_time, period } => {
                     contains_ddt(start_time) || period.as_deref().is_some_and(contains_ddt)
                 }
+                // ddt() cannot appear in an element index (assignments
+                // reject it upstream), so an indexed read is resistive
+                IrExpr::VarIndexed { index, .. } => contains_ddt(index),
                 IrExpr::Const(_)
                 | IrExpr::Param(_)
                 | IrExpr::ParamGiven(_)
@@ -724,8 +783,29 @@ impl DeviceIR {
             match stmt {
                 AnalyzedStatement::Assignment(assign) => {
                     let expr = converter.convert(&assign.expression)?;
+                    let index = match &assign.index {
+                        Some(index_expr) => {
+                            let (_base, lower, len) =
+                                converter.array_layout(&assign.target).ok_or_else(|| {
+                                    crate::error::CodeGenError::new(
+                                        crate::error::CodeGenErrorKind::Internal(format!(
+                                            "indexed assignment to unknown array '{}'",
+                                            assign.target
+                                        )),
+                                    )
+                                })?;
+                            Some(IndexedTarget {
+                                array: assign.target.clone(),
+                                len,
+                                lower,
+                                index: converter.convert(index_expr)?,
+                            })
+                        }
+                        None => None,
+                    };
                     out.push(IrAssignmentItem::Assign(VarAssignment {
                         var_index: assign.var_index,
+                        index,
                         expr,
                     }));
                 }
@@ -812,6 +892,19 @@ impl DeviceIR {
             | IrExpr::Temperature
             | IrExpr::Vt => true,
             IrExpr::Var(name) => static_vars.contains(name),
+            // An indexed read is static when the index is static and every
+            // element it could select is static
+            IrExpr::VarIndexed {
+                array,
+                len,
+                lower,
+                index,
+                ..
+            } => {
+                recurse(index)
+                    && (*lower..*lower + *len as i64)
+                        .all(|k| static_vars.contains(format!("{array}[{k}]").as_str()))
+            }
             IrExpr::Binary(_, l, r) => recurse(l) && recurse(r),
             IrExpr::Unary(_, e) | IrExpr::Limexp(e) => recurse(e),
             IrExpr::Call(_, args) => args.iter().all(recurse),
@@ -864,6 +957,26 @@ impl DeviceIR {
                 for item in items {
                     match item {
                         IrAssignmentItem::Assign(a) => {
+                            if let Some(target) = &a.index {
+                                // A runtime-indexed write may land in any
+                                // element; a non-static one evicts them all
+                                let write_static = enclosing_static
+                                    && DeviceIR::is_instance_static_expr(&a.expr, static_vars)
+                                    && DeviceIR::is_instance_static_expr(
+                                        &target.index,
+                                        static_vars,
+                                    );
+                                if !write_static {
+                                    for k in target.lower..target.lower + target.len as i64 {
+                                        let elem: SmolStr =
+                                            format!("{}[{k}]", target.array).into();
+                                        if static_vars.remove(&elem) {
+                                            *changed = true;
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
                             let name = &variables[a.var_index].name;
                             if static_vars.contains(name)
                                 && (!enclosing_static
@@ -908,8 +1021,14 @@ pub mod autodiff {
     /// before each original assignment.
     #[derive(Debug, Default)]
     pub struct ShadowContext {
-        /// Variables with voltage-dependent values
+        /// Variables with voltage-dependent values. For arrays, the array
+        /// name and every element name join together: one voltage-dependent
+        /// element shadows the whole array (a runtime index may select any
+        /// slot).
         shadowed: HashSet<SmolStr>,
+        /// First slot of the contiguous shadow run per shadow-array name
+        /// (`shadow_name(array, wrt)` -> variable index of element `lower`)
+        array_shadow_base: HashMap<SmolStr, usize>,
     }
 
     impl ShadowContext {
@@ -928,6 +1047,13 @@ pub mod autodiff {
 
         pub fn is_shadowed(&self, name: &str) -> bool {
             self.shadowed.contains(name)
+        }
+
+        /// First variable slot of an array's shadow run along an axis
+        pub fn array_shadow_base(&self, array: &str, wrt: &DerivativeWrt) -> Option<usize> {
+            self.array_shadow_base
+                .get(&Self::shadow_name(array, wrt))
+                .copied()
         }
     }
 
@@ -951,6 +1077,8 @@ pub mod autodiff {
         match expr {
             IrExpr::Voltage(..) | IrExpr::Current(..) | IrExpr::BranchCurrent(_) => true,
             IrExpr::Var(name) => shadowed.contains(name),
+            // The index only selects; the elements carry the slope
+            IrExpr::VarIndexed { array, .. } => shadowed.contains(array),
             IrExpr::Const(_)
             | IrExpr::Param(_)
             | IrExpr::ParamGiven(_)
@@ -1012,24 +1140,45 @@ pub mod autodiff {
     }
 
     /// Collect voltage-dependent variable names over an item tree
-    /// (fixpoint helper for [`build_shadow_assignments`])
+    /// (fixpoint helper for [`build_shadow_assignments`]).
+    ///
+    /// A voltage-dependent write into any array element shadows the whole
+    /// array: a runtime index may route the value to any slot, so every
+    /// element (and the array name itself, checked by indexed reads) joins
+    /// the set together.
     fn scan_shadowed(
         items: &[IrAssignmentItem],
         variables: &[VarDef],
+        arrays: &[ArrayDef],
         shadowed: &mut HashSet<SmolStr>,
         changed: &mut bool,
     ) {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
-                    let name = &variables[assign.var_index].name;
-                    if !shadowed.contains(name) && has_nonzero_derivative(&assign.expr, shadowed) {
-                        shadowed.insert(name.clone());
-                        *changed = true;
+                    if !has_nonzero_derivative(&assign.expr, shadowed) {
+                        continue;
+                    }
+                    let enclosing = arrays.iter().find(|a| {
+                        assign.var_index >= a.base && assign.var_index < a.base + a.len
+                    });
+                    if let Some(array) = enclosing {
+                        if shadowed.insert(array.name.clone()) {
+                            for k in array.lower..array.lower + array.len as i64 {
+                                shadowed.insert(format!("{}[{k}]", array.name).into());
+                            }
+                            *changed = true;
+                        }
+                    } else {
+                        let name = &variables[assign.var_index].name;
+                        if !shadowed.contains(name) {
+                            shadowed.insert(name.clone());
+                            *changed = true;
+                        }
                     }
                 }
                 IrAssignmentItem::Loop { body, .. } => {
-                    scan_shadowed(body, variables, shadowed, changed);
+                    scan_shadowed(body, variables, arrays, shadowed, changed);
                 }
             }
         }
@@ -1050,6 +1199,32 @@ pub mod autodiff {
         for item in items {
             match item {
                 IrAssignmentItem::Assign(assign) => {
+                    if let Some(target) = &assign.index {
+                        // Indexed write: the shadow run receives an indexed
+                        // write of the value's derivative at the same slot
+                        if ctx.is_shadowed(&target.array) {
+                            for wrt in axes(num_nodes, num_branches) {
+                                let deriv =
+                                    simplify(differentiate_with_shadows(&assign.expr, &wrt, ctx));
+                                let shadow_array = ShadowContext::shadow_name(&target.array, &wrt);
+                                let shadow_base = ctx
+                                    .array_shadow_base(&target.array, &wrt)
+                                    .expect("shadowed array has a shadow run");
+                                rewritten.push(IrAssignmentItem::Assign(VarAssignment {
+                                    var_index: shadow_base,
+                                    index: Some(IndexedTarget {
+                                        array: shadow_array,
+                                        len: target.len,
+                                        lower: target.lower,
+                                        index: target.index.clone(),
+                                    }),
+                                    expr: deriv,
+                                }));
+                            }
+                        }
+                        rewritten.push(IrAssignmentItem::Assign(assign));
+                        continue;
+                    }
                     let target = variables[assign.var_index].name.clone();
                     if ctx.is_shadowed(&target) {
                         for wrt in axes(num_nodes, num_branches) {
@@ -1058,6 +1233,7 @@ pub mod autodiff {
                             let shadow = ShadowContext::shadow_name(&target, &wrt);
                             rewritten.push(IrAssignmentItem::Assign(VarAssignment {
                                 var_index: shadow_index[&shadow],
+                                index: None,
                                 expr: deriv,
                             }));
                         }
@@ -1097,7 +1273,13 @@ pub mod autodiff {
         let mut shadowed: HashSet<SmolStr> = HashSet::new();
         loop {
             let mut changed = false;
-            scan_shadowed(&ir.assignments, &ir.variables, &mut shadowed, &mut changed);
+            scan_shadowed(
+                &ir.assignments,
+                &ir.variables,
+                &ir.arrays,
+                &mut shadowed,
+                &mut changed,
+            );
             if !changed {
                 break;
             }
@@ -1107,13 +1289,27 @@ pub mod autodiff {
             return ShadowContext::default();
         }
 
-        let ctx = ShadowContext {
-            shadowed: shadowed.clone(),
-        };
-
-        // Register shadow variables
+        // Register shadow variables. Array elements get their slots in
+        // contiguous runs (allocated below) so runtime-indexed reads and
+        // writes can address d(arr[i]) as shadow_base + (i - lower); the
+        // scalar loop must skip them.
+        let array_member: HashSet<SmolStr> = ir
+            .arrays
+            .iter()
+            .filter(|a| shadowed.contains(&a.name))
+            .flat_map(|a| {
+                std::iter::once(a.name.clone()).chain(
+                    ir.variables[a.base..a.base + a.len]
+                        .iter()
+                        .map(|v| v.name.clone()),
+                )
+            })
+            .collect();
         let mut shadow_index: HashMap<SmolStr, usize> = HashMap::new();
         for name in &shadowed {
+            if array_member.contains(name) {
+                continue;
+            }
             for wrt in axes(num_nodes, num_branches) {
                 let shadow = ShadowContext::shadow_name(name, &wrt);
                 shadow_index.insert(shadow.clone(), ir.variables.len());
@@ -1123,6 +1319,32 @@ pub mod autodiff {
                 });
             }
         }
+
+        // Contiguous shadow runs per (array, axis)
+        let mut array_shadow_base: HashMap<SmolStr, usize> = HashMap::new();
+        let mut shadow_runs: Vec<VarDef> = Vec::new();
+        for array in ir.arrays.iter().filter(|a| shadowed.contains(&a.name)) {
+            for wrt in axes(num_nodes, num_branches) {
+                let run_base = ir.variables.len() + shadow_runs.len();
+                array_shadow_base
+                    .insert(ShadowContext::shadow_name(&array.name, &wrt), run_base);
+                for k in array.lower..array.lower + array.len as i64 {
+                    let element = format!("{}[{k}]", array.name);
+                    let shadow = ShadowContext::shadow_name(&element, &wrt);
+                    shadow_index.insert(shadow.clone(), run_base + (k - array.lower) as usize);
+                    shadow_runs.push(VarDef {
+                        name: shadow,
+                        is_state: false,
+                    });
+                }
+            }
+        }
+        ir.variables.extend(shadow_runs);
+
+        let ctx = ShadowContext {
+            shadowed: shadowed.clone(),
+            array_shadow_base,
+        };
 
         // Interleave shadow updates before each original assignment.
         // Both the derivative and the original expression read the
@@ -1173,6 +1395,9 @@ pub mod autodiff {
             match item {
                 IrAssignmentItem::Assign(assign) => {
                     assign.expr = rewrite_branch_probes(&assign.expr, table);
+                    if let Some(target) = &mut assign.index {
+                        target.index = rewrite_branch_probes(&target.index, table);
+                    }
                 }
                 IrAssignmentItem::Loop { condition, body } => {
                     *condition = rewrite_branch_probes(condition, table);
@@ -1201,6 +1426,9 @@ pub mod autodiff {
             match item {
                 IrAssignmentItem::Assign(assign) => {
                     assign.expr = resolve_ddx(&assign.expr, shadows);
+                    if let Some(target) = &mut assign.index {
+                        target.index = resolve_ddx(&target.index, shadows);
+                    }
                 }
                 IrAssignmentItem::Loop { condition, body } => {
                     *condition = resolve_ddx(condition, shadows);
@@ -1287,6 +1515,19 @@ pub mod autodiff {
                 expr: Box::new(map_expr(expr, f)),
                 node: *node,
             },
+            IrExpr::VarIndexed {
+                array,
+                base,
+                len,
+                lower,
+                index,
+            } => IrExpr::VarIndexed {
+                array: array.clone(),
+                base: *base,
+                len: *len,
+                lower: *lower,
+                index: Box::new(map_expr(index, f)),
+            },
             other => other.clone(),
         }
     }
@@ -1331,6 +1572,25 @@ pub mod autodiff {
                     IrExpr::Const(0.0)
                 }
             }
+
+            // Runtime-indexed reads chain through the array's shadow run
+            // at the same element; the index itself only selects
+            IrExpr::VarIndexed {
+                array,
+                base: _,
+                len,
+                lower,
+                index,
+            } => match shadows.array_shadow_base(array, wrt) {
+                Some(shadow_base) => IrExpr::VarIndexed {
+                    array: ShadowContext::shadow_name(array, wrt),
+                    base: shadow_base,
+                    len: *len,
+                    lower: *lower,
+                    index: index.clone(),
+                },
+                None => IrExpr::Const(0.0),
+            },
 
             // Branch-current unknowns differentiate to 1 along their own
             // axis and 0 along every other

@@ -98,6 +98,11 @@ impl JitCompiler {
                     );
                     stack.push(val);
                 }
+                // Runtime-indexed reads need a bounds-error path the JIT
+                // cannot report faithfully; the interpreter handles them
+                Instruction::PushVariableDyn { .. } => {
+                    return Err(JitError::UnsupportedInstruction("PushVariableDyn"));
+                }
                 Instruction::PushTemperature => {
                     let val = builder.ins().load(
                         types::F64,
