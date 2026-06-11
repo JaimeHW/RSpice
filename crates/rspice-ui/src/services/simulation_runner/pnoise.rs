@@ -333,12 +333,17 @@ fn run_pnoise_analysis_with_config_typed(
         .as_deref()
         .map(str::trim)
         .filter(|node| !node.is_empty() && !is_ground_like(node));
+    let pnoise_input = (config.noise_ref == PnoiseReference::Input)
+        .then(|| config.input_source.trim())
+        .filter(|name| !name.is_empty());
+    let mut exact_input_noise: Option<Vec<Value>> = None;
     match engine.run_pnoise(
         &netlist,
         pss_data.frequency,
         &frequencies,
         config.output_node.trim(),
         pnoise_ref,
+        pnoise_input,
         config.max_sideband.max(1) as i32,
     ) {
         Ok(exact) => {
@@ -360,13 +365,14 @@ fn run_pnoise_analysis_with_config_typed(
                         .collect(),
                 );
             }
+            exact_input_noise = exact.input_noise.clone();
             output_noise = exact.output_noise;
         }
         Err(e) => warnings.push(format!(
             "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
         )),
     }
-    if config.noise_ref == PnoiseReference::Input {
+    if config.noise_ref == PnoiseReference::Input && exact_input_noise.is_none() {
         warnings.push(
             "PNOISE input-referred estimate uses the stationary sideband approximation"
                 .to_string(),
@@ -382,20 +388,56 @@ fn run_pnoise_analysis_with_config_typed(
     match config.noise_ref {
         PnoiseReference::Output => {}
         PnoiseReference::Input => {
-            let estimate = compute_input_referred_pnoise(
-                &engine,
-                &netlist,
-                output_idx,
-                output_ref_idx,
-                config,
-                frequencies.len(),
-                &translated_frequencies,
-                sideband_stride,
-                noise_temperature,
-            )?;
-            input_noise = Some(estimate);
+            if let Some(exact) = exact_input_noise.take() {
+                input_noise = Some(exact);
+            } else {
+                let estimate = compute_input_referred_pnoise(
+                    &engine,
+                    &netlist,
+                    output_idx,
+                    output_ref_idx,
+                    config,
+                    frequencies.len(),
+                    &translated_frequencies,
+                    sideband_stride,
+                    noise_temperature,
+                )?;
+                input_noise = Some(estimate);
+            }
         }
         PnoiseReference::Phase => {
+            // True oscillator phase noise first: the Demir PPV path solves
+            // the autonomous orbit and the phase diffusion constant, which
+            // the driven carrier-normalization below cannot represent (the
+            // conversion matrix degenerates at the carrier). Falls back to
+            // the carrier-normalized driven conversion for forced circuits.
+            let osc_config = rspice_core::analysis::PssConfig::autonomous()
+                .with_period_guess(1.0 / config.pss_fundamental_freq)
+                .with_tstab_periods(30)
+                .with_tolerance(config.pss_tolerance)
+                .with_max_iterations(60);
+            match engine.run_pnoise_oscillator(&netlist, osc_config, &frequencies) {
+                Ok(osc) => {
+                    return Ok(PnoiseData {
+                        frequencies,
+                        output_noise: osc.phase_noise_dbc,
+                        input_noise,
+                        // The integral of the driven-fold PSD does not
+                        // describe the PPV spectrum; omit rather than mix
+                        // models.
+                        total_output_noise: None,
+                        contributors: Vec::new(),
+                        carrier_frequency: 1.0 / osc.period,
+                        sideband_factor,
+                        reference: config.noise_ref,
+                        warnings,
+                    });
+                }
+                Err(e) => warnings.push(format!(
+                    "PNOISE oscillator (PPV) analysis unavailable ({e}); reporting \
+                     carrier-normalized driven noise instead"
+                )),
+            }
             let carrier_rms = estimate_carrier_rms_for_output(
                 &pss_data,
                 config.output_node.trim(),
