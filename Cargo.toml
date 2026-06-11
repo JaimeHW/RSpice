@@ -51,7 +51,13 @@ incremental = true
 
 [profile.release]
 # Release artifacts should prioritize deterministic, fully optimized builds.
+# Fat LTO + a single codegen unit let the optimizer inline faer's sparse
+# kernels straight into the Newton/transient hot loops across crate
+# boundaries; both are required for peak solver throughput.
 incremental = false
+lto = "fat"
+codegen-units = 1
+opt-level = 3
 
 # Faster test compilation
 [profile.test]
