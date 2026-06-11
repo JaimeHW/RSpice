@@ -191,28 +191,21 @@ impl PoleZeroResult {
         self.dominant_pole().map(|p| p.re.abs() / (2.0 * PI))
     }
 
-    /// Sort poles by magnitude
+    /// Sort poles by magnitude. Complex-conjugate pairs compare equal in
+    /// magnitude, so ties order the positive-imaginary member first — the
+    /// convention ngspice uses when printing pole tables.
     pub fn sort_poles_by_magnitude(&mut self) {
-        self.poles.sort_by(|a, b| {
-            let a_mag = a.magnitude();
-            let b_mag = b.magnitude();
-            let a_mag = if a_mag.is_finite() {
-                a_mag
-            } else {
-                f64::INFINITY
-            };
-            let b_mag = if b_mag.is_finite() {
-                b_mag
-            } else {
-                f64::INFINITY
-            };
-            a_mag.total_cmp(&b_mag)
-        });
+        Self::sort_by_magnitude_canonical(&mut self.poles);
     }
 
-    /// Sort zeros by magnitude
+    /// Sort zeros by magnitude with the same conjugate-pair canonical order
+    /// as [`Self::sort_poles_by_magnitude`].
     pub fn sort_zeros_by_magnitude(&mut self) {
-        self.zeros.sort_by(|a, b| {
+        Self::sort_by_magnitude_canonical(&mut self.zeros);
+    }
+
+    fn sort_by_magnitude_canonical(values: &mut [Complex]) {
+        values.sort_by(|a, b| {
             let a_mag = a.magnitude();
             let b_mag = b.magnitude();
             let a_mag = if a_mag.is_finite() {
@@ -225,7 +218,7 @@ impl PoleZeroResult {
             } else {
                 f64::INFINITY
             };
-            a_mag.total_cmp(&b_mag)
+            a_mag.total_cmp(&b_mag).then(b.im.total_cmp(&a.im))
         });
     }
 }

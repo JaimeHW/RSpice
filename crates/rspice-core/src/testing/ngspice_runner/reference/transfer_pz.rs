@@ -231,23 +231,45 @@ impl TestRunner {
                 }
             };
 
+        // Magnitude alone cannot order a complex-conjugate pair: the two
+        // members compare bit-equal from the solver, and reference tables
+        // print the members at different column precisions, so the rounded
+        // magnitudes differ by parts in 1e6 with an arbitrary sign. After
+        // the magnitude sort, both sides canonicalize adjacent
+        // opposite-sign near-conjugates with the positive-imaginary member
+        // first — the order ngspice prints — making the index-wise
+        // comparison independent of root-finder and table ordering.
+        fn canonical(values: &mut [crate::analysis::pole_zero::Complex]) {
+            values.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            for i in 1..values.len() {
+                let (lo, hi) = (values[i - 1], values[i]);
+                let scale = lo.magnitude().max(hi.magnitude());
+                if scale > 0.0
+                    && (hi.magnitude() - lo.magnitude()).abs() <= 1e-5 * scale
+                    && lo.im < 0.0
+                    && hi.im > 0.0
+                {
+                    values.swap(i - 1, i);
+                }
+            }
+        }
         let mut actual_poles = result.poles.clone();
         let mut actual_zeros = result.zeros.clone();
-        actual_poles.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
-        actual_zeros.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+        canonical(&mut actual_poles);
+        canonical(&mut actual_zeros);
 
         if !reference.all.is_empty() {
             let mut actual_all = actual_poles.clone();
             actual_all.extend(actual_zeros.iter().copied());
-            actual_all.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            canonical(&mut actual_all);
             let mut expected_all = reference.all.clone();
-            expected_all.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            canonical(&mut expected_all);
             compare_complex_lists(self, "pz", &expected_all, &actual_all, &mut mismatches);
         } else {
             let mut expected_poles = reference.poles.clone();
-            expected_poles.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            canonical(&mut expected_poles);
             let mut expected_zeros = reference.zeros.clone();
-            expected_zeros.sort_by(|a, b| a.magnitude().total_cmp(&b.magnitude()));
+            canonical(&mut expected_zeros);
             compare_complex_lists(
                 self,
                 "pole",
