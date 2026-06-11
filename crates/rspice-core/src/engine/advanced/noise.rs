@@ -205,12 +205,14 @@ impl Engine {
             let gamma = mos.channel_thermal_noise_gamma();
             if gm > 1e-18 && gamma > 0.0 {
                 let resistance = 1.0 / (gamma * gm).max(1e-30);
-                noise_sources.push(NoiseSource::thermal(
+                let mut source = NoiseSource::thermal(
                     format!("{}:thermal", mos.name),
                     mos.node_drain,
                     mos.node_source,
                     resistance,
-                ));
+                );
+                source.temperature_offset = mos.noise_temperature_offset;
+                noise_sources.push(source);
             }
 
             // SPICE NLEV flicker laws (mos1noi.c; NLEV defaults to 2, whose
@@ -779,6 +781,58 @@ M1 D G 0 0 NM W=20u L=2u
 
 .END
 ";
+
+    /// onoise table of the DTEMP=150 variant of [`MOS_RDRS_NOISE_DECK`]
+    /// from the official ngspice-46 binary.
+    const MOS_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/mos_dtemp_noise_ngspice46.dat");
+
+    /// Instance DTEMP must heat the channel thermal source and both
+    /// externalized drain/source resistances exactly as mos1noi.c does
+    /// (shot-free deck: every noise source is temperature-bearing).
+    #[test]
+    fn mos_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = MOS_RDRS_NOISE_DECK.replace("M1 D G 0 0 NM W=20u L=2u", "M1 D G 0 0 NM W=20u L=2u DTEMP=150");
+        assert_ne!(deck, MOS_RDRS_NOISE_DECK);
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            2,
+            1e3,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = MOS_DTEMP_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
 
     /// The externalized MOS drain/source resistances must reproduce the
     /// official binary's operating point and noise.

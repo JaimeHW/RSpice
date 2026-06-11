@@ -802,6 +802,17 @@ impl Engine {
                     };
                     mosfet.set_temperature(temp_k, tnom_k);
 
+                    // mos1noi.c heats every thermal source by the instance
+                    // offset: DTEMP directly, or temp − CKTtemp + tnom in
+                    // Celsius terms when TEMP is given (ngspice's quirk).
+                    mosfet.noise_temperature_offset =
+                        if instance_param(instance_params, &["TEMP"]).is_some() {
+                            temp_k - self.config.temperature
+                                + netlist.options.tnom.unwrap_or(27.0)
+                        } else {
+                            temp_k - self.config.temperature
+                        };
+
                     // Drain/source ohmic resistances, mos1temp.c precedence:
                     // RD (or RS) when given, else RSH times the diffusion
                     // squares. ngspice stamps the conductance at internal
@@ -831,6 +842,11 @@ impl Engine {
                             .resistors
                             .add(rd_name, drain, dint, drain_r / multiplicity);
                         mosfet.node_drain = dint;
+                        if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.resistors.set_last_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
+                        }
                     }
                     let source_r = if !resistances_apply {
                         0.0
@@ -849,6 +865,11 @@ impl Engine {
                             .resistors
                             .add(rs_name, source, sint, source_r / multiplicity);
                         mosfet.node_source = sint;
+                        if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.resistors.set_last_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
+                        }
                     }
 
                     circuit.mosfets.add(mosfet);

@@ -204,6 +204,9 @@ pub struct Mosfet {
     pub nrd: Value,
     /// Source diffusion squares (NRS instance parameter)
     pub nrs: Value,
+    /// Thermal-noise temperature offset in kelvin (ngspice `dtemp`
+    /// semantics for the channel and parasitic thermal sources).
+    pub noise_temperature_offset: Value,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
     /// Flicker noise current exponent (AF)
