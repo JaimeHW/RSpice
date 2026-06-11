@@ -11,7 +11,9 @@ mod bode;
 mod eye;
 mod fft;
 mod hist;
+mod noise_contrib;
 mod nyquist;
+mod op_inspector;
 mod pz;
 mod smith;
 mod strip;
@@ -48,6 +50,10 @@ pub enum ResultViewer {
     Eye,
     /// Monte-Carlo distribution.
     Hist,
+    /// Per-device operating-point inspector (Spectre-style OP info).
+    Op,
+    /// Ranked band-integrated noise contributors.
+    NoiseContrib,
     /// Legacy Nyquist surface (pre-redesign chrome).
     Nyquist,
     /// Legacy Smith chart surface.
@@ -65,6 +71,8 @@ impl ResultViewer {
             ResultViewer::Fft => "FFT",
             ResultViewer::Eye => "EYE",
             ResultViewer::Hist => "HIST",
+            ResultViewer::Op => "OP",
+            ResultViewer::NoiseContrib => "NOISE",
             ResultViewer::Nyquist => "NYQ",
             ResultViewer::Smith => "SMITH",
             ResultViewer::PoleZero => "PZ",
@@ -79,6 +87,8 @@ impl ResultViewer {
             ResultViewer::Fft => "fft",
             ResultViewer::Eye => "eye",
             ResultViewer::Hist => "mc",
+            ResultViewer::Op => "op info",
+            ResultViewer::NoiseContrib => "noise contributors",
             ResultViewer::Nyquist => "nyquist",
             ResultViewer::Smith => "smith",
             ResultViewer::PoleZero => "pole-zero",
@@ -95,16 +105,21 @@ impl ResultViewer {
             ResultViewer::Nyquist => Some(ActiveViewer::Nyquist),
             ResultViewer::Smith => Some(ActiveViewer::SmithChart),
             ResultViewer::PoleZero => Some(ActiveViewer::PoleZero),
-            ResultViewer::Waves | ResultViewer::Bode => None,
+            ResultViewer::Waves
+            | ResultViewer::Bode
+            | ResultViewer::Op
+            | ResultViewer::NoiseContrib => None,
         }
     }
 
-    const PRIMARY: [ResultViewer; 5] = [
+    const PRIMARY: [ResultViewer; 7] = [
         ResultViewer::Waves,
         ResultViewer::Bode,
         ResultViewer::Fft,
         ResultViewer::Eye,
         ResultViewer::Hist,
+        ResultViewer::Op,
+        ResultViewer::NoiseContrib,
     ];
     const LEGACY: [ResultViewer; 3] = [
         ResultViewer::Nyquist,
@@ -203,6 +218,10 @@ pub struct ResultsState {
     /// Screen rect of the document well (docbar excluded) from the last
     /// rendered frame — the crop window for viewer PNG export. Transient.
     pub well_rect: Option<egui::Rect>,
+    /// OP inspector device-name filter (docbar input). Transient.
+    pub op_filter: String,
+    /// OP inspector sort: (column key, descending). Transient.
+    pub op_sort: Option<(String, bool)>,
 }
 
 /// One user expression trace on a waves strip.
@@ -657,6 +676,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         ResultViewer::Hist => hist::show(ui, &mut app.state),
+        ResultViewer::Op => op_inspector::show(ui, &mut app.state),
+        ResultViewer::NoiseContrib => noise_contrib::show(ui, &mut app.state),
         ResultViewer::Nyquist => nyquist::show(ui, &mut app.state),
         ResultViewer::Smith => smith::show(ui, &mut app.state),
         ResultViewer::PoleZero => pz::show(ui, &mut app.state),
@@ -722,35 +743,137 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                         state.analysis.eye_diagram_state.show_mask = !mask_on;
                     }
                 }
+                ResultViewer::Op => {
+                    let filter = &mut state.shell.results.op_filter;
+                    if !filter.is_empty() && chip(ui, "clear", true).clicked() {
+                        filter.clear();
+                    }
+                    ui.add(
+                        egui::TextEdit::singleline(filter)
+                            .desired_width(150.0)
+                            .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                            .hint_text("filter devices…"),
+                    );
+                }
                 _ => {}
             }
         });
     });
 }
 
+/// The run shelf: run context + overlay control in one docbar popover.
+///
+/// Grammar per the results-v2 design: the active run reads in the button
+/// (with the overlay count when comparing); the popover lists the history —
+/// status dot, label, analyses, elapsed — with click-to-activate rows and
+/// per-run overlay toggles ("signal owns hue, run owns weight").
 fn run_selector(ui: &mut Ui, state: &mut AppState) {
-    let label = state
-        .simulation
-        .active_run()
-        .map_or_else(|| "no runs".to_owned(), |run| format!("run #{}", run.id));
-    let runs: Vec<String> = state
-        .simulation
-        .runs
-        .iter()
-        .map(|run| {
-            format!(
-                "run #{} · {} · {:.1} s",
-                run.id,
-                if run.success { "ok" } else { "failed" },
-                run.elapsed_time
-            )
-        })
-        .collect();
+    let t = Tokens::get(ui.ctx());
+    let overlay_count = state.simulation.overlay_run_ids.len();
+    let label = match state.simulation.active_run() {
+        Some(run) if overlay_count > 0 => format!("run #{} +{overlay_count}", run.id),
+        Some(run) => format!("run #{}", run.id),
+        None => "no runs".to_owned(),
+    };
 
-    if let Some(index) =
-        crate::ui::widgets::select(ui, "volta.results.run", &label, &runs, 150.0)
-    {
+    let mut select_run: Option<usize> = None;
+    let mut toggle_overlay: Option<u64> = None;
+    let mut clear_overlays = false;
+
+    ui.menu_button(
+        egui::RichText::new(label).font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+        |ui| {
+            ui.set_min_width(290.0);
+            let active_id = state.simulation.active_run().map(|run| run.id);
+
+            for (index, run) in state.simulation.runs.iter().enumerate() {
+                let is_active = Some(run.id) == active_id;
+                let overlaid = state.simulation.is_run_overlaid(run.id);
+
+                ui.horizontal(|ui| {
+                    // Status dot: ok / failed.
+                    let (dot, _) =
+                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().circle_filled(
+                        dot.center(),
+                        3.0,
+                        if run.success { t.color.ok } else { t.color.err },
+                    );
+
+                    // Row body: click activates the run.
+                    let analyses: Vec<&str> = run
+                        .analyses
+                        .iter()
+                        .map(|analysis| analysis.analysis_type.short_label())
+                        .collect();
+                    let body = format!(
+                        "{} · {} · {:.1} s",
+                        run.label,
+                        if analyses.is_empty() {
+                            "no analyses".to_owned()
+                        } else {
+                            analyses.join(" ")
+                        },
+                        run.elapsed_time
+                    );
+                    let text = egui::RichText::new(body)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(if is_active { t.color.text } else { t.color.text_dim });
+                    if ui
+                        .add(egui::Label::new(text).sense(egui::Sense::click()))
+                        .on_hover_text("Activate this run")
+                        .clicked()
+                    {
+                        select_run = Some(index);
+                        ui.close_menu();
+                    }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if is_active {
+                            ui.label(
+                                egui::RichText::new("active")
+                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .color(t.color.accent),
+                            );
+                        } else {
+                            let mut on = overlaid;
+                            if ui
+                                .checkbox(&mut on, "overlay")
+                                .on_hover_text(
+                                    "Draw this run's traces under the active run \
+                                     (same signal color, reduced weight)",
+                                )
+                                .changed()
+                            {
+                                toggle_overlay = Some(run.id);
+                            }
+                        }
+                    });
+                });
+            }
+
+            if overlay_count > 0 {
+                ui.separator();
+                if ui.button("Clear overlays").clicked() {
+                    clear_overlays = true;
+                    ui.close_menu();
+                }
+            }
+        },
+    )
+    .response
+    .on_hover_text("Run history — activate a run or overlay runs for comparison");
+
+    if let Some(index) = select_run {
         state.simulation.select_run(index);
+        state.shell.results.clear_cursors();
+    }
+    if let Some(run_id) = toggle_overlay {
+        state.simulation.toggle_run_overlay(run_id);
+        state.shell.results.clear_cursors();
+    }
+    if clear_overlays {
+        state.simulation.clear_run_overlays();
         state.shell.results.clear_cursors();
     }
 }
@@ -908,6 +1031,8 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ResultViewer::Fft => fft::right_panel(ui, state),
         ResultViewer::Eye => eye::right_panel(ui, state),
         ResultViewer::Hist => hist::right_panel(ui, state),
+        ResultViewer::Op => op_inspector::right_panel(ui, state),
+        ResultViewer::NoiseContrib => noise_contrib::right_panel(ui, state),
         ResultViewer::Nyquist => nyquist::right_panel(ui, state),
         ResultViewer::Smith => smith::right_panel(ui, state),
         ResultViewer::PoleZero => pz::right_panel(ui, state),
