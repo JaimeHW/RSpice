@@ -27,7 +27,12 @@ Thumbs.db
 # Test outputs
 *.raw
 *.log
-/diagnostics/
+# Diagnostics scratch output — except the published benchmark
+# scoreboards (roadmap M0.5 artifact)
+/diagnostics/*
+!/diagnostics/benchmarks/
+/diagnostics/benchmarks/*
+!/diagnostics/benchmarks/*.json
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
