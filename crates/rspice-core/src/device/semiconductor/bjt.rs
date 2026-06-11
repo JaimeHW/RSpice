@@ -746,6 +746,9 @@ pub struct Bjt {
     pub af: Value,
     /// Flicker noise frequency exponent (EF)
     pub ef: Value,
+    /// Thermal-noise temperature offset in kelvin (ngspice `dtemp`
+    /// semantics for the parasitic-resistance thermal sources).
+    pub noise_temperature_offset: Value,
     /// VBIC base-emitter flicker noise coefficient (KFN)
     pub kfn: Value,
     /// VBIC base-emitter flicker noise current exponent (AFN)
@@ -1071,6 +1074,7 @@ impl Bjt {
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
+            noise_temperature_offset: 0.0,
             kfn: 0.0,
             afn: 1.0,
             bfn: 1.0,

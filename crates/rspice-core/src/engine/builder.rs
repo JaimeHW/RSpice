@@ -572,6 +572,10 @@ impl Engine {
 
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_temperature(self.config.temperature);
+                    bjt.refresh_noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
                     bjt.set_substrate_node(substrate);
 
                     // VBIC instances solve their internal states as MNA
@@ -604,6 +608,11 @@ impl Engine {
                             circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
                             bjt.node_collector = cint;
                             bjt.clear_collector_series_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
                         }
                         if bjt.re.is_finite() && bjt.re > 0.0 {
                             let eint_name = format!("{}.__eint", element.name);
@@ -612,6 +621,11 @@ impl Engine {
                             circuit.resistors.add(re_name, emitter, eint, bjt.re);
                             bjt.node_emitter = eint;
                             bjt.clear_emitter_series_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
                         }
                     }
 

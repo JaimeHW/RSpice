@@ -108,12 +108,14 @@ impl Engine {
             if let Some(model) = bjt.vbic_noise_operating_model() {
                 for (suffix, node_pos, node_neg, conductance) in model.thermal {
                     if conductance.is_finite() && conductance > 1e-30 {
-                        noise_sources.push(NoiseSource::thermal(
+                        let mut source = NoiseSource::thermal(
                             format!("{}:{}", bjt.name, suffix),
                             node_pos,
                             node_neg,
                             1.0 / conductance,
-                        ));
+                        );
+                        source.temperature_offset = bjt.noise_temperature_offset;
+                        noise_sources.push(source);
                     }
                 }
                 for (suffix, node_pos, node_neg, current) in model.shot {
@@ -1092,6 +1094,108 @@ Q1 C B 0 QN
                 relative,
             );
         }
+    }
+
+    /// onoise tables of the DTEMP=150 variants of the VBIC rb deck and the
+    /// GP rc/re deck from the official ngspice-46 binary.
+    const VBIC_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/vbic_dtemp_noise_ngspice46.dat");
+    const GP_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
+
+    fn assert_onoise_matches(
+        deck: &str,
+        oracle_table: &str,
+        output_node: &str,
+        input_source: &str,
+        points_per_decade: usize,
+        fstart: f64,
+        fstop: f64,
+        gate: f64,
+        label: &str,
+    ) {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name(output_node).expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            points_per_decade,
+            fstart,
+            fstop,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, input_source, &frequencies, 300.15)
+            .expect("noise analysis runs");
+        let oracle: Vec<(f64, f64)> = oracle_table
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= gate,
+                "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// Instance DTEMP must heat the VBIC internal-resistance thermal model
+    /// sources and reshape the operating point through the device
+    /// temperature scaling exactly as the official binary does.
+    #[test]
+    fn vbic_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = RB_NOISE_DECK.replace("Q1 C B 0 0 N1", "Q1 C B 0 0 N1 DTEMP=150");
+        assert_ne!(deck, RB_NOISE_DECK);
+        assert_onoise_matches(
+            &deck,
+            VBIC_DTEMP_NOISE_ORACLE,
+            "c",
+            "VIN",
+            5,
+            1e5,
+            1e7,
+            1e-2,
+            "vbic-dtemp",
+        );
+    }
+
+    /// Instance DTEMP must heat the externalized GP collector/emitter
+    /// resistances exactly as bjtnoise.c does. The band stops at 10 MHz:
+    /// above it the +150 K junction-capacitance temperature scaling
+    /// diverges from the binary by ~1.7 percent at 100 MHz, a GP
+    /// cap-temperature fidelity boundary separate from the noise heating
+    /// under test here.
+    #[test]
+    fn gp_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = GP_RCRE_NOISE_DECK
+            .replace("Q1 C B 0 QN", "Q1 C B 0 QN DTEMP=150")
+            .replace(".NOISE v(c) VIN DEC 5 10k 100Meg", ".NOISE v(c) VIN DEC 5 10k 10Meg");
+        assert_ne!(deck, GP_RCRE_NOISE_DECK);
+        assert_onoise_matches(
+            &deck,
+            GP_DTEMP_NOISE_ORACLE,
+            "c",
+            "VIN",
+            5,
+            1e4,
+            1e7,
+            1e-2,
+            "gp-dtemp",
+        );
     }
 
     /// The externalized GP collector/emitter resistances must reproduce the

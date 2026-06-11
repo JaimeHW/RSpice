@@ -1270,6 +1270,16 @@ impl Bjt {
         self.re_nominal = 0.0;
     }
 
+    /// Resolve the thermal-noise temperature offset, bjtnoise.c/vbicnoise.c
+    /// semantics: DTEMP directly, or with an absolute instance TEMP given,
+    /// temp − CKTtemp + tnom in Celsius terms (ngspice's quirk, mirrored).
+    pub fn refresh_noise_temperature_offset(&mut self, analysis_temp_k: Value, tnom_c: Value) {
+        self.noise_temperature_offset = match self.instance_temp {
+            Some(temp_k) => temp_k - analysis_temp_k + tnom_c,
+            None => self.instance_dtemp,
+        };
+    }
+
     /// Cached operating-point values from the last accepted Newton solution:
     /// `(vbe, vbc, ic, ib, gm)` where `gm = dIc/dVbe` at the bias point.
     pub fn op_values(&self) -> (Value, Value, Value, Value, Value) {
