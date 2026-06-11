@@ -479,10 +479,10 @@ pub enum EventExpr {
     },
     /// Above threshold event
     Above { signal: Expression, span: Span },
-    /// Timer event
+    /// Timer event: timer(start [, period])
     Timer {
-        period: Expression,
-        start: Option<Expression>,
+        start: Expression,
+        period: Option<Expression>,
         span: Span,
     },
     /// Initial step
@@ -548,6 +548,8 @@ pub enum Expression {
     BranchAccess(BranchAccess),
     /// Array access: arr[i]
     ArrayAccess(ArrayAccessExpr),
+    /// Array/concatenation literal: {a, b, c}
+    ArrayLiteral(ArrayLiteralExpr),
     /// Analog operator (ddt, idt, ddx, etc.)
     AnalogOperator(AnalogOperator),
     /// Noise source
@@ -567,6 +569,7 @@ impl Expression {
             Expression::Call(c) => c.span,
             Expression::BranchAccess(b) => b.span(),
             Expression::ArrayAccess(a) => a.span,
+            Expression::ArrayLiteral(a) => a.span,
             Expression::AnalogOperator(o) => o.span(),
             Expression::NoiseSource(n) => n.span(),
         }
@@ -685,6 +688,13 @@ pub struct CallExpr {
 pub struct ArrayAccessExpr {
     pub array: SmolStr,
     pub index: Box<Expression>,
+    pub span: Span,
+}
+
+/// Array/concatenation literal expression: {a, b, c}
+#[derive(Debug, Clone)]
+pub struct ArrayLiteralExpr {
+    pub elements: Vec<Expression>,
     pub span: Span,
 }
 

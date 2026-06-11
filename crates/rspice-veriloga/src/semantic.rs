@@ -767,6 +767,7 @@ impl SemanticAnalyzer {
                 Ok(then_type.common_type(else_type))
             }
             Expression::ArrayAccess(_) => Ok(ValueType::Unknown),
+            Expression::ArrayLiteral(_) => Ok(ValueType::Unknown),
             Expression::AnalogOperator(_) => Ok(ValueType::Real),
             Expression::NoiseSource(_) => Ok(ValueType::Real),
         }

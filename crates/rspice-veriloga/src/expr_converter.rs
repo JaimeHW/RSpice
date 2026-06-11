@@ -126,6 +126,12 @@ impl<'a> ExprConverter<'a> {
                 CodeGenErrorKind::UnsupportedFeature("Array access in expressions".into()),
             )
             .into()),
+            Expression::ArrayLiteral(_) => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(
+                    "Array literals are only supported as analog filter coefficient lists".into(),
+                ),
+            )
+            .into()),
             Expression::AnalogOperator(op) => self.convert_analog_operator(op),
             Expression::NoiseSource(noise) => self.convert_noise_source(noise),
         }
