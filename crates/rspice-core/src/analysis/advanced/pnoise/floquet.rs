@@ -186,10 +186,10 @@ impl FloquetAnalyzer {
     /// 3. ISF computation from adjoint system
     pub fn compute(&mut self) -> Result<(), FloquetError> {
         if self.jacobian_samples.is_empty() {
-            // Use approximate model if no Jacobian data
-            self.compute_approximate_isf();
-            self.initialized = true;
-            return Ok(());
+            // Refuse to fabricate: without linearization samples there is no
+            // circuit-derived ISF. Callers wanting the synthetic sinusoidal
+            // estimate must opt in via compute_approximate_isf().
+            return Err(FloquetError::MissingLinearization);
         }
 
         // Step 1: Compute monodromy matrix M = Î¦(T, 0)
@@ -481,9 +481,8 @@ impl FloquetAnalyzer {
         let n_samples = self.num_time_samples;
 
         if n_nodes == 0 || self.waveform_samples.is_empty() {
-            // No waveform data - use approximate ISF
-            self.compute_approximate_isf();
-            return Ok(());
+            // Refuse to fabricate an ISF without waveform data.
+            return Err(FloquetError::MissingWaveforms);
         }
 
         // Initialize ISF storage
@@ -546,7 +545,12 @@ impl FloquetAnalyzer {
         Ok(())
     }
 
-    /// Compute approximate ISF when no detailed waveform is available
+    /// Compute a SYNTHETIC sinusoidal-oscillator ISF estimate.
+    ///
+    /// This does not look at the circuit at all: it assumes a sinusoidal
+    /// limit cycle (Gamma_rms = 1/sqrt(2)) and a fixed 1 pC swing charge.
+    /// It exists only as an explicitly requested rough estimate; the
+    /// circuit-driven paths error out rather than falling back to it.
     pub fn compute_approximate_isf(&mut self) {
         // Without detailed circuit data, assume sinusoidal oscillation
         // ISF for a sinusoidal oscillator: Î“(t) = cos(Ï‰t)
@@ -833,6 +837,10 @@ pub enum FloquetError {
     SingularMatrix,
     /// Convergence failed
     ConvergenceFailed,
+    /// No time-varying linearization samples were provided
+    MissingLinearization,
+    /// No periodic waveform samples were provided
+    MissingWaveforms,
 }
 
 impl std::fmt::Display for FloquetError {
@@ -841,6 +849,14 @@ impl std::fmt::Display for FloquetError {
             Self::NoStates => write!(f, "No state variables defined"),
             Self::SingularMatrix => write!(f, "Singular matrix in Floquet analysis"),
             Self::ConvergenceFailed => write!(f, "Floquet eigenvalue convergence failed"),
+            Self::MissingLinearization => write!(
+                f,
+                "Floquet analysis needs time-varying linearization samples; none were provided"
+            ),
+            Self::MissingWaveforms => write!(
+                f,
+                "ISF extraction needs periodic waveform samples; none were provided"
+            ),
         }
     }
 }
