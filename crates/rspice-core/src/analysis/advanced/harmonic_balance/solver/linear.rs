@@ -170,6 +170,13 @@ impl HbSolver {
     }
 
     /// Set AC source contribution at an arbitrary harmonic for a node.
+    ///
+    /// `magnitude` is the physical source amplitude. The solver stores
+    /// Fourier coefficients internally (harmonic k contributes
+    /// `2*Re(c_k e^{jkwt})` to the synthesized waveform), so amplitudes
+    /// convert with a factor 1/2 at this boundary; DC passes through.
+    /// Stamping the full amplitude as the coefficient made every nonlinear
+    /// device see twice the true voltage swing.
     pub fn set_harmonic_source(
         &mut self,
         node: usize,
@@ -178,11 +185,14 @@ impl HbSolver {
         phase: Value,
     ) {
         if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
-            self.source_spectra[node][harmonic] = Complex64::from_polar(magnitude, phase);
+            let scale = if harmonic == 0 { 1.0 } else { 0.5 };
+            self.source_spectra[node][harmonic] = Complex64::from_polar(magnitude * scale, phase);
         }
     }
 
     /// Add AC source contribution at an arbitrary harmonic for a node.
+    ///
+    /// Same amplitude-to-coefficient conversion as `set_harmonic_source`.
     pub fn add_harmonic_source(
         &mut self,
         node: usize,
@@ -191,7 +201,8 @@ impl HbSolver {
         phase: Value,
     ) {
         if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
-            self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude, phase);
+            let scale = if harmonic == 0 { 1.0 } else { 0.5 };
+            self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude * scale, phase);
         }
     }
 
@@ -288,6 +299,10 @@ impl HbSolver {
         state.compute_residual_norm();
     }
 
+    /// Source value entering the branch KVL constraint at one harmonic, in
+    /// the solver's internal Fourier-coefficient convention: stored AC
+    /// entries are physical amplitudes, so harmonics k >= 1 convert with a
+    /// factor 1/2 (see `set_harmonic_source`).
     fn voltage_source_value_at_harmonic(
         branch: &VoltageSourceBranch,
         harmonic: usize,
@@ -298,7 +313,7 @@ impl HbSolver {
             branch
                 .ac_harmonics
                 .iter()
-                .find_map(|(index, value)| (*index == harmonic).then_some(*value))
+                .find_map(|(index, value)| (*index == harmonic).then_some(*value * 0.5))
                 .unwrap_or_else(|| Complex64::new(0.0, 0.0))
         }
     }
