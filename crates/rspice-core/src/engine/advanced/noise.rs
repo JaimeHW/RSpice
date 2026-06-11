@@ -753,6 +753,76 @@ Q1 C B 0 QN
 .END
 ";
 
+    /// onoise table of [`DIODE_DTEMP_NOISE_DECK`] from the official
+    /// ngspice-46 binary.
+    const DIODE_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/diode_dtemp_noise_ngspice46.dat");
+
+    /// A forward-biased diode at DTEMP=150 whose series resistance carries a
+    /// comparable share of the output noise: dionoise.c heats the RS thermal
+    /// source by the instance offset while shot noise stays
+    /// temperature-free, so the row values pin the device-resistor
+    /// instance-temperature plumbing.
+    const DIODE_DTEMP_NOISE_DECK: &str = "\
+Diode instance temperature noise testbench
+
+V1 IN 0 DC 0.75 AC 1
+R1 IN A 50
+D1 A 0 DM DTEMP=150
+
+.OPTIONS NOACCT
+
+.NOISE v(a) V1 DEC 2 1k 100k
+
+.MODEL DM D IS=1e-14 N=1.5 RS=200 CJO=1p
+
+.END
+";
+
+    /// The externalized diode series resistance must heat its thermal noise
+    /// by the instance DTEMP exactly as the official binary does.
+    #[test]
+    fn diode_dtemp_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(DIODE_DTEMP_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("a").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            2,
+            1e3,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "V1", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = DIODE_DTEMP_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
     /// onoise table of [`RES_DTEMP_NOISE_DECK`] from the official ngspice-46
     /// binary.
     const RES_DTEMP_NOISE_ORACLE: &str =

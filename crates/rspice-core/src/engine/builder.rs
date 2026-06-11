@@ -486,6 +486,21 @@ impl Engine {
                         circuit.resistors.add(rs_name, anode, aint, diode.rs);
                         diode.node_anode = aint;
                         diode.rs = 0.0;
+                        // dionoise.c heats the RS thermal source by the
+                        // instance offset: DTEMP directly, or with TEMP
+                        // given, temp − CKTtemp + tnom in Celsius terms
+                        // (ngspice's quirk, mirrored).
+                        let noise_dtemp = if instance_param(instance_params, &["TEMP"]).is_some() {
+                            temp_k - self.config.temperature
+                                + netlist.options.tnom.unwrap_or(27.0)
+                        } else {
+                            temp_k - self.config.temperature
+                        };
+                        if noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(noise_dtemp);
+                        }
                     }
 
                     circuit.diodes.add(diode);
