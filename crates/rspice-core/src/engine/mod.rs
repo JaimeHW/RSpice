@@ -34,6 +34,7 @@ mod pss;
 mod result;
 mod source_values;
 mod stamping;
+mod stb;
 mod transfer;
 mod transient;
 
@@ -55,6 +56,7 @@ pub use error::SimulationError;
 pub use hb::{HbAnalysisResult, PacAnalysisResult};
 pub use pss::{PssAnalysisResult, PssError};
 pub use result::TransientResult;
+pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 
 pub(crate) use source_values::{extract_ac_value, extract_dc_value};
