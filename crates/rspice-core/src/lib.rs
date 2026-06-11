@@ -47,7 +47,7 @@ pub mod simd;
 
 // Re-export primary types for convenience
 pub use abort_signal::{AbortSignal, AtomicAbort, NoAbort};
-pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, TransientAnalysis};
+pub use analysis::{AcAnalysis, DcAnalysis, MeasureEngine, MeasureResult, TransientAnalysis};
 pub use circuit::{Circuit, CircuitData, Node, NodeId};
 pub use device::{Device, DeviceModel};
 pub use engine::{

@@ -193,6 +193,21 @@ impl MeasureResult {
 // Measurement Engine
 //=============================================================================
 
+/// Resolve a signal by name, falling back to a case-insensitive scan.
+/// SPICE netlists are case-insensitive, so `.MEAS ... V(OUT)` must find a
+/// waveform stored under `V(out)`.
+fn lookup_signal<'a>(
+    signals: &HashMap<String, &'a [Value]>,
+    name: &str,
+) -> Option<&'a [Value]> {
+    if let Some(signal) = signals.get(name) {
+        return Some(signal);
+    }
+    signals
+        .iter()
+        .find_map(|(key, signal)| key.eq_ignore_ascii_case(name).then_some(*signal))
+}
+
 /// Engine for processing .MEAS statements on simulation results
 pub struct MeasureEngine {
     /// Registered measurements
@@ -364,14 +379,14 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let trig_sig = match signals.get(&trig.signal) {
-            Some(s) => *s,
+        let trig_sig = match lookup_signal(signals, &trig.signal) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", trig.signal));
             }
         };
-        let targ_sig = match signals.get(&targ.signal) {
-            Some(s) => *s,
+        let targ_sig = match lookup_signal(signals, &targ.signal) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", targ.signal));
             }
@@ -429,8 +444,8 @@ impl MeasureEngine {
         signals: &HashMap<String, &[Value]>,
         is_max: bool,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -461,8 +476,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -490,8 +505,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -523,8 +538,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -560,8 +575,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -603,8 +618,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -624,8 +639,8 @@ impl MeasureEngine {
 
         if let (Some(when_sig_name), Some(threshold)) = (when_signal, when_value) {
             // FIND ... WHEN condition=value
-            let when_sig = match signals.get(when_sig_name) {
-                Some(s) => *s,
+            let when_sig = match lookup_signal(signals, when_sig_name) {
+                Some(s) => s,
                 None => {
                     return MeasureResult::failed(
                         name,
@@ -661,8 +676,8 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> MeasureResult {
-        let signal = match signals.get(signal_name) {
-            Some(s) => *s,
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
             None => {
                 return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
             }
@@ -693,3 +708,62 @@ impl Default for MeasureEngine {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn engine_with(statement: MeasureStatement) -> MeasureEngine {
+        let mut engine = MeasureEngine::new();
+        engine.add(statement);
+        engine
+    }
+
+    fn max_statement(signal: &str) -> MeasureStatement {
+        MeasureStatement {
+            name: "peak".to_string(),
+            measure_type: MeasureType::Max {
+                signal: signal.to_string(),
+                from: None,
+                to: None,
+            },
+            analysis: "TRAN".to_string(),
+        }
+    }
+
+    #[test]
+    fn lookup_is_case_insensitive() {
+        let time = [0.0, 1.0, 2.0];
+        let data = [0.0, 3.0, 1.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("v(OUT)")).evaluate(&time, &signals);
+        assert_eq!(results[0].value, Some(3.0));
+    }
+
+    #[test]
+    fn exact_key_wins_over_case_fold() {
+        let time = [0.0, 1.0];
+        let exact = [0.0, 7.0];
+        let folded = [0.0, 9.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &exact);
+        signals.insert("V(OUT)".to_string(), &folded);
+
+        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
+        assert_eq!(results[0].value, Some(7.0));
+    }
+
+    #[test]
+    fn missing_signal_reports_failure() {
+        let time = [0.0, 1.0];
+        let data = [0.0, 1.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("V(nope)")).evaluate(&time, &signals);
+        assert_eq!(results[0].value, None);
+        assert!(results[0].error.as_deref().unwrap_or("").contains("nope"));
+    }
+}
