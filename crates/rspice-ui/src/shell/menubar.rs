@@ -565,6 +565,10 @@ fn tools_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         state.shell.console.filter = crate::shell::state::ConsoleFilter::Script;
     }
     separator(ui);
+    if item(ui, "Preferences…", Some("Ctrl+,")) {
+        state.dialogs.preferences_open = true;
+    }
+    separator(ui);
     if item(ui, "Compile Verilog-A…", None) {
         state.dialogs.veriloga_dialog.open();
     }

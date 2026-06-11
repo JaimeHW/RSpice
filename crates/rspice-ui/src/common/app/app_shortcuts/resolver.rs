@@ -44,7 +44,13 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 24] = [
+const GLOBAL_RULES: [ShortcutRule; 25] = [
+    ShortcutRule::new(
+        ShortcutCommand::OpenPreferences,
+        Key::Comma,
+        Some(true),
+        None,
+    ),
     ShortcutRule::new(ShortcutCommand::FileNew, Key::N, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileOpen, Key::O, Some(true), None),
     ShortcutRule::new(ShortcutCommand::FileSave, Key::S, Some(true), None),

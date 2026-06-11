@@ -79,6 +79,9 @@ pub struct DialogState {
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
 
+    /// Preferences dialog open
+    pub preferences_open: bool,
+
     /// Verilog-A model loading dialog state
     pub veriloga_dialog: crate::panels::VerilogALoadDialogState,
 

@@ -146,6 +146,9 @@ impl RSpiceApp {
                 self.state.shell.view = crate::shell::WorkspaceView::Schematic;
                 self.state.shell.focus_cell_search = true;
             }
+            ShortcutCommand::OpenPreferences => {
+                self.state.dialogs.preferences_open = true;
+            }
         }
     }
 

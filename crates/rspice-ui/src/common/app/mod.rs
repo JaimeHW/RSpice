@@ -73,6 +73,8 @@ mod app_help_dialogs;
 
 mod app_confirmation_dialog;
 
+mod app_preferences_dialog;
+
 mod app_workspace_actions;
 
 mod app_veriloga_workflow;
@@ -372,6 +374,7 @@ impl RSpiceApp {
         crate::panels::render_property_dialog(ctx, &mut self.state);
         self.process_pdk_settings_dialog(ctx);
         self.render_simulation_options_dialog(ctx);
+        self.render_preferences_dialog(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);
