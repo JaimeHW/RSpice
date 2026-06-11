@@ -72,6 +72,11 @@ fn breadcrumb(ui: &mut Ui, state: &mut AppState) {
 /// ERC/DRC status pill from the latest check results.
 fn check_status_pill(ui: &mut Ui, state: &AppState) {
     match &state.dialogs.drc_results {
+        Some(_)
+            if state.dialogs.drc_checked_version != state.schematic.topology_version() =>
+        {
+            Pill::new(PillState::Idle, "ERC stale · re-run").show(ui);
+        }
         Some(result) => {
             let errors = result.errors().len();
             let warnings = result.warnings().len();

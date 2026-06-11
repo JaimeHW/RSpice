@@ -99,4 +99,7 @@ pub(super) fn draw_scene(
             );
         }
     }
+
+    // Check results last — violation badges annotate everything below.
+    super::violations::draw_violation_markers(painter, viewport, state);
 }

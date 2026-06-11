@@ -22,4 +22,5 @@ pub(crate) fn run_design_rule_check(state: &mut AppState) {
     };
     state.push_user_message(ConsoleMessage::info(msg));
     state.dialogs.drc_results = Some(result);
+    state.dialogs.drc_checked_version = state.schematic.topology_version();
 }

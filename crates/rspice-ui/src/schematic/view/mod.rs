@@ -18,6 +18,7 @@ mod preview;
 mod scene;
 mod symbol_primitives;
 mod viewport;
+mod violations;
 
 use self::coordinates::viewport_from_state;
 use self::interaction::handle_tool_interactions;
