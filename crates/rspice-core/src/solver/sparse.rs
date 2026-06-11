@@ -62,12 +62,25 @@ pub struct StaticMatrix {
     position_map: FxHashMap<(usize, usize), usize>,
     /// Reusable LU workspace (lazily initialized on first solve)
     lu: Option<LuWorkspace>,
+    /// Experimental KLU-class backend (`RSPICE_SOLVER=klu`): refactors
+    /// the frozen pattern with a stored pivot sequence instead of fully
+    /// re-pivoting every Newton iteration. Lazily initialized; any
+    /// failure falls back to the faer path.
+    klu: Option<crate::solver::klu::KluSolver>,
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).
     probe_values: Option<Vec<Value>>,
     probe_rhs: Option<Vec<Value>>,
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
+}
+
+/// Whether the experimental KLU backend is selected for this process.
+fn klu_backend_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("RSPICE_SOLVER").is_ok_and(|v| v.eq_ignore_ascii_case("klu"))
+    })
 }
 
 impl StaticMatrix {
@@ -83,6 +96,7 @@ impl StaticMatrix {
             values: vec![0.0; self.values.len()],
             position_map: self.position_map.clone(),
             lu: None,
+            klu: None,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
@@ -195,6 +209,7 @@ impl StaticMatrix {
             values,
             position_map,
             lu: None,
+            klu: None,
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
@@ -412,6 +427,12 @@ impl StaticMatrix {
             )));
         }
 
+        if klu_backend_enabled()
+            && let Some(result) = self.try_solve_klu(rhs)
+        {
+            return Ok(result);
+        }
+
         self.ensure_lu_workspace()?;
 
         let par = get_global_parallelism();
@@ -442,6 +463,40 @@ impl StaticMatrix {
         );
 
         Ok(ws.rhs.col_as_slice(0).to_vec())
+    }
+
+    /// Experimental KLU-class solve (`RSPICE_SOLVER=klu`): values-only
+    /// refactorization over the frozen pattern with a stored pivot
+    /// sequence; full re-pivoting only on a growth alarm. Returns `None`
+    /// on any backend failure so the caller falls through to faer —
+    /// the experiment can degrade performance but never a result.
+    fn try_solve_klu(&mut self, rhs: &[Value]) -> Option<Vec<Value>> {
+        let Self {
+            nrows, csc, values, klu, ..
+        } = self;
+        let n = *nrows;
+        let col_ptr = csc.col_ptr();
+        let row_idx = csc.row_idx();
+
+        let backend = klu.get_or_insert_with(crate::solver::klu::KluSolver::new);
+        if !backend.is_analyzed_for(n) {
+            backend.analyze(n, col_ptr, row_idx);
+        }
+        let factored = match backend.refactor(col_ptr, row_idx, values) {
+            Ok(()) => true,
+            Err(SolverError::PivotGrowth) => backend.factor(col_ptr, row_idx, values).is_ok(),
+            Err(_) => backend.factor(col_ptr, row_idx, values).is_ok(),
+        };
+        if !factored {
+            static FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
+            FALLBACK_LOGGED.call_once(|| {
+                log::warn!("klu backend could not factor this system; using faer fallback");
+            });
+            return None;
+        }
+        let mut out = Vec::new();
+        backend.solve(rhs, &mut out).ok()?;
+        Some(out)
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
