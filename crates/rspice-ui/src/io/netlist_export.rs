@@ -569,11 +569,7 @@ fn wrap_line(line: &str, max_len: usize, continuation: &str) -> String {
 
 /// Simple timestamp without chrono dependency
 fn chrono_lite_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let secs = crate::common::time_compat::unix_epoch().as_secs();
     format!("{}", secs)
 }
 

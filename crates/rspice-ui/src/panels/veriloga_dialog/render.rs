@@ -122,6 +122,9 @@ fn render_file_selection(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
             if mono_input(ui, &mut state.file_path_text, width).changed() {
                 sync_file_path_text(state);
             }
+            // Native file pickers don't exist in the browser build; the
+            // mono path input above remains the entry point there.
+            #[cfg(not(target_arch = "wasm32"))]
             if Button::new("Browse").ghost().show(ui).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("Verilog-A", &["va", "vams"])

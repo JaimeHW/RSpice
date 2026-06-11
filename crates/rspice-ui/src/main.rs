@@ -50,11 +50,47 @@ fn main() {
 }
 
 // =============================================================================
-// Web Entry Point (placeholder for future web support)
+// Web Entry Point — eframe WebRunner into the #rspice_canvas element
 // =============================================================================
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    // Keep wasm builds non-panicking so packaging and static analysis pipelines can run.
-    log::warn!("RSpice web bootstrap is not implemented yet.");
+    use eframe::wasm_bindgen::JsCast as _;
+
+    eframe::WebLogger::init(log::LevelFilter::Info).ok();
+
+    let web_options = eframe::WebOptions::default();
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let document = web_sys::window()
+            .expect("no window")
+            .document()
+            .expect("no document");
+        let canvas = document
+            .get_element_by_id("rspice_canvas")
+            .expect("web shell must provide #rspice_canvas")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("#rspice_canvas is not a canvas element");
+
+        let result = eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|cc| Ok(Box::new(rspice_ui::RSpiceApp::new(cc)))),
+            )
+            .await;
+
+        // Hand off from the static loading overlay once egui owns the canvas.
+        if let Some(loading) = document.get_element_by_id("rspice_loading") {
+            match result {
+                Ok(_) => loading.remove(),
+                Err(e) => {
+                    loading.set_inner_html(&format!(
+                        "<p class=\"err\">RSpice failed to start: {e:?}</p>\
+                         <p class=\"err\">A WebGPU-capable browser (current Chrome/Edge) is required.</p>"
+                    ));
+                }
+            }
+        }
+    });
 }

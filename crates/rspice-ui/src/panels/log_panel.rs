@@ -20,7 +20,8 @@
 //! - Search/filter by text pattern
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use crate::common::time_compat::Instant;
 
 use serde::{Deserialize, Serialize};
 

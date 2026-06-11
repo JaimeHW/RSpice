@@ -80,7 +80,7 @@ impl DrcChecker {
         wires: &[WireInfo],
         net_labels: &[NetLabelInfo],
     ) -> DrcResult {
-        let start = std::time::Instant::now();
+        let start = crate::common::time_compat::Instant::now();
         let mut result = DrcResult::new();
 
         // Build net connectivity map

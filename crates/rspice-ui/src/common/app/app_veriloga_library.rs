@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+
 
 use crate::state::{Library, LibraryManager};
 
@@ -158,10 +158,7 @@ fn temporary_path_for(path: &Path) -> PathBuf {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or(VERILOGA_LIBRARY_CONFIG_FILE);
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+    let nonce = crate::common::time_compat::unix_epoch().as_nanos();
     parent.join(format!(
         ".{}.{}.{}.tmp",
         file_name,

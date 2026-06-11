@@ -71,6 +71,9 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
                 action = Some(PathListAction::Remove(idx));
             }
 
+            // Native folder pickers don't exist in the browser build; the
+            // editable text path remains available there.
+            #[cfg(not(target_arch = "wasm32"))]
             if ui.small_button("browse").on_hover_text("Browse...").clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .set_directory(&entry.path)
@@ -122,6 +125,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
             state.add_library_path(state.new_path_input.clone());
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         if ui.button("Browse...").clicked()
             && let Some(path) = rfd::FileDialog::new().pick_folder()
         {

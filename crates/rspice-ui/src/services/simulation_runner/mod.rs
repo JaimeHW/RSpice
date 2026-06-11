@@ -129,7 +129,6 @@ fn now_ms() -> f64 {
 
 #[cfg(target_arch = "wasm32")]
 fn now_ms() -> f64 {
-    use wasm_bindgen::JsCast;
     web_sys::window()
         .and_then(|w| w.performance())
         .map(|p| p.now())

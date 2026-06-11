@@ -51,7 +51,7 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
     let (tx, rx) = mpsc::channel();
     let source_path = path.clone();
 
-    std::thread::spawn(move || {
+    crate::common::spawn_or_inline(move || {
         log::info!("Starting Verilog-A compilation: {}", source_path.display());
 
         let compiler = rspice_veriloga::VerilogACompiler::new(options);

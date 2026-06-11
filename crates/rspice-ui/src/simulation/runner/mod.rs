@@ -236,11 +236,21 @@ impl SimulationRunner {
         let progress = Arc::clone(&self.progress);
         let abort_flag = Arc::clone(&self.abort_flag);
 
-        // Spawn simulation thread with real engine
-        let handle =
-            thread::spawn(move || run_simulation_thread(request, input, progress, abort_flag));
-
-        self.thread_handle = Some(handle);
+        // Spawn simulation thread with real engine. Browser builds have no
+        // threads: solve inline on the UI thread (demo-scale decks finish in
+        // milliseconds; a Web Worker is the planned home) — progress state is
+        // final by the time this returns, and the absent JoinHandle is fine
+        // because completion is observed through `progress`, not the handle.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let handle =
+                thread::spawn(move || run_simulation_thread(request, input, progress, abort_flag));
+            self.thread_handle = Some(handle);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            run_simulation_thread(request, input, progress, abort_flag);
+        }
         Ok(())
     }
 

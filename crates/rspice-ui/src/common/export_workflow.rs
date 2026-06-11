@@ -28,12 +28,20 @@ pub(crate) trait ExportWorkflowIo {
 pub(crate) struct NativeExportWorkflowIo;
 
 impl ExportWorkflowIo for NativeExportWorkflowIo {
+    #[cfg(not(target_arch = "wasm32"))]
     fn show_save_dialog(&self, config: SaveDialogConfig<'_>) -> Option<PathBuf> {
         rfd::FileDialog::new()
             .add_filter(config.filter_name, config.filter_extensions)
             .set_file_name(config.default_name)
             .set_title(config.title)
             .save_file()
+    }
+
+    /// Browser builds will route exports through a download blob instead of a
+    /// native save dialog; until that lands the action declines gracefully.
+    #[cfg(target_arch = "wasm32")]
+    fn show_save_dialog(&self, _config: SaveDialogConfig<'_>) -> Option<PathBuf> {
+        None
     }
 
     fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {

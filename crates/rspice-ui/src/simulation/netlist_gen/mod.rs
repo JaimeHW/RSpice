@@ -353,11 +353,7 @@ impl<'a> NetlistGenerator<'a> {
 }
 fn chrono_lite_timestamp() -> String {
     // Use system time for a basic timestamp
-    use std::time::{SystemTime, UNIX_EPOCH};
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => format!("{}", d.as_secs()),
-        Err(_) => "unknown".to_string(),
-    }
+    format!("{}", crate::common::time_compat::unix_epoch().as_secs())
 }
 
 //=============================================================================

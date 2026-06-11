@@ -129,10 +129,7 @@ impl SchematicFile {
 
     /// Create with metadata
     pub fn with_metadata(schematic: SchematicState, title: impl Into<String>) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let now = crate::common::time_compat::unix_epoch().as_secs();
 
         Self {
             version: SchematicVersion::current(),
@@ -315,10 +312,7 @@ pub fn save_schematic(schematic: &SchematicState, path: &Path) -> Result<(), Sch
     let mut file = SchematicFile::new(schematic.clone());
 
     // Update metadata timestamp
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let now = crate::common::time_compat::unix_epoch().as_secs();
     file.metadata.modified_at = Some(now);
 
     // Extract title from filename

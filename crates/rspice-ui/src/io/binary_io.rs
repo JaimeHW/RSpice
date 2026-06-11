@@ -37,10 +37,7 @@ impl PsfHeader {
             version: Self::VERSION,
             num_traces,
             num_points,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0),
+            timestamp: crate::common::time_compat::unix_epoch().as_secs(),
         }
     }
 }

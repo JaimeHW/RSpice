@@ -67,10 +67,7 @@ impl SimulationRun {
 
     /// Get current timestamp as Unix epoch seconds
     fn current_timestamp() -> f64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs_f64())
-            .unwrap_or(0.0)
+        crate::common::time_compat::unix_epoch().as_secs_f64()
     }
 
     /// Format timestamp as human-readable time string (e.g., "1:04:01 PM")

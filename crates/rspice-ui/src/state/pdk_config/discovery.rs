@@ -12,10 +12,7 @@ impl PdkConfig {
         self.discovered_files.clear();
         self.scan_errors.clear();
 
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let now = crate::common::time_compat::unix_epoch().as_secs();
 
         // Pre-compute expanded paths to avoid borrow conflicts
         let entry_data: Vec<(usize, String, PathBuf, bool)> = self

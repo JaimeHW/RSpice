@@ -315,7 +315,7 @@ impl SimulationController {
         let task_cancel_flag = Arc::clone(&cancel_flag);
         let task_source = source.clone();
 
-        std::thread::spawn(move || {
+        crate::common::spawn_or_inline(move || {
             let payload = match view {
                 DerivedViewKind::EyeDiagram => {
                     let eye_data = build_eye_diagram_data(&task_source, &task_cancel_flag);

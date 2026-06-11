@@ -18,6 +18,7 @@
 pub mod app;
 pub mod examples;
 pub(crate) mod export_workflow;
+pub(crate) mod time_compat;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
 pub mod menu_bar;
@@ -26,3 +27,17 @@ pub mod simulation_analysis_tabs;
 
 // Re-export main application type
 pub use app::{AppState, ConsoleMessage, RSpiceApp};
+
+/// Run `work` on a background thread natively; inline on wasm32, which has no
+/// threads — the browser build solves on the UI thread until simulations move
+/// into a Web Worker.
+pub(crate) fn spawn_or_inline(work: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::spawn(work);
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        work();
+    }
+}
