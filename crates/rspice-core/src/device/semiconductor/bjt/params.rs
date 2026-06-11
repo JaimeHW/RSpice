@@ -1254,6 +1254,22 @@ impl Bjt {
         self
     }
 
+    /// Clear the collector series resistance after the builder externalizes
+    /// it onto a real circuit resistor; the nominal is cleared too so any
+    /// later temperature refresh cannot resurrect the internal copy.
+    pub fn clear_collector_series_resistance(&mut self) {
+        self.rcx = 0.0;
+        self.rcx_nominal = 0.0;
+        self.rc = 0.0;
+    }
+
+    /// Clear the emitter series resistance after the builder externalizes
+    /// it onto a real circuit resistor.
+    pub fn clear_emitter_series_resistance(&mut self) {
+        self.re = 0.0;
+        self.re_nominal = 0.0;
+    }
+
     /// Cached operating-point values from the last accepted Newton solution:
     /// `(vbe, vbc, ic, ib, gm)` where `gm = dIc/dVbe` at the bias point.
     pub fn op_values(&self) -> (Value, Value, Value, Value, Value) {

@@ -551,6 +551,34 @@ impl Engine {
                                 element.name, suffix
                             ))
                         });
+                    } else {
+                        // Legacy GP: externalize the constant collector and
+                        // emitter resistances onto real internal nodes (the
+                        // diode/JFET/MOSFET pattern), so their thermal noise
+                        // rides the resistor walk and junction noise injects
+                        // at the true internal terminals. Values are taken
+                        // after model, instance, and temperature application,
+                        // and the zeroed device fields collapse the matching
+                        // internal states, so the solved system is identical.
+                        // The bias-dependent base resistance (qb-modulated,
+                        // ngspice BJTgx) stays folded pending the base-prime
+                        // promotion.
+                        if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
+                            let cint_name = format!("{}.__cint", element.name);
+                            let cint = circuit.get_or_create_node(&cint_name);
+                            let rc_name = format!("{}.__rc", element.name);
+                            circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
+                            bjt.node_collector = cint;
+                            bjt.clear_collector_series_resistance();
+                        }
+                        if bjt.re.is_finite() && bjt.re > 0.0 {
+                            let eint_name = format!("{}.__eint", element.name);
+                            let eint = circuit.get_or_create_node(&eint_name);
+                            let re_name = format!("{}.__re", element.name);
+                            circuit.resistors.add(re_name, emitter, eint, bjt.re);
+                            bjt.node_emitter = eint;
+                            bjt.clear_emitter_series_resistance();
+                        }
                     }
 
                     circuit.bjts.add(bjt);
