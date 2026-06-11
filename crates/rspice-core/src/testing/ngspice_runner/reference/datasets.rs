@@ -568,8 +568,10 @@ impl TestRunner {
                     ..
                 })
             );
-            let degrees_phase_probe =
-                normalized_var.starts_with("vp(") || normalized_var.starts_with("ip(");
+            // ngspice batch tables print every phase output in radians (the
+            // degree switch is an interactive-only `units` variable), so all
+            // phase probes wrap in the radian domain.
+            let degrees_phase_probe = false;
 
             let Some(actual_series) = resolver(var) else {
                 mismatches.push(ValueMismatch {

@@ -310,7 +310,10 @@ impl TestRunner {
             .copied()
             .fold(0.0_f64, |max_v, value| max_v.max(value.abs()));
         let series_scale = expected_scale.max(actual_scale);
-        if normalized.starts_with("ph(") {
+        if normalized.starts_with("ph(")
+            || normalized.starts_with("vp(")
+            || normalized.starts_with("ip(")
+        {
             // For radian phase probes, compare with an angle-domain floor derived
             // from the trace scale. This avoids over-penalizing tiny imaginary
             // residue on near-zero phase currents while still capping tolerance.
@@ -321,8 +324,6 @@ impl TestRunner {
             // linear-magnitude differences, so keep a tight absolute floor in
             // the logarithmic domain itself.
             floor = floor.max((series_scale * 2e-4).clamp(5e-3, 2e-1));
-        } else if normalized.starts_with("vp(") || normalized.starts_with("ip(") {
-            floor = floor.max((series_scale * 0.7).clamp(0.12, 3.0));
         }
         if Self::reference_expr_contains_voltage_probe(var) {
             // Use a small waveform-scale floor for direct voltage probes so
