@@ -169,7 +169,7 @@ fn independent_source_kind(netlist: &Netlist, name: &str) -> Option<InputKind> {
 fn set_source_ac(netlist: &mut Netlist, name: &str, magnitude: Value, phase: Value) {
     for element in &mut netlist.elements {
         if element.name.eq_ignore_ascii_case(name)
-            && let (ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec)) =
+            && let ElementKind::VoltageSource(spec) | ElementKind::CurrentSource(spec) =
                 &mut element.kind
         {
             *spec = spec.clone().with_ac(magnitude, phase);
