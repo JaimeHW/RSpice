@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Voltage-controlled switch (S): pivot dot, angled blade, control arrow.
+     Box 40x40, pins 1(0,20), 2(40,20), c+(20,0), c-(20,40). -->
+<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 28,20 H 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,20 L 29,11" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,18.6 l 1.4,1.4 -1.4,1.4 -1.4,-1.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 28,18.6 l 1.4,1.4 -1.4,1.4 -1.4,-1.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 20,0 V 7.6" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 20,12 l -2.2,-4.4 h 4.4 Z" fill="#000000" stroke="none"/>
+  <path d="M 20,40 V 28" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+</svg>

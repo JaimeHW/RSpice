@@ -19,6 +19,7 @@ impl ComponentType {
             | ComponentType::Vccs
             | ComponentType::Ccvs
             | ComponentType::Cccs => 4,
+            ComponentType::VSwitch | ComponentType::TransmissionLine => 4,
             ComponentType::CoupledInductor => 0,
             ComponentType::XspiceSummer
             | ComponentType::XspiceMultiplier
@@ -70,7 +71,8 @@ impl ComponentType {
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
-            | ComponentType::CurrentSourceNoise => {
+            | ComponentType::CurrentSourceNoise
+            | ComponentType::BehavioralSource => {
                 &[("+", Point { x: 0, y: -20 }), ("-", Point { x: 0, y: 20 })]
             }
             // (40, 80): hw 20, hh 40
@@ -117,6 +119,20 @@ impl ComponentType {
                 ("in+", Point { x: -20, y: -10 }),
                 ("in-", Point { x: -20, y: 10 }),
                 ("out", Point { x: 20, y: 0 }),
+            ],
+            // (40, 40): hw 20, hh 20 — switch path left/right, control top/bottom
+            ComponentType::VSwitch => &[
+                ("1", Point { x: -20, y: 0 }),
+                ("2", Point { x: 20, y: 0 }),
+                ("c+", Point { x: 0, y: -20 }),
+                ("c-", Point { x: 0, y: 20 }),
+            ],
+            // (60, 40): hw 30, hh/2 10 — port a left, port b right
+            ComponentType::TransmissionLine => &[
+                ("a+", Point { x: -30, y: -10 }),
+                ("a-", Point { x: -30, y: 10 }),
+                ("b+", Point { x: 30, y: -10 }),
+                ("b-", Point { x: 30, y: 10 }),
             ],
             ComponentType::CoupledInductor => &[],
             // (60, 40): hw 30
@@ -200,7 +216,8 @@ impl ComponentType {
             | ComponentType::CurrentSourceSin
             | ComponentType::CurrentSourcePwl
             | ComponentType::CurrentSourceExp
-            | ComponentType::CurrentSourceNoise => (28, 40),
+            | ComponentType::CurrentSourceNoise
+            | ComponentType::BehavioralSource => (28, 40),
             ComponentType::Ground => (20, 20),
             ComponentType::CellInstance => (60, 40),
             ComponentType::Diode => (40, 20),
@@ -217,6 +234,8 @@ impl ComponentType {
             | ComponentType::Ccvs
             | ComponentType::Cccs => (40, 40),
             ComponentType::OpAmp => (40, 40),
+            ComponentType::VSwitch => (40, 40),
+            ComponentType::TransmissionLine => (60, 40),
             ComponentType::CoupledInductor => (0, 0),
             ComponentType::XspiceGain
             | ComponentType::XspiceSummer
@@ -279,6 +298,9 @@ mod tests {
         ComponentType::Ccvs,
         ComponentType::Cccs,
         ComponentType::OpAmp,
+        ComponentType::BehavioralSource,
+        ComponentType::VSwitch,
+        ComponentType::TransmissionLine,
         ComponentType::CoupledInductor,
         ComponentType::CellInstance,
         ComponentType::Ground,

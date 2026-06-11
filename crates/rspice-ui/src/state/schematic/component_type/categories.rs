@@ -10,6 +10,7 @@ impl ComponentType {
                 | ComponentType::Inductor
                 | ComponentType::Transformer
                 | ComponentType::CoupledInductor
+                | ComponentType::TransmissionLine
         )
     }
 
@@ -52,6 +53,7 @@ impl ComponentType {
                 | ComponentType::Ccvs
                 | ComponentType::Cccs
                 | ComponentType::OpAmp
+                | ComponentType::BehavioralSource
         )
     }
 

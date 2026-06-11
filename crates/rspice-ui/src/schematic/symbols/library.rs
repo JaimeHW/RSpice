@@ -165,6 +165,11 @@ impl SymbolLibrary {
                 "i_src_noise.svg",
                 "Noise Current Source",
             ),
+            (
+                ComponentType::BehavioralSource,
+                "b_src.svg",
+                "Behavioral Source",
+            ),
             (ComponentType::Ground, "ground_signal.svg", "Ground"),
             (ComponentType::Diode, "diode.svg", "Diode"),
             (
@@ -196,6 +201,12 @@ impl SymbolLibrary {
             (ComponentType::Vccs, "vccs.svg", "VCCS (G)"),
             (ComponentType::Ccvs, "ccvs.svg", "CCVS (H)"),
             (ComponentType::Cccs, "cccs.svg", "CCCS (F)"),
+            (ComponentType::VSwitch, "switch_voltage.svg", "V-Switch (S)"),
+            (
+                ComponentType::TransmissionLine,
+                "transmission_line.svg",
+                "Transmission Line",
+            ),
             (ComponentType::XspiceGain, "xspice_gain.svg", "Gain"),
             (ComponentType::XspiceSummer, "xspice_summer.svg", "Summer"),
             (

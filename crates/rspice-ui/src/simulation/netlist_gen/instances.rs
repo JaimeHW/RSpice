@@ -99,6 +99,16 @@ impl<'a> NetlistGenerator<'a> {
                 Some(format!("{} {} {}", instance_name, nodes, source_value))
             }
 
+            // Behavioral source: B name node+ node- V=<expr> | I=<expr>
+            // The value carries the user's expression verbatim
+            // (e.g. V=V(a)*sqrt(V(b)) or I=1m+V(in)/100).
+            ComponentType::BehavioralSource => {
+                let nodes = self.format_nodes(&node_names, 2);
+                let expression = component.value.trim();
+                let expression = if expression.is_empty() { "V=0" } else { expression };
+                Some(format!("{} {} {}", instance_name, nodes, expression))
+            }
+
             // Three-terminal BJT: Q name C B E model [params]
             // Spectre format: Q1 coll base emit npn_Q1 area=1 m=1
             ComponentType::NpnBjt | ComponentType::PnpBjt => {
@@ -170,6 +180,25 @@ impl<'a> NetlistGenerator<'a> {
                 let gain_with_params =
                     self.format_value_with_params(&component.value, &component.params);
                 Some(format!("{} {} {}", instance_name, nodes, gain_with_params))
+            }
+
+            // Voltage-controlled switch (4 terminals: 1 2 c+ c-):
+            // S name n1 n2 nc+ nc- model, plus a .MODEL <model> SW(...) card
+            ComponentType::VSwitch => {
+                let nodes = self.format_nodes(&node_names, 4);
+                let (explicit_model, _) = Self::extract_model_override(component);
+                let model = self.get_switch_model(component, explicit_model.as_deref());
+                Some(format!("{} {} {}", instance_name, nodes, model))
+            }
+
+            // Lossless transmission line (4 terminals: a+ a- b+ b-):
+            // T name a+ a- b+ b- Z0=<z0> TD=<td>
+            ComponentType::TransmissionLine => {
+                let nodes = self.format_nodes(&node_names, 4);
+                let params = crate::properties::parse_params_string(&component.params);
+                let z0 = Self::get_param_owned(&params, "z0", "", "50");
+                let td = Self::get_param_owned(&params, "td", "", "1n");
+                Some(format!("{} {} Z0={} TD={}", instance_name, nodes, z0, td))
             }
 
             // Ground - handled separately

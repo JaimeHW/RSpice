@@ -7,6 +7,8 @@ impl PropertyRegistry {
         self.register_ccvs();
         self.register_cccs();
         self.register_opamp();
+        self.register_behavioral_source();
+        self.register_vswitch();
     }
 
     /// Register the ideal op-amp (ground-referenced VCVS behind a triangle).
@@ -34,6 +36,92 @@ impl PropertyRegistry {
         );
 
         self.sheets.insert(ComponentType::OpAmp, sheet);
+    }
+
+    /// Register the behavioral source (arbitrary V=/I= expression, B element).
+    pub(in super::super) fn register_behavioral_source(&mut self) {
+        let mut sheet = PropertySheet::new();
+
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Instance Name")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("B1"))
+                .with_order(0)
+                .with_category("Instance")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("value")
+                .with_display_name("Expression")
+                .with_description(
+                    "V=<expr> makes a voltage output, I=<expr> a current output, \
+                     e.g. V=V(a)*sqrt(V(b)) or I=1m+V(in)/100",
+                )
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("V=0"))
+                .with_order(10)
+                .with_category("Electrical")
+                .required(),
+        );
+
+        self.sheets.insert(ComponentType::BehavioralSource, sheet);
+    }
+
+    /// Register the voltage-controlled switch (S element + SW model card).
+    pub(in super::super) fn register_vswitch(&mut self) {
+        let mut sheet = PropertySheet::new();
+
+        sheet.add(
+            PropertyDefinition::new("name")
+                .with_display_name("Instance Name")
+                .with_type(PropertyType::String)
+                .with_default(PropertyValue::string("S1"))
+                .with_order(0)
+                .with_category("Instance")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("vt")
+                .with_display_name("Threshold Voltage")
+                .with_description("Control voltage at which the switch toggles")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("V")
+                .with_order(10)
+                .with_category("Electrical")
+                .required(),
+        );
+        sheet.add(
+            PropertyDefinition::new("vh")
+                .with_display_name("Hysteresis Voltage")
+                .with_description("Half-width of the hysteresis band around the threshold")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(0.0))
+                .with_unit("V")
+                .with_order(11)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("ron")
+                .with_display_name("On Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1.0))
+                .with_unit("Ω")
+                .with_order(12)
+                .with_category("Electrical"),
+        );
+        sheet.add(
+            PropertyDefinition::new("roff")
+                .with_display_name("Off Resistance")
+                .with_type(PropertyType::Expression)
+                .with_default(PropertyValue::number(1e12))
+                .with_unit("Ω")
+                .with_order(13)
+                .with_category("Electrical"),
+        );
+
+        self.sheets.insert(ComponentType::VSwitch, sheet);
     }
 
     /// Register VCVS (Voltage-Controlled Voltage Source) with commercial parameters

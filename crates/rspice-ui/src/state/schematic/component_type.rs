@@ -81,6 +81,12 @@ pub enum ComponentType {
     /// Ideal operational amplifier — emitted as a ground-referenced VCVS
     /// (SPICE prefix: E)
     OpAmp,
+    /// Behavioral source — arbitrary V=/I= expression (SPICE prefix: B)
+    BehavioralSource,
+    /// Voltage-controlled switch (SPICE prefix: S)
+    VSwitch,
+    /// Lossless transmission line (SPICE prefix: T)
+    TransmissionLine,
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
     /// Generic hierarchical/library cell instance (SPICE prefix: X)

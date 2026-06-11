@@ -33,6 +33,10 @@ const PASSIVES: &[ComponentPaletteEntry] = &[
         kind: ComponentType::SaturableInductor,
         label: "Saturable Inductor",
     },
+    ComponentPaletteEntry {
+        kind: ComponentType::TransmissionLine,
+        label: "Transmission Line",
+    },
 ];
 
 const SOURCES: &[ComponentPaletteEntry] = &[
@@ -91,6 +95,10 @@ const SOURCES: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::CurrentSourceNoise,
         label: "Noise Current Source",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::BehavioralSource,
+        label: "Behavioral Source",
     },
     ComponentPaletteEntry {
         kind: ComponentType::Ground,
@@ -157,6 +165,10 @@ const CONTROLLED: &[ComponentPaletteEntry] = &[
     ComponentPaletteEntry {
         kind: ComponentType::Cccs,
         label: "CCCS (F)",
+    },
+    ComponentPaletteEntry {
+        kind: ComponentType::VSwitch,
+        label: "V-Switch (S)",
     },
 ];
 

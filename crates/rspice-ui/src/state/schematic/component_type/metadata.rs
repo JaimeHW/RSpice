@@ -35,6 +35,9 @@ impl ComponentType {
             ComponentType::Vccs => "G",
             ComponentType::Ccvs => "H",
             ComponentType::Cccs => "F",
+            ComponentType::BehavioralSource => "B",
+            ComponentType::VSwitch => "S",
+            ComponentType::TransmissionLine => "T",
             ComponentType::Ground => "",
             ComponentType::CellInstance => "X",
             ComponentType::XspiceGain
@@ -97,6 +100,9 @@ impl ComponentType {
             ComponentType::Vccs => "VCCS (G)",
             ComponentType::Ccvs => "CCVS (H)",
             ComponentType::Cccs => "CCCS (F)",
+            ComponentType::BehavioralSource => "Behavioral Source",
+            ComponentType::VSwitch => "V-Switch (S)",
+            ComponentType::TransmissionLine => "Transmission Line",
             ComponentType::Ground => "Ground",
             ComponentType::CellInstance => "Cell Instance",
             ComponentType::XspiceGain => "Gain",
@@ -136,6 +142,8 @@ impl ComponentType {
             ComponentType::CurrentSource => "1m",
             // Open-loop gain of the ideal stage.
             ComponentType::OpAmp => "100k",
+            // The whole V=<expr> / I=<expr> expression is the value.
+            ComponentType::BehavioralSource => "V=0",
             ComponentType::CellInstance => "",
             _ => "",
         }

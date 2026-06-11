@@ -144,6 +144,70 @@ pub(super) fn write_current_source_symbol(
     .unwrap();
 }
 
+pub(super) fn write_behavioral_source_symbol(
+    svg: &mut String,
+    cx: f64,
+    cy: f64,
+    _config: &SvgExportConfig,
+) {
+    // Behavioral source: circle with an expression (asterisk) glyph.
+    writeln!(
+        svg,
+        r#"<circle class="component" cx="{}" cy="{}" r="15"/>"#,
+        cx, cy
+    )
+    .unwrap();
+
+    // Asterisk: horizontal bar plus two crossing diagonals
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 5.0,
+        cy,
+        cx + 5.0,
+        cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 2.5,
+        cy - 4.3,
+        cx + 2.5,
+        cy + 4.3
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 2.5,
+        cy + 4.3,
+        cx + 2.5,
+        cy - 4.3
+    )
+    .unwrap();
+
+    // Lead lines
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx,
+        cy - 15.0,
+        cx,
+        cy - 25.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx,
+        cy + 15.0,
+        cx,
+        cy + 25.0
+    )
+    .unwrap();
+}
+
 // =============================================================================
 // JFET Symbols
 // =============================================================================

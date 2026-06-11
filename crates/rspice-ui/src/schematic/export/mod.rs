@@ -26,17 +26,18 @@ use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_sy
 use self::block_symbols::{write_cell_instance_symbol, write_xspice_symbol};
 use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol,
-    write_vcvs_symbol,
+    write_vcvs_symbol, write_vswitch_symbol,
 };
 use self::geometry::{calculate_bounds, get_rotation_transform, write_wire};
 use self::jfet_symbols::{write_njfet_symbol, write_pjfet_symbol};
 use self::mos_symbols::{write_nmos_symbol, write_pmos_symbol};
 use self::passive_symbols::{
     write_capacitor_symbol, write_coupled_inductor_symbol, write_inductor_symbol,
-    write_resistor_symbol, write_transformer_symbol,
+    write_resistor_symbol, write_tline_symbol, write_transformer_symbol,
 };
 use self::source_symbols::{
-    write_current_source_symbol, write_ground_symbol, write_vsource_symbol,
+    write_behavioral_source_symbol, write_current_source_symbol, write_ground_symbol,
+    write_vsource_symbol,
 };
 
 /// Export a schematic to SVG format
@@ -99,6 +100,7 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         }
         ComponentType::Transformer => write_transformer_symbol(svg, cx, cy, config),
         ComponentType::CoupledInductor => write_coupled_inductor_symbol(svg, cx, cy, config),
+        ComponentType::TransmissionLine => write_tline_symbol(svg, cx, cy, config),
         ComponentType::VoltageSource
         | ComponentType::VoltageSourceAc
         | ComponentType::VoltageSourcePulse
@@ -119,6 +121,7 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         | ComponentType::CurrentSourcePwl
         | ComponentType::CurrentSourceExp
         | ComponentType::CurrentSourceNoise => write_current_source_symbol(svg, cx, cy, config),
+        ComponentType::BehavioralSource => write_behavioral_source_symbol(svg, cx, cy, config),
         // JFET symbols
         ComponentType::Njfet => write_njfet_symbol(svg, cx, cy, config),
         ComponentType::Pjfet => write_pjfet_symbol(svg, cx, cy, config),
@@ -128,6 +131,7 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         ComponentType::Vccs => write_vccs_symbol(svg, cx, cy, config),
         ComponentType::Ccvs => write_ccvs_symbol(svg, cx, cy, config),
         ComponentType::Cccs => write_cccs_symbol(svg, cx, cy, config),
+        ComponentType::VSwitch => write_vswitch_symbol(svg, cx, cy, config),
         ComponentType::CellInstance => write_cell_instance_symbol(svg, cx, cy, config),
         ComponentType::XspiceGain
         | ComponentType::XspiceSummer

@@ -159,3 +159,85 @@ pub(super) fn write_cccs_symbol(svg: &mut String, cx: f64, cy: f64, config: &Svg
     // Current-Controlled Current Source - same as VCCS
     write_vccs_symbol(svg, cx, cy, config);
 }
+
+pub(super) fn write_vswitch_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
+    // Voltage-controlled switch: pivot dot, angled blade, control leads.
+
+    // Switch-path terminal stubs (left/right)
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 20.0,
+        cy,
+        cx - 12.0,
+        cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx + 12.0,
+        cy,
+        cx + 20.0,
+        cy
+    )
+    .unwrap();
+
+    // Contact dots
+    writeln!(
+        svg,
+        r#"<circle class="component" cx="{}" cy="{}" r="1.5"/>"#,
+        cx - 12.0,
+        cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<circle class="component" cx="{}" cy="{}" r="1.5"/>"#,
+        cx + 12.0,
+        cy
+    )
+    .unwrap();
+
+    // Blade from the left pivot, raised above the right contact
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 12.0,
+        cy,
+        cx + 10.0,
+        cy - 10.0
+    )
+    .unwrap();
+
+    // Control leads (top/bottom) with an arrow pointing at the blade
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx,
+        cy - 20.0,
+        cx,
+        cy - 14.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<polygon class="component" fill="white" points="{},{} {},{} {},{}"/>"#,
+        cx,
+        cy - 9.0,
+        cx - 3.0,
+        cy - 14.0,
+        cx + 3.0,
+        cy - 14.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx,
+        cy + 20.0,
+        cx,
+        cy + 12.0
+    )
+    .unwrap();
+}

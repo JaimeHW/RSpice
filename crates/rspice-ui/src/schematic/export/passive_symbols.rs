@@ -231,3 +231,60 @@ pub(super) fn write_coupled_inductor_symbol(
     )
     .unwrap();
 }
+
+pub(super) fn write_tline_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
+    // Lossless transmission line: coax cylinder with four pin stubs.
+
+    // Pin stubs to the a/b port terminals
+    for (x1, x2) in [(cx - 30.0, cx - 13.0), (cx + 13.0, cx + 30.0)] {
+        for dy in [-10.0, 10.0] {
+            writeln!(
+                svg,
+                r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+                x1,
+                cy + dy,
+                x2,
+                cy + dy
+            )
+            .unwrap();
+        }
+    }
+
+    // Cylinder body
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 13.0,
+        cy - 10.0,
+        cx + 13.0,
+        cy - 10.0
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<line class="component" x1="{}" y1="{}" x2="{}" y2="{}"/>"#,
+        cx - 13.0,
+        cy + 10.0,
+        cx + 13.0,
+        cy + 10.0
+    )
+    .unwrap();
+
+    // Near end: full ellipse; far end: convex cap
+    writeln!(
+        svg,
+        r#"<ellipse class="component" cx="{}" cy="{}" rx="3.5" ry="10"/>"#,
+        cx - 13.0,
+        cy
+    )
+    .unwrap();
+    writeln!(
+        svg,
+        r#"<path class="component" d="M {} {} A 3.5 10 0 0 1 {} {}"/>"#,
+        cx + 13.0,
+        cy - 10.0,
+        cx + 13.0,
+        cy + 10.0
+    )
+    .unwrap();
+}
