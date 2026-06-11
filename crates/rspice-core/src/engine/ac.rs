@@ -1045,6 +1045,15 @@ impl Engine {
                 })
                 .collect());
         }
+        // Coupled multiconductor lines have no small-signal load (ngspice's
+        // CPL registers none and its AC solve fails with a singular matrix);
+        // refuse explicitly instead of returning silently dead ports.
+        if !circuit.coupled_tlines.is_empty() {
+            return Err(SimulationError::Circuit(
+                "AC analysis does not support coupled multiconductor (CPL) transmission lines"
+                    .to_string(),
+            ));
+        }
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
