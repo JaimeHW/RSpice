@@ -38,6 +38,31 @@ impl Engine {
     ) -> Vec<NoiseSource> {
         let mut noise_sources = Vec::new();
 
+        // Verilog-A white_noise()/flicker_noise() sources, with PSDs
+        // evaluated at the operating point. Potential-contribution noise
+        // arrives as a series EMF on the branch-equation row, which is an
+        // ordinary system unknown here, so both kinds inject the same way.
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices().iter() {
+            let mut probe = device.clone();
+            let instance = probe.name.clone();
+            for source in probe.noise_sources(dc_solution) {
+                let name = format!("{instance}:{}", source.name);
+                noise_sources.push(match source.exponent {
+                    None => {
+                        NoiseSource::white(name, source.node_pos, source.node_neg, source.psd)
+                    }
+                    Some(ef) => NoiseSource::flicker_psd(
+                        name,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        ef,
+                    ),
+                });
+            }
+        }
+
         // Resistor thermal noise (4kT/R) and model-card flicker noise
         // (resnoise.c), both gated by the per-instance `noisy` switch.
         for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
