@@ -205,9 +205,10 @@ mod dd {
             if self.hi <= -709.0 {
                 return Dd::ZERO;
             }
-            // ln(2) in double-double.
-            let ln2 = Dd::new(0.6931471805599453, 2.3190468138462996e-17);
-            let inv_ln2 = 1.0 / 0.6931471805599453;
+            // ln(2) in double-double: the f64-nearest head plus the
+            // residual tail.
+            let ln2 = Dd::new(std::f64::consts::LN_2, 2.3190468138462996e-17);
+            let inv_ln2 = 1.0 / std::f64::consts::LN_2;
             let k = (self.hi * inv_ln2 + 0.5).floor();
             let r = self.sub(ln2.mul_f64(k));
 

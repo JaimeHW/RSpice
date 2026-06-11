@@ -119,13 +119,9 @@ impl Bjt {
         } else {
             vs
         };
-        let mut vbp = if reuse_previous_state {
-            self.vbp
-        } else if solve_vbp {
-            vcx
-        } else {
-            vcx
-        };
+        // The external-collector voltage seeds vbp whether or not the
+        // parasitic node is solved this pass.
+        let mut vbp = if reuse_previous_state { self.vbp } else { vcx };
         let mut vrth = if reuse_previous_state {
             self.vrth
         } else if has_self_heat {

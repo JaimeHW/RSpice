@@ -1401,11 +1401,7 @@ impl NonlinearDevice for Bjt {
         self.isub_prev = self.isub;
         self.intrinsic_linearization_prev = self.intrinsic_linearization;
 
-        let state = if self.charge_model == BjtChargeModel::Vbic {
-            self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
-        } else {
-            self.solve_intrinsic_terminal_state(vc, vb, ve, vs)
-        };
+        let state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
         let eval = self.evaluate_state(
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
             state.vsi, state.vrth,

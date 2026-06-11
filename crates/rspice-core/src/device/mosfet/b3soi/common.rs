@@ -27,7 +27,10 @@ pub const CHARGE_Q: Value = 1.60219e-19;
 pub const KB_OVER_Q: Value = 8.617087e-5;
 /// Energy gap at 300K used by the diode/BJT blocks (eV).
 pub const EG300: Value = 1.115;
-/// Pi as written in the Berkeley source.
+/// Pi as written in the Berkeley source (`#define PI 3.141592654`);
+/// using the full-precision constant would break bit-parity with the
+/// reference model equations.
+#[allow(clippy::approx_constant)]
 pub const PI: Value = 3.141592654;
 
 // Smoothing deltas from b3soiddld.c (kept with their original names).
