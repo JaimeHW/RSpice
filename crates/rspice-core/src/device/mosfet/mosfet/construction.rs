@@ -422,14 +422,18 @@ impl Mosfet {
         (id, region, gm, gds, gmb, id_eq)
     }
 
+    /// Whether the linearization cached by `update` is valid for the given
+    /// already-limited evaluation voltages. The caller computes the limited
+    /// triple once and shares it between this check and any re-evaluation;
+    /// limiting is deterministic, so comparing limited values is equivalent
+    /// to re-deriving them.
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn cached_linearization_matches(
+    pub(in crate::device::mosfet::mosfet) fn cached_linearization_matches_eval(
         &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
+        eval_vgs: Value,
+        eval_vds: Value,
+        eval_vbs: Value,
     ) -> bool {
-        let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
         self.eval_vgs.is_finite()
             && self.eval_vds.is_finite()
             && self.eval_vbs.is_finite()

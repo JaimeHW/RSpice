@@ -40,13 +40,14 @@ impl Mosfet {
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
         let (vgs, vds, vbs) = self.branch_voltages(voltages);
         let (eval_vgs, eval_vds, eval_vbs) = self.limited_branch_voltages_for_eval(vgs, vds, vbs);
-        let (gm, gds, gmb, id_eq) = if self.cached_linearization_matches(vgs, vds, vbs) {
-            (self.gm, self.gds, self.gmb, self.id_eq)
-        } else {
-            let (_, _, gm, gds, gmb, id_eq) =
-                self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
-            (gm, gds, gmb, id_eq)
-        };
+        let (gm, gds, gmb, id_eq) =
+            if self.cached_linearization_matches_eval(eval_vgs, eval_vds, eval_vbs) {
+                (self.gm, self.gds, self.gmb, self.id_eq)
+            } else {
+                let (_, _, gm, gds, gmb, id_eq) =
+                    self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
+                (gm, gds, gmb, id_eq)
+            };
 
         // Stamp matrix using direct indexing
         // Drain row

@@ -201,9 +201,8 @@ impl Diode {
         };
         let vd = va - vc;
 
-        // Linearize around current operating point
-        let id = self.current(vd);
-        let gd = self.diode_conductance(vd);
+        // Linearize around current operating point (one fused evaluation)
+        let (id, gd) = self.current_and_conductance(vd);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -244,6 +243,30 @@ impl Diode {
         let forward = self.forward_conductance(vd);
         let breakdown = self.breakdown_conductance(vd);
         forward + breakdown
+    }
+
+    /// Junction current and conductance in one evaluation.
+    ///
+    /// `current` + `diode_conductance` share the same forward and breakdown
+    /// exponentials; the stamp path calls this fused form to evaluate each
+    /// exp() once. The expression shapes mirror the individual methods
+    /// exactly so results stay bit-identical.
+    fn current_and_conductance(&self, vd: Value) -> (Value, Value) {
+        let n_vt = self.n * self.vt;
+        let vd_limited = vd.min(80.0 * self.n * self.vt);
+        let e = (vd_limited / n_vt).exp();
+        let forward_i = self.is * (e - 1.0);
+        let forward_g = (self.is / n_vt) * e;
+        let (breakdown_i, breakdown_g) = match self.bv {
+            None => (0.0, 0.0),
+            Some(bv) => {
+                let scale = self.breakdown_softness(bv);
+                let exponent = ((-vd - bv) / scale).clamp(-80.0, 40.0);
+                let be = exponent.exp();
+                (-self.ibv * be, (self.ibv / scale) * be)
+            }
+        };
+        (forward_i + breakdown_i, forward_g + breakdown_g)
     }
 
     fn forward_current(&self, vd: Value) -> Value {
@@ -317,9 +340,8 @@ impl NonlinearDevice for Diode {
         };
         let vd = va - vc;
 
-        // Linearize around current operating point
-        let id = self.current(vd);
-        let gd = self.diode_conductance(vd);
+        // Linearize around current operating point (one fused evaluation)
+        let (id, gd) = self.current_and_conductance(vd);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
