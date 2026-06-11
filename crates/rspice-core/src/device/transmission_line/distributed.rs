@@ -150,20 +150,6 @@ pub(in crate::device::transmission_line) fn distributed_rlc_h2(
 }
 
 #[inline]
-#[allow(dead_code)]
-pub(in crate::device::transmission_line) fn distributed_rlc_h3dash_int(
-    time: Value,
-    delay: Value,
-    beta: Value,
-) -> Value {
-    if time <= delay || beta == 0.0 {
-        return 0.0;
-    }
-    let bessel_arg = beta * (time * time - delay * delay).sqrt();
-    (-beta * time).exp() * bessel_i0(bessel_arg) - (-beta * delay).exp()
-}
-
-#[inline]
 pub(in crate::device::transmission_line) fn distributed_rlc_straight_line_check(
     x1: Value,
     y1: Value,

@@ -359,7 +359,6 @@ pub struct InductorProbeInfo {
 }
 
 /// Adapter to use StaticMatrix with MatrixStamper trait
-#[allow(dead_code)] // Reserved for future direct stamping integration
 struct StaticMatrixStamper<'a> {
     matrix: &'a mut StaticMatrix,
     rhs: &'a mut [Value],
