@@ -72,10 +72,15 @@ pub struct CompiledNoiseSource {
     /// Originating stamp program (activation gates with it)
     pub program_idx: usize,
     /// Power spectral density at the operating point (A²/Hz for current
-    /// contributions, V²/Hz for potential contributions)
+    /// contributions, V²/Hz for potential contributions). For table
+    /// sources this is the amplitude-squared scale on the interpolated
+    /// value.
     pub psd_program: BytecodeProgram,
     /// Flicker frequency exponent program (None = white)
     pub exponent_program: Option<BytecodeProgram>,
+    /// Frequency-interpolated PSD table: sorted (f, p) points and whether
+    /// interpolation runs in log-log coordinates
+    pub table: Option<(Vec<(f64, f64)>, bool)>,
     /// Source label from the noise function's name argument
     pub name: Option<SmolStr>,
 }
@@ -124,6 +129,10 @@ pub struct StampProgram {
     /// For potential contributions: the branch-current unknown this
     /// equation defines. None for current contributions.
     pub branch_ordinal: Option<usize>,
+    /// Indirect contribution: the value program computes a constraint
+    /// residual stamped current-style onto the branch row (the device
+    /// accumulates its companion RHS like a KCL row, not a source row)
+    pub indirect: bool,
     /// Instance-static activation condition (parameter-only). When it
     /// evaluates to zero the program is skipped entirely - for potential
     /// contributions this leaves the branch open instead of shorting it.
@@ -201,6 +210,10 @@ pub struct CompiledBranchSource {
     pub pos: StampIndex,
     /// Negative node of the source branch
     pub neg: StampIndex,
+    /// Constrained by an indirect contribution: the branch row holds the
+    /// constraint equation, so the structural V(p)-V(n) row entries are
+    /// not stamped (the KCL column couplings remain)
+    pub indirect: bool,
 }
 
 /// Jacobian entry
@@ -255,6 +268,8 @@ pub enum Instruction {
     PushVt,
     /// Push time
     PushTime,
+    /// Push the instance multiplicity ($mfactor)
+    PushMfactor,
     /// Binary operations
     Add,
     Sub,

@@ -99,6 +99,9 @@ impl<'a> Vm<'a> {
             Instruction::PushTime => {
                 self.stack.push(self.context.time);
             }
+            Instruction::PushMfactor => {
+                self.stack.push(self.context.multiplicity);
+            }
             Instruction::PushTemperature => {
                 self.stack.push(self.context.temperature);
             }

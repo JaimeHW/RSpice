@@ -316,6 +316,24 @@ impl VerilogADevice {
         self.native_model = None;
     }
 
+    /// Set the instance multiplicity (`m=` / $mfactor): the device stamps
+    /// as m parallel copies. Non-positive values are rejected.
+    pub fn set_multiplicity(&mut self, m: f64) {
+        if m.is_finite() && m > 0.0 {
+            self.context.multiplicity = m;
+        } else {
+            log::warn!(
+                "Verilog-A instance '{}': ignoring non-positive multiplicity {m}",
+                self.name
+            );
+        }
+    }
+
+    /// Instance multiplicity ($mfactor)
+    pub fn multiplicity(&self) -> f64 {
+        self.context.multiplicity
+    }
+
     /// Number of native assignment chunks the JIT produced for this model
     #[cfg(feature = "native")]
     pub fn native_chunk_count(&self) -> usize {
@@ -668,15 +686,18 @@ impl VerilogADevice {
             native,
         );
 
+        let m = vm.context.multiplicity;
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
             if !program_active.get(program_idx).copied().unwrap_or(true) {
                 continue;
             }
+            // Charge of m parallel copies scales the same way as current
+            let scale = if program.branch_ordinal.is_none() { m } else { 1.0 };
 
             for entry in &matrix_indices.reactive[program_idx] {
                 let model_entry = &program.reactive_jacobians[entry.jacobian_idx];
                 let deriv = match vm.execute(&model_entry.program) {
-                    Ok(v) if v.is_finite() => v,
+                    Ok(v) if v.is_finite() => v * scale,
                     _ => continue,
                 };
                 if let (Some(row), Some(col)) = (entry.row, entry.col) {
@@ -845,6 +866,7 @@ impl VerilogADevice {
                 context.branch_current_values.as_ptr()
             },
             analysis_type: context.analysis_type,
+            multiplicity: context.multiplicity,
         }
     }
 
@@ -1090,6 +1112,10 @@ impl VerilogADevice {
         let matrix_indices = &self.matrix_indices;
         #[cfg(feature = "native")]
         let native = self.native_model.as_deref();
+        // Instance multiplicity: m parallel copies scale every flow
+        // (current) stamp by m; potential and constraint rows stay
+        // per-copy, as do probed currents and internal node voltages
+        let m = context.multiplicity;
 
         context.clear_currents();
         // Native snapshots hold a raw pointer into `currents` while values
@@ -1136,13 +1162,22 @@ impl VerilogADevice {
                 &self.branch_current_indices,
             );
 
+            // The unknown is the per-copy branch current; m copies inject
+            // m times that current into the external KCL rows
             if let Some(p) = pos {
-                matrix_add(p, br, 1.0);
-                matrix_add(br, p, 1.0);
+                matrix_add(p, br, m);
+                // Indirect branches replace the V(p)-V(n)-E row with the
+                // constraint equation; only the KCL couplings are
+                // structural
+                if !source.indirect {
+                    matrix_add(br, p, 1.0);
+                }
             }
             if let Some(n) = neg {
-                matrix_add(n, br, -1.0);
-                matrix_add(br, n, -1.0);
+                matrix_add(n, br, -m);
+                if !source.indirect {
+                    matrix_add(br, n, -1.0);
+                }
             }
         }
 
@@ -1166,12 +1201,17 @@ impl VerilogADevice {
                 _ => continue,
             };
 
+            // Probed currents stay per-copy; only the stamps scale
             vm.context.currents.push(value);
             if program.branch_ordinal.is_none()
                 && let Some((pos, neg)) = Self::infer_current_terminal_pair(program)
             {
                 vm.context.set_branch_current(pos, neg, value);
             }
+
+            // Flow contributions of m parallel copies inject m times the
+            // per-copy current; potential and constraint rows are per-copy
+            let scale = if program.branch_ordinal.is_none() { m } else { 1.0 };
 
             // Companion model: solve A*x_new = z with the device linearized
             // at x_old.
@@ -1184,7 +1224,7 @@ impl VerilogADevice {
             // V(p) - V(n) - E(x) = 0; the entries hold -dE/dx (sign -1)
             // and the RHS receives Eeq = E - sum dE/dx * x_old, which is
             // exactly value + sum(sign * deriv * x_old).
-            let mut eq_value = value;
+            let mut eq_value = value * scale;
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
@@ -1198,24 +1238,26 @@ impl VerilogADevice {
                     native.and_then(|n| n.jacobian_fn(program_idx, jacobian_entry.jacobian_idx)),
                 );
                 let deriv = match deriv {
-                    Some(v) if v.is_finite() => v,
+                    Some(v) if v.is_finite() => v * scale,
                     _ => continue,
                 };
 
                 // Accumulate the companion RHS term once per derivative
-                // column. Current contributions duplicate entries per KCL
-                // row (+1/-1): count only the positive copy. Potential
-                // contributions carry single -1-signed entries whose sign
-                // already encodes the subtraction.
-                match program.branch_ordinal {
-                    None => {
+                // column. Current contributions (and indirect constraint
+                // rows, which stamp the same way onto the branch row)
+                // duplicate entries per row with +1/-1 signs: count only
+                // the positive copy. Potential contributions carry single
+                // -1-signed entries whose sign already encodes the
+                // subtraction.
+                match (program.branch_ordinal, program.indirect) {
+                    (None, _) | (Some(_), true) => {
                         if model_entry.sign > 0.0 {
                             let x_col =
                                 Self::axis_value(vm.context, &model_entry.col_axis);
                             eq_value -= deriv * x_col;
                         }
                     }
-                    Some(_) => {
+                    (Some(_), false) => {
                         let x_col = Self::axis_value(vm.context, &model_entry.col_axis);
                         eq_value += model_entry.sign * deriv * x_col;
                     }
@@ -1292,6 +1334,10 @@ impl VerilogADevice {
             if psd == 0.0 {
                 continue;
             }
+            // m uncorrelated parallel copies: current-noise powers add
+            // (x m); series voltage-noise EMFs average (/ m)
+            let m = vm.context.multiplicity;
+            let psd = if source.is_current { psd * m } else { psd / m };
             let exponent = source
                 .exponent_program
                 .as_ref()
@@ -1312,6 +1358,7 @@ impl VerilogADevice {
                 node_neg,
                 psd,
                 exponent,
+                table: source.table.clone(),
                 name: source
                     .name
                     .as_ref()
@@ -1435,10 +1482,14 @@ pub struct EvaluatedNoiseSource {
     /// Negative injection circuit node (0 = ground)
     pub node_neg: usize,
     /// Power spectral density at the operating point (A²/Hz for current
-    /// contributions, V²/Hz for potential contributions)
+    /// contributions, V²/Hz for potential contributions). For table
+    /// sources this is the scale applied to the interpolated value.
     pub psd: f64,
     /// Flicker frequency exponent: S(f) = psd / f^exp (None = white)
     pub exponent: Option<f64>,
+    /// Frequency-interpolated PSD table: sorted (f, p) points and whether
+    /// interpolation runs in log-log coordinates
+    pub table: Option<(Vec<(f64, f64)>, bool)>,
     /// Source label
     pub name: String,
 }

@@ -84,6 +84,7 @@ impl CodeGenerator {
                 .map(|b| CompiledBranchSource {
                     pos: Self::node_stamp_index(ir, b.pos),
                     neg: Self::node_stamp_index(ir, b.neg),
+                    indirect: b.indirect,
                 })
                 .collect(),
             laplace_filters: Vec::new(),
@@ -116,6 +117,10 @@ impl CodeGenerator {
                 program_idx: source.equation_index,
                 psd_program,
                 exponent_program,
+                table: source
+                    .table
+                    .as_ref()
+                    .map(|t| (t.points.clone(), t.log_interp)),
                 name: source.name.clone(),
             });
         }
@@ -207,6 +212,59 @@ impl CodeGenerator {
 
         let mut jacobian_programs = Vec::new();
 
+        if eq.indirect {
+            // Indirect contribution: the branch row carries the constraint
+            // f(x) = 0, stamped exactly like a single KCL row at the
+            // branch unknown's equation (+df/dx entries; the device's
+            // companion RHS gives rhs[br] -= f - sum df/dx * x)
+            let ordinal = eq.branch_ordinal.ok_or_else(|| {
+                CodeGenError::new(CodeGenErrorKind::Internal(
+                    "indirect equation without a branch unknown".into(),
+                ))
+            })?;
+            let branch_row = StampIndex::Branch(ordinal);
+            for deriv in &eq.derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                jacobian_programs.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: 1.0,
+                    program,
+                });
+            }
+
+            let mut reactive_jacobians = Vec::new();
+            for deriv in &eq.reactive_derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                reactive_jacobians.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: 1.0,
+                    program,
+                });
+            }
+
+            let stamp_locations = vec![StampLocation {
+                row: branch_row,
+                col: StampIndex::Ground,
+                sign: -1.0,
+            }];
+
+            return Ok(StampProgram {
+                stamp_locations,
+                value_program,
+                jacobian_programs,
+                reactive_jacobians,
+                branch_ordinal: Some(ordinal),
+                indirect: true,
+                static_condition,
+            });
+        }
+
         if let Some(ordinal) = eq.branch_ordinal {
             // Potential contribution: constitutive row of the branch
             // unknown receives -dE/dx for every axis
@@ -251,6 +309,7 @@ impl CodeGenerator {
                 jacobian_programs,
                 reactive_jacobians,
                 branch_ordinal: Some(ordinal),
+                indirect: false,
                 static_condition,
             });
         }
@@ -322,6 +381,7 @@ impl CodeGenerator {
             jacobian_programs,
             reactive_jacobians,
             branch_ordinal: None,
+            indirect: false,
             static_condition,
         })
     }
@@ -427,6 +487,9 @@ impl CodeGenerator {
             }
             IrExpr::Time => {
                 program.instructions.push(Instruction::PushTime);
+            }
+            IrExpr::Mfactor => {
+                program.instructions.push(Instruction::PushMfactor);
             }
             IrExpr::Binary(op, left, right) => {
                 self.emit_expr(left, ir, program)?;
@@ -690,6 +753,11 @@ impl CodeGenerator {
                 // Contributes to AC noise analysis
                 self.emit_expr(power, ir, program)?;
                 program.instructions.push(Instruction::WhiteNoise);
+            }
+            IrExpr::NoiseTable { .. } => {
+                // Like the other noise functions, the large-signal value
+                // is zero; the table feeds the noise-analysis sources
+                program.instructions.push(Instruction::PushConst(0.0));
             }
             IrExpr::FlickerNoise {
                 power,

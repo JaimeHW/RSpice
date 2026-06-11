@@ -50,6 +50,9 @@ pub struct VmContext {
     pub analysis_type: u8,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
+    /// Instance multiplicity ($mfactor): the number of parallel copies
+    /// this instance represents
+    pub multiplicity: f64,
 }
 
 impl Default for VmContext {
@@ -76,6 +79,7 @@ impl Default for VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
         }
     }
 }
@@ -105,6 +109,7 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
         }
     }
 
@@ -132,6 +137,7 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
         }
     }
 
@@ -159,6 +165,7 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
         }
     }
 

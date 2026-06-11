@@ -126,6 +126,15 @@ impl JitCompiler {
                 Instruction::PushVariableDyn { .. } => {
                     return Err(JitError::UnsupportedInstruction("PushVariableDyn"));
                 }
+                Instruction::PushMfactor => {
+                    let val = builder.ins().load(
+                        types::F64,
+                        MemFlags::trusted(),
+                        ctx_ptr,
+                        EVAL_CTX_OFFSET_MULTIPLICITY,
+                    );
+                    stack.push(val);
+                }
                 Instruction::PushTemperature => {
                     let val = builder.ins().load(
                         types::F64,

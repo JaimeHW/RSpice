@@ -1344,7 +1344,15 @@ impl Engine {
                                         })?
                                 }
                             };
-                            let _ = device.set_parameter(name, resolved);
+                            // `m=` on an instance whose model does not
+                            // declare an m parameter is the standard
+                            // parallel-multiplicity ($mfactor); models
+                            // declaring their own m keep handling it
+                            if !device.set_parameter(name, resolved)
+                                && name.eq_ignore_ascii_case("m")
+                            {
+                                device.set_multiplicity(resolved);
+                            }
                         }
                         // Dependent parameter defaults must see the instance
                         // overrides applied above

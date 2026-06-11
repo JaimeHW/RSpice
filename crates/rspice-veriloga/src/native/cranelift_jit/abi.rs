@@ -46,6 +46,8 @@ pub struct EvalContext {
     /// Analysis type code (0=dc, 1=ac, 2=tran, 3=noise, 4=ic), matching
     /// `VmContext::analysis_type`
     pub analysis_type: u8,
+    /// Instance multiplicity ($mfactor)
+    pub multiplicity: f64,
 }
 
 /// External helper function for table lookup interpolation.

@@ -315,6 +315,10 @@ pub struct AnalyzedBranch {
 pub struct AnalyzedContribution {
     pub branch: SmolStr,
     pub is_current: bool,
+    /// Indirect (implicit-equation) contribution: `expression` holds the
+    /// constraint residual `lhs - rhs` that the unknown source drives to
+    /// zero
+    pub indirect: bool,
     pub expression: Expression,
     pub expr_type: ValueType,
     pub span: Span,
@@ -1313,12 +1317,7 @@ impl SemanticAnalyzer {
                 }
             }
             AnalogStatement::IndirectContribution(stmt) => {
-                self.record_error_at(
-                    SemanticErrorKind::InvalidContribution(
-                        "indirect contributions (V(x): f == g) are not supported yet".into(),
-                    ),
-                    stmt.span,
-                );
+                self.analyze_indirect_contribution(stmt, module)?;
             }
             // System task calls ($strobe, $display, ...) have no effect on
             // the device equations
@@ -1779,60 +1778,8 @@ impl SemanticAnalyzer {
             )));
         }
 
-        let (branch_name, is_current) = match &contrib.target {
-            BranchAccess::Nodes {
-                access, pos, neg, ..
-            } => {
-                let is_current = self.is_flow_access(access);
-
-                // V(name)/I(name) where `name` is a declared branch resolves
-                // through the branch table
-                if neg.is_none()
-                    && let Some(branch) = module.branches.iter().find(|b| b.name == *pos)
-                {
-                    let branch_str = if branch.neg_node.is_empty() {
-                        branch.pos_node.to_string()
-                    } else {
-                        format!("{},{}", branch.pos_node, branch.neg_node)
-                    };
-                    (SmolStr::from(branch_str), is_current)
-                } else {
-                    self.validate_node(pos, contrib.span)?;
-                    if let Some(n) = neg {
-                        self.validate_node(n, contrib.span)?;
-                    }
-                    // Format as "pos,neg" for IR parser compatibility
-                    let branch = if neg.is_some() {
-                        format!("{},{}", pos, neg.as_deref().unwrap())
-                    } else {
-                        pos.to_string()
-                    };
-                    (branch.into(), is_current)
-                }
-            }
-            BranchAccess::Branch { name, access, .. } => {
-                let is_current = self.is_flow_access(access);
-                match module.branches.iter().find(|b| b.name == *name) {
-                    Some(branch) => {
-                        let branch_str = if branch.neg_node.is_empty() {
-                            branch.pos_node.to_string()
-                        } else {
-                            format!("{},{}", branch.pos_node, branch.neg_node)
-                        };
-                        (SmolStr::from(branch_str), is_current)
-                    }
-                    None => {
-                        return Err(CompileError::Semantic(SemanticError::new(
-                            SemanticErrorKind::InvalidBranch(format!(
-                                "undeclared branch '{}'",
-                                name
-                            )),
-                            contrib.span,
-                        )));
-                    }
-                }
-            }
-        };
+        let (branch_name, is_current) =
+            self.resolve_contribution_target(&contrib.target, module, contrib.span)?;
 
         let expression = self.lower_expression(&contrib.value)?;
         let expr_type = self.infer_type(&expression)?;
@@ -1853,12 +1800,140 @@ impl SemanticAnalyzer {
         module.contributions.push(AnalyzedContribution {
             branch: branch_name,
             is_current,
+            indirect: false,
             expression,
             expr_type,
             span: contrib.span,
         });
 
         Ok(())
+    }
+
+    /// Analyze an indirect contribution `V(x): lhs == rhs`: the target
+    /// branch carries an unknown source whose value the solver picks so
+    /// the constraint holds. The recorded expression is the residual
+    /// `lhs - rhs`; under an inactive guard it degrades to `I(branch)`,
+    /// pinning the unknown to zero so the branch opens.
+    fn analyze_indirect_contribution(
+        &mut self,
+        stmt: &IndirectContributionStmt,
+        module: &mut AnalyzedModule,
+    ) -> CompileResult<()> {
+        if self.runtime_loop_depth > 0 {
+            return Err(CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidContribution(
+                    "contributions inside loops require compile-time-constant bounds".into(),
+                ),
+                stmt.span,
+            )));
+        }
+
+        let (branch_name, is_current) =
+            self.resolve_contribution_target(&stmt.branch, module, stmt.span)?;
+
+        let lhs = self.lower_expression(&stmt.lhs)?;
+        let rhs = self.lower_expression(&stmt.rhs)?;
+        for (side, expr) in [("left", &lhs), ("right", &rhs)] {
+            let ty = self.infer_type(expr)?;
+            if !ty.is_numeric() && ty != ValueType::Unknown && ty != ValueType::NatureAccess {
+                self.record_error_at(
+                    SemanticErrorKind::TypeMismatch {
+                        expected: "numeric".to_string(),
+                        found: ty.to_string(),
+                        context: format!("{side} side of indirect contribution"),
+                    },
+                    stmt.span,
+                );
+            }
+        }
+
+        let residual = Self::binary_expr(BinaryOp::Sub, lhs, rhs);
+
+        // Guard fallback: the constraint is replaced by I(branch) = 0
+        let fallback = Expression::BranchAccess(match &stmt.branch {
+            BranchAccess::Nodes { pos, neg, span, .. } => BranchAccess::Nodes {
+                access: "I".into(),
+                pos: pos.clone(),
+                neg: neg.clone(),
+                span: *span,
+            },
+            BranchAccess::Branch { name, span, .. } => BranchAccess::Branch {
+                access: "I".into(),
+                name: name.clone(),
+                span: *span,
+            },
+        });
+        let expression = self.apply_guard(residual, fallback);
+
+        module.contributions.push(AnalyzedContribution {
+            branch: branch_name,
+            is_current,
+            indirect: true,
+            expression,
+            expr_type: ValueType::Real,
+            span: stmt.span,
+        });
+
+        Ok(())
+    }
+
+    /// Resolve a contribution target (node pair or named branch) to the
+    /// IR branch string and its flow/potential kind
+    fn resolve_contribution_target(
+        &mut self,
+        target: &BranchAccess,
+        module: &AnalyzedModule,
+        span: Span,
+    ) -> CompileResult<(SmolStr, bool)> {
+        match target {
+            BranchAccess::Nodes {
+                access, pos, neg, ..
+            } => {
+                let is_current = self.is_flow_access(access);
+
+                // V(name)/I(name) where `name` is a declared branch resolves
+                // through the branch table
+                if neg.is_none()
+                    && let Some(branch) = module.branches.iter().find(|b| b.name == *pos)
+                {
+                    let branch_str = if branch.neg_node.is_empty() {
+                        branch.pos_node.to_string()
+                    } else {
+                        format!("{},{}", branch.pos_node, branch.neg_node)
+                    };
+                    Ok((SmolStr::from(branch_str), is_current))
+                } else {
+                    self.validate_node(pos, span)?;
+                    if let Some(n) = neg {
+                        self.validate_node(n, span)?;
+                    }
+                    // Format as "pos,neg" for IR parser compatibility
+                    let branch = if neg.is_some() {
+                        format!("{},{}", pos, neg.as_deref().unwrap())
+                    } else {
+                        pos.to_string()
+                    };
+                    Ok((branch.into(), is_current))
+                }
+            }
+            BranchAccess::Branch { name, access, .. } => {
+                let is_current = self.is_flow_access(access);
+                match module.branches.iter().find(|b| b.name == *name) {
+                    Some(branch) => {
+                        let branch_str = if branch.neg_node.is_empty() {
+                            branch.pos_node.to_string()
+                        } else {
+                            format!("{},{}", branch.pos_node, branch.neg_node)
+                        };
+                        Ok((SmolStr::from(branch_str), is_current))
+                    }
+                    None => Err(CompileError::Semantic(SemanticError::new(
+                        SemanticErrorKind::InvalidBranch(format!("undeclared branch '{}'", name)),
+                        span,
+                    ))),
+                }
+            }
+        }
     }
 
     /// Whether the access function refers to a flow (current-like) quantity

@@ -48,11 +48,19 @@ impl Engine {
             let instance = probe.name.clone();
             for source in probe.noise_sources(dc_solution) {
                 let name = format!("{instance}:{}", source.name);
-                noise_sources.push(match source.exponent {
-                    None => {
+                noise_sources.push(match (source.table, source.exponent) {
+                    (Some((points, log_interp)), _) => NoiseSource::tabulated(
+                        name,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        points,
+                        log_interp,
+                    ),
+                    (None, None) => {
                         NoiseSource::white(name, source.node_pos, source.node_neg, source.psd)
                     }
-                    Some(ef) => NoiseSource::flicker_psd(
+                    (None, Some(ef)) => NoiseSource::flicker_psd(
                         name,
                         source.node_pos,
                         source.node_neg,

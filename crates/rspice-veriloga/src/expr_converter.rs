@@ -280,6 +280,7 @@ impl<'a> ExprConverter<'a> {
             "$temperature" => Ok(IrExpr::Temperature),
             "$abstime" => Ok(IrExpr::Time),
             "$realtime" => Ok(IrExpr::Time),
+            "$mfactor" => Ok(IrExpr::Mfactor),
             "$simparam" => {
                 // $simparam("name"[, default]) - simulator parameter query.
                 // The explicit default argument wins; otherwise return a
@@ -315,10 +316,6 @@ impl<'a> ExprConverter<'a> {
             }
             "$port_connected" => {
                 // Check if port is connected (always true for now)
-                Ok(IrExpr::Const(1.0))
-            }
-            "$mfactor" => {
-                // Multiplicity factor (default 1.0)
                 Ok(IrExpr::Const(1.0))
             }
             "$limit" => {
@@ -512,6 +509,25 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::FlickerNoise {
                     power: Box::new(power),
                     exponent: Box::new(exponent),
+                    name,
+                })
+            }
+            "$noise_table" | "noise_table" | "$noise_table_log" | "noise_table_log" => {
+                let log_interp = func.name.contains("log");
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "noise_table requires a {f, p, ...} pair list".into(),
+                    ))
+                    .into());
+                }
+                let name = match func.args.get(1) {
+                    Some(crate::ast::Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                let points = self.noise_table_points(&func.args[0], log_interp)?;
+                Ok(IrExpr::NoiseTable {
+                    points,
+                    log_interp,
                     name,
                 })
             }
@@ -982,6 +998,19 @@ impl<'a> ExprConverter<'a> {
                     name,
                 })
             }
+            "noise_table" | "noise_table_log" => {
+                let log_interp = call.name.ends_with("log");
+                let name = match call.args.get(1) {
+                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                let points = self.noise_table_points(require_arg(0)?, log_interp)?;
+                Ok(IrExpr::NoiseTable {
+                    points,
+                    log_interp,
+                    name,
+                })
+            }
             "laplace_nd" => {
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
@@ -1053,10 +1082,6 @@ impl<'a> ExprConverter<'a> {
                 )),
             )
             .into()),
-            "noise_table" | "noise_table_log" => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!("{}()", call.name)),
-            )
-            .into()),
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
                     "Function: {}",
@@ -1065,6 +1090,43 @@ impl<'a> ExprConverter<'a> {
                 .into(),
             ),
         }
+    }
+
+    /// Parse a noise_table pair list `{f1, p1, f2, p2, ...}` into sorted
+    /// (frequency, power) points. String (file) input and non-constant
+    /// entries are clean unsupported errors.
+    fn noise_table_points(
+        &self,
+        arg: &Expression,
+        log_interp: bool,
+    ) -> CompileResult<Vec<(f64, f64)>> {
+        if matches!(arg, Expression::StringLit(_)) {
+            return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                "noise_table file input (inline the {f, p, ...} pairs instead)".into(),
+            ))
+            .into());
+        }
+        let flat = self.const_real_array(arg)?;
+        if flat.is_empty() || flat.len() % 2 != 0 {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table needs a non-empty, even-length {f, p, ...} list".into(),
+            ))
+            .into());
+        }
+        let mut points: Vec<(f64, f64)> =
+            flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        if log_interp
+            && points
+                .iter()
+                .any(|&(f, p)| f <= 0.0 || p <= 0.0)
+        {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table_log requires strictly positive frequencies and powers".into(),
+            ))
+            .into());
+        }
+        Ok(points)
     }
 
     /// Evaluate an array-literal argument to constant reals

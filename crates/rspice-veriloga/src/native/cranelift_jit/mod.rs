@@ -143,6 +143,7 @@ const EVAL_CTX_OFFSET_ANALYSIS_TYPE: i32 = std::mem::offset_of!(EvalContext, ana
 const EVAL_CTX_OFFSET_TIMESTEP: i32 = std::mem::offset_of!(EvalContext, timestep) as i32;
 const EVAL_CTX_OFFSET_STATE_PREV: i32 = std::mem::offset_of!(EvalContext, state_prev) as i32;
 const EVAL_CTX_OFFSET_STATE_VALUES: i32 = std::mem::offset_of!(EvalContext, state_values) as i32;
+const EVAL_CTX_OFFSET_MULTIPLICITY: i32 = std::mem::offset_of!(EvalContext, multiplicity) as i32;
 
 impl NativeModel {
     unsafe fn cast_assignment_fn(ptr: *const u8) -> AssignmentFn {

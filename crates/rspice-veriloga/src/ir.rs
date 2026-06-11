@@ -124,6 +124,10 @@ pub struct BranchEquation {
     pub branch: BranchRef,
     /// Whether this contributes current (true) or voltage (false)
     pub is_current: bool,
+    /// Indirect contribution: `expr` is a constraint residual driven to
+    /// zero by the branch unknown; the branch row carries f(x) = 0
+    /// instead of the V(p)-V(n)-E source relation
+    pub indirect: bool,
     /// Potential contributions reference a branch-current unknown
     pub branch_ordinal: Option<usize>,
     /// Instance-static activation condition (parameter-only guard peeled
@@ -146,6 +150,10 @@ pub struct BranchUnknownDef {
     pub pos: usize,
     /// Negative node (unified index)
     pub neg: usize,
+    /// Driven by an indirect contribution: the branch row holds the
+    /// constraint equation, so the structural V(p)-V(n) row entries must
+    /// not be stamped
+    pub indirect: bool,
 }
 
 /// Branch reference
@@ -211,6 +219,10 @@ pub enum IrExpr {
     Temperature,
     /// Thermal voltage ($vt)
     Vt,
+    /// Instance multiplicity ($mfactor): the number of parallel copies
+    /// this instance represents. The simulator scales flow contributions
+    /// automatically; reading it supports models that need fine control.
+    Mfactor,
     /// Binary operation
     Binary(BinaryOp, Box<IrExpr>, Box<IrExpr>),
     /// Unary operation
@@ -285,6 +297,14 @@ pub enum IrExpr {
     FlickerNoise {
         power: Box<IrExpr>,
         exponent: Box<IrExpr>,
+        name: Option<String>,
+    },
+    /// noise_table / noise_table_log - interpolated PSD over frequency.
+    /// Points are (frequency, power) pairs sorted by frequency;
+    /// `log_interp` selects log-log interpolation.
+    NoiseTable {
+        points: Vec<(f64, f64)>,
+        log_interp: bool,
         name: Option<String>,
     },
     /// analysis(name) - check current analysis type
@@ -363,6 +383,15 @@ pub enum IrFunction {
     Pow,
 }
 
+/// Frequency-interpolated PSD table (noise_table / noise_table_log)
+#[derive(Debug, Clone)]
+pub struct NoiseTableData {
+    /// (frequency, power) points sorted by frequency
+    pub points: Vec<(f64, f64)>,
+    /// Interpolate in log-log coordinates
+    pub log_interp: bool,
+}
+
 /// Noise source extracted from a contribution: the deterministic part of
 /// the expression stamps as usual, and each `white_noise`/`flicker_noise`
 /// term becomes one small-signal source injected at the contribution's
@@ -385,6 +414,9 @@ pub struct NoiseSourceDef {
     pub psd: IrExpr,
     /// Flicker frequency exponent (None = white): S(f) = psd / f^exp
     pub exponent: Option<IrExpr>,
+    /// Frequency-interpolated PSD table; when present, `psd` carries only
+    /// the amplitude-squared scale applied to the interpolated value
+    pub table: Option<NoiseTableData>,
     /// Source label from the noise function's name argument
     pub name: Option<SmolStr>,
 }
@@ -499,7 +531,7 @@ impl DeviceIR {
         // branch-current unknown per node pair receiving a potential
         // contribution. Pairs are normalized so V(a,b) and V(b,a) share
         // one unknown (the reversed orientation flips the sign).
-        let mut parsed_contribs = Vec::with_capacity(module.contributions.len());
+        let mut parsed_contribs: Vec<BranchRef> = Vec::with_capacity(module.contributions.len());
         // (min,max) node pair -> (ordinal, oriented positive node)
         let mut branch_table: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
         for contrib in &module.contributions {
@@ -513,19 +545,53 @@ impl DeviceIR {
                     )
                 })?;
 
-            if !contrib.is_current {
+            // Potential contributions and indirect contributions (either
+            // target kind) introduce a branch-current unknown
+            if !contrib.is_current || contrib.indirect {
                 let key = (
                     branch_ref.pos_terminal.min(branch_ref.neg_terminal),
                     branch_ref.pos_terminal.max(branch_ref.neg_terminal),
                 );
-                branch_table.entry(key).or_insert_with(|| {
-                    let ordinal = ir.branch_unknowns.len();
-                    ir.branch_unknowns.push(BranchUnknownDef {
-                        pos: branch_ref.pos_terminal,
-                        neg: branch_ref.neg_terminal,
-                    });
-                    (ordinal, branch_ref.pos_terminal)
-                });
+                let ordinal = match branch_table.get(&key) {
+                    Some(&(ordinal, _)) => ordinal,
+                    None => {
+                        let ordinal = ir.branch_unknowns.len();
+                        ir.branch_unknowns.push(BranchUnknownDef {
+                            pos: branch_ref.pos_terminal,
+                            neg: branch_ref.neg_terminal,
+                            indirect: contrib.indirect,
+                        });
+                        branch_table.insert(key, (ordinal, branch_ref.pos_terminal));
+                        ordinal
+                    }
+                };
+                // A branch is either constrained by one indirect equation
+                // or driven by (summed) direct potential contributions;
+                // mixing them would over-determine the unknown
+                let registered_indirect = ir.branch_unknowns[ordinal].indirect;
+                if registered_indirect != contrib.indirect
+                    || (contrib.indirect && registered_indirect && {
+                        // Second indirect contribution on the same pair
+                        parsed_contribs
+                            .iter()
+                            .zip(module.contributions.iter())
+                            .any(|(prev_ref, prev)| {
+                                prev.indirect
+                                    && (prev_ref.pos_terminal.min(prev_ref.neg_terminal),
+                                        prev_ref.pos_terminal.max(prev_ref.neg_terminal))
+                                        == key
+                            })
+                    })
+                {
+                    return Err(crate::error::CodeGenError::new(
+                        crate::error::CodeGenErrorKind::InvalidExpression(format!(
+                            "branch '{}' is over-determined: a branch carries either one \
+                             indirect constraint or direct potential contributions, not both",
+                            contrib.branch
+                        )),
+                    )
+                    .into());
+                }
             }
 
             parsed_contribs.push(branch_ref);
@@ -567,7 +633,25 @@ impl DeviceIR {
             // open, not short it to zero volts.
             let (static_condition, expr) = Self::peel_static_condition(expr, &static_vars);
 
-            let (branch_ref, expr, branch_ordinal) = if contrib.is_current {
+            let (branch_ref, expr, branch_ordinal) = if contrib.indirect {
+                // Constraint equations are orientation-free (f == g holds
+                // whichever way the target was written); the KCL couplings
+                // use the unknown's registered orientation
+                let key = (
+                    branch_ref.pos_terminal.min(branch_ref.neg_terminal),
+                    branch_ref.pos_terminal.max(branch_ref.neg_terminal),
+                );
+                let (ordinal, _) = branch_table[&key];
+                let unknown = &ir.branch_unknowns[ordinal];
+                (
+                    BranchRef {
+                        pos_terminal: unknown.pos,
+                        neg_terminal: unknown.neg,
+                    },
+                    expr,
+                    Some(ordinal),
+                )
+            } else if contrib.is_current {
                 (branch_ref, expr, None)
             } else {
                 let key = (
@@ -622,6 +706,7 @@ impl DeviceIR {
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
                 is_current: contrib.is_current,
+                indirect: contrib.indirect,
                 branch_ordinal,
                 static_condition,
                 expr,
@@ -636,7 +721,9 @@ impl DeviceIR {
     /// Whether an expression contains a noise function anywhere
     fn contains_noise(expr: &IrExpr) -> bool {
         match expr {
-            IrExpr::WhiteNoise { .. } | IrExpr::FlickerNoise { .. } => true,
+            IrExpr::WhiteNoise { .. } | IrExpr::FlickerNoise { .. } | IrExpr::NoiseTable { .. } => {
+                true
+            }
             IrExpr::Binary(_, l, r) => Self::contains_noise(l) || Self::contains_noise(r),
             IrExpr::Unary(_, e)
             | IrExpr::Limexp(e)
@@ -715,6 +802,7 @@ impl DeviceIR {
                         power.clone(),
                     ),
                     exponent: None,
+                    table: None,
                     name: name.as_deref().map(SmolStr::from),
                 });
                 Ok(())
@@ -735,6 +823,29 @@ impl DeviceIR {
                         power.clone(),
                     ),
                     exponent: Some((**exponent).clone()),
+                    table: None,
+                    name: name.as_deref().map(SmolStr::from),
+                });
+                Ok(())
+            }
+            IrExpr::NoiseTable {
+                points,
+                log_interp,
+                name,
+            } => {
+                out.push(NoiseSourceDef {
+                    branch: branch.clone(),
+                    is_current,
+                    branch_ordinal,
+                    equation_index,
+                    // The interpolated table value picks up the
+                    // amplitude-squared scale at evaluation time
+                    psd: square(amplitude),
+                    exponent: None,
+                    table: Some(NoiseTableData {
+                        points: points.clone(),
+                        log_interp: *log_interp,
+                    }),
                     name: name.as_deref().map(SmolStr::from),
                 });
                 Ok(())
@@ -873,6 +984,7 @@ impl DeviceIR {
                 IrExpr::FlickerNoise {
                     power, exponent, ..
                 } => contains_ddt(power) || contains_ddt(exponent),
+                IrExpr::NoiseTable { .. } => false,
                 IrExpr::Above {
                     expr, threshold, ..
                 } => contains_ddt(expr) || contains_ddt(threshold),
@@ -892,6 +1004,7 @@ impl DeviceIR {
                 | IrExpr::Time
                 | IrExpr::Temperature
                 | IrExpr::Vt
+                | IrExpr::Mfactor
                 | IrExpr::Analysis(_) => false,
             }
         }
@@ -1100,7 +1213,8 @@ impl DeviceIR {
             | IrExpr::Param(_)
             | IrExpr::ParamGiven(_)
             | IrExpr::Temperature
-            | IrExpr::Vt => true,
+            | IrExpr::Vt
+            | IrExpr::Mfactor => true,
             IrExpr::Var(name) => static_vars.contains(name),
             // An indexed read is static when the index is static and every
             // element it could select is static
@@ -1353,6 +1467,7 @@ pub mod autodiff {
             | IrExpr::Time
             | IrExpr::Temperature
             | IrExpr::Vt
+            | IrExpr::Mfactor
             | IrExpr::Analysis(_) => 0,
             IrExpr::Binary(op, l, r) => match op {
                 BinaryOp::Add
@@ -1403,7 +1518,8 @@ pub mod autodiff {
             | IrExpr::Above { .. }
             | IrExpr::Timer { .. }
             | IrExpr::WhiteNoise { .. }
-            | IrExpr::FlickerNoise { .. } => 0,
+            | IrExpr::FlickerNoise { .. }
+            | IrExpr::NoiseTable { .. } => 0,
         }
     }
 
