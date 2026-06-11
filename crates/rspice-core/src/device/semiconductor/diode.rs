@@ -4,6 +4,12 @@ use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, Nonline
 use crate::solver::{CscIndex, StaticMatrix};
 use crate::{Value, circuit::NodeId};
 
+/// Boltzmann over charge with ngspice-46's CODATA constants
+/// (const.h: CONSTboltz / CHARGE).
+const KOVERQ: Value = 1.38064852e-23 / 1.6021766208e-19;
+/// SPICE reference temperature, 27C in Kelvin (ngspice REFTEMP).
+const REFTEMP: Value = 300.15;
+
 /// Pre-computed stamp indices for O(1) matrix access (2-terminal device)
 #[derive(Debug, Clone, Default)]
 pub struct DiodeIndices {
@@ -43,6 +49,14 @@ pub struct Diode {
     /// Transit time for diffusion capacitance (TT)
     pub tt: Value,
 
+    // Temperature parameters
+    /// Saturation-current temperature exponent (XTI)
+    pub xti: Value,
+    /// Activation energy in eV (EG)
+    pub eg: Value,
+    /// Model nominal temperature override in Celsius (TNOM)
+    pub tnom_c: Option<Value>,
+
     /// Previous iteration voltage (for convergence check)
     prev_vd: Value,
     /// Previous voltage for convergence
@@ -62,7 +76,7 @@ impl Diode {
             node_cathode,
             is: 2.52e-9, // Saturation current
             n: 1.752,    // Emission coefficient
-            vt: 0.02585, // Thermal voltage at 300K
+            vt: KOVERQ * REFTEMP, // Thermal voltage at 27C (ngspice REFTEMP)
             rs: 0.568,   // Series resistance
             bv: None,
             ibv: 1e-6,
@@ -72,6 +86,11 @@ impl Diode {
             vj: 0.7,    // Built-in potential
             m: 0.5,     // Grading coefficient
             tt: 8e-9,   // Transit time (8ns)
+
+            // SPICE temperature defaults
+            xti: 3.0,
+            eg: 1.11,
+            tnom_c: None,
 
             prev_vd: 0.0,
             prev_vd_old: 0.0,
@@ -126,7 +145,81 @@ impl Diode {
         if let Some(&v) = params.get("TT") {
             self.tt = v;
         }
+        if let Some(&v) = params.get("XTI") {
+            self.xti = v;
+        }
+        if let Some(&v) = params.get("EG") {
+            self.eg = v;
+        }
+        if let Some(&v) = params.get("TNOM") {
+            self.tnom_c = Some(v);
+        }
         self
+    }
+
+    /// Scale the junction to the operating temperature.
+    ///
+    /// Mirrors ngspice's diotemp.c at TLEV=0 / TLEVC=0 (the SPICE3
+    /// default): IS follows the activation-energy / XTI law, and VJ and
+    /// CJ0 follow the bandgap-shift mapping. The formulas reduce to
+    /// identity at `temp == tnom`. The soft breakdown branch keeps its
+    /// nominal knee (the exact ngspice IBV/BV matching is not modeled).
+    ///
+    /// Call once after model parameters and junction scaling are applied.
+    pub fn set_temperature(&mut self, temp_kelvin: Value, default_tnom_kelvin: Value) {
+        let tnom = self
+            .tnom_c
+            .map(|c| c + 273.15)
+            .unwrap_or(default_tnom_kelvin);
+        let temp = temp_kelvin;
+        if !(temp > 0.0) || !(tnom > 0.0) {
+            return;
+        }
+
+        let vt = KOVERQ * temp;
+        let vtnom = KOVERQ * tnom;
+
+        // Silicon bandgap at both temperatures (TLEV 0/1 form).
+        let egfet = 1.16 - (7.02e-4 * temp * temp) / (temp + 1108.0);
+        let egfet1 = 1.16 - (7.02e-4 * tnom * tnom) / (tnom + 1108.0);
+        let fact1 = tnom / REFTEMP;
+        let fact2 = temp / REFTEMP;
+        // ngspice's CHARGE*arg terms, folded through k/q so everything
+        // stays in volts.
+        let arg = -egfet / (2.0 * vt) + 1.1150877 / (2.0 * KOVERQ * REFTEMP);
+        let arg1 = -egfet1 / (2.0 * vtnom) + 1.1150877 / (2.0 * KOVERQ * REFTEMP);
+        let pbfact = -2.0 * vt * (1.5 * fact2.ln() + arg);
+        let pbfact1 = -2.0 * vtnom * (1.5 * fact1.ln() + arg1);
+
+        // IS(T) = IS * exp(((T/TNOM)-1)*EG/(N*vt) + (XTI/N)*ln(T/TNOM))
+        let vte = self.n * vt;
+        let is_factor =
+            (((temp / tnom) - 1.0) * self.eg / vte + (self.xti / self.n) * (temp / tnom).ln())
+                .exp();
+        if is_factor.is_finite() && is_factor > 0.0 {
+            self.is *= is_factor;
+        }
+
+        // VJ(T) and CJ0(T), TLEVC=0 bandgap mapping.
+        if self.vj > 0.0 {
+            let pbo = (self.vj - pbfact1) / fact1;
+            if pbo > 0.0 {
+                let gmaold = (self.vj - pbo) / pbo;
+                let denom = 1.0 + self.m * (400e-6 * (tnom - REFTEMP) - gmaold);
+                let t_jct_pot = pbfact + fact2 * pbo;
+                if denom != 0.0 && t_jct_pot > 0.0 {
+                    let mut cj = self.cj0 / denom;
+                    let gmanew = (t_jct_pot - pbo) / pbo;
+                    cj *= 1.0 + self.m * (400e-6 * (temp - REFTEMP) - gmanew);
+                    if cj.is_finite() && cj >= 0.0 {
+                        self.vj = t_jct_pot;
+                        self.cj0 = cj;
+                    }
+                }
+            }
+        }
+
+        self.vt = vt;
     }
 
     /// Cached operating-point values from the last accepted Newton solution:
@@ -382,5 +475,60 @@ impl NonlinearDevice for Diode {
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let tolerance = criteria.voltage_tolerance();
         (self.prev_vd - self.prev_vd_old).abs() < tolerance
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_diode() -> Diode {
+        let mut d = Diode::new("d1".to_string(), 1, 2);
+        d.is = 1e-14;
+        d.n = 1.0;
+        d.vj = 0.8;
+        d.cj0 = 2e-12;
+        d.m = 0.4;
+        d
+    }
+
+    #[test]
+    fn temperature_scaling_is_identity_at_tnom() {
+        let mut d = test_diode();
+        let (is0, vj0, cj0) = (d.is, d.vj, d.cj0);
+        d.set_temperature(REFTEMP, REFTEMP);
+        assert_eq!(d.vt, KOVERQ * REFTEMP);
+        assert!((d.is - is0).abs() <= is0 * 1e-12);
+        assert!((d.vj - vj0).abs() <= vj0 * 1e-12, "vj={} vs {}", d.vj, vj0);
+        assert!((d.cj0 - cj0).abs() <= cj0 * 1e-12);
+    }
+
+    #[test]
+    fn saturation_current_follows_ngspice_diotemp_law() {
+        // IS(T) = IS * exp(((T/TNOM)-1)*EG/(N*vt) + (XTI/N)*ln(T/TNOM))
+        let mut d = test_diode();
+        let temp = 273.15 + 85.0;
+        let tnom = REFTEMP;
+        d.set_temperature(temp, tnom);
+
+        let vt = KOVERQ * temp;
+        let expected = 1e-14
+            * (((temp / tnom) - 1.0) * 1.11 / vt + 3.0 * (temp / tnom).ln()).exp();
+        assert!(
+            (d.is - expected).abs() <= expected * 1e-12,
+            "is={:e} expected={:e}",
+            d.is,
+            expected
+        );
+        assert_eq!(d.vt, vt);
+    }
+
+    #[test]
+    fn junction_potential_drops_with_temperature() {
+        // The bandgap mapping lowers VJ and raises CJ0 as silicon heats up.
+        let mut d = test_diode();
+        d.set_temperature(273.15 + 85.0, REFTEMP);
+        assert!(d.vj < 0.8, "vj={} should drop at 85C", d.vj);
+        assert!(d.cj0 > 2e-12, "cj0={} should rise at 85C", d.cj0);
     }
 }

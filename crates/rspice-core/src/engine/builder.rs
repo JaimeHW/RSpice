@@ -439,13 +439,20 @@ impl Engine {
                         diode.apply_junction_scaling(junction_scale);
                     }
 
-                    if instance_param(instance_params, &["TEMP", "DTEMP"]).is_some() {
-                        log::warn!(
-                            "Diode '{}': TEMP/DTEMP instance overrides are not yet honored \
-                             by the junction model and were ignored",
-                            element.name
-                        );
-                    }
+                    // Junction temperature: instance TEMP is absolute (C),
+                    // DTEMP offsets the circuit temperature; the model TNOM
+                    // (or .options tnom) anchors the scaling.
+                    let tnom_k = crate::analysis::temperature::celsius_to_kelvin(
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+                    let temp_k = if let Some(t) = instance_param(instance_params, &["TEMP"]) {
+                        crate::analysis::temperature::celsius_to_kelvin(t)
+                    } else if let Some(dt) = instance_param(instance_params, &["DTEMP"]) {
+                        self.config.temperature + dt
+                    } else {
+                        self.config.temperature
+                    };
+                    diode.set_temperature(temp_k, tnom_k);
 
                     // Series resistance participates in the solution as an
                     // explicit resistor between the anode and an internal
