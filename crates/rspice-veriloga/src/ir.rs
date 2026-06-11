@@ -340,17 +340,24 @@ pub enum IrExpr {
     },
     /// zi_* - z-domain (sampled-data) filter: the input samples every
     /// `period` seconds and the difference equation output holds between
-    /// samples. Coefficients ascend in z⁻¹.
+    /// samples. Coefficients ascend in zâ»Â¹.
     ZiFilter {
         expr: Box<IrExpr>,
         numerator: Vec<f64>,
         denominator: Vec<f64>,
         period: f64,
     },
-    /// ddx(expr, V(node)) - symbolic partial derivative w.r.t. a node
-    /// potential. Resolved to an explicit derivative expression during
+    /// ddx(expr, V(node)) / ddx(expr, V(a,b)) - symbolic partial
+    /// derivative w.r.t. a node potential or a branch potential
+    /// difference. Resolved to an explicit derivative expression during
     /// device IR construction (where assignment chains are known).
-    Ddx { expr: Box<IrExpr>, node: usize },
+    Ddx {
+        expr: Box<IrExpr>,
+        pos: usize,
+        /// For V(a,b) probes the derivative antisymmetrizes over the
+        /// pair: (d/dVa - d/dVb)/2
+        neg: Option<usize>,
+    },
     /// Companion-model Jacobian factor for ddt: operand / dt in transient,
     /// zero at DC (backward Euler)
     DdtCompanion(Box<IrExpr>),
@@ -418,7 +425,7 @@ pub struct NoiseSourceDef {
     /// with the program's instance-static condition)
     pub equation_index: usize,
     /// Power spectral density at the operating point, including any
-    /// multiplicative amplitude squared (A²/Hz, or V²/Hz for potential
+    /// multiplicative amplitude squared (AÂ²/Hz, or VÂ²/Hz for potential
     /// contributions)
     pub psd: IrExpr,
     /// Flicker frequency exponent (None = white): S(f) = psd / f^exp
@@ -752,11 +759,11 @@ impl DeviceIR {
     }
 
     /// Structurally extract noise sources from a contribution expression:
-    /// `expr ~ deterministic + Σ amplitude_i · noise_i(...)`. Each source
-    /// records its operating-point PSD as `amplitude² · power`, so scaled
+    /// `expr ~ deterministic + Î£ amplitude_i Â· noise_i(...)`. Each source
+    /// records its operating-point PSD as `amplitudeÂ² Â· power`, so scaled
     /// and guarded noise terms (`gain * white_noise(S)`, conditionals)
     /// keep exact small-signal semantics. Noise functions in nonlinear
-    /// positions are hard errors — silently mis-shaping a noise spectrum
+    /// positions are hard errors â€” silently mis-shaping a noise spectrum
     /// would be worse than refusing the model.
     #[allow(clippy::too_many_arguments)]
     fn extract_noise_sources(
@@ -1348,7 +1355,7 @@ pub mod autodiff {
 
     /// Bitmask over differentiation axes (node voltages first, then
     /// branch-current unknowns). Devices with more than 128 axes saturate
-    /// to "all axes" — dense but always correct.
+    /// to "all axes" â€” dense but always correct.
     pub(crate) type AxisMask = u128;
 
     /// All-axes mask (saturation value)
@@ -1383,7 +1390,7 @@ pub mod autodiff {
     /// sequences.
     ///
     /// For every variable whose value depends (transitively) on node
-    /// voltages, a shadow variable holds d(var)/d(axis) — but only along
+    /// voltages, a shadow variable holds d(var)/d(axis) â€” but only along
     /// the axes the variable can actually vary with (its dependency mask):
     /// a variable computed from V(g) and V(s) never carries shadows along
     /// the drain or any branch-current axis. The shadows are updated by
@@ -1835,10 +1842,35 @@ pub mod autodiff {
     /// Resolve ddx() operators into explicit derivative expressions
     pub fn resolve_ddx(expr: &IrExpr, shadows: &ShadowContext) -> IrExpr {
         map_expr(expr, &mut |e| {
-            if let IrExpr::Ddx { expr, node } = e {
+            if let IrExpr::Ddx { expr, pos, neg } = e {
                 let inner = resolve_ddx(expr, shadows);
-                let wrt = DerivativeWrt::Voltage(*node);
-                Some(simplify(differentiate_with_shadows(&inner, &wrt, shadows)))
+                let d_pos = simplify(differentiate_with_shadows(
+                    &inner,
+                    &DerivativeWrt::Voltage(*pos),
+                    shadows,
+                ));
+                Some(match neg {
+                    None => d_pos,
+                    // ddx(f, V(a,b)): when f depends on the pair only
+                    // through V(a)-V(b), (df/dVa - df/dVb)/2 is exactly
+                    // df/d(Va-Vb)
+                    Some(neg) => {
+                        let d_neg = simplify(differentiate_with_shadows(
+                            &inner,
+                            &DerivativeWrt::Voltage(*neg),
+                            shadows,
+                        ));
+                        simplify(IrExpr::Binary(
+                            BinaryOp::Mul,
+                            Box::new(IrExpr::Const(0.5)),
+                            Box::new(IrExpr::Binary(
+                                BinaryOp::Sub,
+                                Box::new(d_pos),
+                                Box::new(d_neg),
+                            )),
+                        ))
+                    }
+                })
             } else {
                 None
             }
@@ -1936,9 +1968,10 @@ pub mod autodiff {
                 max_pos_slew: max_pos_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
                 max_neg_slew: max_neg_slew.as_ref().map(|e| Box::new(map_expr(e, f))),
             },
-            IrExpr::Ddx { expr, node } => IrExpr::Ddx {
+            IrExpr::Ddx { expr, pos, neg } => IrExpr::Ddx {
                 expr: Box::new(map_expr(expr, f)),
-                node: *node,
+                pos: *pos,
+                neg: *neg,
             },
             IrExpr::ZiFilter {
                 expr,

@@ -393,30 +393,42 @@ impl VerilogADevice {
 
     /// Set a parameter value by name
     pub fn set_parameter(&mut self, name: &str, value: f64) -> bool {
-        for (i, param) in self.model.parameters.iter().enumerate() {
-            if param.name == name {
-                // Apply min/max clamping
-                let clamped = match (param.min, param.max) {
-                    (Some(min), Some(max)) => value.clamp(min, max),
-                    (Some(min), None) => value.max(min),
-                    (None, Some(max)) => value.min(max),
-                    (None, None) => value,
-                };
-                if (clamped - value).abs() > 0.0 {
-                    log::warn!(
-                        "Parameter '{}' of '{}' clamped from {} to {} (range bound)",
-                        name,
-                        self.name,
-                        value,
-                        clamped
-                    );
-                }
-                self.context.set_param(i, clamped);
-                self.context.mark_param_given(i);
-                return true;
-            }
+        // Verilog-A is case-sensitive but SPICE decks are not: prefer an
+        // exact match, then accept a case-insensitive one (industry
+        // netlists write PSP's TOXO as toxo)
+        let index = self
+            .model
+            .parameters
+            .iter()
+            .position(|p| p.name == name)
+            .or_else(|| {
+                self.model
+                    .parameters
+                    .iter()
+                    .position(|p| p.name.eq_ignore_ascii_case(name))
+            });
+        let Some(i) = index else { return false };
+        let param = &self.model.parameters[i];
+
+        // Apply min/max clamping
+        let clamped = match (param.min, param.max) {
+            (Some(min), Some(max)) => value.clamp(min, max),
+            (Some(min), None) => value.max(min),
+            (None, Some(max)) => value.min(max),
+            (None, None) => value,
+        };
+        if (clamped - value).abs() > 0.0 {
+            log::warn!(
+                "Parameter '{}' of '{}' clamped from {} to {} (range bound)",
+                name,
+                self.name,
+                value,
+                clamped
+            );
         }
-        false
+        self.context.set_param(i, clamped);
+        self.context.mark_param_given(i);
+        true
     }
 
     /// Evaluate dependent parameter defaults for parameters the instance

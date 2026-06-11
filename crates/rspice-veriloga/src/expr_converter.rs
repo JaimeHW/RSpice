@@ -851,25 +851,33 @@ impl<'a> ExprConverter<'a> {
                 let Expression::BranchAccess(BranchAccess::Nodes { access, pos, neg, .. }) = probe
                 else {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "ddx probe must be a branch access like V(node)".into(),
+                        "ddx probe must be a branch access like V(node) or V(a,b)".into(),
                     ))
                     .into());
                 };
-                if access != "V" || neg.is_some() {
+                // Potential probes of any discipline differentiate w.r.t.
+                // the node unknowns (V, Temp, ...); flow probes (I, Pwr)
+                // would need a branch-flow axis
+                if access == "I" || access == "Pwr" {
                     return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "ddx probes other than a single node potential V(node)".into(),
+                        "ddx with a flow probe (differentiate w.r.t. a potential instead)".into(),
                     ))
                     .into());
                 }
-                let node = self.ctx.node_index(pos).ok_or_else(|| {
+                let unknown_node = |name: &str| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown node: {}",
-                        pos
+                        "Unknown node: {name}"
                     )))
-                })?;
+                };
+                let pos_node = self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
+                let neg_node = neg
+                    .as_ref()
+                    .map(|n| self.ctx.node_index(n).ok_or_else(|| unknown_node(n)))
+                    .transpose()?;
                 Ok(IrExpr::Ddx {
                     expr: Box::new(inner),
-                    node,
+                    pos: pos_node,
+                    neg: neg_node,
                 })
             }
             "absdelay" => {

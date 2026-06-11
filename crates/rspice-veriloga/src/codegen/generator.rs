@@ -528,6 +528,16 @@ impl CodeGenerator {
                 self.emit_expr(inner, ir, program)?;
                 program.instructions.push(Instruction::Neg);
             }
+            // Unary plus is the identity
+            IrExpr::Unary(crate::ast::UnaryOp::Pos, inner) => {
+                self.emit_expr(inner, ir, program)?;
+            }
+            // Bitwise complement truncates to integer: ~x = -x - 1
+            IrExpr::Unary(crate::ast::UnaryOp::BitNot, inner) => {
+                self.emit_expr(inner, ir, program)?;
+                program.instructions.push(Instruction::PushConst(-1.0));
+                program.instructions.push(Instruction::BitXor);
+            }
             IrExpr::Call(func, args) => {
                 for arg in args {
                     self.emit_expr(arg, ir, program)?;
@@ -830,11 +840,6 @@ impl CodeGenerator {
                 }
                 let timer_id = Self::allocate_slot(&self.timer_state_count);
                 program.instructions.push(Instruction::TimerState(timer_id));
-            }
-            IrExpr::Unary(op, _) => {
-                return Err(CompileError::CodeGen(CodeGenError::new(
-                    CodeGenErrorKind::UnsupportedFeature(format!("Unary op {:?}", op)),
-                )));
             }
             IrExpr::LaplaceZP {
                 expr,
