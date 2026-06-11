@@ -328,6 +328,13 @@ impl Engine {
     }
 
     /// Set reactive element state from state vector
+    ///
+    /// Clears every other piece of companion history (capacitor currents,
+    /// inductor voltages): the first step of each period integration runs
+    /// backward Euler, which reads neither, so the period map becomes a pure
+    /// function of the shooting state. Leaving stale history in place would
+    /// leak the previous trajectory into the next one and corrupt both the
+    /// shooting residual and the finite-difference Jacobian columns.
     fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
         let n_caps = circuit.capacitors.len();
 
@@ -335,12 +342,14 @@ impl Engine {
         for (i, v) in state.iter().take(n_caps).enumerate() {
             circuit.capacitors.v_prev[i] = *v;
             circuit.capacitors.v_prev_prev[i] = *v;
+            circuit.capacitors.i_prev[i] = 0.0;
         }
 
         // Set inductor currents
         for (i, current) in state.iter().skip(n_caps).enumerate() {
             circuit.inductors.i_prev[i] = *current;
             circuit.inductors.i_prev_prev[i] = *current;
+            circuit.inductors.v_prev[i] = 0.0;
         }
     }
 
@@ -427,13 +436,39 @@ impl Engine {
     ) -> Result<(Vec<Value>, TransientResult), SimulationError> {
         let max_step = period / config.points_per_period as f64;
 
-        // Get current voltages as starting solution
-        let solution = vec![0.0; circuit.matrix_size()];
+        // Node voltages consistent with the frozen reactive state: they seed
+        // the first Newton solve and become the genuine t=0 waveform sample.
+        let solution = self.pss_initial_node_solution(circuit, matrix, period)?;
 
         let waveform = self.pss_run_tran_internal(circuit, matrix, solution, period, max_step)?;
 
         let final_state = self.pss_extract_reactive_state(circuit);
         Ok((final_state, waveform))
+    }
+
+    /// Solve the network at t = 0 with the reactive state held frozen.
+    ///
+    /// A backward-Euler companion step of `period * 1e-9` pins each capacitor
+    /// to its state voltage and each inductor to its state current (the
+    /// resulting error equals the state drift over that tiny interval), while
+    /// the nonlinear devices settle to node voltages consistent with that
+    /// state. Without this, the waveform's first sample and the Newton seed
+    /// were all zeros.
+    fn pss_initial_node_solution(
+        &self,
+        circuit: &mut Circuit,
+        matrix: &mut StaticMatrix,
+        period: Value,
+    ) -> Result<Vec<Value>, SimulationError> {
+        let dt_freeze = period * 1e-9;
+        let coeff =
+            CompanionCoefficients::for_method(crate::analysis::IntegrationMethod::BackwardEuler);
+        let start = vec![0.0; circuit.matrix_size()];
+
+        match self.pss_newton_solve(circuit, matrix, &coeff, dt_freeze, dt_freeze, &start)? {
+            Some(solution) => Ok(solution),
+            None => Ok(start),
+        }
     }
 
     /// Compute all finite-difference sensitivity columns
@@ -658,6 +693,147 @@ impl Engine {
         Ok(x)
     }
 
+    /// One companion-stamped Newton solve at `t_next` with step `dt`.
+    ///
+    /// Stamps the linear network, time-varying sources, reactive companions
+    /// for the given integration coefficients, and nonlinear devices, then
+    /// iterates to convergence. Reads — never writes — the companion history,
+    /// so callers control when the trajectory actually advances. Returns
+    /// `None` when Newton fails to converge at this step size.
+    fn pss_newton_solve(
+        &self,
+        circuit: &mut Circuit,
+        matrix: &mut StaticMatrix,
+        coeff: &CompanionCoefficients,
+        t_next: Value,
+        dt: Value,
+        start: &[Value],
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let size = circuit.matrix_size();
+        let mut new_solution = start.to_vec();
+        let mut rhs = vec![0.0; size];
+
+        for _iter in 0..self.config.max_iterations {
+            matrix.clear_values();
+            rhs.fill(0.0);
+
+            for i in 0..size {
+                matrix.add(i, i, 1e-12);
+            }
+
+            circuit.stamp_transient_linear_direct(matrix, &mut rhs);
+
+            // Time-varying independent sources: the static stamp wrote DC
+            // values; overwrite the source rows with their value at the
+            // end of this step. This is what makes driven PSS periodic —
+            // without it a SIN drive stamps as its DC offset and the
+            // "steady state" collapses to the DC solution.
+            let num_nodes = circuit.num_nodes();
+            circuit
+                .voltage_sources
+                .update_transient_rhs(&mut rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
+            circuit.current_sources.update_transient_rhs(&mut rhs, t_next);
+
+            // Stamp capacitors
+            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                let capacitance = circuit.capacitors.capacitances[cap_idx];
+                let np = cap.pp.row;
+                let nn = cap.nn.row;
+                let v_n = circuit.capacitors.v_prev[cap_idx];
+                let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
+
+                let geq = coeff.capacitor_geq(capacitance, dt);
+                let i_n_cap = circuit.capacitors.i_prev[cap_idx];
+                let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
+
+                if np > 0 {
+                    matrix.add(np - 1, np - 1, geq);
+                    if nn > 0 {
+                        matrix.add(np - 1, nn - 1, -geq);
+                    }
+                }
+                if nn > 0 {
+                    if np > 0 {
+                        matrix.add(nn - 1, np - 1, -geq);
+                    }
+                    matrix.add(nn - 1, nn - 1, geq);
+                }
+                if np > 0 {
+                    rhs[np - 1] += ieq;
+                }
+                if nn > 0 {
+                    rhs[nn - 1] -= ieq;
+                }
+            }
+
+            // Stamp inductors
+            for l_idx in 0..circuit.inductors.names.len() {
+                let np = circuit.inductors.node_pos[l_idx];
+                let nn = circuit.inductors.node_neg[l_idx];
+                let br = circuit.inductors.branch_indices[l_idx];
+                let inductance = circuit.inductors.inductances[l_idx];
+                let i_n = circuit.inductors.i_prev[l_idx];
+                let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
+                let v_n = circuit.inductors.v_prev[l_idx];
+
+                let req = coeff.inductor_req(inductance, dt);
+                let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
+
+                if np > 0 && br > 0 {
+                    let br_idx = circuit.num_nodes() + br - 1;
+                    matrix.add(br_idx, np - 1, 1.0);
+                    matrix.add(np - 1, br_idx, 1.0);
+                }
+                if nn > 0 && br > 0 {
+                    let br_idx = circuit.num_nodes() + br - 1;
+                    matrix.add(br_idx, nn - 1, -1.0);
+                    matrix.add(nn - 1, br_idx, -1.0);
+                }
+                if br > 0 {
+                    let br_idx = circuit.num_nodes() + br - 1;
+                    matrix.add(br_idx, br_idx, -req);
+                    // Branch row sign convention: v - r_eq*i = -v_eq (see
+                    // Inductors::stamp_transient_companion).
+                    rhs[br_idx] = -veq;
+                }
+            }
+
+            // Mutual coupling overlays on top of the standalone inductors.
+            circuit.stamp_coupled_inductor_pairs_transient(matrix, &mut rhs, dt, coeff);
+
+            if circuit.has_nonlinear_devices() {
+                circuit.update_nonlinear(&new_solution);
+                circuit.stamp_nonlinear(matrix, &mut rhs, &new_solution);
+                circuit.stamp_behavioral(matrix, &mut rhs, &new_solution, t_next);
+            }
+
+            match matrix.solve(&rhs) {
+                Ok(sol) => {
+                    let voltage_converged =
+                        self.node_voltage_convergence_met(&new_solution, &sol, circuit.num_nodes());
+                    let linearized_residual_converged =
+                        self.residual_convergence_met(matrix, &sol, &rhs);
+
+                    new_solution = sol;
+
+                    if circuit.has_nonlinear_devices() {
+                        circuit.update_nonlinear(&new_solution);
+                    }
+
+                    let device_converged = !circuit.has_nonlinear_devices()
+                        || circuit.nonlinear_converged(self.device_convergence_criteria());
+
+                    if voltage_converged && device_converged && linearized_residual_converged {
+                        return Ok(Some(new_solution));
+                    }
+                }
+                Err(_) => return Ok(None),
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Internal transient simulation
     fn pss_run_tran_internal(
         &self,
@@ -668,7 +844,6 @@ impl Engine {
         max_step: Value,
     ) -> Result<TransientResult, SimulationError> {
         let num_nodes = circuit.num_nodes();
-        let size = circuit.matrix_size();
 
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep =
@@ -693,174 +868,58 @@ impl Engine {
         let mut t = 0.0;
         const MAX_ITERATIONS: usize = 100_000;
         let mut total_iterations = 0;
+        let mut first_step = true;
 
         while t < tstop && total_iterations < MAX_ITERATIONS {
             total_iterations += 1;
             let (dt, _) = breakpoints.limit_step(t, timestep.dt());
             let dt = dt.min(tstop - t);
 
-            let mut new_solution = solution.clone();
-            let mut rhs = vec![0.0; size];
-            let mut converged = false;
+            // First step runs backward Euler: it reads no capacitor-current or
+            // inductor-voltage history, so the trajectory depends only on the
+            // shooting state that pss_set_reactive_state installed.
+            let current_method = if first_step {
+                crate::analysis::IntegrationMethod::BackwardEuler
+            } else {
+                trapgear.current_method()
+            };
+            let coeff = CompanionCoefficients::for_method(current_method);
 
-            for _iter in 0..self.config.max_iterations {
-                matrix.clear_values();
-                rhs.fill(0.0);
-
-                for i in 0..size {
-                    matrix.add(i, i, 1e-12);
-                }
-
-                circuit.stamp_transient_linear_direct(matrix, &mut rhs);
-
-                // Time-varying independent sources: the static stamp wrote DC
-                // values; overwrite the source rows with their value at the
-                // end of this step. This is what makes driven PSS periodic —
-                // without it a SIN drive stamps as its DC offset and the
-                // "steady state" collapses to the DC solution.
-                let num_nodes = circuit.num_nodes();
-                circuit
-                    .voltage_sources
-                    .update_transient_rhs(&mut rhs, t + dt, |br_ordinal| num_nodes + br_ordinal);
-                circuit
-                    .current_sources
-                    .update_transient_rhs(&mut rhs, t + dt);
-
-                let current_method = trapgear.current_method();
-                let coeff = CompanionCoefficients::for_method(current_method);
-
-                // Stamp capacitors
-                for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                    let capacitance = circuit.capacitors.capacitances[cap_idx];
-                    let np = cap.pp.row;
-                    let nn = cap.nn.row;
-                    let v_n = circuit.capacitors.v_prev[cap_idx];
-                    let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
-
-                    let geq = coeff.capacitor_geq(capacitance, dt);
-                    let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                    let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
-
-                    if np > 0 {
-                        matrix.add(np - 1, np - 1, geq);
-                        if nn > 0 {
-                            matrix.add(np - 1, nn - 1, -geq);
-                        }
-                    }
-                    if nn > 0 {
-                        if np > 0 {
-                            matrix.add(nn - 1, np - 1, -geq);
-                        }
-                        matrix.add(nn - 1, nn - 1, geq);
-                    }
-                    if np > 0 {
-                        rhs[np - 1] += ieq;
-                    }
-                    if nn > 0 {
-                        rhs[nn - 1] -= ieq;
-                    }
-                }
-
-                // Stamp inductors
-                for l_idx in 0..circuit.inductors.names.len() {
-                    let np = circuit.inductors.node_pos[l_idx];
-                    let nn = circuit.inductors.node_neg[l_idx];
-                    let br = circuit.inductors.branch_indices[l_idx];
-                    let inductance = circuit.inductors.inductances[l_idx];
-                    let i_n = circuit.inductors.i_prev[l_idx];
-                    let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
-                    let v_n = circuit.inductors.v_prev[l_idx];
-
-                    let req = coeff.inductor_req(inductance, dt);
-                    let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
-
-                    if np > 0 && br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, np - 1, 1.0);
-                        matrix.add(np - 1, br_idx, 1.0);
-                    }
-                    if nn > 0 && br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, nn - 1, -1.0);
-                        matrix.add(nn - 1, br_idx, -1.0);
-                    }
-                    if br > 0 {
-                        let br_idx = circuit.num_nodes() + br - 1;
-                        matrix.add(br_idx, br_idx, -req);
-                        // Branch row sign convention: v - r_eq*i = -v_eq (see
-                        // Inductors::stamp_transient_companion).
-                        rhs[br_idx] = -veq;
-                    }
-                }
-
-                // Mutual coupling overlays on top of the standalone inductors.
-                circuit.stamp_coupled_inductor_pairs_transient(matrix, &mut rhs, dt, &coeff);
-
-                if circuit.has_nonlinear_devices() {
-                    circuit.update_nonlinear(&new_solution);
-                    circuit.stamp_nonlinear(matrix, &mut rhs, &new_solution);
-                    circuit.stamp_behavioral(matrix, &mut rhs, &new_solution, t + dt);
-                }
-
-                match matrix.solve(&rhs) {
-                    Ok(sol) => {
-                        let voltage_converged = self.node_voltage_convergence_met(
-                            &new_solution,
-                            &sol,
-                            circuit.num_nodes(),
-                        );
-                        let linearized_residual_converged =
-                            self.residual_convergence_met(matrix, &sol, &rhs);
-
-                        new_solution = sol;
-
-                        if circuit.has_nonlinear_devices() {
-                            circuit.update_nonlinear(&new_solution);
-                        }
-
-                        let device_converged = !circuit.has_nonlinear_devices()
-                            || circuit.nonlinear_converged(self.device_convergence_criteria());
-
-                        if voltage_converged && device_converged && linearized_residual_converged {
-                            converged = true;
-                            break;
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            if !converged {
+            let Some(new_solution) =
+                self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution)?
+            else {
                 timestep.force_step(dt * 0.25);
                 continue;
-            }
+            };
 
             t += dt;
-            lte_estimator.record(&new_solution, dt);
-            trapgear.update(&new_solution, dt);
+            first_step = false;
 
-            // Update capacitor history
+            // Update capacitor history with the same companion coefficients
+            // that built this step, before shifting the voltage history those
+            // coefficients read: i_{n+1} = geq*v_{n+1} - ieq(v_n, v_{n-1}, i_n).
             for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
                 let np = cap.pp.row;
                 let nn = cap.nn.row;
                 let v_new = if np == 0 { 0.0 } else { new_solution[np - 1] }
                     - if nn == 0 { 0.0 } else { new_solution[nn - 1] };
-                circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
-                circuit.capacitors.v_prev[cap_idx] = v_new;
 
-                // Update current history
-                let coeff_update = CompanionCoefficients::for_method(trapgear.current_method());
-                let geq = coeff_update.capacitor_geq(circuit.capacitors.capacitances[cap_idx], dt);
-                let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                let ieq = coeff_update.capacitor_ieq(
-                    circuit.capacitors.capacitances[cap_idx],
+                let capacitance = circuit.capacitors.capacitances[cap_idx];
+                let geq = coeff.capacitor_geq(capacitance, dt);
+                let ieq = coeff.capacitor_ieq(
+                    capacitance,
                     dt,
+                    circuit.capacitors.v_prev[cap_idx],
                     circuit.capacitors.v_prev_prev[cap_idx],
-                    circuit.capacitors.v_prev_prev[cap_idx],
-                    i_n_cap,
+                    circuit.capacitors.i_prev[cap_idx],
                 );
                 circuit.capacitors.i_prev[cap_idx] = geq * v_new - ieq;
+                circuit.capacitors.v_prev_prev[cap_idx] = circuit.capacitors.v_prev[cap_idx];
+                circuit.capacitors.v_prev[cap_idx] = v_new;
             }
+
+            lte_estimator.record(&new_solution, dt);
+            trapgear.update(&new_solution, dt);
 
             // Update inductor history
             for l_idx in 0..circuit.inductors.names.len() {
