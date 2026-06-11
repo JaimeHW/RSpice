@@ -206,6 +206,16 @@ fn value_span(line: &str, name: &str) -> Option<(usize, usize)> {
         .map(|(_, start, end)| (start, end))
 }
 
+/// Every `.param` assignment in the buffer, for completion: the spans are
+/// line-local and only the names matter to callers.
+pub(super) fn buffer_assignments(buffer: &str) -> Vec<(String, usize, usize)> {
+    buffer
+        .lines()
+        .filter_map(scan_assignments)
+        .flatten()
+        .collect()
+}
+
 /// All `.param` rows in the buffer.
 fn scan_params(buffer: &str) -> Vec<ParamRow> {
     let mut rows = Vec::new();

@@ -13,7 +13,7 @@ use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::{Diagnostic, highlight};
+use super::{Diagnostic, completion, highlight};
 
 /// Editor body font size (gutter follows it).
 const FONT_SIZE: f32 = 12.5;
@@ -22,12 +22,21 @@ const GUTTER_W: f32 = 64.0;
 /// Seconds of typing silence before the buffer re-parses.
 const PARSE_DEBOUNCE: f64 = 0.35;
 
+/// Stable id so the completion accept can reposition the caret.
+fn editor_id() -> egui::Id {
+    egui::Id::new("volta.netlist.editor.text")
+}
+
 /// Render the editor and diagnostics strip.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
     refresh_diagnostics(ui, state);
+
+    // Popover keys (⇥, ↑↓, Esc) must be consumed before the TextEdit so
+    // an open popover owns them.
+    let completion_keys = completion::consume_keys(ui, &state.shell.netlist);
 
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
@@ -64,6 +73,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let mut changed = false;
     let mut cursor_line = state.shell.netlist.cursor_line;
+    let mut te_output: Option<egui::text_edit::TextEditOutput> = None;
 
     ui.allocate_ui(egui::vec2(ui.available_width(), editor_h), |ui| {
         egui::ScrollArea::both()
@@ -71,6 +81,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let output = egui::TextEdit::multiline(&mut buffer)
+                    .id(editor_id())
                     .code_editor()
                     .font(font.clone())
                     .desired_width(f32::INFINITY)
@@ -120,13 +131,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         painter.circle_filled(egui::pos2(origin.x - 12.0, y), 2.5, c.accent);
                     }
                 }
+
+                te_output = Some(output);
             });
     });
 
     // Post-edit bookkeeping, after the buffer borrow ends.
+    let now = ui.input(|input| input.time);
     state.shell.netlist.cursor_line = cursor_line;
     if changed {
-        let now = ui.input(|input| input.time);
         let netlist = &mut state.shell.netlist;
         netlist.revision += 1;
         netlist.last_edit_time = now;
@@ -134,6 +147,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         // Editing makes the buffer the source of truth for runs.
         state.workspace.netlist_source = Some(buffer.clone());
     }
+
+    // Completion popover: trigger, render, and apply an acceptance.
+    if let Some(output) = &te_output
+        && let Some((start, end, text, caret)) =
+            completion::show(ui, &mut state.shell.netlist, output, &buffer, completion_keys)
+    {
+        buffer.replace_range(start..end, &text);
+        completion::place_caret(ui, editor_id(), caret);
+        let netlist = &mut state.shell.netlist;
+        netlist.revision += 1;
+        netlist.last_edit_time = now;
+        netlist.edited_lines.insert(cursor_line);
+        state.workspace.netlist_source = Some(buffer.clone());
+    }
+
     state.simulation.netlist_content = buffer;
 
     if strip_rows > 0 {
@@ -193,31 +221,67 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
     }
 
     let buffer = &state.simulation.netlist_content;
-    let diagnostics = if buffer.trim().is_empty() {
-        Vec::new()
+    let (diagnostics, symbols) = if buffer.trim().is_empty() {
+        (Vec::new(), Some(Vec::new()))
     } else {
-        parse_diagnostics(buffer)
+        parse_buffer(buffer)
     };
     let netlist = &mut state.shell.netlist;
     netlist.diagnostics = diagnostics;
+    if let Some(symbols) = symbols {
+        netlist.symbols = symbols;
+    }
     netlist.diag_revision = Some(revision);
 }
 
-/// Parse the buffer and map the error (the parser stops at the first) to
-/// a diagnostic. Includes are *not* resolved here — `.include`/`.lib`
-/// lines are inert in this pass, which keeps keystroke linting free of
-/// file IO; errors inside included files still surface at run time.
-fn parse_diagnostics(buffer: &str) -> Vec<Diagnostic> {
+/// Parse the buffer: diagnostics out of the error path, completion
+/// symbols out of the success path (a broken parse keeps the previous
+/// symbols). Includes are *not* resolved here — `.include`/`.lib` lines
+/// are inert in this pass, which keeps keystroke linting free of file
+/// IO; errors inside included files still surface at run time.
+fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
     match rspice_core::Netlist::parse(buffer) {
-        Ok(_) => Vec::new(),
-        Err(rspice_core::netlist::ParseError::Syntax { line, message }) => vec![Diagnostic {
-            // Parser lines are 1-based; `line == 0` means "unlocated".
-            line: line.checked_sub(1),
-            message,
-        }],
-        Err(other) => vec![Diagnostic {
-            line: None,
-            message: other.to_string(),
-        }],
+        Ok(netlist) => (Vec::new(), Some(harvest_symbols(&netlist))),
+        Err(rspice_core::netlist::ParseError::Syntax { line, message }) => (
+            vec![Diagnostic {
+                // Parser lines are 1-based; `line == 0` means "unlocated".
+                line: line.checked_sub(1),
+                message,
+            }],
+            None,
+        ),
+        Err(other) => (
+            vec![Diagnostic {
+                line: None,
+                message: other.to_string(),
+            }],
+            None,
+        ),
     }
+}
+
+/// Completion symbols from a clean parse: model cards and subcircuits.
+fn harvest_symbols(netlist: &rspice_core::Netlist) -> Vec<completion::SymbolEntry> {
+    let mut symbols = Vec::new();
+    for model in &netlist.models {
+        symbols.push(completion::SymbolEntry {
+            name: model.name.clone(),
+            kind: "model",
+            detail: model.model_type.to_ascii_uppercase(),
+            doc: format!(
+                "{} model card from this deck · {} parameter(s).",
+                model.model_type.to_ascii_uppercase(),
+                model.params.len() + model.expr_params.len() + model.string_params.len()
+            ),
+        });
+    }
+    for subckt in &netlist.subcircuits {
+        symbols.push(completion::SymbolEntry {
+            name: subckt.name.clone(),
+            kind: "subckt",
+            detail: format!("{} ports", subckt.ports.len()),
+            doc: format!(".subckt {} {}", subckt.name, subckt.ports.join(" ")),
+        });
+    }
+    symbols
 }

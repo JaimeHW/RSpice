@@ -18,6 +18,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, crumb_text, docbar};
 
+mod completion;
 mod editor;
 mod highlight;
 mod tuner;
@@ -57,6 +58,14 @@ pub struct NetlistEditorState {
     /// Slider ranges captured when a parameter first appears, so the
     /// range doesn't chase the value while dragging.
     pub param_ranges: HashMap<String, (f64, f64)>,
+    /// The completion popover was open last frame (keys pre-consumed).
+    pub completion_open: bool,
+    /// Selected row in the completion popover.
+    pub completion_index: usize,
+    /// Buffer revision at which Esc dismissed the popover.
+    pub completion_dismissed_at: Option<u64>,
+    /// `.model` / `.subckt` symbols harvested from the last clean parse.
+    pub symbols: Vec<completion::SymbolEntry>,
 }
 
 /// Whether the buffer (not the schematic) is the simulation source.
