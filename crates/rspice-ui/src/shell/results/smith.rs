@@ -138,7 +138,122 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
 
-    plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+    let response = plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+
+    // Interactive readout: nearest locus point on hover, click to pin.
+    // The chart space IS the Γ plane, so the conversion to impedance is
+    // z = z0 (1+Γ)/(1−Γ).
+    let ranges = ((-1.12, 1.12), (-1.12, 1.12));
+    let mut hovered: Option<(usize, usize)> = None;
+    if let Some(pointer) = response.response.hover_pos()
+        && response.plot_rect.contains(pointer)
+    {
+        let mut best = 14.0f32 * 14.0;
+        for (slot, (_, re, im)) in arrays.iter().enumerate() {
+            for i in 0..re.len() {
+                let pos = super::xy_screen_pos(
+                    response.plot_rect,
+                    (re[i], im[i]),
+                    ranges.0,
+                    ranges.1,
+                );
+                let d2 = pos.distance_sq(pointer);
+                if d2 < best {
+                    best = d2;
+                    hovered = Some((slot, i));
+                }
+            }
+        }
+    }
+
+    if response.response.clicked() {
+        let pins = &mut state.shell.results.rf_pin;
+        match hovered {
+            Some(hit) if pins.get(&super::ResultViewer::Smith) == Some(&hit) => {
+                pins.remove(&super::ResultViewer::Smith);
+            }
+            Some(hit) => {
+                pins.insert(super::ResultViewer::Smith, hit);
+            }
+            None => {
+                pins.remove(&super::ResultViewer::Smith);
+            }
+        }
+    }
+
+    let pinned = state
+        .shell
+        .results
+        .rf_pin
+        .get(&super::ResultViewer::Smith)
+        .copied()
+        .filter(|(slot, i)| {
+            arrays
+                .get(*slot)
+                .is_some_and(|(_, re, _)| *i < re.len())
+        });
+    let target = hovered.or(pinned);
+
+    if let Some((slot, i)) = target {
+        let (trace_index, re, im) = &arrays[slot];
+        let gamma_re = re[i];
+        let gamma_im = im[i];
+        let pos = super::xy_screen_pos(
+            response.plot_rect,
+            (gamma_re, gamma_im),
+            ranges.0,
+            ranges.1,
+        );
+        let color = c.traces[slot % c.traces.len()];
+        let painter = plot_ui.painter();
+        if pinned == Some((slot, i)) {
+            painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.8, color));
+        }
+        painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.accent));
+
+        let smith = &state.analysis.smith_chart_state;
+        let trace = &smith.traces[*trace_index];
+        let frequency = trace.points.get(i).map(|p| p.frequency).unwrap_or(0.0);
+        let mag = (gamma_re * gamma_re + gamma_im * gamma_im).sqrt();
+        let phase_deg = gamma_im.atan2(gamma_re).to_degrees();
+        // z = z0 (1+Γ)/(1−Γ)
+        let denom = (1.0 - gamma_re) * (1.0 - gamma_re) + gamma_im * gamma_im;
+        let (r, x) = if denom > 1e-12 {
+            (
+                smith.z0 * (1.0 - gamma_re * gamma_re - gamma_im * gamma_im) / denom,
+                smith.z0 * (2.0 * gamma_im) / denom,
+            )
+        } else {
+            (f64::INFINITY, 0.0)
+        };
+        let vswr = if mag < 1.0 {
+            format!("{:.2}", (1.0 + mag) / (1.0 - mag))
+        } else {
+            "∞".to_owned()
+        };
+        let rows = [
+            ("f".to_owned(), fmt_si(frequency, "Hz", 2)),
+            (
+                "Γ".to_owned(),
+                format!("{mag:.3} ∠ {phase_deg:.1}°"),
+            ),
+            (
+                "Z".to_owned(),
+                if r.is_finite() {
+                    format!(
+                        "{} {} j{}",
+                        fmt_si(r, "Ω", 2),
+                        if x >= 0.0 { "+" } else { "−" },
+                        fmt_si(x.abs(), "Ω", 2)
+                    )
+                } else {
+                    "open".to_owned()
+                },
+            ),
+            ("VSWR".to_owned(), vswr),
+        ];
+        super::point_card(&plot_ui, response.plot_rect, pos, &trace.name, color, &rows);
+    }
 }
 
 // ---------------------------------------------------------------------------

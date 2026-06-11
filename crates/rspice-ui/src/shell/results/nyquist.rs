@@ -153,13 +153,80 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         rows
     };
 
-    plot::show(
+    let response = plot::show(
         &mut plot_ui,
         &spec,
         &mut state.shell.results.cache,
         None,
         Some(&readout),
     );
+
+    // Nearest locus point on hover, click to pin — gain/phase/frequency at
+    // a spot on the locus is the question a Nyquist plot exists to answer.
+    let ranges = ((-extent, extent), (-extent, extent));
+    let mut hovered: Option<(usize, usize)> = None;
+    if let Some(pointer) = response.response.hover_pos()
+        && response.plot_rect.contains(pointer)
+    {
+        let mut best = 14.0f32 * 14.0;
+        for i in 0..re.len() {
+            let pos = super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
+            let d2 = pos.distance_sq(pointer);
+            if d2 < best {
+                best = d2;
+                hovered = Some((0, i));
+            }
+        }
+    }
+
+    if response.response.clicked() {
+        let pins = &mut state.shell.results.rf_pin;
+        match hovered {
+            Some(hit) if pins.get(&super::ResultViewer::Nyquist) == Some(&hit) => {
+                pins.remove(&super::ResultViewer::Nyquist);
+            }
+            Some(hit) => {
+                pins.insert(super::ResultViewer::Nyquist, hit);
+            }
+            None => {
+                pins.remove(&super::ResultViewer::Nyquist);
+            }
+        }
+    }
+
+    let pinned = state
+        .shell
+        .results
+        .rf_pin
+        .get(&super::ResultViewer::Nyquist)
+        .copied()
+        .filter(|(_, i)| *i < re.len());
+    let target = hovered.or(pinned);
+
+    if let Some((_, i)) = target {
+        let pos = super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
+        let painter = plot_ui.painter();
+        if pinned == target {
+            painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.8, c.traces[0]));
+        }
+        painter.circle_stroke(pos, 4.0, egui::Stroke::new(1.5, c.accent));
+
+        let frequency = active_curve(state)
+            .and_then(|curve| curve.points.get(i).map(|p| p.frequency))
+            .unwrap_or(0.0);
+        let magnitude = (re[i] * re[i] + im[i] * im[i]).sqrt();
+        let phase_deg = im[i].atan2(re[i]).to_degrees();
+        let rows = [
+            ("f".to_owned(), fmt_si(frequency, "Hz", 2)),
+            ("Re".to_owned(), fmt_si(re[i], "", 3)),
+            ("Im".to_owned(), fmt_si(im[i], "", 3)),
+            (
+                "|L| ∠".to_owned(),
+                format!("{magnitude:.3} ∠ {phase_deg:.1}°"),
+            ),
+        ];
+        super::point_card(&plot_ui, response.plot_rect, pos, &name, c.traces[0], &rows);
+    }
 }
 
 // ---------------------------------------------------------------------------

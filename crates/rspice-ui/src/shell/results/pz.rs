@@ -114,7 +114,95 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
 
-    plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+    let response = plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+
+    // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
+    // turn the s-plane picture into numbers.
+    let ranges = ((-extent, extent), (-extent, extent));
+    let Some(data) = active_data(state) else {
+        return;
+    };
+    let mut hovered: Option<(usize, usize)> = None;
+    if let Some(pointer) = response.response.hover_pos()
+        && response.plot_rect.contains(pointer)
+    {
+        let mut best = 16.0f32 * 16.0;
+        for (i, root) in data.roots.iter().enumerate() {
+            let pos = super::xy_screen_pos(
+                response.plot_rect,
+                (root.real, root.imag),
+                ranges.0,
+                ranges.1,
+            );
+            let d2 = pos.distance_sq(pointer);
+            if d2 < best {
+                best = d2;
+                hovered = Some((0, i));
+            }
+        }
+    }
+
+    if response.response.clicked() {
+        let pins = &mut state.shell.results.rf_pin;
+        match hovered {
+            Some(hit) if pins.get(&super::ResultViewer::PoleZero) == Some(&hit) => {
+                pins.remove(&super::ResultViewer::PoleZero);
+            }
+            Some(hit) => {
+                pins.insert(super::ResultViewer::PoleZero, hit);
+            }
+            None => {
+                pins.remove(&super::ResultViewer::PoleZero);
+            }
+        }
+    }
+
+    let Some(data) = active_data(state) else {
+        return;
+    };
+    let pinned = state
+        .shell
+        .results
+        .rf_pin
+        .get(&super::ResultViewer::PoleZero)
+        .copied()
+        .filter(|(_, i)| *i < data.roots.len());
+    let target = hovered.or(pinned);
+
+    if let Some((_, i)) = target {
+        let root = &data.roots[i];
+        let pos = super::xy_screen_pos(
+            response.plot_rect,
+            (root.real, root.imag),
+            ranges.0,
+            ranges.1,
+        );
+        let color = if root.is_pole() {
+            c.traces[5]
+        } else {
+            c.traces[1]
+        };
+        let painter = plot_ui.painter();
+        if pinned == target {
+            painter.circle_stroke(pos, 8.0, egui::Stroke::new(1.8, color));
+        }
+        painter.circle_stroke(pos, 6.0, egui::Stroke::new(1.5, c.accent));
+
+        let magnitude = (root.real * root.real + root.imag * root.imag).sqrt();
+        let mut rows = vec![
+            ("σ".to_owned(), fmt_si(root.real, "", 3)),
+            ("jω".to_owned(), fmt_si(root.imag, "", 3)),
+            (
+                "fₙ".to_owned(),
+                fmt_si(magnitude / std::f64::consts::TAU, "Hz", 2),
+            ),
+        ];
+        if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
+            rows.push(("Q".to_owned(), format!("{:.2}", magnitude / (2.0 * root.real.abs()))));
+        }
+        let title = if root.is_pole() { "pole" } else { "zero" };
+        super::point_card(&plot_ui, response.plot_rect, pos, title, color, &rows);
+    }
 }
 
 // ---------------------------------------------------------------------------

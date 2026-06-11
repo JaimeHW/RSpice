@@ -192,6 +192,9 @@ pub struct ResultsState {
     /// Evaluated expression series, keyed by (analysis index, expression);
     /// refreshed when the simulation data version advances.
     pub expr_cache: std::collections::HashMap<(usize, String), ExprSeries>,
+    /// Pinned data point per XY viewer (trace slot, point index) — the
+    /// Smith/Nyquist/PZ click-to-pin readout.
+    pub rf_pin: std::collections::HashMap<ResultViewer, (usize, usize)>,
 }
 
 /// One user expression trace on a waves strip.
@@ -400,6 +403,100 @@ impl DerivedSeries {
 
 /// A results stat table: dimmed names left, mono values right, key rows
 /// accent-highlighted (at most one or two per table, by design).
+/// Forward map for the XY (equal-aspect) viewers: data → screen, matching
+/// the plot engine's linear mapping.
+pub(super) fn xy_screen_pos(
+    plot_rect: egui::Rect,
+    point: (f64, f64),
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+) -> egui::Pos2 {
+    let fx = (point.0 - x_range.0) / (x_range.1 - x_range.0);
+    let fy = (point.1 - y_range.0) / (y_range.1 - y_range.0);
+    egui::pos2(
+        plot_rect.left() + (fx as f32) * plot_rect.width(),
+        plot_rect.bottom() - (fy as f32) * plot_rect.height(),
+    )
+}
+
+/// One row of a point readout card.
+pub(super) type CardRow = (String, String);
+
+/// The floating point-readout card the XY viewers show on hover/pin:
+/// colored mono title + k/v rows, anchored beside the point and clamped
+/// to the plot. Painted, not laid out — it floats over the chart.
+pub(super) fn point_card(
+    ui: &Ui,
+    bounds: egui::Rect,
+    anchor: egui::Pos2,
+    title: &str,
+    title_color: egui::Color32,
+    rows: &[CardRow],
+) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let painter = ui.painter();
+
+    let title_galley = painter.layout_no_wrap(
+        title.to_owned(),
+        theme::mono(11.0, FontWeight::Medium),
+        title_color,
+    );
+    let mut key_width = 0.0f32;
+    let mut value_width = 0.0f32;
+    let galleys: Vec<_> = rows
+        .iter()
+        .map(|(k, v)| {
+            let kg = painter.layout_no_wrap(
+                k.clone(),
+                theme::mono(11.0, FontWeight::Regular),
+                c.text_dim,
+            );
+            let vg =
+                painter.layout_no_wrap(v.clone(), theme::mono(11.0, FontWeight::Regular), c.text);
+            key_width = key_width.max(kg.size().x);
+            value_width = value_width.max(vg.size().x);
+            (kg, vg)
+        })
+        .collect();
+
+    let (pad_x, pad_y, gap, line_h) = (9.0, 6.0, 12.0, 16.0);
+    let width = (key_width + gap + value_width)
+        .max(title_galley.size().x)
+        + pad_x * 2.0;
+    let height = pad_y * 2.0 + line_h * (rows.len() as f32 + 1.0);
+
+    let mut origin = anchor + egui::vec2(14.0, -height - 8.0);
+    if origin.x + width > bounds.right() - 4.0 {
+        origin.x = anchor.x - width - 14.0;
+    }
+    origin.y = origin
+        .y
+        .clamp(bounds.top() + 4.0, (bounds.bottom() - height - 4.0).max(bounds.top() + 4.0));
+
+    let rect = egui::Rect::from_min_size(origin, egui::vec2(width, height));
+    painter.rect(
+        rect,
+        t.radius,
+        c.bg_elevated,
+        egui::Stroke::new(1.0, c.border_strong),
+    );
+    painter.galley(
+        egui::pos2(origin.x + pad_x, origin.y + pad_y),
+        title_galley,
+        title_color,
+    );
+    for (i, (kg, vg)) in galleys.into_iter().enumerate() {
+        let y = origin.y + pad_y + line_h * (i as f32 + 1.0);
+        painter.galley(egui::pos2(origin.x + pad_x, y), kg, c.text_dim);
+        painter.galley(
+            egui::pos2(origin.x + pad_x + key_width + gap + value_width - vg.size().x, y),
+            vg,
+            c.text,
+        );
+    }
+}
+
 pub(super) fn stat_table(ui: &mut Ui, rows: &[(&str, String, bool)]) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
