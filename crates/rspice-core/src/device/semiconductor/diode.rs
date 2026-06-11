@@ -72,6 +72,16 @@ pub struct Diode {
     prev_vd_old: Value,
     /// Previous iteration current
     prev_id: Value,
+    /// Engine-supplied junction shunt conductance (ngspice `CKTgmin`):
+    /// zero in plain solves, raised by gmin-stepping/rescue ladders so the
+    /// continuation can deform the diode system like every other junction.
+    junction_gmin: Value,
+    /// Junction voltage the last stamp linearized at — the `vold` of the
+    /// pnjlim iteration-limiting history.
+    last_limited_vd: std::cell::Cell<Value>,
+    /// The last stamp's pnjlim clamped the junction; a limited step forces
+    /// another Newton iteration (ngspice `Check` semantics).
+    limited: std::cell::Cell<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: DiodeIndices,
 }
@@ -109,8 +119,69 @@ impl Diode {
             prev_vd: 0.0,
             prev_vd_old: 0.0,
             prev_id: 0.0,
+            junction_gmin: 0.0,
+            last_limited_vd: std::cell::Cell::new(0.0),
+            limited: std::cell::Cell::new(false),
             indices: DiodeIndices::default(),
         }
+    }
+
+    /// Engine hook: junction gmin for continuation ladders (mirrors the
+    /// MOSFET/JFET/BJT `set_junction_gmin` convention).
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
+        self.junction_gmin = if gmin.is_finite() { gmin.max(0.0) } else { 0.0 };
+    }
+
+    /// ngspice `DEVpnjlim` (devsup.c): junction-voltage iteration limiting.
+    /// Returns the limited voltage and whether limiting engaged. The same
+    /// math as the validated JFET port; the guard `|vnew-vold| > 2·vte`
+    /// keeps the log arguments positive.
+    fn pnjlim(vnew: Value, vold: Value, vte: Value, vcrit: Value) -> (Value, bool) {
+        if vnew > vcrit && (vnew - vold).abs() > vte + vte {
+            if vold > 0.0 {
+                let arg = (vnew - vold) / vte;
+                if arg > 0.0 {
+                    return (vold + vte * (2.0 + (arg - 2.0).ln()), true);
+                }
+                return (vold - vte * (2.0 + (2.0 - arg).ln()), true);
+            }
+            return (vte * (vnew / vte).ln(), true);
+        }
+        if vnew < 0.0 {
+            let arg = if vold > 0.0 {
+                -vold - 1.0
+            } else {
+                2.0 * vold - 1.0
+            };
+            if vnew < arg {
+                return (arg, true);
+            }
+        }
+        (vnew, false)
+    }
+
+    /// Limit the junction voltage against the previous iterate and
+    /// linearize there, folding the engine junction gmin in (dioload.c:
+    /// `gd += CKTgmin; cd += CKTgmin·vd`). Returns `(vd, id, gd)`.
+    ///
+    /// Breakdown diodes keep the raw voltage: ngspice limits those through
+    /// a dedicated branch around `-BV`, and clamping them with the plain
+    /// forward law would fight the breakdown exponential.
+    fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
+        let vd = if self.bv.is_none() {
+            let vte = self.n * self.vt;
+            let vcrit = vte * (vte / (std::f64::consts::SQRT_2 * self.is.max(1e-300))).ln();
+            let (vd, limited) = Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit);
+            self.limited.set(limited);
+            self.last_limited_vd.set(vd);
+            vd
+        } else {
+            self.limited.set(false);
+            self.last_limited_vd.set(vd_raw);
+            vd_raw
+        };
+        let (id, gd) = self.current_and_conductance(vd);
+        (vd, id + self.junction_gmin * vd, gd + self.junction_gmin)
     }
 
     /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
@@ -354,10 +425,8 @@ impl Diode {
         } else {
             voltages[self.node_cathode - 1]
         };
-        let vd = va - vc;
-
-        // Linearize around current operating point (one fused evaluation)
-        let (id, gd) = self.current_and_conductance(vd);
+        // Iteration-limited linearization with junction gmin folded in.
+        let (vd, id, gd) = self.limited_linearization(va - vc);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -493,10 +562,8 @@ impl NonlinearDevice for Diode {
         } else {
             voltages[self.node_cathode - 1]
         };
-        let vd = va - vc;
-
-        // Linearize around current operating point (one fused evaluation)
-        let (id, gd) = self.current_and_conductance(vd);
+        // Iteration-limited linearization with junction gmin folded in.
+        let (vd, id, gd) = self.limited_linearization(va - vc);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -514,7 +581,9 @@ impl NonlinearDevice for Diode {
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let tolerance = criteria.voltage_tolerance();
-        (self.prev_vd - self.prev_vd_old).abs() < tolerance
+        // A pnjlim-clamped step must iterate again regardless of the
+        // voltage delta (ngspice `Check` semantics).
+        !self.limited.get() && (self.prev_vd - self.prev_vd_old).abs() < tolerance
     }
 }
 
