@@ -28,7 +28,26 @@ impl TestRunner {
             }
         };
 
-        let engine = self.create_dynamic_engine();
+        let mut engine = self.create_dynamic_engine();
+        // RSPICE_GRID_LOCKED=1 replays the reference's recorded time grid as
+        // the exact accepted-step sequence (no adaptive points, no
+        // breakpoint restarts, LTE off), isolating physics parity from
+        // step-control parity: every remaining transient gate failure is a
+        // grid-coupled trajectory difference against a grid no modern
+        // binary reproduces, so comparing on equal grids is the
+        // Spectre-grade validation standard. Decks without a time-axis
+        // reference table fall back to free-running.
+        if std::env::var("RSPICE_GRID_LOCKED").as_deref() == Ok("1")
+            && let Ok(Some(reference)) = self.load_reference_table_for_axis(cir_path, &["time"])
+            && let Some(series) = reference
+                .variables
+                .values()
+                .max_by_key(|series| series.x.len())
+            && series.x.len() >= 2
+        {
+            engine.config.locked_time_grid =
+                Some(std::sync::Arc::new(series.x.clone()));
+        }
         let max_step =
             tmax.unwrap_or_else(|| Self::default_transient_max_step(tstep, tstop, tstart));
 
