@@ -3,6 +3,7 @@ use super::shared::{NodeResolver, generate_frequency_sweep, map_hdf5_output_erro
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{ac_signals, voltage_display_name};
 use crate::hdf5::{Hdf5AcSection, Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
+use crate::report::format_spice_exponent;
 
 /// Run `.TF`: DC small-signal transfer function, input impedance, and
 /// output impedance, reported in ngspice's format.
@@ -47,22 +48,6 @@ pub(super) fn run_tf_from_command(
     }
 
     Ok(())
-}
-
-/// Format like C's `%e` (ngspice's style): six fractional digits and a
-/// signed, zero-padded, at-least-two-digit exponent.
-fn format_spice_exponent(value: f64) -> String {
-    let formatted = format!("{value:.6e}");
-    match formatted.split_once('e') {
-        Some((mantissa, exponent)) => {
-            let (sign, digits) = match exponent.strip_prefix('-') {
-                Some(rest) => ('-', rest),
-                None => ('+', exponent),
-            };
-            format!("{mantissa}e{sign}{digits:0>2}")
-        }
-        None => formatted,
-    }
 }
 
 pub(super) fn run_disto(

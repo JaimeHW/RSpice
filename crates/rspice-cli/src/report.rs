@@ -27,6 +27,25 @@ pub struct SimulationReport {
     pub measurements: Vec<MeasurementReport>,
 }
 
+/// Format like C's `%e` (ngspice's style): six fractional digits and a
+/// signed, zero-padded, at-least-two-digit exponent.
+///
+/// Measurement values must use this rather than fixed-point `{:.6}`, which
+/// rounds SPICE-scale magnitudes (e.g. a 219.8ns risetime) to `0.000000`.
+pub(crate) fn format_spice_exponent(value: f64) -> String {
+    let formatted = format!("{value:.6e}");
+    match formatted.split_once('e') {
+        Some((mantissa, exponent)) => {
+            let (sign, digits) = match exponent.strip_prefix('-') {
+                Some(rest) => ('-', rest),
+                None => ('+', exponent),
+            };
+            format!("{mantissa}e{sign}{digits:0>2}")
+        }
+        None => formatted,
+    }
+}
+
 /// Measurement result for reporting
 #[derive(Debug, Clone)]
 pub struct MeasurementReport {
@@ -208,7 +227,7 @@ fn write_tap_report<W: Write>(
             if meas.passed {
                 let value_str = meas
                     .value
-                    .map(|v| format!(" = {:.6}", v))
+                    .map(|v| format!(" = {}", format_spice_exponent(v)))
                     .unwrap_or_default();
                 write_line(
                     writer,
@@ -352,4 +371,52 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spice_exponent_preserves_sub_microsecond_magnitudes() {
+        assert_eq!(format_spice_exponent(2.198108e-7), "2.198108e-07");
+        assert_eq!(format_spice_exponent(-3.5e-12), "-3.500000e-12");
+        assert_eq!(format_spice_exponent(0.0), "0.000000e+00");
+        assert_eq!(format_spice_exponent(4.999773), "4.999773e+00");
+        assert_eq!(format_spice_exponent(1.5e123), "1.500000e+123");
+    }
+
+    fn report_with_measurement(value: Option<f64>) -> SimulationReport {
+        SimulationReport {
+            name: "rc".into(),
+            netlist: "rc.sp".into(),
+            passed: true,
+            duration_secs: 0.01,
+            error: None,
+            measurements: vec![MeasurementReport {
+                name: "risetime".into(),
+                value,
+                expected: None,
+                tolerance: None,
+                passed: value.is_some(),
+                error: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn tap_report_keeps_sub_microsecond_measurement_visible() {
+        let reports = [report_with_measurement(Some(2.198108e-7))];
+        let mut buf = Vec::new();
+        write_tap_report(&mut buf, Path::new("test.tap"), &reports).expect("write tap");
+        let tap = String::from_utf8(buf).expect("utf8 tap");
+        assert!(
+            tap.contains("ok 2 - risetime = 2.198108e-07"),
+            "TAP output should carry the scientific-notation value: {tap}"
+        );
+        assert!(
+            !tap.contains("0.000000"),
+            "TAP output must not round the measurement to zero: {tap}"
+        );
+    }
 }

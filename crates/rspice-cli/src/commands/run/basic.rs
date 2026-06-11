@@ -533,7 +533,11 @@ pub(super) fn run_measurements(
             println!("  Measurement Results ({}):", meas_results.len());
             for mr in &meas_results {
                 if let Some(value) = mr.value {
-                    println!("    {} = {:.6}", mr.name, value);
+                    println!(
+                        "    {} = {}",
+                        mr.name,
+                        crate::report::format_spice_exponent(value)
+                    );
                 } else {
                     println!(
                         "    {} = FAILED ({})",

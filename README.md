@@ -55,8 +55,8 @@ Run it:
 $ target/release/rspice run rc_lowpass.sp --meas
 ✓ Transient complete: 1053 time points computed
   Measurement Results (2):
-    VPEAK = 4.999773
-    RISETIME = 0.000220
+    VPEAK = 4.999773e+00
+    RISETIME = 2.197215e-04
 
 Simulation complete in 0.003s.
 ```
