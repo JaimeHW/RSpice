@@ -334,17 +334,22 @@ impl HbSolver {
             .collect();
 
         // Accumulate per-source intensity waveforms keyed by node pair.
-        let mut intensities: Vec<((usize, usize), Vec<Value>)> = Vec::new();
+        let mut intensities: Vec<((usize, usize), String, Vec<Value>)> = Vec::new();
         let mut node_voltages = vec![0.0; n];
 
-        for device in &self.nonlinear_devices {
+        for (d_idx, device) in self.nonlinear_devices.iter().enumerate() {
             let branches = device.noise_branches();
             if branches.is_empty() {
                 continue;
             }
             let base = intensities.len();
-            for &(p, q) in &branches {
-                intensities.push(((p, q), vec![0.0; n_time]));
+            for (b, &(p, q)) in branches.iter().enumerate() {
+                let label = format!(
+                    "{:?}#{d_idx} {}",
+                    device.device_type,
+                    device.noise_branch_label(b)
+                );
+                intensities.push(((p, q), label, vec![0.0; n_time]));
             }
             for t in 0..n_time {
                 for node in 0..n {
@@ -352,16 +357,17 @@ impl HbSolver {
                 }
                 let values = device.noise_intensities(&node_voltages, temperature, Q_E, K_B);
                 for (b, value) in values.iter().enumerate() {
-                    intensities[base + b].1[t] = *value;
+                    intensities[base + b].2[t] = *value;
                 }
             }
         }
 
         intensities
             .into_iter()
-            .map(|((p, q), waveform)| {
+            .map(|((p, q), name, waveform)| {
                 let psd = self.fft.to_frequency_domain(&waveform);
                 PeriodicNoiseSource {
+                    name,
                     node_pos: p,
                     node_neg: q,
                     psd,
@@ -370,15 +376,18 @@ impl HbSolver {
             .collect()
     }
 
-    /// Output noise power spectral density (V^2/Hz) at one offset frequency.
+    /// Per-source output noise power spectral densities (V^2/Hz) at one
+    /// offset frequency; the total is the sum (sources are independent).
     ///
-    /// One adjoint solve `Y^T a = e_(out, 0)` gives the transfer from a unit
+    /// One adjoint solve `Y^T a = e_out` gives the transfer from a unit
     /// current injected at every (node, sideband) to the output at the
-    /// analysis frequency; each periodically-modulated white source then
-    /// contributes `sum_{k,m} conj(A_k) A_m S_{k-m}` with `A_k` the adjoint
-    /// gain across its terminals at sideband k and `S_d` the Fourier
-    /// coefficients of its intensity (`S_{-d} = conj(S_d)`). Stationary
-    /// sources reduce to the textbook folding `S0 * sum_k |A_k|^2`.
+    /// analysis frequency — `e_out` carries +1 at the positive output node
+    /// and -1 at the reference for differential outputs. Each periodically
+    /// modulated white source then contributes
+    /// `sum_{k,m} conj(A_k) A_m S_{k-m}` with `A_k` the adjoint gain across
+    /// its terminals at sideband k and `S_d` the Fourier coefficients of its
+    /// intensity (`S_{-d} = conj(S_d)`). Stationary sources reduce to the
+    /// textbook folding `S0 * sum_k |A_k|^2`.
     pub fn solve_periodic_noise(
         &mut self,
         state: &HbSolverState,
@@ -386,12 +395,20 @@ impl HbSolver {
         sideband_min: i32,
         sideband_max: i32,
         output_node: usize,
+        output_ref: Option<usize>,
         sources: &[PeriodicNoiseSource],
-    ) -> Result<Value, HbError> {
+    ) -> Result<Vec<Value>, HbError> {
         let n = self.num_nodes;
         if output_node >= n {
             return Err(HbError::InvalidCircuit(
                 "pnoise output node out of range".to_string(),
+            ));
+        }
+        if let Some(r) = output_ref
+            && r >= n
+        {
+            return Err(HbError::InvalidCircuit(
+                "pnoise output reference node out of range".to_string(),
             ));
         }
         if sideband_min > 0 || sideband_max < 0 {
@@ -413,9 +430,12 @@ impl HbSolver {
         let out_idx = (0 - sideband_min) as usize; // k = 0 entry
         let mut e = vec![Complex64::new(0.0, 0.0); size];
         e[output_node * s + out_idx] = Complex64::new(1.0, 0.0);
+        if let Some(r) = output_ref {
+            e[r * s + out_idx] -= Complex64::new(1.0, 0.0);
+        }
         let adjoint = self.solve_complex_linear_system(&yt, &e)?;
 
-        let mut total = 0.0;
+        let mut contributions = Vec::with_capacity(sources.len());
         for source in sources {
             // Adjoint gain across the source terminals per sideband.
             let mut gains = vec![Complex64::new(0.0, 0.0); s];
@@ -448,16 +468,18 @@ impl HbSolver {
             }
             // The double sum is Hermitian by construction; numerical
             // round-off leaves a vanishing imaginary part.
-            total += contribution.re.max(0.0);
+            contributions.push(contribution.re.max(0.0));
         }
 
-        Ok(total)
+        Ok(contributions)
     }
 }
 
 /// One periodically modulated white current-noise source.
 #[derive(Debug, Clone)]
 pub struct PeriodicNoiseSource {
+    /// Display label for contributor reporting.
+    pub name: String,
     /// Terminal the noise current flows into (solver node index; `usize::MAX`
     /// or any out-of-range value means ground).
     pub node_pos: usize,

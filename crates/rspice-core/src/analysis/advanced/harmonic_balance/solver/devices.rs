@@ -354,6 +354,23 @@ impl NonlinearDeviceInstance {
         }
     }
 
+    /// Human-readable mechanism label for one `noise_branches` entry.
+    pub fn noise_branch_label(&self, branch: usize) -> &'static str {
+        match self.device_type {
+            NonlinearDeviceType::Diode => "shot",
+            NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => {
+                if branch == 0 { "ic shot" } else { "ib shot" }
+            }
+            NonlinearDeviceType::Nmos
+            | NonlinearDeviceType::Pmos
+            | NonlinearDeviceType::Njfet
+            | NonlinearDeviceType::Pjfet => "channel thermal",
+            NonlinearDeviceType::VoltageSwitch | NonlinearDeviceType::CurrentSwitch => {
+                "ron thermal"
+            }
+        }
+    }
+
     /// Instantaneous white-noise intensities s(t) >= 0 in A^2/Hz for each
     /// branch of `noise_branches`, evaluated at one time sample: shot noise
     /// `2q|I|` for junction and transport currents, channel thermal
@@ -412,6 +429,16 @@ impl NonlinearDeviceInstance {
                 vec![4.0 * kt * g]
             }
         }
+    }
+
+    /// Set the thermal voltage kT/q the junction laws evaluate at; device
+    /// structs carry it temperature-adjusted, so passing it through keeps HB
+    /// at the same operating temperature as the rest of the engine.
+    pub fn with_thermal_voltage(mut self, vt: Value) -> Self {
+        if vt.is_finite() && vt > 0.0 {
+            self.params.vt = vt;
+        }
+        self
     }
 
     /// Attach junction charge parameters: `cap_a` is the primary junction

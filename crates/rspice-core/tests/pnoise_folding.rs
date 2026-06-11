@@ -32,7 +32,7 @@ c1 mid 0 1n
     let offsets = [1.0e3, 1.0e5, 1.0e7];
 
     let pnoise = engine
-        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", 6)
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, 6)
         .expect("pnoise completes");
 
     // Reference: the stationary noise analysis at the same frequencies.
@@ -80,7 +80,7 @@ c1 out 0 1f
     let engine = Engine::new(SimulationConfig::default());
 
     let result = engine
-        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", 12)
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, 12)
         .expect("pnoise completes");
     assert!(result.converged, "operating point must converge");
 
@@ -101,4 +101,40 @@ c1 out 0 1f
         "chopped-resistor output noise must fold to the time-average \
          transfer: got {got:.4e}, want {expected:.4e} V^2/Hz"
     );
+}
+
+/// Per-source contributions must decompose the total exactly (independent
+/// sources), so the contributor list is a true breakdown rather than an
+/// estimate.
+#[test]
+fn pnoise_contributors_sum_to_the_total() {
+    let deck = "\
+* contributor decomposition network
+v1 in 0 dc 2
+r1 in mid 10k
+d1 mid 0 dmod
+c1 mid 0 1n
+.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let offsets = [1.0e4, 1.0e6];
+
+    let result = engine
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, 6)
+        .expect("pnoise completes");
+
+    assert!(
+        !result.contributors.is_empty(),
+        "thermal and shot contributors must be reported"
+    );
+    for (i, &total) in result.output_noise.iter().enumerate() {
+        let sum: f64 = result.contributors.iter().map(|(_, psds)| psds[i]).sum();
+        assert!(
+            (sum - total).abs() <= 1e-12 * total.max(1e-300),
+            "contributors must sum to the total at offset {}: {sum:.6e} vs {total:.6e}",
+            offsets[i]
+        );
+    }
 }

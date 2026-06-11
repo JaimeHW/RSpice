@@ -322,36 +322,55 @@ fn run_pnoise_analysis_with_config_typed(
     let mut warnings = Vec::new();
 
     let mut output_noise = folded_output_noise.clone();
-    // The primary output curve comes from the engine's cyclostationary
-    // conversion-matrix pnoise when the output is single-ended: it carries
-    // the LO-modulated transfers and modulated shot/thermal intensities the
-    // stationary sideband fold cannot represent. The fold remains as the
-    // differential-output fallback and for the secondary breakdowns below.
-    if output_ref_idx.is_none() {
-        match engine.run_pnoise(
-            &netlist,
-            pss_data.frequency,
-            &frequencies,
-            config.output_node.trim(),
-            config.max_sideband.max(1) as i32,
-        ) {
-            Ok(exact) => output_noise = exact.output_noise,
-            Err(e) => warnings.push(format!(
-                "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
-            )),
+    let mut exact_contributors: Option<Vec<(String, f64)>> = None;
+    // The primary output curve and the contributor breakdown come from the
+    // engine's cyclostationary conversion-matrix pnoise: it carries the
+    // LO-modulated transfers and modulated shot/thermal intensities the
+    // stationary sideband fold cannot represent. The fold remains only as
+    // the failure fallback and behind the input-referred estimate.
+    let pnoise_ref = config
+        .output_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|node| !node.is_empty() && !is_ground_like(node));
+    match engine.run_pnoise(
+        &netlist,
+        pss_data.frequency,
+        &frequencies,
+        config.output_node.trim(),
+        pnoise_ref,
+        config.max_sideband.max(1) as i32,
+    ) {
+        Ok(exact) => {
+            if config.noise_summary {
+                let total: f64 = exact.output_noise.iter().sum();
+                exact_contributors = Some(
+                    exact
+                        .contributors
+                        .iter()
+                        .map(|(name, psds)| {
+                            let share: f64 = psds.iter().sum();
+                            let pct = if total > 0.0 {
+                                100.0 * share / total
+                            } else {
+                                0.0
+                            };
+                            (name.clone(), pct)
+                        })
+                        .collect(),
+                );
+            }
+            output_noise = exact.output_noise;
         }
-        if config.noise_summary {
-            warnings.push(
-                "PNOISE contributor breakdown uses the stationary sideband approximation"
-                    .to_string(),
-            );
-        }
-        if config.noise_ref == PnoiseReference::Input {
-            warnings.push(
-                "PNOISE input-referred estimate uses the stationary sideband approximation"
-                    .to_string(),
-            );
-        }
+        Err(e) => warnings.push(format!(
+            "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
+        )),
+    }
+    if config.noise_ref == PnoiseReference::Input {
+        warnings.push(
+            "PNOISE input-referred estimate uses the stationary sideband approximation"
+                .to_string(),
+        );
     }
     let mut input_noise = None;
     let total_output_noise = if config.integrated_noise {
@@ -404,8 +423,17 @@ fn run_pnoise_analysis_with_config_typed(
     }
 
     let contributors = if config.noise_summary {
-        fold_sideband_contributors(&translated_noise_results, sideband_stride)
-            .map_err(PnoiseRunError::Data)?
+        match exact_contributors {
+            Some(exact) => exact,
+            None => {
+                warnings.push(
+                    "PNOISE contributor breakdown uses the stationary sideband approximation"
+                        .to_string(),
+                );
+                fold_sideband_contributors(&translated_noise_results, sideband_stride)
+                    .map_err(PnoiseRunError::Data)?
+            }
+        }
     } else {
         Vec::new()
     };

@@ -19,8 +19,11 @@ use crate::analysis::advanced::harmonic_balance::{HbConfig, PeriodicNoiseSource}
 pub struct PnoiseAnalysisResult {
     /// Offset frequencies (Hz), the output analysis frequencies.
     pub frequencies: Vec<Value>,
-    /// Output noise voltage PSD at each offset (V^2/Hz).
+    /// Total output noise voltage PSD at each offset (V^2/Hz).
     pub output_noise: Vec<Value>,
+    /// Per-source contributions: `(label, psd per offset)`, summing to the
+    /// total at every offset.
+    pub contributors: Vec<(String, Vec<Value>)>,
     /// Large-signal fundamental (Hz).
     pub fundamental_freq: Value,
     /// Whether the operating-point solve converged.
@@ -28,7 +31,8 @@ pub struct PnoiseAnalysisResult {
 }
 
 impl Engine {
-    /// Run periodic noise analysis at `output_node` over `offsets`.
+    /// Run periodic noise analysis at `output_node` (optionally referenced
+    /// to `output_ref` for a differential output) over `offsets`.
     ///
     /// `fundamental_freq` is the large-signal periodicity; `max_sideband`
     /// bounds the folding range (sidebands -K..=K participate). Resistor
@@ -40,6 +44,7 @@ impl Engine {
         fundamental_freq: Value,
         offsets: &[Value],
         output_node: &str,
+        output_ref: Option<&str>,
         max_sideband: i32,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
         if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
@@ -104,6 +109,18 @@ impl Engine {
                     "pnoise output node '{output_node}' not found in circuit nodes"
                 ))
             })?;
+        let ref_idx = output_ref
+            .map(|name| {
+                node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name.trim()))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            "pnoise output reference node '{name}' not found in circuit nodes"
+                        ))
+                    })
+            })
+            .transpose()?;
 
         let temperature = self.config.temperature;
         let k_b = 1.380649e-23;
@@ -118,7 +135,14 @@ impl Engine {
             }
             let np = circuit.resistors.stamps[i].pp.row;
             let nn = circuit.resistors.stamps[i].nn.row;
+            let name = circuit
+                .resistors
+                .names
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| format!("R#{i}"));
             sources.push(PeriodicNoiseSource {
+                name: format!("{name} thermal"),
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
                 psd: vec![Complex64::new(4.0 * k_b * temperature * g, 0.0)],
@@ -129,14 +153,19 @@ impl Engine {
         sources.extend(solver.device_noise_sources(&state, temperature));
 
         let mut output_noise = Vec::with_capacity(offsets.len());
+        let mut contributors: Vec<(String, Vec<Value>)> = sources
+            .iter()
+            .map(|s| (s.name.clone(), Vec::with_capacity(offsets.len())))
+            .collect();
         for &offset in offsets {
-            let psd = solver
+            let per_source = solver
                 .solve_periodic_noise(
                     &state,
                     offset,
                     -max_sideband,
                     max_sideband,
                     out_idx,
+                    ref_idx,
                     &sources,
                 )
                 .map_err(|e| {
@@ -144,12 +173,16 @@ impl Engine {
                         "pnoise solve failed at offset {offset:.6e} Hz: {e}"
                     ))
                 })?;
-            output_noise.push(psd);
+            output_noise.push(per_source.iter().sum());
+            for (slot, &value) in contributors.iter_mut().zip(&per_source) {
+                slot.1.push(value);
+            }
         }
 
         Ok(PnoiseAnalysisResult {
             frequencies: offsets.to_vec(),
             output_noise,
+            contributors,
             fundamental_freq,
             converged: state.converged,
         })
