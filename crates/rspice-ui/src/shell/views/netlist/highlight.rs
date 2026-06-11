@@ -1,0 +1,264 @@
+//! SPICE syntax highlighting for the netlist editor.
+//!
+//! Token classes follow the design's instrument-panel reading order:
+//! element names neutral, nodes dim, values bright (trace blue),
+//! dot-commands accent, comments faint, model names pink, `{expressions}`
+//! green. Lines carrying a parse diagnostic are underlined in the error
+//! color — same source of truth as the gutter pip and the bottom strip.
+
+use std::collections::HashSet;
+
+use egui::text::{LayoutJob, TextFormat};
+use egui::{Color32, FontId, Stroke};
+
+use crate::ui::palette::Palette;
+
+/// Build the highlighted layout job for the whole buffer. The job's text
+/// must equal `text` exactly — `TextEdit` maps cursor positions onto it.
+pub fn layout_job(
+    text: &str,
+    font: FontId,
+    c: &Palette,
+    error_lines: &HashSet<usize>,
+) -> LayoutJob {
+    let mut job = LayoutJob {
+        break_on_newline: true,
+        ..Default::default()
+    };
+    job.wrap.max_width = f32::INFINITY;
+
+    let segments: Vec<&str> = text.split('\n').collect();
+    let last = segments.len().saturating_sub(1);
+    for (line_idx, line) in segments.iter().enumerate() {
+        let underline = if error_lines.contains(&line_idx) {
+            Stroke::new(1.0, c.err)
+        } else {
+            Stroke::NONE
+        };
+        let mut push = |job: &mut LayoutJob, span: &str, color: Color32| {
+            if span.is_empty() {
+                return;
+            }
+            job.append(
+                span,
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color,
+                    underline,
+                    ..Default::default()
+                },
+            );
+        };
+        highlight_line(&mut job, line, c, &mut push);
+        if line_idx != last {
+            // The newline itself carries no visible style.
+            job.append(
+                "\n",
+                0.0,
+                TextFormat {
+                    font_id: font.clone(),
+                    color: c.text,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+    job
+}
+
+/// Append one line's tokens to the job.
+fn highlight_line(
+    job: &mut LayoutJob,
+    line: &str,
+    c: &Palette,
+    push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
+) {
+    let trimmed = line.trim_start();
+
+    // Whole-line comment.
+    if trimmed.starts_with('*') {
+        push(job, line, c.text_faint);
+        return;
+    }
+
+    // Inline comment split (`;` or ` $`).
+    let comment_at = find_inline_comment(line);
+    let (code, comment) = line.split_at(comment_at.unwrap_or(line.len()));
+
+    let code_trimmed = code.trim_start();
+    let lead_len = code.len() - code_trimmed.len();
+    push(job, &code[..lead_len], c.text);
+
+    if code_trimmed.starts_with('.') {
+        highlight_dot_line(job, code_trimmed, c, push);
+    } else if code_trimmed.starts_with('+') {
+        push(job, &code_trimmed[..1], c.text_faint);
+        highlight_fields(job, &code_trimmed[1..], c, push, false);
+    } else {
+        // Element line: refdes neutral-bright, then nodes/values.
+        highlight_fields(job, code_trimmed, c, push, true);
+    }
+
+    push(job, comment, c.text_faint);
+}
+
+/// Dot-command line: the command accent, `.model` names pink, the rest
+/// per the generic field rules.
+fn highlight_dot_line(
+    job: &mut LayoutJob,
+    code: &str,
+    c: &Palette,
+    push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
+) {
+    let cmd_end = code
+        .char_indices()
+        .find(|(_, ch)| ch.is_whitespace())
+        .map(|(i, _)| i)
+        .unwrap_or(code.len());
+    let (cmd, rest) = code.split_at(cmd_end);
+    push(job, cmd, c.accent);
+
+    if cmd.eq_ignore_ascii_case(".model") || cmd.eq_ignore_ascii_case(".subckt") {
+        // The defined name reads in the model hue.
+        let ws_end = rest
+            .char_indices()
+            .find(|(_, ch)| !ch.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(rest.len());
+        let (ws, after) = rest.split_at(ws_end);
+        push(job, ws, c.text);
+        let name_end = after
+            .char_indices()
+            .find(|(_, ch)| ch.is_whitespace())
+            .map(|(i, _)| i)
+            .unwrap_or(after.len());
+        let (name, tail) = after.split_at(name_end);
+        push(job, name, c.traces[2]);
+        highlight_fields(job, tail, c, push, false);
+    } else {
+        highlight_fields(job, rest, c, push, false);
+    }
+}
+
+/// Generic SPICE fields: identifiers dim (nodes), numbers bright,
+/// `name=value` pairs, `{expressions}` green. When `first_is_element`,
+/// the leading identifier reads as the element name (neutral-bright).
+fn highlight_fields(
+    job: &mut LayoutJob,
+    text: &str,
+    c: &Palette,
+    push: &mut impl FnMut(&mut LayoutJob, &str, Color32),
+    first_is_element: bool,
+) {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    let mut field_index = 0usize;
+
+    while i < bytes.len() {
+        let ch = bytes[i] as char;
+
+        if ch.is_whitespace() {
+            let start = i;
+            while i < bytes.len() && (bytes[i] as char).is_whitespace() {
+                i += 1;
+            }
+            push(job, &text[start..i], c.text);
+            continue;
+        }
+
+        if ch == '{' {
+            // Expression: color braces and body green, to the matching brace.
+            let start = i;
+            let mut depth = 0i32;
+            while i < bytes.len() {
+                match bytes[i] as char {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            push(job, &text[start..i], c.traces[3]);
+            field_index += 1;
+            continue;
+        }
+
+        if ch == '=' {
+            push(job, "=", c.text_faint);
+            i += 1;
+            continue;
+        }
+
+        // A token: read to whitespace, '=', or '{'.
+        let start = i;
+        while i < bytes.len() {
+            let t = bytes[i] as char;
+            if t.is_whitespace() || t == '=' || t == '{' {
+                break;
+            }
+            i += 1;
+        }
+        let token = &text[start..i];
+        let next_is_assign = bytes.get(i).copied() == Some(b'=');
+
+        let color = if field_index == 0 && first_is_element {
+            c.text
+        } else if next_is_assign {
+            c.text_dim
+        } else if looks_numeric(token) {
+            c.traces[1]
+        } else if was_preceded_by_assign(text, start) {
+            // Bare-word parameter values (e.g. `model=nch`) read as values.
+            c.traces[1]
+        } else {
+            c.text_dim
+        };
+        push(job, token, color);
+        field_index += 1;
+    }
+}
+
+/// Engineering-notation literal: starts with a digit, sign, or decimal
+/// point ("4.7k", "-2.5", ".5u", "1e-9").
+fn looks_numeric(token: &str) -> bool {
+    token
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit() || ch == '+' || ch == '-' || ch == '.')
+}
+
+/// Whether the non-space character before `start` is `=`.
+fn was_preceded_by_assign(text: &str, start: usize) -> bool {
+    text[..start]
+        .chars()
+        .rev()
+        .find(|ch| !ch.is_whitespace())
+        .is_some_and(|ch| ch == '=')
+}
+
+/// Position of an inline comment (`;` anywhere, or ` $` after whitespace).
+fn find_inline_comment(line: &str) -> Option<usize> {
+    let semicolon = line.find(';');
+    let dollar = line
+        .char_indices()
+        .find(|(i, ch)| {
+            *ch == '$'
+                && *i > 0
+                && line[..*i]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|prev| prev.is_whitespace())
+        })
+        .map(|(i, _)| i);
+    match (semicolon, dollar) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}

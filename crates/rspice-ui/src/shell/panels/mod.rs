@@ -36,51 +36,58 @@ pub fn show(
     let t = Tokens::get(ctx);
     let c = t.color;
 
-    SidePanel::left("volta.left")
-        .default_width(LEFT_WIDTH)
-        .width_range(PANEL_MIN..=PANEL_MAX)
-        .resizable(true)
-        .frame(Frame::none().fill(c.bg_panel))
-        .show_separator_line(false)
-        .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            ui.painter().vline(
-                rect.right() - 0.5,
-                rect.y_range(),
-                egui::Stroke::new(1.0, c.border),
-            );
-            ScrollArea::vertical()
-                .id_salt("volta.left.scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| match state.shell.view {
-                    WorkspaceView::Schematic => schematic::left(ui, state, symbol_library),
-                    WorkspaceView::Simulate => simulate::left(ui, state),
-                    WorkspaceView::Results => results::left(ui, state),
-                    _ => {}
-                });
-        });
+    if state.shell.view.has_left_panel() {
+        SidePanel::left("volta.left")
+            .default_width(LEFT_WIDTH)
+            .width_range(PANEL_MIN..=PANEL_MAX)
+            .resizable(true)
+            .frame(Frame::none().fill(c.bg_panel))
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                ui.painter().vline(
+                    rect.right() - 0.5,
+                    rect.y_range(),
+                    egui::Stroke::new(1.0, c.border),
+                );
+                ScrollArea::vertical()
+                    .id_salt("volta.left.scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match state.shell.view {
+                        WorkspaceView::Schematic => schematic::left(ui, state, symbol_library),
+                        WorkspaceView::Simulate => simulate::left(ui, state),
+                        WorkspaceView::Results => results::left(ui, state),
+                        _ => {}
+                    });
+            });
+    }
 
-    SidePanel::right("volta.right")
-        .default_width(RIGHT_WIDTH)
-        .width_range(PANEL_MIN..=PANEL_MAX)
-        .resizable(true)
-        .frame(Frame::none().fill(c.bg_panel))
-        .show_separator_line(false)
-        .show(ctx, |ui| {
-            let rect = ui.max_rect();
-            ui.painter().vline(
-                rect.left() + 0.5,
-                rect.y_range(),
-                egui::Stroke::new(1.0, c.border),
-            );
-            ScrollArea::vertical()
-                .id_salt("volta.right.scroll")
-                .auto_shrink([false, false])
-                .show(ui, |ui| match state.shell.view {
-                    WorkspaceView::Schematic => schematic::right(ui, state),
-                    WorkspaceView::Simulate => simulate::right(ui, state),
-                    WorkspaceView::Results => results::right(ui, state),
-                    _ => {}
-                });
-        });
+    if state.shell.view.has_right_panel() {
+        SidePanel::right("volta.right")
+            .default_width(RIGHT_WIDTH)
+            .width_range(PANEL_MIN..=PANEL_MAX)
+            .resizable(true)
+            .frame(Frame::none().fill(c.bg_panel))
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                let rect = ui.max_rect();
+                ui.painter().vline(
+                    rect.left() + 0.5,
+                    rect.y_range(),
+                    egui::Stroke::new(1.0, c.border),
+                );
+                ScrollArea::vertical()
+                    .id_salt("volta.right.scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match state.shell.view {
+                        WorkspaceView::Schematic => schematic::right(ui, state),
+                        WorkspaceView::Simulate => simulate::right(ui, state),
+                        WorkspaceView::Results => results::right(ui, state),
+                        WorkspaceView::Netlist => {
+                            crate::shell::views::netlist::right_panel(ui, state)
+                        }
+                        _ => {}
+                    });
+            });
+    }
 }

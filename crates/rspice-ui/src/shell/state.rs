@@ -46,11 +46,28 @@ impl WorkspaceView {
         }
     }
 
-    /// Whether this view shows the contextual side panels.
+    /// Whether this view shows any contextual side panel.
     pub fn has_side_panels(self) -> bool {
+        self.has_left_panel() || self.has_right_panel()
+    }
+
+    /// Whether this view populates the left panel.
+    pub fn has_left_panel(self) -> bool {
         matches!(
             self,
             WorkspaceView::Schematic | WorkspaceView::Simulate | WorkspaceView::Results
+        )
+    }
+
+    /// Whether this view populates the right panel (the netlist editor
+    /// hosts the tuner there).
+    pub fn has_right_panel(self) -> bool {
+        matches!(
+            self,
+            WorkspaceView::Schematic
+                | WorkspaceView::Simulate
+                | WorkspaceView::Results
+                | WorkspaceView::Netlist
         )
     }
 }
@@ -161,6 +178,8 @@ pub struct ShellState {
     pub export_png_requested: bool,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: super::results::ResultsState,
+    /// Netlist editor state (diagnostics, diff pips, tuner mode).
+    pub netlist: super::views::netlist::NetlistEditorState,
     /// In-flight inspector edit session, if any.
     pub inspector_edit: Option<InspectorEdit>,
 }
