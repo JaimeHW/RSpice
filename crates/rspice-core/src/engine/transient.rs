@@ -735,6 +735,13 @@ impl Engine {
             None => tstop,
         };
         const LOCKED_MAX_RETRIES: usize = 8;
+        // Order-matching variant of the locked mode: the reference grid
+        // encodes the producing binary's dt dynamics but not its integration
+        // order, and ngspice drops to backward Euler on the step leaving
+        // every breakpoint. With this set, locked steps that start on a
+        // source breakpoint time use order 1, mirroring that behavior.
+        let locked_edge_order = locked_grid.is_some()
+            && std::env::var("RSPICE_GRID_LOCKED_EDGE_ORDER").as_deref() == Ok("1");
 
         // Initialize capacitor voltage history from DC solution
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
@@ -941,8 +948,12 @@ impl Engine {
                 MAX_FORCE_ACCEPT_DELTA_V,
             );
             let current_method = current_integration_method(&trapgear);
-            let step_trap_order =
-                Self::step_trapezoidal_order(current_method, trap_order, at_breakpoint);
+            let locked_edge_order_reset = locked_edge_order && breakpoints.at_breakpoint(t);
+            let step_trap_order = Self::step_trapezoidal_order(
+                current_method,
+                trap_order,
+                at_breakpoint || locked_edge_order_reset,
+            );
             let coeff = CompanionCoefficients::for_method(Self::effective_companion_method(
                 current_method,
                 step_trap_order,
