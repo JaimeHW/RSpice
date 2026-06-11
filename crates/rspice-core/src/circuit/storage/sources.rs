@@ -301,7 +301,7 @@ impl VoltageSources {
             .fold(0.0, Value::max)
     }
 
-    fn load_pwl_waveform_cached(
+    pub(crate) fn load_pwl_waveform_cached(
         path: &str,
         time_scale: Value,
         value_scale: Value,
@@ -382,8 +382,33 @@ impl VoltageSources {
         width_defaults_to_zero: bool,
         context: Option<TransientSourceContext>,
     ) -> (Value, Value, Value, Value, Value) {
-        let step_default = Self::pulse_step_default(context);
-        let stop_default = Self::pulse_stop_default(context);
+        Self::resolve_pulse_timing_with_defaults(
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+            width_defaults_to_zero,
+            Self::pulse_step_default(context),
+            Self::pulse_stop_default(context),
+        )
+    }
+
+    /// Resolve PULSE timing fields against explicit tstep/tstop defaults.
+    /// Shared with breakpoint scheduling so accepted timesteps land on the
+    /// same edges the waveform actually produces.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_pulse_timing_with_defaults(
+        delay: Value,
+        rise: Value,
+        fall: Value,
+        width: Value,
+        period: Value,
+        width_defaults_to_zero: bool,
+        step_default: Value,
+        stop_default: Value,
+    ) -> (Value, Value, Value, Value, Value) {
         let period_was_omitted = period.is_nan();
 
         let td = if delay.is_finite() {

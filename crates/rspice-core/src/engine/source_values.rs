@@ -19,7 +19,25 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
             ..
         } => offset + amplitude * phase.sin(),
         SourceSpec::Pwl { points } => points.first().map(|(_, v)| *v).unwrap_or(0.0),
-        SourceSpec::PwlFile { value_offset, .. } => *value_offset, // Use value offset as DC
+        // ngspice's TRANOP sees the waveform value at t=0, not just the
+        // offset; otherwise the transient starts from a wrong bias and
+        // glitches at the first step. Falls back to the offset when the
+        // file cannot be read (the transient path warns about it).
+        SourceSpec::PwlFile {
+            path,
+            time_scale,
+            value_scale,
+            time_offset,
+            value_offset,
+        } => crate::circuit::VoltageSources::load_pwl_waveform_cached(
+            path,
+            *time_scale,
+            *value_scale,
+            *time_offset,
+            *value_offset,
+        )
+        .map(|wf| wf.value_at(0.0))
+        .unwrap_or(*value_offset),
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
         // ngspice's SFFM/AM evaluate to exactly 0 at t <= TD (vsrcload.c),

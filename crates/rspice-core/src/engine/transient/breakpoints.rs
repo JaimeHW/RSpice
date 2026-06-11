@@ -79,43 +79,19 @@ impl Engine {
                 width_defaults_to_zero,
                 ..
             } => {
-                let step_default = tstep_hint.max(1e-18);
-                let stop_default = tstop.max(1e-18);
-                let td = if delay.is_finite() {
-                    delay.max(0.0)
-                } else {
-                    0.0
-                };
-                let tr = if rise.is_nan() { step_default } else { *rise };
-                let tf = if fall.is_nan() { step_default } else { *fall };
-                let pw = if width.is_nan() && *width_defaults_to_zero {
-                    0.0
-                } else if width.is_nan() {
-                    stop_default
-                } else {
-                    *width
-                };
-                let per = if period.is_nan() {
-                    stop_default
-                } else {
-                    *period
-                };
-
-                let tr = if tr.is_finite() && tr > 0.0 {
-                    tr
-                } else {
-                    step_default
-                };
-                let tf = if tf.is_finite() && tf > 0.0 {
-                    tf
-                } else {
-                    step_default
-                };
-                let pw = if pw.is_finite() && pw >= 0.0 {
-                    pw
-                } else {
-                    stop_default
-                };
+                // Same resolution as the waveform runtime, so breakpoints
+                // land exactly on the edges the source actually produces.
+                let (td, tr, tf, pw, per) =
+                    crate::circuit::VoltageSources::resolve_pulse_timing_with_defaults(
+                        *delay,
+                        *rise,
+                        *fall,
+                        *width,
+                        *period,
+                        *width_defaults_to_zero,
+                        tstep_hint.max(1e-18),
+                        tstop.max(1e-18),
+                    );
 
                 let per_valid = per.is_finite() && per > 0.0;
                 let max_cycles = if per_valid {
