@@ -81,7 +81,8 @@ pub(super) fn parse_command(
             });
         }
         ".MODEL" => {
-            models.push(parse_model_definition(stream, line_num, params)?);
+            let model = parse_model_definition(stream, line_num, params, models)?;
+            models.push(model);
         }
         ".PARAM" | ".CSPARAM" => {
             parse_param_statement(stream, line_num, params)?;
