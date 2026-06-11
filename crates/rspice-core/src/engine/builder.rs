@@ -840,6 +840,15 @@ impl Engine {
                         .unwrap_or(usize::MAX);
                     let params_map =
                         model_def.map(|device_model| model_params_upper_map(&device_model.params));
+                    // ngspice selects HFET1 either by the NHFET/PHFET model
+                    // type or by NMF/PMF with LEVEL=5 (the z-device level
+                    // map: 1 = MES, 2-4 = MESA, 5 = HFET1).
+                    let card_is_hfet_level = params_map
+                        .as_ref()
+                        .and_then(|params| params.get("LEVEL").copied())
+                        .is_some_and(|level| {
+                            level.is_finite() && level.round() as i32 == 5
+                        });
                     let use_hfet_defaults = model_def
                         .map(|device_model| {
                             device_model.model_type.eq_ignore_ascii_case("NHFET")
@@ -848,7 +857,8 @@ impl Engine {
                         .unwrap_or_else(|| {
                             model.eq_ignore_ascii_case("NHFET")
                                 || model.eq_ignore_ascii_case("PHFET")
-                        });
+                        })
+                        || card_is_hfet_level;
                     let resolved_mesfet_type = if let Some(device_model) = model_def {
                         resolve_mesfet_type_from_model(&device_model.model_type).ok_or_else(|| {
                             SimulationError::Circuit(format!(
