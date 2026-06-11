@@ -278,6 +278,11 @@ impl Preprocessor {
 
     /// Preprocess source string
     pub fn preprocess_source(&mut self, source: &str) -> Result<String, PreprocessorError> {
+        // Strip comments first so directives inside comments are inert and
+        // trailing comments never leak into directive arguments or macro
+        // bodies. Newlines are preserved to keep line numbers stable.
+        let source = self.strip_comments(source)?;
+
         let mut output = String::with_capacity(source.len());
         let mut lines = source.lines().enumerate().peekable();
 
@@ -293,16 +298,25 @@ impl Preprocessor {
             let include_line = cond_stack.iter().all(|&b| b);
 
             // Handle directives
-            if trimmed.starts_with('`') {
+            let directive_parts = if trimmed.starts_with('`') {
                 let (directive, rest) = Self::split_directive(trimmed);
+                if Self::is_known_directive(directive) {
+                    Some((directive, rest))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
+            if let Some((directive, rest)) = directive_parts {
                 match directive {
                     "include" => {
                         if include_line {
                             let included = self.handle_include(rest, line_num + 1)?;
                             output.push_str(&included);
-                            output.push('\n');
                         }
+                        output.push('\n');
                     }
                     "define" => {
                         if include_line {
@@ -414,20 +428,35 @@ impl Preprocessor {
                         seen_true.pop();
                         output.push('\n');
                     }
-                    _ => {
-                        // Unknown directive or macro invocation - output as-is for later expansion
-                        if include_line {
-                            output.push_str(line);
-                            output.push('\n');
-                        } else {
-                            output.push('\n');
-                        }
-                    }
+                    _ => unreachable!("is_known_directive() filtered the directive set"),
                 }
             } else if include_line {
-                // Regular line - output as-is for later expansion
-                output.push_str(line);
+                // Regular line (possibly starting with a macro invocation).
+                // Expand macros inline so that `define/`undef ordering is
+                // honored. A function-like invocation may span multiple
+                // lines, so pull lines until its parentheses balance.
+                let mut logical = line.to_string();
+                while self.invocation_needs_more_input(&logical) {
+                    match lines.next() {
+                        Some((_, next_line)) => {
+                            logical.push('\n');
+                            logical.push_str(next_line);
+                        }
+                        None => break,
+                    }
+                }
+
+                let expanded = self.expand_macros_at(&logical, line_num + 1)?;
+
+                // Preserve the overall line count even if the expansion
+                // swallowed embedded newlines from a multi-line invocation.
+                let consumed_newlines = logical.matches('\n').count();
+                let emitted_newlines = expanded.matches('\n').count();
+                output.push_str(&expanded);
                 output.push('\n');
+                for _ in emitted_newlines..consumed_newlines {
+                    output.push('\n');
+                }
             } else {
                 // Skipped line - preserve line count
                 output.push('\n');
@@ -443,9 +472,166 @@ impl Preprocessor {
             ));
         }
 
-        // Final pass: expand all macros on the complete output
-        // This handles multi-line macro invocations correctly
-        self.expand_macros(&output)
+        Ok(output)
+    }
+
+    /// Directive names processed by the preprocessor itself. Anything else
+    /// starting with a backtick is a macro invocation (or an unknown
+    /// directive left for downstream stages).
+    fn is_known_directive(name: &str) -> bool {
+        matches!(
+            name,
+            "include" | "define" | "undef" | "ifdef" | "ifndef" | "else" | "elsif" | "endif"
+        )
+    }
+
+    /// Remove comments while preserving line structure and string literals.
+    fn strip_comments(&self, source: &str) -> Result<String, PreprocessorError> {
+        let mut out = String::with_capacity(source.len());
+        let mut chars = source.chars().peekable();
+        let mut line = 1usize;
+        let mut in_string = false;
+
+        while let Some(ch) = chars.next() {
+            if ch == '\n' {
+                line += 1;
+                out.push(ch);
+                in_string = false; // strings do not span raw newlines
+                continue;
+            }
+
+            if in_string {
+                out.push(ch);
+                if ch == '\\' {
+                    if let Some(&next) = chars.peek() {
+                        out.push(next);
+                        chars.next();
+                        if next == '\n' {
+                            line += 1;
+                        }
+                    }
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            match ch {
+                '"' => {
+                    in_string = true;
+                    out.push(ch);
+                }
+                '/' => match chars.peek() {
+                    Some('/') => {
+                        // Line comment: drop to end of line (newline kept by outer loop)
+                        while let Some(&next) = chars.peek() {
+                            if next == '\n' {
+                                break;
+                            }
+                            chars.next();
+                        }
+                    }
+                    Some('*') => {
+                        let start_line = line;
+                        chars.next(); // consume '*'
+                        let mut prev = '\0';
+                        let mut closed = false;
+                        for next in chars.by_ref() {
+                            if next == '\n' {
+                                line += 1;
+                                out.push('\n');
+                            }
+                            if prev == '*' && next == '/' {
+                                closed = true;
+                                break;
+                            }
+                            prev = next;
+                        }
+                        if !closed {
+                            return Err(PreprocessorError::new(
+                                "Unterminated block comment",
+                                self.current_file.clone(),
+                                start_line,
+                            ));
+                        }
+                        out.push(' ');
+                    }
+                    _ => out.push(ch),
+                },
+                _ => out.push(ch),
+            }
+        }
+
+        Ok(out)
+    }
+
+    /// Check whether `text` ends inside the argument list of a defined
+    /// function-like macro invocation (so the invocation continues on the
+    /// next physical line).
+    fn invocation_needs_more_input(&self, text: &str) -> bool {
+        let mut chars = text.chars().peekable();
+        let mut in_string = false;
+
+        while let Some(ch) = chars.next() {
+            if in_string {
+                if ch == '\\' {
+                    chars.next();
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
+            match ch {
+                '"' => in_string = true,
+                '`' => {
+                    let mut name = String::new();
+                    while let Some(&c) = chars.peek() {
+                        if c.is_ascii_alphanumeric() || c == '_' {
+                            name.push(c);
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    let is_function_like = self
+                        .macros
+                        .get(&name)
+                        .is_some_and(|def| !def.params.is_empty());
+                    if is_function_like && chars.peek() == Some(&'(') {
+                        chars.next(); // consume '('
+                        let mut depth = 1usize;
+                        let mut arg_string = false;
+                        loop {
+                            let Some(c) = chars.next() else {
+                                return true; // ran out before the args closed
+                            };
+                            if arg_string {
+                                if c == '\\' {
+                                    chars.next();
+                                } else if c == '"' {
+                                    arg_string = false;
+                                }
+                                continue;
+                            }
+                            match c {
+                                '"' => arg_string = true,
+                                '(' => depth += 1,
+                                ')' => {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        false
     }
 
     /// Split a directive line into directive name and rest
@@ -462,11 +648,30 @@ impl Preprocessor {
     fn handle_include(&mut self, rest: &str, line_num: usize) -> Result<String, PreprocessorError> {
         let rest = rest.trim();
 
-        // Parse filename from "file" or <file>
-        let filename = if (rest.starts_with('"') && rest.ends_with('"'))
-            || (rest.starts_with('<') && rest.ends_with('>'))
-        {
-            &rest[1..rest.len() - 1]
+        // Parse filename from "file" or <file>, tolerating trailing text
+        // (comments are already stripped, but be robust to stray tokens).
+        let filename = if let Some(stripped) = rest.strip_prefix('"') {
+            match stripped.find('"') {
+                Some(end) => &stripped[..end],
+                None => {
+                    return Err(PreprocessorError::new(
+                        format!("Unterminated include filename: {}", rest),
+                        self.current_file.clone(),
+                        line_num,
+                    ));
+                }
+            }
+        } else if let Some(stripped) = rest.strip_prefix('<') {
+            match stripped.find('>') {
+                Some(end) => &stripped[..end],
+                None => {
+                    return Err(PreprocessorError::new(
+                        format!("Unterminated include filename: {}", rest),
+                        self.current_file.clone(),
+                        line_num,
+                    ));
+                }
+            }
         } else {
             return Err(PreprocessorError::new(
                 format!("Invalid include syntax: {}", rest),
@@ -512,53 +717,94 @@ impl Preprocessor {
     }
 
     /// Handle `define directive
-    fn handle_define(&mut self, rest: &str, _line_num: usize) -> Result<(), PreprocessorError> {
+    fn handle_define(&mut self, rest: &str, line_num: usize) -> Result<(), PreprocessorError> {
         let rest = rest.trim();
 
-        // Check for parameterized macro: NAME(a, b, c) body
-        if let Some(paren_pos) = rest.find('(') {
-            let name = &rest[..paren_pos];
-            let after_name = &rest[paren_pos..];
+        // The macro name is the leading identifier.
+        let name_end = rest
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(rest.len());
+        let name = &rest[..name_end];
+        if name.is_empty() {
+            return Err(PreprocessorError::new(
+                format!("Invalid macro definition: {}", rest),
+                self.current_file.clone(),
+                line_num,
+            ));
+        }
+        let after_name = &rest[name_end..];
 
-            if let Some(close_paren) = after_name.find(')') {
-                let params_str = &after_name[1..close_paren];
-                let params: Vec<String> = params_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
+        // A macro is function-like only when '(' immediately follows the
+        // name (LRM 10.2). `define X (expr) defines a simple macro whose
+        // body happens to start with a parenthesis.
+        if let Some(after_paren) = after_name.strip_prefix('(') {
+            let Some(close_paren) = after_paren.find(')') else {
+                return Err(PreprocessorError::new(
+                    format!("Unterminated macro parameter list for `{}", name),
+                    self.current_file.clone(),
+                    line_num,
+                ));
+            };
 
-                let body = after_name[close_paren + 1..].trim().to_string();
-                self.define(name.trim(), MacroDef::with_params(params, body));
+            let params_str = &after_paren[..close_paren];
+            let params: Vec<String> = params_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            for param in &params {
+                let valid = !param.is_empty()
+                    && param
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+                    && param.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                if !valid {
+                    return Err(PreprocessorError::new(
+                        format!("Invalid macro parameter '{}' for `{}", param, name),
+                        self.current_file.clone(),
+                        line_num,
+                    ));
+                }
             }
+
+            let body = after_paren[close_paren + 1..].trim().to_string();
+            self.define(name, MacroDef::with_params(params, body));
         } else {
-            // Simple macro: NAME body
-            let mut parts = rest.splitn(2, char::is_whitespace);
-            let name = parts.next().unwrap_or("");
-            let body = parts.next().unwrap_or("").trim();
-
-            if !name.is_empty() {
-                self.define(name, MacroDef::simple(body));
-            }
+            let body = after_name.trim();
+            self.define(name, MacroDef::simple(body));
         }
 
         Ok(())
     }
 
-    /// Expand macros in a line (with recursive expansion for nested macros)
-    fn expand_macros(&self, line: &str) -> Result<String, PreprocessorError> {
-        let mut result = line.to_string();
+    /// Expand macros in text (with recursive expansion for nested macros)
+    pub fn expand_macros(&self, line: &str) -> Result<String, PreprocessorError> {
+        self.expand_macros_at(line, 0)
+    }
 
-        // Recursively expand until no more macros are found (max 100 iterations for safety)
-        for _ in 0..100 {
+    /// Expand macros in text, reporting errors at the given line number
+    fn expand_macros_at(&self, line: &str, line_num: usize) -> Result<String, PreprocessorError> {
+        const MAX_EXPANSION_DEPTH: usize = 100;
+
+        let mut result = line.to_string();
+        for _ in 0..MAX_EXPANSION_DEPTH {
             let expanded = self.expand_macros_single_pass(&result)?;
             if expanded == result {
-                break; // No more expansions
+                return Ok(result); // Fixed point reached
             }
             result = expanded;
         }
 
-        Ok(result)
+        // Still changing after the depth limit: macro expansion does not
+        // terminate (mutually recursive definitions). Fail loudly instead
+        // of emitting partially-expanded text.
+        Err(PreprocessorError::new(
+            "Macro expansion did not terminate (recursive `define?)",
+            self.current_file.clone(),
+            line_num,
+        ))
     }
 
     /// Single pass of macro expansion
@@ -594,9 +840,32 @@ impl Preprocessor {
 
                 if let Some(macro_def) = self.macros.get(&name) {
                     // Check for arguments
-                    if !macro_def.params.is_empty() && chars.peek() == Some(&'(') {
+                    if !macro_def.params.is_empty() {
+                        if chars.peek() != Some(&'(') {
+                            return Err(PreprocessorError::new(
+                                format!(
+                                    "Macro `{} expects {} argument(s) but none were supplied",
+                                    name,
+                                    macro_def.params.len()
+                                ),
+                                self.current_file.clone(),
+                                0,
+                            ));
+                        }
                         chars.next(); // consume '('
                         let args = Self::parse_macro_args(&mut chars);
+                        if args.len() != macro_def.params.len() {
+                            return Err(PreprocessorError::new(
+                                format!(
+                                    "Macro `{} expects {} argument(s), got {}",
+                                    name,
+                                    macro_def.params.len(),
+                                    args.len()
+                                ),
+                                self.current_file.clone(),
+                                0,
+                            ));
+                        }
                         result.push_str(&macro_def.expand(&args));
                     } else {
                         result.push_str(&macro_def.expand(&[]));
@@ -619,9 +888,25 @@ impl Preprocessor {
         let mut args = Vec::new();
         let mut current_arg = String::new();
         let mut paren_depth = 1;
+        let mut in_string = false;
 
-        for ch in chars.by_ref() {
+        while let Some(ch) = chars.next() {
+            if in_string {
+                current_arg.push(ch);
+                if ch == '\\' {
+                    if let Some(next) = chars.next() {
+                        current_arg.push(next);
+                    }
+                } else if ch == '"' {
+                    in_string = false;
+                }
+                continue;
+            }
             match ch {
+                '"' => {
+                    in_string = true;
+                    current_arg.push(ch);
+                }
                 '(' => {
                     paren_depth += 1;
                     current_arg.push(ch);
@@ -649,3 +934,170 @@ impl Preprocessor {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pp(source: &str) -> String {
+        Preprocessor::new()
+            .preprocess_source(source)
+            .expect("preprocessing failed")
+    }
+
+    #[test]
+    fn simple_macro_expansion() {
+        let out = pp("`define TWO 2\nx = `TWO;\n");
+        assert!(out.contains("x = 2;"), "got: {out}");
+    }
+
+    #[test]
+    fn define_with_space_before_paren_is_simple_macro() {
+        // `define GMIN (1e-12) must define a simple macro whose body is
+        // "(1e-12)", not a function-like macro with a bogus parameter.
+        let out = pp("`define GMIN (1e-12)\ng = `GMIN;\n");
+        assert!(out.contains("g = (1e-12);"), "got: {out}");
+    }
+
+    #[test]
+    fn function_like_macro() {
+        let out = pp("`define MAX(a,b) ((a)>(b)?(a):(b))\nm = `MAX(x, y+1);\n");
+        assert!(out.contains("m = ((x)>(y+1)?(x):(y+1));"), "got: {out}");
+    }
+
+    #[test]
+    fn function_like_macro_nested_parens() {
+        let out = pp("`define SQ(x) ((x)*(x))\nv = `SQ(f(a,b));\n");
+        assert!(out.contains("v = ((f(a,b))*(f(a,b)));"), "got: {out}");
+    }
+
+    #[test]
+    fn directive_inside_block_comment_is_ignored() {
+        let out = pp("/*\n`define HIDDEN 1\n*/\n`ifdef HIDDEN\nbad\n`endif\nok\n");
+        assert!(!out.contains("bad"), "got: {out}");
+        assert!(out.contains("ok"), "got: {out}");
+    }
+
+    #[test]
+    fn trailing_comment_on_define_excluded_from_body() {
+        let out = pp("`define TMAX 326.85 // celsius limit\nt = `TMAX + 1;\n");
+        assert!(out.contains("t = 326.85 + 1;"), "got: {out}");
+    }
+
+    #[test]
+    fn define_undef_ordering_is_honored() {
+        let src = "`define X 1\na = `X;\n`undef X\n`define X 2\nb = `X;\n";
+        let out = pp(src);
+        assert!(out.contains("a = 1;"), "got: {out}");
+        assert!(out.contains("b = 2;"), "got: {out}");
+    }
+
+    #[test]
+    fn use_before_redefinition_keeps_old_value() {
+        let src = "`define V 10\nfirst = `V;\n`define V 20\nsecond = `V;\n";
+        let out = pp(src);
+        assert!(out.contains("first = 10;"), "got: {out}");
+        assert!(out.contains("second = 20;"), "got: {out}");
+    }
+
+    #[test]
+    fn multiline_define_continuation() {
+        let src = "`define BIG(a) ((a) + \\\n  1.0)\nr = `BIG(z);\n";
+        let out = pp(src);
+        let normalized: String = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(normalized.contains("r = ((z) + 1.0);"), "got: {out}");
+    }
+
+    #[test]
+    fn multiline_invocation_pulls_lines() {
+        let src = "`define ADD(a,b) ((a)+(b))\ns = `ADD(x,\n        y);\n";
+        let out = pp(src);
+        assert!(out.contains("s = ((x)+(y));"), "got: {out}");
+    }
+
+    #[test]
+    fn ifdef_else_endif() {
+        let src = "`define FEATURE\n`ifdef FEATURE\nyes\n`else\nno\n`endif\n";
+        let out = pp(src);
+        assert!(out.contains("yes"));
+        assert!(!out.contains("no"));
+
+        let src2 = "`ifdef MISSING\nyes\n`else\nno\n`endif\n";
+        let out2 = pp(src2);
+        assert!(!out2.contains("yes"));
+        assert!(out2.contains("no"));
+    }
+
+    #[test]
+    fn nested_ifdef_in_skipped_region() {
+        let src = "`ifdef OUTER\n`ifdef INNER\na\n`endif\nb\n`endif\nc\n";
+        let out = pp(src);
+        assert!(!out.contains('a'));
+        assert!(!out.contains('b'));
+        assert!(out.contains('c'));
+    }
+
+    #[test]
+    fn elsif_chain() {
+        let src = "`define B\n`ifdef A\n1\n`elsif B\n2\n`else\n3\n`endif\n";
+        let out = pp(src);
+        assert!(out.contains('2'), "got: {out}");
+        assert!(!out.contains('1'));
+        assert!(!out.contains('3'));
+    }
+
+    #[test]
+    fn mutually_recursive_macros_error() {
+        let src = "`define A `B\n`define B `A\nx = `A;\n";
+        assert!(Preprocessor::new().preprocess_source(src).is_err());
+    }
+
+    #[test]
+    fn macro_not_expanded_inside_string() {
+        let out = pp("`define NAME bob\ns = \"`NAME\";\n");
+        assert!(out.contains("\"`NAME\""), "got: {out}");
+    }
+
+    #[test]
+    fn macro_args_with_string_commas() {
+        let out = pp("`define MSG(s) $strobe(s)\n`MSG(\"a, b\");\n");
+        assert!(out.contains("$strobe(\"a, b\");"), "got: {out}");
+    }
+
+    #[test]
+    fn line_count_preserved() {
+        let src = "`define X 1\n/* multi\nline\ncomment */\nx = `X;\n";
+        let out = pp(src);
+        assert_eq!(out.matches('\n').count(), 5, "got: {out:?}");
+        // "x = 1;" must sit on the 5th line for span fidelity.
+        assert_eq!(out.lines().nth(4), Some("x = 1;"), "got: {out:?}");
+    }
+
+    #[test]
+    fn unterminated_block_comment_errors() {
+        assert!(
+            Preprocessor::new()
+                .preprocess_source("/* never closed\nmodule x;\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn wrong_argument_count_errors() {
+        let src = "`define ADD(a,b) ((a)+(b))\nx = `ADD(1);\n";
+        assert!(Preprocessor::new().preprocess_source(src).is_err());
+    }
+
+    #[test]
+    fn word_boundary_in_macro_body_substitution() {
+        // Parameter "a" must not be replaced inside the identifier "axis".
+        let out = pp("`define F(a) (axis + a)\ny = `F(3);\n");
+        assert!(out.contains("y = (axis + 3);"), "got: {out}");
+    }
+
+    #[test]
+    fn predefined_vams_macros() {
+        let out = pp("`ifdef __VAMS_ENABLE__\nvams\n`endif\n");
+        assert!(out.contains("vams"));
+    }
+}
