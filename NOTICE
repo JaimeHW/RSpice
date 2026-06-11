@@ -1,0 +1,140 @@
+RSpice — Third-Party Notices
+============================
+
+This file contains attributions and license notices for third-party software
+and assets included in or used by RSpice. RSpice itself is distributed under
+the terms in the repository LICENSE file.
+
+-------------------------------------------------------------------------------
+1. ngspice (portions derived from; Modified BSD / BSD-3-Clause)
+-------------------------------------------------------------------------------
+
+Portions of RSpice's device models and transient engine are derived from, or
+ported by study of, source files of the ngspice circuit simulator
+(https://ngspice.sourceforge.io/), version 46. All such files are part of
+ngspice's Modified BSD ("New BSD") licensed code base. No code was taken from
+ngspice's LGPL components (src/maths/KLU, src/frontend/numparam, tclspice),
+its GPL component (src/xspice/icm/table), or its MPL component (src/osdi).
+
+Derived components include:
+  - BSIM3SOI DD/FD/PD MOSFET models (crates/rspice-core/src/device/mosfet/b3soi/)
+    ported from ngspice src/spicelib/devices/bsim3soi_dd, bsim3soi_fd,
+    bsim3soi_pd — Copyright 1990, 1999 Regents of the University of California.
+    Authors: Samuel Fung, Dennis Sinitsky, Stephen Tang, Weidong Liu, Pin Su,
+    and others.
+  - Coupled and lossy transmission-line convolution runtimes (CPL, TXL)
+    (crates/rspice-core/src/device/cpl_native.rs,
+    crates/rspice-core/src/device/transmission_line/txl.rs) ported from
+    ngspice src/spicelib/devices/cpl and txl — Copyright 1992 Regents of the
+    University of California. Author: Charles Hough.
+  - LTRA lossy-line, JFET/MESFET/HFET, BJT/VBIC, and legacy MOS equation and
+    algorithm portions modeled on ngspice src/spicelib/devices (ltra, jfet,
+    mesa, hfet1, bjt, vbic, mos1/mos2/mos6, devsup.c) and transient analysis
+    control modeled on src/spicelib/analysis (dctran.c) — Copyright
+    1985-2018 Regents of the University of California and others; MESA model
+    Copyright 1993 T. Ytterdal, K. Lee, M. Shur and T. A. Fjeldly.
+  - Independent-source SFFM/AM waveform semantics from
+    src/spicelib/devices/vsrc/vsrcload.c — Copyright 1990 Regents of the
+    University of California.
+
+The test decks, reference outputs, and QA scripts under tests/ are
+redistributed verbatim from the ngspice-46 tests/ directory (which in turn
+includes material from Spice3f5 and MacSpice3f4), likewise under the
+Modified BSD license.
+
+ngspice Modified BSD license:
+
+  Copyright 1985 - 2018, Regents of the University of California and others
+
+  Redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the following conditions are met:
+
+  1. Redistributions of source code must retain the above copyright notice,
+  this list of conditions and the following disclaimer.
+
+  2. Redistributions in binary form must reproduce the above copyright
+  notice, this list of conditions and the following disclaimer in the
+  documentation and/or other materials provided with the distribution.
+
+  3. Neither the name of the copyright holder nor the names of its
+  contributors may be used to endorse or promote products derived from this
+  software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  POSSIBILITY OF SUCH DAMAGE.
+
+Beyond the components listed above, RSpice's compatibility with ngspice
+(netlist syntax, numparam expression semantics, XSPICE code-model behavior,
+.TF/NUTMEG output formats, default tolerances) is implemented independently
+at the behavior/format level, validated against ngspice as an external test
+oracle, and does not incorporate ngspice source code.
+
+-------------------------------------------------------------------------------
+2. BSIM4 Verilog-A model (BSD-3-Clause style, UC Berkeley)
+-------------------------------------------------------------------------------
+
+models/veriloga/bsim4.va is the BSIM4 version 4.8 compact MOSFET model in
+Verilog-A from the BSIM Group at the University of California, Berkeley.
+
+  Copyright 2001 Regents of the University of California. All rights reserved.
+  Author: Weidong Liu.
+  Authors: Xuemei Xi, Kanyu M. Cao, Hui Wan, Mansun Chan, Chenming Hu.
+  Project Director: Prof. Chenming Hu.
+
+Distributed under the BSIM4 license terms of the Regents of the University
+of California (BSD-3-Clause in current BSIM releases).
+
+-------------------------------------------------------------------------------
+3. IBM Plex fonts (SIL Open Font License 1.1)
+-------------------------------------------------------------------------------
+
+RSpice embeds the IBM Plex Sans and IBM Plex Mono typefaces
+(crates/rspice-ui/assets/fonts/).
+
+  Copyright (c) 2017 IBM Corp. with Reserved Font Name "Plex"
+
+  This Font Software is licensed under the SIL Open Font License,
+  Version 1.1. The complete license text is included alongside the fonts at
+  crates/rspice-ui/assets/fonts/OFL-IBMPlex.txt and is also available at
+  https://scripts.sil.org/OFL
+
+-------------------------------------------------------------------------------
+4. Rust crate dependencies
+-------------------------------------------------------------------------------
+
+RSpice links against open-source Rust crates. Most are dual-licensed
+MIT OR Apache-2.0 (serde, clap, egui, eframe, egui-wgpu, wgpu, rustfft,
+rayon, thiserror, log, env_logger, num-complex, png, base64, uuid, once_cell,
+indexmap, smol_str, pyo3, toml, dirs, getrandom, wasm-bindgen, svgtypes,
+portable-atomic, rustc-hash, clap_complete, tokio[MIT], and others) or plain
+MIT (faer, nom, bincode, indicatif, mimalloc, rfd, rustyhdf5,
+serde-wasm-bindgen). Dependencies under other permissive licenses:
+
+  - usvg                 — MPL-2.0 (used unmodified; source available at
+                           https://crates.io/crates/usvg)
+  - numpy (rust-numpy)   — BSD-2-Clause
+  - libloading           — ISC
+  - winit                — Apache-2.0
+  - cranelift (codegen/jit/module/native, optional) — Apache-2.0 WITH
+                           LLVM-exception
+  - wide, bytemuck, raw-window-handle — Zlib OR Apache-2.0 OR MIT
+  - blake3 (optional)    — CC0-1.0 OR Apache-2.0
+  - pollster             — Apache-2.0 OR MIT
+
+The full license texts of these crates are available from their respective
+distributions on https://crates.io.
+
+-------------------------------------------------------------------------------
+
+The names of the University of California, the ngspice project, IBM, or any
+other copyright holders listed above may not be used to endorse or promote
+RSpice or products derived from it without their prior written permission.
