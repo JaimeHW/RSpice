@@ -3920,6 +3920,7 @@ dependencies = [
  "portable-atomic",
  "rayon",
  "rspice-veriloga",
+ "rustc-hash 2.1.1",
  "rustfft",
  "serde",
  "thiserror 2.0.18",

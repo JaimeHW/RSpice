@@ -15,6 +15,7 @@ use faer::sparse::linalg::lu as sparse_lu;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
 use faer::sparse::{SparseColMat, SparseColMatRef, SymbolicSparseColMat};
 use faer::{Conj, Mat, get_global_parallelism};
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 /// Reusable sparse-LU workspace for the Newton hot path.
@@ -55,8 +56,10 @@ pub struct StaticMatrix {
     /// CSC values (mutable - updated each iteration)
     values: Vec<Value>,
     /// Mapping from (row, col) to index in values array
-    /// This enables O(1) stamping during simulation
-    position_map: std::collections::HashMap<(usize, usize), usize>,
+    /// This enables O(1) stamping during simulation. FxHash: stamp lookups
+    /// are integer pairs on the Newton hot path, and the map is never
+    /// iterated, so hasher choice is invisible beyond speed.
+    position_map: FxHashMap<(usize, usize), usize>,
     /// Reusable LU workspace (lazily initialized on first solve)
     lu: Option<LuWorkspace>,
     /// Scratch values + RHS retained between residual probes (see
@@ -150,7 +153,7 @@ impl StaticMatrix {
 
         // Accumulate duplicates and build position map
         let mut accumulated: Vec<(usize, usize, Value)> = Vec::with_capacity(entries.len());
-        let mut position_map = std::collections::HashMap::new();
+        let mut position_map = FxHashMap::default();
 
         for (r, c, v) in entries {
             if let Some(last) = accumulated.last_mut()
@@ -487,7 +490,7 @@ pub struct ComplexMatrix {
     /// Complex values (updated for each frequency)
     values: Vec<Complex64>,
     /// Mapping from (row, col) to index in values array
-    position_map: std::collections::HashMap<(usize, usize), usize>,
+    position_map: FxHashMap<(usize, usize), usize>,
     /// Reusable LU workspace; the symbolic part is shared with the real
     /// matrix when available (symbolic LU is scalar-type independent).
     lu: Option<ComplexLuWorkspace>,

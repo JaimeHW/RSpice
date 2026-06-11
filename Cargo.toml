@@ -30,6 +30,9 @@ rustfft = "6.2"
 rayon = "1.10"
 portable-atomic = { version = "1.10", features = ["float"] }
 
+# Deterministic fast hashing for integer-keyed hot maps (matrix stamp lookup)
+rustc-hash = "2.1"
+
 # Parsing
 nom = "8.0"
 
