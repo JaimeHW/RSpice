@@ -228,11 +228,41 @@ pub(crate) fn separator(ui: &mut Ui) {
     );
 }
 
+/// A submenu row. egui's stock `menu_button` carries its own widget
+/// styling (dim text, different padding/height), which made these rows
+/// look disabled next to [`item`] rows — restyle it to the same chrome:
+/// 26 px row, FS_2 sans in `text`, `bg_hover` fill, 9 px inset.
 fn submenu(ui: &mut Ui, title: &str, add_contents: impl FnOnce(&mut Ui)) {
-    ui.menu_button(title, |ui| {
-        ui.set_min_width(210.0);
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        add_contents(ui);
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    ui.scope(|ui| {
+        let style = ui.style_mut();
+        style.spacing.button_padding = vec2(9.0, 0.0);
+        style.spacing.interact_size.y = 26.0;
+        let rounding: egui::Rounding = t.radius.into();
+        for visuals in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.open,
+        ] {
+            visuals.fg_stroke.color = c.text;
+            visuals.bg_stroke = egui::Stroke::NONE;
+            visuals.rounding = rounding;
+        }
+        style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        style.visuals.widgets.hovered.weak_bg_fill = c.bg_hover;
+        style.visuals.widgets.active.weak_bg_fill = c.bg_hover;
+        style.visuals.widgets.open.weak_bg_fill = c.bg_hover;
+
+        ui.menu_button(
+            egui::RichText::new(title).font(theme::sans(tokens::FS_2, FontWeight::Regular)),
+            |ui| {
+                ui.set_min_width(210.0);
+                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                add_contents(ui);
+            },
+        );
     });
 }
 
