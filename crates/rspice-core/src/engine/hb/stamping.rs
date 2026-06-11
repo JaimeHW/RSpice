@@ -212,6 +212,12 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
+            let spec = circuit
+                .voltage_sources
+                .source_specs
+                .get(i)
+                .and_then(|s| s.as_ref());
+            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .voltage_sources
                 .names
@@ -260,6 +266,12 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
+            let spec = circuit
+                .voltage_sources
+                .source_specs
+                .get(i)
+                .and_then(|s| s.as_ref());
+            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .voltage_sources
                 .names
@@ -329,6 +341,12 @@ impl Engine {
                 .get(i)
                 .copied()
                 .unwrap_or(0.0);
+            let spec = circuit
+                .current_sources
+                .source_specs
+                .get(i)
+                .and_then(|s| s.as_ref());
+            let (ac_mag, ac_phase) = Self::hb_source_drive_terms(ac_mag, ac_phase, spec);
             let source_name = circuit
                 .current_sources
                 .names

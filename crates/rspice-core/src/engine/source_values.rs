@@ -30,7 +30,12 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
 }
 
 /// Extract AC value (magnitude, phase in radians) from a SourceSpec enum
-/// Returns (magnitude, phase) tuple, defaulting to (0.0, 0.0) for non-AC sources
+///
+/// Only an explicit AC keyword contributes: like ngspice, a transient
+/// waveform such as SIN never excites small-signal AC analysis on its
+/// own (vsrcacld.c stamps VSRCacGiven values exclusively). Harmonic
+/// balance, which does interpret SIN drives, falls back to the waveform
+/// spec separately via hb_source_drive_terms.
 pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
     match spec {
         SourceSpec::Ac { magnitude, phase } => (*magnitude, *phase),
@@ -45,11 +50,56 @@ pub(crate) fn extract_ac_value(spec: &SourceSpec) -> (Value, Value) {
             ..
         } => (*ac_magnitude, *ac_phase),
         SourceSpec::DcTransient { transient, .. } => extract_ac_value(transient),
-        // Sin sources have AC component at their frequency
-        SourceSpec::Sin {
-            amplitude, phase, ..
-        } => (*amplitude, *phase),
-        // Other sources don't have explicit AC component in HB sense
         _ => (0.0, 0.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sin_waveforms_do_not_excite_small_signal_ac() {
+        // ngspice-46 oracle: .ac on a deck whose only stimulus is
+        // SIN(0 1 1k) reports exactly zero at every frequency.
+        let spec = SourceSpec::Sin {
+            offset: 0.0,
+            amplitude: 1.0,
+            frequency: 1.0e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: 0.0,
+        };
+        assert_eq!(extract_ac_value(&spec), (0.0, 0.0));
+
+        let wrapped = SourceSpec::DcTransient {
+            dc_value: 0.5,
+            transient: Box::new(spec),
+        };
+        assert_eq!(extract_ac_value(&wrapped), (0.0, 0.0));
+    }
+
+    #[test]
+    fn explicit_ac_keyword_still_drives_small_signal_ac() {
+        let spec = SourceSpec::DcAc {
+            dc_value: 0.0,
+            ac_magnitude: 2.0,
+            ac_phase: 0.25,
+        };
+        assert_eq!(extract_ac_value(&spec), (2.0, 0.25));
+    }
+
+    #[test]
+    fn sin_operating_point_value_includes_phase() {
+        // TRANOP evaluates the waveform at t=0: VO + VA*sin(PHASE).
+        let spec = SourceSpec::Sin {
+            offset: 1.0,
+            amplitude: 2.0,
+            frequency: 1.0e3,
+            delay: 0.0,
+            damping: 0.0,
+            phase: std::f64::consts::FRAC_PI_2,
+        };
+        assert_eq!(extract_dc_value(&spec), 3.0);
     }
 }

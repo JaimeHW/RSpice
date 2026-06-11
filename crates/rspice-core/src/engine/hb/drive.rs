@@ -289,4 +289,36 @@ impl Engine {
     pub(in crate::engine::hb) fn hb_node_to_solver_index(node: usize, num_nodes: usize) -> usize {
         if node == 0 { num_nodes } else { node - 1 }
     }
+
+    /// HB drive terms for one source. An explicit AC keyword wins; a
+    /// source specified only as a SIN waveform drives its tone with the
+    /// waveform amplitude and phase (Spectre-style). Small-signal AC
+    /// deliberately ignores SIN waveforms, so the stored AC arrays alone
+    /// are not enough here.
+    #[inline]
+    pub(in crate::engine::hb) fn hb_source_drive_terms(
+        ac_mag: Value,
+        ac_phase: Value,
+        spec: Option<&SourceSpec>,
+    ) -> (Value, Value) {
+        if ac_mag.abs() > HB_ZERO_SENSE_TOL {
+            return (ac_mag, ac_phase);
+        }
+        match spec {
+            Some(SourceSpec::Sin {
+                amplitude, phase, ..
+            }) => (*amplitude, *phase),
+            Some(SourceSpec::DcTransient { transient, .. }) => {
+                if let SourceSpec::Sin {
+                    amplitude, phase, ..
+                } = transient.as_ref()
+                {
+                    (*amplitude, *phase)
+                } else {
+                    (ac_mag, ac_phase)
+                }
+            }
+            _ => (ac_mag, ac_phase),
+        }
+    }
 }
