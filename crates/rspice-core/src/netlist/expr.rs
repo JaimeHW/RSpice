@@ -6,7 +6,6 @@
 //! - Built-in functions: sqrt, sin, cos, tan, exp, log, log10, abs, min, max
 //! - Parameter substitution from context
 
-use super::lexer::parse_spice_value;
 use crate::Value;
 use std::collections::HashMap;
 
