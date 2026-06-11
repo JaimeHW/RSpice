@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct VoltageSources {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,
@@ -677,7 +677,7 @@ impl VoltageSources {
 }
 
 /// Current source storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct CurrentSources {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,

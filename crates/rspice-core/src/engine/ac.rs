@@ -891,38 +891,62 @@ impl Engine {
         let node_names = circuit.node_names_sorted();
         let branch_names = circuit.branch_names_sorted();
 
-        // Closure to solve at a single frequency
-        let solve_at_freq = |freq: Value| -> Result<AcResult, SimulationError> {
-            let omega = 2.0 * PI * freq;
-            let mut ac_matrix =
-                Self::build_small_signal_ac_matrix(&circuit, &matrix, &dc_solution, omega);
-            let rhs = Self::build_ac_excitation_rhs(&circuit);
-            let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+        // Closure to solve at a single frequency. Takes the circuit as a
+        // parameter so the parallel path below can hand each worker its own
+        // clone (device-evaluation caches are Cell-based and not Sync).
+        let solve_at_freq =
+            |circuit: &CircuitData, freq: Value| -> Result<AcResult, SimulationError> {
+                let omega = 2.0 * PI * freq;
+                let mut ac_matrix =
+                    Self::build_small_signal_ac_matrix(circuit, &matrix, &dc_solution, omega);
+                let rhs = Self::build_ac_excitation_rhs(circuit);
+                let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
 
-            Ok(AcResult {
-                frequency: freq,
-                node_names: node_names.clone(),
-                branch_names: branch_names.clone(),
-                voltages: solution[..num_nodes].to_vec(),
-                currents: if size > num_nodes {
-                    solution[num_nodes..].to_vec()
-                } else {
-                    vec![]
-                },
-            })
-        };
+                Ok(AcResult {
+                    frequency: freq,
+                    node_names: node_names.clone(),
+                    branch_names: branch_names.clone(),
+                    voltages: solution[..num_nodes].to_vec(),
+                    currents: if size > num_nodes {
+                        solution[num_nodes..].to_vec()
+                    } else {
+                        vec![]
+                    },
+                })
+            };
 
-        // NOTE: the sweep is intentionally sequential. Device evaluation
-        // caches (BJT linearization/charge snapshots, transmission-line
-        // responses) use Cell/RefCell interior mutability, so CircuitData is
-        // not Sync and cannot be shared across a rayon frequency sweep.
-        // Restoring parallel sweeps requires per-thread circuit state (e.g.
-        // a Clone-able CircuitData or an extracted evaluation context);
-        // results per frequency point are independent, so that change is
-        // mechanical but belongs to the device-cache architecture.
+        // Parallel sweep: every frequency point shares the same operating
+        // point and matrix structure, so points are fully independent.
+        // CircuitData is not Sync (Cell-based device-eval caches), so each
+        // worker owns an independent clone paired with one contiguous chunk
+        // of the sweep — no shared state, no locks, and chunk order
+        // preserves output ordering. The caches are pure memoization, so
+        // per-point results are identical to the sequential path.
+        #[cfg(feature = "parallel")]
+        if frequencies.len() >= 10 {
+            use rayon::prelude::*;
+
+            let workers = rayon::current_num_threads().clamp(1, frequencies.len());
+            let chunk_len = frequencies.len().div_ceil(workers);
+            let work: Vec<(CircuitData, &[Value])> = frequencies
+                .chunks(chunk_len)
+                .map(|chunk| (circuit.clone(), chunk))
+                .collect();
+            let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = work
+                .into_par_iter()
+                .map(|(worker_circuit, chunk)| {
+                    chunk
+                        .iter()
+                        .map(|&freq| solve_at_freq(&worker_circuit, freq))
+                        .collect()
+                })
+                .collect();
+            return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
+        }
+
         frequencies
             .iter()
-            .map(|&freq| solve_at_freq(freq))
+            .map(|&freq| solve_at_freq(&circuit, freq))
             .collect()
     }
 }

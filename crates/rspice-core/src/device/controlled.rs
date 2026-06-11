@@ -15,7 +15,7 @@ use crate::{Value, circuit::NodeId};
 //=============================================================================
 
 /// Voltage-Controlled Voltage Source storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Vcvs {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,
@@ -133,7 +133,7 @@ impl Vcvs {
 //=============================================================================
 
 /// Voltage-Controlled Current Source storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Vccs {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,
@@ -233,7 +233,7 @@ impl Vccs {
 //=============================================================================
 
 /// Current-Controlled Current Source storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Cccs {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,
@@ -324,7 +324,7 @@ impl Cccs {
 //=============================================================================
 
 /// Current-Controlled Voltage Source storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Ccvs {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,

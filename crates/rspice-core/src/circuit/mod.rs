@@ -271,7 +271,11 @@ pub struct MultiWindingTransformerBinding {
 }
 
 /// High-performance circuit representation using Struct-of-Arrays
-#[derive(Debug)]
+///
+/// `Clone` exists so embarrassingly-parallel sweeps (AC frequency points)
+/// can give each worker thread an independent copy: device evaluation
+/// caches use `Cell`/`RefCell` and are not shareable across threads.
+#[derive(Debug, Clone)]
 pub struct CircuitData {
     /// Node name to ID mapping
     node_map: HashMap<String, NodeId>,

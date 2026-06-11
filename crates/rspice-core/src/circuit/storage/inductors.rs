@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Inductors {
     pub names: Vec<String>,
     pub node_pos: Vec<NodeId>,

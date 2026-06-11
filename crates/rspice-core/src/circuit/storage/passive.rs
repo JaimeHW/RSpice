@@ -1,7 +1,7 @@
 use super::*;
 
 /// Resistor storage (SoA layout for cache efficiency)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Resistors {
     /// Device names
     pub names: Vec<String>,
@@ -78,7 +78,7 @@ impl Resistors {
 }
 
 /// Capacitor storage (SoA)
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Capacitors {
     pub names: Vec<String>,
     /// Pre-computed stamps for the capacitor matrix entries
