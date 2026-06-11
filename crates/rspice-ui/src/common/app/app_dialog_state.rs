@@ -49,6 +49,29 @@ pub struct LicenseDialogState {
     pub phase: LicensePhase,
 }
 
+/// Command palette (Ctrl+K) state.
+#[derive(Debug, Clone, Default)]
+pub struct CommandPaletteState {
+    /// Whether the palette is showing.
+    pub open: bool,
+    /// Filter text.
+    pub query: String,
+    /// Index into the filtered list.
+    pub selected: usize,
+    /// Request keyboard focus on the next frame (set when opened).
+    pub want_focus: bool,
+}
+
+impl CommandPaletteState {
+    /// Open fresh (empty query, first row selected, focus requested).
+    pub fn open(&mut self) {
+        self.open = true;
+        self.query.clear();
+        self.selected = 0;
+        self.want_focus = true;
+    }
+}
+
 /// Dialog visibility state
 
 #[derive(Debug, Clone, Default)]
@@ -107,6 +130,9 @@ pub struct DialogState {
 
     /// License activation dialog state
     pub license_dialog: LicenseDialogState,
+
+    /// Command palette state
+    pub command_palette: CommandPaletteState,
 
     /// Verilog-A model loading dialog state
     pub veriloga_dialog: crate::panels::VerilogALoadDialogState,

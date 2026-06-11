@@ -44,10 +44,16 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 25] = [
+const GLOBAL_RULES: [ShortcutRule; 26] = [
     ShortcutRule::new(
         ShortcutCommand::OpenPreferences,
         Key::Comma,
+        Some(true),
+        None,
+    ),
+    ShortcutRule::new(
+        ShortcutCommand::OpenCommandPalette,
+        Key::K,
         Some(true),
         None,
     ),

@@ -9,7 +9,8 @@ pub(crate) struct ShortcutInputSnapshot {
 
 impl ShortcutInputSnapshot {
     pub(crate) fn from_input_state(input: &InputState, has_focus: bool) -> Self {
-        const TRACKED_KEYS: [Key; 34] = [
+        const TRACKED_KEYS: [Key; 35] = [
+            Key::K,
             Key::N,
             Key::O,
             Key::S,

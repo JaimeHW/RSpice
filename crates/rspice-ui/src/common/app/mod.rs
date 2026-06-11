@@ -77,6 +77,8 @@ mod app_preferences_dialog;
 
 mod app_license_dialog;
 
+mod app_command_palette;
+
 mod app_workspace_actions;
 
 mod app_veriloga_workflow;
@@ -391,6 +393,7 @@ impl RSpiceApp {
         self.render_simulation_options_dialog(ctx);
         self.render_preferences_dialog(ctx);
         self.render_license_dialog(ctx);
+        self.render_command_palette(ctx);
         self.render_about_dialog(ctx);
         self.render_waveform_calculator_dialog(ctx);
         self.render_shortcuts_help_dialog(ctx);

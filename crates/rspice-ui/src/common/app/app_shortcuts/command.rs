@@ -41,9 +41,55 @@ pub(crate) enum ShortcutCommand {
     ToolLabel,
     FocusCellSearch,
     OpenPreferences,
+    OpenCommandPalette,
 }
 
 impl ShortcutCommand {
+    /// Every command, in the order the command palette lists them.
+    pub(crate) const ALL: [ShortcutCommand; 42] = [
+        ShortcutCommand::RunSimulation,
+        ShortcutCommand::StopSimulation,
+        ShortcutCommand::RunChecks,
+        ShortcutCommand::FileNew,
+        ShortcutCommand::FileOpen,
+        ShortcutCommand::FileSave,
+        ShortcutCommand::EditUndo,
+        ShortcutCommand::EditRedo,
+        ShortcutCommand::EditCopy,
+        ShortcutCommand::EditPaste,
+        ShortcutCommand::EditCut,
+        ShortcutCommand::EditDelete,
+        ShortcutCommand::EditSelectAll,
+        ShortcutCommand::ToolSelect,
+        ShortcutCommand::ToolWire,
+        ShortcutCommand::ToolLabel,
+        ShortcutCommand::ToolProbe,
+        ShortcutCommand::PlaceResistor,
+        ShortcutCommand::PlaceCapacitor,
+        ShortcutCommand::PlaceInductor,
+        ShortcutCommand::PlaceDiode,
+        ShortcutCommand::PlaceNmos,
+        ShortcutCommand::PlaceNpnBjt,
+        ShortcutCommand::PlaceGround,
+        ShortcutCommand::PlaceVoltageSource,
+        ShortcutCommand::PlaceCurrentSource,
+        ShortcutCommand::RotateSelectionOrPreview,
+        ShortcutCommand::MirrorSelectionHorizontal,
+        ShortcutCommand::MirrorSelectionVertical,
+        ShortcutCommand::OpenPropertiesEditor,
+        ShortcutCommand::ZoomIn,
+        ShortcutCommand::ZoomOut,
+        ShortcutCommand::ZoomFit,
+        ShortcutCommand::Zoom100,
+        ShortcutCommand::NextWorkspaceTab,
+        ShortcutCommand::ToggleBrowserPanel,
+        ShortcutCommand::ToggleLogPanel,
+        ShortcutCommand::FocusCellSearch,
+        ShortcutCommand::OpenPreferences,
+        ShortcutCommand::ShowShortcutsHelp,
+        ShortcutCommand::EscapeCancel,
+        ShortcutCommand::OpenCommandPalette,
+    ];
     pub(crate) fn display_name(self) -> &'static str {
         match self {
             ShortcutCommand::FileNew => "New",
@@ -87,6 +133,7 @@ impl ShortcutCommand {
             ShortcutCommand::ToolLabel => "Net Label Tool",
             ShortcutCommand::FocusCellSearch => "Find Instance",
             ShortcutCommand::OpenPreferences => "Preferences",
+            ShortcutCommand::OpenCommandPalette => "Command Palette",
         }
     }
 
@@ -133,6 +180,7 @@ impl ShortcutCommand {
             ShortcutCommand::ToolLabel => "N",
             ShortcutCommand::FocusCellSearch => "Shift+I",
             ShortcutCommand::OpenPreferences => "Ctrl+,",
+            ShortcutCommand::OpenCommandPalette => "Ctrl+K",
         }
     }
 }

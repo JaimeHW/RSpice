@@ -573,6 +573,9 @@ fn tools_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         state.shell.console.filter = crate::shell::state::ConsoleFilter::Script;
     }
     separator(ui);
+    if item(ui, "Command palette", Some("Ctrl+K")) {
+        state.dialogs.command_palette.open();
+    }
     if item(ui, "Preferences…", Some("Ctrl+,")) {
         state.dialogs.preferences_open = true;
     }

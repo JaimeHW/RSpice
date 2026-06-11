@@ -149,6 +149,9 @@ impl RSpiceApp {
             ShortcutCommand::OpenPreferences => {
                 self.state.dialogs.preferences_open = true;
             }
+            ShortcutCommand::OpenCommandPalette => {
+                self.state.dialogs.command_palette.open();
+            }
         }
     }
 
