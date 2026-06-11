@@ -756,6 +756,85 @@ Q1 C B 0 QN
 .END
 ";
 
+    /// onoise table of [`GP_RB_NOISE_DECK`] from the official ngspice-46
+    /// binary.
+    const GP_RB_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/gp_rb_noise_ngspice46.dat");
+
+    /// The quantifying deck for the GP noise gap: RB=500 driven from a
+    /// low-impedance source, where the base-resistance thermal noise
+    /// referred through the stage gain dominates the output (the binary
+    /// reports five times the amplitude shot noise alone produces). Without
+    /// RBM the base resistance is constant — ngspice defaults RBM to RB,
+    /// zeroing the qb-modulated part — so the externalized base node
+    /// carries the whole story.
+    const GP_RB_NOISE_DECK: &str = "\
+GP base resistance noise check
+
+V1 VCC 0 5
+VIN B 0 DC 0.78 AC 1
+RC VCC C 1k
+Q1 C B 0 QN
+
+.OPTIONS NOACCT
+
+.NOISE v(c) VIN DEC 2 100k 10Meg
+
+.MODEL QN NPN IS=1e-16 BF=100 BR=2 RB=500 RC=10 RE=2
++ CJE=2e-12 CJC=1e-12 TF=3e-10 TR=5e-9
+
+.END
+";
+
+    /// The standing acceptance gate for the GP base-resistance increment:
+    /// closing the factor-five deficit requires the base node in the matrix,
+    /// and a first externalization attempt passed this gate but shifted the
+    /// junction-limiting Newton trajectories on reference-sensitive decks
+    /// (general suite 8/8 -> 5/8), so it was reverted. The increment lands
+    /// when this passes with the full suite green.
+    #[test]
+    #[ignore = "pending the GP base-node promotion; see the test doc"]
+    fn gp_rb_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(GP_RB_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("c").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            2,
+            1e5,
+            1e7,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = GP_RB_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 1e-2,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
     /// The externalized GP collector/emitter resistances must reproduce the
     /// official binary's noise on a deck they dominate.
     #[test]
