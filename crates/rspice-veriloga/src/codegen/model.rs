@@ -115,6 +115,11 @@ pub enum StampIndex {
 pub struct JacobianEntry {
     pub row: StampIndex,
     pub col: StampIndex,
+    /// Unified node index of the derivative column (terminals first, then
+    /// internal nodes). Used to compute the companion RHS term G*V.
+    pub col_node: usize,
+    /// Sign applied to the derivative value when stamping
+    pub sign: f64,
     pub program: BytecodeProgram,
 }
 
@@ -191,11 +196,20 @@ pub enum Instruction {
     Or, // Logical or
     Not, // Logical not
     /// State-based time derivative: ddt(expr) using state index
-    /// Uses backward Euler: (current - prev) / dt
+    /// Backward Euler: (current - prev) / dt; records current into state
+    /// Stack: [expr] -> [d(expr)/dt]
     DdtState(usize),
     /// State-based integration: idt(expr, ic) using state index
-    /// Uses forward Euler: prev + expr * dt
+    /// Backward Euler: prev + expr * dt; returns ic at DC
+    /// Stack: [expr, ic] -> [integral]
     IdtState(usize),
+    /// Companion Jacobian factor for ddt: top-of-stack / dt (0 at DC)
+    DdtJacobian,
+    /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)
+    IdtJacobian,
+    /// Slope of lookup table at the input point
+    /// Stack: [input] -> [dy/dx]
+    TableDerivative(usize),
     /// $limit function: bounds value change per iteration for convergence
     /// Uses state index to track previous value
     LimitState(usize),

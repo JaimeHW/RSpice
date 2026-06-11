@@ -25,6 +25,9 @@ pub struct VmContext {
     pub state_values: Vec<f64>,
     /// State variable values (previous timestep) - for ddt/idt
     pub state_values_prev: Vec<f64>,
+    /// Per-slot flag marking state slots that have been written at least
+    /// once (used by $limit to detect its first evaluation)
+    pub state_initialized: Vec<bool>,
     /// Current timestep (delta t) for transient analysis
     pub timestep: f64,
     /// Lookup tables for $table_model interpolation
@@ -57,6 +60,7 @@ impl Default for VmContext {
             temperature: 300.15, // 27C default
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_initialized: Vec::new(),
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
@@ -83,6 +87,7 @@ impl VmContext {
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_initialized: Vec::new(),
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
@@ -107,6 +112,7 @@ impl VmContext {
             temperature: 300.15,
             state_values: Vec::new(),
             state_values_prev: Vec::new(),
+            state_initialized: Vec::new(),
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
@@ -131,6 +137,7 @@ impl VmContext {
             temperature: 300.15,
             state_values: vec![0.0; num_states],
             state_values_prev: vec![0.0; num_states],
+            state_initialized: vec![false; num_states],
             timestep: 0.0,
             lookup_tables: Vec::new(),
             delay_buffers: Vec::new(),
@@ -156,6 +163,7 @@ impl VmContext {
     pub fn allocate_states(&mut self, count: usize) {
         self.state_values.resize(count, 0.0);
         self.state_values_prev.resize(count, 0.0);
+        self.state_initialized.resize(count, false);
     }
 
     /// Allocate delay buffers used by `absdelay(...)`.
@@ -209,12 +217,29 @@ impl VmContext {
         }
     }
 
-    /// Get the voltage difference between two terminals.
+    /// Get the voltage difference between two nodes in the unified node
+    /// space (terminals first, then internal nodes; usize::MAX is the
+    /// global reference node).
     #[inline]
     pub fn voltage(&self, pos: usize, neg: usize) -> f64 {
-        let v_pos = self.voltages.get(pos).copied().unwrap_or(0.0);
-        let v_neg = self.voltages.get(neg).copied().unwrap_or(0.0);
-        v_pos - v_neg
+        self.node_potential(pos) - self.node_potential(neg)
+    }
+
+    /// Potential of a unified node index against the global reference.
+    #[inline]
+    pub fn node_potential(&self, node: usize) -> f64 {
+        if node == usize::MAX {
+            return 0.0;
+        }
+        let num_terminals = self.voltages.len();
+        if node < num_terminals {
+            self.voltages[node]
+        } else {
+            self.internal_voltages
+                .get(node - num_terminals)
+                .copied()
+                .unwrap_or(0.0)
+        }
     }
 
     /// Get internal node voltage.

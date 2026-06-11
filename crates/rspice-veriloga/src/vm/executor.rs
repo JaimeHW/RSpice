@@ -164,7 +164,8 @@ impl<'a> Vm<'a> {
             Instruction::Not => self.unary_op(|a| if a.abs() < 1e-15 { 1.0 } else { 0.0 })?,
 
             // State-based ddt: (current_expr - prev_state) / dt
-            // The expression value is on the stack, we save it and compute derivative
+            // The operand is recorded into the state slot so the next
+            // accepted timestep sees its history.
             Instruction::DdtState(idx) => {
                 let current_value = self.pop()?;
                 let prev_value = self
@@ -174,73 +175,103 @@ impl<'a> Vm<'a> {
                     .copied()
                     .unwrap_or(current_value);
 
-                // Save current value for next timestep
-                if *idx < self.context.state_values.len() {
-                    // Note: We can't mutate context here since it's borrowed
-                    // The device layer should handle state updates
+                // Record the operand for the next timestep
+                if self.context.state_values.len() <= *idx {
+                    self.context.state_values.resize(*idx + 1, 0.0);
                 }
+                self.context.state_values[*idx] = current_value;
 
                 // Compute derivative: (current - prev) / dt
-                // For DC analysis (dt=0), return 0
+                // For DC analysis (dt=0), ddt = 0 and the recorded state
+                // seeds the first transient step.
                 let dt = self.context.timestep;
                 let derivative = if dt.abs() > 1e-20 {
                     (current_value - prev_value) / dt
                 } else {
-                    0.0 // DC analysis: ddt = 0
+                    0.0
                 };
                 self.stack.push(derivative);
             }
 
             // State-based idt: prev_state + expr * dt
-            // Accumulates the integral over time
+            // Stack: [expr, ic]; at DC the integral sits at its initial
+            // condition, which also seeds the transient state.
             Instruction::IdtState(idx) => {
+                let ic = self.pop()?;
                 let current_value = self.pop()?;
-                let prev_integral = self
-                    .context
-                    .state_values_prev
-                    .get(*idx)
-                    .copied()
-                    .unwrap_or(0.0);
 
                 let dt = self.context.timestep;
-                // Forward Euler: integral += expr * dt
                 let new_integral = if dt.abs() > 1e-20 {
+                    let prev_integral = self
+                        .context
+                        .state_values_prev
+                        .get(*idx)
+                        .copied()
+                        .unwrap_or(ic);
                     prev_integral + current_value * dt
                 } else {
-                    prev_integral // DC: use accumulated value
+                    ic
                 };
+
+                if self.context.state_values.len() <= *idx {
+                    self.context.state_values.resize(*idx + 1, 0.0);
+                }
+                self.context.state_values[*idx] = new_integral;
+
                 self.stack.push(new_integral);
+            }
+
+            // Companion Jacobian factor for ddt: a / dt (0 at DC)
+            Instruction::DdtJacobian => {
+                let dt = self.context.timestep;
+                self.unary_op(|a| if dt.abs() > 1e-20 { a / dt } else { 0.0 })?
+            }
+
+            // Companion Jacobian factor for idt: a * dt (0 at DC)
+            Instruction::IdtJacobian => {
+                let dt = self.context.timestep;
+                self.unary_op(|a| if dt.abs() > 1e-20 { a * dt } else { 0.0 })?
+            }
+
+            // Slope of a lookup table at the input point
+            Instruction::TableDerivative(table_id) => {
+                let input = self.pop()?;
+                let result = self
+                    .context
+                    .lookup_tables
+                    .get(*table_id)
+                    .map(|table| table.derivative(input))
+                    .unwrap_or(0.0);
+                self.stack.push(result);
             }
 
             // $limit function: bounds value change per Newton iteration
             // Stack: [new_value, step_limit] -> [limited_value]
-            // Uses state to track previous iteration value
+            // Tracks the previous *iteration* value in the state slot (the
+            // old implementation read the never-written previous-timestep
+            // array, clamping against zero forever).
             Instruction::LimitState(idx) => {
                 let step_limit = self.pop()?;
                 let new_value = self.pop()?;
 
-                // Get previous value from state (or use new_value if first iteration)
-                let prev_value = self
-                    .context
-                    .state_values_prev
-                    .get(*idx)
-                    .copied()
-                    .unwrap_or(new_value);
+                if self.context.state_values.len() <= *idx {
+                    self.context.state_values.resize(*idx + 1, 0.0);
+                }
+                if self.context.state_initialized.len() <= *idx {
+                    self.context.state_initialized.resize(*idx + 1, false);
+                }
 
-                // Compute the change from previous iteration
-                let delta = new_value - prev_value;
-
-                // Clamp the delta to within [-step_limit, +step_limit]
-                let limited_delta = if delta > step_limit {
-                    step_limit
-                } else if delta < -step_limit {
-                    -step_limit
+                let limited_value = if self.context.state_initialized[*idx] {
+                    let prev_value = self.context.state_values[*idx];
+                    let delta = new_value - prev_value;
+                    let limited_delta = delta.clamp(-step_limit, step_limit);
+                    prev_value + limited_delta
                 } else {
-                    delta
+                    new_value
                 };
 
-                // Compute limited value
-                let limited_value = prev_value + limited_delta;
+                self.context.state_values[*idx] = limited_value;
+                self.context.state_initialized[*idx] = true;
                 self.stack.push(limited_value);
             }
 
@@ -424,6 +455,18 @@ impl<'a> Vm<'a> {
                     3 => {
                         // "noise" check
                         if current_type == 3 { 1.0 } else { 0.0 }
+                    }
+                    4 => {
+                        // "ic" check
+                        if current_type == 4 { 1.0 } else { 0.0 }
+                    }
+                    5 => {
+                        // "static": any equilibrium analysis (DC or IC)
+                        if current_type == 0 || current_type == 4 {
+                            1.0
+                        } else {
+                            0.0
+                        }
                     }
                     _ => 0.0, // Unknown analysis type
                 };

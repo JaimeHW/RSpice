@@ -296,6 +296,21 @@ impl VerilogADevice {
         self.context.time = time;
     }
 
+    /// Set the transient timestep (0 selects DC semantics for ddt/idt)
+    pub fn set_timestep(&mut self, dt: f64) {
+        self.context.set_timestep(dt);
+    }
+
+    /// Set the analysis type (0=dc, 1=ac, 2=tran, 3=noise, 4=ic)
+    pub fn set_analysis_type(&mut self, analysis: u8) {
+        self.context.analysis_type = analysis;
+    }
+
+    /// Commit integrator state after an accepted timestep
+    pub fn advance_state(&mut self) {
+        self.context.advance_state();
+    }
+
     /// Set the circuit node indices for internal nodes
     ///
     /// Called during circuit setup when the solver allocates nodes for internal nodes.
@@ -390,7 +405,7 @@ impl VerilogADevice {
                     ),
                     program_idx,
                     jacobian_idx,
-                    sign: 1.0,
+                    sign: jac_entry.sign,
                 })
                 .collect();
         }
@@ -585,7 +600,7 @@ impl VerilogADevice {
             for (jac_idx, jac_entry) in program.jacobian_programs.iter().enumerate() {
                 if let Ok(value) = vm.execute(&jac_entry.program) {
                     entries.push(JacobianEntry {
-                        value,
+                        value: jac_entry.sign * value,
                         row: jac_entry.row.clone(),
                         col: jac_entry.col.clone(),
                         program_idx: prog_idx,
@@ -636,26 +651,56 @@ impl VerilogADevice {
                 vm.context.set_branch_current(pos, neg, value);
             }
 
-            // Stamp RHS contributions
-            for entry in &matrix_indices.rhs[program_idx] {
-                if let Some(row) = entry.node {
-                    rhs_add(row, entry.sign * value);
-                }
-            }
+            // Companion model: solve A*V_new = z with the device linearized
+            // at V_old. Each KCL row receives the equivalent current
+            //   Ieq = I(V_old) - sum_col dI/dV_col * V_col_old
+            // and the Jacobian G stamps both the positive and negative rows
+            // (the entry sign tracks the row).
+            let mut ieq = value;
 
-            // Stamp Jacobian entries
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
-                let deriv = match vm
-                    .execute(&program.jacobian_programs[jacobian_entry.jacobian_idx].program)
-                {
+                let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
+                let deriv = match vm.execute(&model_entry.program) {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
+
+                // Count each derivative column once for the RHS companion
+                // term (entries come in +row/-row pairs)
+                if model_entry.sign > 0.0 {
+                    let v_col = Self::unified_node_voltage(vm.context, model_entry.col_node);
+                    ieq -= deriv * v_col;
+                }
 
                 if let (Some(row), Some(col)) = (jacobian_entry.row, jacobian_entry.col) {
                     matrix_add(row, col, jacobian_entry.sign * deriv);
                 }
             }
+
+            // RHS: rhs[pos] -= Ieq, rhs[neg] += Ieq (signs recorded at
+            // compile time)
+            for entry in &matrix_indices.rhs[program_idx] {
+                if let Some(row) = entry.node {
+                    rhs_add(row, entry.sign * ieq);
+                }
+            }
+        }
+    }
+
+    /// Voltage of a unified node index (terminals first, then internal
+    /// nodes; usize::MAX is the global reference)
+    fn unified_node_voltage(context: &VmContext, node: usize) -> f64 {
+        let num_terminals = context.terminal_count();
+        if node == usize::MAX {
+            0.0
+        } else if node < num_terminals {
+            context.voltages.get(node).copied().unwrap_or(0.0)
+        } else {
+            context
+                .internal_voltages
+                .get(node - num_terminals)
+                .copied()
+                .unwrap_or(0.0)
         }
     }
 

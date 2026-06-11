@@ -23,6 +23,12 @@ use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
 
+/// Convert (re, im) root pairs into real polynomial coefficients in
+/// ascending powers of s. Errors when the roots do not form conjugate pairs.
+pub fn roots_to_polynomial(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
+    StateSpaceFilter::roots_to_polynomial_ascending(roots)
+}
+
 /// Complex number representation for poles and zeros
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Complex {
@@ -286,6 +292,25 @@ impl StateSpaceFilter {
 
         // Extract real parts (imaginary should be ~0 for conjugate pairs)
         poly.iter().map(|c| c.re).collect()
+    }
+
+    /// Convert (re, im) root pairs to real polynomial coefficients in
+    /// ascending powers of s, validating that complex roots cancel.
+    pub fn roots_to_polynomial_ascending(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
+        let complex_roots: Vec<Complex> = roots.iter().map(|&(re, im)| Complex::new(re, im)).collect();
+
+        // Validate that the imaginary parts cancel (conjugate pairs)
+        let mut im_sum = 0.0;
+        for root in &complex_roots {
+            im_sum += root.im;
+        }
+        if im_sum.abs() > 1e-9 {
+            return Err("complex roots must come in conjugate pairs".to_string());
+        }
+
+        let mut descending = Self::roots_to_poly(&complex_roots);
+        descending.reverse();
+        Ok(descending)
     }
 
     /// Create a unity gain passthrough filter

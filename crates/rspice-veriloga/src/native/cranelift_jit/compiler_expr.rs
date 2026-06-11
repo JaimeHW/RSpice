@@ -10,8 +10,41 @@ impl JitCompiler {
         vars_ptr: Value,
         module: &mut JITModule,
         math_funcs: &HashMap<&'static str, FuncId>,
+        num_terminals: usize,
     ) -> JitResult<Value> {
         let mut stack: Vec<Value> = Vec::new();
+
+        // Load the potential of a unified node index (terminals first, then
+        // internal nodes; usize::MAX is ground). The dispatch happens at
+        // compile time since node indices are constants.
+        let load_node_potential = |builder: &mut FunctionBuilder, node: usize| -> Value {
+            if node == usize::MAX {
+                builder.ins().f64const(0.0)
+            } else if node < num_terminals {
+                let voltages_ptr = builder.ins().load(
+                    self.isa.pointer_type(),
+                    MemFlags::new(),
+                    ctx_ptr,
+                    EVAL_CTX_OFFSET_VOLTAGES,
+                );
+                builder
+                    .ins()
+                    .load(types::F64, MemFlags::new(), voltages_ptr, (node * 8) as i32)
+            } else {
+                let internal_ptr = builder.ins().load(
+                    self.isa.pointer_type(),
+                    MemFlags::new(),
+                    ctx_ptr,
+                    EVAL_CTX_OFFSET_INTERNAL_VOLTAGES,
+                );
+                builder.ins().load(
+                    types::F64,
+                    MemFlags::new(),
+                    internal_ptr,
+                    ((node - num_terminals) * 8) as i32,
+                )
+            }
+        };
 
         for instr in &program.instructions {
             match instr {
@@ -35,24 +68,8 @@ impl JitCompiler {
                     stack.push(val);
                 }
                 Instruction::PushVoltage(pos, neg) => {
-                    let voltages_ptr = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::new(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_VOLTAGES,
-                    );
-                    let v_pos = builder.ins().load(
-                        types::F64,
-                        MemFlags::new(),
-                        voltages_ptr,
-                        (*pos * 8) as i32,
-                    );
-                    let v_neg = builder.ins().load(
-                        types::F64,
-                        MemFlags::new(),
-                        voltages_ptr,
-                        (*neg * 8) as i32,
-                    );
+                    let v_pos = load_node_potential(builder, *pos);
+                    let v_neg = load_node_potential(builder, *neg);
                     let diff = builder.ins().fsub(v_pos, v_neg);
                     stack.push(diff);
                 }
@@ -405,40 +422,27 @@ impl JitCompiler {
                     stack.push(result);
                 }
 
-                // State operations (transient analysis)
-                Instruction::DdtState(_idx) | Instruction::IdtState(_idx) => {
-                    // For now, push 0 - proper ddt/idt implementation needs state tracking
-                    // This is a fallback for DC analysis where ddt/idt return 0
-                    let _ = stack.pop();
-                    stack.push(builder.ins().f64const(0.0));
+                // Stateful operators mutate per-instance history; compiling
+                // them with DC-only semantics silently diverged from the
+                // interpreter in transient analysis. Refuse instead - the
+                // device falls back to the bytecode interpreter.
+                Instruction::DdtState(_) => {
+                    return Err(JitError::UnsupportedInstruction("DdtState"));
                 }
-
-                // LimitState: call rspice_limit helper function
-                // Signature: fn(state_prev, state_idx, new_value, step_limit) -> f64
-                Instruction::LimitState(idx) => {
-                    let step_limit = stack.pop().unwrap();
-                    let new_value = stack.pop().unwrap();
-
-                    let state_prev = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::trusted(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_STATE_PREV,
-                    );
-
-                    // Create state index as pointer-sized integer
-                    let state_idx = builder.ins().iconst(self.isa.pointer_type(), *idx as i64);
-
-                    // Call rspice_limit helper
-                    let func_id = math_funcs
-                        .get("rspice_limit")
-                        .ok_or_else(|| JitError::FunctionNotFound("rspice_limit".to_string()))?;
-                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-                    let call = builder
-                        .ins()
-                        .call(func_ref, &[state_prev, state_idx, new_value, step_limit]);
-                    let result = builder.inst_results(call)[0];
-                    stack.push(result);
+                Instruction::IdtState(_) => {
+                    return Err(JitError::UnsupportedInstruction("IdtState"));
+                }
+                Instruction::DdtJacobian => {
+                    return Err(JitError::UnsupportedInstruction("DdtJacobian"));
+                }
+                Instruction::IdtJacobian => {
+                    return Err(JitError::UnsupportedInstruction("IdtJacobian"));
+                }
+                Instruction::TableDerivative(_) => {
+                    return Err(JitError::UnsupportedInstruction("TableDerivative"));
+                }
+                Instruction::LimitState(_) => {
+                    return Err(JitError::UnsupportedInstruction("LimitState"));
                 }
 
                 // TableLookup: call rspice_table_lookup helper function
@@ -477,44 +481,19 @@ impl JitCompiler {
                     stack.push(result);
                 }
 
-                // AbsDelayState: transport delay
-                // For DC/JIT, delay is typically not applicable - return current value
-                // Full transient delay would need buffer pointer in context
-                Instruction::AbsDelayState(_buffer_id) => {
-                    let _delay_time = stack.pop().unwrap();
-                    let current_value = stack.pop().unwrap();
-                    // In DC analysis, absdelay returns current value
-                    stack.push(current_value);
+                // Stateful filters and detectors require per-instance
+                // history; refuse so the interpreter handles them
+                Instruction::AbsDelayState(_) => {
+                    return Err(JitError::UnsupportedInstruction("AbsDelayState"));
                 }
-
-                // TransitionState: piecewise-linear smoothing
-                // In DC/JIT, transition is instantaneous - return input
-                Instruction::TransitionState(_filter_id) => {
-                    let _fall_time = stack.pop().unwrap();
-                    let _rise_time = stack.pop().unwrap();
-                    let _delay = stack.pop().unwrap();
-                    let input = stack.pop().unwrap();
-                    // In DC, transition returns input
-                    stack.push(input);
+                Instruction::TransitionState(_) => {
+                    return Err(JitError::UnsupportedInstruction("TransitionState"));
                 }
-
-                // SlewState: slew rate limiting
-                // In DC/JIT, slew is instantaneous - return input
-                Instruction::SlewState(_filter_id) => {
-                    let _max_neg_slew = stack.pop().unwrap();
-                    let _max_pos_slew = stack.pop().unwrap();
-                    let input = stack.pop().unwrap();
-                    // In DC, slew returns input
-                    stack.push(input);
+                Instruction::SlewState(_) => {
+                    return Err(JitError::UnsupportedInstruction("SlewState"));
                 }
-
-                // CrossState: threshold crossing detection
-                // In DC, cross never fires - return 0
-                Instruction::CrossState(_detector_id) => {
-                    let _direction = stack.pop().unwrap();
-                    let _value = stack.pop().unwrap();
-                    // DC: no crossing events
-                    stack.push(builder.ins().f64const(0.0));
+                Instruction::CrossState(_) => {
+                    return Err(JitError::UnsupportedInstruction("CrossState"));
                 }
 
                 // WhiteNoise: noise source
@@ -532,16 +511,11 @@ impl JitCompiler {
                     stack.push(builder.ins().f64const(0.0));
                 }
 
-                // Analysis: check current analysis type
-                // In JIT, we assume DC analysis by default (return 1 for dc check, 0 others)
-                Instruction::Analysis(analysis_str_id) => {
-                    // For JIT DC analysis: dc=1, ac=0, tran=0
-                    let result = if *analysis_str_id == 0 {
-                        1.0 // DC check returns true
-                    } else {
-                        0.0 // Non-DC checks return false
-                    };
-                    stack.push(builder.ins().f64const(result));
+                // The evaluation context does not expose the analysis type
+                // to native code yet; assuming DC silently diverged from the
+                // interpreter during transient analysis
+                Instruction::Analysis(_) => {
+                    return Err(JitError::UnsupportedInstruction("Analysis"));
                 }
 
                 // AboveState: level crossing event
@@ -557,56 +531,16 @@ impl JitCompiler {
                     stack.push(result);
                 }
 
-                // TimerState: periodic timer
-                // In DC, timer never fires - return 0
-                Instruction::TimerState(_timer_id) => {
-                    let _period = stack.pop().unwrap();
-                    let _start_time = stack.pop().unwrap();
-                    // DC: no timer events
-                    stack.push(builder.ins().f64const(0.0));
+                // TimerState depends on simulation time bookkeeping
+                Instruction::TimerState(_) => {
+                    return Err(JitError::UnsupportedInstruction("TimerState"));
                 }
 
-                // LaplaceState: Laplace state-space filter step
-                // Calls rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
-                Instruction::LaplaceState(filter_id) => {
-                    let input = stack.pop().unwrap();
-
-                    let filters_ptr = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::new(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_LAPLACE_FILTERS,
-                    );
-                    let filters_len = builder.ins().load(
-                        self.isa.pointer_type(),
-                        MemFlags::new(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_LAPLACE_FILTERS_LEN,
-                    );
-
-                    let timestep = builder.ins().load(
-                        types::F64,
-                        MemFlags::new(),
-                        ctx_ptr,
-                        EVAL_CTX_OFFSET_TIMESTEP,
-                    );
-
-                    // Create filter_id as a constant
-                    let filter_idx = builder
-                        .ins()
-                        .iconst(self.isa.pointer_type(), *filter_id as i64);
-
-                    // Call rspice_laplace_step(filters_ptr, filters_len, filter_id, input, timestep)
-                    let func_id = math_funcs.get("rspice_laplace_step").ok_or_else(|| {
-                        JitError::FunctionNotFound("rspice_laplace_step".to_string())
-                    })?;
-                    let func_ref = module.declare_func_in_func(*func_id, builder.func);
-                    let call = builder.ins().call(
-                        func_ref,
-                        &[filters_ptr, filters_len, filter_idx, input, timestep],
-                    );
-                    let result = builder.inst_results(call)[0];
-                    stack.push(result);
+                // Laplace filters carry per-instance integration state that
+                // the native path cannot manage consistently with the
+                // interpreter (the helper mutated the shared model filters)
+                Instruction::LaplaceState(_) => {
+                    return Err(JitError::UnsupportedInstruction("LaplaceState"));
                 }
             }
         }

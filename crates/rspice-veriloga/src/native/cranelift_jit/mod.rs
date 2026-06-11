@@ -36,6 +36,9 @@ pub enum JitError {
     Codegen(String),
     /// Function not found
     FunctionNotFound(String),
+    /// Instruction the JIT cannot compile faithfully; the caller falls
+    /// back to the bytecode interpreter
+    UnsupportedInstruction(&'static str),
 }
 
 impl std::fmt::Display for JitError {
@@ -44,6 +47,9 @@ impl std::fmt::Display for JitError {
             JitError::Module(msg) => write!(f, "JIT module error: {}", msg),
             JitError::Codegen(msg) => write!(f, "JIT codegen error: {}", msg),
             JitError::FunctionNotFound(name) => write!(f, "Function not found: {}", name),
+            JitError::UnsupportedInstruction(name) => {
+                write!(f, "Instruction not supported by the JIT: {}", name)
+            }
         }
     }
 }
@@ -92,15 +98,9 @@ const EVAL_CTX_OFFSET_CURRENTS_LEN: i32 = std::mem::offset_of!(EvalContext, curr
 const EVAL_CTX_OFFSET_NUM_TERMINALS: i32 = std::mem::offset_of!(EvalContext, num_terminals) as i32;
 const EVAL_CTX_OFFSET_TEMPERATURE: i32 = std::mem::offset_of!(EvalContext, temperature) as i32;
 const EVAL_CTX_OFFSET_TIME: i32 = std::mem::offset_of!(EvalContext, time) as i32;
-const EVAL_CTX_OFFSET_TIMESTEP: i32 = std::mem::offset_of!(EvalContext, timestep) as i32;
-const EVAL_CTX_OFFSET_STATE_PREV: i32 = std::mem::offset_of!(EvalContext, state_prev) as i32;
 const EVAL_CTX_OFFSET_LOOKUP_TABLES: i32 = std::mem::offset_of!(EvalContext, lookup_tables) as i32;
 const EVAL_CTX_OFFSET_LOOKUP_TABLES_LEN: i32 =
     std::mem::offset_of!(EvalContext, lookup_tables_len) as i32;
-const EVAL_CTX_OFFSET_LAPLACE_FILTERS: i32 =
-    std::mem::offset_of!(EvalContext, laplace_filters) as i32;
-const EVAL_CTX_OFFSET_LAPLACE_FILTERS_LEN: i32 =
-    std::mem::offset_of!(EvalContext, laplace_filters_len) as i32;
 
 impl NativeModel {
     unsafe fn cast_assignment_fn(ptr: *const u8) -> AssignmentFn {

@@ -18,31 +18,76 @@ use smol_str::SmolStr;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Constant-fold an IR expression (used for filter coefficients and
+/// constant direction arguments)
+fn autodiff_fold(expr: IrExpr) -> IrExpr {
+    crate::ir::autodiff::simplify(expr)
+}
+
+/// Sentinel node index for the global reference (ground) node.
+///
+/// `V(a)` measures the potential of `a` against this reference, never
+/// against terminal 0.
+pub const GROUND_NODE: usize = usize::MAX;
+
 /// Context for expression conversion
 ///
 /// Maintains mappings from names to indices for efficient IR generation.
+/// Nodes occupy a unified index space: ports first (0..num_terminals),
+/// then internal nodes (num_terminals..num_terminals+num_internal).
+/// Ground nets map to [`GROUND_NODE`].
 #[derive(Debug)]
 pub struct ConversionContext {
-    /// Map from terminal name to index
-    terminal_map: HashMap<SmolStr, usize>,
+    /// Map from node name (port or internal) to unified node index
+    node_map: HashMap<SmolStr, usize>,
+    /// Map from named branch to its (pos, neg) node indices
+    branch_map: HashMap<SmolStr, (usize, usize)>,
     /// Map from parameter name to index
     param_map: HashMap<SmolStr, usize>,
     /// Map from variable name to index
     var_map: HashMap<SmolStr, usize>,
-    /// Ground terminal index (if any)
-    ground_index: Option<usize>,
+    /// Number of external terminals (ports)
+    num_terminals: usize,
+    /// Number of internal nodes
+    num_internal: usize,
 }
 
 impl ConversionContext {
     /// Create a new conversion context from an analyzed module
     pub fn from_module(module: &AnalyzedModule) -> Self {
-        let mut terminal_map = HashMap::new();
+        let mut node_map = HashMap::new();
         let mut param_map = HashMap::new();
         let mut var_map = HashMap::new();
 
-        // Map port names to terminal indices
+        // Ports occupy node indices 0..P
+        let num_terminals = module.ports.len();
         for (idx, port) in module.ports.iter().enumerate() {
-            terminal_map.insert(port.name.clone(), idx);
+            node_map.insert(port.name.clone(), idx);
+        }
+
+        // Internal nodes follow at P..P+N
+        let num_internal = module.internal_nodes.len();
+        for node in &module.internal_nodes {
+            node_map.insert(node.name.clone(), num_terminals + node.index);
+        }
+
+        // Ground nets reference the global ground sentinel
+        for name in &module.ground_nodes {
+            node_map.insert(name.clone(), GROUND_NODE);
+        }
+
+        // Named branches resolve to node pairs
+        let mut branch_map = HashMap::new();
+        for branch in &module.branches {
+            let pos = node_map.get(&branch.pos_node).copied();
+            let neg = if branch.neg_node.is_empty() {
+                Some(GROUND_NODE)
+            } else {
+                node_map.get(&branch.neg_node).copied()
+            };
+            if let (Some(pos), Some(neg)) = (pos, neg) {
+                branch_map.insert(branch.name.clone(), (pos, neg));
+            }
         }
 
         // Map parameter names to indices
@@ -56,21 +101,23 @@ impl ConversionContext {
         }
 
         Self {
-            terminal_map,
+            node_map,
+            branch_map,
             param_map,
             var_map,
-            ground_index: None,
+            num_terminals,
+            num_internal,
         }
     }
 
-    /// Set the ground terminal index
-    pub fn set_ground(&mut self, idx: usize) {
-        self.ground_index = Some(idx);
+    /// Get unified node index by name (port, internal node, or ground net)
+    pub fn node_index(&self, name: &str) -> Option<usize> {
+        self.node_map.get(name).copied()
     }
 
-    /// Get terminal index by name
-    pub fn terminal_index(&self, name: &str) -> Option<usize> {
-        self.terminal_map.get(name).copied()
+    /// Resolve a named branch to its (pos, neg) node indices
+    pub fn branch_nodes(&self, name: &str) -> Option<(usize, usize)> {
+        self.branch_map.get(name).copied()
     }
 
     /// Get parameter index by name
@@ -83,14 +130,19 @@ impl ConversionContext {
         self.var_map.get(name).copied()
     }
 
-    /// Ground terminal index (0 for implicit ground)
+    /// Global ground (reference) node index
     pub fn ground(&self) -> usize {
-        self.ground_index.unwrap_or(0)
+        GROUND_NODE
     }
 
-    /// Number of terminals
+    /// Number of external terminals
     pub fn num_terminals(&self) -> usize {
-        self.terminal_map.len()
+        self.num_terminals
+    }
+
+    /// Total number of nodes carrying unknowns (terminals + internal)
+    pub fn num_nodes(&self) -> usize {
+        self.num_terminals + self.num_internal
     }
 }
 
@@ -642,15 +694,9 @@ impl<'a> ExprConverter<'a> {
                     Box::new(ln_ratio),
                 ));
             }
-            _ => {
-                return Err(
-                    CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
-                        "Function: {}",
-                        call.name
-                    )))
-                    .into(),
-                );
-            }
+            // Analog operators, noise sources, filters, and event functions
+            // arrive as plain calls; route them to their IR forms.
+            _ => return self.convert_analog_call(call),
         };
 
         let args: Vec<IrExpr> = call
@@ -662,15 +708,348 @@ impl<'a> ExprConverter<'a> {
         Ok(IrExpr::Call(ir_func, args))
     }
 
+    /// Convert analog operators, filters, noise sources, and event functions
+    fn convert_analog_call(&self, call: &CallExpr) -> CompileResult<IrExpr> {
+        let require_arg = |n: usize| -> CompileResult<&Expression> {
+            call.args.get(n).ok_or_else(|| {
+                CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                    "{} requires at least {} argument(s)",
+                    call.name,
+                    n + 1
+                )))
+                .into()
+            })
+        };
+
+        match call.name.as_str() {
+            "ddt" => {
+                let inner = self.convert(require_arg(0)?)?;
+                Ok(IrExpr::Ddt(Box::new(inner)))
+            }
+            "idt" => {
+                let inner = self.convert(require_arg(0)?)?;
+                let ic = call
+                    .args
+                    .get(1)
+                    .map(|e| self.convert(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(IrExpr::Idt(Box::new(inner), ic))
+            }
+            "idtmod" => {
+                if call.args.len() > 2 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                        "idtmod with a modulus argument".into(),
+                    ))
+                    .into());
+                }
+                let inner = self.convert(require_arg(0)?)?;
+                let ic = call
+                    .args
+                    .get(1)
+                    .map(|e| self.convert(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(IrExpr::Idt(Box::new(inner), ic))
+            }
+            "ddx" => {
+                let inner = self.convert(require_arg(0)?)?;
+                let probe = require_arg(1)?;
+                let Expression::BranchAccess(BranchAccess::Nodes { access, pos, neg, .. }) = probe
+                else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "ddx probe must be a branch access like V(node)".into(),
+                    ))
+                    .into());
+                };
+                if access != "V" || neg.is_some() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                        "ddx probes other than a single node potential V(node)".into(),
+                    ))
+                    .into());
+                }
+                let node = self.ctx.node_index(pos).ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                        "Unknown node: {}",
+                        pos
+                    )))
+                })?;
+                Ok(IrExpr::Ddx {
+                    expr: Box::new(inner),
+                    node,
+                })
+            }
+            "absdelay" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let delay = self.convert(require_arg(1)?)?;
+                Ok(IrExpr::AbsDelay {
+                    expr: Box::new(expr),
+                    delay_time: Box::new(delay),
+                })
+            }
+            "transition" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    Ok(call
+                        .args
+                        .get(n)
+                        .map(|e| self.convert(e))
+                        .transpose()?
+                        .map(Box::new))
+                };
+                Ok(IrExpr::Transition {
+                    expr: Box::new(expr),
+                    delay: opt(1)?,
+                    rise_time: opt(2)?,
+                    fall_time: opt(3)?,
+                })
+            }
+            "slew" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let opt = |n: usize| -> CompileResult<Option<Box<IrExpr>>> {
+                    Ok(call
+                        .args
+                        .get(n)
+                        .map(|e| self.convert(e))
+                        .transpose()?
+                        .map(Box::new))
+                };
+                Ok(IrExpr::Slew {
+                    expr: Box::new(expr),
+                    max_pos_slew: opt(1)?,
+                    max_neg_slew: opt(2)?,
+                })
+            }
+            "cross" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let direction = match call.args.get(1) {
+                    Some(arg) => match self.convert(arg).map(autodiff_fold) {
+                        Ok(IrExpr::Const(v)) => Some(v as i32),
+                        _ => Some(0),
+                    },
+                    None => None,
+                };
+                let time_tol = call
+                    .args
+                    .get(2)
+                    .map(|e| self.convert(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(IrExpr::Cross {
+                    expr: Box::new(expr),
+                    direction,
+                    time_tol,
+                })
+            }
+            "above" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let threshold = match call.args.get(1) {
+                    Some(t) => self.convert(t)?,
+                    None => IrExpr::Const(0.0),
+                };
+                let time_tol = call
+                    .args
+                    .get(2)
+                    .map(|e| self.convert(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(IrExpr::Above {
+                    expr: Box::new(expr),
+                    threshold: Box::new(threshold),
+                    time_tol,
+                })
+            }
+            "timer" => {
+                let start_time = self.convert(require_arg(0)?)?;
+                let period = call
+                    .args
+                    .get(1)
+                    .map(|e| self.convert(e))
+                    .transpose()?
+                    .map(Box::new);
+                Ok(IrExpr::Timer {
+                    start_time: Box::new(start_time),
+                    period,
+                })
+            }
+            "last_crossing" => {
+                // Returns -1 until the first crossing is observed (LRM);
+                // crossing-time bookkeeping is not implemented yet.
+                Ok(IrExpr::Const(-1.0))
+            }
+            "analysis" => {
+                let analysis_type = match call.args.first() {
+                    Some(Expression::StringLit(s)) => s.value.to_string(),
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                            "analysis() requires a string argument".into(),
+                        ))
+                        .into());
+                    }
+                };
+                Ok(IrExpr::Analysis(analysis_type))
+            }
+            "white_noise" => {
+                let power = self.convert(require_arg(0)?)?;
+                let name = match call.args.get(1) {
+                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                Ok(IrExpr::WhiteNoise {
+                    power: Box::new(power),
+                    name,
+                })
+            }
+            "flicker_noise" => {
+                let power = self.convert(require_arg(0)?)?;
+                let exponent = self.convert(require_arg(1)?)?;
+                let name = match call.args.get(2) {
+                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                Ok(IrExpr::FlickerNoise {
+                    power: Box::new(power),
+                    exponent: Box::new(exponent),
+                    name,
+                })
+            }
+            "laplace_nd" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let numerator = self.const_real_array(require_arg(1)?)?;
+                let denominator = self.const_real_array(require_arg(2)?)?;
+                if denominator.iter().all(|c| *c == 0.0) {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "laplace_nd denominator must be nonzero".into(),
+                    ))
+                    .into());
+                }
+                Ok(IrExpr::LaplaceND {
+                    expr: Box::new(expr),
+                    numerator,
+                    denominator,
+                })
+            }
+            "laplace_zp" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let zeros = self.const_complex_pairs(require_arg(1)?)?;
+                let poles = self.const_complex_pairs(require_arg(2)?)?;
+                Ok(IrExpr::LaplaceZP {
+                    expr: Box::new(expr),
+                    zeros,
+                    poles,
+                    gain: 1.0,
+                })
+            }
+            "laplace_zd" => {
+                // zeros (pairs) + denominator coefficients: expand the
+                // zeros into a numerator polynomial
+                let expr = self.convert(require_arg(0)?)?;
+                let zeros = self.const_complex_pairs(require_arg(1)?)?;
+                let denominator = self.const_real_array(require_arg(2)?)?;
+                let numerator =
+                    crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace_zd zeros: {}",
+                            e
+                        )))
+                    })?;
+                Ok(IrExpr::LaplaceND {
+                    expr: Box::new(expr),
+                    numerator,
+                    denominator,
+                })
+            }
+            "laplace_np" => {
+                // numerator coefficients + poles (pairs)
+                let expr = self.convert(require_arg(0)?)?;
+                let numerator = self.const_real_array(require_arg(1)?)?;
+                let poles = self.const_complex_pairs(require_arg(2)?)?;
+                let denominator =
+                    crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "laplace_np poles: {}",
+                            e
+                        )))
+                    })?;
+                Ok(IrExpr::LaplaceND {
+                    expr: Box::new(expr),
+                    numerator,
+                    denominator,
+                })
+            }
+            "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(format!(
+                    "Z-domain filter {} (use laplace_* instead)",
+                    call.name
+                )),
+            )
+            .into()),
+            "noise_table" | "noise_table_log" => Err(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(format!("{}()", call.name)),
+            )
+            .into()),
+            _ => Err(
+                CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
+                    "Function: {}",
+                    call.name
+                )))
+                .into(),
+            ),
+        }
+    }
+
+    /// Evaluate an array-literal argument to constant reals
+    fn const_real_array(&self, expr: &Expression) -> CompileResult<Vec<f64>> {
+        let elements: Vec<&Expression> = match expr {
+            Expression::ArrayLiteral(arr) => arr.elements.iter().collect(),
+            other => vec![other],
+        };
+
+        elements
+            .into_iter()
+            .map(|e| {
+                let converted = autodiff_fold(self.convert(e)?);
+                match converted {
+                    IrExpr::Const(v) => Ok(v),
+                    _ => Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                        "filter coefficients must be compile-time constants \
+                         (parameter-dependent coefficients are not supported yet)"
+                            .into(),
+                    ))
+                    .into()),
+                }
+            })
+            .collect()
+    }
+
+    /// Evaluate an array-literal argument to constant (re, im) pairs
+    fn const_complex_pairs(&self, expr: &Expression) -> CompileResult<Vec<(f64, f64)>> {
+        let values = self.const_real_array(expr)?;
+        if !values.len().is_multiple_of(2) {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "pole/zero vectors must contain (real, imaginary) pairs".into(),
+            ))
+            .into());
+        }
+        Ok(values.chunks_exact(2).map(|p| (p[0], p[1])).collect())
+    }
+
     /// Convert a branch access expression
     fn convert_branch_access(&self, access: &BranchAccess) -> CompileResult<IrExpr> {
         match access {
             BranchAccess::Nodes {
                 access, pos, neg, ..
             } => {
-                let pos_idx = self.ctx.terminal_index(pos).ok_or_else(|| {
+                // A single-name access may refer to a declared named branch
+                if neg.is_none()
+                    && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
+                {
+                    return Self::access_to_ir(access, pos_idx, neg_idx);
+                }
+
+                let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown terminal: {}",
+                        "Unknown node: {}",
                         pos
                     )))
                 })?;
@@ -678,9 +1057,9 @@ impl<'a> ExprConverter<'a> {
                 let neg_idx = neg
                     .as_ref()
                     .map(|n| {
-                        self.ctx.terminal_index(n).ok_or_else(|| {
+                        self.ctx.node_index(n).ok_or_else(|| {
                             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                                "Unknown terminal: {}",
+                                "Unknown node: {}",
                                 n
                             )))
                         })
@@ -688,28 +1067,30 @@ impl<'a> ExprConverter<'a> {
                     .transpose()?
                     .unwrap_or(self.ctx.ground());
 
-                match access.as_str() {
-                    "V" => Ok(IrExpr::Voltage(pos_idx, neg_idx)),
-                    "I" => Ok(IrExpr::Current(pos_idx, neg_idx)),
-                    _ => Err(
-                        CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
-                            "Branch access: {}",
-                            access
-                        )))
-                        .into(),
-                    ),
-                }
+                Self::access_to_ir(access, pos_idx, neg_idx)
             }
             BranchAccess::Branch { access, name, .. } => {
-                // Named branch access - would need branch table lookup
-                Err(
-                    CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
-                        "Named branch access: {}(<{}>)",
-                        access, name
-                    )))
-                    .into(),
-                )
+                let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("Unknown branch: {}", name),
+                    ))
+                    .into());
+                };
+                Self::access_to_ir(access, pos_idx, neg_idx)
             }
+        }
+    }
+
+    /// Map an access function and node pair to the IR quantity.
+    ///
+    /// Potential accesses (V, Temp, Pos, ...) read the node-pair potential;
+    /// flow accesses (I, Pwr, ...) read the branch flow.
+    fn access_to_ir(access: &str, pos: usize, neg: usize) -> CompileResult<IrExpr> {
+        match access {
+            "I" | "Pwr" | "F" | "Tau" | "MMF" | "Flow" => Ok(IrExpr::Current(pos, neg)),
+            // All potential-natured accesses behave like V over the unified
+            // node space
+            _ => Ok(IrExpr::Voltage(pos, neg)),
         }
     }
 
@@ -795,9 +1176,18 @@ impl<'a> ExprConverter<'a> {
     pub fn convert_branch_ref(&self, access: &BranchAccess) -> CompileResult<BranchRef> {
         match access {
             BranchAccess::Nodes { pos, neg, .. } => {
-                let pos_idx = self.ctx.terminal_index(pos).ok_or_else(|| {
+                if neg.is_none()
+                    && let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(pos)
+                {
+                    return Ok(BranchRef {
+                        pos_terminal: pos_idx,
+                        neg_terminal: neg_idx,
+                    });
+                }
+
+                let pos_idx = self.ctx.node_index(pos).ok_or_else(|| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown terminal: {}",
+                        "Unknown node: {}",
                         pos
                     )))
                 })?;
@@ -805,9 +1195,9 @@ impl<'a> ExprConverter<'a> {
                 let neg_idx = neg
                     .as_ref()
                     .map(|n| {
-                        self.ctx.terminal_index(n).ok_or_else(|| {
+                        self.ctx.node_index(n).ok_or_else(|| {
                             CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                                "Unknown terminal: {}",
+                                "Unknown node: {}",
                                 n
                             )))
                         })
@@ -820,10 +1210,18 @@ impl<'a> ExprConverter<'a> {
                     neg_terminal: neg_idx,
                 })
             }
-            BranchAccess::Branch { name, .. } => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!("Named branch: {}", name)),
-            )
-            .into()),
+            BranchAccess::Branch { name, .. } => {
+                let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("Unknown branch: {}", name),
+                    ))
+                    .into());
+                };
+                Ok(BranchRef {
+                    pos_terminal: pos_idx,
+                    neg_terminal: neg_idx,
+                })
+            }
         }
     }
 

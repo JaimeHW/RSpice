@@ -43,6 +43,7 @@ impl JitCompiler {
                 vars_ptr,
                 module,
                 math_funcs,
+                model.num_terminals,
             )?;
 
             // Store to vars[var_index]
@@ -110,6 +111,7 @@ impl JitCompiler {
             vars_ptr,
             module,
             math_funcs,
+            model.num_terminals,
         )?;
 
         builder.ins().return_(&[value]);

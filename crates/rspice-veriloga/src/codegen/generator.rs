@@ -30,7 +30,7 @@ impl CodeGenerator {
         })?;
 
         // Build IR
-        let ir = DeviceIR::from_analyzed(module);
+        let ir = DeviceIR::from_analyzed(module)?;
 
         // Generate code from IR
         self.generate_from_ir(&ir)
@@ -92,68 +92,91 @@ impl CodeGenerator {
         Ok(model)
     }
 
+    /// Map a unified node index (terminals, then internal nodes, ground
+    /// sentinel) to a stamp index
+    fn node_stamp_index(ir: &DeviceIR, node: usize) -> StampIndex {
+        if node == crate::expr_converter::GROUND_NODE {
+            StampIndex::Ground
+        } else if node < ir.terminals.len() {
+            StampIndex::Terminal(node)
+        } else {
+            StampIndex::Internal(node - ir.terminals.len())
+        }
+    }
+
     /// Compile a branch equation to a stamp program
+    ///
+    /// Current contributions use the standard SPICE companion form: the
+    /// Jacobian G stamps all four (pos/neg x col) positions and the RHS
+    /// receives -/+ Ieq where Ieq = I - sum(G*V) is computed by the device
+    /// at stamp time.
     fn compile_equation(&self, eq: &BranchEquation, ir: &DeviceIR) -> CompileResult<StampProgram> {
+        if !eq.is_current {
+            // Potential contributions (V(a,b) <+ ...) require a branch
+            // current unknown in the MNA system, which the engine does not
+            // allocate yet. Failing is better than silently stamping
+            // nothing, which produced plausible-looking wrong results.
+            return Err(CompileError::CodeGen(CodeGenError::new(
+                CodeGenErrorKind::UnsupportedFeature(
+                    "potential (voltage) contributions are not supported yet; \
+                     rewrite the model with current contributions"
+                        .into(),
+                ),
+            )));
+        }
+
         let value_program = self.compile_expr(&eq.expr, ir)?;
+
+        let pos = Self::node_stamp_index(ir, eq.branch.pos_terminal);
+        let neg = Self::node_stamp_index(ir, eq.branch.neg_terminal);
 
         let mut jacobian_programs = Vec::new();
         for deriv in &eq.derivatives {
+            let DerivativeWrt::Voltage(col_node) = deriv.wrt else {
+                continue;
+            };
+            let col = Self::node_stamp_index(ir, col_node);
             let program = self.compile_expr(&deriv.expr, ir)?;
-            let (row, col) = self.derivative_indices(&eq.branch, &deriv.wrt, eq.is_current);
-            jacobian_programs.push(JacobianEntry { row, col, program });
+
+            // KCL row of the positive node gains +dI/dV, the negative node
+            // row gains -dI/dV
+            jacobian_programs.push(JacobianEntry {
+                row: pos.clone(),
+                col: col.clone(),
+                col_node,
+                sign: 1.0,
+                program: program.clone(),
+            });
+            jacobian_programs.push(JacobianEntry {
+                row: neg.clone(),
+                col,
+                col_node,
+                sign: -1.0,
+                program,
+            });
         }
 
-        // Build stamp locations for the contribution
-        let pos = eq.branch.pos_terminal;
-        let neg = eq.branch.neg_terminal;
-
-        let stamp_locations = if eq.is_current {
-            // Current contribution: stamps to RHS at pos and neg
-            vec![
-                StampLocation {
-                    row: StampIndex::Terminal(pos),
-                    col: StampIndex::Ground,
-                    sign: -1.0,
-                },
-                StampLocation {
-                    row: StampIndex::Terminal(neg),
-                    col: StampIndex::Ground,
-                    sign: 1.0,
-                },
-            ]
-        } else {
-            // Voltage contribution would need branch equation
-            vec![]
-        };
+        // Current contribution: I leaves pos, enters neg.
+        // The device computes Ieq = I - G*V and stamps rhs[pos] -= Ieq,
+        // rhs[neg] += Ieq (signs recorded here).
+        let stamp_locations = vec![
+            StampLocation {
+                row: pos,
+                col: StampIndex::Ground,
+                sign: -1.0,
+            },
+            StampLocation {
+                row: neg,
+                col: StampIndex::Ground,
+                sign: 1.0,
+            },
+        ];
 
         Ok(StampProgram {
             stamp_locations,
             value_program,
             jacobian_programs,
         })
-    }
-
-    /// Get row/col for a derivative
-    fn derivative_indices(
-        &self,
-        branch: &crate::ir::BranchRef,
-        wrt: &DerivativeWrt,
-        is_current: bool,
-    ) -> (StampIndex, StampIndex) {
-        match wrt {
-            DerivativeWrt::Voltage(node) => {
-                if is_current {
-                    (
-                        StampIndex::Terminal(branch.pos_terminal),
-                        StampIndex::Terminal(*node),
-                    )
-                } else {
-                    (StampIndex::Internal(0), StampIndex::Terminal(*node))
-                }
-            }
-            DerivativeWrt::Current(p, _n) => (StampIndex::Terminal(*p), StampIndex::Internal(0)),
-            DerivativeWrt::Time => (StampIndex::Ground, StampIndex::Ground),
-        }
     }
 
     /// Compile an IR expression to bytecode
@@ -302,20 +325,52 @@ impl CodeGenerator {
                 program.instructions.push(Instruction::Not);
             }
             IrExpr::Ddt(inner) => {
-                // For DC analysis, ddt = 0. For transient, would need state tracking.
-                // For now, emit 0 for DC compatibility
-                let _ = inner; // Mark as intentionally unused for now
-                program.instructions.push(Instruction::PushConst(0.0));
+                // Backward-Euler time derivative with a dedicated state slot:
+                // (value - prev_value) / dt in transient, 0 at DC. The state
+                // slot records the operand so the next step has its history.
+                self.emit_expr(inner, ir, program)?;
+                let state_id = Self::allocate_slot(&self.limit_state_count);
+                program.instructions.push(Instruction::DdtState(state_id));
             }
             IrExpr::Idt(inner, ic) => {
-                // For DC analysis, idt behavior depends on context
-                // For now, use initial condition if provided, else 0
+                // Time integral: state + value*dt in transient; the initial
+                // condition (default 0) seeds the integral at DC/IC.
+                self.emit_expr(inner, ir, program)?;
                 if let Some(ic_expr) = ic {
                     self.emit_expr(ic_expr, ir, program)?;
                 } else {
-                    let _ = inner; // Mark as intentionally unused for now
                     program.instructions.push(Instruction::PushConst(0.0));
                 }
+                let state_id = Self::allocate_slot(&self.limit_state_count);
+                program.instructions.push(Instruction::IdtState(state_id));
+            }
+            IrExpr::DdtCompanion(inner) => {
+                // Jacobian companion factor: operand / dt (0 at DC)
+                self.emit_expr(inner, ir, program)?;
+                program.instructions.push(Instruction::DdtJacobian);
+            }
+            IrExpr::IdtCompanion(inner) => {
+                // Jacobian companion factor: operand * dt (0 at DC)
+                self.emit_expr(inner, ir, program)?;
+                program.instructions.push(Instruction::IdtJacobian);
+            }
+            IrExpr::TableDerivative {
+                input,
+                x_data,
+                y_data,
+            } => {
+                self.emit_expr(input, ir, program)?;
+                let table_id = self.register_lookup_table(x_data, y_data)?;
+                program
+                    .instructions
+                    .push(Instruction::TableDerivative(table_id));
+            }
+            IrExpr::Ddx { .. } => {
+                return Err(CompileError::CodeGen(CodeGenError::new(
+                    CodeGenErrorKind::Internal(
+                        "unresolved ddx() reached code generation".into(),
+                    ),
+                )));
             }
             IrExpr::Limit(inner, step) => {
                 // $limit(expr, step) - bounds value change per Newton iteration
@@ -452,6 +507,8 @@ impl CodeGenerator {
                     "tran" | "transient" => 2,
                     "noise" => 3,
                     "ic" => 4,
+                    // "static" matches any equilibrium (DC or IC) analysis
+                    "static" => 5,
                     _ => 255, // Unknown = always false
                 };
                 program
