@@ -1236,6 +1236,92 @@ impl VerilogADevice {
         }
     }
 
+    /// Evaluate the model's noise sources at an operating point.
+    ///
+    /// PSDs come from the contribution expressions' `white_noise` /
+    /// `flicker_noise` terms (amplitude-squared scaling folded in at
+    /// compile time). Current-contribution sources inject across their
+    /// node pair; potential-contribution sources inject at the branch
+    /// row as a series EMF, so their PSD is in V²/Hz. Node ids follow the
+    /// engine convention (0 = ground). Mode-disabled contributions
+    /// contribute nothing.
+    pub fn noise_sources(&mut self, circuit_voltages: &[f64]) -> Vec<EvaluatedNoiseSource> {
+        self.update_all_voltages(circuit_voltages);
+
+        let context = &mut self.context;
+        let model = &self.model;
+        let program_active = &self.program_active;
+        #[cfg(feature = "native")]
+        let native = self.native_model.as_deref();
+
+        context.clear_currents();
+        let mut vm = Vm::new(context);
+        Self::run_assignment_pass(
+            &mut vm,
+            model,
+            #[cfg(feature = "native")]
+            native,
+        );
+
+        let circuit_node = |index: &StampIndex| -> usize {
+            match index {
+                StampIndex::Terminal(t) => self.node_mapping.get(*t).copied().unwrap_or(0),
+                StampIndex::Internal(i) => {
+                    self.internal_node_indices.get(*i).copied().unwrap_or(0)
+                }
+                StampIndex::Branch(k) => {
+                    self.branch_current_indices.get(*k).copied().unwrap_or(0)
+                }
+                StampIndex::Ground => 0,
+            }
+        };
+
+        let mut sources = Vec::with_capacity(model.noise_sources.len());
+        for (idx, source) in model.noise_sources.iter().enumerate() {
+            if !program_active
+                .get(source.program_idx)
+                .copied()
+                .unwrap_or(true)
+            {
+                continue;
+            }
+            let psd = match vm.execute(&source.psd_program) {
+                Ok(v) if v.is_finite() => v.max(0.0),
+                _ => continue,
+            };
+            if psd == 0.0 {
+                continue;
+            }
+            let exponent = source
+                .exponent_program
+                .as_ref()
+                .map(|p| vm.execute(p).unwrap_or(1.0));
+
+            // Potential-contribution noise is a series EMF on the branch
+            // equation row; current noise injects across the node pair
+            let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
+                (false, Some(ordinal)) => (
+                    self.branch_current_indices.get(ordinal).copied().unwrap_or(0),
+                    0,
+                ),
+                _ => (circuit_node(&source.pos), circuit_node(&source.neg)),
+            };
+
+            sources.push(EvaluatedNoiseSource {
+                node_pos,
+                node_neg,
+                psd,
+                exponent,
+                name: source
+                    .name
+                    .as_ref()
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| format!("noise{idx}")),
+            });
+        }
+        sources
+    }
+
     /// Value of a differentiation axis: a unified node voltage or a
     /// branch-current unknown
     fn axis_value(context: &VmContext, axis: &crate::codegen::ColumnAxis) -> f64 {
@@ -1338,6 +1424,23 @@ impl VerilogADevice {
             _ => None,
         }
     }
+}
+
+/// One noise source evaluated at an operating point
+#[derive(Debug, Clone)]
+pub struct EvaluatedNoiseSource {
+    /// Positive injection circuit node (0 = ground); for potential
+    /// contributions this is the branch-equation row's unknown
+    pub node_pos: usize,
+    /// Negative injection circuit node (0 = ground)
+    pub node_neg: usize,
+    /// Power spectral density at the operating point (A²/Hz for current
+    /// contributions, V²/Hz for potential contributions)
+    pub psd: f64,
+    /// Flicker frequency exponent: S(f) = psd / f^exp (None = white)
+    pub exponent: Option<f64>,
+    /// Source label
+    pub name: String,
 }
 
 /// Result of Jacobian computation

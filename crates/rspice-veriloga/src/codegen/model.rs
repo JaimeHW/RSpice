@@ -52,6 +52,32 @@ pub struct CompiledModel {
     pub branch_sources: Vec<CompiledBranchSource>,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
+    /// Small-signal noise sources extracted from contributions
+    pub noise_sources: Vec<CompiledNoiseSource>,
+}
+
+/// Compiled noise source: PSD evaluated at the operating point, injected
+/// at the originating contribution's branch during noise analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledNoiseSource {
+    /// Positive injection node
+    pub pos: StampIndex,
+    /// Negative injection node
+    pub neg: StampIndex,
+    /// Current contribution (true) injects across the nodes; a potential
+    /// contribution injects at its branch-equation row as a series EMF
+    pub is_current: bool,
+    /// Branch ordinal for potential contributions
+    pub branch_ordinal: Option<usize>,
+    /// Originating stamp program (activation gates with it)
+    pub program_idx: usize,
+    /// Power spectral density at the operating point (A²/Hz for current
+    /// contributions, V²/Hz for potential contributions)
+    pub psd_program: BytecodeProgram,
+    /// Flicker frequency exponent program (None = white)
+    pub exponent_program: Option<BytecodeProgram>,
+    /// Source label from the noise function's name argument
+    pub name: Option<SmolStr>,
 }
 
 /// Lookup table for $table_model interpolation

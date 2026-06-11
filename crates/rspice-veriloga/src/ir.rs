@@ -363,20 +363,30 @@ pub enum IrFunction {
     Pow,
 }
 
-/// Noise source definition
+/// Noise source extracted from a contribution: the deterministic part of
+/// the expression stamps as usual, and each `white_noise`/`flicker_noise`
+/// term becomes one small-signal source injected at the contribution's
+/// branch during noise analysis.
 #[derive(Debug, Clone)]
 pub struct NoiseSourceDef {
+    /// Injection branch (the contribution's node pair)
     pub branch: BranchRef,
-    pub kind: NoiseKind,
-    pub power_expr: IrExpr,
+    /// Current contribution (true) injects across the nodes; a potential
+    /// contribution injects at its branch-equation row (series EMF)
+    pub is_current: bool,
+    /// Branch ordinal for potential contributions
+    pub branch_ordinal: Option<usize>,
+    /// Index of the originating equation/stamp program (activation gates
+    /// with the program's instance-static condition)
+    pub equation_index: usize,
+    /// Power spectral density at the operating point, including any
+    /// multiplicative amplitude squared (A²/Hz, or V²/Hz for potential
+    /// contributions)
+    pub psd: IrExpr,
+    /// Flicker frequency exponent (None = white): S(f) = psd / f^exp
+    pub exponent: Option<IrExpr>,
+    /// Source label from the noise function's name argument
     pub name: Option<SmolStr>,
-}
-
-/// Noise source kind
-#[derive(Debug, Clone)]
-pub enum NoiseKind {
-    White,
-    Flicker { exponent: f64 },
 }
 
 impl DeviceIR {
@@ -595,6 +605,20 @@ impl DeviceIR {
                 None => Vec::new(),
             };
 
+            // Extract small-signal noise sources (white_noise /
+            // flicker_noise terms) for noise analysis; they evaluate to
+            // zero in the large-signal programs
+            let equation_index = ir.equations.len();
+            Self::extract_noise_sources(
+                &expr,
+                &IrExpr::Const(1.0),
+                &branch_ref,
+                contrib.is_current,
+                branch_ordinal,
+                equation_index,
+                &mut ir.noise_sources,
+            )?;
+
             ir.equations.push(BranchEquation {
                 branch: branch_ref,
                 is_current: contrib.is_current,
@@ -607,6 +631,192 @@ impl DeviceIR {
         }
 
         Ok(ir)
+    }
+
+    /// Whether an expression contains a noise function anywhere
+    fn contains_noise(expr: &IrExpr) -> bool {
+        match expr {
+            IrExpr::WhiteNoise { .. } | IrExpr::FlickerNoise { .. } => true,
+            IrExpr::Binary(_, l, r) => Self::contains_noise(l) || Self::contains_noise(r),
+            IrExpr::Unary(_, e)
+            | IrExpr::Limexp(e)
+            | IrExpr::Ddt(e)
+            | IrExpr::DdtCompanion(e)
+            | IrExpr::IdtCompanion(e)
+            | IrExpr::Limit(e, _) => Self::contains_noise(e),
+            IrExpr::Idt(e, ic) => {
+                Self::contains_noise(e) || ic.as_deref().is_some_and(Self::contains_noise)
+            }
+            IrExpr::Conditional(c, t, e) => {
+                Self::contains_noise(c) || Self::contains_noise(t) || Self::contains_noise(e)
+            }
+            IrExpr::Call(_, args) => args.iter().any(Self::contains_noise),
+            _ => false,
+        }
+    }
+
+    /// Structurally extract noise sources from a contribution expression:
+    /// `expr ~ deterministic + Σ amplitude_i · noise_i(...)`. Each source
+    /// records its operating-point PSD as `amplitude² · power`, so scaled
+    /// and guarded noise terms (`gain * white_noise(S)`, conditionals)
+    /// keep exact small-signal semantics. Noise functions in nonlinear
+    /// positions are hard errors — silently mis-shaping a noise spectrum
+    /// would be worse than refusing the model.
+    #[allow(clippy::too_many_arguments)]
+    fn extract_noise_sources(
+        expr: &IrExpr,
+        amplitude: &IrExpr,
+        branch: &BranchRef,
+        is_current: bool,
+        branch_ordinal: Option<usize>,
+        equation_index: usize,
+        out: &mut Vec<NoiseSourceDef>,
+    ) -> crate::error::CompileResult<()> {
+        if !Self::contains_noise(expr) {
+            return Ok(());
+        }
+        let recurse = |e: &IrExpr, amp: &IrExpr, out: &mut Vec<NoiseSourceDef>| {
+            Self::extract_noise_sources(
+                e,
+                amp,
+                branch,
+                is_current,
+                branch_ordinal,
+                equation_index,
+                out,
+            )
+        };
+        let unsupported = |what: &str| {
+            crate::error::CompileError::from(crate::error::CodeGenError::new(
+                crate::error::CodeGenErrorKind::UnsupportedFeature(format!(
+                    "noise function in a {what} (noise terms must enter contributions \
+                     additively, optionally scaled)"
+                )),
+            ))
+        };
+        let square = |amp: &IrExpr| {
+            IrExpr::Binary(
+                BinaryOp::Mul,
+                Box::new(amp.clone()),
+                Box::new(amp.clone()),
+            )
+        };
+
+        match expr {
+            IrExpr::WhiteNoise { power, name } => {
+                out.push(NoiseSourceDef {
+                    branch: branch.clone(),
+                    is_current,
+                    branch_ordinal,
+                    equation_index,
+                    psd: IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(square(amplitude)),
+                        power.clone(),
+                    ),
+                    exponent: None,
+                    name: name.as_deref().map(SmolStr::from),
+                });
+                Ok(())
+            }
+            IrExpr::FlickerNoise {
+                power,
+                exponent,
+                name,
+            } => {
+                out.push(NoiseSourceDef {
+                    branch: branch.clone(),
+                    is_current,
+                    branch_ordinal,
+                    equation_index,
+                    psd: IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(square(amplitude)),
+                        power.clone(),
+                    ),
+                    exponent: Some((**exponent).clone()),
+                    name: name.as_deref().map(SmolStr::from),
+                });
+                Ok(())
+            }
+            IrExpr::Binary(BinaryOp::Add | BinaryOp::Sub, l, r) => {
+                // Sign flips square away
+                recurse(l, amplitude, out)?;
+                recurse(r, amplitude, out)
+            }
+            IrExpr::Binary(BinaryOp::Mul, l, r) => {
+                match (Self::contains_noise(l), Self::contains_noise(r)) {
+                    (true, true) => Err(unsupported("product of noise terms")),
+                    (true, false) => {
+                        let amp = IrExpr::Binary(
+                            BinaryOp::Mul,
+                            Box::new(amplitude.clone()),
+                            r.clone(),
+                        );
+                        recurse(l, &amp, out)
+                    }
+                    (false, true) => {
+                        let amp = IrExpr::Binary(
+                            BinaryOp::Mul,
+                            Box::new(amplitude.clone()),
+                            l.clone(),
+                        );
+                        recurse(r, &amp, out)
+                    }
+                    (false, false) => Ok(()),
+                }
+            }
+            IrExpr::Binary(BinaryOp::Div, l, r) => {
+                if Self::contains_noise(r) {
+                    return Err(unsupported("divisor"));
+                }
+                let amp = IrExpr::Binary(
+                    BinaryOp::Div,
+                    Box::new(amplitude.clone()),
+                    r.clone(),
+                );
+                recurse(l, &amp, out)
+            }
+            // Sign is irrelevant under the square
+            IrExpr::Unary(UnaryOp::Neg | UnaryOp::Pos, e) => recurse(e, amplitude, out),
+            // A guard gates the source: amplitude picks up cond ? 1 : 0,
+            // which squares to the same 0/1 gate
+            IrExpr::Conditional(c, t, e) => {
+                if Self::contains_noise(c) {
+                    return Err(unsupported("condition"));
+                }
+                if Self::contains_noise(t) {
+                    let gate = IrExpr::Conditional(
+                        c.clone(),
+                        Box::new(IrExpr::Const(1.0)),
+                        Box::new(IrExpr::Const(0.0)),
+                    );
+                    let amp = IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(amplitude.clone()),
+                        Box::new(gate),
+                    );
+                    recurse(t, &amp, out)?;
+                }
+                if Self::contains_noise(e) {
+                    let gate = IrExpr::Conditional(
+                        c.clone(),
+                        Box::new(IrExpr::Const(0.0)),
+                        Box::new(IrExpr::Const(1.0)),
+                    );
+                    let amp = IrExpr::Binary(
+                        BinaryOp::Mul,
+                        Box::new(amplitude.clone()),
+                        Box::new(gate),
+                    );
+                    recurse(e, &amp, out)?;
+                }
+                Ok(())
+            }
+            // Anything else holding a noise term (inside ddt, functions,
+            // comparisons, ...) has no defined small-signal meaning
+            _ => Err(unsupported("nonlinear or dynamic position")),
+        }
     }
 
     /// Extract the reactive operand of a contribution: for

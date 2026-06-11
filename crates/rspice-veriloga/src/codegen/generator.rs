@@ -87,6 +87,7 @@ impl CodeGenerator {
                 })
                 .collect(),
             laplace_filters: Vec::new(),
+            noise_sources: Vec::new(),
         };
 
         // Generate evaluation steps (executed in order before contributions)
@@ -96,6 +97,27 @@ impl CodeGenerator {
         for eq in &ir.equations {
             let program = self.compile_equation(eq, ir)?;
             model.stamp_programs.push(program);
+        }
+
+        // Compile noise-source PSD programs (evaluated at the operating
+        // point during noise analysis)
+        for source in &ir.noise_sources {
+            let psd_program = self.compile_expr(&source.psd, ir)?;
+            let exponent_program = source
+                .exponent
+                .as_ref()
+                .map(|e| self.compile_expr(e, ir))
+                .transpose()?;
+            model.noise_sources.push(CompiledNoiseSource {
+                pos: Self::node_stamp_index(ir, source.branch.pos_terminal),
+                neg: Self::node_stamp_index(ir, source.branch.neg_terminal),
+                is_current: source.is_current,
+                branch_ordinal: source.branch_ordinal,
+                program_idx: source.equation_index,
+                psd_program,
+                exponent_program,
+                name: source.name.clone(),
+            });
         }
 
         model.laplace_filters = self.laplace_filters.take();
