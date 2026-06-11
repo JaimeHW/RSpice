@@ -802,6 +802,55 @@ impl Engine {
                     };
                     mosfet.set_temperature(temp_k, tnom_k);
 
+                    // Drain/source ohmic resistances, mos1temp.c precedence:
+                    // RD (or RS) when given, else RSH times the diffusion
+                    // squares. ngspice stamps the conductance at internal
+                    // prime nodes scaled by the multiplicity; the explicit
+                    // resistor uses the reciprocal equivalent R/m, and the
+                    // repointed device terminals make junction noise and
+                    // limiting act at the true internal nodes.
+                    // Legacy BSIM1/BSIM2 instances keep their historical
+                    // terminal topology; their sheet-resistance handling is
+                    // part of the bsim parity program.
+                    let multiplicity = mosfet.multiplicity.max(1e-12);
+                    let resistances_apply = !mosfet.uses_legacy_bsim();
+                    let drain_r = if !resistances_apply {
+                        0.0
+                    } else if mosfet.rd_model > 0.0 {
+                        mosfet.rd_model
+                    } else if mosfet.rsh > 0.0 {
+                        mosfet.rsh * mosfet.nrd.max(0.0)
+                    } else {
+                        0.0
+                    };
+                    if drain_r > 0.0 {
+                        let dint_name = format!("{}.__dint", element.name);
+                        let dint = circuit.get_or_create_node(&dint_name);
+                        let rd_name = format!("{}.__rd", element.name);
+                        circuit
+                            .resistors
+                            .add(rd_name, drain, dint, drain_r / multiplicity);
+                        mosfet.node_drain = dint;
+                    }
+                    let source_r = if !resistances_apply {
+                        0.0
+                    } else if mosfet.rs_model > 0.0 {
+                        mosfet.rs_model
+                    } else if mosfet.rsh > 0.0 {
+                        mosfet.rsh * mosfet.nrs.max(0.0)
+                    } else {
+                        0.0
+                    };
+                    if source_r > 0.0 {
+                        let sint_name = format!("{}.__sint", element.name);
+                        let sint = circuit.get_or_create_node(&sint_name);
+                        let rs_name = format!("{}.__rs", element.name);
+                        circuit
+                            .resistors
+                            .add(rs_name, source, sint, source_r / multiplicity);
+                        mosfet.node_source = sint;
+                    }
+
                     circuit.mosfets.add(mosfet);
                 }
                 ElementKind::Jfet {
