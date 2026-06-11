@@ -376,6 +376,134 @@ impl Mosfet {
         }
     }
 
+    /// Saturation voltage under velocity saturation, mos2load.c's "baum's
+    /// theory of scattering velocity saturation": the resolvent cubic of
+    /// the quartic in `x = sqrt(vdsat + phi - vbs)`, then the smallest
+    /// positive root that satisfies the quartic to 1e-6. `None` keeps the
+    /// classic vdsat (no valid root), exactly like ngspice's `jknt == 0`.
+    #[allow(clippy::too_many_arguments)]
+    fn level2_vmax_vdsat(
+        vgsx: Value,
+        vbin: Value,
+        eta: Value,
+        gammad: Value,
+        phi_min_vbs: Value,
+        sarg3: Value,
+        xv: Value,
+    ) -> Option<Value> {
+        const SIG1: [Value; 4] = [1.0, -1.0, 1.0, -1.0];
+        const SIG2: [Value; 4] = [1.0, 1.0, -1.0, -1.0];
+
+        let v1 = (vgsx - vbin) / eta + phi_min_vbs;
+        let v2 = phi_min_vbs;
+        let a1 = gammad / 0.75;
+        let b1 = -2.0 * (v1 + xv);
+        let c1 = -2.0 * gammad * xv;
+        let d1 = 2.0 * v1 * (v2 + xv) - v2 * v2 - 4.0 / 3.0 * gammad * sarg3;
+        let a = -b1;
+        let b = a1 * c1 - 4.0 * d1;
+        let c = -d1 * (a1 * a1 - 4.0 * b1) - c1 * c1;
+        let r = -a * a / 3.0 + b;
+        let s = 2.0 * a * a * a / 27.0 - a * b / 3.0 + c;
+        let r3 = r * r * r;
+        let s2 = s * s;
+        let p = s2 / 4.0 + r3 / 27.0;
+        let p0 = p.abs();
+        let p2 = p0.sqrt();
+        let y3 = if p < 0.0 {
+            let ro = (s2 / 4.0 + p0).sqrt();
+            let ro = (ro.ln() / 3.0).exp();
+            let fi = (-2.0 * p2 / s).atan();
+            2.0 * ro * (fi / 3.0).cos() - a / 3.0
+        } else {
+            // ngspice takes |.|^(1/3) for both branch terms.
+            let p3 = ((-s / 2.0 + p2).abs().ln() / 3.0).exp();
+            let p4 = ((-s / 2.0 - p2).abs().ln() / 3.0).exp();
+            p3 + p4 - a / 3.0
+        };
+
+        let a3 = (a1 * a1 / 4.0 - b1 + y3).sqrt();
+        let b3 = (y3 * y3 / 4.0 - d1).sqrt();
+        let mut xvalid: Option<Value> = None;
+        for i in 0..4 {
+            let a4 = a1 / 2.0 + SIG1[i] * a3;
+            let b4 = y3 / 2.0 + SIG2[i] * b3;
+            let delta4 = a4 * a4 / 4.0 - b4;
+            if !(delta4 >= 0.0) {
+                continue;
+            }
+            let tmp = delta4.sqrt();
+            for root in [-a4 / 2.0 + tmp, -a4 / 2.0 - tmp] {
+                if !(root > 0.0) {
+                    continue;
+                }
+                let poly = root * root * root * root
+                    + a1 * root * root * root
+                    + b1 * root * root
+                    + c1 * root
+                    + d1;
+                if !(poly.abs() <= 1.0e-6) {
+                    continue;
+                }
+                match xvalid {
+                    Some(v) if root >= v => {}
+                    _ => xvalid = Some(root),
+                }
+            }
+        }
+
+        xvalid
+            .map(|x| x * x - phi_min_vbs)
+            .filter(|v| v.is_finite())
+    }
+
+    /// ngspice's analytic vdsat sensitivities under velocity saturation
+    /// (mos2load.c dfunds/dfundg/dfundb), evaluated at the quartic vdsat.
+    /// Returns `(dsdvgs, dsdvbs)`.
+    #[allow(clippy::too_many_arguments)]
+    fn level2_vmax_vdsat_derivatives(
+        &self,
+        vdsat: Value,
+        vgsx: Value,
+        vbin: Value,
+        eta: Value,
+        gammad: Value,
+        lvbs: Value,
+        phi: Value,
+        sqrt_phi: Value,
+        phi_min_vbs: Value,
+        sarg: Value,
+        sarg3: Value,
+        dsrgdb: Value,
+        dgdvbs: Value,
+        factor: Value,
+        ueff: Value,
+    ) -> (Value, Value) {
+        let bsarg_input = (vdsat + phi_min_vbs).max(1.0e-18);
+        let (bsarg, dbsrdb) = if (lvbs - vdsat) <= 0.0 {
+            let bsarg = bsarg_input.sqrt();
+            (bsarg, -0.5 / bsarg)
+        } else {
+            let bsarg = sqrt_phi / (1.0 + 0.5 * (lvbs - vdsat) / phi);
+            (bsarg, -0.5 * bsarg * bsarg / (phi * sqrt_phi))
+        };
+        let bodys = bsarg * bsarg * bsarg - sarg3;
+        let gdbdvs = 2.0 * gammad * (bsarg * bsarg * dbsrdb - sarg * sarg * dsrgdb);
+
+        let argv = (vgsx - vbin) / eta - vdsat;
+        let vqchan = argv - gammad * bsarg;
+        let dqdsat = -1.0 + gammad * dbsrdb;
+        let vl = self.mos2_max_drift_vel * self.level2_effective_length();
+        let dfunds = vl * dqdsat - ueff * vqchan;
+        let dfundg = (vl - ueff * vdsat) / eta;
+        let dfundb = -vl * (1.0 + dqdsat - factor / eta)
+            + ueff * (gdbdvs - dgdvbs * bodys / 1.5) / eta;
+        if dfunds == 0.0 || !dfunds.is_finite() {
+            return (0.0, 0.0);
+        }
+        (-dfundg / dfunds, -dfundb / dfunds)
+    }
+
     fn level2_forward_evaluate(&self, lvgs: Value, lvds: Value, lvbs: Value) -> Mos2Evaluation {
         let effective_length = self.level2_effective_length();
         let effective_width = self.w.max(1.0e-18);
@@ -479,6 +607,20 @@ impl Mosfet {
             }
         } else {
             vdsat = ((vgsx - vbin) / eta).max(0.0);
+        }
+        if self.mos2_max_drift_vel > 0.0 {
+            // VMAX given: velocity saturation lowers vdsat (Baum quartic).
+            // ngspice reads the card mobility here, not the
+            // temperature-scaled one (mos2load.c uses MOS2surfaceMobility).
+            let ueff = self.u0_card * 1.0e-4 * ufact;
+            if ueff > 0.0 && effective_length > 0.0 {
+                let xv = self.mos2_max_drift_vel * effective_length / ueff;
+                if let Some(sat) =
+                    Self::level2_vmax_vdsat(vgsx, vbin, eta, gammad, phi_min_vbs, sarg3, xv)
+                {
+                    vdsat = sat;
+                }
+            }
         }
 
         let mut xlamda = self.lambda;
@@ -649,6 +791,48 @@ impl Mosfet {
             }
         } else {
             vdsat = ((vgsx - vbin) / eta).max_const(0.0);
+        }
+        if self.mos2_max_drift_vel > 0.0 {
+            // VMAX given: velocity saturation lowers vdsat (Baum quartic).
+            // The root is found at value level; ngspice's analytic
+            // dfunds/dfundg/dfundb sensitivities seed the dual so all
+            // downstream derivatives chain exactly like mos2load.c.
+            // Card mobility, like the scalar path (never temperature-scaled).
+            let ueff = self.u0_card * 1.0e-4 * ufact.value;
+            if ueff > 0.0 && effective_length > 0.0 {
+                let xv = self.mos2_max_drift_vel * effective_length / ueff;
+                if let Some(sat) = Self::level2_vmax_vdsat(
+                    vgsx.value,
+                    vbin.value,
+                    eta,
+                    gammad.value,
+                    phi_min_vbs.value,
+                    sarg3.value,
+                    xv,
+                ) {
+                    let (dsdvgs, dsdvbs) = self.level2_vmax_vdsat_derivatives(
+                        sat,
+                        vgsx.value,
+                        vbin.value,
+                        eta,
+                        gammad.value,
+                        lvbs.value,
+                        phi,
+                        sqrt_phi,
+                        phi_min_vbs.value,
+                        sarg.value,
+                        sarg3.value,
+                        dsrgdb,
+                        gamasd.derivative[2],
+                        factor,
+                        ueff,
+                    );
+                    vdsat = Dual3 {
+                        value: sat,
+                        derivative: [dsdvgs, 0.0, dsdvbs],
+                    };
+                }
+            }
         }
 
         let mut xlamda = Dual3::constant(self.lambda);
@@ -946,6 +1130,73 @@ mod tests {
             assert_relative(gm, finite_difference(1.0, 0.0, 0.0), 2.0e-5);
             assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-5);
             assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-5);
+        }
+    }
+
+    fn mos2_vmax_device() -> Mosfet {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("VTO".to_string(), 0.7);
+        params.insert("KP".to_string(), 110.0e-6);
+        params.insert("GAMMA".to_string(), 0.4);
+        params.insert("PHI".to_string(), 0.65);
+        params.insert("LAMBDA".to_string(), 0.02);
+        params.insert("NSUB".to_string(), 1.0e16);
+        params.insert("TOX".to_string(), 50.0e-9);
+        params.insert("UO".to_string(), 600.0);
+        params.insert("VMAX".to_string(), 1.0e5);
+        params.insert("XJ".to_string(), 0.5e-6);
+
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(10.0e-6, 1.0e-6)
+    }
+
+    #[test]
+    fn level2_vmax_drain_current_matches_ngspice46() {
+        // ngspice-46 oracle (.op, vd#branch): 3.88779e-4 A at 27C for
+        // vgs=1.5, vds=2. The velocity-saturated vdsat (Baum quartic)
+        // is what pulls the classic value down by ~5%.
+        let mos = mos2_vmax_device();
+        let eval = mos.level2_evaluate(1.5, 2.0, 0.0);
+        assert_relative(eval.id, 3.88779e-4, 1.0e-5);
+    }
+
+    #[test]
+    fn level2_vmax_small_signal_matches_ngspice46() {
+        // In saturation the conductances follow ngspice's CONVENTION, not
+        // the true derivative: mos2load.c carries no dvdsat/dvds (the
+        // vdsat dependence through the short-channel gamma is deliberately
+        // neglected), so a finite-difference check cannot apply here.
+        // Oracle: ngspice-46 .op, print @m1[gm] @m1[gds] @m1[gmbs].
+        let mos = mos2_vmax_device();
+        let (_, _, gm, gds, gmb) = mos.level2_operating_point(1.5, 2.0, 0.0);
+        assert_relative(gm, 8.231405e-4, 1.0e-6);
+        assert_relative(gds, 1.639541e-5, 1.0e-6);
+        assert_relative(gmb, 7.948465e-5, 1.0e-6);
+    }
+
+    #[test]
+    fn level2_vmax_linear_region_jacobian_matches_centered_difference() {
+        // Linear-region current never reads vdsat, so the exact-derivative
+        // check stays valid there even with VMAX given.
+        let mos = mos2_vmax_device();
+        let cases = [(1.2, 0.2, -0.2), (2.5, 0.5, -0.5)];
+
+        for (vgs, vds, vbs) in cases {
+            let (_, _, gm, gds, gmb) = mos.level2_operating_point(vgs, vds, vbs);
+            let finite_difference = |dvgs: Value, dvds: Value, dvbs: Value| {
+                let step = 1.0e-7;
+                let plus =
+                    mos.level2_evaluate(vgs + dvgs * step, vds + dvds * step, vbs + dvbs * step);
+                let minus =
+                    mos.level2_evaluate(vgs - dvgs * step, vds - dvds * step, vbs - dvbs * step);
+                (plus.id - minus.id) / (2.0 * step)
+            };
+
+            assert_relative(gm, finite_difference(1.0, 0.0, 0.0), 2.0e-4);
+            assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-4);
+            assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-4);
         }
     }
 

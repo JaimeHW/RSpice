@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 impl Mosfet {
     /// Create a new NMOS with default parameters
@@ -73,6 +73,7 @@ impl Mosfet {
             legacy_bsim_model: None,
             legacy_bsim_sized: None,
             u0: 400.0,    // Low-field mobility (cm^2/V*s)
+            u0_card: 400.0,
             ua: 2.25e-9,  // Mobility degradation coefficient
             ub: 5.87e-19, // Second-order mobility coefficient
             vsat: 1.5e5,  // Saturation velocity (m/s)
@@ -470,6 +471,7 @@ impl Mosfet {
             self.phi = 0.6;
             self.lambda = 0.0;
             self.u0 = 600.0;
+            self.u0_card = 600.0;
             self.cox = EPS_OX_REL * EPS0 / 1.0e-7;
             self.kp = self.u0 * 1.0e-4 * self.cox;
             self.cgso = 0.0;
@@ -484,6 +486,7 @@ impl Mosfet {
             self.phi = 0.6;
             self.lambda = 0.0;
             self.u0 = 600.0;
+            self.u0_card = 600.0;
             self.cox = 0.0;
             self.kp = 0.0;
             self.cgso = 0.0;
@@ -717,6 +720,7 @@ impl Mosfet {
         // BSIM3 parameters
         if let Some(&v) = params.get("U0").or_else(|| params.get("UO")) {
             self.u0 = v;
+            self.u0_card = v;
         }
         if self.level == 6
             && kc_explicit.is_none()
@@ -1226,3 +1230,4 @@ mod tests {
         assert!((mos.kc - expected_kc).abs() <= expected_kc * 1.0e-12);
     }
 }
+

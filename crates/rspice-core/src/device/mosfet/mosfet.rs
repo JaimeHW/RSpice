@@ -138,6 +138,10 @@ pub struct Mosfet {
     legacy_bsim_sized: Option<LegacyBsimSizedModel>,
     /// Mobility at low field (U0) in cm^2/V*s
     pub u0: Value,
+    /// U0 exactly as given on the model card, never temperature-scaled.
+    /// ngspice's MOS2 velocity-saturation path reads the model mobility
+    /// directly (mos2load.c uses MOS2surfaceMobility, not tSurfMob).
+    pub u0_card: Value,
     /// First-order mobility degradation (UA)
     pub ua: Value,
     /// Second-order mobility degradation (UB)
