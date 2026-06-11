@@ -564,6 +564,9 @@ impl Jfet {
         frequency_hz: Value,
     ) -> (Value, Value, Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(self.params.tnom);
+        // GATEMOD=1's gmg/gmd are deliberately not part of the AC stamp:
+        // ngspice's hfetacl.c omits them too (only ggd/ggs/gm/gds appear),
+        // so dropping them here is reference-exact.
         let (_, gm_base, gds_base, _, _, ggs, ggd, _, _gmg, _gmd) =
             self.compute_operating_terms(vgs, vds, vgd);
 
