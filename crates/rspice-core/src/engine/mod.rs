@@ -55,5 +55,6 @@ pub use error::SimulationError;
 pub use hb::HbAnalysisResult;
 pub use pss::{PssAnalysisResult, PssError};
 pub use result::TransientResult;
+pub use transient::{TransientCheckpoint, netlist_fingerprint};
 
 pub(crate) use source_values::{extract_ac_value, extract_dc_value};

@@ -29,6 +29,7 @@ fn newton_merit_debug_enabled() -> bool {
 }
 
 mod breakpoints;
+mod checkpoint;
 mod companion_stamps;
 mod globalization;
 mod noise;
@@ -39,6 +40,8 @@ mod state;
 mod step_control;
 mod truncation;
 mod vbic;
+
+pub use checkpoint::{TransientCheckpoint, netlist_fingerprint};
 
 /// Maximum voltage limit for solution values (matching DC solver)
 ///
@@ -359,6 +362,77 @@ impl Engine {
         }
     }
 
+    /// Run a transient and additionally return the end-of-run state
+    /// checkpoint, for segmented long simulations: save it, then extend
+    /// later with [`Engine::run_tran_resume`].
+    pub fn run_tran_checkpointed(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        let engine = self.resolved_for_netlist(netlist);
+        match noise::expand_transient_noise(netlist, tstop)
+            .map_err(SimulationError::Circuit)?
+        {
+            Some(expanded) => {
+                engine.run_tran_resolved_with_resume(&expanded, tstop, max_step, &NoAbort, None)
+            }
+            None => engine.run_tran_resolved_with_resume(netlist, tstop, max_step, &NoAbort, None),
+        }
+    }
+
+    /// Continue a transient from a checkpoint to a later stop time.
+    ///
+    /// The checkpoint must come from the same netlist (fingerprint
+    /// enforced). Continuation restores the exact linear-reactive state
+    /// (capacitor/inductor integrator histories) and restarts integration
+    /// at the checkpoint time with absolute-time source evaluation — the
+    /// same numerical regime as a breakpoint restart. Nonlinear-device
+    /// iteration memories and transmission-line delay histories re-derive
+    /// from the restored solution on the first step.
+    ///
+    /// TRNOISE decks regenerate their sample train for each segment's
+    /// horizon; run noise decks unsegmented when a single continuous
+    /// sample path matters.
+    pub fn run_tran_resume(
+        &self,
+        netlist: &Netlist,
+        checkpoint: &TransientCheckpoint,
+        tstop: Value,
+        max_step: Value,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        checkpoint
+            .validate_for(netlist)
+            .map_err(SimulationError::Circuit)?;
+        if !(tstop > checkpoint.time) {
+            return Err(SimulationError::Circuit(format!(
+                "resume stop time {tstop:e} must exceed the checkpoint time {:e}",
+                checkpoint.time
+            )));
+        }
+
+        let engine = self.resolved_for_netlist(netlist);
+        match noise::expand_transient_noise(netlist, tstop)
+            .map_err(SimulationError::Circuit)?
+        {
+            Some(expanded) => engine.run_tran_resolved_with_resume(
+                &expanded,
+                tstop,
+                max_step,
+                &NoAbort,
+                Some(checkpoint),
+            ),
+            None => engine.run_tran_resolved_with_resume(
+                netlist,
+                tstop,
+                max_step,
+                &NoAbort,
+                Some(checkpoint),
+            ),
+        }
+    }
+
     #[inline]
     fn should_enable_nonlinear_source_ramp_cap(
         circuit: &crate::circuit::Circuit,
@@ -382,16 +456,36 @@ impl Engine {
         max_step: Value,
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
+        self.run_tran_resolved_with_resume(netlist, tstop, max_step, abort, None)
+            .map(|(result, _)| result)
+    }
+
+    /// The transient integration body. `resume` injects a checkpointed
+    /// state (time, solution, reactive histories) instead of the fresh
+    /// initial solution — numerically a breakpoint restart at the
+    /// checkpoint time. Returns the result together with the end-of-run
+    /// checkpoint for segmented continuation.
+    fn run_tran_resolved_with_resume(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        abort: &dyn AbortSignal,
+        resume: Option<&TransientCheckpoint>,
+    ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
+        let fingerprint = netlist_fingerprint(netlist);
         let mut circuit = self.build_circuit(netlist)?;
         if circuit.num_nodes() == 0 && circuit.num_branches() == 0 {
-            return Ok(TransientResult {
+            let result = TransientResult {
                 time: vec![0.0],
                 voltages: Vec::new(),
                 branch_currents: Vec::new(),
                 num_nodes: 0,
                 node_names: Vec::new(),
                 branch_names: Vec::new(),
-            });
+            };
+            let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
+            return Ok((result, checkpoint));
         }
         let hinted_max_step = circuit
             .transient_max_step_hint
@@ -410,6 +504,22 @@ impl Engine {
         // Get DC operating point as initial condition.
         let (mut solution, initial_solution_mode) =
             self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
+
+        // Resume: the standard initial-solution machinery above still ran
+        // (its device-state priming is wanted), but time, solution, and the
+        // reactive histories come from the checkpoint.
+        let resume_time = resume.map_or(0.0, |checkpoint| checkpoint.time);
+        if let Some(checkpoint) = resume {
+            if checkpoint.solution.len() != circuit.matrix_size() {
+                return Err(SimulationError::Circuit(format!(
+                    "checkpoint solution has {} unknowns, circuit has {}; \
+                     the checkpoint belongs to a different elaboration",
+                    checkpoint.solution.len(),
+                    circuit.matrix_size()
+                )));
+            }
+            solution.clone_from(&checkpoint.solution);
+        }
         // The SOI floating-body SmartVbs clamp (Vbs >= 0) belongs to the DC/OP
         // phase only; during time-stepping the body may legitimately swing below
         // the source, so disable it for the transient sweep. Transient also
@@ -434,7 +544,13 @@ impl Engine {
             dev.set_dc_mode(false);
             dev.set_bypass_tolerances(bypass_tolerances);
         }
-        let applied_ic = self.apply_initial_condition_overrides(netlist, &circuit, &mut solution);
+        // .IC overrides describe the t=0 state; a resumed run is already
+        // mid-trajectory, so they must not re-apply.
+        let applied_ic = if resume.is_none() {
+            self.apply_initial_condition_overrides(netlist, &circuit, &mut solution)
+        } else {
+            0
+        };
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
         }
@@ -515,7 +631,7 @@ impl Engine {
         );
         let initial_step = Self::ngspice_t0_breakpoint_limited_initial_timestep(
             Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
-            breakpoints.next_after(0.0),
+            breakpoints.next_after(resume_time),
         );
         let practical_min = Self::startup_practical_min_timestep(
             has_bjts,
@@ -580,7 +696,7 @@ impl Engine {
 
         let branch_names = circuit.branch_names_sorted();
         let mut result = TransientResult {
-            time: vec![0.0],
+            time: vec![resume_time],
             voltages: (0..num_nodes)
                 .map(|i| vec![solution.get(i).copied().unwrap_or(0.0)])
                 .collect(),
@@ -591,7 +707,7 @@ impl Engine {
             node_names,
             branch_names,
         };
-        let mut t = 0.0;
+        let mut t = resume_time;
 
         // Initialize capacitor voltage history from DC solution
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
@@ -632,9 +748,18 @@ impl Engine {
         }
         circuit.update_coupled_inductor_pair_state(&solution);
         circuit.update_multi_winding_transformer_state(&solution);
-        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, 0.0);
+
+        // Resume: replace the flat (DC-style) reactive histories written
+        // above with the exact integrator histories from the checkpoint.
+        if let Some(checkpoint) = resume {
+            checkpoint
+                .inject(&mut circuit)
+                .map_err(SimulationError::Circuit)?;
+        }
+
+        let tline_dc_refs = Self::initialize_tline_history(&mut circuit, &solution, resume_time);
         let coupled_tline_refs =
-            Self::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
+            Self::initialize_coupled_tline_history(&mut circuit, &solution, resume_time);
         let mut bjt_history = Self::initialize_bjt_history(&circuit, &solution);
         // ngspice seeds CKTdeltaOld[] with maxstep before the first transient point.
         // Mirror that here so early VBIC truncation/order checks have the same
@@ -2555,7 +2680,8 @@ impl Engine {
             );
         }
 
-        Ok(result)
+        let final_checkpoint = TransientCheckpoint::capture(fingerprint, t, &solution, &circuit);
+        Ok((result, final_checkpoint))
     }
 
     /// Run transient analysis with waveform compression
