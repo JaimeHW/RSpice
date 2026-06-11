@@ -48,7 +48,10 @@ pub use multirate::{
     AutoPartitioner, CircuitPartition, InterfaceHistory, MultiRateConfig, MultiRateResult,
     MultiRateSolver, MultiRateState, NodeActivity, PartitionState, PartitionStats, RateClass,
 };
-pub use noise::{IntegratedNoise, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType};
+pub use noise::{
+    IntegratedContribution, IntegratedNoise, NoiseAnalysis, NoiseContribution, NoiseResult,
+    NoiseSource, NoiseSourceType,
+};
 pub use pac::{ConversionMatrix, PacAnalyzer, PacConfig, PacError, PacResult, PacSweepType};
 pub use parametric::{ParametricResults, ParametricSweep, StepSpec, StepTarget, StepType};
 pub use pole_zero::{Matrix as PzMatrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};

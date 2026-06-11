@@ -25,6 +25,7 @@ mod construction;
 mod external_models;
 mod force_accept;
 mod introspection;
+pub use introspection::{DeviceOpEntry, DeviceOpReport};
 mod linear_stamping;
 mod magnetic;
 mod nonlinear;

@@ -337,6 +337,32 @@ pub struct NoiseContribution {
     pub percentage: Value,
 }
 
+impl NoiseSourceType {
+    /// Short human-readable mechanism label for summary tables.
+    pub fn label(&self) -> &'static str {
+        match self {
+            NoiseSourceType::Thermal => "thermal",
+            NoiseSourceType::Shot => "shot",
+            NoiseSourceType::Flicker => "flicker",
+            NoiseSourceType::Burst => "burst",
+        }
+    }
+}
+
+/// Band-integrated contribution of one device/mechanism pair — one row of
+/// the classic ranked noise-summary table.
+#[derive(Debug, Clone)]
+pub struct IntegratedContribution {
+    /// Device instance name.
+    pub device_name: String,
+    /// Noise mechanism.
+    pub noise_type: NoiseSourceType,
+    /// Output-referred noise power integrated over the band (V²).
+    pub integrated_power: Value,
+    /// Share of total integrated output noise (percent).
+    pub percentage: Value,
+}
+
 impl NoiseResult {
     /// Get total output noise in V/√Hz (RMS voltage noise density)
     pub fn output_noise_rms(&self) -> Value {
@@ -403,6 +429,76 @@ impl IntegratedNoise {
         }
 
         total.sqrt() // Return RMS voltage
+    }
+
+    /// Per-device, per-mechanism output-noise contributions integrated over
+    /// the analysis band (trapezoidal, matching `total_output_noise`),
+    /// ranked descending by integrated power — the ranked noise-summary
+    /// table analog designers read first.
+    pub fn contribution_summary(&self) -> Vec<IntegratedContribution> {
+        use std::collections::HashMap;
+
+        let mut totals: HashMap<(String, &'static str), (NoiseSourceType, Value)> = HashMap::new();
+
+        for window in self.results.windows(2) {
+            let (a, b) = (&window[0], &window[1]);
+            let df = b.frequency - a.frequency;
+            if df <= 0.0 {
+                continue;
+            }
+
+            // Index the right edge once so each pair match is O(1).
+            let mut right: HashMap<(&str, &'static str), Value> =
+                HashMap::with_capacity(b.contributions.len());
+            for contribution in &b.contributions {
+                right.insert(
+                    (
+                        contribution.device_name.as_str(),
+                        contribution.noise_type.label(),
+                    ),
+                    contribution.output_contribution,
+                );
+            }
+
+            for contribution in &a.contributions {
+                let key = (
+                    contribution.device_name.as_str(),
+                    contribution.noise_type.label(),
+                );
+                let s_right = right
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(contribution.output_contribution);
+                let power = 0.5 * (contribution.output_contribution + s_right) * df;
+                let entry = totals
+                    .entry((contribution.device_name.clone(), contribution.noise_type.label()))
+                    .or_insert((contribution.noise_type.clone(), 0.0));
+                entry.1 += power;
+            }
+        }
+
+        let total: Value = totals.values().map(|(_, power)| *power).sum();
+        let mut summary: Vec<IntegratedContribution> = totals
+            .into_iter()
+            .map(
+                |((device_name, _), (noise_type, integrated_power))| IntegratedContribution {
+                    device_name,
+                    noise_type,
+                    integrated_power,
+                    percentage: if total > 0.0 {
+                        100.0 * integrated_power / total
+                    } else {
+                        0.0
+                    },
+                },
+            )
+            .collect();
+        summary.sort_by(|x, y| {
+            y.integrated_power
+                .partial_cmp(&x.integrated_power)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        summary
     }
 
     /// Calculate integrated input-referred noise (V RMS)
@@ -483,3 +579,56 @@ pub fn noise_bandwidth_second_order_butterworth(f3db: Value) -> Value {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    fn result_at(frequency: Value, r1: Value, d1: Value) -> NoiseResult {
+        NoiseResult {
+            frequency,
+            output_noise_density: r1 + d1,
+            input_referred_density: r1 + d1,
+            contributions: vec![
+                NoiseContribution {
+                    device_name: "r1".to_string(),
+                    noise_type: NoiseSourceType::Thermal,
+                    output_contribution: r1,
+                    percentage: 0.0,
+                },
+                NoiseContribution {
+                    device_name: "d1".to_string(),
+                    noise_type: NoiseSourceType::Shot,
+                    output_contribution: d1,
+                    percentage: 0.0,
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn contribution_summary_integrates_ranks_and_normalizes() {
+        // Flat densities over a 100 Hz band: powers integrate exactly.
+        let integrated = IntegratedNoise::new(vec![
+            result_at(100.0, 4e-18, 1e-18),
+            result_at(200.0, 4e-18, 1e-18),
+        ]);
+
+        let summary = integrated.contribution_summary();
+        assert_eq!(summary.len(), 2);
+
+        // Ranked descending: the resistor dominates.
+        assert_eq!(summary[0].device_name, "r1");
+        assert!((summary[0].integrated_power - 4e-16).abs() < 1e-28);
+        assert_eq!(summary[1].device_name, "d1");
+        assert!((summary[1].integrated_power - 1e-16).abs() < 1e-28);
+
+        // Percentages cover the whole and match the 4:1 split.
+        assert!((summary[0].percentage - 80.0).abs() < 1e-9);
+        assert!((summary[1].percentage - 20.0).abs() < 1e-9);
+
+        // Band total agrees with the per-contributor sum.
+        let total_v = integrated.total_output_noise();
+        assert!(((total_v * total_v) - 5e-16).abs() < 1e-27);
+    }
+}

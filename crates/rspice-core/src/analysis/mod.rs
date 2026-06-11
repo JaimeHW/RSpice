@@ -59,7 +59,8 @@ pub use core::{
 // Re-export key types from advanced
 pub use advanced::{
     Distribution, EdgeType, ElementDesc, ElementType, FourierAnalysis, FourierConfig,
-    FourierResult, FrequencySweep, HarmonicComponent, IntegratedNoise, MeasureEngine,
+    FourierResult, FrequencySweep, HarmonicComponent, IntegratedContribution, IntegratedNoise,
+    MeasureEngine,
     MeasureResult, MeasureStatement, MeasureType, MonteCarloConfig, MonteCarloResult,
     MonteCarloRunner, NoiseAnalysis, NoiseResult, NoiseSource, NoiseSourceType, ParametricResults,
     ParametricSweep, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult, Port, PzMatrix, SMatrix,

@@ -271,6 +271,8 @@ pub(super) fn run_noise(
                         last.frequency, last.input_referred_density
                     );
                 }
+
+                print_noise_contribution_summary(&results, ctx.verbose);
             }
 
             if let Some(ref output_path) = ctx.output_path_for("noise") {
@@ -329,6 +331,50 @@ pub(super) fn run_noise(
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Noise")),
     }
+}
+
+/// Print the ranked, band-integrated noise-contributor table.
+///
+/// Compact (top 10) by default; `verbose` lifts the cap. Rows carry the
+/// device, mechanism, integrated output power, and share of the total so
+/// the dominant contributor is visible at a glance.
+fn print_noise_contribution_summary(
+    results: &[rspice_core::analysis::NoiseResult],
+    verbose: bool,
+) {
+    let integrated = rspice_core::analysis::IntegratedNoise::new(results.to_vec());
+    let summary = integrated.contribution_summary();
+    if summary.is_empty() {
+        return;
+    }
+
+    const COMPACT_ROW_CAP: usize = 10;
+    let cap = if verbose { usize::MAX } else { COMPACT_ROW_CAP };
+
+    println!("  Noise Contributors (band-integrated, ranked):");
+    println!(
+        "    {:<20} {:<9} {:>14} {:>8}",
+        "DEVICE", "TYPE", "POWER (V^2)", "SHARE"
+    );
+    for contribution in summary.iter().take(cap) {
+        println!(
+            "    {:<20} {:<9} {:>14.4e} {:>7.2}%",
+            contribution.device_name,
+            contribution.noise_type.label(),
+            contribution.integrated_power,
+            contribution.percentage
+        );
+    }
+    if summary.len() > cap {
+        println!(
+            "    ... ({} more contributors; rerun with --verbose for all)",
+            summary.len() - cap
+        );
+    }
+    println!(
+        "  Total integrated output noise: {:.6e} V rms",
+        integrated.total_output_noise()
+    );
 }
 
 pub(super) fn run_pz(

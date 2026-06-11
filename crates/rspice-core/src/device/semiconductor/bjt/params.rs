@@ -1228,6 +1228,18 @@ impl Bjt {
         self
     }
 
+    /// Cached operating-point values from the last accepted Newton solution:
+    /// `(vbe, vbc, ic, ib, gm)` where `gm = dIc/dVbe` at the bias point.
+    pub fn op_values(&self) -> (Value, Value, Value, Value, Value) {
+        (
+            self.vbe,
+            self.vbc,
+            self.ic,
+            self.ib,
+            self.intrinsic_linearization.dic_dvbe,
+        )
+    }
+
     /// Apply instance-level BJT scaling and thermal overrides.
     ///
     /// Supported keys:

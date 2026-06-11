@@ -15,8 +15,8 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
         println!("Running DC operating point...");
     }
 
-    match ctx.engine.run_dc_op(ctx.netlist) {
-        Ok(result) => {
+    match ctx.engine.run_dc_op_with_report(ctx.netlist) {
+        Ok((result, op_report)) => {
             if !ctx.quiet {
                 let voltage_signals = dc_operating_point_voltage_signals(&result);
                 let current_signals = dc_operating_point_current_signals(&result);
@@ -33,6 +33,8 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                 if current_signals.len() > 5 {
                     println!("  ... ({} more branch currents)", current_signals.len() - 5);
                 }
+
+                print_device_op_report(&op_report, ctx.verbose);
             }
 
             if let Some(ref output_path) = ctx.output_path_for("op") {
@@ -45,6 +47,71 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "DC OP")),
+    }
+}
+
+/// Engineering-notation formatter for operating-point quantities.
+fn format_engineering(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    if !value.is_finite() {
+        return format!("{}", value);
+    }
+    let magnitude = value.abs();
+    let (scaled, suffix) = if magnitude >= 1e9 {
+        (value / 1e9, "G")
+    } else if magnitude >= 1e6 {
+        (value / 1e6, "Meg")
+    } else if magnitude >= 1e3 {
+        (value / 1e3, "k")
+    } else if magnitude >= 1.0 {
+        (value, "")
+    } else if magnitude >= 1e-3 {
+        (value * 1e3, "m")
+    } else if magnitude >= 1e-6 {
+        (value * 1e6, "u")
+    } else if magnitude >= 1e-9 {
+        (value * 1e9, "n")
+    } else if magnitude >= 1e-12 {
+        (value * 1e12, "p")
+    } else {
+        (value * 1e15, "f")
+    };
+    format!("{:.4}{}", scaled, suffix)
+}
+
+/// Print the per-device operating-point table (the Spectre-style OP info).
+///
+/// Compact by default; `verbose` lifts the row cap so large circuits can
+/// dump every device.
+fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose: bool) {
+    if report.is_empty() {
+        return;
+    }
+
+    const COMPACT_ROW_CAP: usize = 25;
+    let cap = if verbose { usize::MAX } else { COMPACT_ROW_CAP };
+
+    println!("Device Operating Points:");
+    for entry in report.entries.iter().take(cap) {
+        let region = entry
+            .region
+            .map(|region| format!(" [{}]", region))
+            .unwrap_or_default();
+        let params = entry
+            .params
+            .iter()
+            .map(|(name, value)| format!("{}={}", name, format_engineering(*value)))
+            .collect::<Vec<_>>()
+            .join("  ");
+        println!("  {:<16} {:<7}{} {}", entry.name, entry.device_kind, region, params);
+    }
+    if report.entries.len() > cap {
+        println!(
+            "  ... ({} more devices; rerun with --verbose for the full table)",
+            report.entries.len() - cap
+        );
     }
 }
 

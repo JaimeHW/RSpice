@@ -1,6 +1,88 @@
 use super::*;
 
+/// One device's operating-point summary line.
+#[derive(Debug, Clone)]
+pub struct DeviceOpEntry {
+    /// Instance name as written in the netlist (hierarchical after flatten).
+    pub name: String,
+    /// Device family label ("MOSFET", "BJT", "DIODE", ...).
+    pub device_kind: &'static str,
+    /// Operating region, when the device family defines one.
+    pub region: Option<&'static str>,
+    /// Named operating-point quantities in display order.
+    pub params: Vec<(&'static str, Value)>,
+}
+
+/// Per-device operating-point report for an entire solved circuit —
+/// the data behind a Spectre-style OP info table.
+#[derive(Debug, Clone, Default)]
+pub struct DeviceOpReport {
+    pub entries: Vec<DeviceOpEntry>,
+}
+
+impl DeviceOpReport {
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
 impl CircuitData {
+    /// Build the per-device operating-point report from the device state
+    /// cached by the last accepted Newton solution. Call after a DC
+    /// operating point (or any analysis that leaves devices at a solution).
+    pub fn device_op_report(&self) -> DeviceOpReport {
+        let mut entries = Vec::new();
+
+        for mosfet in &self.mosfets.devices {
+            let op = mosfet.op_values();
+            entries.push(DeviceOpEntry {
+                name: mosfet.name.clone(),
+                device_kind: "MOSFET",
+                region: Some(op.region),
+                params: vec![
+                    ("id", op.id),
+                    ("vgs", op.vgs),
+                    ("vds", op.vds),
+                    ("vbs", op.vbs),
+                    ("vth", op.vth),
+                    ("gm", op.gm),
+                    ("gds", op.gds),
+                    ("gmb", op.gmb),
+                ],
+            });
+        }
+
+        for bjt in &self.bjts.devices {
+            let (vbe, vbc, ic, ib, gm) = bjt.op_values();
+            let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
+            entries.push(DeviceOpEntry {
+                name: bjt.name.clone(),
+                device_kind: "BJT",
+                region: None,
+                params: vec![
+                    ("ic", ic),
+                    ("ib", ib),
+                    ("vbe", vbe),
+                    ("vce", vbe - vbc),
+                    ("beta", beta),
+                    ("gm", gm),
+                ],
+            });
+        }
+
+        for diode in &self.diodes.devices {
+            let (vd, id, gd) = diode.op_values();
+            entries.push(DeviceOpEntry {
+                name: diode.name.clone(),
+                device_kind: "DIODE",
+                region: None,
+                params: vec![("vd", vd), ("id", id), ("gd", gd)],
+            });
+        }
+
+        DeviceOpReport { entries }
+    }
+
     /// Read-only access to linear resistor storage (names, nodes, conductances).
     pub fn resistor_storage(&self) -> &Resistors {
         &self.resistors

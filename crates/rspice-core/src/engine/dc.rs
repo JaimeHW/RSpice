@@ -90,13 +90,29 @@ impl Engine {
 
     /// Run DC operating point analysis
     pub fn run_dc_op(&self, netlist: &Netlist) -> Result<SimulationResult, SimulationError> {
+        self.run_dc_op_with_report(netlist).map(|(result, _)| result)
+    }
+
+    /// Run DC operating point analysis and return the per-device
+    /// operating-point report alongside the node solution.
+    ///
+    /// The report carries each semiconductor device's bias point and
+    /// small-signal parameters (id/gm/gds/region for MOSFETs, ic/beta/gm for
+    /// BJTs, vd/id/gd for diodes) as cached by the converged Newton solve.
+    pub fn run_dc_op_with_report(
+        &self,
+        netlist: &Netlist,
+    ) -> Result<(SimulationResult, crate::circuit::DeviceOpReport), SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
 
         // Build circuit from netlist
         let mut circuit = engine.build_circuit(netlist)?;
 
         if circuit.num_nodes() == 0 {
-            return Ok(Self::build_empty_dc_result());
+            return Ok((
+                Self::build_empty_dc_result(),
+                crate::circuit::DeviceOpReport::default(),
+            ));
         }
 
         // Build matrix structure (done once)
@@ -128,7 +144,7 @@ impl Engine {
             }
         }
 
-        Ok(result)
+        Ok((result, circuit.device_op_report()))
     }
 
     /// Run DC sweep analysis

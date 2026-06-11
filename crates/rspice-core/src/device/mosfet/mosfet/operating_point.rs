@@ -1,5 +1,50 @@
 use super::*;
 
+/// Snapshot of a MOSFET's cached small-signal operating point, for
+/// device operating-point reporting (the Spectre-style OP info table).
+#[derive(Debug, Clone, Copy)]
+pub struct MosfetOpValues {
+    /// Operating region name: "cutoff" | "linear" | "saturation".
+    pub region: &'static str,
+    /// Drain current (A).
+    pub id: Value,
+    /// Gate-source voltage (V).
+    pub vgs: Value,
+    /// Drain-source voltage (V).
+    pub vds: Value,
+    /// Bulk-source voltage (V).
+    pub vbs: Value,
+    /// Threshold voltage at the operating back-bias (V).
+    pub vth: Value,
+    /// Transconductance dId/dVgs (S).
+    pub gm: Value,
+    /// Output conductance dId/dVds (S).
+    pub gds: Value,
+    /// Back-gate transconductance dId/dVbs (S).
+    pub gmb: Value,
+}
+
+impl Mosfet {
+    /// Cached operating-point values from the last accepted Newton solution.
+    pub fn op_values(&self) -> MosfetOpValues {
+        MosfetOpValues {
+            region: match self.region {
+                MosRegion::Cutoff => "cutoff",
+                MosRegion::Linear => "linear",
+                MosRegion::Saturation => "saturation",
+            },
+            id: self.id,
+            vgs: self.vgs,
+            vds: self.vds,
+            vbs: self.vbs,
+            vth: self.vth(self.vbs),
+            gm: self.gm,
+            gds: self.gds,
+            gmb: self.gmb,
+        }
+    }
+}
+
 impl Mosfet {
     pub(crate) fn gate_charge_branch_voltages_at(
         &self,

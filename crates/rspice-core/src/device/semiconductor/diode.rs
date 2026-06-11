@@ -129,6 +129,13 @@ impl Diode {
         self
     }
 
+    /// Cached operating-point values from the last accepted Newton solution:
+    /// `(vd, id, gd)` — junction voltage, current, and conductance.
+    pub fn op_values(&self) -> (Value, Value, Value) {
+        let (id, gd) = self.current_and_conductance(self.prev_vd);
+        (self.prev_vd, id, gd)
+    }
+
     /// Apply a parallel-junction scale factor (instance `AREA` × `M`).
     ///
     /// Saturation and breakdown-knee currents and the zero-bias depletion
