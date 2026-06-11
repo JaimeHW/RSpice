@@ -277,3 +277,41 @@ fn statistical_functions_compose_with_parameters_and_expressions() {
     let v = eval_with(&ctx, "W * (1 + agauss(0, 0.01, 1))");
     assert!(v > 1.8e-6 && v < 2.2e-6, "composed draw {v} implausible");
 }
+
+#[test]
+fn power_operator_matches_ngspice_numparam() {
+    // Every value below pins an ngspice-46 .param oracle result: power
+    // binds tighter than unary minus, chains fold left, and a sign in
+    // exponent position applies to the immediate operand only.
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "-2^2"), -4.0);
+    assert_eq!(eval_with(&ctx, "3-2^2"), -1.0);
+    assert_eq!(eval_with(&ctx, "2^-2"), 0.25);
+    assert_eq!(eval_with(&ctx, "2^3^2"), 64.0);
+    assert_eq!(eval_with(&ctx, "4^3^0.5"), 8.0);
+    assert_eq!(eval_with(&ctx, "2^-3^2"), 0.015625);
+    assert_eq!(eval_with(&ctx, "2^-3^2*4"), 0.0625);
+    assert_eq!(eval_with(&ctx, "2^-3-1"), -0.875);
+    assert_eq!(eval_with(&ctx, "2**-2"), 0.25);
+    assert_eq!(eval_with(&ctx, "-2**2"), -4.0);
+    assert_eq!(eval_with(&ctx, "2**3**2"), 64.0);
+}
+
+#[test]
+fn number_suffixes_match_ngspice_numparam() {
+    // numparam swallows letters after a number, applies the scale factor
+    // even after a scientific exponent, and has no `mil` unit (`1mil` is
+    // milli). All values pinned against ngspice-46.
+    let ctx = ParamContext::new();
+    assert_eq!(eval_with(&ctx, "10kohm"), 10_000.0);
+    assert_eq!(eval_with(&ctx, "1MegHz"), 1e6);
+    assert_eq!(eval_with(&ctx, "1mil"), 1e-3);
+    assert_eq!(eval_with(&ctx, "1e3k"), 1e6);
+    // ngspice computes `mantissa * scale`, so pin the same product (one
+    // ulp off the decimal literal 2.5e-6).
+    assert_eq!(eval_with(&ctx, "2.5u"), 2.5 * 1e-6);
+    assert_eq!(eval_with(&ctx, "1a"), 1e-18);
+    assert_eq!(eval_with(&ctx, "5xyz"), 5.0);
+    assert_eq!(eval_with(&ctx, "10k + 1"), 10_001.0);
+    assert_eq!(eval_with(&ctx, "3meg"), 3e6);
+}

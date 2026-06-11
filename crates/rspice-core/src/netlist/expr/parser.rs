@@ -295,35 +295,58 @@ impl<'a> ExprParser<'a> {
         Ok(left)
     }
 
-    /// Parse power expressions (^)
+    /// Parse power expressions (^ / **), left-associative like ngspice
+    /// numparam: `2^3^2` = `(2^3)^2`. A sign in exponent position applies
+    /// to the immediate operand only and the chain keeps folding left, so
+    /// `2^-3^2` = `(2^-3)^2`.
     fn parse_power(&mut self) -> Result<Expr, ExprError> {
-        let base = self.parse_primary()?;
+        let mut base = self.parse_primary()?;
 
-        self.skip_ws();
-        let op_start = self.pos;
-        let is_power = if self.consume('^') {
-            true
-        } else if self.consume('*') {
-            if self.consume('*') {
-                true
-            } else {
-                self.pos = op_start;
-                false
-            }
-        } else {
-            false
-        };
-
-        if is_power {
+        loop {
             self.skip_ws();
-            let exp = self.parse_unary()?;
-            Ok(Expr::BinOp {
+            let op_start = self.pos;
+            let is_power = if self.consume('^') {
+                true
+            } else if self.consume('*') {
+                if self.consume('*') {
+                    true
+                } else {
+                    self.pos = op_start;
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !is_power {
+                break;
+            }
+
+            self.skip_ws();
+            let exp = self.parse_power_exponent()?;
+            base = Expr::BinOp {
                 op: BinOpKind::Pow,
                 left: Box::new(base),
                 right: Box::new(exp),
+            };
+        }
+
+        Ok(base)
+    }
+
+    /// Exponent operand: optional signs ahead of a primary, nothing more.
+    fn parse_power_exponent(&mut self) -> Result<Expr, ExprError> {
+        self.skip_ws();
+        if self.consume('-') {
+            let operand = self.parse_power_exponent()?;
+            Ok(Expr::UnaryOp {
+                op: UnaryOpKind::Neg,
+                operand: Box::new(operand),
             })
+        } else if self.consume('+') {
+            self.parse_power_exponent()
         } else {
-            Ok(base)
+            self.parse_primary()
         }
     }
 
@@ -392,6 +415,12 @@ impl<'a> ExprParser<'a> {
     }
 
     /// Parse a number with optional SPICE suffix
+    ///
+    /// Mirrors ngspice numparam (xpressn.c `fetchnumber`): a scale suffix
+    /// may follow even after a scientific exponent (`1e3k` = 1e6) and any
+    /// remaining letters are swallowed (`10kOhm`, `1MegHz`). Expressions
+    /// have no `mil` scale, unlike netlist value positions: `1mil` is
+    /// milli with `il` swallowed.
     fn parse_number(&mut self) -> Result<Expr, ExprError> {
         let start = self.pos;
         let chars: Vec<char> = self.input[start..].chars().collect();
@@ -410,43 +439,61 @@ impl<'a> ExprParser<'a> {
             }
         }
 
-        // Consume exponent part
+        // A scientific exponent needs at least one digit; otherwise the
+        // `e`/`E` is a unit letter (`2e` = 2.0, like `2x`).
         if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
-            i += 1;
-            if i < chars.len() && (chars[i] == '+' || chars[i] == '-') {
-                i += 1;
+            let mut j = i + 1;
+            if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
+                j += 1;
             }
-            while i < chars.len() && chars[i].is_ascii_digit() {
-                i += 1;
+            let digits_start = j;
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
             }
-        } else {
-            // Only consume SPICE suffix if NOT scientific notation
-            // Check for MEG first (3 chars)
-            let mut consumed_suffix = false;
-            if i + 3 <= chars.len() {
-                let suffix3: String = chars[i..i + 3].iter().collect();
-                if suffix3.eq_ignore_ascii_case("meg") {
-                    i += 3;
-                    consumed_suffix = true;
-                }
-            }
-            // Then check for single-char suffixes (k, u, n, p, f, m, g, t)
-            if !consumed_suffix && i < chars.len() {
-                let c = chars[i].to_ascii_uppercase();
-                if matches!(c, 'K' | 'M' | 'U' | 'N' | 'P' | 'F' | 'G' | 'T' | 'A') {
-                    i += 1;
-                }
+            if j > digits_start {
+                i = j;
             }
         }
 
-        // Calculate actual position
+        let numeric_end = i;
+
+        // ngspice numparam scale factors (xpressn.c `parseunit`).
+        let mut multiplier = 1.0;
+        if i < chars.len() && chars[i].is_ascii_alphabetic() {
+            let is_meg = i + 3 <= chars.len()
+                && chars[i..i + 3]
+                    .iter()
+                    .collect::<String>()
+                    .eq_ignore_ascii_case("meg");
+            multiplier = if is_meg {
+                1e6
+            } else {
+                match chars[i].to_ascii_uppercase() {
+                    'T' => 1e12,
+                    'G' => 1e9,
+                    'K' => 1e3,
+                    'M' => 1e-3,
+                    'U' => 1e-6,
+                    'N' => 1e-9,
+                    'P' => 1e-12,
+                    'F' => 1e-15,
+                    'A' => 1e-18,
+                    _ => 1.0,
+                }
+            };
+            // Swallow the unit and any trailing letters (`10kOhm`).
+            while i < chars.len() && chars[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+        }
+
         let byte_len: usize = chars[..i].iter().map(|c| c.len_utf8()).sum();
         self.pos = start + byte_len;
 
-        let num_str = &self.input[start..self.pos];
-        match parse_spice_value(num_str) {
-            Ok(v) => Ok(Expr::Number(v)),
-            Err(_) => Err(ExprError::InvalidNumber(num_str.to_string())),
+        let num_str: String = chars[..numeric_end].iter().collect();
+        match num_str.parse::<f64>() {
+            Ok(v) => Ok(Expr::Number(v * multiplier)),
+            Err(_) => Err(ExprError::InvalidNumber(num_str)),
         }
     }
 
