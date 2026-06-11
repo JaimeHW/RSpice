@@ -1,19 +1,18 @@
-//! PDK Settings Dialog
+//! Model Library Paths Dialog
 //!
-//! Professional interface for configuring PDK (Process Design Kit) library paths,
-//! environment variables, and model file discovery settings.
+//! Master–detail interface for configuring PDK (Process Design Kit) library
+//! paths, environment variables, and model file discovery
+//! (`design/volta-dialogs-v2.html` §2).
 //!
 //! ## Features
 //!
-//! - Library path management (add/remove/enable/disable)
-//! - Environment variable configuration (e.g., $PDK_HOME)
-//! - Model file discovery with preview
-//! - Recent files tracking
-//! - Persistent configuration
+//! - Source management (add/remove/enable/disable, inline path editing)
+//! - Environment variable overrides next to the paths that use them
+//! - Discovered-file table with type badges, scoped to the selected source
+//! - Persistent configuration; changes commit on Close
 
 mod model;
 mod render;
-mod tabs;
 
-pub use model::{PdkSettingsDialogResult, PdkSettingsDialogState, PdkSettingsTab};
+pub use model::{PdkSettingsDialogResult, PdkSettingsDialogState};
 pub use render::render_pdk_settings_dialog;

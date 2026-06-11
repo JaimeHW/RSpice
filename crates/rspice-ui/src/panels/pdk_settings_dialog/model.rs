@@ -17,8 +17,12 @@ pub struct PdkSettingsDialogState {
     pub new_env_name: String,
     /// Input field for new environment variable value
     pub new_env_value: String,
-    /// Currently selected tab
-    pub selected_tab: PdkSettingsTab,
+    /// Source selected in the rail; `None` shows files of every source
+    pub selected_source: Option<usize>,
+    /// Whether the inline new-source input row is showing
+    pub adding_path: bool,
+    /// Whether the inline new-variable input row is showing
+    pub adding_env: bool,
     /// Whether a scan is in progress
     pub scanning: bool,
     /// Filter text for discovered files
@@ -49,6 +53,7 @@ impl PdkSettingsDialogState {
         self.original_config = Some(config);
         self.open = true;
         self.reset_inputs();
+        self.select_default_source();
 
         // Auto-discover files if there are library paths configured
         if !self.config.library_paths().is_empty() {
@@ -62,6 +67,16 @@ impl PdkSettingsDialogState {
         self.original_config = Some(self.config.clone());
         self.open = true;
         self.reset_inputs();
+        self.select_default_source();
+    }
+
+    /// Select the first source (or none when the list is empty).
+    fn select_default_source(&mut self) {
+        self.selected_source = if self.config.library_paths().is_empty() {
+            None
+        } else {
+            Some(0)
+        };
     }
 
     /// Close the dialog
@@ -125,8 +140,14 @@ impl PdkSettingsDialogState {
     /// Add a new library path
     pub fn add_library_path(&mut self, path: String) {
         if !path.is_empty() {
-            self.config.add_library_path(path);
+            self.config.add_library_path(path.clone());
             self.new_path_input.clear();
+            // Focus the source that was just added (or already existed).
+            self.selected_source = self
+                .config
+                .library_paths()
+                .iter()
+                .position(|entry| entry.path == path);
             // Auto-rescan to show discovered files immediately
             self.rescan();
         }
@@ -134,7 +155,22 @@ impl PdkSettingsDialogState {
 
     /// Remove a library path by index
     pub fn remove_library_path(&mut self, index: usize) {
-        self.config.remove_library_path(index);
+        if self.config.remove_library_path(index).is_none() {
+            return;
+        }
+        // Keep the selection and any inline edit pointing at the same entry.
+        self.selected_source = match self.selected_source {
+            Some(selected) if selected == index => None,
+            Some(selected) if selected > index => Some(selected - 1),
+            other => other,
+        };
+        self.editing_path_index = match self.editing_path_index {
+            Some(editing) if editing == index => None,
+            Some(editing) if editing > index => Some(editing - 1),
+            other => other,
+        };
+        // Drop the removed source's files from the table immediately.
+        self.rescan();
     }
 
     /// Toggle path enabled state
@@ -177,47 +213,13 @@ impl PdkSettingsDialogState {
         self.new_env_name.clear();
         self.new_env_value.clear();
         self.file_filter.clear();
+        self.adding_path = false;
+        self.adding_env = false;
         self.editing_path_index = None;
         self.edit_path_buffer.clear();
         self.editing_env_index = None;
         self.edit_env_name_buffer.clear();
         self.edit_env_value_buffer.clear();
-    }
-}
-
-/// Available tabs in the PDK settings dialog
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PdkSettingsTab {
-    /// Library paths configuration
-    #[default]
-    LibraryPaths,
-    /// Environment variables
-    Environment,
-    /// Discovered files browser
-    DiscoveredFiles,
-    /// Recent files
-    RecentFiles,
-}
-
-impl PdkSettingsTab {
-    /// Get display name for the tab
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::LibraryPaths => "Library Paths",
-            Self::Environment => "Environment",
-            Self::DiscoveredFiles => "Discovered Files",
-            Self::RecentFiles => "Recent Files",
-        }
-    }
-
-    /// Get all tabs
-    pub fn all() -> &'static [PdkSettingsTab] {
-        &[
-            Self::LibraryPaths,
-            Self::Environment,
-            Self::DiscoveredFiles,
-            Self::RecentFiles,
-        ]
     }
 }
 
