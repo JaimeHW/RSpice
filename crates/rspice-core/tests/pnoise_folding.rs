@@ -19,17 +19,18 @@ fn pnoise_without_large_signal_drive_matches_stationary_noise() {
     // Forward-biased diode divider: thermal (R1) plus shot (D1) noise with
     // frequency shaping from the 1 nF capacitor.
     let deck = "\
-* stationary parity network
+* stationary parity network (thermal + shot + diode flicker)
 v1 in 0 dc 2
 r1 in mid 10k
 d1 mid 0 dmod
 c1 mid 0 1n
-.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0
+.model dmod D IS=1e-12 N=1.0 CJ0=0 TT=0 RS=0 KF=1e-15 AF=1
 .end
 ";
     let netlist = Netlist::parse(deck).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    let offsets = [1.0e3, 1.0e5, 1.0e7];
+    // 100 Hz sits in the flicker-dominated region, 10 MHz in pure white.
+    let offsets = [1.0e2, 1.0e3, 1.0e5, 1.0e7];
 
     let pnoise = engine
         .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, 6)

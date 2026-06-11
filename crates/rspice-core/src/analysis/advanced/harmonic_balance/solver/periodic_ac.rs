@@ -374,6 +374,7 @@ impl HbSolver {
                     node_pos: p,
                     node_neg: q,
                     psd,
+                    flicker: None,
                 }
             })
             .collect()
@@ -469,6 +470,18 @@ impl HbSolver {
                     contribution += gains[k_idx].conj() * gains[m_idx] * s_d;
                 }
             }
+
+            // Stationary flicker folding: the colored density is sampled at
+            // each sideband's absolute frequency and folds through |A_k|^2
+            // (no sideband correlation for a stationary source).
+            if let Some((coeff, ef)) = source.flicker {
+                let omega0_hz = self.config.fundamental_freq;
+                for (k_idx, gain) in gains.iter().enumerate() {
+                    let k = sideband_min + k_idx as i32;
+                    let f_abs = (offset_hz + (k as f64) * omega0_hz).abs().max(1e-3);
+                    contribution += gain.norm_sqr() * coeff / f_abs.powf(ef);
+                }
+            }
             // The double sum is Hermitian by construction; numerical
             // round-off leaves a vanishing imaginary part.
             contributions.push(contribution.re.max(0.0));
@@ -491,4 +504,10 @@ pub struct PeriodicNoiseSource {
     /// Fourier coefficients of the intensity s(t) >= 0 in A^2/Hz, indexed by
     /// harmonic (c-convention; negative harmonics by conjugation).
     pub psd: Vec<Complex64>,
+    /// Stationary flicker term `(coefficient, frequency exponent)`: adds
+    /// `coefficient / |f|^exponent` evaluated at each sideband's absolute
+    /// frequency. The coefficient already folds the bias dependence
+    /// (KF * |I_dc|^AF); bias modulation of 1/f noise is approximated by the
+    /// periodic average, the standard folding treatment.
+    pub flicker: Option<(Value, Value)>,
 }

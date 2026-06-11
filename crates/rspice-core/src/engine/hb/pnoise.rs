@@ -127,8 +127,24 @@ impl Engine {
 
         // Stationary resistor thermal sources: 4kT*G between the resistor
         // terminals (DC-only intensity spectrum).
+        let hb_dc_voltage = |row: usize| -> Value {
+            if row == 0 {
+                0.0
+            } else {
+                state
+                    .x
+                    .get(row - 1)
+                    .and_then(|s| s.first())
+                    .map(|c| c.re)
+                    .unwrap_or(0.0)
+            }
+        };
+
         let mut sources: Vec<PeriodicNoiseSource> = Vec::new();
         for i in 0..circuit.resistors.len() {
+            if !circuit.resistors.noisy.get(i).copied().unwrap_or(true) {
+                continue;
+            }
             let g = circuit.resistors.conductances[i];
             if !(g.is_finite() && g > 0.0) {
                 continue;
@@ -146,7 +162,42 @@ impl Engine {
                 node_pos: Self::hb_node_to_solver_index(np, num_nodes),
                 node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
                 psd: vec![Complex64::new(4.0 * k_b * temperature * g, 0.0)],
+                flicker: None,
             });
+
+            // Model-card resistor flicker rides on the DC bias current,
+            // matching the stationary .noise treatment.
+            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
+                let i_dc = g * (hb_dc_voltage(np) - hb_dc_voltage(nn));
+                if i_dc.abs() > 1e-18 {
+                    sources.push(PeriodicNoiseSource {
+                        name: format!("{name} flicker"),
+                        node_pos: Self::hb_node_to_solver_index(np, num_nodes),
+                        node_neg: Self::hb_node_to_solver_index(nn, num_nodes),
+                        psd: vec![Complex64::new(0.0, 0.0)],
+                        flicker: Some((coefficient * i_dc.abs().powf(af), ef)),
+                    });
+                }
+            }
+        }
+
+        // Diode flicker (KF * |Id|^AF / f) at the periodic-average bias.
+        for diode in &circuit.diodes.devices {
+            if diode.kf > 0.0 {
+                let va = hb_dc_voltage(diode.node_anode);
+                let vc = hb_dc_voltage(diode.node_cathode);
+                let arg = ((va - vc) / (diode.n * diode.vt)).min(40.0);
+                let i_dc = diode.is * (arg.exp() - 1.0);
+                if i_dc.abs() > 1e-18 {
+                    sources.push(PeriodicNoiseSource {
+                        name: format!("{} flicker", diode.name),
+                        node_pos: Self::hb_node_to_solver_index(diode.node_anode, num_nodes),
+                        node_neg: Self::hb_node_to_solver_index(diode.node_cathode, num_nodes),
+                        psd: vec![Complex64::new(0.0, 0.0)],
+                        flicker: Some((diode.kf * i_dc.abs().powf(diode.af), 1.0)),
+                    });
+                }
+            }
         }
 
         // Cyclostationary device sources from the converged waveforms.
