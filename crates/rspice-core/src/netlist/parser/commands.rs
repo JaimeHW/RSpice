@@ -325,10 +325,9 @@ pub(super) fn parse_save_command(
     }
 
     if !parsed_any {
-        return Err(ParseError::Syntax {
-            line: line_num,
-            message: "Save/print directive requires at least one output signal".to_string(),
-        });
+        // ngspice warns and ignores a bare .print/.save (several corpus
+        // decks carry one); a hard error would reject the whole deck.
+        log::warn!("line {line_num}: save/print directive without output signals ignored");
     }
 
     Ok(())
