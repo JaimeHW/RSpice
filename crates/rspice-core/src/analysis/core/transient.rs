@@ -2,30 +2,7 @@
 
 #![allow(clippy::type_complexity)]
 use crate::Value;
-use crate::analysis::AnalysisConfig;
 
-/// Transient Analysis engine
-#[derive(Debug)]
-#[allow(dead_code)] // Reserved for full integration
-pub struct TransientAnalysis {
-    config: AnalysisConfig,
-    /// Simulation stop time
-    stop_time: Value,
-    /// Maximum time step
-    max_step: Value,
-    /// Initial time step
-    initial_step: Value,
-    /// Integration method
-    method: IntegrationMethod,
-    /// Use Initial Conditions (UIC) - skip DC operating point, use IC= values
-    /// When true:
-    ///   - Skip DC operating point calculation
-    ///   - Use IC= values on capacitors and inductors directly
-    ///   - Set all unspecified node voltages to 0V
-    ///
-    /// This is useful for oscillators and circuits that don't have a stable DC OP
-    use_initial_conditions: bool,
-}
 
 type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
 
@@ -42,73 +19,6 @@ pub enum IntegrationMethod {
     /// Uses Trapezoidal for smooth regions (better accuracy) and
     /// switches to Gear2 at discontinuities/oscillations (better stability)
     TrapGear,
-}
-
-impl TransientAnalysis {
-    pub fn new(stop_time: Value, max_step: Value) -> Self {
-        Self {
-            config: AnalysisConfig::default(),
-            stop_time,
-            max_step,
-            initial_step: max_step / 100.0,
-            method: IntegrationMethod::Trapezoidal,
-            use_initial_conditions: false,
-        }
-    }
-
-    /// Set integration method
-    pub fn with_method(mut self, method: IntegrationMethod) -> Self {
-        self.method = method;
-        self
-    }
-
-    /// Set initial timestep
-    pub fn with_initial_step(mut self, step: Value) -> Self {
-        self.initial_step = step;
-        self
-    }
-
-    /// Enable Use Initial Conditions (UIC) mode
-    ///
-    /// When UIC is enabled:
-    /// - Skip DC operating point calculation at t=0
-    /// - Use IC= values on capacitors (voltage) and inductors (current)
-    /// - Unspecified nodes start at 0V
-    ///
-    /// This is useful for:
-    /// - Oscillators (no stable DC OP)
-    /// - Circuits where you want to specify exact starting conditions
-    /// - Faster simulation when DC OP is not needed
-    pub fn with_uic(mut self, uic: bool) -> Self {
-        self.use_initial_conditions = uic;
-        self
-    }
-
-    /// Check if UIC (Use Initial Conditions) mode is enabled
-    pub fn uic(&self) -> bool {
-        self.use_initial_conditions
-    }
-
-    /// Get stop time
-    pub fn stop_time(&self) -> Value {
-        self.stop_time
-    }
-
-    /// Get maximum step
-    pub fn max_step(&self) -> Value {
-        self.max_step
-    }
-
-    /// Get integration method
-    pub fn method(&self) -> IntegrationMethod {
-        self.method
-    }
-}
-
-impl Default for TransientAnalysis {
-    fn default() -> Self {
-        Self::new(1e-3, 1e-6) // 1ms simulation, 1us max step
-    }
 }
 
 /// Adaptive timestep controller

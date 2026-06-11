@@ -16,5 +16,5 @@ pub use temperature::{
 };
 pub use transient::{
     BreakpointManager, CompanionCoefficients, IntegrationMethod, LteEstimator, TimestepController,
-    TransientAnalysis, TrapGearController,
+    TrapGearController,
 };

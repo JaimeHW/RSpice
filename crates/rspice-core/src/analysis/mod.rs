@@ -53,7 +53,7 @@ pub use core::{
     AcAnalysis, AcResult, BreakpointManager, CompanionCoefficients, DcAnalysis, DcSweep,
     DiscreteFilter, IntegrationMethod, JunctionTempScaling, LteEstimator, MosfetTempScaling,
     ResistorTempCoeffs, TemperatureContext, TimestepController, TransferFunction,
-    TransientAnalysis, TrapGearController,
+    TrapGearController,
 };
 
 // Re-export key types from advanced
