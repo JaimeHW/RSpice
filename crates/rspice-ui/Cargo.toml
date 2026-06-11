@@ -27,8 +27,8 @@ desktop = []
 veriloga = []
 
 [dependencies]
-# RSpice core simulation engine
-rspice-core = { path = "../rspice-core", default-features = false, features = ["veriloga"] }
+# RSpice core simulation engine lives in the target sections below: native
+# builds keep the default fast paths (parallel + simd), wasm opts out.
 
 # Verilog-A compiler (pure Rust, works on all platforms)
 rspice-veriloga = { path = "../rspice-veriloga" }
@@ -87,10 +87,16 @@ rfd = "0.15"
 dirs = "5.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Default features on: faer-parallel/parallel/simd so the desktop app gets
+# the same fast solver paths as the CLI.
+rspice-core = { path = "../rspice-core", features = ["veriloga"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen and the
+# browser entropy source (getrandom/js) that faer needs on this target.
+rspice-core = { path = "../rspice-core", default-features = false, features = ["veriloga", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
