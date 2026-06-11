@@ -101,7 +101,10 @@ impl Default for SimulationConfig {
             abstol: 1e-12,
             reltol: 1e-3,
             residual_reltol: 1e-3,
-            min_timestep: 1e-15,
+            // Matches the engine's MIN_TIMESTEP: a deeper floor only lets
+            // failing timepoints grind a thousand times longer through the
+            // dt-cut ladder before the rescue machinery fires.
+            min_timestep: 1e-12,
             max_timestep: 1e-3,
             compress_waveforms: false,
             compression_tolerance: 1e-4,

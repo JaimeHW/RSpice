@@ -720,7 +720,13 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         tolerance: config.simulation.reltol,
         convergence_config: ConvergenceConfig {
             voltage_reltol: config.simulation.reltol,
-            voltage_abstol: config.simulation.abstol,
+            // SPICE tolerance semantics: ABSTOL bounds branch currents and
+            // VNTOL bounds node voltages. Applying the 1e-12 current floor
+            // to voltages demands convergence a million times tighter than
+            // ngspice and stalls junction decks at conduction handoffs.
+            // Deck-level `.options vntol` still overrides through the
+            // config resolver.
+            voltage_abstol: 1e-6,
             current_abstol: config.simulation.abstol,
             residual_reltol: config.simulation.residual_reltol,
             ..ConvergenceConfig::default()
