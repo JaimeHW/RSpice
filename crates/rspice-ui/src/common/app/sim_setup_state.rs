@@ -194,6 +194,8 @@ pub struct SimSetupState {
     pub picker_open: bool,
     /// Picker search query.
     pub picker_query: String,
+    /// Analysis highlighted in the picker rail (sticky across opens).
+    pub picker_selected: Option<usize>,
 }
 
 impl SimSetupState {
@@ -462,6 +464,132 @@ impl SimSetupState {
             Ok(points) if points > 0 => None,
             _ => Some(format!("points: '{}' is not a positive integer", self.ac.points)),
         }
+    }
+
+    /// The SPICE card this analysis writes into the deck, exactly as the
+    /// controller will emit it — or the first validation error. Drives the
+    /// "Writes" strip in the add-analysis dialog.
+    pub fn spice_preview(&self, index: usize) -> Result<String, String> {
+        if let Some(error) = self.validation_error(index) {
+            return Err(error);
+        }
+        let sweep_kind = ["dec", "oct", "lin"][self.ac.sweep.min(2)];
+        Ok(match index {
+            0 => self.op.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            1 => {
+                let start = self.tran.start.trim();
+                let mut card = format!(
+                    ".tran {} {} {}",
+                    self.tran.step,
+                    self.tran.stop,
+                    if start.is_empty() { "0" } else { start }
+                );
+                let max = self.tran.max_step.trim();
+                if !max.is_empty() && !max.eq_ignore_ascii_case("auto") {
+                    card.push(' ');
+                    card.push_str(max);
+                }
+                if self.tran.uic {
+                    card.push_str(" uic");
+                }
+                card
+            }
+            2 => format!(
+                ".ac {sweep_kind} {} {} {}",
+                self.ac.points.trim(),
+                self.ac.fstart,
+                self.ac.fstop
+            ),
+            3 => {
+                let mut card = format!(
+                    ".dc {} {} {} {}",
+                    self.dc.source, self.dc.start, self.dc.stop, self.dc.step
+                );
+                if self.dc.nested {
+                    card.push_str(&format!(
+                        " {} {} {} {}",
+                        self.dc.source2, self.dc.start2, self.dc.stop2, self.dc.step2
+                    ));
+                }
+                card
+            }
+            4 => {
+                let reference = self.noise.reference.trim();
+                let output = if reference.is_empty() || reference == "0" {
+                    format!("v({})", self.noise.output)
+                } else {
+                    format!("v({},{})", self.noise.output, reference)
+                };
+                format!(
+                    ".noise {output} {} dec {} {} {}",
+                    self.noise.input,
+                    self.ac.points.trim(),
+                    self.noise.fstart,
+                    self.noise.fstop
+                )
+            }
+            5 => self.pz.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            6 => self.sens.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            7 => self.mc.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            8 => self.pss.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            9 => self.stb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            10 => self.temp.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            11 => self.hb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            12 => self.sp.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            13 => self.pac.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            14 => self.pnoise.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            15 => self.pxf.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            16 => self.pstb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            17 => self.xf.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            18 => {
+                // Corner is a run plan, not a single card — preview the plan.
+                let corner = &self.corner;
+                let flags = [
+                    (corner.process_tt, "TT"),
+                    (corner.process_ss, "SS"),
+                    (corner.process_ff, "FF"),
+                    (corner.process_sf, "SF"),
+                    (corner.process_fs, "FS"),
+                ];
+                let on: Vec<&str> = flags.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
+                format!("* corner plan · {}", on.join(" "))
+            }
+            19 => self
+                .envelope
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            20 => self
+                .fourier
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            21 => self
+                .reliability
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            22 => self
+                .optimization
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            23 => self.soa.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            24 => {
+                let mut card = format!(
+                    ".disto {sweep_kind} {} {} {}",
+                    self.ac.points.trim(),
+                    self.ac.fstart,
+                    self.ac.fstop
+                );
+                let ratio = self.disto_f2_over_f1.trim();
+                if !ratio.is_empty() && !ratio.eq_ignore_ascii_case("auto") {
+                    card.push_str(&format!(" f2overf1={ratio}"));
+                }
+                card
+            }
+            _ => String::new(),
+        })
     }
 
     /// Fill defaults into any analysis state still at its blank

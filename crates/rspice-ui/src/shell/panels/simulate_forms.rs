@@ -41,7 +41,7 @@ fn action_line(ui: &mut Ui, label: &str) -> bool {
 }
 
 /// Render the form for `index`; returns the explanatory note.
-pub(super) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usize) -> &'static str {
+pub(in crate::shell) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usize) -> &'static str {
     match index {
         0 => {
             input_row(ui, "Temperature", &mut setup.op.temperature);
