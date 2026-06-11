@@ -665,6 +665,19 @@ impl Engine {
         const ABORT_CHECK_INTERVAL: usize = 16;
         let estimated_steps = ((tstop / max_step).ceil().max(1.0) as usize).saturating_add(1);
         let max_total_iterations = estimated_steps.saturating_mul(40).max(10_000_000);
+        // Reserve waveform storage up front: recording pushes one point per
+        // accepted step into every node/branch vector, and repeated doubling
+        // re-copies the whole waveform set each time for large decks. The cap
+        // keeps a pessimistic step estimate from over-reserving; growth past
+        // it falls back to normal doubling.
+        let reserve_points = estimated_steps.min(1 << 16);
+        result.time.reserve(reserve_points);
+        for voltages in result.voltages.iter_mut() {
+            voltages.reserve(reserve_points);
+        }
+        for currents in result.branch_currents.iter_mut() {
+            currents.reserve(reserve_points);
+        }
         let mut last_progress_log = std::time::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
