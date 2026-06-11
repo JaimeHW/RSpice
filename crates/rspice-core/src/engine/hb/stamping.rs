@@ -282,22 +282,26 @@ impl Engine {
 
             self.hb_stamp_admittance(solver, np, nn, HB_NORTON_G, true);
 
+            // Norton conversion of `V` in series with Rs = 1/G: a current source
+            // G*V injecting INTO the positive node, in parallel with G. The
+            // independent-current-source convention (current pulled out of the
+            // positive node) does not apply here.
             let i_dc = dc * HB_NORTON_G;
             if np > 0 {
-                solver.add_dc_source(np - 1, -i_dc);
+                solver.add_dc_source(np - 1, i_dc);
             }
             if nn > 0 {
-                solver.add_dc_source(nn - 1, i_dc);
+                solver.add_dc_source(nn - 1, -i_dc);
             }
 
             let i_ac = ac_mag * HB_NORTON_G;
             if i_ac.abs() > 1e-30 && !harmonics.is_empty() {
                 for harmonic in harmonics {
                     if np > 0 {
-                        solver.add_harmonic_source(np - 1, harmonic, -i_ac, ac_phase);
+                        solver.add_harmonic_source(np - 1, harmonic, i_ac, ac_phase);
                     }
                     if nn > 0 {
-                        solver.add_harmonic_source(nn - 1, harmonic, i_ac, ac_phase);
+                        solver.add_harmonic_source(nn - 1, harmonic, -i_ac, ac_phase);
                     }
                 }
             }
