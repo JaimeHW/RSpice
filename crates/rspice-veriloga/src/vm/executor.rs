@@ -244,6 +244,44 @@ impl<'a> Vm<'a> {
                 self.stack.push(new_integral);
             }
 
+            // Wrapped integration: idtmod(expr, ic, modulus, offset)
+            // Stack: [expr, ic, modulus, offset]; the integral folds into
+            // [offset, offset + modulus)
+            Instruction::IdtModState(idx) => {
+                let offset = self.pop()?;
+                let modulus = self.pop()?;
+                let ic = self.pop()?;
+                let current_value = self.pop()?;
+
+                let dt = self.context.timestep;
+                let raw = if dt.abs() > 1e-20 {
+                    let prev = self
+                        .context
+                        .state_values_prev
+                        .get(*idx)
+                        .copied()
+                        .unwrap_or(ic);
+                    prev + current_value * dt
+                } else {
+                    ic
+                };
+
+                // Fold into [offset, offset + modulus)
+                let wrapped = if modulus > 0.0 {
+                    let phase = (raw - offset).rem_euclid(modulus);
+                    offset + phase
+                } else {
+                    raw
+                };
+
+                if self.context.state_values.len() <= *idx {
+                    self.context.state_values.resize(*idx + 1, 0.0);
+                }
+                self.context.state_values[*idx] = wrapped;
+
+                self.stack.push(wrapped);
+            }
+
             // Companion Jacobian factor for ddt: a / dt (0 at DC)
             Instruction::DdtJacobian => {
                 let dt = self.context.timestep;

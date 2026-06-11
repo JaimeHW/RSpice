@@ -433,6 +433,9 @@ impl JitCompiler {
                 Instruction::IdtState(_) => {
                     return Err(JitError::UnsupportedInstruction("IdtState"));
                 }
+                Instruction::IdtModState(_) => {
+                    return Err(JitError::UnsupportedInstruction("IdtModState"));
+                }
                 Instruction::DdtJacobian => {
                     return Err(JitError::UnsupportedInstruction("DdtJacobian"));
                 }

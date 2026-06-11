@@ -37,9 +37,9 @@
 //! Targets the Verilog-A subset of the Verilog-AMS LRM 2.4. Currently
 //! supported:
 //!
-//! - Analog operators: `ddt`, `idt` (backward Euler), `ddx`, `limexp`,
-//!   `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`, `$limit`,
-//!   `$table_model`
+//! - Analog operators: `ddt`, `idt`, `idtmod` (backward Euler), `ddx`,
+//!   `limexp`, `absdelay`, `transition`, `slew`, `laplace_zp/zd/np/nd`,
+//!   `$limit`, `$table_model`
 //! - Noise source declarations (`white_noise`, `flicker_noise`) - parsed
 //!   and carried in the IR; noise-analysis integration is pending
 //! - System functions: `$temperature`, `$vt`, `$abstime`, `$simparam`,
@@ -55,10 +55,9 @@
 //!
 //! Known limitations (clean compile errors, never silent):
 //!
-//! - Potential (voltage) contributions need branch-current unknowns
-//! - Loops with runtime-dependent bounds (e.g. BSIM4 `nf` finger loops)
-//! - `idtmod` with a modulus, Z-domain (`zi_*`) filters, `noise_table`,
-//!   indirect contributions, array-valued variables in expressions
+//! - Noise-analysis integration of declared noise sources is pending
+//! - Z-domain (`zi_*`) filters, `noise_table`, indirect contributions,
+//!   array-valued variables in expressions
 
 pub mod ast;
 pub mod codegen;

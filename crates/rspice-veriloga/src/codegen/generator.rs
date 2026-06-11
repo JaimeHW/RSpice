@@ -441,6 +441,27 @@ impl CodeGenerator {
                 let state_id = Self::allocate_slot(&self.limit_state_count);
                 program.instructions.push(Instruction::IdtState(state_id));
             }
+            IrExpr::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+            } => {
+                self.emit_expr(expr, ir, program)?;
+                match ic {
+                    Some(ic) => self.emit_expr(ic, ir, program)?,
+                    None => program.instructions.push(Instruction::PushConst(0.0)),
+                }
+                self.emit_expr(modulus, ir, program)?;
+                match offset {
+                    Some(offset) => self.emit_expr(offset, ir, program)?,
+                    None => program.instructions.push(Instruction::PushConst(0.0)),
+                }
+                let state_id = Self::allocate_slot(&self.limit_state_count);
+                program
+                    .instructions
+                    .push(Instruction::IdtModState(state_id));
+            }
             IrExpr::DdtCompanion(inner) => {
                 // Jacobian companion factor: operand / dt (0 at DC)
                 self.emit_expr(inner, ir, program)?;

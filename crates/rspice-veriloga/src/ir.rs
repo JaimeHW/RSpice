@@ -172,6 +172,14 @@ pub enum IrExpr {
     Ddt(Box<IrExpr>),
     /// Time integral (idt)
     Idt(Box<IrExpr>, Option<Box<IrExpr>>),
+    /// Wrapped time integral (idtmod): the integral folds into
+    /// [offset, offset + modulus)
+    IdtMod {
+        expr: Box<IrExpr>,
+        ic: Option<Box<IrExpr>>,
+        modulus: Box<IrExpr>,
+        offset: Option<Box<IrExpr>>,
+    },
     /// Limited exponential
     Limexp(Box<IrExpr>),
     /// $limit function for convergence control
@@ -745,6 +753,7 @@ pub mod autodiff {
             IrExpr::Unary(UnaryOp::Not | UnaryOp::BitNot, _) => false,
             IrExpr::Limexp(e) | IrExpr::Ddt(e) => recurse(e),
             IrExpr::Idt(e, _) => recurse(e),
+            IrExpr::IdtMod { expr, .. } => recurse(expr),
             IrExpr::Limit(e, _) => recurse(e),
             IrExpr::Call(func, args) => match func {
                 IrFunction::Floor | IrFunction::Ceil => false,
@@ -994,6 +1003,17 @@ pub mod autodiff {
                 Box::new(map_expr(e, f)),
                 ic.as_ref().map(|e| Box::new(map_expr(e, f))),
             ),
+            IrExpr::IdtMod {
+                expr,
+                ic,
+                modulus,
+                offset,
+            } => IrExpr::IdtMod {
+                expr: Box::new(map_expr(expr, f)),
+                ic: ic.as_ref().map(|e| Box::new(map_expr(e, f))),
+                modulus: Box::new(map_expr(modulus, f)),
+                offset: offset.as_ref().map(|e| Box::new(map_expr(e, f))),
+            },
             IrExpr::Limexp(e) => IrExpr::Limexp(Box::new(map_expr(e, f))),
             IrExpr::Limit(e, step) => IrExpr::Limit(
                 Box::new(map_expr(e, f)),
@@ -1401,6 +1421,12 @@ pub mod autodiff {
 
             // idt companion: d(idt(x))/dV = dt * dx/dV (zero at DC)
             IrExpr::Idt(inner, _) => IrExpr::IdtCompanion(Box::new(differentiate(inner))),
+
+            // idtmod: the wrap is the identity almost everywhere, so the
+            // small-signal derivative matches idt
+            IrExpr::IdtMod { expr, .. } => {
+                IrExpr::IdtCompanion(Box::new(differentiate(expr)))
+            }
 
             // $limit passes its value through at convergence
             IrExpr::Limit(inner, _) => differentiate(inner),

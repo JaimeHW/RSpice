@@ -762,12 +762,8 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::Idt(Box::new(inner), ic))
             }
             "idtmod" => {
-                if call.args.len() > 2 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "idtmod with a modulus argument".into(),
-                    ))
-                    .into());
-                }
+                // idtmod(expr [, ic [, modulus [, offset]]]) - without a
+                // modulus it degenerates to idt
                 let inner = self.convert(require_arg(0)?)?;
                 let ic = call
                     .args
@@ -775,7 +771,24 @@ impl<'a> ExprConverter<'a> {
                     .map(|e| self.convert(e))
                     .transpose()?
                     .map(Box::new);
-                Ok(IrExpr::Idt(Box::new(inner), ic))
+                match call.args.get(2) {
+                    Some(modulus) => {
+                        let modulus = Box::new(self.convert(modulus)?);
+                        let offset = call
+                            .args
+                            .get(3)
+                            .map(|e| self.convert(e))
+                            .transpose()?
+                            .map(Box::new);
+                        Ok(IrExpr::IdtMod {
+                            expr: Box::new(inner),
+                            ic,
+                            modulus,
+                            offset,
+                        })
+                    }
+                    None => Ok(IrExpr::Idt(Box::new(inner), ic)),
+                }
             }
             "ddx" => {
                 let inner = self.convert(require_arg(0)?)?;

@@ -475,6 +475,49 @@ endmodule
 }
 
 #[test]
+fn idtmod_wraps_the_integral() {
+    // Phase accumulator: phi = idtmod(rate, 0, 1) folds into [0, 1)
+    let model = compile(
+        r#"
+`include "disciplines.vams"
+module phase(p, n);
+    inout p, n;
+    electrical p, n;
+    parameter real rate = 1.0e6;
+    real phi;
+    analog begin
+        phi = idtmod(rate, 0.0, 1.0);
+        I(p, n) <+ phi * 1.0e-3;
+    end
+endmodule
+"#,
+    );
+    let mut device = VerilogADevice::new("PH1", model, &[1, 0]);
+    device.update_voltages(&[0.0]);
+
+    // DC: integral sits at its initial condition
+    assert!(device.evaluate()[0].abs() < 1e-18);
+    device.advance_state();
+
+    // rate * dt = 0.25 per step; the fourth step wraps 1.0 -> 0.0
+    device.set_analysis_type(2);
+    device.set_timestep(0.25e-6);
+    let mut phases = Vec::new();
+    for _ in 0..6 {
+        let current = device.evaluate()[0];
+        phases.push(current / 1.0e-3);
+        device.advance_state();
+    }
+    let expected = [0.25, 0.5, 0.75, 0.0, 0.25, 0.5];
+    for (i, (got, want)) in phases.iter().zip(expected).enumerate() {
+        assert!(
+            (got - want).abs() < 1e-9,
+            "step {i}: phase {got} != {want} (all: {phases:?})"
+        );
+    }
+}
+
+#[test]
 fn jacobian_matches_finite_difference_for_diode() {
     let model = compile(
         r#"

@@ -263,6 +263,10 @@ pub enum Instruction {
     /// Backward Euler: prev + expr * dt; returns ic at DC
     /// Stack: [expr, ic] -> [integral]
     IdtState(usize),
+    /// Wrapped integration: idtmod(expr, ic, modulus, offset)
+    /// The integral folds into [offset, offset + modulus)
+    /// Stack: [expr, ic, modulus, offset] -> [wrapped integral]
+    IdtModState(usize),
     /// Companion Jacobian factor for ddt: top-of-stack / dt (0 at DC)
     DdtJacobian,
     /// Companion Jacobian factor for idt: top-of-stack * dt (0 at DC)

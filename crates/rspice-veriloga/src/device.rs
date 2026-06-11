@@ -192,6 +192,7 @@ impl VerilogADevice {
                 match instruction {
                     Instruction::DdtState(idx)
                     | Instruction::IdtState(idx)
+                    | Instruction::IdtModState(idx)
                     | Instruction::LimitState(idx) => update_max(&mut max_state, *idx),
                     Instruction::AbsDelayState(idx) => update_max(&mut max_delay_buffer, *idx),
                     Instruction::TransitionState(idx) => {
