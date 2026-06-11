@@ -205,7 +205,7 @@ impl Engine {
     /// injections. Voltage sources use their stiff Norton conversion (the
     /// parallel conductance is already stamped); current sources inject
     /// directly with the SPICE element orientation.
-    fn pac_input_injections(
+    pub(in crate::engine::hb) fn pac_input_injections(
         circuit: &CircuitData,
         input_name: &str,
         _num_nodes: usize,

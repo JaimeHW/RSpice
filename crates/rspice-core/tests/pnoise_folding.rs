@@ -33,7 +33,7 @@ c1 mid 0 1n
     let offsets = [1.0e2, 1.0e3, 1.0e5, 1.0e7];
 
     let pnoise = engine
-        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, 6)
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, None, 6)
         .expect("pnoise completes");
 
     // Reference: the stationary noise analysis at the same frequencies.
@@ -81,7 +81,7 @@ c1 out 0 1f
     let engine = Engine::new(SimulationConfig::default());
 
     let result = engine
-        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, 12)
+        .run_pnoise(&netlist, 1.0e6, &[1.0e4], "out", None, None, 12)
         .expect("pnoise completes");
     assert!(result.converged, "operating point must converge");
 
@@ -123,7 +123,7 @@ c1 mid 0 1n
     let offsets = [1.0e4, 1.0e6];
 
     let result = engine
-        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, 6)
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, None, 6)
         .expect("pnoise completes");
 
     assert!(
@@ -136,6 +136,46 @@ c1 mid 0 1n
             (sum - total).abs() <= 1e-12 * total.max(1e-300),
             "contributors must sum to the total at offset {}: {sum:.6e} vs {total:.6e}",
             offsets[i]
+        );
+    }
+}
+
+
+/// Input-referred pnoise divides the output PSD by the squared conversion
+/// transfer from the input source. With no LO and a linear divider both
+/// pieces are closed-form: H(f) = (R2 || Zc) / (R1 + R2 || Zc).
+#[test]
+fn input_referred_pnoise_matches_the_closed_form_transfer() {
+    let deck = "\
+* linear divider for input-referred check
+vin in 0 dc 0
+r1 in mid 10k
+r2 mid 0 10k
+c1 mid 0 1n
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let offsets = [1.0e3, 1.0e5];
+
+    let result = engine
+        .run_pnoise(&netlist, 1.0e6, &offsets, "mid", None, Some("vin"), 6)
+        .expect("pnoise completes");
+    let input_noise = result.input_noise.expect("input-referred present");
+
+    let (r1, r2, c) = (10.0e3, 10.0e3, 1.0e-9);
+    for (i, &f) in offsets.iter().enumerate() {
+        let w = 2.0 * std::f64::consts::PI * f;
+        let zc = num_complex::Complex64::new(0.0, -1.0 / (w * c));
+        let z2 = (num_complex::Complex64::new(r2, 0.0) * zc)
+            / (num_complex::Complex64::new(r2, 0.0) + zc);
+        let h = z2 / (num_complex::Complex64::new(r1, 0.0) + z2);
+        let expected = result.output_noise[i] / h.norm_sqr();
+        assert!(
+            (input_noise[i] - expected).abs() < 0.01 * expected,
+            "input-referred noise at {f:.0e} Hz must be output/|H|^2: \
+             got {:.4e}, want {expected:.4e}",
+            input_noise[i]
         );
     }
 }

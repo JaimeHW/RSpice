@@ -12,7 +12,9 @@
 
 use super::*;
 use crate::analysis::HbSolverState;
-use crate::analysis::advanced::harmonic_balance::{HbConfig, PeriodicNoiseSource};
+use crate::analysis::advanced::harmonic_balance::{
+    HbConfig, PeriodicAcExcitation, PeriodicNoiseSource,
+};
 
 /// Result of periodic noise analysis.
 #[derive(Debug, Clone)]
@@ -24,6 +26,11 @@ pub struct PnoiseAnalysisResult {
     /// Per-source contributions: `(label, psd per offset)`, summing to the
     /// total at every offset.
     pub contributors: Vec<(String, Vec<Value>)>,
+    /// Input-referred noise (V^2/Hz): output noise divided by the squared
+    /// magnitude of the conversion transfer from the input source (at its
+    /// own frequency, sideband 0) to the output. Present when an input
+    /// source was named.
+    pub input_noise: Option<Vec<Value>>,
     /// Large-signal fundamental (Hz).
     pub fundamental_freq: Value,
     /// Whether the operating-point solve converged.
@@ -38,6 +45,7 @@ impl Engine {
     /// bounds the folding range (sidebands -K..=K participate). Resistor
     /// thermal noise is stationary; junction shot noise and FET channel
     /// thermal noise are modulated by the periodic operating point.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_pnoise(
         &self,
         netlist: &Netlist,
@@ -45,6 +53,7 @@ impl Engine {
         offsets: &[Value],
         output_node: &str,
         output_ref: Option<&str>,
+        input_source: Option<&str>,
         max_sideband: i32,
     ) -> Result<PnoiseAnalysisResult, SimulationError> {
         if !fundamental_freq.is_finite() || fundamental_freq <= 0.0 {
@@ -203,7 +212,16 @@ impl Engine {
         // Cyclostationary device sources from the converged waveforms.
         sources.extend(solver.device_noise_sources(&state, temperature));
 
+        // Input transfer for input-referred noise: the conversion transfer
+        // from the named source (unit excitation at sideband 0) to the
+        // output at the analysis frequency.
+        let input_injections = input_source
+            .map(|name| Self::pac_input_injections(&circuit, name, num_nodes))
+            .transpose()?;
+
         let mut output_noise = Vec::with_capacity(offsets.len());
+        let mut input_noise: Option<Vec<Value>> =
+            input_injections.as_ref().map(|_| Vec::with_capacity(offsets.len()));
         let mut contributors: Vec<(String, Vec<Value>)> = sources
             .iter()
             .map(|s| (s.name.clone(), Vec::with_capacity(offsets.len())))
@@ -224,9 +242,39 @@ impl Engine {
                         "pnoise solve failed at offset {offset:.6e} Hz: {e}"
                     ))
                 })?;
-            output_noise.push(per_source.iter().sum());
+            let total: Value = per_source.iter().sum();
+            output_noise.push(total);
             for (slot, &value) in contributors.iter_mut().zip(&per_source) {
                 slot.1.push(value);
+            }
+
+            if let (Some(injections), Some(acc)) =
+                (input_injections.as_ref(), input_noise.as_mut())
+            {
+                let excitation = PeriodicAcExcitation {
+                    sideband: 0,
+                    injections: injections.clone(),
+                };
+                let response = solver
+                    .solve_periodic_ac(
+                        &state,
+                        offset,
+                        -max_sideband,
+                        max_sideband,
+                        std::slice::from_ref(&excitation),
+                    )
+                    .map_err(|e| {
+                        SimulationError::Circuit(format!(
+                            "pnoise input transfer failed at offset {offset:.6e} Hz: {e}"
+                        ))
+                    })?;
+                let zero_idx = max_sideband as usize; // k = 0 with range -K..K
+                let mut h = response[0][out_idx][zero_idx];
+                if let Some(r) = ref_idx {
+                    h -= response[0][r][zero_idx];
+                }
+                let h2 = h.norm_sqr().max(1e-300);
+                acc.push(total / h2);
             }
         }
 
@@ -234,6 +282,7 @@ impl Engine {
             frequencies: offsets.to_vec(),
             output_noise,
             contributors,
+            input_noise,
             fundamental_freq,
             converged: state.converged,
         })
