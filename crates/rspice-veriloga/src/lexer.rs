@@ -552,6 +552,12 @@ impl<'a> Lexer<'a> {
                     TokenKind::Hash
                 }
             }
+            // Assignment pattern `'{ ... }` (LRM 2.4 array initializers):
+            // lexes as the same brace token as a concatenation literal
+            '\'' if self.peek_char() == Some('{') => {
+                self.advance();
+                TokenKind::LBrace
+            }
 
             // Compiler directive
             '`' => return self.scan_directive(start),
