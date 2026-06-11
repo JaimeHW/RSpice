@@ -73,6 +73,7 @@ impl CodeGenerator {
             terminal_names: ir.terminals.iter().map(|t| t.name.clone()).collect(),
             parameters,
             num_variables: ir.variables.len(),
+            variable_names: ir.variables.iter().map(|v| v.name.clone()).collect(),
             assignment_steps: Vec::new(),
             stamp_programs: Vec::new(),
             lookup_tables: Vec::new(),

@@ -33,8 +33,10 @@ use crate::native::NativeModel;
 pub struct VerilogADevice {
     /// Device instance name
     pub name: SmolStr,
-    /// Compiled model (shared reference would be better, but owned for simplicity)
-    model: CompiledModel,
+    /// Compiled model, shared between clones. Newton line-search snapshots
+    /// clone devices per probe; sharing the (potentially megabyte-scale)
+    /// program keeps that clone proportional to runtime state only.
+    model: std::sync::Arc<CompiledModel>,
     /// Runtime execution context
     context: VmContext,
     /// Mapping from terminal index to circuit node ID (0 = ground)
@@ -135,6 +137,10 @@ impl VerilogADevice {
         }
         context.param_given = vec![false; model.parameters.len()];
         context.variables.resize(model.num_variables, 0.0);
+        // Stateful runtime data referenced by the bytecode lives in the
+        // per-instance context (the model stays immutable and shared)
+        context.lookup_tables = model.lookup_tables.clone();
+        context.laplace_filters = model.laplace_filters.clone();
         Self::preallocate_vm_runtime_state(&mut context, &model);
 
         // Attempt native compilation (if feature enabled)
@@ -145,7 +151,7 @@ impl VerilogADevice {
         let num_stamp_programs = model.stamp_programs.len();
         let mut device = Self {
             name: name.into(),
-            model,
+            model: std::sync::Arc::new(model),
             context,
             node_mapping,
             internal_node_indices: vec![0; num_internal_nodes],
@@ -461,6 +467,26 @@ impl VerilogADevice {
         self.branch_current_indices.get(ordinal).copied()
     }
 
+    /// Read an internal model variable by name (operating-point
+    /// inspection). Returns the value from the most recent evaluation.
+    pub fn variable(&self, name: &str) -> Option<f64> {
+        let idx = self
+            .model
+            .variable_names
+            .iter()
+            .position(|n| n.as_str() == name)?;
+        self.context.variables.get(idx).copied()
+    }
+
+    /// Iterate (name, value) over all internal model variables
+    pub fn variables(&self) -> impl Iterator<Item = (&str, f64)> {
+        self.model
+            .variable_names
+            .iter()
+            .map(|n| n.as_str())
+            .zip(self.context.variables.iter().copied())
+    }
+
     /// Remap circuit node IDs after an external topology rewrite.
     pub fn remap_circuit_nodes(&mut self, mut remap: impl FnMut(usize) -> usize) {
         for node in &mut self.node_mapping {
@@ -680,12 +706,12 @@ impl VerilogADevice {
                 self.context.lookup_tables.as_ptr()
             },
             lookup_tables_len: self.context.lookup_tables.len(),
-            laplace_filters: if self.model.laplace_filters.is_empty() {
+            laplace_filters: if self.context.laplace_filters.is_empty() {
                 std::ptr::null_mut()
             } else {
-                self.model.laplace_filters.as_mut_ptr()
+                self.context.laplace_filters.as_mut_ptr()
             },
-            laplace_filters_len: self.model.laplace_filters.len(),
+            laplace_filters_len: self.context.laplace_filters.len(),
         }
     }
 
@@ -891,10 +917,12 @@ impl VerilogADevice {
             }
 
             // Compute the contribution value (branch current for current
-            // contributions, source voltage for potential contributions)
+            // contributions, source voltage for potential contributions).
+            // Non-finite values would poison the whole system; skip the
+            // program and let Newton damping recover.
             let value = match vm.execute(&program.value_program) {
-                Ok(v) => v,
-                Err(_) => continue,
+                Ok(v) if v.is_finite() => v,
+                _ => continue,
             };
 
             vm.context.currents.push(value);
@@ -919,9 +947,12 @@ impl VerilogADevice {
 
             for jacobian_entry in &matrix_indices.jacobian[program_idx] {
                 let model_entry = &program.jacobian_programs[jacobian_entry.jacobian_idx];
+                // A non-finite derivative (a model kink such as
+                // d(sqrt(x))/dx at x=0) is treated as zero: the residual
+                // stays exact and Newton proceeds on the remaining slope.
                 let deriv = match vm.execute(&model_entry.program) {
-                    Ok(v) => v,
-                    Err(_) => continue,
+                    Ok(v) if v.is_finite() => v,
+                    _ => continue,
                 };
 
                 // Accumulate the companion RHS term once per derivative

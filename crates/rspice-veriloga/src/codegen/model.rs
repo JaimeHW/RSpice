@@ -35,6 +35,9 @@ pub struct CompiledModel {
     pub parameters: Vec<CompiledParameter>,
     /// Number of variables
     pub num_variables: usize,
+    /// Variable names (index-aligned with the runtime variable storage);
+    /// used for operating-point reporting and debugging
+    pub variable_names: Vec<SmolStr>,
     /// Evaluation steps (assignments and runtime loops), executed in order
     /// before the contributions
     pub assignment_steps: Vec<AssignmentStep>,
