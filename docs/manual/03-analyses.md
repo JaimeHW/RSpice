@@ -1,0 +1,65 @@
+# 3 · Analyses
+
+Every analysis card in the deck runs in order; with several analyses,
+output files are tagged per analysis (`out.tran.csv`, `out.ac.csv`, …).
+A deck with no analysis card runs a DC operating point.
+
+## Core set (deck cards)
+
+| Card | Meaning |
+|---|---|
+| `.op` | DC operating point. |
+| `.dc SRC start stop step` | DC transfer sweep (nested sweep supported via a second source tuple). |
+| `.ac dec\|oct\|lin N fstart fstop` | Small-signal frequency sweep. |
+| `.tran tstep tstop [tstart [tmax]]` | Transient; `tstep` is the output interval, integration is variable-step (trap/Gear with LTE control). |
+| `.noise v(out[,ref]) SRC dec\|oct\|lin N f0 f1` | Small-signal noise: output/input-referred spectra, per-contributor breakdown, band-integrated totals. |
+| `.disto dec\|oct\|lin N f0 f1 [f2/f1]` | Small-signal distortion. |
+| `.pz in+ in- out+ out- cur\|vol pol\|zer\|pz` | Pole-zero extraction. |
+| `.sens v(out[,ref]) [AC sweep]` | DC or AC sensitivity. |
+| `.tf v(out) SRC` / `.tf i(VSRC) SRC` | DC transfer function (gain, Rin, Rout). |
+| `.four f0 v(out) …` | Fourier analysis of the last transient. |
+
+Initial conditions: `.ic v(node)=value …` seeds the transient start;
+`.nodeset` hints the DC solve. `.options uic` semantics are not yet
+implemented (a warning is printed; the run uses the DC start).
+
+## Convergence aids
+
+The DC solve escalates automatically: Newton with damping, then
+gmin-stepping, then source-stepping/pseudo-transient continuation.
+Transient steps that hit a stiff knife-edge engage a gmin-continuation
+rescue and, if the step controller livelocks at the minimum timestep, a
+breakpoint-style integration restart. Tuning knobs (`.options` or CLI):
+`reltol`, `abstol`, `vntol`, `gmin`, `itl…`, `temp`, `trtol`, `method`
+(`trap`/`gear`), plus `--convergence <preset>` on the CLI.
+
+## Advanced / RF set
+
+These run through the CLI flags or the IDE's analysis setup (they are
+configured per run rather than as deck cards):
+
+| Analysis | CLI / IDE |
+|---|---|
+| Periodic steady state (shooting) | `--pss-freq F [--pss-harmonics N] [--pss-tstab T]` |
+| Harmonic balance (Krylov for ≥256 unknowns) | `--hb-freq F [--hb-harmonics N]` |
+| PAC / PXF / PSTB / periodic noise / envelope | IDE analysis setup |
+| S-parameters (Touchstone export) | IDE analysis setup |
+| Monte Carlo | `--monte-carlo N [--seed S]` or `.mc` card |
+| Pole-zero via nodes | `--pz-input N --pz-output M` |
+| Sensitivity | `--sens-output N [--sens-param NAME]` |
+
+## Transient checkpointing
+
+Long transients can be segmented:
+
+```sh
+rspice run long.cir --checkpoint seg1.ckpt          # runs to tstop, saves state
+rspice run long2.cir --restore seg1.ckpt            # continues from the checkpoint
+```
+
+The checkpoint stores the exact reactive integrator state and is
+fingerprint-guarded against a mismatched deck. `--restore` requires the
+deck's `tstop` to exceed the checkpoint time, and combines with
+`--checkpoint` to chain segments. TRNOISE decks regenerate their noise
+train per segment — run those unsegmented when one continuous sample
+path matters.
