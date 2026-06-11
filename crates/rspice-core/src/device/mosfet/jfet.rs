@@ -380,6 +380,10 @@ pub struct Jfet {
     eval_igd: Value,
     eval_ggs: Value,
     eval_ggd: Value,
+    /// GATEMOD=1 gate-drain current sensitivity to vgs (zero otherwise).
+    eval_gmg: Value,
+    /// GATEMOD=1 gate-drain current sensitivity to vds (zero otherwise).
+    eval_gmd: Value,
     eval_vds_linear: Value,
     lin_vgs: Value,
     lin_vgd: Value,

@@ -297,10 +297,9 @@ impl Jfet {
         let vgd_int = pol * vgd;
 
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
-            // GATEMOD=1 (ngspice's thermally self-consistent gate model,
-            // hfetload.c) is not implemented; both settings use the
-            // diode/leakage gate branch and model resolution warns when
-            // GATEMOD=1 is requested.
+            // GATEMOD=1 gate currents are produced by the channel
+            // evaluation (calculate_hfet1_core) and never reach this
+            // diode/leakage path; see compute_operating_terms.
             let (igs_int, ggs, igd_int, ggd) =
                 if self.params.hfet_level >= 2 && self.params.hfet_level < 5 {
                     let (igs_int, ggs) = self.mesa_gate_branch(vgs_int, temp_source);
@@ -565,7 +564,8 @@ impl Jfet {
         frequency_hz: Value,
     ) -> (Value, Value, Value, Value) {
         let (temp_common, temp_source, _) = self.resolved_temperatures(self.params.tnom);
-        let (_, gm_base, gds_base, _, _, ggs, ggd, _) = self.compute_operating_terms(vgs, vds, vgd);
+        let (_, gm_base, gds_base, _, _, ggs, ggd, _, _gmg, _gmd) =
+            self.compute_operating_terms(vgs, vds, vgd);
 
         let (gm, gds) = match self.params.channel_model {
             JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {

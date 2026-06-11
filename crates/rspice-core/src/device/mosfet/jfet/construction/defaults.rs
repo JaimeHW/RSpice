@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 impl Jfet {
     /// Create a new N-JFET
@@ -36,6 +36,8 @@ impl Jfet {
             eval_igs: 0.0,
             eval_igd: 0.0,
             eval_ggs: 0.0,
+            eval_gmg: 0.0,
+            eval_gmd: 0.0,
             eval_ggd: 0.0,
             eval_vds_linear: 0.0,
             lin_vgs: 0.0,
@@ -86,6 +88,8 @@ impl Jfet {
             eval_igs: 0.0,
             eval_igd: 0.0,
             eval_ggs: 0.0,
+            eval_gmg: 0.0,
+            eval_gmd: 0.0,
             eval_ggd: 0.0,
             eval_vds_linear: 0.0,
             lin_vgs: 0.0,
@@ -298,3 +302,4 @@ impl Jfet {
         self
     }
 }
+

@@ -30,9 +30,12 @@ impl Jfet {
         vgd: Value,
         regularize_gate_conductance: bool,
     ) {
-        let (ids, gm, gds, igs, igd, mut ggs, mut ggd, vds_linear) =
+        let (ids, gm, gds, igs, igd, mut ggs, mut ggd, vds_linear, gmg, gmd) =
             self.compute_operating_terms(vgs, vds, vgd);
-        if regularize_gate_conductance && self.has_gate_generation_branch() {
+        if regularize_gate_conductance
+            && self.has_gate_generation_branch()
+            && !(self.params.hfet_gatemod && self.params.hfet_level >= 5)
+        {
             ggs = self.regularized_gate_conductance(vgs, igs, ggs);
             ggd = self.regularized_gate_conductance(vgd, igd, ggd);
         }
@@ -43,6 +46,8 @@ impl Jfet {
         self.eval_igd = igd;
         self.eval_ggs = ggs;
         self.eval_ggd = ggd;
+        self.eval_gmg = gmg;
+        self.eval_gmd = gmd;
         self.eval_vds_linear = vds_linear;
         self.lin_vgs = vgs;
         self.lin_vgd = vgd;
@@ -120,7 +125,7 @@ impl Jfet {
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
 
-        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) = if self.eval_valid {
+        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, gmg, gmd) = if self.eval_valid {
             (
                 self.eval_ids,
                 self.eval_gm,
@@ -130,34 +135,38 @@ impl Jfet {
                 self.eval_ggs,
                 self.eval_ggd,
                 self.eval_vds_linear,
+                self.eval_gmg,
+                self.eval_gmd,
             )
         } else {
             self.compute_operating_terms(vgs, vds, vgd)
         };
         let ids_eq = ids - gm * vgs - gds * vds_linear;
         let igs_eq = igs - ggs * vgs;
-        let igd_eq = igd - ggd * vgd;
+        // GATEMOD=1's gate-drain branch is controlled by vgs and vds
+        // (gmg/gmd), not vgd; both are zero for the diode gate models.
+        let igd_eq = igd - ggd * vgd - gmg * vgs - gmd * vds;
 
         // Drain row
         if let Some(idx) = self.indices.dd {
-            matrix.stamp_direct(idx, gds + ggd);
+            matrix.stamp_direct(idx, gds + ggd - gmd);
         }
         if let Some(idx) = self.indices.dg {
-            matrix.stamp_direct(idx, gm - ggd);
+            matrix.stamp_direct(idx, gm - ggd - gmg);
         }
         if let Some(idx) = self.indices.ds {
-            matrix.stamp_direct(idx, -gm - gds);
+            matrix.stamp_direct(idx, -gm - gds + gmg + gmd);
         }
 
         // Gate row
         if let Some(idx) = self.indices.gd {
-            matrix.stamp_direct(idx, -ggd);
+            matrix.stamp_direct(idx, -ggd + gmd);
         }
         if let Some(idx) = self.indices.gg {
-            matrix.stamp_direct(idx, ggs + ggd);
+            matrix.stamp_direct(idx, ggs + ggd + gmg);
         }
         if let Some(idx) = self.indices.gs {
-            matrix.stamp_direct(idx, -ggs);
+            matrix.stamp_direct(idx, -ggs - gmg - gmd);
         }
 
         // Source row
@@ -261,9 +270,15 @@ impl NonlinearDevice for Jfet {
             let delvgd = vgd - vgd_prev;
             let delvds = delvgs - delvgd;
 
-            let cghat = self.lin_cg + self.eval_ggs * delvgs + self.eval_ggd * delvgd;
+            let cghat = self.lin_cg
+                + self.eval_ggs * delvgs
+                + self.eval_ggd * delvgd
+                + self.eval_gmg * delvgs
+                + self.eval_gmd * delvds;
             let cdhat = self.lin_cd + self.eval_gm * delvgs + self.eval_gds * delvds
-                - self.eval_ggd * delvgd;
+                - self.eval_ggd * delvgd
+                - self.eval_gmg * delvgs
+                - self.eval_gmd * delvds;
 
             let vgs_ok = delvgs.abs() <= RELTOL * vgs.abs().max(vgs_prev.abs()) + VOLT_TOL;
             let vgd_ok = delvgd.abs() <= RELTOL * vgd.abs().max(vgd_prev.abs()) + VOLT_TOL;
@@ -301,7 +316,7 @@ impl NonlinearDevice for Jfet {
     ) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
 
-        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear) = if self.eval_valid {
+        let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, gmg, gmd) = if self.eval_valid {
             (
                 self.eval_ids,
                 self.eval_gm,
@@ -311,21 +326,23 @@ impl NonlinearDevice for Jfet {
                 self.eval_ggs,
                 self.eval_ggd,
                 self.eval_vds_linear,
+                self.eval_gmg,
+                self.eval_gmd,
             )
         } else {
             self.compute_operating_terms(vgs, vds, vgd)
         };
         let ids_eq = ids - gm * vgs - gds * vds_linear;
         let igs_eq = igs - ggs * vgs;
-        let igd_eq = igd - ggd * vgd;
+        let igd_eq = igd - ggd * vgd - gmg * vgs - gmd * vds;
 
-        matrix.stamp(self.drain, self.drain, gds + ggd);
-        matrix.stamp(self.drain, self.gate, gm - ggd);
-        matrix.stamp(self.drain, self.source, -gm - gds);
+        matrix.stamp(self.drain, self.drain, gds + ggd - gmd);
+        matrix.stamp(self.drain, self.gate, gm - ggd - gmg);
+        matrix.stamp(self.drain, self.source, -gm - gds + gmg + gmd);
 
-        matrix.stamp(self.gate, self.drain, -ggd);
-        matrix.stamp(self.gate, self.gate, ggs + ggd);
-        matrix.stamp(self.gate, self.source, -ggs);
+        matrix.stamp(self.gate, self.drain, -ggd + gmd);
+        matrix.stamp(self.gate, self.gate, ggs + ggd + gmg);
+        matrix.stamp(self.gate, self.source, -ggs - gmg - gmd);
 
         matrix.stamp(self.source, self.drain, -gds);
         matrix.stamp(self.source, self.gate, -gm - ggs);

@@ -666,12 +666,42 @@ impl Jfet {
     }
 
     #[inline]
+    #[allow(clippy::type_complexity)]
     pub(super) fn compute_operating_terms(
         &self,
         vgs: Value,
         vds: Value,
         vgd: Value,
-    ) -> (Value, Value, Value, Value, Value, Value, Value, Value) {
+    ) -> (
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+    ) {
+        // GATEMOD=1 evaluates channel and gate together: the gate-drain
+        // branch has no vgd conductance; its sensitivities are gmg/gmd
+        // and the A1/A2 corrections are already in the channel terms.
+        if matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+            && self.params.hfet_gatemod
+            && self.params.hfet_level >= 5
+        {
+            let (temp_common, _, _) = self.resolved_temperatures(self.params.tnom);
+            let (ids, gm, gds, gate) = self.calculate_hfet1_gatemod(vgs, vds, temp_common);
+            let pol = self.jfet_type.polarity();
+            let (igs, igd, ggs, gmg, gmd) = match gate {
+                Some(g) => (pol * g.cgs, pol * g.cgd, g.ggs, g.gmg, g.gmd),
+                None => (0.0, 0.0, 0.0, 0.0, 0.0),
+            };
+            let gds = if gds.is_finite() { gds } else { 0.0 };
+            return (ids, gm, gds, igs, igd, ggs, 0.0, vds, gmg, gmd);
+        }
+
         let mut vds_linear = vds;
         let (mut ids, mut gm, mut gds_raw) = self.calculate(vgs, vds, self.params.tnom);
         if self.hfet_legacy_inverse_active
@@ -705,7 +735,7 @@ impl Jfet {
         }
         let (igs, igd, ggs, ggd) = self.gate_junctions(vgs, vgd, self.params.tnom);
         let gds = if gds_raw.is_finite() { gds_raw } else { 0.0 };
-        (ids, gm, gds, igs, igd, ggs, ggd, vds_linear)
+        (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, 0.0, 0.0)
     }
 
     /// Calculate classic Shichman-Hodges drain current and conductances.

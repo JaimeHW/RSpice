@@ -1037,7 +1037,7 @@ mod hfet1_tests {
         // deck has to come from somewhere downstream.
         let mut jfet = Jfet::njf("z1", 1, 2, 3).enable_hfet_model();
         jfet.params.vto = 0.1;
-        let (ids, _gm, _gds, igs, igd, _ggs, _ggd, vds_linear) =
+        let (ids, _gm, _gds, igs, igd, _ggs, _ggd, vds_linear, _gmg, _gmd) =
             jfet.compute_operating_terms(0.4, 0.05, 0.35);
         assert!(
             (ids - 2.68269e-4).abs() <= 2.68269e-4 * 1.0e-3,

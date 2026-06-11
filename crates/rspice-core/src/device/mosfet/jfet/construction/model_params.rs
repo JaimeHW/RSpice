@@ -10,12 +10,6 @@ impl Jfet {
         }
         if let Some(v) = params.get("GATEMOD").copied().filter(|v| v.is_finite()) {
             p.hfet_gatemod = v.round() != 0.0;
-            if p.hfet_gatemod {
-                log::warn!(
-                    "HFET1 GATEMOD=1 thermally self-consistent gate model is not \
-                     implemented yet; falling back to the GATEMOD=0 diode gate model"
-                );
-            }
         }
 
         if let Some(v) = params
