@@ -449,16 +449,17 @@ impl<'a> Lexer<'a> {
     /// Parse a single-quoted expression 'expr' (ngspice-style)
     fn parse_quoted_expression(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut end = 1; // Skip opening quote
+        let mut terminated = false;
 
         for c in input[1..].chars() {
             end += c.len_utf8();
             if c == '\'' {
+                terminated = true;
                 break;
             }
         }
 
-        // Check if we found the closing quote
-        if end == 1 || input.chars().nth(end - 1) != Some('\'') {
+        if !terminated {
             return Err(LexError::UnterminatedExpression(self.line));
         }
 
@@ -771,3 +772,38 @@ impl TokenStream {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expression_tokens(input: &str) -> Vec<String> {
+        tokenize(input)
+            .expect("tokenize failed")
+            .into_iter()
+            .filter_map(|t| match t.kind {
+                TokenKind::Expression(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn quoted_expressions_keep_multibyte_content() {
+        // The byte/char index mix-up used to reject any quoted expression
+        // containing a multibyte character as unterminated.
+        assert_eq!(expression_tokens("R1 a b 'µ0*2'"), ["µ0*2"]);
+        assert_eq!(expression_tokens("R1 a b '2*3'"), ["2*3"]);
+    }
+
+    #[test]
+    fn braced_expressions_keep_multibyte_content() {
+        assert_eq!(expression_tokens("R1 a b {µ0*2}"), ["µ0*2"]);
+    }
+
+    #[test]
+    fn unterminated_quoted_expression_is_rejected() {
+        assert!(tokenize("R1 a b '2*3").is_err());
+        assert!(tokenize("R1 a b 'µ0*2").is_err());
+    }
+}
