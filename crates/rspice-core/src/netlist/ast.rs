@@ -755,6 +755,25 @@ pub enum SourceSpec {
         /// PHASEC: carrier phase in degrees
         phase_carrier: Value,
     },
+
+    /// Transient noise source: TRNOISE(NA NT NALPHA NAMP)
+    ///
+    /// Gaussian white noise of RMS amplitude `NA` sampled every `NT`
+    /// seconds, plus 1/f^NALPHA noise of amplitude `NAMP` (Kasdin
+    /// fractional-integration filter, matching ngspice's trnoise). The
+    /// transient front end expands this spec into a seeded, deterministic
+    /// PWL sample train before circuit construction; the DC operating
+    /// point sees exactly 0 (zero-mean noise, ngspice semantics).
+    TrNoise {
+        /// NA: white-noise RMS amplitude (V or A). 0 disables.
+        na: Value,
+        /// NT: sample interval (s). Must be > 0 when any amplitude is set.
+        nt: Value,
+        /// NALPHA: 1/f exponent, 0 < alpha < 2. 0 disables flicker.
+        nalpha: Value,
+        /// NAMP: 1/f^alpha amplitude. 0 disables flicker.
+        namp: Value,
+    },
 }
 
 impl SourceSpec {

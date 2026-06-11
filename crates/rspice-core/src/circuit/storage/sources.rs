@@ -447,6 +447,9 @@ impl VoltageSources {
         match spec {
             SourceSpec::Dc(v) => *v,
             SourceSpec::Ac { .. } => 0.0, // AC sources are DC=0 in transient
+            // TRNOISE expands into a PWL sample train before circuit
+            // construction; an unexpanded spec is zero-mean by definition.
+            SourceSpec::TrNoise { .. } => 0.0,
             SourceSpec::DcAc { dc_value, .. } => *dc_value,
             SourceSpec::DcTransient { transient, .. } => {
                 Self::evaluate_source_at_time_with_context(transient, time, context)

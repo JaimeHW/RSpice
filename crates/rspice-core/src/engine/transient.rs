@@ -31,6 +31,7 @@ fn newton_merit_debug_enabled() -> bool {
 mod breakpoints;
 mod companion_stamps;
 mod globalization;
+mod noise;
 mod rescue;
 mod residual;
 mod startup;
@@ -345,7 +346,17 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<TransientResult, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        engine.run_tran_with_abort_resolved(netlist, tstop, max_step, abort)
+        // TRNOISE sources expand into seeded, deterministic PWL sample
+        // trains covering [0, tstop] before circuit construction; decks
+        // without noise sources pass through untouched (no clone).
+        match noise::expand_transient_noise(netlist, tstop)
+            .map_err(SimulationError::Circuit)?
+        {
+            Some(expanded) => {
+                engine.run_tran_with_abort_resolved(&expanded, tstop, max_step, abort)
+            }
+            None => engine.run_tran_with_abort_resolved(netlist, tstop, max_step, abort),
+        }
     }
 
     #[inline]

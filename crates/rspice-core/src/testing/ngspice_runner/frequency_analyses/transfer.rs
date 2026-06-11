@@ -134,7 +134,8 @@ impl TestRunner {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. } => 0.0,
+                        | crate::netlist::SourceSpec::Am { .. }
+                        | crate::netlist::SourceSpec::TrNoise { .. } => 0.0,
                     });
                 }
                 _ => {

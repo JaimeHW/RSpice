@@ -330,7 +330,8 @@ impl TestRunner {
                         | crate::netlist::SourceSpec::PwlFile { .. }
                         | crate::netlist::SourceSpec::Exp { .. }
                         | crate::netlist::SourceSpec::Sffm { .. }
-                        | crate::netlist::SourceSpec::Am { .. } => {
+                        | crate::netlist::SourceSpec::Am { .. }
+                        | crate::netlist::SourceSpec::TrNoise { .. } => {
                             *spec = crate::netlist::SourceSpec::Dc(dc_value);
                         }
                     }

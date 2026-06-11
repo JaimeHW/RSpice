@@ -874,6 +874,14 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *modulation_offset *= m;
             *modulation_amplitude *= m;
         }
+        SourceSpec::TrNoise { na, namp, .. } => {
+            // Deterministic multiplicity convention: parallel copies share
+            // one sample train, so amplitudes scale linearly. Physically
+            // uncorrelated devices would scale as sqrt(m); model that by
+            // adjusting NA/NAMP explicitly in the deck.
+            *na *= m;
+            *namp *= m;
+        }
     }
 }
 

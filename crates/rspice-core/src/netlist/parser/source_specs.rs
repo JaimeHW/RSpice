@@ -133,6 +133,10 @@ pub(super) fn parse_source_spec(
                 stream.advance();
                 return parse_am_spec(stream, line_num, params);
             }
+            "TRNOISE" => {
+                stream.advance();
+                return parse_trnoise_spec(stream, line_num, params);
+            }
             _ => {}
         }
     }
@@ -188,8 +192,64 @@ fn parse_transient_source_spec_keyword(
             stream.advance();
             parse_am_spec(stream, line_num, params).map(Some)
         }
+        "TRNOISE" => {
+            stream.advance();
+            parse_trnoise_spec(stream, line_num, params).map(Some)
+        }
         _ => Ok(None),
     }
+}
+
+/// Parse TRNOISE(NA NT NALPHA NAMP [RTSAM RTSCAPT RTSEMT]).
+///
+/// White (`NA`/`NT`) and 1/f (`NALPHA`/`NAMP`) terms are supported; the RTS
+/// (random telegraph) tail is recognized but rejected with a clear
+/// diagnostic rather than silently ignored.
+fn parse_trnoise_spec(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<SourceSpec, ParseError> {
+    let has_paren = stream.consume(&TokenKind::LParen);
+
+    let na = expect_value_default(stream, params, 0.0);
+    let nt = expect_value_default(stream, params, 0.0);
+    let nalpha = expect_value_default(stream, params, 0.0);
+    let namp = expect_value_default(stream, params, 0.0);
+    let rts = try_value(stream, params);
+
+    if has_paren {
+        stream.consume(&TokenKind::RParen);
+    }
+
+    if rts.is_some_and(|v| v != 0.0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRNOISE RTS (random telegraph) parameters are not supported yet; \
+                      set RTSAM=0 or omit the tail"
+                .to_string(),
+        });
+    }
+
+    if (na != 0.0 || namp != 0.0) && !(nt.is_finite() && nt > 0.0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRNOISE requires a positive sample interval NT".to_string(),
+        });
+    }
+    if namp != 0.0 && !(nalpha > 0.0 && nalpha < 2.0) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "TRNOISE NALPHA must satisfy 0 < NALPHA < 2 when NAMP is set".to_string(),
+        });
+    }
+
+    Ok(SourceSpec::TrNoise {
+        na,
+        nt,
+        nalpha,
+        namp,
+    })
 }
 
 /// Parse SFFM(VO VA FC MDI FM TD PHASEM PHASEC); omitted frequencies stay

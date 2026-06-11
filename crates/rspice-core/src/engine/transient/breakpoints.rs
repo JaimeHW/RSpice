@@ -60,7 +60,12 @@ impl Engine {
         use crate::netlist::SourceSpec;
 
         match spec {
-            SourceSpec::Dc(_) | SourceSpec::Ac { .. } | SourceSpec::DcAc { .. } => {}
+            // TRNOISE breakpoints come from its expanded PWL sample train;
+            // the unexpanded spec itself schedules none.
+            SourceSpec::Dc(_)
+            | SourceSpec::Ac { .. }
+            | SourceSpec::DcAc { .. }
+            | SourceSpec::TrNoise { .. } => {}
             SourceSpec::DcTransient { transient, .. }
             | SourceSpec::DcAcTransient { transient, .. } => {
                 Self::add_source_spec_breakpoints(breakpoints, transient, tstop, tstep_hint);

@@ -16,8 +16,9 @@ pub(crate) fn extract_dc_value(spec: &SourceSpec) -> Value {
         SourceSpec::Exp { v1, .. } => *v1,
         SourceSpec::Ac { .. } => 0.0, // AC sources have no DC component
         // ngspice's SFFM/AM evaluate to exactly 0 at t <= TD (vsrcload.c),
-        // which is what the operating point sees at time zero.
-        SourceSpec::Sffm { .. } | SourceSpec::Am { .. } => 0.0,
+        // which is what the operating point sees at time zero. TRNOISE is
+        // zero-mean, so the operating point sees 0 as well.
+        SourceSpec::Sffm { .. } | SourceSpec::Am { .. } | SourceSpec::TrNoise { .. } => 0.0,
     }
 }
 
