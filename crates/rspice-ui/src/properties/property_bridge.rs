@@ -303,8 +303,8 @@ pub fn collect_properties_from_component(
                 // Use the definition's type to create appropriate PropertyValue
                 match &def.default_value {
                     PropertyValue::Number { .. } => {
-                        // Try to parse as number
-                        if let Ok(num) = value.parse::<f64>() {
+                        // Engineering notation ("1k", "10n") counts as numeric.
+                        if let Ok(num) = crate::properties::parse_engineering_value(&value) {
                             PropertyValue::Number {
                                 value: num,
                                 unit: def.unit.clone(),

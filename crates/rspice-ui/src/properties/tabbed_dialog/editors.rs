@@ -94,7 +94,9 @@ fn render_expression_editor(
     let response = mono_input(ui, &mut new_text, width);
 
     if response.changed() && new_text != text {
-        if let Ok(value) = new_text.parse::<f64>() {
+        // Engineering notation ("100k", "10n") resolves to a number; only
+        // genuinely symbolic input stays an expression.
+        if let Ok(value) = crate::properties::parse_engineering_value(&new_text) {
             return Some(PropertyValue::number(value));
         }
         return Some(PropertyValue::Expression(new_text));
