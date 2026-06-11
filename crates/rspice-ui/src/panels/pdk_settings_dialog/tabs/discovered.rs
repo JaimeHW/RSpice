@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::super::model::PdkSettingsDialogState;
+use crate::ui::tokens::Tokens;
 use egui::{RichText, Ui};
 
 /// Render the Discovered Files tab
@@ -8,6 +9,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_discovered_files_tab(
     ui: &mut Ui,
     state: &mut PdkSettingsDialogState,
 ) -> Option<PathBuf> {
+    let c = Tokens::get(ui.ctx()).color;
     let mut load_file: Option<PathBuf> = None;
 
     ui.heading("Discovered Model Files");
@@ -35,13 +37,13 @@ pub(in crate::panels::pdk_settings_dialog) fn render_discovered_files_tab(
             ui.add_space(40.0);
             ui.label(
                 RichText::new("No model files discovered.")
-                    .color(egui::Color32::GRAY)
+                    .color(c.text_dim)
                     .italics(),
             );
             ui.add_space(8.0);
             ui.label(
                 RichText::new("Add library paths and click 'Rescan' to discover files.")
-                    .color(egui::Color32::GRAY)
+                    .color(c.text_faint)
                     .size(11.0),
             );
         });
@@ -55,12 +57,14 @@ pub(in crate::panels::pdk_settings_dialog) fn render_discovered_files_tab(
 
         for file in filtered {
             ui.horizontal(|ui| {
+                // File-type badges draw from the categorical trace palette —
+                // theme-aware in both modes, unlike hand-picked RGB.
                 let (type_color, type_text) = match file.file_type() {
-                    "lib" => (egui::Color32::from_rgb(100, 180, 100), "LIB"),
-                    "scs" => (egui::Color32::from_rgb(100, 150, 200), "SCS"),
-                    "mod" => (egui::Color32::from_rgb(200, 150, 100), "MOD"),
-                    "sp" | "cir" => (egui::Color32::from_rgb(150, 150, 150), "SP"),
-                    _ => (egui::Color32::GRAY, "???"),
+                    "lib" => (c.traces[2], "LIB"),
+                    "scs" => (c.traces[1], "SCS"),
+                    "mod" => (c.traces[3], "MOD"),
+                    "sp" | "cir" => (c.text_dim, "SP"),
+                    _ => (c.text_faint, "???"),
                 };
                 ui.label(
                     RichText::new(format!("[{}]", type_text))
@@ -77,7 +81,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_discovered_files_tab(
                 if !file.sections.is_empty() {
                     ui.label(
                         RichText::new(format!("({})", file.sections.join(", ")))
-                            .color(egui::Color32::GRAY)
+                            .color(c.text_faint)
                             .size(10.0),
                     );
                 }

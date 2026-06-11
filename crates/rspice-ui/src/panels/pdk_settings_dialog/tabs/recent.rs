@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::super::model::PdkSettingsDialogState;
+use crate::ui::tokens::Tokens;
 use egui::{RichText, Ui};
 
 /// Render the Recent Files tab
@@ -8,6 +9,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_recent_files_tab(
     ui: &mut Ui,
     state: &mut PdkSettingsDialogState,
 ) -> Option<PathBuf> {
+    let c = Tokens::get(ui.ctx()).color;
     let mut load_file: Option<PathBuf> = None;
 
     ui.heading("Recent Files");
@@ -20,7 +22,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_recent_files_tab(
             ui.add_space(40.0);
             ui.label(
                 RichText::new("No recent files.")
-                    .color(egui::Color32::GRAY)
+                    .color(c.text_dim)
                     .italics(),
             );
         });
@@ -36,7 +38,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_recent_files_tab(
                 if !std::path::Path::new(file_path).exists() {
                     ui.label(
                         RichText::new("(not found)")
-                            .color(egui::Color32::from_rgb(200, 100, 100))
+                            .color(c.err)
                             .size(10.0),
                     );
                 }

@@ -9,7 +9,7 @@
 
 use crate::analysis::calculator::{CalcValue, SimulationContext, evaluator, parser};
 use crate::state::SimulationState;
-use egui::{Button, Color32, ScrollArea, TextEdit, Ui, Vec2};
+use egui::{Button, ScrollArea, TextEdit, Ui, Vec2};
 
 #[derive(Default, Clone)]
 pub struct CalculatorPanel {
@@ -90,10 +90,11 @@ impl CalculatorPanel {
                 }
 
                 // Error / Result Display
+                let c = crate::ui::tokens::Tokens::get(ui.ctx()).color;
                 if let Some(err) = &self.error_msg {
-                    ui.colored_label(Color32::RED, format!("Error: {}", err));
+                    ui.colored_label(c.err, format!("Error: {}", err));
                 } else if let Some(res) = &self.last_result {
-                    ui.colored_label(Color32::GREEN, format!("Result: {}", res));
+                    ui.colored_label(c.ok, format!("Result: {}", res));
                 }
 
                 ui.horizontal(|ui| {

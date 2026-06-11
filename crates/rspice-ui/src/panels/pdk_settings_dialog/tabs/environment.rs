@@ -1,4 +1,5 @@
 use super::super::model::PdkSettingsDialogState;
+use crate::ui::tokens::Tokens;
 use egui::{RichText, Ui};
 
 /// Render the Environment tab
@@ -6,6 +7,8 @@ pub(in crate::panels::pdk_settings_dialog) fn render_environment_tab(
     ui: &mut Ui,
     state: &mut PdkSettingsDialogState,
 ) {
+    let c = Tokens::get(ui.ctx()).color;
+
     ui.heading("Environment Variables");
     ui.add_space(4.0);
 
@@ -13,7 +16,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_environment_tab(
         RichText::new(
             "Define environment variable overrides for path expansion (e.g., $PDK_HOME).",
         )
-        .color(egui::Color32::GRAY)
+        .color(c.text_dim)
         .size(11.0),
     );
 
@@ -38,7 +41,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_environment_tab(
             if resolved != *value {
                 ui.label(
                     RichText::new(format!("→ {}", resolved))
-                        .color(egui::Color32::GRAY)
+                        .color(c.text_faint)
                         .size(10.0),
                 );
             }
@@ -82,7 +85,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_environment_tab(
         .show(ui, |ui| {
             ui.label(
                 RichText::new("Read-only view of relevant system environment variables.")
-                    .color(egui::Color32::GRAY)
+                    .color(c.text_dim)
                     .size(11.0),
             );
             ui.add_space(4.0);

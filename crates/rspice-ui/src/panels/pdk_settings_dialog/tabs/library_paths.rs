@@ -1,4 +1,5 @@
 use super::super::model::PdkSettingsDialogState;
+use crate::ui::tokens::Tokens;
 use egui::{RichText, Ui};
 
 /// Render the Library Paths tab
@@ -6,12 +7,14 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
     ui: &mut Ui,
     state: &mut PdkSettingsDialogState,
 ) {
+    let c = Tokens::get(ui.ctx()).color;
+
     ui.heading("Library Search Paths");
     ui.add_space(4.0);
 
     ui.label(
         RichText::new("Configure directories where RSpice will search for PDK model files (.lib, .scs, .mod).")
-            .color(egui::Color32::GRAY)
+            .color(c.text_dim)
             .size(11.0),
     );
 
@@ -35,9 +38,9 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
                 action = Some(PathListAction::ToggleRecursive(idx));
             }
             ui.label(RichText::new("R").size(10.0).color(if recursive {
-                egui::Color32::GREEN
+                c.ok
             } else {
-                egui::Color32::GRAY
+                c.text_faint
             }));
 
             if state.editing_path_index == Some(idx) {
@@ -51,7 +54,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
                 let path_text = if entry.enabled {
                     RichText::new(&entry.path)
                 } else {
-                    RichText::new(&entry.path).color(egui::Color32::GRAY)
+                    RichText::new(&entry.path).color(c.text_faint)
                 };
                 if ui.link(path_text).clicked() {
                     state.editing_path_index = Some(idx);
@@ -62,7 +65,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
             if entry.file_count > 0 {
                 ui.label(
                     RichText::new(format!("({} files)", entry.file_count))
-                        .color(egui::Color32::from_rgb(100, 180, 100))
+                        .color(c.ok)
                         .size(10.0),
                 );
             }
@@ -136,7 +139,7 @@ pub(in crate::panels::pdk_settings_dialog) fn render_library_paths_tab(
     ui.add_space(12.0);
     ui.label(
         RichText::new("Tip: Use environment variables like $PDK_HOME in paths. Configure them in the Environment tab.")
-            .color(egui::Color32::from_rgb(150, 150, 200))
+            .color(c.text_dim)
             .size(11.0),
     );
 }
