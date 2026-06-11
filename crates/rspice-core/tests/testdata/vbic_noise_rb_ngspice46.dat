@@ -1,0 +1,15 @@
+# v(onoise_spectrum) of the VBIC base-resistance noise testbench in
+# engine/advanced/noise.rs tests, from the official ngspice-46 release
+# binary (ngspice_con.exe -b, default root-spectral-density units).
+# Columns: frequency_hz onoise_v_per_sqrt_hz
+1.000000e+05 5.030370e-08
+1.584893e+05 5.030369e-08
+2.511886e+05 5.030368e-08
+3.981072e+05 5.030365e-08
+6.309573e+05 5.030357e-08
+1.000000e+06 5.030338e-08
+1.584893e+06 5.030289e-08
+2.511886e+06 5.030167e-08
+3.981072e+06 5.029861e-08
+6.309573e+06 5.029091e-08
+1.000000e+07 5.027159e-08

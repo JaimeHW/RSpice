@@ -306,9 +306,24 @@ impl Bjt {
         vci: Value,
         vbi: Value,
     ) -> BranchLinearization {
+        self.irci_branch_with_self_conductance(vcx, vci, vbi).0
+    }
+
+    /// Kull epi branch together with its `dIrci/dVrci` partial in ngspice's
+    /// parameterization. The three controlling voltages satisfy
+    /// `vrci = vbci − vbcx` identically, so this partial is not recoverable
+    /// from the node-space derivatives; vbicload.c stores it as the
+    /// `Irci_Vrci` state (gmin parallel included) and vbicnoise.c reads that
+    /// state as the thermal-noise conductance of the epi resistance.
+    pub(in crate::device::semiconductor::bjt) fn irci_branch_with_self_conductance(
+        &self,
+        vcx: Value,
+        vci: Value,
+        vbi: Value,
+    ) -> (BranchLinearization, Value) {
         let mut branch = BranchLinearization::default();
         if !Self::series_active(self.rci) {
-            return branch;
+            return (branch, 0.0);
         }
 
         let p = self.polarity();
@@ -411,7 +426,7 @@ impl Bjt {
         branch.d_internal[IDX_VCX] = d_irci_eff_dvrci_eff - d_irci_eff_dvbcx_eff;
         branch.d_internal[IDX_VCI] = -(d_irci_eff_dvrci_eff + d_irci_eff_dvbci_eff);
         branch.d_internal[IDX_VBI] = d_irci_eff_dvbci_eff + d_irci_eff_dvbcx_eff;
-        branch
+        (branch, d_irci_eff_dvrci_eff)
     }
 
     #[inline]

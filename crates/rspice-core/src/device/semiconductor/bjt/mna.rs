@@ -19,12 +19,88 @@
 
 use super::*;
 
+/// Operating-point noise description of a promoted VBIC instance,
+/// mirroring the per-branch states vbicnoise.c reads: thermal conductances
+/// of the parasitic resistances and the shot/flicker branch currents, each
+/// with its injection node pair on the internal topology.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct VbicNoiseOperatingModel {
+    /// `(label, node+, node−, conductance)` for rcx/rci/rbx/rbi/re/rbp.
+    pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
+    /// `(label, node+, node−, branch current)` for iciei/ibe/ibep.
+    pub shot: [(&'static str, NodeId, NodeId, Value); 3],
+    /// Intrinsic B-E current and node pair for the KFN flicker source.
+    pub flicker_ibe: (NodeId, NodeId, Value),
+    /// Parasitic B-E current and node pair for the second flicker source.
+    pub flicker_ibep: (NodeId, NodeId, Value),
+}
+
 impl Bjt {
     /// True once the builder has promoted this instance's VBIC states to MNA
     /// unknowns.
     #[inline]
     pub(crate) fn vbic_mna_promoted(&self) -> bool {
         self.vbic_mna_promoted
+    }
+
+    /// Noise sources of a promoted VBIC at the last updated bias, following
+    /// vbicnoise.c exactly — including its two verified quirks, because the
+    /// only validation oracle for noise spectra is the official binary and
+    /// both quirks are measurable through the parasitic capacitances at
+    /// high frequency:
+    /// - the rbp thermal source is injected across the emitter nodes
+    ///   (emitEI–emit), not its physical bp–cx branch;
+    /// - the rs thermal and iccp shot sources are computed by ngspice but
+    ///   omitted from the spectrum sum (VBICTOTNOIZ), so they are not
+    ///   produced here at all.
+    pub(crate) fn vbic_noise_operating_model(&self) -> Option<VbicNoiseOperatingModel> {
+        if !self.uses_vbic_dynamic_charges() || !self.vbic_mna_promoted() {
+            return None;
+        }
+        let eval = self.mna_eval?;
+        let (_, g_rci) = self.irci_branch_with_self_conductance(self.vcx, self.vci, self.vbi);
+        Some(VbicNoiseOperatingModel {
+            thermal: [
+                (
+                    "rcx",
+                    self.node_cx,
+                    self.node_collector,
+                    eval.ircx.d_external[EXT_C],
+                ),
+                ("rci", self.node_cx, self.node_ci, g_rci),
+                (
+                    "rbx",
+                    self.node_bx,
+                    self.node_base,
+                    eval.irbx.d_external[EXT_B],
+                ),
+                (
+                    "rbi",
+                    self.node_bx,
+                    self.node_bi,
+                    eval.irbi.d_internal[IDX_VBX],
+                ),
+                (
+                    "re",
+                    self.node_ei,
+                    self.node_emitter,
+                    eval.ire.d_external[EXT_E],
+                ),
+                (
+                    "rbp",
+                    self.node_ei,
+                    self.node_emitter,
+                    -eval.irbp.d_internal[IDX_VCX],
+                ),
+            ],
+            shot: [
+                ("ic", self.node_ci, self.node_ei, eval.iciei.current),
+                ("ibe", self.node_bi, self.node_ei, eval.ibe.current),
+                ("ibep", self.node_bx, self.node_bp, eval.ibep.current),
+            ],
+            flicker_ibe: (self.node_bi, self.node_ei, eval.ibe.current),
+            flicker_ibep: (self.node_bx, self.node_bp, eval.ibep.current),
+        })
     }
 
     /// True when the parasitic (bp) state carries its own KCL row; mirrors the

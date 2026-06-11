@@ -79,8 +79,67 @@ impl Engine {
             }
         }
 
-        // BJT collector/base shot noise and model-card flicker noise.
+        // BJT noise. Promoted VBIC instances follow vbicnoise.c on the
+        // internal topology: thermal noise from the operating-point
+        // conductance of every parasitic resistance, shot noise on the
+        // transport and junction branch currents, and KFN flicker on the
+        // intrinsic and parasitic B-E junctions with the multiplicity
+        // folded as m·KFN·|I/m|^AFN / f^BFN (an effective coefficient of
+        // KFN·m^(1−AFN) on the m-folded branch current). Legacy GP keeps
+        // the external-node shot and KF flicker sources.
         for bjt in &circuit.bjts.devices {
+            if let Some(model) = bjt.vbic_noise_operating_model() {
+                for (suffix, node_pos, node_neg, conductance) in model.thermal {
+                    if conductance.is_finite() && conductance > 1e-30 {
+                        noise_sources.push(NoiseSource::thermal(
+                            format!("{}:{}", bjt.name, suffix),
+                            node_pos,
+                            node_neg,
+                            1.0 / conductance,
+                        ));
+                    }
+                }
+                for (suffix, node_pos, node_neg, current) in model.shot {
+                    if current.abs() > 1e-18 {
+                        noise_sources.push(NoiseSource::shot(
+                            format!("{}:{}", bjt.name, suffix),
+                            node_pos,
+                            node_neg,
+                            current,
+                        ));
+                    }
+                }
+                if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
+                    let m = bjt.m.max(1.0);
+                    let coefficient = kfn * m.powf(1.0 - afn);
+                    let (bi, ei, ibe) = model.flicker_ibe;
+                    if ibe.abs() > 1e-18 {
+                        noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                            format!("{}:flicker", bjt.name),
+                            bi,
+                            ei,
+                            coefficient,
+                            afn,
+                            bfn,
+                            ibe.abs(),
+                        ));
+                    }
+                    let (bx, bp, ibep) = model.flicker_ibep;
+                    if ibep.abs() > 1e-18 {
+                        noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                            format!("{}:flicker_bep", bjt.name),
+                            bx,
+                            bp,
+                            coefficient,
+                            afn,
+                            bfn,
+                            ibep.abs(),
+                        ));
+                    }
+                }
+                continue;
+            }
+
             let (ic, ibe, ibc) = bjt.noise_branch_currents();
             if ic > 1e-18 {
                 noise_sources.push(NoiseSource::shot(
@@ -118,33 +177,6 @@ impl Engine {
                         af,
                         ef,
                         ib,
-                    ));
-                }
-            }
-
-            // VBIC base-emitter flicker noise (vbicnoise.c FLBENOIZ):
-            // S = m·KFN·|Ibe/m|^AFN / f^BFN across the intrinsic B-E
-            // junction, where Ibe is the m-folded junction current. The
-            // multiplicity folds into the coefficient as KFN·m^(1−AFN);
-            // injection lands on the promoted internal nodes so the base
-            // and emitter resistances shape the transfer like the oracle.
-            if let Some((kfn, afn, bfn)) = bjt.vbic_flicker_noise_coefficients() {
-                let (_, ibe, _) = bjt.noise_branch_currents();
-                if ibe > 1e-18 {
-                    let m = bjt.m.max(1.0);
-                    let (node_pos, node_neg) = if bjt.vbic_mna_promoted() {
-                        (bjt.node_bi, bjt.node_ei)
-                    } else {
-                        (bjt.node_base, bjt.node_emitter)
-                    };
-                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
-                        format!("{}:flicker", bjt.name),
-                        node_pos,
-                        node_neg,
-                        kfn * m.powf(1.0 - afn),
-                        afn,
-                        bfn,
-                        ibe,
                     ));
                 }
             }
@@ -491,6 +523,87 @@ impl Engine {
 mod tests {
     use super::super::super::Engine;
     use crate::Netlist;
+
+    /// onoise_spectrum table of [`RB_NOISE_DECK`] from the official
+    /// ngspice-46 binary, in its default root-spectral-density units.
+    const RB_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/vbic_noise_rb_ngspice46.dat");
+
+    /// A low-impedance-driven CE stage with large RBX/RBI: the parasitic
+    /// base-resistance thermal sources dominate the output noise, so this
+    /// deck is blind to nothing the vbicnoise.c port added — unlike the
+    /// shipped regression deck, whose 100k network swamps them.
+    const RB_NOISE_DECK: &str = "\
+VBIC base resistance noise testbench
+
+V1 VCC 0 5
+VIN B 0 DC 0.78 AC 1
+RC VCC C 1k
+Q1 C B 0 0 N1
+
+.OPTIONS NOACCT
+
+.NOISE v(c) VIN DEC 5 100k 10Meg
+
+.MODEL N1 NPN LEVEL=4
++ IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 RCX=10
++ RCI=60 RBX=100 RBI=400 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2e-3
++ CJE=1e-13 CJC=2e-14 CJEP=1e-13 CJCP=4e-13 VO=2 GAMM=2e-11 HRCF=2
++ QCO=1e-12 TF=10e-12 TR=100e-12
+
+.END
+";
+
+    /// The VBIC parasitic-resistance thermal sources and internal-node shot
+    /// sources must reproduce the official binary on a deck designed to
+    /// expose them.
+    #[test]
+    fn vbic_parasitic_resistance_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(RB_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("c").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            5,
+            1e5,
+            1e7,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = RB_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "frequency grids must match");
+
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            assert!(
+                (result.frequency - freq_ref).abs() <= 1e-6 * freq_ref,
+                "sweep grid diverged from the oracle at {:e}",
+                freq_ref,
+            );
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
 
     /// VBIC KFN/AFN/BFN flicker noise must ride the intrinsic B-E junction
     /// with vbicnoise.c's multiplicity folding: `m·KFN·|Ibe/m|^AFN / f^BFN`,
