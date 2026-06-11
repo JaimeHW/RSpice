@@ -728,6 +728,78 @@ M1 D G 0 0 NM W=20u L=2u M=2
         }
     }
 
+    /// onoise table of [`GP_RCRE_NOISE_DECK`] from the official ngspice-46
+    /// binary.
+    const GP_RCRE_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/gp_rcre_noise_ngspice46.dat");
+
+    /// A Gummel-Poon CE stage with RB=0 and dominant collector/emitter
+    /// resistances: the builder externalizes RC and RE onto real internal
+    /// nodes, so their thermal noise and the prime-node shot injection are
+    /// the whole story this deck tells. The base-prime promotion (RB > 0)
+    /// is the remaining GP noise increment and is deliberately absent here.
+    const GP_RCRE_NOISE_DECK: &str = "\
+GP collector emitter resistance noise testbench
+
+V1 VCC 0 5
+VIN B 0 DC 0.78 AC 1
+RC VCC C 1k
+Q1 C B 0 QN
+
+.OPTIONS NOACCT
+
+.NOISE v(c) VIN DEC 5 10k 100Meg
+
+.MODEL QN NPN IS=1e-16 BF=100 BR=2 RB=0 RC=200 RE=50
++ CJE=2e-12 CJC=1e-12 TF=3e-10 TR=5e-9
+
+.END
+";
+
+    /// The externalized GP collector/emitter resistances must reproduce the
+    /// official binary's noise on a deck they dominate.
+    #[test]
+    fn gp_rcre_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(GP_RCRE_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("c").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            5,
+            1e4,
+            1e8,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = GP_RCRE_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 1e-2,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
     /// onoise table of [`JFET_FLICKER_DECK`] from the official ngspice-46
     /// binary.
     const JFET_FLICKER_ORACLE: &str =
