@@ -400,11 +400,11 @@ impl NonlinearDeviceInstance {
                 vec![2.0 * q_e * op.ic.abs(), 2.0 * q_e * op.ib.abs()]
             }
             NonlinearDeviceType::Nmos => {
-                let (_, _, _, gm, gds) = self.mos_operating_point(1.0, node_voltages);
+                let (_, _, _, gm, gds, _) = self.mos_operating_point(1.0, node_voltages);
                 vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
             }
             NonlinearDeviceType::Pmos => {
-                let (_, _, _, gm, gds) = self.mos_operating_point(-1.0, node_voltages);
+                let (_, _, _, gm, gds, _) = self.mos_operating_point(-1.0, node_voltages);
                 vec![(8.0 / 3.0) * kt * (gm.abs() + gds.abs())]
             }
             NonlinearDeviceType::Njfet => {
@@ -429,6 +429,15 @@ impl NonlinearDeviceInstance {
                 vec![4.0 * kt * g]
             }
         }
+    }
+
+    /// Set the MOSFET body-effect parameters: threshold shifts by
+    /// `gamma*(sqrt(phi + vsb) - sqrt(phi))` with the source-bulk voltage
+    /// measured in the polarity frame from the effective source.
+    pub fn with_body_effect(mut self, gamma: Value, phi: Value) -> Self {
+        self.params.gamma = gamma.max(0.0);
+        self.params.phi = phi.max(1e-3);
+        self
     }
 
     /// Set the thermal voltage kT/q the junction laws evaluate at; device
@@ -657,8 +666,7 @@ impl NonlinearDeviceInstance {
     /// channel-length modulation applies in triode and saturation so the
     /// current and its derivatives are continuous across the region boundary
     /// (ngspice MOS1 convention).
-    fn mos_ids(&self, vgs: Value, vds: Value) -> (Value, Value, Value) {
-        let vth = self.params.vth;
+    fn mos_ids(&self, vgs: Value, vds: Value, vth: Value) -> (Value, Value, Value) {
         let kp = self.params.kp;
         let lambda = self.params.lambda.max(0.0);
         let vov = vgs - vth;
@@ -684,41 +692,65 @@ impl NonlinearDeviceInstance {
 
     /// Resolve the effective drain/source orientation and operating point.
     ///
-    /// Returns `(eff_d, eff_s, ids, gm, gds)` where `ids`, `gm`, `gds` are in
-    /// the swapped polarity frame and the current absorbed at `eff_d` is
-    /// `p * ids`.
+    /// Returns `(eff_d, eff_s, ids, gm, gds, gmbs)` in the swapped polarity
+    /// frame; the current absorbed at `eff_d` is `p * ids`. The threshold
+    /// carries the body effect `vth = vto + gamma*(sqrt(phi + vsb) -
+    /// sqrt(phi))` with `vsb` measured from the EFFECTIVE source (the swap
+    /// keeps the device symmetric), clamped at full depletion; `gmbs =
+    /// -dIds/dVth * dVth/dVsb` is the bulk transconductance.
     fn mos_operating_point(
         &self,
         p: Value,
         node_voltages: &[Value],
-    ) -> (usize, usize, Value, Value, Value) {
+    ) -> (usize, usize, Value, Value, Value, Value) {
         let v_d = self.get_terminal_voltage(node_voltages, 0);
         let v_g = self.get_terminal_voltage(node_voltages, 1);
         let v_s = self.get_terminal_voltage(node_voltages, 2);
+        let v_b = self.get_terminal_voltage(node_voltages, 3);
 
         let d = self.terminals[0];
         let s = self.terminals[2];
 
         // Symmetric device: swap drain/source when the effective Vds is negative.
-        let (vgs, vds, eff_d, eff_s) = if p * (v_d - v_s) >= 0.0 {
-            (p * (v_g - v_s), p * (v_d - v_s), d, s)
+        let (vgs, vds, vsb, eff_d, eff_s) = if p * (v_d - v_s) >= 0.0 {
+            (p * (v_g - v_s), p * (v_d - v_s), p * (v_s - v_b), d, s)
         } else {
-            (p * (v_g - v_d), p * (v_s - v_d), s, d)
+            (p * (v_g - v_d), p * (v_s - v_d), p * (v_d - v_b), s, d)
         };
 
-        let (ids, gm, gds) = self.mos_ids(vgs, vds);
-        (eff_d, eff_s, ids, gm, gds)
+        let gamma = self.params.gamma.max(0.0);
+        let phi = self.params.phi.max(1e-3);
+        let (vth, dvth_dvsb) = if gamma > 0.0 {
+            let arg = phi + vsb;
+            if arg > 0.0 {
+                let sqrt_arg = arg.sqrt();
+                (
+                    self.params.vth + gamma * (sqrt_arg - phi.sqrt()),
+                    gamma / (2.0 * sqrt_arg),
+                )
+            } else {
+                // Full depletion clamp: threshold pinned, no bulk control.
+                (self.params.vth - gamma * phi.sqrt(), 0.0)
+            }
+        } else {
+            (self.params.vth, 0.0)
+        };
+
+        let (ids, gm, gds) = self.mos_ids(vgs, vds, vth);
+        let gmbs = gm * dvth_dvsb;
+        (eff_d, eff_s, ids, gm, gds, gmbs)
     }
 
     fn eval_mos(&self, p: Value, node_voltages: &[Value]) -> Vec<(usize, Value)> {
-        let (eff_d, eff_s, ids, _, _) = self.mos_operating_point(p, node_voltages);
+        let (eff_d, eff_s, ids, _, _, _) = self.mos_operating_point(p, node_voltages);
         let absorbed = p * ids; // Current absorbed at the effective drain.
         vec![(eff_d, -absorbed), (eff_s, absorbed)]
     }
 
     fn jac_mos(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
-        let (eff_d, eff_s, _, gm, gds) = self.mos_operating_point(p, node_voltages);
+        let (eff_d, eff_s, _, gm, gds, gmbs) = self.mos_operating_point(p, node_voltages);
         let g = self.terminals[1];
+        let b = self.terminals[3];
 
         if gm == 0.0 && gds == 0.0 {
             // Cutoff: tiny drain-source leak keeps the Jacobian regular without
@@ -734,13 +766,18 @@ impl NonlinearDeviceInstance {
 
         // The polarity factors cancel (p^2 = 1): the node-space stamps are the
         // textbook MOS pattern in the effective frame for NMOS and PMOS alike.
+        // Ids falls as Vsb rises (gmbs acts like a back-gate gm controlled by
+        // the effective source-bulk voltage), so the source column carries
+        // the full -(gm + gds + gmbs) dependence and the bulk column +gmbs.
         vec![
             ((eff_d, eff_d), gds),
             ((eff_d, g), gm),
-            ((eff_d, eff_s), -(gm + gds)),
+            ((eff_d, b), gmbs),
+            ((eff_d, eff_s), -(gm + gds + gmbs)),
             ((eff_s, eff_d), -gds),
             ((eff_s, g), -gm),
-            ((eff_s, eff_s), gm + gds),
+            ((eff_s, b), -gmbs),
+            ((eff_s, eff_s), gm + gds + gmbs),
         ]
     }
 
@@ -1266,6 +1303,44 @@ mod tests {
 
         let pmos = NonlinearDeviceInstance::pmos(0, 1, 2, 3, 0.7, 1.2e-5, 0.05);
         assert_jacobian_matches_finite_difference(&pmos, 4, (-3.0, 3.0), 80, 29);
+
+        // Body effect engaged: the gmbs stamps on the bulk column must be
+        // the derivative of the threshold law everywhere, including the
+        // drain/source swap region and the full-depletion clamp.
+        let nmos_body =
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.04).with_body_effect(0.6, 0.7);
+        assert_jacobian_matches_finite_difference(&nmos_body, 4, (-3.0, 3.0), 80, 31);
+
+        let pmos_body =
+            NonlinearDeviceInstance::pmos(0, 1, 2, 3, 0.7, 1.2e-5, 0.05).with_body_effect(0.5, 0.65);
+        assert_jacobian_matches_finite_difference(&pmos_body, 4, (-3.0, 3.0), 80, 37);
+    }
+
+    /// The body-effect threshold law itself: at fixed bias the saturation
+    /// current must follow 0.5*kp*(vgs - vth(vsb))^2 with
+    /// vth = vto + gamma*(sqrt(phi + vsb) - sqrt(phi)).
+    #[test]
+    fn body_effect_shifts_the_threshold_by_the_textbook_law() {
+        let gamma = 0.5;
+        let phi = 0.7;
+        let nmos =
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.0).with_body_effect(gamma, phi);
+
+        // Vd=5, Vg=2, Vs=0, Vb=-1: saturation with vsb = 1.
+        let v = vec![5.0, 2.0, 0.0, -1.0];
+        let into_source: Value = nmos
+            .evaluate(&v)
+            .iter()
+            .filter(|(n, _)| *n == 2)
+            .map(|(_, c)| c)
+            .sum();
+
+        let vth = 0.7 + gamma * ((phi + 1.0_f64).sqrt() - phi.sqrt());
+        let expected = 0.5 * 2e-5 * (2.0 - vth) * (2.0 - vth);
+        assert!(
+            (into_source - expected).abs() < 1e-9 * expected,
+            "saturation current must follow the shifted threshold: got {into_source:.6e}, want {expected:.6e}"
+        );
     }
 
     #[test]

@@ -363,6 +363,10 @@ pub struct NonlinearDeviceParams {
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
+    /// Body-effect coefficient gamma (MOSFET, V^0.5)
+    pub gamma: Value,
+    /// Surface potential phi (MOSFET, V)
+    pub phi: Value,
     /// Early voltage (BJT)
     pub vaf: Value,
     /// Switch ON resistance
@@ -399,6 +403,8 @@ impl Default for NonlinearDeviceParams {
             vth: 0.7,
             kp: 2e-5,
             lambda: 0.0,
+            gamma: 0.0,
+            phi: 0.6,
             vaf: f64::INFINITY,
             ron: 1.0,
             roff: 1e6,

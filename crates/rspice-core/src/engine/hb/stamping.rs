@@ -52,16 +52,17 @@ impl Engine {
             let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
             let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
             let kp = mos.kp.max(1e-18);
-            match mos.mos_type {
-                crate::device::MosType::Nmos => {
-                    solver.add_nmos(drain, gate, source, bulk, kp, mos.vto, mos.lambda);
-                }
-                crate::device::MosType::Pmos => {
-                    // The solver works in the polarity frame: the effective
-                    // threshold is -VTO, which keeps depletion PMOS negative.
-                    solver.add_pmos(drain, gate, source, bulk, kp, -mos.vto, mos.lambda);
-                }
-            }
+            let instance = match mos.mos_type {
+                crate::device::MosType::Nmos => NonlinearDeviceInstance::nmos(
+                    drain, gate, source, bulk, mos.vto, kp, mos.lambda,
+                ),
+                // The solver works in the polarity frame: the effective
+                // threshold is -VTO, which keeps depletion PMOS negative.
+                crate::device::MosType::Pmos => NonlinearDeviceInstance::pmos(
+                    drain, gate, source, bulk, -mos.vto, kp, mos.lambda,
+                ),
+            };
+            solver.add_nonlinear_device(instance.with_body_effect(mos.gamma, mos.phi));
         }
 
         for jfet in &circuit.jfets {
