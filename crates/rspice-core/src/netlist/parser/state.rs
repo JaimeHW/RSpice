@@ -22,6 +22,7 @@ pub(super) struct ParseState {
     pub(super) node_sets: Vec<NodeSet>,
     pub(super) global_nodes: HashSet<String>,
     pub(super) veriloga_includes: Vec<VerilogAInclude>,
+    pub(super) spef_includes: Vec<String>,
     pub(super) measurements: Vec<MeasureStatement>,
     pub(super) saves: SaveSet,
     pub(super) options: super::SimulationOptions,
@@ -42,6 +43,7 @@ impl ParseState {
             node_sets: Vec::new(),
             global_nodes: HashSet::new(),
             veriloga_includes: Vec::new(),
+            spef_includes: Vec::new(),
             measurements: Vec::new(),
             saves: SaveSet::default(),
             options: super::SimulationOptions::default(),
@@ -81,6 +83,7 @@ impl ParseState {
             saves: self.saves,
             options: self.options,
             veriloga_includes: self.veriloga_includes,
+            spef_includes: self.spef_includes,
             source_text: Some(input.to_string()),
             source_path: None,
         })
@@ -95,6 +98,7 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) global_nodes: &'a mut HashSet<String>,
     pub(super) saves: &'a mut SaveSet,
     pub(super) options: &'a mut super::SimulationOptions,
+    pub(super) spef_includes: &'a mut Vec<String>,
 }
 
 pub(super) struct ParseCommandContext<'a> {
@@ -107,4 +111,5 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) measurements: &'a mut Vec<MeasureStatement>,
     pub(super) saves: &'a mut SaveSet,
     pub(super) options: &'a mut super::SimulationOptions,
+    pub(super) spef_includes: &'a mut Vec<String>,
 }

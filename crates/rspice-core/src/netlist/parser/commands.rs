@@ -17,6 +17,7 @@ pub(super) fn parse_command(
         measurements,
         saves,
         options,
+        spef_includes,
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
@@ -126,6 +127,22 @@ pub(super) fn parse_command(
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass
             log::debug!("Include directive found: line {}", line_num);
+        }
+        ".SPEF_INCLUDE" => {
+            // SPEF parasitics back-annotate after parsing (netlist::spef);
+            // the path-aware parse entry points resolve and apply them.
+            let path = match &stream.peek().kind {
+                TokenKind::StringLit(s) => s.clone(),
+                TokenKind::Ident(s) => s.clone(),
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: ".spef_include requires a file path".to_string(),
+                    });
+                }
+            };
+            stream.advance();
+            spef_includes.push(path);
         }
         ".LIB" => {
             // Library directives are handled in a preprocessing pass

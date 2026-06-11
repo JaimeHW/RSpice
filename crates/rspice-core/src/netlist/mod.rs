@@ -21,6 +21,7 @@ pub mod lexer;
 pub mod multi_run;
 pub mod param_scope;
 mod parser;
+pub mod spef;
 mod xspice_parser;
 
 pub use ast::*;
@@ -91,6 +92,10 @@ pub struct Netlist {
     pub options: SimulationOptions,
     /// Verilog-A model includes from .VERILOGA statements
     pub veriloga_includes: Vec<VerilogAInclude>,
+    /// SPEF parasitic files from `.spef_include` (or `.include *.spef`),
+    /// back-annotated onto the parsed deck by the path-aware parse entry
+    /// points (`netlist::spef`).
+    pub spef_includes: Vec<String>,
     /// Optional original netlist text used to build this AST.
     /// Stored to support parameter re-application workflows (e.g., sensitivity).
     pub source_text: Option<String>,
@@ -129,8 +134,48 @@ impl Netlist {
         let processed = Self::preprocess_includes(input, file_path)?;
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
+        Self::apply_spef_includes(&mut netlist, file_path)?;
         netlist.source_path = Some(file_path.to_path_buf());
         Ok(netlist)
+    }
+
+    /// Back-annotate every `.spef_include` referenced by the deck
+    /// (paths resolve relative to the deck file).
+    fn apply_spef_includes(
+        netlist: &mut Netlist,
+        deck_path: &std::path::Path,
+    ) -> Result<(), ParseError> {
+        if netlist.spef_includes.is_empty() {
+            return Ok(());
+        }
+        let base = deck_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| std::path::Path::new("."));
+        for entry in netlist.spef_includes.clone() {
+            let candidate = std::path::Path::new(&entry);
+            let path = if candidate.is_absolute() {
+                candidate.to_path_buf()
+            } else {
+                base.join(candidate)
+            };
+            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
+                line: 0,
+                message: format!("failed to read SPEF file `{}`: {e}", path.display()),
+            })?;
+            let parasitics = spef::SpefFile::parse(&content)?;
+            let report = parasitics.apply(netlist);
+            log::info!(
+                "SPEF `{}`: {} net(s), {} pin(s) rewired ({} skipped), {} R + {} C added",
+                path.display(),
+                report.nets,
+                report.rewired_pins,
+                report.skipped_pins,
+                report.resistors,
+                report.capacitors
+            );
+        }
+        Ok(())
     }
 
     /// Parse a netlist from a file with include expansion
@@ -175,6 +220,7 @@ impl Netlist {
         let processed = processor.expand_content(input, path)?;
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, path);
+        Self::apply_spef_includes(&mut netlist, path)?;
         netlist.source_path = Some(path.to_path_buf());
         Ok(netlist)
     }
@@ -283,6 +329,7 @@ impl Default for Netlist {
             saves: SaveSet::default(),
             options: SimulationOptions::default(),
             veriloga_includes: Vec::new(),
+            spef_includes: Vec::new(),
             source_text: None,
             source_path: None,
         }

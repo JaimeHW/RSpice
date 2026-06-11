@@ -250,6 +250,15 @@ impl IncludeProcessor {
             if (upper.starts_with(".INCLUDE") || upper.starts_with(".INC "))
                 && let Some(filename) = parse_include_directive(trimmed)
             {
+                // SPEF files are parasitic data, not SPICE text: route to
+                // the back-annotation pass (`.spef_include`) with the path
+                // resolved here, where include search rules apply.
+                if filename.to_ascii_lowercase().ends_with(".spef") {
+                    let path = self.resolve_path_from(base_dir, &filename)?;
+                    let normalized = path.display().to_string().replace('\\', "/");
+                    result.push_str(&format!(".spef_include \"{normalized}\"\n"));
+                    continue;
+                }
                 let included = self.process_include_from(base_dir, &filename)?;
                 result.push_str(&included);
                 if !included.ends_with('\n') {
