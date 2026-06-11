@@ -80,6 +80,11 @@ pub struct HbSolverState {
     /// Number of iterations
     pub iteration: usize,
 
+    /// Total harmonic Newton iterations accumulated across every phase of
+    /// the convergence strategy (never reset by the ladder), for honest
+    /// convergence-cost reporting.
+    pub total_iterations: usize,
+
     /// Converged flag
     pub converged: bool,
 }
@@ -92,6 +97,7 @@ impl HbSolverState {
             residual: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             residual_norm: f64::INFINITY,
             iteration: 0,
+            total_iterations: 0,
             converged: false,
         }
     }

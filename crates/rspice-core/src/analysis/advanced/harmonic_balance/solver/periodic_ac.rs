@@ -34,6 +34,7 @@ impl HbSolver {
     pub(super) fn conductance_spectra(
         &mut self,
         state: &HbSolverState,
+        harmonic_count: usize,
     ) -> Vec<(usize, usize, Vec<Complex64>)> {
         let n = self.num_nodes;
         let n_time = self.fft.size();
@@ -95,7 +96,7 @@ impl HbSolver {
                 if max_g < 1e-30 {
                     continue;
                 }
-                let spectrum = self.fft.to_frequency_domain(&g_time[i][j]);
+                let spectrum = self.fft.to_frequency_domain_n(&g_time[i][j], harmonic_count);
                 spectra.push((i, j, spectrum));
             }
         }
@@ -108,6 +109,7 @@ impl HbSolver {
     pub(super) fn capacitance_spectra(
         &mut self,
         state: &HbSolverState,
+        harmonic_count: usize,
     ) -> Vec<(usize, usize, Vec<Complex64>)> {
         let n = self.num_nodes;
         if !self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
@@ -141,7 +143,7 @@ impl HbSolver {
                 if max_c < 1e-30 {
                     continue;
                 }
-                let spectrum = self.fft.to_frequency_domain(&c_time[i][j]);
+                let spectrum = self.fft.to_frequency_domain_n(&c_time[i][j], harmonic_count);
                 spectra.push((i, j, spectrum));
             }
         }
@@ -221,13 +223,14 @@ impl HbSolver {
         // inductor admittance, mirroring the operating-point treatment.
         let omega_floor = omega0 * 1e-12;
 
+        let span = (sideband_max - sideband_min).unsigned_abs() as usize;
         let spectra = if self.has_nonlinear_devices() {
-            self.conductance_spectra(state)
+            self.conductance_spectra(state, span.max(self.num_harmonics))
         } else {
             Vec::new()
         };
         let cap_spectra = if self.has_nonlinear_devices() {
-            self.capacitance_spectra(state)
+            self.capacitance_spectra(state, span.max(self.num_harmonics))
         } else {
             Vec::new()
         };

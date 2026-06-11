@@ -11,7 +11,7 @@ impl HbSolver {
         );
 
         result.converged = state.converged;
-        result.iterations = state.iteration;
+        result.iterations = state.total_iterations.max(state.iteration);
         result.residual_norm = state.residual_norm;
         result.node_names = self.node_names.clone();
 

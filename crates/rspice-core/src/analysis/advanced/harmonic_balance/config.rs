@@ -130,6 +130,13 @@ pub struct HbConfig {
     /// Enable source stepping for difficult convergence
     pub source_stepping: bool,
 
+    /// Solve Newton steps with the exact real-split Jacobian (Toeplitz plus
+    /// conjugate/Hankel coupling). `false` selects the legacy Toeplitz-only
+    /// complex Jacobian, kept for A/B comparison and the large-system Krylov
+    /// fast path; both converge to identical spectra, the exact path just
+    /// gets there in fewer iterations.
+    pub use_exact_jacobian: bool,
+
     /// Verbose logging
     pub verbose: bool,
 }
@@ -154,6 +161,7 @@ impl HbConfig {
             use_krylov: false,
             gmres_restart: 30,
             source_stepping: false,
+            use_exact_jacobian: true,
             verbose: false,
         }
     }

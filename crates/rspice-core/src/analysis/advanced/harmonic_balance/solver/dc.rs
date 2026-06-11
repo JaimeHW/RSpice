@@ -549,7 +549,7 @@ impl HbSolver {
     }
 
     /// Solve real linear system using Gaussian elimination with partial pivoting
-    fn solve_real_linear_system(
+    pub(super) fn solve_real_linear_system(
         &self,
         a: &[Vec<Value>],
         b: &[Value],

@@ -229,6 +229,7 @@ impl HbSolver {
     ) -> bool {
         for iter in 0..max_iter {
             state.iteration = iter;
+            state.total_iterations += 1;
 
             // 1. Compute full residual: linear + nonlinear + GMIN contributions
             self.compute_full_residual_with_gmin(state, gmin);
@@ -241,13 +242,22 @@ impl HbSolver {
                 return true;
             }
 
-            // 3. Build full Jacobian (linear + nonlinear + GMIN)
-            let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
-
-            // 4. Solve J * Î”X = -R for Newton update
-            let delta_x = match self.solve_jacobian_system(&jacobian, state) {
-                Ok(dx) => dx,
-                Err(_) => return false, // Singular matrix
+            // 3+4. Build the Jacobian and solve J * dX = -R. The exact path
+            // carries the conjugate (Hankel) coupling in a real-split system
+            // and restores quadratic convergence; the Toeplitz-only complex
+            // path remains selectable for A/B comparison and for the large-
+            // system Krylov fast path.
+            let delta_x = if self.config.use_exact_jacobian {
+                match self.solve_jacobian_system_exact(state, gmin) {
+                    Ok(dx) => dx,
+                    Err(_) => return false, // Singular matrix
+                }
+            } else {
+                let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
+                match self.solve_jacobian_system(&jacobian, state) {
+                    Ok(dx) => dx,
+                    Err(_) => return false, // Singular matrix
+                }
             };
 
             // 5. Apply line search for robust convergence
@@ -717,6 +727,130 @@ impl HbSolver {
                 }
             }
         }
+    }
+
+    /// Solve the Newton step with the EXACT Jacobian in real-split form.
+    ///
+    /// The one-sided residual depends on both `c_m` and `c_m*` (perturbing a
+    /// coefficient perturbs its implied conjugate), so the exact derivative
+    /// carries a Toeplitz part `T = dI_k/dc_m = -G[k-m]` AND a Hankel part
+    /// `H = dI_k/dc_m* = -G[k+m]` (plus the matching `jw_k*C` charge terms).
+    /// `H` is antilinear, so the system is assembled over real unknowns
+    /// `[a_0, a_1, b_1, ...]` per node (`c_k = a_k + j b_k`, `b_0 = 0`):
+    /// the Toeplitz block maps to `[[Re T, -Im T], [Im T, Re T]]` and the
+    /// Hankel block to `[[Re H, Im H], [Im H, -Re H]]`; the DC row keeps only
+    /// its real equation and the DC column only its real unknown. Hankel
+    /// indices reach `k + m = 2H`, so the coupling spectra are sampled out to
+    /// twice the solution's harmonic count (alias-capped by the FFT grid).
+    fn solve_jacobian_system_exact(
+        &mut self,
+        state: &HbSolverState,
+        gmin: Value,
+    ) -> Result<Vec<Vec<Complex64>>, HbError> {
+        let n = self.num_nodes;
+        let h = self.num_harmonics + 1; // complex components per node
+        let w = 2 * self.num_harmonics + 1; // real unknowns per node
+        let size = n * w;
+        let omega0 = 2.0 * PI * self.config.fundamental_freq;
+
+        // Row/column index helpers in the real layout.
+        let re_idx = |node: usize, k: usize| -> usize {
+            if k == 0 { node * w } else { node * w + 2 * k - 1 }
+        };
+        let im_idx = |node: usize, k: usize| -> usize { node * w + 2 * k };
+
+        // Toeplitz part (linear + GMIN + nonlinear G and charge), expanded
+        // from the existing complex assembly.
+        let jac_c = self.build_full_jacobian_with_gmin(state, gmin);
+        let mut a = vec![vec![0.0; size]; size];
+        for i in 0..n {
+            for k in 0..h {
+                for j in 0..n {
+                    for l in 0..h {
+                        let t = jac_c[i * h + k][j * h + l];
+                        if t.re == 0.0 && t.im == 0.0 {
+                            continue;
+                        }
+                        let row_re = re_idx(i, k);
+                        let col_re = re_idx(j, l);
+                        a[row_re][col_re] += t.re;
+                        if l > 0 {
+                            a[row_re][im_idx(j, l)] += -t.im;
+                        }
+                        if k > 0 {
+                            let row_im = im_idx(i, k);
+                            a[row_im][col_re] += t.im;
+                            if l > 0 {
+                                a[row_im][im_idx(j, l)] += t.re;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hankel part: H = -(G[k+m]) and -(jw_k * C[k+m]), m >= 1.
+        if self.has_nonlinear_devices() {
+            let extended = 2 * self.num_harmonics;
+            let g_spectra = self.conductance_spectra(state, extended);
+            let c_spectra = self.capacitance_spectra(state, extended);
+
+            let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {
+                let row_re = re_idx(i, k);
+                a[row_re][re_idx(j, m)] += hval.re;
+                a[row_re][im_idx(j, m)] += hval.im;
+                if k > 0 {
+                    let row_im = im_idx(i, k);
+                    a[row_im][re_idx(j, m)] += hval.im;
+                    a[row_im][im_idx(j, m)] += -hval.re;
+                }
+            };
+
+            for (i, j, spec) in &g_spectra {
+                for k in 0..h {
+                    for m in 1..h {
+                        if let Some(&g) = spec.get(k + m) {
+                            add_hankel(*i, *j, k, m, -g);
+                        }
+                    }
+                }
+            }
+            for (i, j, spec) in &c_spectra {
+                for k in 0..h {
+                    let jw = Complex64::new(0.0, (k as f64) * omega0);
+                    for m in 1..h {
+                        if let Some(&c) = spec.get(k + m) {
+                            add_hankel(*i, *j, k, m, -(jw * c));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Realified RHS: -residual, DC keeps only its real equation.
+        let mut rhs = vec![0.0; size];
+        for node in 0..n {
+            for k in 0..h {
+                let r = state.residual[node][k];
+                rhs[re_idx(node, k)] = -r.re;
+                if k > 0 {
+                    rhs[im_idx(node, k)] = -r.im;
+                }
+            }
+        }
+
+        let solution = self.solve_real_linear_system(&a, &rhs)?;
+
+        let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+        for node in 0..n {
+            for k in 0..h {
+                let re = solution[re_idx(node, k)];
+                let im = if k > 0 { solution[im_idx(node, k)] } else { 0.0 };
+                delta_x[node][k] = Complex64::new(re, im);
+            }
+        }
+
+        Ok(delta_x)
     }
 
     /// Solve the Jacobian system: J * ΔX = -R
