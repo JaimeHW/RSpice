@@ -2899,10 +2899,22 @@ impl Engine {
         max_step: Value,
         compression: CompressionConfig,
     ) -> Result<TransientResultCompressed, SimulationError> {
+        self.run_tran_compressed_with_abort(netlist, tstop, max_step, compression, &NoAbort)
+    }
+
+    /// Run compressed transient analysis with abort signal for cancellation.
+    pub fn run_tran_compressed_with_abort(
+        &self,
+        netlist: &Netlist,
+        tstop: Value,
+        max_step: Value,
+        compression: CompressionConfig,
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientResultCompressed, SimulationError> {
         // Reuse the robust transient solver path, then apply waveform compression
         // during result marshaling. This keeps compressed and uncompressed physics
         // behavior identical, avoiding divergence between solver implementations.
-        let result = self.run_tran(netlist, tstop, max_step)?;
+        let result = self.run_tran_with_abort(netlist, tstop, max_step, abort)?;
 
         if result.time.is_empty() {
             return Ok(TransientResultCompressed {
