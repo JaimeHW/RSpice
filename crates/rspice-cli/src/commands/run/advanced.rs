@@ -922,10 +922,10 @@ fn run_corners_parallel(
             .into_inner()
             .expect("corner slot lock")
             .expect("worker filled its slot");
-        if let Some(ref err) = outcome.error {
-            if !ctx.quiet {
-                eprintln!("  Corner '{}' failed: {}", name, err);
-            }
+        if let Some(ref err) = outcome.error
+            && !ctx.quiet
+        {
+            eprintln!("  Corner '{}' failed: {}", name, err);
         }
         ctx.measurements.borrow_mut().extend(outcome.measurements);
         ctx.outputs.borrow_mut().extend(outcome.outputs);
@@ -1217,15 +1217,15 @@ pub(super) fn run_sparam(
         s12.push(port_v(point2, &port_nodes[0], &port_nodes[1])?);
     }
 
-    if !ctx.quiet {
-        if let (Some(first_s11), Some(first_s21)) = (s11.first(), s21.first()) {
-            println!(
-                "  @ {:e} Hz: |S11|={:.4} |S21|={:.4}",
-                frequencies.first().copied().unwrap_or(0.0),
-                first_s11.norm(),
-                first_s21.norm()
-            );
-        }
+    if !ctx.quiet
+        && let (Some(first_s11), Some(first_s21)) = (s11.first(), s21.first())
+    {
+        println!(
+            "  @ {:e} Hz: |S11|={:.4} |S21|={:.4}",
+            frequencies.first().copied().unwrap_or(0.0),
+            first_s11.norm(),
+            first_s21.norm()
+        );
     }
 
     if let Some(ref output_path) = ctx.output_path_for("sparam") {

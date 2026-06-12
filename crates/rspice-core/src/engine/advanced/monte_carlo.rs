@@ -152,11 +152,14 @@ impl Engine {
         // threads, each with its own engine. Index-addressed slots keep
         // results in run order, so statistics match a serial sweep exactly;
         // failed runs are skipped just as before.
+        // (node voltages, node names) of a converged run; None = failed run.
+        type RunOutcome = Option<(Vec<Value>, Vec<String>)>;
+
         let workers = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
             .min(num_runs.max(1));
-        let mut run_outcomes: Vec<Option<(Vec<Value>, Vec<String>)>> = Vec::new();
+        let mut run_outcomes: Vec<RunOutcome> = Vec::new();
         if workers <= 1 {
             for run_netlist in &run_netlists {
                 run_outcomes.push(
@@ -170,7 +173,7 @@ impl Engine {
             use std::sync::atomic::{AtomicUsize, Ordering};
 
             let next = AtomicUsize::new(0);
-            let slots: Vec<Mutex<Option<(Vec<Value>, Vec<String>)>>> =
+            let slots: Vec<Mutex<RunOutcome>> =
                 (0..run_netlists.len()).map(|_| Mutex::new(None)).collect();
             let config = self.config().clone();
 
