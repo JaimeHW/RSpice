@@ -2,14 +2,22 @@
 //!
 //! Provides Python access to simulation results:
 //! - `SimulationResult` - DC operating point results
-//! - `TransientResult` - Time-domain waveforms
+//! - `TransientResult` - Time-domain waveforms (voltages and branch currents)
 //! - `AcResult` - Frequency-domain complex phasors
 //! - `DcSweepResult` - Collection of DC solutions
+//! - `FourierResult` - Harmonic decomposition / THD of a waveform
+//! - `TransferFunctionResult` - Small-signal gain and impedances
+//! - `Measurement` / `RunReport` - .MEAS verification outcomes
+//!
+//! Error discipline: every accessor raises `IndexError` for out-of-range
+//! indices and `KeyError` for unknown node/branch names — silent zeros are
+//! never fabricated.
 
 use numpy::{PyArray1, ToPyArray};
-use pyo3::exceptions::{PyIndexError, PyKeyError};
+use pyo3::exceptions::{PyIndexError, PyKeyError, PyValueError};
 use pyo3::prelude::*;
 use rspice_core::analysis::AcResult;
+use rspice_core::analysis::{FourierAnalysis, FourierConfig};
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
 
@@ -27,7 +35,14 @@ enum ResultAccessError {
         index: usize,
         available_points: usize,
     },
+    InvalidFreqIndex {
+        index: usize,
+        available_points: usize,
+    },
     UnknownNodeName {
+        name: String,
+    },
+    UnknownBranchName {
         name: String,
     },
 }
@@ -53,8 +68,17 @@ impl From<ResultAccessError> for PyErr {
             } => PyIndexError::new_err(format!(
                 "sweep index {index} is out of range for result with {available_points} points"
             )),
+            ResultAccessError::InvalidFreqIndex {
+                index,
+                available_points,
+            } => PyIndexError::new_err(format!(
+                "frequency index {index} is out of range for result with {available_points} points"
+            )),
             ResultAccessError::UnknownNodeName { name } => {
                 PyKeyError::new_err(format!("unknown node '{name}'"))
+            }
+            ResultAccessError::UnknownBranchName { name } => {
+                PyKeyError::new_err(format!("unknown branch '{name}'"))
             }
         }
     }
@@ -83,13 +107,26 @@ fn invalid_sweep_index_error(index: usize, available_points: usize) -> ResultAcc
     }
 }
 
+fn invalid_freq_index_error(index: usize, available_points: usize) -> ResultAccessError {
+    ResultAccessError::InvalidFreqIndex {
+        index,
+        available_points,
+    }
+}
+
 fn unknown_node_name_error(name: &str) -> ResultAccessError {
     ResultAccessError::UnknownNodeName {
         name: name.to_string(),
     }
 }
 
-fn is_ground_name(name: &str) -> bool {
+fn unknown_branch_name_error(name: &str) -> ResultAccessError {
+    ResultAccessError::UnknownBranchName {
+        name: name.to_string(),
+    }
+}
+
+pub(crate) fn is_ground_name(name: &str) -> bool {
     matches!(name, "0") || name.eq_ignore_ascii_case("gnd")
 }
 
@@ -116,7 +153,7 @@ fn checked_simulation_voltage_named(result: &SimulationResult, name: &str) -> Ac
 ///     >>> v_out = result.voltage("out")
 #[pyclass(name = "SimulationResult")]
 pub struct PySimulationResult {
-    inner: SimulationResult,
+    pub(crate) inner: SimulationResult,
 }
 
 impl PySimulationResult {
@@ -158,11 +195,6 @@ impl PySimulationResult {
         .map_err(PyErr::from)
     }
 
-    /// Get voltage at a node by index (internal method for tests)
-    pub fn voltage_by_index(&self, node: usize) -> PyResult<f64> {
-        self.checked_voltage(node).map_err(PyErr::from)
-    }
-
     /// Get all node voltages as a NumPy array
     ///
     /// Returns:
@@ -187,23 +219,15 @@ impl PySimulationResult {
     ///     name: Element name (e.g., "V1", "L1")
     ///
     /// Returns:
-    ///     float or None: Current through the element, or None if not found
-    fn branch_current(&self, name: &str) -> Option<f64> {
-        self.inner.branch_current_named(name).or_else(|| {
-            // Preserve legacy index-based fallback for synthetic test results
-            // that have branch currents but no canonical branch metadata.
-            if !self.inner.branch_currents.is_empty()
-                && (name.to_uppercase().starts_with('V') || name.to_uppercase().starts_with('L'))
-                && let Ok(idx) = name[1..].parse::<usize>()
-            {
-                return self
-                    .inner
-                    .branch_currents
-                    .get(idx.saturating_sub(1))
-                    .copied();
-            }
-            None
-        })
+    ///     float: Current through the element
+    ///
+    /// Raises:
+    ///     KeyError: If no branch carries that name
+    fn branch_current(&self, name: &str) -> PyResult<f64> {
+        self.inner
+            .branch_current_named(name)
+            .ok_or_else(|| unknown_branch_name_error(name))
+            .map_err(PyErr::from)
     }
 
     /// Get all branch currents as a NumPy array
@@ -238,16 +262,16 @@ impl PySimulationResult {
 
 /// Transient simulation result with time-domain waveforms
 ///
-/// Contains time points and voltage waveforms for all nodes.
-/// Arrays are returned as NumPy ndarrays for efficient numerical processing.
+/// Contains time points, node voltage waveforms, and branch current
+/// waveforms. Arrays are returned as NumPy ndarrays.
 ///
 /// Example:
 ///     >>> result = engine.run_tran(netlist, 1e-3, 1e-6)
 ///     >>> import matplotlib.pyplot as plt
-///     >>> plt.plot(result.time, result.voltage_waveform(2))
+///     >>> plt.plot(result.time, result.voltage_waveform("out"))
 #[pyclass(name = "TransientResult")]
 pub struct PyTransientResult {
-    inner: TransientResult,
+    pub(crate) inner: TransientResult,
 }
 
 impl PyTransientResult {
@@ -285,6 +309,14 @@ impl PyTransientResult {
             .ok_or_else(|| unknown_node_name_error(name))?;
         self.checked_waveform(node)
     }
+
+    pub(crate) fn waveform_for(&self, node: &NodeIdentifier) -> PyResult<Vec<f64>> {
+        match node {
+            NodeIdentifier::Index(idx) => self.checked_waveform(*idx),
+            NodeIdentifier::Name(name) => self.checked_waveform_named(name),
+        }
+        .map_err(PyErr::from)
+    }
 }
 
 #[pymethods]
@@ -318,11 +350,35 @@ impl PyTransientResult {
         py: Python<'py>,
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let waveform = match node {
-            NodeIdentifier::Index(idx) => self.checked_waveform(idx)?,
-            NodeIdentifier::Name(name) => self.checked_waveform_named(&name)?,
-        };
-        Ok(waveform.to_pyarray(py))
+        Ok(self.waveform_for(&node)?.to_pyarray(py))
+    }
+
+    /// Get the current waveform through a branch element
+    ///
+    /// Branch currents exist for voltage sources and inductors (MNA branch
+    /// equations).
+    ///
+    /// Args:
+    ///     name: Element name (e.g. "V1", "L2")
+    ///
+    /// Returns:
+    ///     numpy.ndarray: Current values at each time point
+    ///
+    /// Raises:
+    ///     KeyError: If no branch carries that name
+    ///
+    /// Example:
+    ///     >>> i_supply = result.branch_current_waveform("V1")
+    fn branch_current_waveform<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .try_branch_current_waveform_named(name)
+            .map(|waveform| waveform.to_pyarray(py))
+            .ok_or_else(|| unknown_branch_name_error(name))
+            .map_err(PyErr::from)
     }
 
     /// Get voltage at a specific node and time index
@@ -346,6 +402,48 @@ impl PyTransientResult {
             .try_voltage_at(node, time_index)
             .ok_or_else(|| invalid_node_index_error(node, self.inner.num_nodes))
             .map_err(PyErr::from)
+    }
+
+    /// Fourier-analyze a node waveform
+    ///
+    /// Decomposes the waveform into harmonics of `fundamental` and computes
+    /// total harmonic distortion. Equivalent to the `.FOUR` SPICE analysis.
+    ///
+    /// Args:
+    ///     node: Node index or name
+    ///     fundamental: Fundamental frequency in Hz
+    ///     num_harmonics: Number of harmonics to compute (default 9)
+    ///
+    /// Returns:
+    ///     FourierResult: DC component, harmonics, and THD
+    ///
+    /// Raises:
+    ///     ValueError: If fundamental is not a positive finite number
+    ///     IndexError / KeyError: For invalid nodes
+    ///
+    /// Example:
+    ///     >>> four = tran.fourier("out", fundamental=1e3)
+    ///     >>> print(f"THD = {four.thd_percent:.2f}%")
+    #[pyo3(signature = (node, fundamental, num_harmonics=9))]
+    fn fourier(
+        &self,
+        node: NodeIdentifier,
+        fundamental: f64,
+        num_harmonics: usize,
+    ) -> PyResult<PyFourierResult> {
+        if !fundamental.is_finite() || fundamental <= 0.0 {
+            return Err(PyValueError::new_err(format!(
+                "fundamental must be a positive finite frequency in Hz, got {fundamental}"
+            )));
+        }
+        if num_harmonics == 0 {
+            return Err(PyValueError::new_err("num_harmonics must be at least 1"));
+        }
+        let waveform = self.waveform_for(&node)?;
+        let analysis =
+            FourierAnalysis::new(FourierConfig::new(fundamental).with_harmonics(num_harmonics));
+        let result = analysis.analyze(&self.inner.time, &waveform);
+        Ok(PyFourierResult::from_core(&result))
     }
 
     /// Get the number of time points
@@ -372,6 +470,12 @@ impl PyTransientResult {
         self.inner.node_names.clone()
     }
 
+    /// Get branch names aligned with branch current waveforms
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.inner.branch_names.clone()
+    }
+
     /// Get the simulation stop time
     #[getter]
     pub fn stop_time(&self) -> f64 {
@@ -390,24 +494,86 @@ impl PyTransientResult {
 
 /// AC analysis result with complex frequency-domain data
 ///
-/// Contains frequencies and complex voltage phasors for each node
-/// at each frequency. Arrays are returned as NumPy ndarrays.
+/// Contains frequencies and complex voltage phasors for each node at each
+/// frequency. Nodes are addressable by index or name; out-of-range nodes
+/// raise rather than returning silent zeros.
 ///
 /// Example:
 ///     >>> result = engine.run_ac(netlist, [10, 100, 1000])
-///     >>> mag_db = 20 * np.log10(result.voltage_magnitude(2))
-///     >>> phase_deg = np.degrees(result.voltage_phase(2))
+///     >>> mag_db = result.voltage_db("out")
+///     >>> phase_deg = result.voltage_phase_degrees("out")
 #[pyclass(name = "AcResult")]
 pub struct PyAcResult {
     frequencies: Vec<f64>,
     results: Vec<AcResult>,
+    node_names: Vec<String>,
+    branch_names: Vec<String>,
 }
 
 impl PyAcResult {
     pub fn new(frequencies: Vec<f64>, results: Vec<AcResult>) -> Self {
+        let node_names = results
+            .first()
+            .map(|r| r.node_names.clone())
+            .unwrap_or_default();
+        let branch_names = results
+            .first()
+            .map(|r| r.branch_names.clone())
+            .unwrap_or_default();
         Self {
             frequencies,
             results,
+            node_names,
+            branch_names,
+        }
+    }
+
+    /// Number of non-ground nodes with phasor data.
+    fn node_count(&self) -> usize {
+        self.results
+            .first()
+            .map(|r| r.voltages.len())
+            .unwrap_or(self.node_names.len())
+    }
+
+    /// Resolve a node identifier to a node index (0 = ground).
+    ///
+    /// `node_names[i]` corresponds to node index `i + 1` (core's
+    /// `node_names_sorted` excludes ground).
+    fn resolve_node(&self, node: &NodeIdentifier) -> AccessResult<usize> {
+        match node {
+            NodeIdentifier::Index(idx) => {
+                if *idx <= self.node_count() {
+                    Ok(*idx)
+                } else {
+                    Err(invalid_node_index_error(*idx, self.node_count()))
+                }
+            }
+            NodeIdentifier::Name(name) => {
+                if is_ground_name(name) {
+                    return Ok(0);
+                }
+                self.node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .map(|pos| pos + 1)
+                    .ok_or_else(|| unknown_node_name_error(name))
+            }
+        }
+    }
+
+    fn resolve_branch(&self, name: &str) -> AccessResult<usize> {
+        self.branch_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case(name))
+            .ok_or_else(|| unknown_branch_name_error(name))
+    }
+
+    fn checked_freq_index(&self, index: usize) -> AccessResult<()> {
+        if index < self.results.len() {
+            Ok(())
+        } else {
+            Err(invalid_freq_index_error(index, self.results.len()))
         }
     }
 }
@@ -429,118 +595,164 @@ impl PyAcResult {
         self.frequencies.len()
     }
 
+    /// Node names addressable in this result (excluding ground)
+    #[getter]
+    fn node_names(&self) -> Vec<String> {
+        self.node_names.clone()
+    }
+
+    /// Branch names with complex current phasors
+    #[getter]
+    fn branch_names(&self) -> Vec<String> {
+        self.branch_names.clone()
+    }
+
     /// Get voltage magnitude at a node across all frequencies
     ///
     /// Args:
-    ///     node: Node index
+    ///     node: Node index or name
     ///
     /// Returns:
     ///     numpy.ndarray: Magnitude values at each frequency
-    fn voltage_magnitude<'py>(&self, py: Python<'py>, node: usize) -> Bound<'py, PyArray1<f64>> {
+    ///
+    /// Raises:
+    ///     IndexError / KeyError: For invalid nodes
+    fn voltage_magnitude<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
         let magnitudes: Vec<f64> = self
             .results
             .iter()
-            .map(|r| r.voltage_magnitude(node))
+            .map(|r| r.voltage_magnitude(idx))
             .collect();
-        magnitudes.to_pyarray(py)
+        Ok(magnitudes.to_pyarray(py))
     }
 
-    /// Get voltage phase at a node across all frequencies
-    ///
-    /// Args:
-    ///     node: Node index
-    ///
-    /// Returns:
-    ///     numpy.ndarray: Phase values in radians at each frequency
-    fn voltage_phase<'py>(&self, py: Python<'py>, node: usize) -> Bound<'py, PyArray1<f64>> {
-        let phases: Vec<f64> = self.results.iter().map(|r| r.voltage_phase(node)).collect();
-        phases.to_pyarray(py)
+    /// Get voltage phase at a node across all frequencies (radians)
+    fn voltage_phase<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
+        let phases: Vec<f64> = self.results.iter().map(|r| r.voltage_phase(idx)).collect();
+        Ok(phases.to_pyarray(py))
     }
 
-    /// Get voltage phase at a node across all frequencies in degrees
-    ///
-    /// Args:
-    ///     node: Node index
-    ///
-    /// Returns:
-    ///     numpy.ndarray: Phase values in degrees at each frequency
+    /// Get voltage phase at a node across all frequencies (degrees)
     fn voltage_phase_degrees<'py>(
         &self,
         py: Python<'py>,
-        node: usize,
-    ) -> Bound<'py, PyArray1<f64>> {
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
         let phases: Vec<f64> = self
             .results
             .iter()
-            .map(|r| r.voltage_phase(node).to_degrees())
+            .map(|r| r.voltage_phase(idx).to_degrees())
             .collect();
-        phases.to_pyarray(py)
+        Ok(phases.to_pyarray(py))
     }
 
     /// Get complex voltage at a node across all frequencies
-    ///
-    /// Args:
-    ///     node: Node index
     ///
     /// Returns:
     ///     numpy.ndarray: complex128 phasor values at each frequency
     ///
     /// Example:
-    ///     >>> h = ac.voltage_complex(2) / ac.voltage_complex(1)  # transfer fn
+    ///     >>> h = ac.voltage_complex("out") / ac.voltage_complex("in")
     fn voltage_complex<'py>(
         &self,
         py: Python<'py>,
-        node: usize,
-    ) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
         let zero = rspice_core::Complex64::new(0.0, 0.0);
         let values: Vec<rspice_core::Complex64> = self
             .results
             .iter()
             .map(|r| {
-                // Node 0 is ground, so voltages are 0-indexed for node-1
-                if node == 0 {
+                if idx == 0 {
                     zero
                 } else {
-                    r.voltages.get(node - 1).copied().unwrap_or(zero)
+                    r.voltages.get(idx - 1).copied().unwrap_or(zero)
                 }
             })
             .collect();
-        values.to_pyarray(py)
+        Ok(values.to_pyarray(py))
     }
 
     /// Get voltage magnitude in dB (20·log10 |V|) at a node across all frequencies
-    ///
-    /// Args:
-    ///     node: Node index
-    ///
-    /// Returns:
-    ///     numpy.ndarray: Magnitude in dB at each frequency
-    fn voltage_db<'py>(&self, py: Python<'py>, node: usize) -> Bound<'py, PyArray1<f64>> {
-        let db: Vec<f64> = self.results.iter().map(|r| r.voltage_db(node)).collect();
-        db.to_pyarray(py)
+    fn voltage_db<'py>(
+        &self,
+        py: Python<'py>,
+        node: NodeIdentifier,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
+        let db: Vec<f64> = self.results.iter().map(|r| r.voltage_db(idx)).collect();
+        Ok(db.to_pyarray(py))
     }
 
-    /// Get voltage magnitude at a specific frequency and node
+    /// Get complex branch current through an element across all frequencies
+    ///
+    /// Branch currents exist for voltage sources and inductors.
     ///
     /// Args:
-    ///     freq_index: Index into the frequency array
-    ///     node: Node index
+    ///     name: Element name (e.g. "V1", "L2")
     ///
-    /// Returns:
-    ///     float: Voltage magnitude at that frequency/node
-    pub fn magnitude_at(&self, freq_index: usize, node: usize) -> f64 {
-        self.results
-            .get(freq_index)
-            .map(|r| r.voltage_magnitude(node))
-            .unwrap_or(0.0)
+    /// Raises:
+    ///     KeyError: If no branch carries that name
+    fn branch_current_complex<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
+        let idx = self.resolve_branch(name).map_err(PyErr::from)?;
+        let zero = rspice_core::Complex64::new(0.0, 0.0);
+        let values: Vec<rspice_core::Complex64> = self
+            .results
+            .iter()
+            .map(|r| r.currents.get(idx).copied().unwrap_or(zero))
+            .collect();
+        Ok(values.to_pyarray(py))
     }
 
-    /// Get phase at a specific frequency index and node
-    fn phase_at(&self, freq_index: usize, node: usize) -> f64 {
-        self.results
-            .get(freq_index)
-            .map(|r| r.voltage_phase(node))
-            .unwrap_or(0.0)
+    /// Get branch current magnitude through an element across all frequencies
+    fn branch_current_magnitude<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+    ) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        let idx = self.resolve_branch(name).map_err(PyErr::from)?;
+        let values: Vec<f64> = self
+            .results
+            .iter()
+            .map(|r| r.currents.get(idx).map(|c| c.norm()).unwrap_or(0.0))
+            .collect();
+        Ok(values.to_pyarray(py))
+    }
+
+    /// Get voltage magnitude at a specific frequency index and node
+    ///
+    /// Raises:
+    ///     IndexError: If the frequency index is out of range
+    pub fn magnitude_at(&self, freq_index: usize, node: NodeIdentifier) -> PyResult<f64> {
+        self.checked_freq_index(freq_index).map_err(PyErr::from)?;
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
+        Ok(self.results[freq_index].voltage_magnitude(idx))
+    }
+
+    /// Get phase at a specific frequency index and node (radians)
+    ///
+    /// Raises:
+    ///     IndexError: If the frequency index is out of range
+    fn phase_at(&self, freq_index: usize, node: NodeIdentifier) -> PyResult<f64> {
+        self.checked_freq_index(freq_index).map_err(PyErr::from)?;
+        let idx = self.resolve_node(&node).map_err(PyErr::from)?;
+        Ok(self.results[freq_index].voltage_phase(idx))
     }
 
     fn __repr__(&self) -> String {
@@ -554,27 +766,24 @@ impl PyAcResult {
             "no frequencies".to_string()
         };
         format!(
-            "AcResult(frequencies={}, range={})",
+            "AcResult(frequencies={}, range={}, nodes={})",
             self.frequencies.len(),
-            freq_range
+            freq_range,
+            self.node_count()
         )
     }
 }
 
 /// DC sweep analysis result
 ///
-/// Contains a collection of DC operating point solutions at different
-/// sweep values.
+/// A sequence of (sweep_value, SimulationResult) pairs. Supports `len()`,
+/// indexing (including negative indices), and iteration:
 ///
-/// Example:
-///     >>> result = engine.run_dc_sweep(netlist, "V1", 0, 5, 0.1)
-///     >>> for i in range(len(result)):
-///     ...     v_in = result.sweep_values[i]
-///     ...     v_out = result.result_at(i).voltage(2)
-///     ...     print(f"Vin={v_in:.1f}V -> Vout={v_out:.3f}V")
+///     >>> for v_in, sol in engine.run_dc_sweep(netlist, "V1", 0, 5, 0.1):
+///     ...     print(v_in, sol.voltage("out"))
 #[pyclass(name = "DcSweepResult")]
 pub struct PyDcSweepResult {
-    results: Vec<(f64, SimulationResult)>,
+    pub(crate) results: Vec<(f64, SimulationResult)>,
 }
 
 impl PyDcSweepResult {
@@ -606,20 +815,10 @@ impl PyDcSweepResult {
         self.results.len()
     }
 
-    /// Get the number of sweep points
-    #[getter]
-    pub fn len(&self) -> usize {
-        self.results.len()
-    }
-
     /// Get all sweep points as (value, result) pairs
     ///
     /// Returns:
     ///     list[tuple[float, SimulationResult]]: One entry per sweep point
-    ///
-    /// Example:
-    ///     >>> for v_in, sol in result.points():
-    ///     ...     print(f"V1={v_in:.1f}V -> V(out)={sol.voltage('out'):.3f}V")
     pub fn points(&self) -> Vec<(f64, PySimulationResult)> {
         self.results
             .iter()
@@ -627,10 +826,16 @@ impl PyDcSweepResult {
             .collect()
     }
 
+    /// Iterate over (value, SimulationResult) pairs
+    fn __iter__(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let points = slf.points();
+        let list = points.into_pyobject(py)?;
+        Ok(list.call_method0("__iter__")?.unbind())
+    }
+
     /// Index into the sweep: `result[i]` -> (value, SimulationResult)
     ///
-    /// Supports negative indices and the Python iteration protocol, so
-    /// `for value, solution in result:` just works.
+    /// Supports negative indices.
     fn __getitem__(&self, index: isize) -> PyResult<(f64, PySimulationResult)> {
         let len = self.results.len() as isize;
         let idx = if index < 0 { index + len } else { index };
@@ -643,21 +848,21 @@ impl PyDcSweepResult {
         Ok((*value, PySimulationResult::new(result.clone())))
     }
 
-    /// Get the result at a specific sweep index (as Py wrapper)
+    /// Get the result at a specific sweep index
     ///
-    /// Args:
-    ///     index: Sweep point index
-    ///
-    /// Returns:
-    ///     SimulationResult: DC solution at that sweep point
-    pub fn result_at(&self, index: usize) -> Option<PySimulationResult> {
-        self.results
-            .get(index)
+    /// Raises:
+    ///     IndexError: If the sweep index is out of range
+    pub fn result_at(&self, index: usize) -> PyResult<PySimulationResult> {
+        self.point(index)
             .map(|(_, r)| PySimulationResult::new(r.clone()))
+            .map_err(PyErr::from)
     }
 
-    /// Get the sweep value at a specific index (internal for tests)
-    pub fn voltage_at(&self, index: usize) -> PyResult<f64> {
+    /// Get the sweep value at a specific index
+    ///
+    /// Raises:
+    ///     IndexError: If the sweep index is out of range
+    pub fn sweep_value_at(&self, index: usize) -> PyResult<f64> {
         self.point(index)
             .map(|(value, _)| *value)
             .map_err(PyErr::from)
@@ -667,23 +872,36 @@ impl PyDcSweepResult {
     ///
     /// Raises:
     ///     IndexError: If the sweep point or node index is out of range
-    fn voltage(&self, index: usize, node: usize) -> PyResult<f64> {
+    ///     KeyError: If the node name does not exist
+    fn voltage(&self, index: usize, node: NodeIdentifier) -> PyResult<f64> {
         let (_, result) = self.point(index).map_err(PyErr::from)?;
-        checked_simulation_voltage(result, node).map_err(PyErr::from)
+        match node {
+            NodeIdentifier::Index(idx) => checked_simulation_voltage(result, idx),
+            NodeIdentifier::Name(name) => checked_simulation_voltage_named(result, &name),
+        }
+        .map_err(PyErr::from)
     }
 
     /// Get voltage at a node across all sweep points as a NumPy array
     ///
+    /// Args:
+    ///     node: Node index or name
+    ///
     /// Raises:
-    ///     IndexError: If the node index is out of range
+    ///     IndexError / KeyError: For invalid nodes
     fn voltage_array<'py>(
         &self,
         py: Python<'py>,
-        node: usize,
+        node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let mut voltages = Vec::with_capacity(self.results.len());
         for (_, result) in &self.results {
-            voltages.push(checked_simulation_voltage(result, node).map_err(PyErr::from)?);
+            let v = match &node {
+                NodeIdentifier::Index(idx) => checked_simulation_voltage(result, *idx),
+                NodeIdentifier::Name(name) => checked_simulation_voltage_named(result, name),
+            }
+            .map_err(PyErr::from)?;
+            voltages.push(v);
         }
         Ok(voltages.to_pyarray(py))
     }
@@ -749,7 +967,7 @@ impl PyNoiseContribution {
 /// Contains output noise spectral density and contribution breakdown.
 ///
 /// Example:
-///     >>> result = engine.run_noise(netlist, output_node=2, frequencies=[1e3, 10e3])
+///     >>> result = engine.run_noise(netlist, output_node="out", frequencies=[1e3, 10e3])
 ///     >>> for r in result:
 ///     ...     print(f"f={r.frequency:.0f}Hz: {r.output_noise_rms*1e9:.2f}nV/√Hz")
 #[pyclass(name = "NoiseResult")]
@@ -964,10 +1182,8 @@ impl PyVariableStatistics {
 /// Contains statistical results for all output variables from a Monte Carlo run.
 ///
 /// Example:
-///     >>> config = MonteCarloConfig(num_runs=1000, seed=42)
-///     >>> result = engine.run_monte_carlo(netlist, config)
-///     >>> print(f"Runs: {result.num_runs}, Failures: {result.num_failures}")
-///     >>> v_out = result.get_variable("V(out)")
+///     >>> result = engine.run_monte_carlo(netlist, num_runs=1000, seed=42)
+///     >>> v_out = result.get_variable("V(OUT)")
 ///     >>> print(f"V(out): {v_out.mean:.3f} ± {v_out.std_dev:.3f}V")
 #[pyclass(name = "MonteCarloResult")]
 #[derive(Debug, Clone)]
@@ -1004,30 +1220,37 @@ impl PyMonteCarloResult {
 
 #[pymethods]
 impl PyMonteCarloResult {
-    /// Get statistics for a specific variable by name
+    /// Get statistics for a specific variable by name (case-insensitive)
     fn get_variable(&self, name: &str) -> Option<PyVariableStatistics> {
-        self.variables.get(name).cloned()
+        self.variables.get(name).cloned().or_else(|| {
+            self.variables
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(name))
+                .map(|(_, v)| v.clone())
+        })
     }
 
     /// Get all variable names
     #[getter]
     fn variable_names(&self) -> Vec<String> {
-        self.variables.keys().cloned().collect()
+        let mut names: Vec<String> = self.variables.keys().cloned().collect();
+        names.sort();
+        names
     }
 
     /// Get mean for a variable
     fn mean(&self, name: &str) -> Option<f64> {
-        self.variables.get(name).map(|v| v.mean)
+        self.get_variable(name).map(|v| v.mean)
     }
 
     /// Get standard deviation for a variable
     fn std_dev(&self, name: &str) -> Option<f64> {
-        self.variables.get(name).map(|v| v.std_dev)
+        self.get_variable(name).map(|v| v.std_dev)
     }
 
     /// Get min/max range as tuple
     fn range(&self, name: &str) -> Option<(f64, f64)> {
-        self.variables.get(name).map(|v| (v.min, v.max))
+        self.get_variable(name).map(|v| (v.min, v.max))
     }
 
     /// Get success rate as percentage
@@ -1056,11 +1279,12 @@ impl PyMonteCarloResult {
 
 /// Complex number for poles and zeros
 ///
-/// Represents a pole or zero in the s-domain (Laplace domain).
+/// Represents a pole or zero in the s-domain (Laplace domain). Convertible
+/// to a built-in complex with `complex(value)`.
 ///
 /// Example:
 ///     >>> for pole in result.poles:
-///     ...     print(f"Pole: {pole.real} + {pole.imag}j")
+///     ...     print(complex(pole))
 ///     ...     if pole.is_real:
 ///     ...         print(f"  Time constant: {pole.time_constant:.3e}s")
 #[pyclass(name = "ComplexValue")]
@@ -1085,6 +1309,11 @@ impl PyComplexValue {
 
 #[pymethods]
 impl PyComplexValue {
+    /// Convert to a built-in Python complex number
+    fn __complex__<'py>(&self, py: Python<'py>) -> Bound<'py, pyo3::types::PyComplex> {
+        pyo3::types::PyComplex::from_doubles(py, self.real, self.imag)
+    }
+
     /// Get magnitude |z|
     #[getter]
     fn magnitude(&self) -> f64 {
@@ -1109,7 +1338,7 @@ impl PyComplexValue {
         self.imag.abs() < 1e-10
     }
 
-    /// Get frequency in Hz (for imaginary pole/zero)
+    /// Get frequency in Hz (|Im| / 2π)
     #[getter]
     fn frequency_hz(&self) -> f64 {
         self.imag.abs() / (2.0 * std::f64::consts::PI)
@@ -1145,10 +1374,13 @@ impl PyComplexValue {
 ///
 /// Contains poles and zeros of a circuit's transfer function.
 ///
+/// Note: `run_pz` injects a unit *current* at the input node, so `dc_gain`
+/// is a transimpedance (V/A), not a voltage ratio. Pole/zero locations are
+/// input-independent.
+///
 /// Example:
-///     >>> result = engine.run_pz(netlist, input_node=1, output_node=2)
+///     >>> result = engine.run_pz(netlist, input_node="in", output_node="out")
 ///     >>> print(f"Stable: {result.is_stable}")
-///     >>> print(f"DC Gain: {result.dc_gain:.3f}")
 ///     >>> for pole in result.poles:
 ///     ...     print(f"Pole: {pole}")
 #[pyclass(name = "PoleZeroResult")]
@@ -1158,7 +1390,7 @@ pub struct PyPoleZeroResult {
     poles: Vec<PyComplexValue>,
     /// System zeros
     zeros: Vec<PyComplexValue>,
-    /// DC gain H(0)
+    /// DC transimpedance H(0) in V/A (unit current input)
     #[pyo3(get)]
     pub dc_gain: f64,
     /// High-frequency gain H(∞) if finite
@@ -1199,6 +1431,28 @@ impl PyPoleZeroResult {
         self.zeros.clone()
     }
 
+    /// Get all poles as a complex128 NumPy array
+    #[getter]
+    fn poles_array<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        let values: Vec<rspice_core::Complex64> = self
+            .poles
+            .iter()
+            .map(|p| rspice_core::Complex64::new(p.real, p.imag))
+            .collect();
+        values.to_pyarray(py)
+    }
+
+    /// Get all zeros as a complex128 NumPy array
+    #[getter]
+    fn zeros_array<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<rspice_core::Complex64>> {
+        let values: Vec<rspice_core::Complex64> = self
+            .zeros
+            .iter()
+            .map(|z| rspice_core::Complex64::new(z.real, z.imag))
+            .collect();
+        values.to_pyarray(py)
+    }
+
     /// Get real poles only (as list)
     fn real_poles(&self) -> Vec<PyComplexValue> {
         self.poles.iter().filter(|p| p.is_real()).copied().collect()
@@ -1213,7 +1467,7 @@ impl PyPoleZeroResult {
             .collect()
     }
 
-    /// Check if system is stable (all poles have Re < 0)
+    /// Check if system is stable (no pole with Re > 1e-10)
     #[getter]
     fn is_stable(&self) -> bool {
         self.poles.iter().all(|p| p.real < 1e-10)
@@ -1223,8 +1477,13 @@ impl PyPoleZeroResult {
     fn dominant_pole(&self) -> Option<PyComplexValue> {
         self.poles
             .iter()
-            .filter(|p| p.real < 0.0)
-            .min_by(|a, b| a.real.abs().partial_cmp(&b.real.abs()).unwrap())
+            .filter(|p| p.real < 0.0 && p.real.is_finite())
+            .min_by(|a, b| {
+                a.real
+                    .abs()
+                    .partial_cmp(&b.real.abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .copied()
     }
 
@@ -1258,8 +1517,455 @@ impl PyPoleZeroResult {
     }
 }
 
+//=============================================================================
+// Fourier Analysis Results
+//=============================================================================
+
+/// A single harmonic component from Fourier analysis
+#[pyclass(name = "Harmonic")]
+#[derive(Debug, Clone)]
+pub struct PyHarmonic {
+    /// Harmonic number (1 = fundamental)
+    #[pyo3(get)]
+    pub n: usize,
+    /// Frequency in Hz
+    #[pyo3(get)]
+    pub frequency: f64,
+    /// Magnitude
+    #[pyo3(get)]
+    pub magnitude: f64,
+    /// Phase in radians
+    #[pyo3(get)]
+    pub phase: f64,
+}
+
+#[pymethods]
+impl PyHarmonic {
+    /// Phase in degrees
+    #[getter]
+    fn phase_degrees(&self) -> f64 {
+        self.phase.to_degrees()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Harmonic(n={}, f={:.4e}Hz, mag={:.6e}, phase={:.2}°)",
+            self.n,
+            self.frequency,
+            self.magnitude,
+            self.phase.to_degrees()
+        )
+    }
+}
+
+/// Fourier analysis result (harmonic decomposition + THD)
+///
+/// Example:
+///     >>> four = tran.fourier("out", fundamental=1e3)
+///     >>> print(f"THD = {four.thd_percent:.3f}%")
+///     >>> for h in four.harmonics:
+///     ...     print(h)
+#[pyclass(name = "FourierResult")]
+#[derive(Debug, Clone)]
+pub struct PyFourierResult {
+    /// DC component of the waveform
+    #[pyo3(get)]
+    pub dc_component: f64,
+    /// Total harmonic distortion as a ratio (0-1)
+    #[pyo3(get)]
+    pub thd: f64,
+    harmonics: Vec<PyHarmonic>,
+}
+
+impl PyFourierResult {
+    pub fn from_core(result: &rspice_core::analysis::FourierResult) -> Self {
+        // Core's harmonic 0 is the DC term; expose it via `dc_component`
+        // and keep the list at n >= 1 so harmonics[0] is the fundamental.
+        let harmonics = result
+            .harmonics
+            .iter()
+            .filter(|h| h.harmonic_number >= 1)
+            .map(|h| PyHarmonic {
+                n: h.harmonic_number,
+                frequency: h.frequency,
+                magnitude: h.magnitude,
+                phase: h.phase,
+            })
+            .collect();
+        Self {
+            dc_component: result.dc_component,
+            // Core reports THD in percent already.
+            thd: result.thd / 100.0,
+            harmonics,
+        }
+    }
+}
+
+#[pymethods]
+impl PyFourierResult {
+    /// Total harmonic distortion in percent
+    #[getter]
+    fn thd_percent(&self) -> f64 {
+        self.thd * 100.0
+    }
+
+    /// All harmonic components (index 0 = fundamental)
+    #[getter]
+    fn harmonics(&self) -> Vec<PyHarmonic> {
+        self.harmonics.clone()
+    }
+
+    /// Harmonic magnitudes as a NumPy array (index 0 = fundamental)
+    #[getter]
+    fn magnitudes<'py>(&self, py: Python<'py>) -> Bound<'py, PyArray1<f64>> {
+        let mags: Vec<f64> = self.harmonics.iter().map(|h| h.magnitude).collect();
+        mags.to_pyarray(py)
+    }
+
+    /// Magnitude of the fundamental
+    #[getter]
+    fn fundamental_magnitude(&self) -> Option<f64> {
+        self.harmonics.first().map(|h| h.magnitude)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "FourierResult(harmonics={}, dc={:.4e}, thd={:.4}%)",
+            self.harmonics.len(),
+            self.dc_component,
+            self.thd * 100.0
+        )
+    }
+}
+
+//=============================================================================
+// Transfer Function Results
+//=============================================================================
+
+/// Small-signal transfer function result (.TF)
+///
+/// Example:
+///     >>> tf = engine.run_transfer_function(netlist, "out", "V1")
+///     >>> print(f"gain={tf.gain:.3f}, Zin={tf.input_impedance:.1f}Ω")
+#[pyclass(name = "TransferFunctionResult")]
+#[derive(Debug, Clone)]
+pub struct PyTransferFunctionResult {
+    /// Output specification
+    #[pyo3(get)]
+    pub output: String,
+    /// Input source name
+    #[pyo3(get)]
+    pub input: String,
+    /// DC small-signal gain (output / input)
+    #[pyo3(get)]
+    pub gain: f64,
+    /// Input impedance in Ohms
+    #[pyo3(get)]
+    pub input_impedance: f64,
+    /// Output impedance (Thevenin) in Ohms
+    #[pyo3(get)]
+    pub output_impedance: f64,
+}
+
+impl PyTransferFunctionResult {
+    pub fn from_core(result: &rspice_core::analysis::TransferFunctionResult) -> Self {
+        Self {
+            output: result.output.clone(),
+            input: result.input.clone(),
+            gain: result.gain,
+            input_impedance: result.input_impedance,
+            output_impedance: result.output_impedance,
+        }
+    }
+}
+
+#[pymethods]
+impl PyTransferFunctionResult {
+    /// Gain in dB (20·log10 |gain|)
+    #[getter]
+    fn gain_db(&self) -> f64 {
+        20.0 * self.gain.abs().log10()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "TransferFunctionResult({}/{}: gain={:.4e}, Zin={:.4e}, Zout={:.4e})",
+            self.output, self.input, self.gain, self.input_impedance, self.output_impedance
+        )
+    }
+}
+
+//=============================================================================
+// Measurement / Run Report
+//=============================================================================
+
+/// Result of a single .MEAS statement
+///
+/// `passed` is true when the measurement evaluated to a value. A failed
+/// measurement carries an `error` message instead.
+///
+/// Example:
+///     >>> m = report.measurement("trise")
+///     >>> assert m.passed and m.value < 1e-6
+#[pyclass(name = "Measurement")]
+#[derive(Debug, Clone)]
+pub struct PyMeasurement {
+    /// Measurement name (from the .MEAS statement)
+    #[pyo3(get)]
+    pub name: String,
+    /// Analysis the measurement applies to ("TRAN", "AC", "DC")
+    #[pyo3(get)]
+    pub analysis: String,
+    /// Measured value, or None if evaluation failed
+    #[pyo3(get)]
+    pub value: Option<f64>,
+    /// Failure description when evaluation failed
+    #[pyo3(get)]
+    pub error: Option<String>,
+}
+
+impl PyMeasurement {
+    pub fn from_core(result: &rspice_core::MeasureResult, analysis: &str) -> Self {
+        Self {
+            name: result.name.clone(),
+            analysis: analysis.to_string(),
+            value: result.value,
+            error: result.error.clone(),
+        }
+    }
+
+    pub fn unevaluated(name: &str, analysis: &str, reason: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            analysis: analysis.to_string(),
+            value: None,
+            error: Some(reason.to_string()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyMeasurement {
+    /// True when the measurement produced a value
+    #[getter]
+    fn passed(&self) -> bool {
+        self.value.is_some()
+    }
+
+    /// Convert to float; raises ValueError when the measurement failed
+    fn __float__(&self) -> PyResult<f64> {
+        self.value.ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "measurement '{}' has no value: {}",
+                self.name,
+                self.error.as_deref().unwrap_or("evaluation failed")
+            ))
+        })
+    }
+
+    fn __repr__(&self) -> String {
+        match self.value {
+            Some(v) => format!("Measurement({}={:.6e} [{}])", self.name, v, self.analysis),
+            None => format!(
+                "Measurement({} FAILED [{}]: {})",
+                self.name,
+                self.analysis,
+                self.error.as_deref().unwrap_or("evaluation failed")
+            ),
+        }
+    }
+}
+
+/// Record of one analysis directive handled by `Engine.run`
+#[pyclass(name = "AnalysisRecord")]
+#[derive(Debug, Clone)]
+pub struct PyAnalysisRecord {
+    /// Analysis kind: "op", "dc", "ac", "tran", "noise", "tf", "four", ...
+    #[pyo3(get)]
+    pub kind: String,
+    /// Human-readable summary of the directive
+    #[pyo3(get)]
+    pub detail: String,
+    /// True when the directive was not executed
+    #[pyo3(get)]
+    pub skipped: bool,
+    /// Why the directive was skipped (when skipped)
+    #[pyo3(get)]
+    pub reason: Option<String>,
+}
+
+impl PyAnalysisRecord {
+    pub fn executed(kind: &str, detail: String) -> Self {
+        Self {
+            kind: kind.to_string(),
+            detail,
+            skipped: false,
+            reason: None,
+        }
+    }
+
+    pub fn skipped(kind: &str, detail: String, reason: &str) -> Self {
+        Self {
+            kind: kind.to_string(),
+            detail,
+            skipped: true,
+            reason: Some(reason.to_string()),
+        }
+    }
+}
+
+#[pymethods]
+impl PyAnalysisRecord {
+    fn __repr__(&self) -> String {
+        if self.skipped {
+            format!(
+                "AnalysisRecord({} SKIPPED: {})",
+                self.detail,
+                self.reason.as_deref().unwrap_or("")
+            )
+        } else {
+            format!("AnalysisRecord({})", self.detail)
+        }
+    }
+}
+
+/// Aggregated outcome of `Engine.run`: every analysis the netlist requested
+/// plus all .MEAS verification results.
+///
+/// Designed for CI: `report.assert_passed()` raises `MeasurementError` if
+/// any measurement failed (or none were evaluated), with a message listing
+/// each failure.
+///
+/// Example:
+///     >>> report = engine.run(netlist)
+///     >>> report.assert_passed()
+///     >>> tpd = report.measurement("tpd").value
+#[pyclass(name = "RunReport")]
+pub struct PyRunReport {
+    /// DC operating point result (last .op)
+    #[pyo3(get)]
+    pub op: Option<Py<PySimulationResult>>,
+    /// DC sweep result (last .dc)
+    #[pyo3(get)]
+    pub dc: Option<Py<PyDcSweepResult>>,
+    /// Transient result (last .tran)
+    #[pyo3(get)]
+    pub tran: Option<Py<PyTransientResult>>,
+    /// AC result (last .ac)
+    #[pyo3(get)]
+    pub ac: Option<Py<PyAcResult>>,
+    /// Noise results (last .noise)
+    #[pyo3(get)]
+    pub noise: Option<Vec<PyNoiseResult>>,
+    /// Transfer function result (last .tf)
+    #[pyo3(get)]
+    pub tf: Option<PyTransferFunctionResult>,
+    /// Fourier results (one per .four output)
+    #[pyo3(get)]
+    pub fourier: Vec<PyFourierResult>,
+    /// One record per analysis directive in the netlist
+    #[pyo3(get)]
+    pub records: Vec<PyAnalysisRecord>,
+    /// All measurement outcomes
+    #[pyo3(get)]
+    pub measurements: Vec<PyMeasurement>,
+}
+
+#[pymethods]
+impl PyRunReport {
+    /// Look up a measurement by name (case-insensitive)
+    fn measurement(&self, name: &str) -> Option<PyMeasurement> {
+        self.measurements
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(name))
+            .cloned()
+    }
+
+    /// Number of measurements evaluated
+    #[getter]
+    fn num_measurements(&self) -> usize {
+        self.measurements.len()
+    }
+
+    /// True when every measurement produced a value (vacuously true with none)
+    #[getter]
+    fn all_passed(&self) -> bool {
+        self.measurements.iter().all(|m| m.value.is_some())
+    }
+
+    /// Measurements that failed to evaluate
+    #[getter]
+    fn failures(&self) -> Vec<PyMeasurement> {
+        self.measurements
+            .iter()
+            .filter(|m| m.value.is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// Kinds of analyses that actually executed (e.g. ["op", "tran"])
+    #[getter]
+    fn analyses_run(&self) -> Vec<String> {
+        self.records
+            .iter()
+            .filter(|r| !r.skipped)
+            .map(|r| r.kind.clone())
+            .collect()
+    }
+
+    /// Records for directives that were skipped
+    #[getter]
+    fn skipped(&self) -> Vec<PyAnalysisRecord> {
+        self.records.iter().filter(|r| r.skipped).cloned().collect()
+    }
+
+    /// Raise MeasurementError unless at least one measurement was evaluated
+    /// and all of them passed.
+    ///
+    /// This is the CI primitive: a netlist whose .MEAS statements were
+    /// silently skipped fails loudly instead of green-washing a pipeline.
+    fn assert_passed(&self) -> PyResult<()> {
+        if self.measurements.is_empty() {
+            return Err(crate::errors::MeasurementError::new_err(
+                "no measurements were evaluated: the netlist has no .MEAS statements \
+                 covered by the analyses that ran",
+            ));
+        }
+        let failures = self.failures();
+        if failures.is_empty() {
+            return Ok(());
+        }
+        let mut message = format!(
+            "{} of {} measurements failed:",
+            failures.len(),
+            self.measurements.len()
+        );
+        for f in &failures {
+            message.push_str(&format!(
+                "\n  {} [{}]: {}",
+                f.name,
+                f.analysis,
+                f.error.as_deref().unwrap_or("evaluation failed")
+            ));
+        }
+        Err(crate::errors::MeasurementError::new_err(message))
+    }
+
+    fn __repr__(&self) -> String {
+        let executed = self.records.iter().filter(|r| !r.skipped).count();
+        let skipped = self.records.len() - executed;
+        format!(
+            "RunReport(analyses={}, skipped={}, measurements={}, all_passed={})",
+            executed,
+            skipped,
+            self.measurements.len(),
+            self.all_passed()
+        )
+    }
+}
+
 /// Helper enum for node identification (by index or name)
-#[derive(FromPyObject)]
+#[derive(FromPyObject, Debug, Clone)]
 pub enum NodeIdentifier {
     #[pyo3(transparent)]
     Index(usize),

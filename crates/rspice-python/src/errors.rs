@@ -5,6 +5,8 @@
 //! - `ParseError` - Netlist parsing failures
 //! - `SimulationError` - General simulation failures
 //! - `ConvergenceError` - Newton-Raphson convergence failures
+//! - `MeasurementError` - Failed .MEAS verification (raised by
+//!   `RunReport.assert_passed`)
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -40,6 +42,14 @@ create_exception!(
     ConvergenceError,
     SimulationError,
     "Raised when Newton-Raphson iteration fails to converge."
+);
+
+// Measurement verification failures
+create_exception!(
+    rspice,
+    MeasurementError,
+    RSpiceError,
+    "Raised when .MEAS verification fails (see RunReport.assert_passed)."
 );
 
 /// Convert a parse error to PyErr
