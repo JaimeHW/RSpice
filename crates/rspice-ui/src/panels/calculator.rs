@@ -1,5 +1,5 @@
 //! Waveform calculator — the egui implementation of
-//! `design/volta-dialogs-v2.html` §1.
+//! `design/app/volta-dialogs-v2.html` §1.
 //!
 //! Keyboard-first: there is no keypad — the two things a calculator over
 //! simulation data actually needs are the active run's signals and the

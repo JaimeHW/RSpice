@@ -1,5 +1,5 @@
 //! Compile Verilog-A — the egui implementation of
-//! `design/volta-dialogs-v2.html` §3.
+//! `design/app/volta-dialogs-v2.html` §3.
 //!
 //! One vertical flow: source → options → status. The status zone is a
 //! state machine (idle / compiling / success / failed) like the license

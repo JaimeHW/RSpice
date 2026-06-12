@@ -26,7 +26,7 @@ pub enum LibraryDeleteTarget {
     },
 }
 
-/// Where the license-activation flow stands (`design/volta-license-dialog.html`).
+/// Where the license-activation flow stands (`design/app/volta-license-dialog.html`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub enum LicensePhase {
     /// Waiting for a key.

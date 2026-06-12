@@ -1,5 +1,5 @@
 //! Model library paths — the egui implementation of
-//! `design/volta-dialogs-v2.html` §2.
+//! `design/app/volta-dialogs-v2.html` §2.
 //!
 //! One master–detail surface replaces the four ad-hoc tabs: sources on the
 //! left rail (enable checkbox, inline path edit, file count at a glance)

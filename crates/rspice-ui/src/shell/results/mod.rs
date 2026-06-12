@@ -1,6 +1,6 @@
 //! The Results workspace.
 //!
-//! Ports `design/volta-results-workspace.html`: a docbar with run context,
+//! Ports `design/app/volta-results-workspace.html`: a docbar with run context,
 //! viewer tabs and viewer-local controls; a document well carrying the
 //! active viewer (waveform strips, Bode, FFT, eye, histogram, and the
 //! Nyquist/Smith/pole-zero diagnostics); and a right panel that swaps to

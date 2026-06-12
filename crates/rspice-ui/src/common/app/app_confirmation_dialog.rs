@@ -1,5 +1,5 @@
 //! Save-changes confirmation — the template instance of the VOLTA modal
-//! grammar (`design/volta-dialogs.html` §02): small surface, one sentence,
+//! grammar (`design/app/volta-dialogs.html` §02): small surface, one sentence,
 //! three explicit verbs. Ghost = Cancel, secondary = Don't save,
 //! primary = Save.
 

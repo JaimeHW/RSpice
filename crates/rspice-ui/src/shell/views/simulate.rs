@@ -2,7 +2,7 @@
 //! outputs, corner selection, and the run bar with live progress. The
 //! run-set card is the single source of truth: tick to enable, click to
 //! configure in the right inspector; adding rides the anchored analysis
-//! palette (`design/volta-simulate-v2.html`), never a modal.
+//! palette (`design/app/volta-simulate-v2.html`), never a modal.
 
 use egui::Ui;
 
@@ -457,7 +457,7 @@ fn corners_card(ui: &mut Ui, state: &mut AppState) {
 }
 
 // ---------------------------------------------------------------------------
-// Analysis palette (design/volta-simulate-v2.html)
+// Analysis palette (design/app/volta-simulate-v2.html)
 // ---------------------------------------------------------------------------
 //
 // Anchored under the card's "+ Add analysis" action; add-only — it puts a

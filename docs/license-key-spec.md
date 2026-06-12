@@ -1,7 +1,7 @@
 # RSpice license keys — format & verification spec (v1 draft)
 
 > Draft 2026-06-10 for the `rspice-platform` signer and the in-app activation
-> flow. Companion design artifact: `design/volta-license-dialog.html`.
+> flow. Companion design artifact: `design/app/volta-license-dialog.html`.
 > Goal: **offline-first, account-less, tamper-evident, boring to operate.**
 
 ## 1. Principles

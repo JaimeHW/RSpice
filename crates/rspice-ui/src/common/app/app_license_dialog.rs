@@ -1,5 +1,5 @@
 //! License activation — the egui implementation of
-//! `design/volta-license-dialog.html`.
+//! `design/app/volta-license-dialog.html`.
 //!
 //! Three phases on one VOLTA modal: Entry (textarea + field note),
 //! Error (same pane, note in `err`), Verified (summary card with the

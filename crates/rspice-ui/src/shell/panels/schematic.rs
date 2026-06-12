@@ -1,7 +1,7 @@
 //! Schematic-context side panels: the left rail (navigator + library +
 //! place strip) and the instance inspector (right).
 //!
-//! The rail implements design/volta-schematic-rail.html: one rail, two
+//! The rail implements design/app/volta-schematic-rail.html: one rail, two
 //! contexts. NAVIGATOR answers "where am I, what is here" — nameplate,
 //! occurrence path, instances/nets/ports. LIBRARY answers "what can I
 //! place" — palette categories, project and vendor libraries, a stable
