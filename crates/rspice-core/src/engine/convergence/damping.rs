@@ -176,6 +176,38 @@ impl Engine {
         best_solution
     }
 
+    /// Whether per-device iterate-replacement junction limiting governs the
+    /// Newton step for this circuit. Legacy Gummel-Poon BJTs run ngspice's
+    /// bjtload.c pnjlim discipline inside `update`: the full node step is
+    /// the algorithm and the per-iterate junction replacement is the
+    /// globalization. Merit-based step shrinking livelocks junction turn-on
+    /// for these devices because the raw nonlinear residual transiently
+    /// rises along the convergent direction.
+    pub(in crate::engine) fn junction_limiting_owns_newton_steps(circuit: &CircuitData) -> bool {
+        circuit
+            .bjts
+            .devices
+            .iter()
+            .any(|bjt| bjt.uses_legacy_gummel_poon())
+    }
+
+    pub(in crate::engine::convergence) fn apply_damping_strategy_with_junction_ownership<F>(
+        &self,
+        old: &[Value],
+        proposal: &[Value],
+        damping_state: &mut NewtonDampingState,
+        junction_owns_steps: bool,
+        merit: F,
+    ) -> Vec<Value>
+    where
+        F: FnMut(&[Value]) -> Option<Value>,
+    {
+        if junction_owns_steps {
+            return proposal.to_vec();
+        }
+        self.apply_damping_strategy(old, proposal, damping_state, merit)
+    }
+
     pub(in crate::engine::convergence) fn apply_damping_strategy<F>(
         &self,
         old: &[Value],

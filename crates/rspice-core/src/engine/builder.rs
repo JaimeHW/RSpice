@@ -616,17 +616,17 @@ impl Engine {
                             ))
                         });
                     } else {
-                        // Legacy GP: externalize the constant collector and
-                        // emitter resistances onto real internal nodes (the
-                        // diode/JFET/MOSFET pattern), so their thermal noise
-                        // rides the resistor walk and junction noise injects
-                        // at the true internal terminals. Values are taken
-                        // after model, instance, and temperature application,
-                        // and the zeroed device fields collapse the matching
-                        // internal states, so the solved system is identical.
-                        // The bias-dependent base resistance (qb-modulated,
-                        // ngspice BJTgx) stays folded pending the base-prime
-                        // promotion.
+                        // Legacy GP: externalize the constant collector,
+                        // emitter, and base resistances onto real internal
+                        // nodes (the diode/JFET/MOSFET pattern), so their
+                        // thermal noise rides the resistor walk and junction
+                        // noise injects at the true internal terminals.
+                        // Values are taken after model, instance, and
+                        // temperature application, and the zeroed device
+                        // fields collapse the matching internal states, so
+                        // the solved system is identical. Only the
+                        // bias-dependent base part (qb-modulated, ngspice
+                        // BJTgx, nonzero when RBM < RB) stays folded.
                         if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
                             let cint_name = format!("{}.__cint", element.name);
                             let cint = circuit.get_or_create_node(&cint_name);
@@ -647,6 +647,27 @@ impl Engine {
                             circuit.resistors.add(re_name, emitter, eint, bjt.re);
                             bjt.node_emitter = eint;
                             bjt.clear_emitter_series_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
+                        }
+                        // The constant base part is RBM, which ngspice
+                        // defaults to RB (bjttemp.c) so the folded remainder
+                        // is zero for common cards. Junction limiting moves
+                        // with the topology: the device update applies
+                        // pnjlim to its junction state against the previous
+                        // iterate (bjtload.c's discipline at the prime
+                        // nodes), and the engine-side external scale clamp
+                        // skips GP devices.
+                        if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
+                            let bint_name = format!("{}.__bint", element.name);
+                            let bint = circuit.get_or_create_node(&bint_name);
+                            let rb_name = format!("{}.__rb", element.name);
+                            circuit.resistors.add(rb_name, base, bint, bjt.rbx);
+                            bjt.node_base = bint;
+                            bjt.clear_base_constant_resistance();
                             if bjt.noise_temperature_offset != 0.0 {
                                 circuit.resistors.set_last_noise_temperature_offset(
                                     bjt.noise_temperature_offset,

@@ -147,7 +147,12 @@ impl Engine {
             };
 
             let mut new_solution =
-                self.apply_damping_strategy(&solution, &raw_solution, damping_state, |trial| {
+                self.apply_damping_strategy_with_junction_ownership(
+                    &solution,
+                    &raw_solution,
+                    damping_state,
+                    Self::junction_limiting_owns_newton_steps(circuit),
+                    |trial| {
                     self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale)
                 });
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);

@@ -850,6 +850,13 @@ impl Bjt {
         if !self.previous_reduced_linearization_valid {
             return false;
         }
+        // ngspice CKTnoncon: an iterate whose junction voltages pnjlim
+        // replaced is by definition not converged -- the stamped companion
+        // intentionally disagrees with the raw solution until the limiter
+        // disengages.
+        if self.legacy_junction_limited {
+            return false;
+        }
 
         let reltol = criteria.relative_tolerance();
         let current_tol = criteria.current_tolerance();
@@ -919,13 +926,13 @@ impl Bjt {
         vs: Value,
     ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
-        let biases = [vc, vb, ve, vs];
+        let anchor = self.companion_anchor(vc, vb, ve, vs);
         let currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
         let mut rhs = [0.0; EXTERNAL_DIM];
         for row in 0..EXTERNAL_DIM {
             rhs[row] = -currents[row];
             for col in 0..EXTERNAL_DIM {
-                rhs[row] += rows[row][col] * biases[col];
+                rhs[row] += rows[row][col] * anchor[col];
             }
         }
         (rows, rhs)

@@ -318,10 +318,11 @@ impl Engine {
                     Err(_) => break,
                 };
 
-                let mut new_solution = self.apply_damping_strategy(
+                let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
                     &solution,
                     &raw_solution,
                     &mut damping_state,
+                    Self::junction_limiting_owns_newton_steps(circuit),
                     |trial| {
                         self.nonlinear_merit_with_pseudo_transient(
                             circuit,
@@ -679,10 +680,11 @@ impl Engine {
 
                 match matrix.solve(&rhs) {
                     Ok(raw_solution) => {
-                        let mut new_solution = self.apply_damping_strategy(
+                        let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
                             &solution,
                             &raw_solution,
                             &mut damping_state,
+                            Self::junction_limiting_owns_newton_steps(circuit),
                             |trial| self.nonlinear_merit_with_gmin(circuit, matrix, trial, gmin),
                         );
                         Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);

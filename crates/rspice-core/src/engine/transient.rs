@@ -618,6 +618,11 @@ impl Engine {
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient =
             !circuit.has_nonlinear_devices() && !circuit.has_xspice_devices();
+        // ngspice's flat transient Newton: when junction devices replace
+        // their own iterate voltages (legacy GP pnjlim in update), the full
+        // node step is the algorithm; per-iteration node-delta clamps walk
+        // the junction against frozen nodes and livelock turn-on edges.
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(&circuit);
         let prefer_dense_solver = Self::should_prefer_dense_transient_solver(
             is_strictly_linear_transient,
             size,
@@ -1468,24 +1473,7 @@ impl Engine {
                             }
                         }
 
-                        // ngspice-style per-junction limiting runs on every
-                        // Newton iterate regardless of the global trust-region
-                        // policy; this is what keeps full node updates safe
-                        // around exponential junctions (pnjlim discipline).
-                        if !circuit.bjts.devices.is_empty() {
-                            let junction_limited = Self::limit_bjt_junction_external_updates(
-                                &circuit,
-                                &mut sol,
-                                &new_solution,
-                                num_nodes,
-                                Some(&force_accept_protected_nodes),
-                            );
-                            if junction_limited {
-                                circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
-                            }
-                        }
-
-                        if conservative_limiting_active {
+                        if conservative_limiting_active && !junction_owns_steps {
                             // Trust-region damping is critical for stiff semiconductor
                             // nonlinearities, but it should not throttle linear decks or
                             // break ideal voltage-source equations by independently clipping
