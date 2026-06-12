@@ -1,6 +1,6 @@
 //! # RSpice Python Bindings
 //!
-//! Commercial-grade Python bindings for the RSpice circuit simulation engine,
+//! Python bindings for the RSpice circuit simulation engine,
 //! providing automation, scripting, and integration with the Python scientific ecosystem.
 //!
 //! ## Architecture
@@ -51,6 +51,7 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<config::PyConvergenceConfig>()?;
     m.add_class::<config::PyBypassConfig>()?;
     m.add_class::<config::PyDampingStrategy>()?;
+    m.add_class::<config::PyIntegrationMethod>()?;
 
     // Result classes
     m.add_class::<results::PySimulationResult>()?;
@@ -76,15 +77,20 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.py().get_type::<errors::ConvergenceError>(),
     )?;
 
+    // __all__ drives the package __init__'s star-import: dunders must be
+    // listed explicitly or maturin's wrapper hides them.
     m.add(
         "__all__",
         [
+            "__version__",
+            "__author__",
             "Netlist",
             "Engine",
             "SimulationConfig",
             "ConvergenceConfig",
             "BypassConfig",
             "DampingStrategy",
+            "IntegrationMethod",
             "SimulationResult",
             "TransientResult",
             "AcResult",
