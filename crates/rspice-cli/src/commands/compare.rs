@@ -32,6 +32,8 @@ pub struct CompareArgs {
     pub ignore_missing: bool,
     /// On mismatch (or missing golden), copy the result over the golden file
     pub bless: bool,
+    /// Resample the result onto the golden file's scale before comparing
+    pub interpolate: bool,
 }
 
 impl Default for CompareArgs {
@@ -47,6 +49,7 @@ impl Default for CompareArgs {
             allow_truncated: false,
             ignore_missing: false,
             bless: false,
+            interpolate: false,
         }
     }
 }
@@ -127,6 +130,12 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     let result_data = load_waveform_data(&args.result)?;
     let golden_data = load_waveform_data(&args.golden)?;
 
+    let result_data = if args.interpolate {
+        resample_onto_golden(result_data, &golden_data)?
+    } else {
+        result_data
+    };
+
     // Perform comparison
     let cmp_result = compare_waveforms(&result_data, &golden_data, &args)?;
 
@@ -192,6 +201,81 @@ fn load_waveform_data(path: &std::path::Path) -> Result<WaveformData, CliError> 
     let table = load_table(path, detect_format(path))?;
     let (variables, values) = table.to_real_series().into_iter().unzip();
     Ok(WaveformData { variables, values })
+}
+
+/// Linearly resample the result's series onto the golden file's scale so
+/// runs with different time grids compare point-for-point. The scale is
+/// each file's first series; the result scale must be strictly increasing
+/// and must cover the golden range — interpolation never extrapolates.
+fn resample_onto_golden(
+    result: WaveformData,
+    golden: &WaveformData,
+) -> Result<WaveformData, CliError> {
+    let invalid = |message: String| CliError::VerificationFailed { message };
+
+    let result_scale = result
+        .values
+        .first()
+        .ok_or_else(|| invalid("result file has no data to interpolate".to_string()))?
+        .clone();
+    let golden_scale = golden
+        .values
+        .first()
+        .ok_or_else(|| invalid("golden file has no data to interpolate against".to_string()))?;
+
+    if result_scale.len() < 2 {
+        return Err(invalid(
+            "result needs at least two points to interpolate".to_string(),
+        ));
+    }
+    if result_scale.windows(2).any(|pair| pair[1] <= pair[0]) {
+        return Err(invalid(
+            "result scale is not strictly increasing; cannot interpolate".to_string(),
+        ));
+    }
+
+    let (low, high) = (result_scale[0], *result_scale.last().expect("non-empty"));
+    let slack = (high - low).abs().max(1.0) * 1e-9;
+    for &point in golden_scale {
+        if point < low - slack || point > high + slack {
+            return Err(invalid(format!(
+                "golden scale point {point:e} lies outside the result range                  [{low:e}, {high:e}]; interpolation would extrapolate"
+            )));
+        }
+    }
+
+    let interp_at = |series: &[f64], x: f64| -> f64 {
+        // Index of the first scale point >= x (the scale is sorted).
+        let upper = result_scale.partition_point(|&s| s < x);
+        if upper == 0 {
+            return series[0];
+        }
+        if upper >= result_scale.len() {
+            return *series.last().expect("non-empty");
+        }
+        let (x0, x1) = (result_scale[upper - 1], result_scale[upper]);
+        let (y0, y1) = (series[upper - 1], series[upper]);
+        if x1 == x0 {
+            return y0;
+        }
+        y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    };
+
+    let mut values = Vec::with_capacity(result.values.len());
+    values.push(golden_scale.clone());
+    for series in result.values.iter().skip(1) {
+        if series.len() != result_scale.len() {
+            return Err(invalid(
+                "result series lengths disagree with its scale; cannot interpolate".to_string(),
+            ));
+        }
+        values.push(golden_scale.iter().map(|&x| interp_at(series, x)).collect());
+    }
+
+    Ok(WaveformData {
+        variables: result.variables,
+        values,
+    })
 }
 
 /// Compare two waveform datasets.

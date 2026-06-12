@@ -246,6 +246,76 @@ fn bless_updates_the_golden_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// --interpolate resamples the result onto the golden grid, so a finer
+/// (or shifted) time base compares point-for-point instead of failing on
+/// the point count.
+#[test]
+fn interpolate_compares_across_different_grids() {
+    let dir = test_dir("interp");
+    // Result: ramp sampled at 0.5us; golden: the same ramp at 1us.
+    std::fs::write(
+        dir.join("result.csv"),
+        "time,V(OUT)\n0,1.0\n5e-7,1.5\n1e-6,2.0\n1.5e-6,2.5\n2e-6,3.0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("golden.csv"),
+        "time,V(OUT)\n0,1.0\n1e-6,2.0\n2e-6,3.0\n",
+    )
+    .unwrap();
+
+    // Without interpolation the differing grids are a structural failure.
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(3));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--interpolate",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    // A golden grid extending beyond the result must refuse to extrapolate.
+    std::fs::write(
+        dir.join("long_golden.csv"),
+        "time,V(OUT)\n0,1.0\n1e-6,2.0\n5e-6,6.0\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("long_golden.csv").to_str().unwrap(),
+            "--interpolate",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(3));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("extrapolate"),
+        "refusal should explain why: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// NaN never matches, including NaN-vs-NaN.
 #[test]
 fn nan_values_fail_comparison() {

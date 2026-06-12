@@ -490,6 +490,12 @@ pub struct CompareArgs {
     /// file when they differ (or when the golden file does not exist yet)
     #[arg(long)]
     pub bless: bool,
+
+    /// Linearly resample the result onto the golden file's scale before
+    /// comparing, so runs with different time grids compare point-for-point
+    /// (the result scale must cover the golden range)
+    #[arg(long)]
+    pub interpolate: bool,
 }
 
 /// CI/CD report formats
