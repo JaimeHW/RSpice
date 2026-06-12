@@ -557,8 +557,15 @@ impl<'a> Parser<'a> {
         if upper == "TIME" || upper == "T" {
             return Expr::Time;
         }
-        if upper == "FREQ" || upper == "FREQUENCY" || upper == "F" {
+        // `hertz` is ngspice's AC-frequency variable. The behavioral AC
+        // linearization is evaluated at the operating point, so in AC
+        // sweeps it reads as the context frequency where one is supplied
+        // and 0 elsewhere (DC/transient), matching ngspice's DC behavior.
+        if upper == "FREQ" || upper == "FREQUENCY" || upper == "F" || upper == "HERTZ" {
             return Expr::Frequency;
+        }
+        if upper == "TEMPER" {
+            return Expr::Temperature;
         }
 
         // Check for function call

@@ -14,6 +14,8 @@ pub enum Instruction {
     PushTime,
     /// Push frequency variable
     PushFreq,
+    /// Push circuit temperature (degrees Celsius)
+    PushTemperature,
     /// Load node voltage by index
     LoadVoltage(usize),
     /// Load branch current by index
@@ -140,6 +142,8 @@ pub struct Context<'a> {
     pub time: Value,
     /// Current frequency (for AC)
     pub frequency: Value,
+    /// Circuit temperature in degrees Celsius (`temper`)
+    pub temperature: Value,
 }
 
 impl<'a> Context<'a> {
@@ -150,6 +154,9 @@ impl<'a> Context<'a> {
             currents,
             time: 0.0,
             frequency: 0.0,
+            temperature: crate::analysis::temperature::kelvin_to_celsius(
+                crate::constants::TEMP_REFERENCE,
+            ),
         }
     }
 
@@ -160,7 +167,16 @@ impl<'a> Context<'a> {
             currents,
             time,
             frequency: 0.0,
+            temperature: crate::analysis::temperature::kelvin_to_celsius(
+                crate::constants::TEMP_REFERENCE,
+            ),
         }
+    }
+
+    /// Set the circuit temperature (degrees Celsius) for `temper`.
+    pub fn with_temperature(mut self, temperature: Value) -> Self {
+        self.temperature = temperature;
+        self
     }
 }
 
@@ -193,6 +209,7 @@ impl Vm {
                 Instruction::PushConst(v) => self.stack.push(*v),
                 Instruction::PushTime => self.stack.push(ctx.time),
                 Instruction::PushFreq => self.stack.push(ctx.frequency),
+                Instruction::PushTemperature => self.stack.push(ctx.temperature),
 
                 Instruction::LoadVoltage(idx) => {
                     let v = ctx.voltages.get(*idx).copied().unwrap_or(0.0);

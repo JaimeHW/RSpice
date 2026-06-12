@@ -1415,7 +1415,7 @@ impl Engine {
                         ))
                     })?;
 
-                    let bvs = crate::device::BehavioralVoltageSource::new(
+                    let mut bvs = crate::device::BehavioralVoltageSource::new(
                         element.name.clone(),
                         np,
                         nn,
@@ -1423,6 +1423,9 @@ impl Engine {
                         &prepared_expression,
                     )
                     .map_err(SimulationError::Circuit)?;
+                    bvs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                        self.config.temperature,
+                    ));
                     circuit.behavioral_sources.add_voltage(bvs);
                 }
                 ElementKind::BehavioralCurrent {
@@ -1447,13 +1450,16 @@ impl Engine {
                         ))
                     })?;
 
-                    let bcs = crate::device::BehavioralCurrentSource::new(
+                    let mut bcs = crate::device::BehavioralCurrentSource::new(
                         element.name.clone(),
                         np,
                         nn,
                         &prepared_expression,
                     )
                     .map_err(SimulationError::Circuit)?;
+                    bcs.set_temperature(crate::analysis::temperature::kelvin_to_celsius(
+                        self.config.temperature,
+                    ));
                     circuit.behavioral_sources.add_current(bcs);
                 }
                 // Flattened tree leaves external subcircuit-backed devices here

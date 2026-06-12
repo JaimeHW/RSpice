@@ -26,6 +26,10 @@ fn compile_expr(expr: &Expr, program: &mut CompiledExpr) {
             program.instructions.push(Instruction::PushFreq);
         }
 
+        Expr::Temperature => {
+            program.instructions.push(Instruction::PushTemperature);
+        }
+
         Expr::NodeVoltage(node) => {
             let idx = program.get_or_create_node(node);
             program.instructions.push(Instruction::LoadVoltage(idx));

@@ -28,6 +28,8 @@ pub enum Expr {
     Time,
     /// Frequency variable (for AC)
     Frequency,
+    /// Circuit temperature in degrees Celsius (`temper`)
+    Temperature,
 }
 
 /// Binary operators

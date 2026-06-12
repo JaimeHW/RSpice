@@ -38,6 +38,8 @@ pub struct BehavioralVoltageSource {
     node_partials: Vec<Value>,
     /// Linearization partials d(expr)/d(branch_values[idx])
     branch_partials: Vec<Value>,
+    /// Circuit temperature in degrees Celsius, surfaced as `temper`.
+    temperature: Value,
 }
 
 impl BehavioralVoltageSource {
@@ -66,6 +68,9 @@ impl BehavioralVoltageSource {
             branch_values: Vec::new(),
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
+            temperature: crate::analysis::temperature::kelvin_to_celsius(
+                crate::constants::TEMP_REFERENCE,
+            ),
         })
     }
 
@@ -143,8 +148,14 @@ impl BehavioralVoltageSource {
 
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
-        let ctx = Context::transient(&self.node_values, &self.branch_values, time);
+        let ctx = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_temperature(self.temperature);
         self.vm.execute(&self.program, &ctx)
+    }
+
+    /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
+    pub fn set_temperature(&mut self, temperature: Value) {
+        self.temperature = temperature;
     }
 
     #[inline]
@@ -332,6 +343,8 @@ pub struct BehavioralCurrentSource {
     node_partials: Vec<Value>,
     /// Linearization partials d(expr)/d(branch_values[idx])
     branch_partials: Vec<Value>,
+    /// Circuit temperature in degrees Celsius, surfaced as `temper`.
+    temperature: Value,
 }
 
 impl BehavioralCurrentSource {
@@ -358,6 +371,9 @@ impl BehavioralCurrentSource {
             branch_values: Vec::new(),
             node_partials: Vec::new(),
             branch_partials: Vec::new(),
+            temperature: crate::analysis::temperature::kelvin_to_celsius(
+                crate::constants::TEMP_REFERENCE,
+            ),
         })
     }
 
@@ -435,8 +451,14 @@ impl BehavioralCurrentSource {
 
     #[inline]
     fn evaluate_with_cached_inputs(&mut self, time: Value) -> Value {
-        let ctx = Context::transient(&self.node_values, &self.branch_values, time);
+        let ctx = Context::transient(&self.node_values, &self.branch_values, time)
+            .with_temperature(self.temperature);
         self.vm.execute(&self.program, &ctx)
+    }
+
+    /// Set the circuit temperature (degrees Celsius) surfaced as `temper`.
+    pub fn set_temperature(&mut self, temperature: Value) {
+        self.temperature = temperature;
     }
 
     #[inline]
