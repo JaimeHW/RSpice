@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>404 — RSpice</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  main {
+    min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: var(--space-lg);
+    background-image: radial-gradient(circle, var(--canvas-grid) 1px, transparent 1.4px);
+    background-size: 26px 26px;
+  }
+  .tile-lg { width: 64px; height: 64px; margin-bottom: var(--space-lg); }
+  h1 { font-size: clamp(34px, 6vw, 48px); line-height: 1.1; }
+  .code-lab {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--text-faint); margin: 0 0 var(--space-sm);
+  }
+  p.why { color: var(--text-dim); max-width: 44ch; margin: var(--space-md) 0 0; text-wrap: pretty; }
+  .actions { display: flex; gap: var(--space-md); margin-top: var(--space-xl); flex-wrap: wrap; justify-content: center; }
+</style>
+</head>
+<body data-theme="dark">
+<script>
+(function(){try{var t=localStorage.getItem("rspice-site-theme");
+if(!t&&window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches){t="light";}
+if(t){document.body.dataset.theme=t;}}catch(e){}})();
+</script>
+<main>
+  <span class="logo-tile tile-lg" aria-hidden="true">
+    <svg viewBox="0 0 96 96" style="width:70%;height:70%;">
+      <g fill="none" stroke="var(--schematic-ink)" stroke-width="8">
+        <path d="M 14 34 H 27.5"></path>
+        <path d="M 14 62 H 27.5"></path>
+        <path d="M 69.5 48 H 82"></path>
+      </g>
+      <g fill="none" stroke="var(--schematic-ink)" stroke-width="4">
+        <circle cx="8" cy="34" r="6"></circle>
+        <circle cx="8" cy="62" r="6"></circle>
+        <circle cx="88" cy="48" r="6"></circle>
+      </g>
+      <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="var(--schematic-ink)"
+            stroke="var(--schematic-ink)" stroke-width="8" stroke-linejoin="round"></path>
+    </svg>
+  </span>
+  <p class="code-lab">error 404 · floating node</p>
+  <h1>Nothing is driving this net.</h1>
+  <p class="why">The address you probed isn't connected to anything. Check the URL,
+  or head back to a node that converges.</p>
+  <div class="actions">
+    <a class="btn btn-accent" href="index.html">Back to the home page</a>
+    <a class="btn btn-ghost" href="docs.html">Open the docs</a>
+  </div>
+</main>
+</body>
+</html>

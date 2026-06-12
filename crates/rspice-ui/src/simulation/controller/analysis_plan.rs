@@ -2,12 +2,10 @@ use super::*;
 
 impl SimulationController {
     pub(super) fn enabled_analysis_indices(state: &AppState) -> Vec<usize> {
+        // The run set is the single source of truth: no silent fallback to
+        // the selected row — start_simulation refuses an empty set instead.
         let mut indices: Vec<usize> = state.sim_setup.enabled.iter().copied().collect();
         indices.sort_unstable();
-        if indices.is_empty() {
-            // Nothing enabled: run the analysis selected in the Simulate view.
-            indices.push(state.shell.selected_analysis.unwrap_or(1).min(24));
-        }
         indices
     }
 

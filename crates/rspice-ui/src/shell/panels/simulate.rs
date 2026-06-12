@@ -22,10 +22,10 @@ fn run_history_section(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    if let Some(action) = section_header(ui, "Run history", Some("Clear")) {
-        if action.clicked() {
-            state.simulation.clear_runs();
-        }
+    if let Some(action) = section_header(ui, "Run history", Some("Clear"))
+        && action.clicked()
+    {
+        state.simulation.clear_runs();
     }
 
     ui.scope(|ui| {
@@ -188,6 +188,50 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
                         .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                         .color(c.text_faint),
                 );
+            }
+
+            // The exact card this configuration writes into the deck —
+            // live validation feedback, formerly the add-dialog's strip.
+            ui.add_space(10.0);
+            let y = ui.cursor().top();
+            ui.painter().hline(
+                ui.max_rect().x_range(),
+                y - 0.5,
+                egui::Stroke::new(1.0, c.border),
+            );
+            ui.add_space(7.0);
+            let mut caption = egui::text::LayoutJob::default();
+            caption.append(
+                "WRITES",
+                0.0,
+                egui::TextFormat {
+                    font_id: theme::mono(9.5, FontWeight::Medium),
+                    color: c.text_faint,
+                    extra_letter_spacing: 0.1 * 9.5,
+                    ..Default::default()
+                },
+            );
+            ui.label(caption);
+            ui.add_space(2.0);
+            match setup.spice_preview(selected_tab) {
+                Ok(card) => {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(card)
+                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .color(c.text_dim),
+                        )
+                        .truncate(),
+                    );
+                }
+                Err(_) => {
+                    // The error itself already renders above the note.
+                    ui.label(
+                        egui::RichText::new("fix the error above — no card emitted")
+                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                            .color(c.err),
+                    );
+                }
             }
         });
 }

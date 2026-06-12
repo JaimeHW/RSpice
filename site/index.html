@@ -1,0 +1,1499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSpice — Analog &amp; RF circuit simulation</title>
+<meta name="description" content="RSpice is a ground-up SPICE engine in Rust, validated point-for-point against ngspice on a 113-deck regression corpus. Native, browser, and bench.">
+<meta property="og:title" content="RSpice — The analog simulator, rebuilt.">
+<meta property="og:description" content="A ground-up SPICE engine in Rust, validated point-for-point against ngspice. RF analyses, a Verilog-A compiler, Python automation — native, browser, and bench.">
+<meta property="og:image" content="https://jaimehw.github.io/RSpice/assets/og-card.png">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  /* ---------- Hero ---------- */
+  .hero {
+    padding: 84px 0 var(--space-2xl);
+    background-image: radial-gradient(circle, var(--canvas-grid) 1px, transparent 1.4px);
+    background-size: 26px 26px;
+    background-position: center top;
+  }
+  .hero h1 {
+    font-size: clamp(38px, 6vw, 58px);
+    line-height: 1.05;
+    max-width: 15ch;
+  }
+  .hero .sub {
+    color: var(--text-dim);
+    font-size: 18px;
+    max-width: 56ch;
+    margin: var(--space-lg) 0 0;
+    text-wrap: pretty;
+  }
+  .hero .sub strong { color: var(--text); font-weight: 500; }
+  .hero-ctas { display: flex; gap: var(--space-md); margin-top: var(--space-xl); flex-wrap: wrap; }
+  .hero-meta {
+    margin-top: var(--space-md);
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.05em;
+    color: var(--text-faint);
+  }
+
+  /* ============================================================
+     Product window — faithful miniature of the VOLTA results shell
+     (regions, heights, and patterns from design/volta-results-workspace.html)
+     ============================================================ */
+  .stage { margin-top: var(--space-2xl); }
+  .window {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    font-size: 12px;
+    transition: background var(--t-med) ease, border-color var(--t-med) ease;
+  }
+  .window .mono { font-family: var(--font-mono); }
+
+  /* menubar — 32px */
+  .w-menubar {
+    display: flex; align-items: stretch; height: 32px;
+    background: var(--bg-panel); border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .w-brand {
+    display: flex; align-items: center; gap: 7px; padding: 0 12px;
+    font-weight: 600; letter-spacing: 0.06em; font-size: 11.5px;
+  }
+  .w-brand svg { width: 13px; height: 13px; --run-ink: var(--accent-line); }
+  .w-menu { padding: 0 10px; color: var(--text-dim); display: flex; align-items: center; }
+  .w-mb-right { margin-left: auto; display: flex; align-items: center; padding-right: 12px;
+    color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; }
+
+  /* toolbar — 42px */
+  .w-toolbar {
+    display: flex; align-items: center; gap: 2px; height: 42px;
+    padding: 0 8px; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+  }
+  .tb-sep { width: 1px; height: 22px; background: var(--border); margin: 0 6px; flex: none; }
+  .w-iconbtn {
+    appearance: none; border: none; background: transparent;
+    width: 28px; height: 28px; display: grid; place-items: center; flex: none;
+    border-radius: var(--radius); color: var(--text-dim); cursor: default;
+  }
+  .w-iconbtn[disabled] { opacity: 0.4; }
+  .w-iconbtn svg { width: 16px; height: 16px; stroke: currentColor; fill: none;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .w-tb-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .w-select {
+    appearance: none; height: 24px; padding: 0 24px 0 8px;
+    background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-family: var(--font-mono); font-size: 12px; cursor: pointer;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%2393999E' stroke-width='1.4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center;
+  }
+  .w-select:hover { border-color: var(--border-strong); }
+  .w-btn {
+    appearance: none; height: 24px; display: inline-flex; align-items: center; gap: 6px;
+    padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius);
+    color: var(--text); font-size: 12px; font-weight: 500; background: var(--bg-panel);
+    cursor: pointer;
+    transition: background var(--t-fast) ease, border-color var(--t-fast) ease;
+  }
+  .w-btn:hover { background: var(--bg-hover); }
+  .w-btn[disabled] { opacity: 0.4; pointer-events: none; }
+  .w-btn svg { width: 12px; height: 12px; stroke: currentColor; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  /* Instrument-direction accent button: mono, uppercase, letterspaced — the RUN control */
+  .w-btn.w-run {
+    background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink);
+    font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.07em;
+    font-size: 11px; font-weight: 500;
+  }
+  .w-btn.w-run:hover { background: var(--accent-fill-hover); border-color: var(--accent-fill-hover); }
+  .w-btn.w-run svg { fill: currentColor; }
+  .w-btn.w-run .key { opacity: 0.65; }
+
+  /* workspace tabs — 35px */
+  .w-wtabs {
+    display: flex; align-items: stretch; height: 35px;
+    background: var(--bg-app); border-bottom: 1px solid var(--border); padding: 0 8px;
+    overflow-x: auto;
+  }
+  .w-wtab {
+    appearance: none; border: none; background: transparent; cursor: default;
+    display: flex; align-items: center; gap: 7px; padding: 0 14px;
+    color: var(--text-dim); font-size: 12px; white-space: nowrap;
+  }
+  .w-wtab svg { width: 13px; height: 13px; stroke: currentColor; fill: none;
+    stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .w-wtab.active { color: var(--text); background: var(--bg-panel);
+    box-shadow: inset 0 2px 0 var(--accent-line); }
+
+  /* main grid — fixed height like the product viewport; panels scroll inside it */
+  .w-main { display: grid; grid-template-columns: 212px 1fr 252px; height: 560px; min-height: 0; }
+  .w-left  { border-right: 1px solid var(--border); background: var(--bg-panel); overflow-y: auto; min-height: 0; }
+  .w-right { border-left: 1px solid var(--border); background: var(--bg-panel); overflow-y: auto; min-height: 0; }
+  .w-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-app); }
+
+  .w-section-h {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 12px 5px; color: var(--text-faint);
+    font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+  }
+  .w-tree { padding: 0 6px 8px; }
+  .w-row {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    height: 26px; padding: 0 6px; border-radius: var(--radius);
+    color: var(--text-dim); font-size: 12px; font-family: var(--font-mono);
+  }
+  .w-row .twist { width: 10px; flex: none; color: var(--text-faint); font-size: 9px; }
+  .w-row .meta { margin-left: auto; color: var(--text-faint); font-size: 11px; }
+  .w-row .chipdot { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .w-row.sel { background: var(--accent-dim); color: var(--text); }
+  .w-row input[type="checkbox"] { accent-color: var(--accent-line); width: 13px; height: 13px; margin: 0; }
+  .w-indent { padding-left: 22px; }
+
+  /* docbar + viewer tabs — 34px */
+  .w-docbar {
+    display: flex; align-items: center; gap: 8px; height: 34px;
+    padding: 0 10px; background: var(--bg-panel); border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .w-vtabs { display: flex; align-items: center; gap: 2px; margin-left: 2px; }
+  .w-vtab {
+    appearance: none; border: none; background: transparent; cursor: default;
+    height: 24px; padding: 0 11px; display: inline-flex; align-items: center;
+    border-radius: var(--radius); color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  }
+  .w-vtab.active { background: var(--accent-dim); color: var(--accent-line); }
+  .w-vtab[disabled] { opacity: 0.55; }
+  .w-db-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .w-chip {
+    height: 22px; display: inline-flex; align-items: center; padding: 0 9px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 11px;
+  }
+  .w-chip.on { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent-line); }
+
+  /* plot strips — fill the workspace height; TRAN gets the lion's share like the product */
+  .w-strips { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 1px; background: var(--border); }
+  .w-strip { background: var(--canvas-bg); display: flex; flex-direction: column; min-height: 0; }
+  .w-strip.strip-tran { flex: 1; }
+  .w-strip.strip-ac { flex: 1; }
+  .w-strip-head {
+    display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 10px;
+    font-size: 11px; color: var(--text-dim); background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .w-strip-head .kind { font-family: var(--font-mono); font-weight: 600;
+    letter-spacing: 0.08em; color: var(--text); }
+  .w-strip-head .sub { color: var(--text-faint); }
+  .w-legend { display: flex; gap: 10px; margin-left: 14px; }
+  .w-leg {
+    appearance: none; border: none; background: transparent; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 11px; padding: 1px 6px; border-radius: var(--radius);
+    transition: background var(--t-fast) ease, opacity var(--t-fast) ease;
+  }
+  .w-leg:hover { background: var(--bg-hover); color: var(--text); }
+  .w-leg .sw { width: 14px; height: 3px; border-radius: 1px; }
+  .w-leg.off { opacity: 0.38; }
+  .w-leg.off .sw { background: var(--text-faint) !important; }
+  .w-plot { flex: 1; min-height: 0; position: relative; }
+  .w-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+  .w-plot.static svg { cursor: default; }
+
+  /* right panel */
+  .w-kv { display: flex; justify-content: space-between; min-height: 22px; align-items: center;
+    font-size: 12px; padding: 0 12px; }
+  .w-kv .k { color: var(--text-dim); }
+  .w-kv .v { font-family: var(--font-mono); color: var(--text); }
+  .w-mtable { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .w-mtable td { padding: 4px 12px; border-bottom: 1px solid var(--border); }
+  .w-mtable td:first-child { color: var(--text-dim); }
+  .w-mtable td:last-child { text-align: right; font-family: var(--font-mono); color: var(--text); }
+  .w-mtable tr:last-child td { border-bottom: none; }
+  .w-mtable tr.hl td { color: var(--accent-line); }
+  .w-mtable tr.hl td:first-child { color: var(--text); }
+  .w-hint { padding: 2px 12px 8px; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+  .cursor-block { margin: 2px 12px 8px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--bg-inset); }
+  .cursor-block .cb-head {
+    display: flex; align-items: center; gap: 6px; padding: 5px 9px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text);
+    border-bottom: 1px solid var(--border);
+  }
+  .cursor-block .cb-dot { width: 8px; height: 8px; border-radius: 2px; }
+  .cursor-block .cb-x { margin-left: auto; color: var(--text-dim); }
+  .cursor-block .cb-row { display: flex; justify-content: space-between;
+    padding: 2px 9px; font-size: 11px; font-family: var(--font-mono); }
+  .cursor-block .cb-row .k { color: var(--text-dim); }
+  .cursor-block .cb-row:last-child { padding-bottom: 6px; }
+  .w-clear { appearance: none; border: none; background: transparent; cursor: pointer;
+    margin-left: auto; color: var(--text-faint); font-size: 11px; font-weight: 400;
+    letter-spacing: 0; text-transform: none; border-radius: var(--radius); padding: 1px 6px; }
+  .w-clear:hover { background: var(--bg-hover); color: var(--text); }
+
+  /* status bar — 25px */
+  .w-statusbar {
+    display: flex; align-items: center; height: 25px; padding: 0 10px; gap: 18px;
+    background: var(--bg-panel); border-top: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+    overflow: hidden; white-space: nowrap;
+  }
+  .w-statusbar .sb-right { margin-left: auto; display: flex; gap: 18px; align-items: center; }
+  .w-pill { display: inline-flex; align-items: center; gap: 5px; }
+  .w-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+  .w-pill.ok .dot { background: var(--ok); }
+  .w-pill.busy .dot { background: var(--accent-fill); }
+
+  /* demo controls — marketing chrome, deliberately outside the product window */
+  .bench {
+    display: flex; align-items: center; gap: var(--space-lg); flex-wrap: wrap;
+    margin-top: var(--space-sm);
+    padding: 10px 14px;
+    border: 1px dashed var(--border-strong); border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--bg-panel) 55%, transparent);
+  }
+  .bench .lab {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-faint); flex: none;
+  }
+  .bench-field { display: flex; align-items: center; gap: 10px; }
+  .bench-field label { font-size: 13px; color: var(--text-dim); white-space: nowrap; }
+  .bench-field .val { font-family: var(--font-mono); font-size: 12px; color: var(--text); min-width: 44px; }
+  .bench-note { font-size: 12px; color: var(--text-faint); margin-left: auto; text-wrap: pretty; }
+  input[type="range"] {
+    appearance: none; -webkit-appearance: none;
+    width: 170px; height: 22px; background: transparent; cursor: pointer; margin: 0;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 3px; background: var(--border-strong); border-radius: 2px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent-fill); border: none; margin-top: -5px;
+    transition: transform var(--t-fast) ease;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+  input[type="range"]::-moz-range-track { height: 3px; background: var(--border-strong); border-radius: 2px; }
+  input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%;
+    background: var(--accent-fill); border: none; }
+
+  /* ---------- Proof bar ---------- */
+  .proof {
+    margin-top: var(--space-2xl);
+    border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    background: var(--bg-panel);
+  }
+  .proof-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .proof-cell { padding: var(--space-lg); border-left: 1px solid var(--border); }
+  .proof-cell:first-child { border-left: none; }
+  .proof-cell .kicker { margin-bottom: 6px; }
+  .proof-cell p { margin: 0; font-size: 14.5px; color: var(--text-dim); text-wrap: pretty; }
+  .proof-cell p strong { color: var(--text); font-weight: 600; }
+
+  /* ---------- Analyses ---------- */
+  .grid-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); }
+  .acard {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-md);
+    transition: border-color var(--t-fast) ease, background var(--t-fast) ease;
+  }
+  .acard:hover { border-color: var(--border-strong); background: var(--bg-elevated); }
+  .acard-head { display: flex; align-items: baseline; gap: var(--space-sm); margin-bottom: 4px; }
+  .acard h3 { font-size: 15px; }
+  .acard .cmd { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-faint); margin-left: auto;
+    white-space: nowrap; }
+  .acard p { margin: 0; font-size: 13.5px; color: var(--text-dim); text-wrap: pretty; }
+  .chip-pro {
+    font-family: var(--font-mono); font-size: 9.5px; font-weight: 500; letter-spacing: 0.1em;
+    color: var(--accent-ink); background: var(--accent-fill);
+    border-radius: var(--radius); padding: 1px 6px; flex: none;
+  }
+  .acard.pro { border-color: color-mix(in srgb, var(--accent-fill) 45%, var(--border)); }
+
+  /* ---------- Platforms ---------- */
+  .plat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-md); }
+  .plat {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: var(--space-lg);
+    display: flex; flex-direction: column; gap: var(--space-md);
+  }
+  .frame { border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+    background: var(--canvas-bg); overflow: hidden; }
+  .frame-bar {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-elevated); border-bottom: 1px solid var(--border);
+    padding: 4px 8px;
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--text-faint);
+  }
+  .frame-bar .pill {
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: 999px; padding: 1px 8px;
+  }
+  .frame svg.mini { width: 100%; height: auto; }
+  .frame.tablet { border-radius: 10px; border-width: 2px; padding: 6px; background: var(--bg-elevated); }
+  .frame.tablet .screen { border-radius: 4px; background: var(--canvas-bg);
+    border: 1px solid var(--border); overflow: hidden; }
+  .plat h3 { font-size: 16.5px; }
+  .plat p { margin: 0; font-size: 14px; color: var(--text-dim); text-wrap: pretty; }
+  .plat .pmeta { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint);
+    letter-spacing: 0.05em; margin-top: auto; }
+
+  /* ---------- Validation ---------- */
+  .val-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2xl); align-items: start; }
+  .val-copy p { color: var(--text-dim); margin: var(--space-md) 0 0; text-wrap: pretty; }
+  .val-copy p strong { color: var(--text); font-weight: 600; }
+  .val-list { margin: var(--space-lg) 0 0; padding: 0; list-style: none; display: grid; gap: var(--space-sm); }
+  .val-list li { display: flex; gap: 10px; font-size: 14.5px; color: var(--text-dim); }
+  .val-list li::before {
+    content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-line); margin-top: 7px;
+  }
+  .val-list li strong { color: var(--text); font-weight: 600; }
+  .val-cta { margin-top: var(--space-lg); }
+  #val-plot { width: 100%; height: auto; }
+  .interop { margin-top: var(--space-xl); display: flex; flex-wrap: wrap; gap: var(--space-sm); align-items: center; }
+  .interop .lab { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text-faint); margin-right: var(--space-sm); }
+
+  /* ---------- Pricing ---------- */
+  .price-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-md); align-items: stretch; }
+  .tier {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: var(--space-lg);
+    display: flex; flex-direction: column; gap: var(--space-md);
+    transition: border-color var(--t-fast) ease;
+  }
+  .tier:hover { border-color: var(--border-strong); }
+  .tier.featured { border-color: var(--accent-fill); background: var(--bg-elevated); }
+  .tier-head .kicker { margin-bottom: 2px; }
+  .tier-name { font-size: 17px; display: flex; align-items: baseline; gap: 8px; }
+  .tier-price { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+  .tier-price .per { font-size: 13px; font-weight: 400; color: var(--text-dim); letter-spacing: 0; }
+  .tier-tag {
+    font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em;
+    border: 1px solid var(--border-strong); border-radius: var(--radius);
+    color: var(--text-dim); padding: 1px 6px;
+  }
+  .tier ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .tier li { font-size: 13.5px; color: var(--text-dim); display: flex; gap: 8px; }
+  .tier li::before { content: "—"; color: var(--accent-line); flex: none; }
+  .tier li strong { color: var(--text); font-weight: 600; }
+  .tier .btn { margin-top: auto; }
+  .price-note {
+    margin-top: var(--space-lg);
+    font-family: var(--font-mono); font-size: 12px; color: var(--text-faint); letter-spacing: 0.03em;
+  }
+
+  /* ---------- Final CTA ---------- */
+  .cta-band {
+    margin-top: var(--space-3xl);
+    border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    background-image: radial-gradient(circle, var(--canvas-grid) 1px, transparent 1.4px);
+    background-size: 26px 26px;
+  }
+  .cta-inner { padding: var(--space-3xl) 0; text-align: center; }
+  .cta-inner h2 { font-size: 36px; }
+  .cta-inner p { color: var(--text-dim); margin: var(--space-md) auto 0; max-width: 46ch; }
+  .cta-actions { display: flex; gap: var(--space-md); justify-content: center;
+    margin-top: var(--space-xl); flex-wrap: wrap; }
+  footer.site { margin-top: 0; }
+
+  /* ---------- Responsive (page) ---------- */
+  @media (max-width: 1020px) {
+    .w-main { grid-template-columns: 1fr 252px; }
+    .w-left { display: none; }
+    .price-grid { grid-template-columns: repeat(2, 1fr); }
+    .val-grid { grid-template-columns: 1fr; gap: var(--space-xl); }
+  }
+  @media (max-width: 820px) {
+    .w-main { grid-template-columns: 1fr; height: 460px; }
+    .w-right { display: none; }
+    .w-toolbar .w-iconbtn, .w-toolbar .tb-sep { display: none; }
+    .w-menu:nth-child(n+6) { display: none; }
+    .w-mb-right { display: none; }
+    .bench-note { display: none; }
+    .grid-cards, .plat-grid, .proof-grid { grid-template-columns: 1fr; }
+    .proof-cell { border-left: none; border-top: 1px solid var(--border); }
+    .proof-cell:first-child { border-top: none; }
+    .cta-inner h2 { font-size: 28px; }
+  }
+  @media (max-width: 560px) {
+    .price-grid { grid-template-columns: 1fr; }
+    .hero { padding-top: 56px; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+<script>
+(function(){try{var t=localStorage.getItem("rspice-site-theme");
+if(!t&&window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches){t="light";}
+if(t){document.body.dataset.theme=t;}}catch(e){}})();
+</script>
+
+<!-- ============ Shared geometry: the Run mark (professional final, from the mark sheet)
+     and the RSpice wordmark (IBM Plex Sans SemiBold outlines) ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Run · standard cut (48px and above): port-ring terminals, equal pins -->
+    <symbol id="run" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="8">
+        <path d="M 14 34 H 27.5"></path>
+        <path d="M 14 62 H 27.5"></path>
+        <path d="M 69.5 48 H 82"></path>
+      </g>
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="4">
+        <circle cx="8" cy="34" r="6"></circle>
+        <circle cx="8" cy="62" r="6"></circle>
+        <circle cx="88" cy="48" r="6"></circle>
+      </g>
+      <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="8" stroke-linejoin="round"></path>
+    </symbol>
+    <!-- Run · mid cut (24-32px): dot-tip terminals on the heavy stroke -->
+    <symbol id="run-m" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="10.5">
+        <path d="M 8 32 H 29"></path>
+        <path d="M 8 64 H 29"></path>
+        <path d="M 70 48 H 88"></path>
+      </g>
+      <g fill="var(--run-ink, #17181A)">
+        <circle cx="8" cy="32" r="8"></circle>
+        <circle cx="8" cy="64" r="8"></circle>
+        <circle cx="88" cy="48" r="8"></circle>
+      </g>
+      <path d="M 25 20 L 25 76 L 71 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="10.5" stroke-linejoin="round"></path>
+    </symbol>
+    <!-- Run · small cut (16px): heavier stroke, wider input spacing -->
+    <symbol id="run-s" viewBox="0 0 96 96">
+      <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="10.5"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
+        <path d="M 11 32 H 30" fill="none"></path>
+        <path d="M 11 64 H 30" fill="none"></path>
+        <path d="M 77 48 H 88" fill="none"></path>
+      </g>
+    </symbol>
+    <!-- WORDMARK: 'RSpice' outlined from IBM Plex Sans SemiBold -->
+    <symbol id="wordmark" viewBox="6 -10 456 144">
+      <path fill="currentColor" d="M30.66 100H11.75V0H56.88Q63.75 0 69.2 2.15Q74.64 4.3 78.44 8.38Q82.23 12.46 84.31 18.19Q86.39 23.93 86.39 30.95Q86.39 41.26 81.73 48.71Q77.08 56.16 67.77 59.31L88.25 100H67.19L48.57 61.46H30.66ZM55.01 45.56Q60.46 45.56 63.61 42.62Q66.76 39.68 66.76 34.24V27.65Q66.76 22.21 63.61 19.34Q60.46 16.48 55.01 16.48H30.66V45.56ZM137.97 101.72Q125.07 101.72 116.12 97.13Q107.16 92.55 100.72 85.1L113.47 72.78Q118.62 78.8 125 81.95Q131.38 85.1 139.11 85.1Q147.85 85.1 152.29 81.3Q156.73 77.51 156.73 71.06Q156.73 66.05 153.87 62.89Q151 59.74 143.12 58.31L133.67 56.88Q103.72 52.15 103.72 27.79Q103.72 21.06 106.23 15.62Q108.74 10.17 113.47 6.3Q118.19 2.44 124.86 0.36Q131.52 -1.72 139.97 -1.72Q151.29 -1.72 159.74 2.01Q168.19 5.73 174.21 13.04L161.32 25.21Q157.59 20.63 152.29 17.77Q146.99 14.9 138.97 14.9Q130.8 14.9 126.72 17.98Q122.64 21.06 122.64 26.65Q122.64 32.38 125.93 35.1Q129.23 37.82 136.53 39.11L145.85 40.83Q161.03 43.55 168.27 50.5Q175.5 57.45 175.5 69.91Q175.5 77.08 172.99 82.88Q170.49 88.68 165.69 92.91Q160.89 97.13 153.94 99.43Q146.99 101.72 137.97 101.72ZM193.27 25.21H211.6V37.54H212.18Q214.18 31.09 219.77 27.29Q225.36 23.5 232.81 23.5Q247.13 23.5 254.66 33.6Q262.18 43.7 262.18 62.46Q262.18 81.38 254.66 91.55Q247.13 101.72 232.81 101.72Q225.36 101.72 219.84 97.85Q214.33 93.98 212.18 87.54H211.6V128.65H193.27ZM226.93 86.53Q234.1 86.53 238.54 81.81Q242.98 77.08 242.98 69.05V56.16Q242.98 48.14 238.54 43.34Q234.1 38.54 226.93 38.54Q220.34 38.54 215.97 41.83Q211.6 45.13 211.6 50.57V74.36Q211.6 80.23 215.97 83.38Q220.34 86.53 226.93 86.53ZM288.4 14.33Q282.66 14.33 280.16 11.75Q277.65 9.17 277.65 5.16V2.29Q277.65 -1.72 280.16 -4.3Q282.66 -6.88 288.4 -6.88Q293.98 -6.88 296.56 -4.3Q299.14 -1.72 299.14 2.29V5.16Q299.14 9.17 296.56 11.75Q293.98 14.33 288.4 14.33ZM279.23 25.21H297.56V100H279.23ZM348.28 101.72Q339.97 101.72 333.52 99Q327.08 96.28 322.71 91.12Q318.34 85.96 316.05 78.72Q313.75 71.49 313.75 62.46Q313.75 53.44 316.05 46.28Q318.34 39.11 322.71 34.03Q327.08 28.94 333.52 26.22Q339.97 23.5 348.28 23.5Q359.6 23.5 366.98 28.51Q374.36 33.52 377.65 42.41L362.61 49.14Q361.32 44.41 357.81 41.33Q354.3 38.25 348.28 38.25Q340.54 38.25 336.75 43.12Q332.95 47.99 332.95 55.87V69.48Q332.95 77.36 336.75 82.16Q340.54 86.96 348.28 86.96Q354.87 86.96 358.45 83.6Q362.03 80.23 364.04 75.21L378.08 81.95Q374.36 91.83 366.76 96.78Q359.17 101.72 348.28 101.72ZM422.49 101.72Q414.18 101.72 407.66 98.93Q401.15 96.13 396.63 91.05Q392.12 85.96 389.68 78.72Q387.25 71.49 387.25 62.46Q387.25 53.58 389.61 46.42Q391.98 39.26 396.42 34.17Q400.86 29.08 407.31 26.29Q413.75 23.5 421.92 23.5Q430.66 23.5 437.11 26.5Q443.55 29.51 447.71 34.67Q451.86 39.83 453.94 46.63Q456.02 53.44 456.02 61.17V67.19H406.3V69.05Q406.3 77.22 410.89 82.16Q415.47 87.11 424.5 87.11Q431.38 87.11 435.74 84.24Q440.11 81.38 443.55 76.93L453.44 87.97Q448.85 94.41 440.9 98.07Q432.95 101.72 422.49 101.72ZM422.21 37.25Q414.9 37.25 410.6 42.12Q406.3 46.99 406.3 54.73V55.87H436.96V54.58Q436.96 46.85 433.17 42.05Q429.37 37.25 422.21 37.25Z"></path>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============ Nav ============ -->
+<nav class="nav" aria-label="Main">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="RSpice home">
+      <span class="logo-tile"><svg aria-hidden="true"><use href="#run-m"></use></svg></span>
+      <svg class="wm" aria-label="RSpice"><use href="#wordmark"></use></svg>
+    </a>
+    <div class="nav-links">
+      <a href="#product">Product</a>
+      <a href="#analyses">Analyses</a>
+      <a href="#validation">Validation</a>
+      <a href="#pricing">Pricing</a>
+      <a href="docs.html">Docs</a>
+    </div>
+    <div class="nav-cta">
+      <button type="button" class="icon-toggle js-theme-flip" aria-label="Toggle light/dark theme">
+        <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"></circle><path d="M8 1.2v1.8M8 13v1.8M1.2 8H3M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"></path></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A6 6 0 0 1 6.5 2.5a6 6 0 1 0 7 7z"></path></svg>
+      </button>
+      <a class="btn btn-accent btn-sm" href="download.html">Download</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+  <!-- ============ Hero ============ -->
+  <header class="hero">
+    <div class="wrap">
+      <p class="kicker"><span class="tick">▶</span>&nbsp; RSpice · Analog &amp; RF circuit simulation</p>
+      <h1>The analog simulator, rebuilt.</h1>
+      <p class="sub">RSpice is a ground-up SPICE engine written in Rust, validated
+      <strong>point-for-point against ngspice on a 113-deck regression corpus</strong>.
+      RF analyses, a Verilog-A compiler, Python automation — one engine that ships
+      native, in the browser, and on the bench.</p>
+      <div class="hero-ctas">
+        <a class="btn btn-accent" href="ide/" title="Browser IDE — experimental, needs WebGPU">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5 L8 18.5 L19 12 Z"></path></svg>
+          Run it in your browser</a>
+        <a class="btn btn-ghost" href="download.html">Download free</a>
+      </div>
+      <p class="hero-meta">windows · macos · linux · webassembly — no account required · the browser IDE needs WebGPU</p>
+
+      <!-- ============ Product window (Results workspace) ============ -->
+      <div class="stage" id="product">
+        <div class="window" aria-label="RSpice results workspace — a live demo: press Run to re-solve the RLC step deck">
+
+          <!-- menubar -->
+          <div class="w-menubar">
+            <span class="w-brand"><svg aria-hidden="true"><use href="#run-s"></use></svg>RSPICE</span>
+            <span class="w-menu">File</span><span class="w-menu">Edit</span><span class="w-menu">View</span>
+            <span class="w-menu">Create</span><span class="w-menu">Check</span><span class="w-menu">Simulate</span>
+            <span class="w-menu">Tools</span><span class="w-menu">Window</span><span class="w-menu">Help</span>
+            <span class="w-mb-right">rlc_step · checked out by you</span>
+          </div>
+
+          <!-- toolbar -->
+          <div class="w-toolbar">
+            <button class="w-iconbtn" disabled aria-label="Select tool"><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6.5 1.5L9 19z"></path></svg></button>
+            <button class="w-iconbtn" disabled aria-label="Draw wire"><svg viewBox="0 0 24 24"><path d="M4 18h7V6h9"></path><circle cx="4" cy="18" r="1.6"></circle><circle cx="20" cy="6" r="1.6"></circle></svg></button>
+            <button class="w-iconbtn" disabled aria-label="Net label"><svg viewBox="0 0 24 24"><path d="M5 7V5h14v2M12 5v14M9 19h6"></path></svg></button>
+            <button class="w-iconbtn" disabled aria-label="Probe net"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="5.5"></circle><path d="M14.5 14.5L20 20"></path></svg></button>
+            <span class="tb-sep"></span>
+            <button class="w-iconbtn" disabled aria-label="Zoom in"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="M11 8v6M8 11h6M16.5 16.5L21 21"></path></svg></button>
+            <button class="w-iconbtn" disabled aria-label="Zoom out"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="M8 11h6M16.5 16.5L21 21"></path></svg></button>
+            <button class="w-iconbtn" disabled aria-label="Zoom to fit"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg></button>
+            <div class="w-tb-right">
+              <select class="w-select" id="corner" aria-label="Process corner and temperature">
+                <option value="tt" selected>tt · 27 °C</option>
+                <option value="ff">ff · −40 °C</option>
+                <option value="ss">ss · 125 °C</option>
+              </select>
+              <button class="w-btn" disabled type="button">
+                <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12"></rect></svg>Stop</button>
+              <button class="w-btn w-run" id="btn-run" type="button" aria-label="Run simulation (the live demo)">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>Run<span class="key">F5</span></button>
+            </div>
+          </div>
+
+          <!-- workspace tabs -->
+          <div class="w-wtabs" aria-hidden="true">
+            <span class="w-wtab"><svg viewBox="0 0 24 24"><path d="M4 5h16v4H4zM4 13h16v6H4zM8 5v4M8 13v6"></path></svg>Library</span>
+            <span class="w-wtab"><svg viewBox="0 0 24 24"><path d="M4 18h5v-6h6V6h5"></path><circle cx="4" cy="18" r="1.5"></circle><circle cx="20" cy="6" r="1.5"></circle></svg>Schematic · rlc_step</span>
+            <span class="w-wtab"><svg viewBox="0 0 24 24"><path d="M7 4h7l4 4v12H7z"></path><path d="M14 4v4h4"></path></svg>Netlist</span>
+            <span class="w-wtab"><svg viewBox="0 0 24 24"><path d="M4 12h4l2-6 4 12 2-6h4"></path></svg>Simulate</span>
+            <span class="w-wtab active"><svg viewBox="0 0 24 24"><path d="M4 20V8M10 20V4M16 20v-9M21 20H3"></path></svg>Results</span>
+          </div>
+
+          <!-- main -->
+          <div class="w-main">
+
+            <!-- left: signals -->
+            <aside class="w-left" aria-hidden="true">
+              <div class="w-section-h">Signals — <span id="sig-run">run #1</span></div>
+              <div class="w-tree">
+                <div class="w-row"><span class="twist">▾</span>tran <span class="meta">601 pts</span></div>
+                <div class="w-row w-indent"><input type="checkbox" checked tabindex="-1"><span class="chipdot" style="background:var(--trace-in)"></span>/in</div>
+                <div class="w-row w-indent"><input type="checkbox" checked tabindex="-1"><span class="chipdot" style="background:var(--trace-out)"></span>/out</div>
+                <div class="w-row"><span class="twist">▾</span>ac <span class="meta">181 pts</span></div>
+                <div class="w-row w-indent"><input type="checkbox" checked tabindex="-1"><span class="chipdot" style="background:var(--trace-out)"></span>dB20(/out)</div>
+                <div class="w-row w-indent"><input type="checkbox" checked tabindex="-1"><span class="chipdot" style="background:var(--trace-ph)"></span>phase(/out)</div>
+              </div>
+              <div class="w-section-h">Expressions</div>
+              <div class="w-tree">
+                <div class="w-row"><span class="chipdot" style="background:var(--trace-out)"></span>overshoot(/out) <span class="meta">fx</span></div>
+                <div class="w-row"><span class="chipdot" style="background:var(--trace-out)"></span>settle2(/out) <span class="meta">fx</span></div>
+              </div>
+              <div class="w-section-h">Run history</div>
+              <div class="w-tree" id="run-history"></div>
+            </aside>
+
+            <!-- center: docbar + strips -->
+            <section class="w-center">
+              <div class="w-docbar">
+                <span class="mono" style="font-size:11px;"><b id="db-run" style="color:var(--text);font-weight:500;">run #1 · tt 27 °C</b></span>
+                <nav class="w-vtabs" aria-hidden="true">
+                  <span class="w-vtab active">WAVES</span>
+                  <span class="w-vtab" aria-disabled="true">BODE</span>
+                  <span class="w-vtab" aria-disabled="true">FFT</span>
+                  <span class="w-vtab" aria-disabled="true">HIST</span>
+                </nav>
+                <div class="w-db-right">
+                  <span class="w-chip on">cursors A/B</span>
+                  <button class="w-btn" id="btn-csv" type="button">Export…</button>
+                </div>
+              </div>
+              <div class="w-strips">
+                <div class="w-strip strip-tran">
+                  <div class="w-strip-head">
+                    <span class="kind">TRAN</span>
+                    <span class="w-legend">
+                      <button type="button" class="w-leg" data-vis="tin" aria-pressed="true"><span class="sw" style="background:var(--trace-in)"></span>/in</button>
+                      <button type="button" class="w-leg" data-vis="tout" aria-pressed="true"><span class="sw" style="background:var(--trace-out)"></span>/out</button>
+                    </span>
+                  </div>
+                  <div class="w-plot">
+                    <svg id="plot-tran" role="img"
+                         aria-label="Transient strip — click to place measurement cursors A and B"></svg>
+                  </div>
+                </div>
+                <div class="w-strip strip-ac">
+                  <div class="w-strip-head">
+                    <span class="kind">AC</span>
+                    <span class="w-legend">
+                      <button type="button" class="w-leg" data-vis="mag" aria-pressed="true"><span class="sw" style="background:var(--trace-out)"></span>dB20</button>
+                      <button type="button" class="w-leg" data-vis="ph" aria-pressed="true"><span class="sw" style="background:var(--trace-ph)"></span>phase°</button>
+                    </span>
+                  </div>
+                  <div class="w-plot static">
+                    <svg id="plot-ac" role="img" aria-label="AC magnitude and phase strip"></svg>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- right: cursors + measurements -->
+            <aside class="w-right">
+              <div class="w-section-h">Cursors <button class="w-clear" id="cursor-clear" type="button">Clear</button></div>
+              <div class="w-hint" id="cursor-hint">Click the TRAN strip to place cursor A, click again for B. Esc clears.</div>
+              <div class="cursor-block" id="cur-a" hidden>
+                <div class="cb-head"><span class="cb-dot" style="background:var(--accent-line)"></span>A<span class="cb-x" id="cur-a-x">—</span></div>
+                <div class="cb-row"><span class="k">/out</span><span id="cur-a-out">—</span></div>
+                <div class="cb-row"><span class="k">/in</span><span id="cur-a-in">—</span></div>
+              </div>
+              <div class="cursor-block" id="cur-b" hidden>
+                <div class="cb-head"><span class="cb-dot" style="background:var(--trace-in)"></span>B<span class="cb-x" id="cur-b-x">—</span></div>
+                <div class="cb-row"><span class="k">/out</span><span id="cur-b-out">—</span></div>
+                <div class="cb-row"><span class="k">/in</span><span id="cur-b-in">—</span></div>
+              </div>
+              <div class="cursor-block" id="cur-d" hidden>
+                <div class="cb-head"><span class="cb-dot" style="background:var(--text-faint)"></span>B − A<span class="cb-x" id="cur-d-x">—</span></div>
+                <div class="cb-row"><span class="k">Δ/out</span><span id="cur-d-out">—</span></div>
+                <div class="cb-row"><span class="k">1/Δt</span><span id="cur-d-f">—</span></div>
+              </div>
+              <div class="w-section-h">Measurements — <span id="meas-run">run #1</span></div>
+              <table class="w-mtable">
+                <tbody>
+                  <tr><td>ζ effective</td><td id="m-zeta">—</td></tr>
+                  <tr><td>Q</td><td id="m-q">—</td></tr>
+                  <tr class="hl"><td>Overshoot</td><td id="m-os">—</td></tr>
+                  <tr><td>Peak time</td><td id="m-tp">—</td></tr>
+                  <tr class="hl"><td>Settling ±2 %</td><td id="m-ts">—</td></tr>
+                  <tr><td>f<sub>−3dB</sub></td><td id="m-f3">—</td></tr>
+                </tbody>
+              </table>
+              <div class="w-section-h">Export</div>
+              <div class="w-kv"><span class="k">Database</span><span class="v" id="m-db">run1.vdb</span></div>
+            </aside>
+          </div>
+
+          <!-- status bar -->
+          <div class="w-statusbar">
+            <span>waves · 2 strips</span>
+            <span id="sb-cursor">cursors: click plot for A · B</span>
+            <span class="sb-right">
+              <span id="sb-corner">tt · 27 °C</span>
+              <span class="w-pill ok" id="sb-engine"><span class="dot"></span><span id="sb-engine-txt">engine idle</span></span>
+              <span id="sb-run">run #1</span>
+            </span>
+          </div>
+        </div>
+
+        <!-- demo bench — site chrome, intentionally outside the product window -->
+        <div class="bench">
+          <span class="lab">Demo bench</span>
+          <div class="bench-field">
+            <label for="zeta">Damping ζ</label>
+            <input type="range" id="zeta" min="0.15" max="1.20" step="0.005" value="0.35">
+            <span class="val" id="zeta-val">0.350</span>
+          </div>
+          <div class="bench-field">
+            <label for="f0">f₀</label>
+            <select class="w-select" id="f0" style="height:30px;">
+              <option value="400">400 Hz</option>
+              <option value="800" selected>800 Hz</option>
+              <option value="2000">2 kHz</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-netlist" type="button">Copy netlist</button>
+          <span class="bench-note">Live closed-form solve — drag ζ, pick a corner, press <b>Run</b>.
+          Click the TRAN strip for cursors.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ Proof bar ============ -->
+    <div class="proof">
+      <div class="wrap proof-grid">
+        <div class="proof-cell">
+          <p class="kicker">Oracle-validated</p>
+          <p>Every release is diffed <strong>point-for-point against ngspice-46</strong>
+          on a 113-deck regression corpus — rerunnable from a clean checkout.</p>
+        </div>
+        <div class="proof-cell">
+          <p class="kicker">Compact models, compiled</p>
+          <p>A built-in <strong>Verilog-A compiler</strong> ships BSIM4.8 as a compiled
+          model — and takes your foundry's .va decks, NDA and all.</p>
+        </div>
+        <div class="proof-cell">
+          <p class="kicker">Deterministic by design</p>
+          <p>Seeded Monte Carlo, reproducible runs, a memory-safe Rust core —
+          <strong>the same deck gives the same answer, every time</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ Analyses ============ -->
+  <section class="section" id="analyses" aria-labelledby="h-analyses">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">Analyses</p>
+        <h2 id="h-analyses">Everything on the bench, from .OP to phase noise.</h2>
+        <p>The core engine covers the full SPICE repertoire. The RF suite — the analyses that
+        usually cost five figures a seat — is one Pro license. Labels show how each one is
+        reached: netlist card, CLI flag, or engine API.</p>
+      </div>
+      <div class="grid-cards">
+        <div class="acard">
+          <div class="acard-head"><h3>Operating point</h3><span class="cmd">.op</span></div>
+          <p>Newton with gmin and source stepping for stubborn convergence.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>DC sweep</h3><span class="cmd">.dc</span></div>
+          <p>Two-source nested sweeps, temperature sweeps, and .STEP parameter families.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>AC small-signal</h3><span class="cmd">.ac</span></div>
+          <p>Complex MNA magnitude and phase, with .TF gain / Zin / Zout.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>Transient</h3><span class="cmd">.tran</span></div>
+          <p>Adaptive timestep with TRAP and Gear, breakpoint-accurate sources.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>Noise</h3><span class="cmd">.noise</span></div>
+          <p>Input- and output-referred spot and integrated noise.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>Monte Carlo</h3><span class="cmd">--monte-carlo</span></div>
+          <p>Process and mismatch draws with gauss / agauss, seeded and exactly reproducible.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>Parametric step</h3><span class="cmd">.step</span></div>
+          <p>Sweep any parameter; overlay families of curves in one run.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>S-parameters</h3><span class="cmd">engine api</span></div>
+          <p>Multiport network analysis with Touchstone export, from the Rust API.</p>
+        </div>
+        <div class="acard">
+          <div class="acard-head"><h3>Verilog-A models</h3><span class="cmd">compile-va</span></div>
+          <p>Compiled compact models — BSIM4.8 ships as Verilog-A; bring your foundry's .va decks.</p>
+        </div>
+        <div class="acard pro">
+          <div class="acard-head"><h3>Harmonic balance</h3><span class="chip-pro">PRO</span><span class="cmd">--hb-freq</span></div>
+          <p>Multi-tone steady state for mixers, PAs, and large-signal RF.</p>
+        </div>
+        <div class="acard pro">
+          <div class="acard-head"><h3>Periodic steady state</h3><span class="chip-pro">PRO</span><span class="cmd">--pss-freq</span></div>
+          <p>Shooting PSS for oscillators and switched circuits.</p>
+        </div>
+        <div class="acard pro">
+          <div class="acard-head"><h3>PNoise &amp; PAC</h3><span class="chip-pro">PRO</span><span class="cmd">engine api</span></div>
+          <p>Phase noise and periodic AC around the steady state.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Platforms ============ -->
+  <section class="section" id="platforms" aria-labelledby="h-plat">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">One engine · three surfaces</p>
+        <h2 id="h-plat">The same solver, everywhere you work.</h2>
+        <p>One Rust codebase compiles to native desktop, WebAssembly, and touch devices.
+        Same netlist, same numerics, same answer on all three.</p>
+      </div>
+      <div class="plat-grid">
+        <div class="plat">
+          <div class="frame">
+            <div class="frame-bar"><span>rspice — diffamp.cir</span></div>
+            <svg class="mini js-mini" viewBox="0 0 280 96" aria-hidden="true"></svg>
+          </div>
+          <h3>Native desktop</h3>
+          <p>Windows, macOS, and Linux. GPU-drawn canvas, fully offline — your license
+          is a signed key, not a phone-home.</p>
+          <p class="pmeta">win · mac · linux</p>
+        </div>
+        <div class="plat">
+          <div class="frame">
+            <div class="frame-bar"><span class="pill">jaimehw.github.io/RSpice/ide</span></div>
+            <svg class="mini js-mini" viewBox="0 0 280 96" aria-hidden="true"></svg>
+          </div>
+          <h3>In the browser</h3>
+          <p>The full engine compiled to WebAssembly. Nothing to install, nothing uploaded —
+          decks simulate on your own silicon.</p>
+          <p class="pmeta">wasm · client-side</p>
+        </div>
+        <div class="plat">
+          <div class="frame tablet">
+            <div class="screen">
+              <svg class="mini js-mini" viewBox="0 0 280 96" aria-hidden="true"></svg>
+            </div>
+          </div>
+          <h3>Tablet &amp; mobile</h3>
+          <p>The browser build is touch-first on tablets — review schematics and carry
+          last night's Monte Carlo to the lab bench.</p>
+          <p class="pmeta">wasm · ipad &amp; android browsers</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Validation ============ -->
+  <section class="section" id="validation" aria-labelledby="h-val">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">Validation</p>
+        <h2 id="h-val">Trust is a regression suite, not a slogan.</h2>
+      </div>
+      <div class="val-grid">
+        <div class="val-copy">
+          <p>A simulator earns its place by agreeing with the simulators you already trust —
+          then by being honest when it doesn't. RSpice is developed against
+          <strong>independent oracles on locked time grids</strong>, so a passing deck means
+          numerically the same waveform, not "looks close".</p>
+          <ul class="val-list">
+            <li><strong>ngspice-46 parity</strong> — the regression corpus runs both engines on
+            identical grids and diffs every point of every probe.</li>
+            <li><strong>Analytic RF oracles</strong> — harmonic balance and shooting-PSS are
+            pinned to closed-form decks; the Verilog-A BSIM4 is pinned to ngspice's native
+            BSIM4 bias-for-bias.</li>
+            <li><strong>Open corpus</strong> — the 113 validation decks come from the ngspice
+            example corpus and published test suites, so you can rerun the evidence yourself.</li>
+          </ul>
+          <div class="val-cta">
+            <a class="btn btn-ghost" href="parity.html">Open the parity dashboard <span class="arr">→</span></a>
+          </div>
+          <div class="interop">
+            <span class="lab">Interop</span>
+            <span class="tag">SPICE netlists</span>
+            <span class="tag">LTspice .raw</span>
+            <span class="tag">Verilog-A</span>
+            <span class="tag">Touchstone</span>
+            <span class="tag">Python API</span>
+            <span class="tag">CSV · HDF5 · JSON</span>
+          </div>
+        </div>
+        <figure class="figure" style="margin:0;">
+          <svg id="val-plot" viewBox="0 0 560 320" role="img"
+               aria-label="Overlay of an RSpice transient trace on the ngspice oracle trace, with a flat residual underneath"></svg>
+          <figcaption>rlc step · rspice (yellow) over ngspice-46 oracle (dashed) — rendered here
+          from the closed-form reference; the suite diffs the real engines</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ Pricing ============ -->
+  <section class="section" id="pricing" aria-labelledby="h-pricing">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="kicker">Pricing</p>
+        <h2 id="h-pricing">Free where it should be. Paid where it earns it.</h2>
+        <p>The core simulator is free — including commercial use. You pay when RSpice
+        replaces a five-figure RF seat, not before.</p>
+      </div>
+      <div class="price-grid">
+        <div class="tier">
+          <div class="tier-head">
+            <p class="kicker">Community</p>
+            <p class="tier-price">$0 <span class="per">forever</span></p>
+          </div>
+          <ul>
+            <li><strong>All core analyses</strong> — op, dc, ac, tran, noise, MC, step</li>
+            <li>Native + browser apps</li>
+            <li>Schematic, netlist, waveforms</li>
+            <li>SPICE raw · CSV · HDF5 · JSON output</li>
+            <li><strong>Commercial use allowed</strong></li>
+          </ul>
+          <a class="btn btn-ghost" href="download.html">Download</a>
+        </div>
+        <div class="tier featured">
+          <div class="tier-head">
+            <p class="kicker">Pro</p>
+            <p class="tier-price">$499 <span class="per">/ year · per engineer</span></p>
+          </div>
+          <ul>
+            <li>Everything in Community</li>
+            <li><strong>RF suite</strong> — HB, PSS, PNoise, PAC</li>
+            <li><strong>Python automation API</strong></li>
+            <li>Priority support</li>
+          </ul>
+          <a class="btn btn-accent" href="https://github.com/JaimeHW/RSpice/releases"
+             title="Checkout opens with v1.0.0 — watch the repo for launch">Start Pro</a>
+        </div>
+        <div class="tier">
+          <div class="tier-head">
+            <p class="kicker">Team</p>
+            <p class="tier-name"><span class="tier-price" style="font-size:22px;">Per seat</span><span class="tier-tag">early access</span></p>
+          </div>
+          <ul>
+            <li>Everything in Pro</li>
+            <li>Cloud simulation runners</li>
+            <li>Shared libraries &amp; PDK sync</li>
+            <li>Pooled, reassignable seats</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://github.com/JaimeHW/RSpice/issues"
+             title="Open a GitHub issue — the interim contact channel">Talk to us</a>
+        </div>
+        <div class="tier">
+          <div class="tier-head">
+            <p class="kicker">Enterprise</p>
+            <p class="tier-price" style="font-size:22px;">Custom</p>
+          </div>
+          <ul>
+            <li>Floating &amp; offline licenses</li>
+            <li>Air-gapped installs</li>
+            <li>On-prem cloud runners</li>
+            <li>Procurement, SLAs, escrow</li>
+          </ul>
+          <a class="btn btn-ghost" href="https://github.com/JaimeHW/RSpice/issues"
+             title="Open a GitHub issue — the interim contact channel">Talk to us</a>
+        </div>
+      </div>
+      <p class="price-note">licenses are signed keys that work offline — no account, no telemetry,
+      no phone-home. checkout opens with v1.0.0; until then, the GitHub repo is the front door.</p>
+    </div>
+  </section>
+
+  <!-- ============ Final CTA ============ -->
+  <div class="cta-band">
+    <div class="wrap cta-inner">
+      <p class="kicker">Get started</p>
+      <h2>Press run.</h2>
+      <p>Open the browser app and simulate your first deck before your coffee cools —
+      or download the free Community edition.</p>
+      <div class="cta-actions">
+        <a class="btn btn-accent" href="ide/" title="Browser IDE — experimental, needs WebGPU">
+          <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5 L8 18.5 L19 12 Z"></path></svg>
+          Run it in your browser</a>
+        <a class="btn btn-ghost" href="download.html">Download free</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ============ Footer ============ -->
+<footer class="site">
+  <div class="wrap">
+    <div class="foot-inner">
+      <a class="brand" href="#top" aria-label="RSpice home">
+        <span class="logo-tile" style="width:24px;height:24px;"><svg aria-hidden="true"><use href="#run-m"></use></svg></span>
+        <svg class="wm" style="height:16px;width:52px;" aria-label="RSpice"><use href="#wordmark"></use></svg>
+      </a>
+      <div class="foot-links">
+        <a href="docs.html">Docs</a>
+        <a href="changelog.html">Changelog</a>
+        <a href="parity.html">Validation</a>
+        <a href="play/">Playground</a>
+        <a href="https://github.com/JaimeHW/RSpice/issues">Contact</a>
+        <a href="https://github.com/JaimeHW/RSpice">GitHub</a>
+      </div>
+    </div>
+    <p class="foot-fine">© 2026 RSpice · IBM Plex type under the SIL Open Font License ·
+    the mark is an op-amp; the figures on this page are solved, not sketched</p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+<script>
+(function () {
+  "use strict";
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function el(name, attrs, parent) {
+    var n = document.createElementNS(SVGNS, name);
+    for (var k in attrs) { n.setAttribute(k, attrs[k]); }
+    if (parent) { parent.appendChild(n); }
+    return n;
+  }
+
+  /* ============ Solvers: exact second-order responses (all damping regimes) ============ */
+  function stepResponse(zeta, w0, tEnd, n) {
+    var pts = [];
+    for (var i = 0; i <= n; i++) {
+      var t = tEnd * i / n, y;
+      if (zeta < 0.9995) {
+        var wd = w0 * Math.sqrt(1 - zeta * zeta);
+        y = 1 - Math.exp(-zeta * w0 * t) *
+            (Math.cos(wd * t) + zeta / Math.sqrt(1 - zeta * zeta) * Math.sin(wd * t));
+      } else if (zeta < 1.0005) {
+        y = 1 - (1 + w0 * t) * Math.exp(-w0 * t);
+      } else {
+        var r = Math.sqrt(zeta * zeta - 1);
+        var s1 = -w0 * (zeta - r), s2 = -w0 * (zeta + r);
+        y = 1 - (s2 * Math.exp(s1 * t) - s1 * Math.exp(s2 * t)) / (s2 - s1);
+      }
+      pts.push([t, y]);
+    }
+    return pts;
+  }
+  /* |H| in dB and phase in degrees for the 2nd-order lowpass, u = f/f0 */
+  function acResponse(zeta, nPts) {
+    var mag = [], ph = [];
+    for (var i = 0; i <= nPts; i++) {
+      var lg = -2 + 4 * i / nPts;          /* log10(u) from -2 to +2 */
+      var u = Math.pow(10, lg);
+      var re = 1 - u * u, im = 2 * zeta * u;
+      mag.push([lg, -10 * Math.log10(re * re + im * im)]);
+      ph.push([lg, -Math.atan2(im, re) * 180 / Math.PI]);
+    }
+    return { mag: mag, ph: ph };
+  }
+  function metrics(pts, zeta, f0) {
+    var ymax = -1, tp = 0, ts = null;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i][1] > ymax) { ymax = pts[i][1]; tp = pts[i][0]; }
+    }
+    for (var j = pts.length - 1; j >= 0; j--) {
+      if (Math.abs(pts[j][1] - 1) > 0.02) { ts = j + 1 < pts.length ? pts[j + 1][0] : pts[j][0]; break; }
+    }
+    /* f(-3dB) of the 2nd-order lowpass, exact */
+    var a = 1 - 2 * zeta * zeta;
+    var f3 = f0 * Math.sqrt(a + Math.sqrt(a * a + 1));
+    return {
+      overshoot: Math.max(0, (ymax - 1) * 100),
+      tPeak: ymax > 1.0005 ? tp : null,
+      tSettle: ts,
+      q: 1 / (2 * zeta),
+      f3db: f3
+    };
+  }
+  function fmtMs(t) { return t === null ? "—" : (t * 1000).toFixed(2) + " ms"; }
+  function fmtHz(f) {
+    if (f >= 1000) { return (f / 1000).toFixed(2) + " kHz"; }
+    return f.toFixed(0) + " Hz";
+  }
+  function pathFrom(pts, x0, x1, y0, y1, xMin, xMax, yMin, yMax) {
+    var d = "";
+    for (var i = 0; i < pts.length; i++) {
+      var x = x0 + (x1 - x0) * (pts[i][0] - xMin) / (xMax - xMin);
+      var y = y1 - (y1 - y0) * (pts[i][1] - yMin) / (yMax - yMin);
+      d += (i === 0 ? "M" : "L") + x.toFixed(2) + " " + y.toFixed(2);
+    }
+    return d;
+  }
+  /* draw-in animation for a freshly rendered trace */
+  function animateTrace(path) {
+    var len;
+    try { len = path.getTotalLength(); } catch (e) { return; }
+    path.style.strokeDasharray = len + " " + len;
+    path.style.strokeDashoffset = len;
+    path.getBoundingClientRect();
+    path.style.transition = "stroke-dashoffset 0.5s ease-out";
+    path.style.strokeDashoffset = "0";
+    setTimeout(function () {
+      path.style.strokeDasharray = ""; path.style.strokeDashoffset = ""; path.style.transition = "";
+    }, 560);
+  }
+
+  /* ============ Demo state ============ */
+  var zetaInput = document.getElementById("zeta");
+  var f0Select = document.getElementById("f0");
+  var cornerSel = document.getElementById("corner");
+  var N = 600;
+  var CORNERS = {
+    /* R drifts with temperature (+0.39 %/°C on a 27 °C base) → ζ scales with R */
+    tt: { label: "tt · 27 °C", zf: 1.0 },
+    ff: { label: "ff · −40 °C", zf: 1 - 0.0039 * 67 },
+    ss: { label: "ss · 125 °C", zf: 1 + 0.0039 * 98 }
+  };
+  var state = { run: 0, pts: [], tEnd: 6e-3, zetaEff: 0.35, f0: 800, cursors: [] };
+
+  function currentParams() {
+    var zeta = parseFloat(zetaInput.value);
+    var corner = CORNERS[cornerSel.value];
+    var f0 = parseFloat(f0Select.value);
+    return {
+      zetaEff: Math.min(1.5, zeta * corner.zf),
+      f0: f0, corner: corner,
+      w0: 2 * Math.PI * f0,
+      tEnd: 6e-3 * 800 / f0
+    };
+  }
+
+  /* ============ TRAN strip ============ */
+  var tranSvg = document.getElementById("plot-tran");
+  var TR = { W: 760, H: 280, L: 46, R: 12, T: 12, B: 24, yMin: -0.1, yMax: 1.7 };
+  var vis = { tin: true, tout: true, mag: true, ph: true };
+  /* size the svg 1:1 to its flex-allocated box — the product renders into the live viewport */
+  function sizeSvg(svg, geo) {
+    var box = svg.parentNode;
+    if (box.clientWidth) { geo.W = box.clientWidth; }
+    if (box.clientHeight) { geo.H = box.clientHeight; }
+    svg.setAttribute("viewBox", "0 0 " + geo.W + " " + geo.H);
+  }
+  function renderTran(animate) {
+    var p = currentParams();
+    state.pts = stepResponse(p.zetaEff, p.w0, p.tEnd, N);
+    state.tEnd = p.tEnd; state.zetaEff = p.zetaEff; state.f0 = p.f0;
+    state.cursors = state.cursors.filter(function (t) { return t <= p.tEnd; });
+    sizeSvg(tranSvg, TR);
+    tranSvg.textContent = "";
+    var i, x, y;
+    /* frame + grid */
+    for (i = 0; i <= 6; i++) {
+      x = TR.L + (TR.W - TR.R - TR.L) * i / 6;
+      el("line", { x1: x, y1: TR.T, x2: x, y2: TR.H - TR.B, stroke: "var(--canvas-grid)", "stroke-width": 1 }, tranSvg);
+      el("text", { x: x, y: TR.H - 9, "text-anchor": i === 6 ? "end" : "middle", fill: "var(--text-dim)",
+        "font-family": "var(--font-mono)", "font-size": 10 }, tranSvg)
+        .textContent = (p.tEnd * 1000 * i / 6).toFixed(1) + (i === 6 ? " ms" : "");
+    }
+    for (i = 0; i <= 4; i++) {
+      var v = 1.6 * i / 4;
+      y = yPixTran(v);
+      el("line", { x1: TR.L, y1: y, x2: TR.W - TR.R, y2: y, stroke: "var(--canvas-grid)", "stroke-width": 1 }, tranSvg);
+      el("text", { x: TR.L - 7, y: y + 3, "text-anchor": "end", fill: "var(--text-dim)",
+        "font-family": "var(--font-mono)", "font-size": 10 }, tranSvg).textContent = v.toFixed(1);
+    }
+    el("rect", { x: TR.L, y: TR.T, width: TR.W - TR.R - TR.L, height: TR.H - TR.B - TR.T,
+      fill: "none", stroke: "var(--border-strong)", "stroke-width": 1 }, tranSvg);
+    /* in-plot title, as in the product */
+    el("text", { x: TR.L + 10, y: TR.T + 18, fill: "var(--text-faint)",
+      "font-family": "var(--font-ui)", "font-size": 13.5 }, tranSvg)
+      .textContent = "V vs time · unit step";
+    /* /in step (thin) */
+    if (vis.tin) {
+      var inD = "M" + TR.L + " " + yPixTran(0) + "L" + TR.L + " " + yPixTran(1) +
+                "L" + (TR.W - TR.R) + " " + yPixTran(1);
+      el("path", { d: inD, fill: "none", stroke: "var(--trace-in)", "stroke-width": 1.4, opacity: 0.85 }, tranSvg);
+    }
+    /* /out */
+    if (vis.tout) {
+      var outPath = el("path", { d: pathFrom(state.pts, TR.L, TR.W - TR.R, TR.T, TR.H - TR.B,
+        0, p.tEnd, TR.yMin, TR.yMax),
+        fill: "none", stroke: "var(--trace-out)", "stroke-width": 1.8,
+        "stroke-linejoin": "round", "stroke-linecap": "round" }, tranSvg);
+      if (animate) { animateTrace(outPath); }
+    }
+    drawCursors();
+  }
+  function yPixTran(v) {
+    return (TR.H - TR.B) - (TR.H - TR.B - TR.T) * (v - TR.yMin) / (TR.yMax - TR.yMin);
+  }
+  function xPixTran(t) { return TR.L + (TR.W - TR.R - TR.L) * t / state.tEnd; }
+
+  /* ============ AC strip ============ */
+  var acSvg = document.getElementById("plot-ac");
+  var AC = { W: 760, H: 150, L: 46, R: 46, T: 10, B: 22, dbMin: -80, dbMax: 20 };
+  function renderAc(animate) {
+    var p = currentParams();
+    var resp = acResponse(p.zetaEff, 180);
+    sizeSvg(acSvg, AC);
+    acSvg.textContent = "";
+    var i, x, y;
+    /* decade grid: log10(u) = -2..2 → f = f0/100 .. f0*100 */
+    for (i = 0; i <= 4; i++) {
+      var lg = -2 + i;
+      x = AC.L + (AC.W - AC.R - AC.L) * (lg + 2) / 4;
+      el("line", { x1: x, y1: AC.T, x2: x, y2: AC.H - AC.B, stroke: "var(--canvas-grid)", "stroke-width": 1 }, acSvg);
+      el("text", { x: x, y: AC.H - 8, "text-anchor": i === 4 ? "end" : "middle", fill: "var(--text-dim)",
+        "font-family": "var(--font-mono)", "font-size": 10 }, acSvg)
+        .textContent = fmtHz(p.f0 * Math.pow(10, lg));
+    }
+    /* dB gridlines + left labels */
+    for (i = 0; i <= 5; i++) {
+      var db = AC.dbMax - 20 * i;
+      y = AC.T + (AC.dbMax - db) / (AC.dbMax - AC.dbMin) * (AC.H - AC.T - AC.B);
+      el("line", { x1: AC.L, y1: y, x2: AC.W - AC.R, y2: y, stroke: "var(--canvas-grid)", "stroke-width": 1 }, acSvg);
+      el("text", { x: AC.L - 7, y: y + 3, "text-anchor": "end", fill: "var(--text-dim)",
+        "font-family": "var(--font-mono)", "font-size": 10 }, acSvg).textContent = db;
+    }
+    /* right phase labels */
+    var phTicks = [0, -90, -180];
+    for (i = 0; i < phTicks.length; i++) {
+      y = AC.T + (0 - phTicks[i]) / 180 * (AC.H - AC.T - AC.B);
+      el("text", { x: AC.W - AC.R + 7, y: y + 3, "text-anchor": "start", fill: "var(--text-dim)",
+        "font-family": "var(--font-mono)", "font-size": 10 }, acSvg).textContent = phTicks[i] + "°";
+    }
+    el("rect", { x: AC.L, y: AC.T, width: AC.W - AC.R - AC.L, height: AC.H - AC.T - AC.B,
+      fill: "none", stroke: "var(--border-strong)", "stroke-width": 1 }, acSvg);
+    /* in-plot title, as in the product */
+    el("text", { x: AC.L + 10, y: AC.T + 18, fill: "var(--text-faint)",
+      "font-family": "var(--font-ui)", "font-size": 13.5 }, acSvg)
+      .textContent = "magnitude & phase · log f";
+    /* f(-3dB) marker — product 'analysis marker' pattern */
+    var m = metrics(state.pts, p.zetaEff, p.f0);
+    var lg3 = Math.log10(m.f3db / p.f0);
+    if (vis.mag && lg3 > -2 && lg3 < 2) {
+      x = AC.L + (AC.W - AC.R - AC.L) * (lg3 + 2) / 4;
+      el("line", { x1: x, y1: AC.T, x2: x, y2: AC.H - AC.B, stroke: "var(--text-faint)",
+        "stroke-width": 1, "stroke-dasharray": "4 3" }, acSvg);
+      el("text", { x: x + 5, y: AC.T + 11, fill: "var(--text-faint)",
+        "font-family": "var(--font-mono)", "font-size": 9.5 }, acSvg)
+        .textContent = "f-3dB " + fmtHz(m.f3db);
+    }
+    /* phase (under), magnitude (over) */
+    if (vis.ph) {
+      el("path", { d: pathFrom(resp.ph, AC.L, AC.W - AC.R, AC.T, AC.H - AC.B, -2, 2, -180, 0),
+        fill: "none", stroke: "var(--trace-ph)", "stroke-width": 1.4, opacity: 0.9 }, acSvg);
+    }
+    if (vis.mag) {
+      var magPath = el("path", { d: pathFrom(resp.mag, AC.L, AC.W - AC.R, AC.T, AC.H - AC.B,
+        -2, 2, AC.dbMin, AC.dbMax),
+        fill: "none", stroke: "var(--trace-out)", "stroke-width": 1.8,
+        "stroke-linejoin": "round" }, acSvg);
+      if (animate) { animateTrace(magPath); }
+    }
+  }
+
+  /* ============ Measurements + console + history ============ */
+  function updateReadouts() {
+    var m = metrics(state.pts, state.zetaEff, state.f0);
+    document.getElementById("zeta-val").textContent = parseFloat(zetaInput.value).toFixed(3);
+    document.getElementById("m-zeta").textContent = state.zetaEff.toFixed(3);
+    document.getElementById("m-q").textContent = m.q.toFixed(2);
+    document.getElementById("m-os").textContent = m.overshoot < 0.05 ? "0 %" : m.overshoot.toFixed(1) + " %";
+    document.getElementById("m-tp").textContent = fmtMs(m.tPeak);
+    document.getElementById("m-ts").textContent = fmtMs(m.tSettle);
+    document.getElementById("m-f3").textContent = fmtHz(m.f3db);
+    return m;
+  }
+  function logRun() {
+    var p = currentParams();
+    state.run += 1;
+    var label = "run #" + state.run + " · " + p.corner.label;
+    document.getElementById("db-run").textContent = label;
+    document.getElementById("sig-run").textContent = "run #" + state.run;
+    document.getElementById("meas-run").textContent = "run #" + state.run;
+    document.getElementById("sb-run").textContent = "run #" + state.run;
+    document.getElementById("sb-corner").textContent = p.corner.label;
+    document.getElementById("m-db").textContent = "run" + state.run + ".vdb";
+    var hist = document.getElementById("run-history");
+    var row = document.createElement("div");
+    row.className = "w-row sel";
+    row.innerHTML = "<span class=\"chipdot\" style=\"background:var(--ok)\"></span>#" + state.run +
+      " · " + cornerSel.value + " <span class=\"meta\">" + (N + 1) + " pts</span>";
+    if (hist.firstChild) {
+      hist.firstChild.classList.remove("sel");
+      hist.insertBefore(row, hist.firstChild);
+    } else { hist.appendChild(row); }
+    while (hist.children.length > 3) { hist.removeChild(hist.lastChild); }
+  }
+  var engineTimer = null;
+  function flashEngine() {
+    var pill = document.getElementById("sb-engine");
+    var txt = document.getElementById("sb-engine-txt");
+    pill.classList.remove("ok"); pill.classList.add("busy");
+    txt.textContent = "running…";
+    if (engineTimer) { clearTimeout(engineTimer); }
+    engineTimer = setTimeout(function () {
+      pill.classList.remove("busy"); pill.classList.add("ok");
+      txt.textContent = "engine idle";
+    }, 420);
+  }
+
+  /* full run: animate, log history, status flash */
+  function run() {
+    flashEngine();
+    renderTran(true);
+    renderAc(true);
+    updateReadouts();
+    updateCursorPanel();
+    logRun();
+  }
+  /* silent preview while dragging parameters */
+  function preview() {
+    renderTran(false);
+    renderAc(false);
+    updateReadouts();
+    updateCursorPanel();
+  }
+
+  document.getElementById("btn-run").addEventListener("click", run);
+  cornerSel.addEventListener("change", run);
+  zetaInput.addEventListener("input", preview);
+  f0Select.addEventListener("change", preview);
+
+  /* ============ Cursors A/B on the TRAN strip ============ */
+  function interp(t) {
+    var n = state.pts.length - 1;
+    var f = Math.min(Math.max(t / state.tEnd, 0), 1) * n;
+    var i = Math.min(Math.floor(f), n - 1), a = f - i;
+    return state.pts[i][1] * (1 - a) + state.pts[i + 1][1] * a;
+  }
+  function drawCursors() {
+    var colors = ["var(--accent-line)", "var(--trace-in)"];
+    var names = ["A", "B"];
+    for (var c = 0; c < state.cursors.length; c++) {
+      var t = state.cursors[c];
+      var x = xPixTran(t);
+      el("line", { x1: x, y1: TR.T, x2: x, y2: TR.H - TR.B, stroke: colors[c], "stroke-width": 1 }, tranSvg);
+      el("rect", { x: x - 7, y: TR.T, width: 14, height: 13, fill: colors[c] }, tranSvg);
+      el("text", { x: x, y: TR.T + 10, "text-anchor": "middle", fill: "var(--canvas-bg)",
+        "font-family": "var(--font-mono)", "font-size": 9, "font-weight": 600 }, tranSvg)
+        .textContent = names[c];
+    }
+  }
+  function updateCursorPanel() {
+    var blocks = [
+      { id: "cur-a", x: "cur-a-x", out: "cur-a-out", inn: "cur-a-in" },
+      { id: "cur-b", x: "cur-b-x", out: "cur-b-out", inn: "cur-b-in" }
+    ];
+    for (var c = 0; c < 2; c++) {
+      var has = c < state.cursors.length;
+      document.getElementById(blocks[c].id).hidden = !has;
+      if (has) {
+        var t = state.cursors[c];
+        document.getElementById(blocks[c].x).textContent = (t * 1000).toFixed(3) + " ms";
+        document.getElementById(blocks[c].out).textContent = interp(t).toFixed(4) + " V";
+        document.getElementById(blocks[c].inn).textContent = (t > 0 ? "1.0000" : "0.0000") + " V";
+      }
+    }
+    var hasD = state.cursors.length === 2;
+    document.getElementById("cur-d").hidden = !hasD;
+    var hint = document.getElementById("cursor-hint");
+    var sb = document.getElementById("sb-cursor");
+    if (hasD) {
+      var dt = state.cursors[1] - state.cursors[0];
+      var dv = interp(state.cursors[1]) - interp(state.cursors[0]);
+      document.getElementById("cur-d-x").textContent = (dt * 1000).toFixed(3) + " ms";
+      document.getElementById("cur-d-out").textContent = dv.toFixed(4) + " V";
+      document.getElementById("cur-d-f").textContent = dt !== 0 ? fmtHz(Math.abs(1 / dt)) : "—";
+      hint.hidden = true;
+      sb.textContent = "Δt " + (dt * 1000).toFixed(3) + " ms · 1/Δt " + (dt !== 0 ? fmtHz(Math.abs(1 / dt)) : "—");
+    } else if (state.cursors.length === 1) {
+      hint.hidden = true;
+      sb.textContent = "cursor A @ " + (state.cursors[0] * 1000).toFixed(3) + " ms — click for B";
+    } else {
+      hint.hidden = false;
+      sb.textContent = "cursors: click plot for A · B";
+    }
+  }
+  tranSvg.addEventListener("click", function (ev) {
+    var r = tranSvg.getBoundingClientRect();
+    var sx = ev.clientX - r.left;
+    if (sx < TR.L || sx > TR.W - TR.R) { return; }
+    var t = (sx - TR.L) / (TR.W - TR.R - TR.L) * state.tEnd;
+    if (state.cursors.length >= 2) { state.cursors = []; }
+    state.cursors.push(t);
+    state.cursors.sort(function (a, b) { return a - b; });
+    renderTran(false);
+    updateCursorPanel();
+  });
+  function clearCursors() {
+    state.cursors = [];
+    renderTran(false);
+    updateCursorPanel();
+  }
+  document.getElementById("cursor-clear").addEventListener("click", clearCursors);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && state.cursors.length) { clearCursors(); }
+  });
+
+  /* legend toggles — trace visibility, as in the product */
+  document.querySelectorAll(".w-leg").forEach(function (b) {
+    b.addEventListener("click", function () {
+      vis[b.dataset.vis] = !vis[b.dataset.vis];
+      b.classList.toggle("off", !vis[b.dataset.vis]);
+      b.setAttribute("aria-pressed", String(vis[b.dataset.vis]));
+      renderTran(false);
+      renderAc(false);
+    });
+  });
+
+  /* re-render into the new box on resize */
+  var rsTimer = null;
+  window.addEventListener("resize", function () {
+    if (rsTimer) { clearTimeout(rsTimer); }
+    rsTimer = setTimeout(function () { renderTran(false); renderAc(false); }, 120);
+  });
+
+  /* ============ Export + netlist ============ */
+  document.getElementById("btn-csv").addEventListener("click", function () {
+    var rows = "t,V(out)\n";
+    for (var i = 0; i < state.pts.length; i++) {
+      rows += state.pts[i][0].toExponential(6) + "," + state.pts[i][1].toFixed(9) + "\n";
+    }
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
+    a.download = "rspice-demo.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  function netlistText() {
+    var p = currentParams();
+    var Lh = 10e-3;
+    var C = 1 / (p.w0 * p.w0 * Lh);
+    var Rr = 2 * p.zetaEff * Math.sqrt(Lh / C);
+    return "* RSpice demo — series RLC unit step (zeta=" + p.zetaEff.toFixed(3) +
+      ", f0=" + p.f0 + "Hz, corner " + cornerSel.value + ")\n" +
+      "V1 in 0 PULSE(0 1 0 1u 1u 1 2)\n" +
+      "R1 in n1 " + Rr.toFixed(2) + "\n" +
+      "L1 n1 out " + (Lh * 1000).toFixed(1) + "m\n" +
+      "C1 out 0 " + (C * 1e9).toFixed(2) + "n\n" +
+      ".tran " + (p.tEnd / N * 1e6).toFixed(1) + "u " + (p.tEnd * 1000).toFixed(1) + "m\n" +
+      ".ac dec 45 " + (p.f0 / 100).toFixed(2) + " " + (p.f0 * 100).toFixed(0) + "\n" +
+      ".print tran v(out)\n.end\n";
+  }
+  var nlBtn = document.getElementById("btn-netlist");
+  nlBtn.addEventListener("click", function () {
+    var done = function () {
+      var prev = nlBtn.textContent;
+      nlBtn.textContent = "Copied";
+      setTimeout(function () { nlBtn.textContent = prev; }, 1400);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(netlistText()).then(done, done);
+    } else { done(); }
+  });
+
+  /* ============ Mini frames (platform cards) ============ */
+  (function buildMinis() {
+    var minis = document.querySelectorAll(".js-mini");
+    var pts = stepResponse(0.30, 2 * Math.PI * 800, 6e-3, 160);
+    for (var k = 0; k < minis.length; k++) {
+      var svg = minis[k];
+      for (var g = 1; g <= 3; g++) {
+        el("line", { x1: 280 * g / 4, y1: 6, x2: 280 * g / 4, y2: 90,
+          stroke: "var(--canvas-grid)", "stroke-width": 1 }, svg);
+      }
+      el("line", { x1: 8, y1: 34, x2: 272, y2: 34, stroke: "var(--text-faint)",
+        "stroke-width": 0.8, "stroke-dasharray": "4 4", opacity: 0.6 }, svg);
+      el("path", { d: pathFrom(pts, 8, 264, 10, 88, 0, 6e-3, 0, 1.55), fill: "none",
+        stroke: "var(--accent-line)", "stroke-width": 1.8, "stroke-linecap": "round" }, svg);
+      el("circle", { cx: 264, cy: 88 - 78 * pts[pts.length - 1][1] / 1.55, r: 2.6,
+        fill: "var(--accent-line)" }, svg);
+    }
+  })();
+
+  /* ============ Validation overlay figure ============ */
+  (function buildVal() {
+    var svg = document.getElementById("val-plot");
+    var W = 560, L = 40, R = 14;
+    var pts = stepResponse(0.45, 2 * Math.PI * 800, 6e-3, 240);
+    var i, x, y;
+    for (i = 0; i <= 6; i++) {
+      x = L + (W - R - L) * i / 6;
+      el("line", { x1: x, y1: 14, x2: x, y2: 226, stroke: "var(--canvas-grid)", "stroke-width": 1 }, svg);
+      el("line", { x1: x, y1: 248, x2: x, y2: 306, stroke: "var(--canvas-grid)", "stroke-width": 1 }, svg);
+    }
+    for (i = 0; i <= 4; i++) {
+      y = 226 - 212 * i / 4;
+      el("line", { x1: L, y1: y, x2: W - R, y2: y, stroke: "var(--canvas-grid)", "stroke-width": 1 }, svg);
+    }
+    el("text", { x: L, y: 10, fill: "var(--text-faint)", "font-family": "var(--font-mono)",
+      "font-size": 10 }, svg).textContent = "V(out)";
+    el("path", { d: pathFrom(pts, L, W - R, 14, 226, 0, 6e-3, 0, 1.6), fill: "none",
+      stroke: "var(--oracle)", "stroke-width": 3, "stroke-dasharray": "7 5", opacity: 0.85 }, svg);
+    el("path", { d: pathFrom(pts, L, W - R, 14, 226, 0, 6e-3, 0, 1.6), fill: "none",
+      stroke: "var(--accent-line)", "stroke-width": 1.7 }, svg);
+    el("text", { x: L, y: 244, fill: "var(--text-faint)", "font-family": "var(--font-mono)",
+      "font-size": 10 }, svg).textContent = "residual (V) · grid-locked";
+    el("line", { x1: L, y1: 277, x2: W - R, y2: 277, stroke: "var(--accent-line)", "stroke-width": 1.6 }, svg);
+    el("text", { x: W - R, y: 271, "text-anchor": "end", fill: "var(--text-faint)",
+      "font-family": "var(--font-mono)", "font-size": 10 }, svg).textContent = "0";
+  })();
+
+  run();           /* run #1 on load */
+  updateCursorPanel();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RSpice — WASM playground</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("../assets/fonts/IBMPlexSans-Regular.ttf") format("truetype");
+    font-weight: 400; font-display: swap;
+  }
+  @font-face {
+    font-family: "IBM Plex Sans";
+    src: url("../assets/fonts/IBMPlexSans-SemiBold.ttf") format("truetype");
+    font-weight: 600; font-display: swap;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("../assets/fonts/IBMPlexMono-Regular.ttf") format("truetype");
+    font-weight: 400; font-display: swap;
+  }
+
+  :root {
+    --bg-app: #11171B; --bg-panel: #1A2024; --bg-inset: #0B1115; --bg-hover: #262E33;
+    --border: #2B3136; --border-strong: #444C50;
+    --text: #D7DBDE; --text-dim: #93999E; --text-faint: #646A6E;
+    --canvas-bg: #0B1115; --canvas-grid: #1E262B;
+    --accent: #F2B824; --accent-hover: #F7CB55; --accent-ink: #17181A;
+    --ok: #65D68A; --err: #E06C5A;
+    --trace: #F2B824; --trace-2: #7CB8E8;
+    --mono: "IBM Plex Mono", Consolas, ui-monospace, monospace;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --radius: 2px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg-app); color: var(--text);
+    font: 400 14px/1.5 var(--sans);
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+
+  header { display: flex; align-items: center; gap: 12px; padding-bottom: 16px;
+    border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+  .tile { width: 34px; height: 34px; border-radius: 22%; background: var(--accent);
+    display: flex; align-items: center; justify-content: center; flex: none; }
+  .tile svg { width: 70%; height: 70%; }
+  h1 { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+  .sub { font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    letter-spacing: 0.08em; text-transform: uppercase; margin: 1px 0 0; }
+  .badge {
+    margin-left: auto; font-family: var(--mono); font-size: 11px;
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong); border-radius: var(--radius);
+    padding: 4px 10px; color: var(--text-dim);
+  }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
+  .badge.ready .dot { background: var(--ok); }
+  .badge.error .dot { background: var(--err); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 3px;
+    display: flex; flex-direction: column; min-width: 0; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--text-faint); }
+  .panel-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  textarea {
+    width: 100%; min-height: 320px; resize: vertical;
+    background: var(--bg-inset); color: var(--text); border: none; outline: none;
+    font: 400 12.5px/1.6 var(--mono); padding: 12px 14px;
+  }
+  textarea:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+
+  .controls { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border);
+    align-items: center; flex-wrap: wrap; }
+  .field { display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); }
+  .field input {
+    width: 84px; background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text);
+    font: 400 12px var(--mono); padding: 4px 8px;
+  }
+  .field input:focus { border-color: var(--accent); outline: none; }
+  button {
+    appearance: none; cursor: pointer; border-radius: var(--radius);
+    border: 1px solid var(--border-strong); background: transparent; color: var(--text);
+    font: 500 12.5px var(--sans); padding: 6px 14px; min-height: 30px;
+    transition: background 0.16s ease, border-color 0.16s ease;
+  }
+  button:hover { background: var(--bg-hover); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button[disabled] { opacity: 0.4; cursor: default; }
+  button.run {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-ink);
+    font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.07em;
+    font-size: 11.5px; display: inline-flex; align-items: center; gap: 6px;
+  }
+  button.run:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  button.run svg { width: 11px; height: 11px; fill: currentColor; }
+
+  #plot { width: 100%; height: 300px; display: block; background: var(--canvas-bg); }
+  .log {
+    font: 400 12px/1.7 var(--mono); color: var(--text-dim);
+    padding: 10px 14px; min-height: 86px; max-height: 180px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .log .ok { color: var(--ok); }
+  .log .err { color: var(--err); }
+  .log .t { color: var(--text-faint); }
+  table.op { width: 100%; border-collapse: collapse; font: 400 12px var(--mono); }
+  table.op td { padding: 3px 14px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+  table.op td:last-child { text-align: right; color: var(--text); }
+  .note { margin-top: 16px; font-family: var(--mono); font-size: 11px; color: var(--text-faint);
+    letter-spacing: 0.03em; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="tile" aria-hidden="true">
+      <svg viewBox="0 0 96 96"><g fill="#17181A" stroke="#17181A" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"><path d="M 31 20 L 31 76 L 77 48 Z"></path><path d="M 9 34 H 30" fill="none"></path><path d="M 9 62 H 30" fill="none"></path><path d="M 77 48 H 87" fill="none"></path></g></svg>
+    </span>
+    <div>
+      <h1>RSpice WASM playground</h1>
+      <p class="sub">the real engine · compiled to webassembly · running in this tab</p>
+    </div>
+    <span class="badge" id="badge"><span class="dot"></span><span id="badge-txt">loading module…</span></span>
+  </header>
+
+  <div class="grid">
+    <section class="panel" aria-label="Netlist editor">
+      <div class="panel-head">netlist
+        <span class="right">
+          <button type="button" id="btn-summary">Summarize</button>
+          <button type="button" id="btn-op">.op</button>
+          <button type="button" class="run" id="btn-tran" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"></path></svg>Run .tran</button>
+        </span>
+      </div>
+      <textarea id="deck" spellcheck="false" aria-label="SPICE netlist">* series RLC unit step (zeta = 0.35, f0 = 800 Hz)
+V1 in 0 PULSE(0 1 0 1u 1u 1 2)
+R1 in n1 35.19
+L1 n1 out 10m
+C1 out 0 3957.9n
+.end</textarea>
+      <div class="controls">
+        <span class="field"><label for="tstop">tstop</label><input id="tstop" value="6m"></span>
+        <span class="field"><label for="hmax">hmax</label><input id="hmax" value="10u"></span>
+        <span class="field" style="margin-left:auto;color:var(--text-faint);">ctrl+enter runs</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-label="Results">
+      <div class="panel-head">waveform <span class="right" id="plot-meta"></span></div>
+      <svg id="plot" role="img" aria-label="Transient waveform plot"></svg>
+      <div class="panel-head" style="border-top:1px solid var(--border);">console</div>
+      <div class="log" id="log" aria-live="polite"></div>
+    </section>
+  </div>
+
+  <div class="panel" style="margin-top:16px;" id="op-panel" hidden>
+    <div class="panel-head">operating point</div>
+    <table class="op" id="op-table"></table>
+  </div>
+
+  <p class="note">engine: rspice-core → rspice-wasm (wasm32-unknown-unknown) · everything solves
+  client-side; nothing leaves this tab · production app will move solves into a Web Worker</p>
+</main>
+
+<script type="module">
+import init, { summarizeNetlist, runDcOperatingPoint, runTransientAnalysis }
+  from "./pkg/rspice_wasm.js";
+
+const $ = (id) => document.getElementById(id);
+const log = (msg, cls) => {
+  const line = document.createElement("div");
+  if (cls) { line.className = cls; }
+  line.textContent = msg;
+  $("log").appendChild(line);
+  $("log").scrollTop = $("log").scrollHeight;
+};
+
+/* engineering-notation parser for tstop/hmax fields (6m, 10u, 1.5k…) */
+function engValue(s) {
+  const m = String(s).trim().match(/^([-+]?[0-9]*\.?[0-9]+(?:e[-+]?[0-9]+)?)\s*(meg|[tgkmunpf])?/i);
+  if (!m) { return NaN; }
+  const scale = { t: 1e12, g: 1e9, meg: 1e6, k: 1e3, m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12, f: 1e-15 };
+  const suffix = m[2] ? m[2].toLowerCase() : "";
+  return parseFloat(m[1]) * (suffix ? scale[suffix] : 1);
+}
+function fmtEng(v) {
+  const a = Math.abs(v);
+  if (a >= 1 || a === 0) { return v.toPrecision(4); }
+  if (a >= 1e-3) { return (v * 1e3).toPrecision(4) + "m"; }
+  if (a >= 1e-6) { return (v * 1e6).toPrecision(4) + "u"; }
+  if (a >= 1e-9) { return (v * 1e9).toPrecision(4) + "n"; }
+  return v.toExponential(3);
+}
+
+/* ---- minimal strip plot, site-consistent ---- */
+const SVGNS = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  const n = document.createElementNS(SVGNS, name);
+  for (const k in attrs) { n.setAttribute(k, attrs[k]); }
+  if (parent) { parent.appendChild(n); }
+  return n;
+}
+function drawPlot(time, series) {
+  const svg = $("plot");
+  const W = svg.clientWidth || 520, H = svg.clientHeight || 300;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.textContent = "";
+  const L = 52, R = 12, T = 12, B = 26;
+  let yMin = Infinity, yMax = -Infinity;
+  for (const s of series) { for (const v of s.values) {
+    if (v < yMin) { yMin = v; } if (v > yMax) { yMax = v; }
+  } }
+  if (!isFinite(yMin)) { return; }
+  const pad = (yMax - yMin) * 0.08 || 0.1;
+  yMin -= pad; yMax += pad;
+  const t0 = time[0], t1 = time[time.length - 1];
+  const xp = (t) => L + (W - L - R) * (t - t0) / (t1 - t0 || 1);
+  const yp = (v) => (H - B) - (H - B - T) * (v - yMin) / (yMax - yMin);
+  for (let i = 0; i <= 6; i++) {
+    const x = L + (W - L - R) * i / 6;
+    el("line", { x1: x, y1: T, x2: x, y2: H - B, stroke: "var(--canvas-grid)" }, svg);
+    el("text", { x, y: H - 8, "text-anchor": i === 6 ? "end" : "middle", fill: "var(--text-faint)",
+      "font-family": "var(--mono)", "font-size": 10 }, svg)
+      .textContent = fmtEng(t0 + (t1 - t0) * i / 6) + (i === 6 ? "s" : "");
+  }
+  for (let i = 0; i <= 4; i++) {
+    const v = yMin + (yMax - yMin) * i / 4;
+    el("line", { x1: L, y1: yp(v), x2: W - R, y2: yp(v), stroke: "var(--canvas-grid)" }, svg);
+    el("text", { x: L - 7, y: yp(v) + 3, "text-anchor": "end", fill: "var(--text-faint)",
+      "font-family": "var(--mono)", "font-size": 10 }, svg).textContent = fmtEng(v);
+  }
+  el("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "none",
+    stroke: "var(--border-strong)" }, svg);
+  const colors = ["var(--trace)", "var(--trace-2)", "#D984B0", "#9A8FE8"];
+  series.forEach((s, idx) => {
+    let d = "";
+    for (let i = 0; i < time.length; i++) {
+      d += (i ? "L" : "M") + xp(time[i]).toFixed(1) + " " + yp(s.values[i]).toFixed(1);
+    }
+    el("path", { d, fill: "none", stroke: colors[idx % colors.length], "stroke-width": 1.8,
+      "stroke-linejoin": "round" }, svg);
+  });
+  $("plot-meta").textContent = series.map(s => s.name).join(" · ");
+}
+
+/* ---- engine wiring ---- */
+let ready = false;
+function setBadge(state, txt) {
+  $("badge").className = "badge " + state;
+  $("badge-txt").textContent = txt;
+}
+function deck() { return $("deck").value; }
+
+function doSummary() {
+  try {
+    const s = summarizeNetlist(deck());
+    log(`summary: "${s.title}" — ${s.element_count} elements, ${s.analysis_count} analyses, ` +
+        `${s.model_count} models, ${s.subcircuit_count} subckts`, "ok");
+  } catch (e) { log("parse error: " + e, "err"); }
+}
+function doOp() {
+  try {
+    const t = performance.now();
+    const r = runDcOperatingPoint(deck());
+    const ms = (performance.now() - t).toFixed(1);
+    const table = $("op-table");
+    table.textContent = "";
+    r.node_names.forEach((n, i) => {
+      const row = table.insertRow();
+      row.insertCell().textContent = "V(" + n + ")";
+      row.insertCell().textContent = fmtEng(r.node_voltages[i]) + " V";
+    });
+    r.branch_names.forEach((n, i) => {
+      const row = table.insertRow();
+      row.insertCell().textContent = "I(" + n + ")";
+      row.insertCell().textContent = fmtEng(r.branch_currents[i]) + " A";
+    });
+    $("op-panel").hidden = false;
+    log(`op: converged — ${r.node_names.length} nodes, ${r.branch_names.length} branches (${ms} ms)`, "ok");
+  } catch (e) { log("op error: " + e, "err"); }
+}
+function doTran() {
+  const tstop = engValue($("tstop").value);
+  const hmax = engValue($("hmax").value);
+  if (!(tstop > 0) || !(hmax > 0)) { log("bad tstop/hmax", "err"); return; }
+  try {
+    const t = performance.now();
+    const r = runTransientAnalysis(deck(), tstop, hmax);
+    const ms = (performance.now() - t).toFixed(1);
+    const want = ["out", "in"];
+    const series = [];
+    for (const name of want) {
+      const i = r.node_names.findIndex(n => n.toLowerCase() === name);
+      if (i >= 0) { series.push({ name: "V(" + r.node_names[i] + ")", values: r.voltages[i] }); }
+    }
+    if (!series.length && r.node_names.length) {
+      series.push({ name: "V(" + r.node_names[0] + ")", values: r.voltages[0] });
+    }
+    drawPlot(r.time, series);
+    log(`tran: 0–${fmtEng(tstop)}s · ${r.time.length} pts · solved in ${ms} ms`, "ok");
+  } catch (e) { log("tran error: " + e, "err"); }
+}
+
+$("btn-summary").addEventListener("click", doSummary);
+$("btn-op").addEventListener("click", doOp);
+$("btn-tran").addEventListener("click", doTran);
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && ready) { doTran(); }
+});
+window.addEventListener("resize", () => { /* re-render handled on next run */ });
+
+init().then(() => {
+  ready = true;
+  setBadge("ready", "engine ready");
+  $("btn-tran").disabled = false;
+  log("rspice_wasm module loaded", "ok");
+  doTran();   /* first solve on load — the brand moment */
+}).catch((e) => {
+  setBadge("error", "module failed");
+  log("init failed: " + e, "err");
+});
+</script>
+</body>
+</html>

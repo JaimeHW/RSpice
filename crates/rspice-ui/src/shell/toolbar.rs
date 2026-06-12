@@ -47,8 +47,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                     ui.add_space(8.0);
                     ui.spacing_mut().item_spacing.x = 8.0;
 
-                    let can_run =
-                        !state.schematic.components.is_empty() && !state.simulation.is_running;
+                    let can_run = state.can_run_simulation();
                     if Button::new("Run")
                         .icon(Icon::Run)
                         .hint("F5")

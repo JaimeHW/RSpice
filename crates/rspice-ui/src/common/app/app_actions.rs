@@ -109,9 +109,7 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::RunSimulation => {
-                if !self.state.schematic.components.is_empty()
-                    && !self.state.simulation.is_running
-                {
+                if self.state.can_run_simulation() {
                     self.state.simulation.trigger_simulation = true;
                     self.state.shell.view = crate::shell::WorkspaceView::Simulate;
                 }

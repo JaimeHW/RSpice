@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog — RSpice</title>
+<meta name="description" content="What's new in RSpice, release by release. Every release is diffed against the oracle suite before it ships.">
+<meta property="og:title" content="Changelog — RSpice">
+<meta property="og:description" content="What's new in RSpice, release by release.">
+<meta property="og:image" content="https://jaimehw.github.io/RSpice/assets/og-card.png">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/site.css">
+<style>
+  /* ---------- Changelog ---------- */
+  .chg-col { max-width: 72ch; padding-bottom: var(--space-3xl); }
+  .page-head-simple { padding: 84px 0 var(--space-xl); }
+  .page-head-simple h1 { font-size: clamp(34px, 5vw, 44px); line-height: 1.08; }
+  .page-sub {
+    color: var(--text-dim); font-size: 18px; max-width: 56ch;
+    margin: var(--space-lg) 0 0; text-wrap: pretty;
+  }
+  .ver { border-top: 1px solid var(--border); padding: var(--space-xl) 0; scroll-margin-top: 74px; }
+  .ver:target { border-top-color: var(--accent-line); }
+  .ver-head { display: flex; align-items: baseline; gap: var(--space-md); flex-wrap: wrap; }
+  .ver-head h2 { font-size: 26px; }
+  .ver-head .tag { font-size: 10px; padding: 1px 7px; }
+  .ver-anchor {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text-faint);
+    text-decoration: none;
+  }
+  .ver-anchor:hover { color: var(--accent-line); text-decoration: underline; }
+  .ver:target .ver-anchor { color: var(--accent-line); }
+  .ver-date { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+  .chg-group { margin-top: var(--space-lg); }
+  .chg-chip {
+    display: inline-block;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    border-radius: var(--radius); padding: 2px 8px;
+  }
+  .chg-chip.add { background: var(--accent-fill); color: var(--accent-ink); }
+  .chg-chip.fix { border: 1px solid var(--border-strong); color: var(--text-dim); }
+  .chg-chip.perf { background: var(--accent-dim); color: var(--accent-line); }
+  .chg-list { list-style: none; margin: var(--space-sm) 0 0; padding: 0; display: grid; gap: 8px; }
+  .chg-list li { display: flex; gap: 8px; font-size: 14.5px; color: var(--text-dim); text-wrap: pretty; }
+  .chg-list li::before { content: "—"; color: var(--accent-line); flex: none; }
+  .chg-list li strong { color: var(--text); font-weight: 600; }
+
+  @media (max-width: 820px) {
+    .page-head-simple { padding-top: 56px; }
+    .ver-date { margin-left: 0; flex-basis: 100%; }
+  }
+</style>
+</head>
+<body data-theme="dark">
+<script>
+(function(){try{var t=localStorage.getItem("rspice-site-theme");
+if(!t&&window.matchMedia&&matchMedia("(prefers-color-scheme: light)").matches){t="light";}
+if(t){document.body.dataset.theme=t;}}catch(e){}})();
+</script>
+
+<!-- ============ Shared geometry: the Run mark and the RSpice wordmark ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Run · standard cut (48px and above): port-ring terminals, equal pins -->
+    <symbol id="run" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="8">
+        <path d="M 14 34 H 27.5"></path>
+        <path d="M 14 62 H 27.5"></path>
+        <path d="M 69.5 48 H 82"></path>
+      </g>
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="4">
+        <circle cx="8" cy="34" r="6"></circle>
+        <circle cx="8" cy="62" r="6"></circle>
+        <circle cx="88" cy="48" r="6"></circle>
+      </g>
+      <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="8" stroke-linejoin="round"></path>
+    </symbol>
+    <!-- Run · mid cut (24-32px): dot-tip terminals on the heavy stroke -->
+    <symbol id="run-m" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="10.5">
+        <path d="M 8 32 H 29"></path>
+        <path d="M 8 64 H 29"></path>
+        <path d="M 70 48 H 88"></path>
+      </g>
+      <g fill="var(--run-ink, #17181A)">
+        <circle cx="8" cy="32" r="8"></circle>
+        <circle cx="8" cy="64" r="8"></circle>
+        <circle cx="88" cy="48" r="8"></circle>
+      </g>
+      <path d="M 25 20 L 25 76 L 71 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="10.5" stroke-linejoin="round"></path>
+    </symbol>
+    <symbol id="run-s" viewBox="0 0 96 96">
+      <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="10.5"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
+        <path d="M 11 32 H 30" fill="none"></path>
+        <path d="M 11 64 H 30" fill="none"></path>
+        <path d="M 77 48 H 88" fill="none"></path>
+      </g>
+    </symbol>
+    <symbol id="wordmark" viewBox="6 -10 456 144">
+      <path fill="currentColor" d="M30.66 100H11.75V0H56.88Q63.75 0 69.2 2.15Q74.64 4.3 78.44 8.38Q82.23 12.46 84.31 18.19Q86.39 23.93 86.39 30.95Q86.39 41.26 81.73 48.71Q77.08 56.16 67.77 59.31L88.25 100H67.19L48.57 61.46H30.66ZM55.01 45.56Q60.46 45.56 63.61 42.62Q66.76 39.68 66.76 34.24V27.65Q66.76 22.21 63.61 19.34Q60.46 16.48 55.01 16.48H30.66V45.56ZM137.97 101.72Q125.07 101.72 116.12 97.13Q107.16 92.55 100.72 85.1L113.47 72.78Q118.62 78.8 125 81.95Q131.38 85.1 139.11 85.1Q147.85 85.1 152.29 81.3Q156.73 77.51 156.73 71.06Q156.73 66.05 153.87 62.89Q151 59.74 143.12 58.31L133.67 56.88Q103.72 52.15 103.72 27.79Q103.72 21.06 106.23 15.62Q108.74 10.17 113.47 6.3Q118.19 2.44 124.86 0.36Q131.52 -1.72 139.97 -1.72Q151.29 -1.72 159.74 2.01Q168.19 5.73 174.21 13.04L161.32 25.21Q157.59 20.63 152.29 17.77Q146.99 14.9 138.97 14.9Q130.8 14.9 126.72 17.98Q122.64 21.06 122.64 26.65Q122.64 32.38 125.93 35.1Q129.23 37.82 136.53 39.11L145.85 40.83Q161.03 43.55 168.27 50.5Q175.5 57.45 175.5 69.91Q175.5 77.08 172.99 82.88Q170.49 88.68 165.69 92.91Q160.89 97.13 153.94 99.43Q146.99 101.72 137.97 101.72ZM193.27 25.21H211.6V37.54H212.18Q214.18 31.09 219.77 27.29Q225.36 23.5 232.81 23.5Q247.13 23.5 254.66 33.6Q262.18 43.7 262.18 62.46Q262.18 81.38 254.66 91.55Q247.13 101.72 232.81 101.72Q225.36 101.72 219.84 97.85Q214.33 93.98 212.18 87.54H211.6V128.65H193.27ZM226.93 86.53Q234.1 86.53 238.54 81.81Q242.98 77.08 242.98 69.05V56.16Q242.98 48.14 238.54 43.34Q234.1 38.54 226.93 38.54Q220.34 38.54 215.97 41.83Q211.6 45.13 211.6 50.57V74.36Q211.6 80.23 215.97 83.38Q220.34 86.53 226.93 86.53ZM288.4 14.33Q282.66 14.33 280.16 11.75Q277.65 9.17 277.65 5.16V2.29Q277.65 -1.72 280.16 -4.3Q282.66 -6.88 288.4 -6.88Q293.98 -6.88 296.56 -4.3Q299.14 -1.72 299.14 2.29V5.16Q299.14 9.17 296.56 11.75Q293.98 14.33 288.4 14.33ZM279.23 25.21H297.56V100H279.23ZM348.28 101.72Q339.97 101.72 333.52 99Q327.08 96.28 322.71 91.12Q318.34 85.96 316.05 78.72Q313.75 71.49 313.75 62.46Q313.75 53.44 316.05 46.28Q318.34 39.11 322.71 34.03Q327.08 28.94 333.52 26.22Q339.97 23.5 348.28 23.5Q359.6 23.5 366.98 28.51Q374.36 33.52 377.65 42.41L362.61 49.14Q361.32 44.41 357.81 41.33Q354.3 38.25 348.28 38.25Q340.54 38.25 336.75 43.12Q332.95 47.99 332.95 55.87V69.48Q332.95 77.36 336.75 82.16Q340.54 86.96 348.28 86.96Q354.87 86.96 358.45 83.6Q362.03 80.23 364.04 75.21L378.08 81.95Q374.36 91.83 366.76 96.78Q359.17 101.72 348.28 101.72ZM422.49 101.72Q414.18 101.72 407.66 98.93Q401.15 96.13 396.63 91.05Q392.12 85.96 389.68 78.72Q387.25 71.49 387.25 62.46Q387.25 53.58 389.61 46.42Q391.98 39.26 396.42 34.17Q400.86 29.08 407.31 26.29Q413.75 23.5 421.92 23.5Q430.66 23.5 437.11 26.5Q443.55 29.51 447.71 34.67Q451.86 39.83 453.94 46.63Q456.02 53.44 456.02 61.17V67.19H406.3V69.05Q406.3 77.22 410.89 82.16Q415.47 87.11 424.5 87.11Q431.38 87.11 435.74 84.24Q440.11 81.38 443.55 76.93L453.44 87.97Q448.85 94.41 440.9 98.07Q432.95 101.72 422.49 101.72ZM422.21 37.25Q414.9 37.25 410.6 42.12Q406.3 46.99 406.3 54.73V55.87H436.96V54.58Q436.96 46.85 433.17 42.05Q429.37 37.25 422.21 37.25Z"></path>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============ Nav ============ -->
+<nav class="nav" aria-label="Main">
+  <div class="wrap nav-inner">
+    <a class="brand" href="index.html" aria-label="RSpice home">
+      <span class="logo-tile"><svg aria-hidden="true"><use href="#run-m"></use></svg></span>
+      <svg class="wm" aria-label="RSpice"><use href="#wordmark"></use></svg>
+    </a>
+    <div class="nav-links">
+      <a href="index.html#product">Product</a>
+      <a href="index.html#analyses">Analyses</a>
+      <a href="parity.html">Validation</a>
+      <a href="index.html#pricing">Pricing</a>
+      <a href="docs.html">Docs</a>
+    </div>
+    <div class="nav-cta">
+      <button type="button" class="icon-toggle js-theme-flip" aria-label="Toggle light/dark theme">
+        <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"></circle><path d="M8 1.2v1.8M8 13v1.8M1.2 8H3M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"></path></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 9.5A6 6 0 0 1 6.5 2.5a6 6 0 1 0 7 7z"></path></svg>
+      </button>
+      <a class="btn btn-accent btn-sm" href="download.html">Download</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+  <div class="wrap">
+    <div class="chg-col">
+      <header class="page-head-simple">
+        <p class="kicker"><span class="tick">▶</span>&nbsp; Changelog</p>
+        <h1 id="h-chg">What’s new</h1>
+        <p class="page-sub">Every release is diffed against the oracle suite before it
+        ships. Entries are grouped by what changed, not by how it felt.</p>
+      </header>
+
+      <article class="ver" id="v1-0-0" aria-labelledby="vh-1-0-0">
+        <header class="ver-head">
+          <h2 id="vh-1-0-0">v1.0.0</h2>
+          <a class="ver-anchor" href="#v1-0-0">#v1-0-0</a>
+          <span class="tag">release target</span>
+          <span class="ver-date">in progress on main</span>
+        </header>
+
+        <div class="chg-group">
+          <span class="chg-chip add">Added</span>
+          <ul class="chg-list">
+            <li><strong>SFFM and AM transient sources</strong> — single-frequency FM and
+            amplitude-modulated stimuli, point-for-point with ngspice-46.</li>
+            <li><strong>.TF transfer-function front door</strong> — small-signal gain,
+            input and output impedance from one dot-command, ngspice-identical output.</li>
+            <li><strong>.if / .elseif / .else / .endif</strong> netlist conditionals in
+            the parser.</li>
+            <li><strong>gauss / agauss Monte Carlo draws</strong> — process and mismatch
+            parameter distributions, seeded and exactly reproducible.</li>
+          </ul>
+        </div>
+
+        <div class="chg-group">
+          <span class="chg-chip fix">Fixed</span>
+          <ul class="chg-list">
+            <li><strong>Inductor transient companion model</strong> — RL and RLC decks
+            now match closed-form responses on the full time grid.</li>
+            <li><strong>VBIC excess-phase transient</strong> — pinned to an ngspice-46
+            oracle waveform in the regression suite.</li>
+          </ul>
+        </div>
+
+        <div class="chg-group">
+          <span class="chg-chip perf">Performance</span>
+          <ul class="chg-list">
+            <li><strong>Sparse LU factorization</strong> tuned on the matrix hot
+            path.</li>
+            <li><strong>Parallel AC sweeps</strong> — frequency points fan out across
+            cores.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="ver" id="v0-9-0" aria-labelledby="vh-0-9-0">
+        <header class="ver-head">
+          <h2 id="vh-0-9-0">v0.9.0</h2>
+          <a class="ver-anchor" href="#v0-9-0">#v0-9-0</a>
+          <span class="tag">early access</span>
+          <time class="ver-date" datetime="2026-02-18">2026-02-18</time>
+        </header>
+        <div class="chg-group">
+          <ul class="chg-list" style="margin-top:0;">
+            <li><strong>Core analyses</strong> — .op, .dc, .ac, .tran, and .noise on the
+            MNA engine, validated against ngspice-46.</li>
+            <li><strong>LTspice .raw reader</strong> — pull existing simulation results
+            in for waveform comparison.</li>
+            <li><strong>Native + WebAssembly builds</strong> from a single Rust codebase
+            — same numerics on both targets.</li>
+          </ul>
+        </div>
+      </article>
+
+      <p class="small-print">v1.0.0 items describe the launch target; dates are
+      placeholders until release. the commit-level history lives in the
+      <a href="https://github.com/JaimeHW/RSpice/commits/main" style="color:var(--text-dim);">repo log</a>.</p>
+    </div>
+  </div>
+</main>
+
+<!-- ============ Footer ============ -->
+<footer class="site tight">
+  <div class="wrap">
+    <div class="foot-inner">
+      <a class="brand" href="index.html" aria-label="RSpice home">
+        <span class="logo-tile" style="width:24px;height:24px;"><svg aria-hidden="true"><use href="#run-m"></use></svg></span>
+        <svg class="wm" style="height:16px;width:52px;" aria-label="RSpice"><use href="#wordmark"></use></svg>
+      </a>
+      <div class="foot-links">
+        <a href="docs.html">Docs</a>
+        <a href="changelog.html">Changelog</a>
+        <a href="parity.html">Validation</a>
+        <a href="play/">Playground</a>
+        <a href="https://github.com/JaimeHW/RSpice/issues">Contact</a>
+        <a href="https://github.com/JaimeHW/RSpice">GitHub</a>
+      </div>
+    </div>
+    <p class="foot-fine">© 2026 RSpice · IBM Plex type under the SIL Open Font License ·
+    the mark is an op-amp; the figures on this site are solved, not sketched</p>
+  </div>
+</footer>
+
+<script src="assets/site.js" defer></script>
+</body>
+</html>

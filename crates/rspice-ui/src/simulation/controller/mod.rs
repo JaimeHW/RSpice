@@ -158,6 +158,16 @@ impl SimulationController {
     fn start_simulation(&mut self, state: &mut AppState) {
         log::info!("start_simulation called");
 
+        // The UI disables its Run affordances on an empty run set; this
+        // backstops the direct trigger paths (tuner re-sim, automation).
+        if state.sim_setup.enabled.is_empty() {
+            state.push_sim_message(ConsoleMessage::warning(
+                "Nothing in the run set — tick an analysis in the Simulate view".to_string(),
+            ));
+            state.simulation.status = "Run set is empty".to_string();
+            return;
+        }
+
         self.pending_analyses.clear();
         let plan = match self.build_analysis_plan(state) {
             Ok(plan) => plan,
