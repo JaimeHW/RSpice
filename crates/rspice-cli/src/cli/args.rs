@@ -105,6 +105,11 @@ pub struct RunArgs {
     #[arg(long)]
     pub meas: bool,
 
+    /// Exit 0 even when .MEAS measurements fail (default: failed
+    /// measurements exit with code 3)
+    #[arg(long)]
+    pub allow_failed_meas: bool,
+
     /// Show progress bar with ETA for transient simulation
     #[arg(long)]
     pub progress: bool,

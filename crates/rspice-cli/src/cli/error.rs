@@ -16,6 +16,9 @@ pub enum ExitCode {
     GeneralError = 1,
     /// Misuse of command (invalid arguments)
     MisuseOfCommand = 2,
+    /// Verification failure: the simulation ran, but a .MEAS check failed
+    /// or results did not match the golden reference
+    VerificationFailed = 3,
     /// Input file not found
     InputNotFound = 66,
     /// Input file format error
@@ -64,6 +67,9 @@ pub enum CliError {
         analysis: Option<String>,
     },
 
+    #[error("Verification failed: {message}")]
+    VerificationFailed { message: String },
+
     #[error("Failed to write output: {path}")]
     OutputError {
         path: PathBuf,
@@ -105,6 +111,7 @@ impl CliError {
             CliError::InputReadError { .. } => ExitCode::IoError,
             CliError::ParseError { .. } => ExitCode::InputError,
             CliError::SimulationError { .. } => ExitCode::GeneralError,
+            CliError::VerificationFailed { .. } => ExitCode::VerificationFailed,
             CliError::OutputError { .. } => ExitCode::IoError,
             CliError::OutputSerializationError { .. } => ExitCode::InternalError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,

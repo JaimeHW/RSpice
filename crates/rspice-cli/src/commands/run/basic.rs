@@ -729,6 +729,13 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
         }
     }
 
+    if results.is_empty() && !temperatures.is_empty() {
+        return Err(CliError::simulation_error_in(
+            "no temperature point converged",
+            "Temperature Sweep",
+        ));
+    }
+
     if !ctx.quiet {
         println!("\n┌─────────────────────────────────────┐");
         println!("│     Temperature Sweep Summary       │");

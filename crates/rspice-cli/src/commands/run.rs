@@ -356,6 +356,24 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         return Err(CliError::simulation_error(err_msg));
     }
 
+    // The simulation itself succeeded; failed .MEAS checks still fail the
+    // process so automation can trust the exit status.
+    let failed_measurements: Vec<&str> = reports
+        .iter()
+        .flat_map(|report| &report.measurements)
+        .filter(|meas| !meas.passed)
+        .map(|meas| meas.name.as_str())
+        .collect();
+    if !failed_measurements.is_empty() && !args.allow_failed_meas {
+        return Err(CliError::VerificationFailed {
+            message: format!(
+                "{} measurement(s) failed: {}",
+                failed_measurements.len(),
+                failed_measurements.join(", ")
+            ),
+        });
+    }
+
     Ok(())
 }
 
