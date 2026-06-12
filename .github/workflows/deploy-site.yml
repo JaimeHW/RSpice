@@ -1,0 +1,64 @@
+# Deliberate site deploys. main is a shared live-dev branch, so the site
+# never deploys per-push: run this manually (gh workflow run deploy-site)
+# or push a site-v* tag. The build is tools/deploy/build_site.sh — both
+# wasm bundles compiled from the dispatched ref, bundle-integrity gates,
+# and a live headless solve of the playground; nothing publishes unless
+# every gate passes. Publishing force-replaces the gh-pages tree, which
+# is the Cloudflare Pages production branch — Cloudflare picks the push
+# up and serves it within about a minute. Rollback: re-run on an older
+# ref. The branch stays single-commit (force_orphan) so multi-MB wasm
+# bundles never accrete history.
+name: Deploy site
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["site-v*"]
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  deploy:
+    name: Build, verify, publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
+        run: |
+          VERSION=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | head -1 | cut -d'"' -f2)
+          echo "Cargo.lock pins wasm-bindgen $VERSION"
+          DIST="wasm-bindgen-${VERSION}-x86_64-unknown-linux-musl"
+          if curl -sSfL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${VERSION}/${DIST}.tar.gz" | tar -xz; then
+            mv "${DIST}/wasm-bindgen" "$HOME/.cargo/bin/"
+          else
+            echo "prebuilt download failed — building from source"
+            cargo install wasm-bindgen-cli --version "$VERSION" --locked
+          fi
+          wasm-bindgen --version
+
+      - name: Build and verify (_site)
+        run: bash tools/deploy/build_site.sh
+
+      - name: Publish to gh-pages (Cloudflare Pages production branch)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./_site
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: "deploy ${{ github.sha }}"
