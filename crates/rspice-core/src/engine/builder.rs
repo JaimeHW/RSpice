@@ -119,6 +119,24 @@ fn is_magnetic_core_model_type(model_type: &str) -> bool {
         || model_type.eq_ignore_ascii_case("JILESATHERTON")
 }
 
+/// MOS model levels with a native bulk-MOSFET implementation: Berkeley
+/// MOS1/MOS2/MOS6 (1/2/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
+/// 55-57 (BSIM3-SOI) are routed to dedicated SOI devices before this check
+/// applies.
+fn native_bulk_mos_level(level: i32) -> bool {
+    matches!(level, 1 | 2 | 4 | 5 | 6)
+}
+
+/// Diagnostic descriptor for well-known MOS model levels.
+fn mos_level_descriptor(level: i32) -> String {
+    match level {
+        3 => "LEVEL=3 (MOS3)".to_string(),
+        8 | 49 | 53 => format!("LEVEL={level} (BSIM3v3)"),
+        14 | 54 => format!("LEVEL={level} (BSIM4)"),
+        _ => format!("LEVEL={level}"),
+    }
+}
+
 impl Engine {
     /// Build circuit from netlist (flattens subcircuits first)
     pub fn build_circuit(&self, netlist: &Netlist) -> Result<CircuitData, SimulationError> {
@@ -172,6 +190,10 @@ impl Engine {
                 );
             }
         }
+
+        // Deduplicates the loud simplified-MOS warnings to one per model card.
+        let mut simplified_mos_warned: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         for element in &flat_elements {
             match &element.kind {
@@ -691,6 +713,50 @@ impl Engine {
                                 }
                                 _ => {}
                             }
+                        }
+                    }
+
+                    // Levels without a native implementation must not fall
+                    // through to the simplified short-channel approximation
+                    // silently: a BSIM3/BSIM4 card evaluated with ~15 honored
+                    // parameters yields plausible-looking but wrong currents,
+                    // which is strictly worse than an error. LEVEL=3 remains
+                    // runnable with a warning — the approximation is of the
+                    // same empirical family and the vendored ngspice MOS3
+                    // oracle deck passes within suite tolerance — while
+                    // BSIM-class levels require an explicit
+                    // `.options allow_simplified_mos=1` opt-in.
+                    if !native_bulk_mos_level(level) {
+                        let descriptor = mos_level_descriptor(level);
+                        if level == 3 {
+                            if simplified_mos_warned.insert(model.clone()) {
+                                log::warn!(
+                                    "MOSFET model '{model}' (LEVEL=3): no native MOS3 \
+                                     implementation; using a simplified short-channel \
+                                     approximation. MOS3-specific parameters (THETA, ETA, \
+                                     KAPPA, NFS, VMAX, XJ, DELTA) are not honored."
+                                );
+                            }
+                        } else if netlist.options.allow_simplified_mos == Some(true) {
+                            if simplified_mos_warned.insert(model.clone()) {
+                                log::warn!(
+                                    "MOSFET model '{model}' ({descriptor}): not implemented \
+                                     natively; running the simplified short-channel \
+                                     approximation because `.options allow_simplified_mos` \
+                                     is set. Results will NOT match {descriptor}."
+                                );
+                            }
+                        } else {
+                            return Err(SimulationError::Circuit(format!(
+                                "MOSFET '{}': model '{}' requests {} which has no native \
+                                 implementation. Supported levels: 1, 2, 6 (Berkeley \
+                                 MOS1/MOS2/MOS6), 4/5 (legacy BSIM1/BSIM2), 55-57 \
+                                 (BSIM3-SOI FD/DD/PD). For BSIM4 accuracy use the bundled \
+                                 Verilog-A model (models/veriloga/bsim4.va); to knowingly \
+                                 run a simplified ~15-parameter approximation instead, set \
+                                 `.options allow_simplified_mos=1`.",
+                                element.name, model, descriptor
+                            )));
                         }
                     }
 

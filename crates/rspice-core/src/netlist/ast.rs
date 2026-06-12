@@ -1169,6 +1169,12 @@ pub struct SimulationOptions {
     /// before parameter evaluation regardless of where the `.options` line
     /// appears; Monte-Carlo drivers derive per-run streams from it.
     pub seed: Option<u64>,
+    /// Accept MOS model levels with no native implementation (e.g. BSIM3
+    /// LEVEL=8/49, BSIM4 LEVEL=14/54) and run them on the simplified
+    /// short-channel approximation instead of rejecting the deck. The
+    /// approximation ignores nearly the entire BSIM parameter set, so this
+    /// is opt-in; results will not match the named model.
+    pub allow_simplified_mos: Option<bool>,
 }
 
 impl SimulationOptions {
@@ -1229,6 +1235,9 @@ impl SimulationOptions {
         }
         if other.seed.is_some() {
             self.seed = other.seed;
+        }
+        if other.allow_simplified_mos.is_some() {
+            self.allow_simplified_mos = other.allow_simplified_mos;
         }
     }
 }

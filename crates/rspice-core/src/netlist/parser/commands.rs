@@ -472,6 +472,15 @@ pub(super) fn parse_options_command(
                 let method = expect_ident(stream, line_num)?;
                 options.method = Some(method.to_uppercase());
             }
+            "ALLOW_SIMPLIFIED_MOS" | "ALLOWSIMPLIFIEDMOS" => {
+                // Bare flag enables; an explicit value of 0 disables.
+                let enabled = if has_equals {
+                    expect_value(stream, line_num, params)? != 0.0
+                } else {
+                    true
+                };
+                options.allow_simplified_mos = Some(enabled);
+            }
             _ => {
                 // Unknown option: allow bare flags; consume value only when explicitly assigned.
                 if has_equals

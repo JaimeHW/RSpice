@@ -2,6 +2,12 @@ check model binning
 
 * (exec-spice "ngspice -b %s")
 
+* This deck exercises binned-model *selection* (LMIN/LMAX/WMIN/WMAX), not
+* BSIM4 physics. RSpice has no native LEVEL=54 model and rejects such cards
+* by default; the opt-in below runs them on the simplified approximation,
+* which is sufficient for the threshold-selection checks here.
+.options allow_simplified_mos=1
+
 ix1  0 1       dc=5uA
 mx1  1 1 0 0   nmos0v7 l=5u w=5u
 
