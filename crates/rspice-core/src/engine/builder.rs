@@ -13,13 +13,15 @@ use crate::{CircuitData, Netlist};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "veriloga")]
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+use std::io::Write;
 #[cfg(feature = "veriloga")]
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 use std::time::{Duration, Instant};
 
 mod model_resolution;
