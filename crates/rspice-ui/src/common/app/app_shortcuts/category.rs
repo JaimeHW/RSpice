@@ -8,17 +8,21 @@ pub(crate) enum ShortcutCategory {
     Tools,
     ComponentPlacement,
     Transform,
+    Simulation,
+    Navigation,
     General,
 }
 
 impl ShortcutCategory {
-    pub(crate) const ALL: [ShortcutCategory; 7] = [
+    pub(crate) const ALL: [ShortcutCategory; 9] = [
         ShortcutCategory::File,
         ShortcutCategory::Edit,
         ShortcutCategory::View,
         ShortcutCategory::Tools,
         ShortcutCategory::ComponentPlacement,
         ShortcutCategory::Transform,
+        ShortcutCategory::Simulation,
+        ShortcutCategory::Navigation,
         ShortcutCategory::General,
     ];
 
@@ -30,6 +34,8 @@ impl ShortcutCategory {
             ShortcutCategory::Tools => "Tools",
             ShortcutCategory::ComponentPlacement => "Component Placement",
             ShortcutCategory::Transform => "Transform",
+            ShortcutCategory::Simulation => "Simulation",
+            ShortcutCategory::Navigation => "Navigation",
             ShortcutCategory::General => "General",
         }
     }
@@ -57,6 +63,7 @@ impl ShortcutCategory {
             ShortcutCategory::Tools => &[
                 ShortcutCommand::ToolSelect,
                 ShortcutCommand::ToolWire,
+                ShortcutCommand::ToolLabel,
                 ShortcutCommand::ToolProbe,
             ],
             ShortcutCategory::ComponentPlacement => &[
@@ -75,10 +82,28 @@ impl ShortcutCategory {
                 ShortcutCommand::MirrorSelectionHorizontal,
                 ShortcutCommand::MirrorSelectionVertical,
             ],
+            ShortcutCategory::Simulation => &[
+                ShortcutCommand::RunSimulation,
+                ShortcutCommand::StopSimulation,
+                ShortcutCommand::RunChecks,
+            ],
+            ShortcutCategory::Navigation => &[
+                ShortcutCommand::ZoomIn,
+                ShortcutCommand::ZoomOut,
+                ShortcutCommand::ZoomFit,
+                ShortcutCommand::Zoom100,
+                ShortcutCommand::NextWorkspaceTab,
+                ShortcutCommand::DescendIntoSelected,
+                ShortcutCommand::AscendHierarchy,
+                ShortcutCommand::FocusDesignSearch,
+                ShortcutCommand::FocusCellSearch,
+            ],
             ShortcutCategory::General => &[
                 ShortcutCommand::OpenPropertiesEditor,
                 ShortcutCommand::EscapeCancel,
                 ShortcutCommand::ShowShortcutsHelp,
+                ShortcutCommand::OpenPreferences,
+                ShortcutCommand::OpenCommandPalette,
             ],
         }
     }

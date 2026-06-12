@@ -15,6 +15,12 @@ fn shortcut_help_row(command: ShortcutCommand) -> (&'static str, &'static str) {
     (command.shortcut_string(), command.display_name())
 }
 
+fn shortcut_row_matches(command: ShortcutCommand, filter: &str) -> bool {
+    filter.is_empty()
+        || command.display_name().to_lowercase().contains(filter)
+        || command.shortcut_string().to_lowercase().contains(filter)
+}
+
 impl RSpiceApp {
     pub(super) fn render_about_dialog(&mut self, ctx: &Context) {
         if !self.state.dialogs.about {
@@ -113,14 +119,51 @@ impl RSpiceApp {
             return;
         }
 
+        // Count against the filter as entered last frame — immediate mode
+        // corrects the hint one frame after each keystroke.
+        let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();
+        let total: usize = ShortcutCategory::ALL
+            .iter()
+            .map(|c| c.commands().len())
+            .sum();
+        let shown: usize = ShortcutCategory::ALL
+            .iter()
+            .flat_map(|c| c.commands())
+            .filter(|c| shortcut_row_matches(**c, &filter))
+            .count();
+        let hint = format!("{shown} of {total} shortcuts");
+
+        let filter_text = &mut self.state.dialogs.shortcuts_filter;
         let choice = Dialog::new("Help", "Keyboard shortcuts", "Close")
             .size(DialogSize::Md)
+            .hint(&hint)
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
+
+                ui.add(
+                    egui::TextEdit::singleline(filter_text)
+                        .hint_text("Filter — try 'mirror' or 'zoom'")
+                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .desired_width(f32::INFINITY),
+                );
+                let filter = filter_text.trim().to_lowercase();
+
                 ui.spacing_mut().item_spacing.y = 0.0;
+                let mut any_shown = false;
 
                 for category in ShortcutCategory::ALL {
+                    let commands: Vec<_> = category
+                        .commands()
+                        .iter()
+                        .copied()
+                        .filter(|c| shortcut_row_matches(*c, &filter))
+                        .collect();
+                    if commands.is_empty() {
+                        continue;
+                    }
+                    any_shown = true;
+
                     ui.add_space(8.0);
                     let mut header = egui::text::LayoutJob::default();
                     header.append(
@@ -136,8 +179,8 @@ impl RSpiceApp {
                     ui.label(header);
                     ui.add_space(2.0);
 
-                    for command in category.commands() {
-                        let (shortcut, display_name) = shortcut_help_row(*command);
+                    for command in commands {
+                        let (shortcut, display_name) = shortcut_help_row(command);
                         // Description left, key chord right in mono — the
                         // kv pattern with the value rendered as a key cap.
                         let (rect, _) = ui.allocate_exact_size(
@@ -180,10 +223,20 @@ impl RSpiceApp {
                         );
                     }
                 }
+
+                if !any_shown {
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("nothing matches — clear the filter")
+                            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                            .color(c.text_faint),
+                    );
+                }
             });
 
         if choice != DialogChoice::None {
             self.state.dialogs.shortcuts_help = false;
+            self.state.dialogs.shortcuts_filter.clear();
         }
     }
 }

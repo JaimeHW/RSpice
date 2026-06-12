@@ -80,6 +80,8 @@ pub struct DialogState {
     pub about: bool,
     /// Shortcuts help dialog
     pub shortcuts_help: bool,
+    /// Shortcuts help filter text — nobody reads 45 unfiltered rows
+    pub shortcuts_filter: String,
     /// New Cell creation dialog
     pub new_cell_dialog: bool,
     /// New Cell name input
