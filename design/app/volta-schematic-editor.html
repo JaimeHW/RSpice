@@ -610,16 +610,16 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
       <svg class="schem" viewBox="0 0 1180 360">
         <rect x="0" y="0" width="1180" height="360" fill="url(#griddots)"></rect>
         <text class="empty-1" x="590" y="160" text-anchor="middle">Empty schematic</text>
-        <text class="empty-2" x="590" y="186" text-anchor="middle">Pick a part from the left panel, or press Shift+R · C · Shift+L · V · G to place one</text>
+        <text class="empty-2" x="590" y="186" text-anchor="middle">Pick a part from the left panel, or press Shift+R · C · L · V · G to place one</text>
         <text class="empty-2" x="590" y="206" text-anchor="middle">File ▸ Open example loads a ready-to-run circuit</text>
       </svg>
     </div>
   </div>
   <p class="note">
-    Reconciliation <span class="tag spec">spec</span>: the shipped copy reads “press R · C · L · V · G”,
-    but the shipped bindings are <kbd>Shift+R</kbd> resistor, <kbd>C</kbd> capacitor, <kbd>Shift+L</kbd>
-    inductor, <kbd>V</kbd> source, <kbd>G</kbd> ground (<kbd>R</kbd> is rotate, <kbd>L</kbd> would
-    collide). The copy shown here matches the bindings; fix the string, not the keymap.
+    Reconciliation <span class="tag spec">spec</span>: the shipped copy read “press R · C · L · V · G”,
+    but bare <kbd>R</kbd> rotates — the resistor is <kbd>Shift+R</kbd>. The other four keys were right
+    (<kbd>C</kbd> capacitor, <kbd>L</kbd> inductor, <kbd>V</kbd> source, <kbd>G</kbd> ground).
+    The copy shown here matches the bindings; fix the string, not the keymap.
   </p>
 </section>
 
@@ -631,7 +631,7 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
   <table class="spec">
     <tr><th>Group</th><th>Bindings</th></tr>
     <tr><td>tools</td><td><kbd>S</kbd> select · <kbd>W</kbd> wire · <kbd>N</kbd> net label · <kbd>P</kbd> probe · <kbd>Esc</kbd> cancel/clear</td></tr>
-    <tr><td>place</td><td><kbd>Shift+R</kbd> resistor · <kbd>C</kbd> capacitor · <kbd>Shift+L</kbd> inductor · <kbd>G</kbd> ground · <kbd>V</kbd> v-source · <kbd>I</kbd> i-source · <kbd>D</kbd> diode · <kbd>M</kbd> NMOS · <kbd>Q</kbd> NPN</td></tr>
+    <tr><td>place</td><td><kbd>Shift+R</kbd> resistor · <kbd>C</kbd> capacitor · <kbd>L</kbd> inductor · <kbd>G</kbd> ground · <kbd>V</kbd> v-source · <kbd>I</kbd> i-source · <kbd>D</kbd> diode · <kbd>M</kbd> NMOS · <kbd>Q</kbd> NPN</td></tr>
     <tr><td>transform</td><td><kbd>R</kbd> rotate 90° · <kbd>H</kbd> mirror horizontal · <kbd>Y</kbd> mirror vertical</td></tr>
     <tr><td>edit</td><td><kbd>E</kbd> properties · <kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Shift+Z</kbd> undo/redo · <kbd>Ctrl+X</kbd>/<kbd>C</kbd>/<kbd>V</kbd> clipboard · <kbd>Ctrl+A</kbd> all</td></tr>
     <tr><td>view</td><td><kbd>F</kbd> fit · <kbd>Ctrl+0</kbd> 100 % · <kbd>Ctrl++</kbd>/<kbd>Ctrl+-</kbd> zoom · wheel = cursor-centered zoom · middle-drag / <kbd>Shift</kbd>+drag = pan</td></tr>
