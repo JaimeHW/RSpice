@@ -217,6 +217,36 @@ fn timeout_exits_one_twenty_four() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The --summary JSON verdict agrees with the exit code.
+#[test]
+fn summary_json_carries_the_verdict() {
+    let dir = test_dir("summary");
+    let deck = dir.join("fail.sp");
+    std::fs::write(&deck, FAILING_MEAS_DECK).expect("write deck");
+    let summary = dir.join("summary.json");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--summary",
+        summary.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(3));
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&summary).expect("summary file"))
+            .expect("valid json");
+    assert_eq!(json["passed"], false, "summary verdict must match exit code");
+    assert_eq!(json["tool"]["name"], "rspice");
+    assert_eq!(
+        json["runs"][0]["measurements"][0]["passed"], false,
+        "failed measurement recorded: {json}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Failed measurements still land in report files alongside the bad exit
 /// status, so CI dashboards and shell checks agree.
 #[test]

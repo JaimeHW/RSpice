@@ -199,6 +199,53 @@ fn missing_golden_variable_fails() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// --bless bootstraps a missing golden and accepts drift on demand.
+#[test]
+fn bless_updates_the_golden_file() {
+    let dir = test_dir("bless");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    std::fs::write(&result, "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+
+    // Bootstrap: golden does not exist yet.
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            result.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--bless",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(0));
+    assert!(golden.exists(), "--bless must create the golden file");
+
+    // Drift: result changes, bless accepts it, plain compare then passes.
+    std::fs::write(&result, "time,V(OUT)\n0,1.0\n1e-6,2.5\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            result.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--bless",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(0));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            result.to_str().unwrap(),
+            golden.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(0), "blessed golden must now match");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// NaN never matches, including NaN-vs-NaN.
 #[test]
 fn nan_values_fail_comparison() {

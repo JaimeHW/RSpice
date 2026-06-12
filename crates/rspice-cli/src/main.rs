@@ -89,6 +89,7 @@ fn main() -> ExitCode {
                 fail_fast: args.fail_fast,
                 allow_truncated: args.allow_truncated,
                 ignore_missing: args.ignore_missing,
+                bless: args.bless,
             };
             commands::compare::execute(compare_args, cli.verbose, cli.quiet)
         }

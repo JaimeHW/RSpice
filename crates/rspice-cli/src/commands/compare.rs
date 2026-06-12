@@ -30,6 +30,8 @@ pub struct CompareArgs {
     pub allow_truncated: bool,
     /// Tolerate golden variables that are missing from the result
     pub ignore_missing: bool,
+    /// On mismatch (or missing golden), copy the result over the golden file
+    pub bless: bool,
 }
 
 impl Default for CompareArgs {
@@ -44,6 +46,7 @@ impl Default for CompareArgs {
             fail_fast: false,
             allow_truncated: false,
             ignore_missing: false,
+            bless: false,
         }
     }
 }
@@ -98,6 +101,10 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
         });
     }
     if !args.golden.exists() {
+        if args.bless {
+            bless_golden(&args.result, &args.golden, quiet, "no golden file yet")?;
+            return Ok(());
+        }
         return Err(CliError::InputNotFound {
             path: args.golden.clone(),
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "Golden file not found"),
@@ -132,6 +139,9 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
 
     if cmp_result.passed {
         Ok(())
+    } else if args.bless {
+        bless_golden(&args.result, &args.golden, quiet, "differences accepted")?;
+        Ok(())
     } else {
         let mut parts = Vec::new();
         if !cmp_result.differences.is_empty() {
@@ -149,6 +159,23 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
             message: format!("comparison failed: {}", parts.join("; ")),
         })
     }
+}
+
+/// Promote the result file to the new golden reference.
+fn bless_golden(
+    result: &std::path::Path,
+    golden: &std::path::Path,
+    quiet: bool,
+    why: &str,
+) -> Result<(), CliError> {
+    std::fs::copy(result, golden).map_err(|e| CliError::OutputError {
+        path: golden.to_path_buf(),
+        source: e,
+    })?;
+    if !quiet {
+        println!("✓ Golden updated ({}): {}", why, golden.display());
+    }
+    Ok(())
 }
 
 /// Waveform data structure for comparison

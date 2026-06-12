@@ -249,6 +249,11 @@ pub struct RunArgs {
     #[arg(long, value_name = "FILE")]
     pub meas_file: Option<PathBuf>,
 
+    /// Write a JSON run summary (tool version, per-run status, measurements,
+    /// verdict) to FILE, or to stdout with `-`
+    #[arg(long, value_name = "FILE")]
+    pub summary: Option<PathBuf>,
+
     // =========================================================================
     // Advanced RF/Analog Analysis Options
     // =========================================================================
@@ -474,6 +479,11 @@ pub struct CompareArgs {
     /// (default: missing variables fail)
     #[arg(long)]
     pub ignore_missing: bool,
+
+    /// Accept the result as the new reference: copy it over the golden
+    /// file when they differ (or when the golden file does not exist yet)
+    #[arg(long)]
+    pub bless: bool,
 }
 
 /// CI/CD report formats

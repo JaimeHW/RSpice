@@ -364,9 +364,31 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let duration = start_time.elapsed().as_secs_f64();
     write_report_files(&reports, &args, verbose)?;
 
+    let failed_measurements: Vec<&str> = reports
+        .iter()
+        .flat_map(|report| &report.measurements)
+        .filter(|meas| !meas.passed)
+        .map(|meas| meas.name.as_str())
+        .collect();
+    let abort_reason = crate::abort::reason();
+    let passed = first_error.is_none()
+        && abort_reason.is_none()
+        && (failed_measurements.is_empty() || args.allow_failed_meas);
+
+    if let Some(ref summary_path) = args.summary {
+        write_run_summary(
+            summary_path,
+            &args,
+            &reports,
+            duration,
+            passed,
+            abort_reason,
+        )?;
+    }
+
     // An abort outranks the per-analysis errors it caused: report files are
     // already on disk, but the exit status says interrupted/timed out.
-    match crate::abort::reason() {
+    match abort_reason {
         Some(crate::abort::AbortReason::Interrupt) => return Err(CliError::Interrupted),
         Some(crate::abort::AbortReason::Timeout) => {
             return Err(CliError::TimedOut {
@@ -386,12 +408,6 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     // The simulation itself succeeded; failed .MEAS checks still fail the
     // process so automation can trust the exit status.
-    let failed_measurements: Vec<&str> = reports
-        .iter()
-        .flat_map(|report| &report.measurements)
-        .filter(|meas| !meas.passed)
-        .map(|meas| meas.name.as_str())
-        .collect();
     if !failed_measurements.is_empty() && !args.allow_failed_meas {
         return Err(CliError::VerificationFailed {
             message: format!(
@@ -402,6 +418,61 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         });
     }
 
+    Ok(())
+}
+
+/// Write the one-artifact JSON contract for automation: tool identity,
+/// per-run status with every measurement, and the overall verdict that the
+/// exit code will reflect. `-` writes to stdout.
+fn write_run_summary(
+    path: &std::path::Path,
+    args: &RunArgs,
+    reports: &[SimulationReport],
+    duration: f64,
+    passed: bool,
+    abort_reason: Option<crate::abort::AbortReason>,
+) -> Result<(), CliError> {
+    let json = serde_json::json!({
+        "tool": {
+            "name": "rspice",
+            "version": env!("CARGO_PKG_VERSION"),
+        },
+        "netlist": args.input.display().to_string(),
+        "duration_secs": duration,
+        "passed": passed,
+        "aborted": abort_reason.map(|reason| match reason {
+            crate::abort::AbortReason::Interrupt => "interrupt",
+            crate::abort::AbortReason::Timeout => "timeout",
+        }),
+        "runs": reports.iter().map(|report| {
+            serde_json::json!({
+                "name": report.name,
+                "passed": report.passed,
+                "error": report.error,
+                "duration_secs": report.duration_secs,
+                "measurements": report.measurements.iter().map(|meas| {
+                    serde_json::json!({
+                        "name": meas.name,
+                        "value": meas.value,
+                        "passed": meas.passed,
+                        "error": meas.error,
+                    })
+                }).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+    });
+
+    if path.as_os_str() == "-" {
+        match serde_json::to_string_pretty(&json) {
+            Ok(text) => println!("{text}"),
+            Err(e) => eprintln!("Error: failed to serialize run summary: {e}"),
+        }
+        return Ok(());
+    }
+
+    let text = serde_json::to_string_pretty(&json)
+        .map_err(|e| CliError::output_json_error(path, e))?;
+    std::fs::write(path, text + "\n").map_err(|e| CliError::output_error(path, e))?;
     Ok(())
 }
 
