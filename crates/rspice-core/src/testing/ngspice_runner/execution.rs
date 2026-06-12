@@ -286,6 +286,36 @@ impl TestRunner {
             },
         };
 
+        // Expected-diagnostic decks invert the convergence outcome: the
+        // adjudicated result is a clean convergence failure (the reference
+        // simulator fails these decks too), and converging instead demands
+        // re-adjudication of the contract.
+        if matches!(contract, Some(ValidationContract::ExpectedUnsolvable)) {
+            match &final_result.error {
+                Some(message) if message.contains("Convergence failed") => {
+                    log::info!(
+                        "'{}' failed as adjudicated (expected_unsolvable): {message}",
+                        final_result.name
+                    );
+                    final_result.passed = true;
+                    final_result.error = None;
+                    final_result.mismatches.clear();
+                }
+                Some(_) => {
+                    // A non-convergence failure (parse error, panic,
+                    // timeout) is a genuine defect even on an unsolvable
+                    // deck; keep it failing as reported.
+                }
+                None => {
+                    final_result.passed = false;
+                    final_result.error = Some(
+                        "deck is adjudicated unsolvable (expected_unsolvable contract) but every analysis converged -- re-adjudicate the contract"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+
         if final_result.duration_ms > self.config.max_time_per_test_ms {
             final_result.passed = false;
             let timeout_msg = format!(

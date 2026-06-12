@@ -1534,7 +1534,11 @@ fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
 
     for (rel, mode) in &manifest {
         let deck_path = tests_dir.join(rel);
-        if mode == "scripted_control" {
+        // Smoke is the only mode that asserts the absence of a comparable
+        // oracle; the other contracts (scripted_control, locked_grid,
+        // measures, expected_unsolvable) describe HOW an existing reference
+        // or expected outcome gates the deck.
+        if mode != "smoke" {
             continue;
         }
 
@@ -1542,6 +1546,25 @@ fn test_validation_manifest_only_covers_decks_without_direct_oracles() {
             !deck_has_reference_output(&deck_path),
             "validation-manifest entry '{}' is unnecessary because the deck already has a checked-in direct oracle",
             rel
+        );
+    }
+}
+
+#[test]
+fn test_measures_manifest_entries_have_gate_sidecars() {
+    let tests_dir = get_tests_dir();
+    let manifest = load_validation_manifest();
+
+    for (rel, mode) in &manifest {
+        if mode != "measures" {
+            continue;
+        }
+        let sidecar = tests_dir.join(rel).with_extension("gates.tsv");
+        assert!(
+            sidecar.is_file(),
+            "validation-manifest marks '{}' as measures, but '{}' is missing",
+            rel,
+            sidecar.display()
         );
     }
 }

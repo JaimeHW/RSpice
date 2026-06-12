@@ -230,8 +230,31 @@ impl AbortSignal for DeadlineAbort {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ValidationContract {
+    /// Execution-only coverage: the deck must parse, build, and complete
+    /// its analyses; no comparable reference output exists.
     Smoke,
+    /// Upstream deck whose validation lives in a `.control` script RSpice
+    /// does not interpret.
     ScriptedControl,
+    /// The deck's operating point is genuinely unsolvable (e.g., a
+    /// certified right-half-plane instability that the reference
+    /// simulator also fails); the expected outcome is a clean convergence
+    /// diagnostic, and converging would itself demand re-adjudication.
+    ExpectedUnsolvable,
+    /// Transient comparison replays the reference's recorded time grid as
+    /// the accepted-step sequence: physics parity judged on equal grids,
+    /// the standard for waveforms whose pointwise free-run values encode
+    /// the producing binary's adaptive-step choices rather than circuit
+    /// behavior.
+    LockedGrid,
+    /// Transient comparison gates on extracted engineering measures
+    /// (crossing times, settled levels, peaks) from a sidecar
+    /// `<deck>.gates.tsv`, computed identically from the reference table
+    /// and the simulation. The standard for waveforms whose raw tail
+    /// samples are chaotic amplifications below solver tolerance — the
+    /// reference simulator's own answers move tens of percent under step
+    /// refinement there.
+    Measures,
 }
 
 impl ValidationContract {
@@ -239,6 +262,9 @@ impl ValidationContract {
         match token.trim() {
             "smoke" => Some(Self::Smoke),
             "scripted_control" => Some(Self::ScriptedControl),
+            "expected_unsolvable" => Some(Self::ExpectedUnsolvable),
+            "locked_grid" => Some(Self::LockedGrid),
+            "measures" => Some(Self::Measures),
             _ => None,
         }
     }
