@@ -1,7 +1,7 @@
 # Nightly depth: the full release-mode test suite, the ngspice conformance
-# report (non-gating until the conformance program reaches 113/113 — the
-# pass-rate log is the artifact), and a release build of the shipped
-# binaries on Windows to catch LTO/release-only breakage.
+# run gated at its recorded watermark (the pass-rate log is the artifact),
+# and a release build of the shipped binaries on Windows to catch
+# LTO/release-only breakage.
 name: Nightly
 
 on:
@@ -40,15 +40,20 @@ jobs:
           -- --nocapture --test-threads 1 | tee conformance.log
       - name: Conformance ratchet
         # Accuracy can only move forward: fail the nightly when the full
-        # suite reports more failing decks than the recorded watermark
-        # (105/113 passing in release). Raise the floor as decks are fixed;
-        # never lower it.
+        # suite reports more failing decks than the recorded watermark.
+        # Never lower the floor. Watermark 2 as measured 2026-06-12: the
+        # two fourbitadder decks (general + transient), a regression
+        # bisected to 5f4f9e41 with a fix in flight — ratchet to 0 when it
+        # lands. The grep anchors on the aggregate row of
+        # test_full_ngspice_suite_summary and pins the deck count, so a
+        # shrinking test universe fails the gate instead of faking
+        # progress; bump the count deliberately when decks are added.
         env:
-          MAX_FAILING: "8"
+          MAX_FAILING: "2"
         run: |
-          failed=$(grep -E 'Test Summary: 113 total' conformance.log | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+' | tail -1)
+          failed=$(grep -E '^TOTAL +113 tests' conformance.log | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+' | tail -1)
           if [ -z "$failed" ]; then
-            echo "full-suite summary line missing from conformance.log" >&2
+            echo "full-suite aggregate row (TOTAL ... 113 tests) missing from conformance.log" >&2
             exit 1
           fi
           echo "failing decks: $failed (watermark allows <= $MAX_FAILING)"

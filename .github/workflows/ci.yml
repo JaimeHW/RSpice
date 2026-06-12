@@ -1,7 +1,7 @@
 # Per-commit gate: build the workspace warning-clean and run the fast test
 # tier on Linux and Windows. The ngspice conformance suites are excluded
-# here (they gate in nightly.yml until the conformance program reaches
-# 113/113); the live-oracle audit is `#[ignore]` and never runs in CI.
+# here for runtime; they gate in nightly.yml against the conformance
+# watermark. The live-oracle audit is `#[ignore]` and never runs in CI.
 name: CI
 
 on:
