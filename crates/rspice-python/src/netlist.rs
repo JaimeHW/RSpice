@@ -76,6 +76,7 @@ fn describe_analysis(analysis: &AnalysisCommand) -> String {
             stop,
             start,
             max_step,
+            uic: _,
         } => {
             let mut out = format!(".tran {step} {stop}");
             if let Some(start) = start {

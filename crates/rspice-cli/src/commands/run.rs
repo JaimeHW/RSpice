@@ -221,6 +221,8 @@ impl<'a> RunContext<'a> {
                 stop,
                 start,
                 max_step,
+                // The engine reads UIC from the netlist's own .TRAN card.
+                uic: _,
             } => basic::run_transient(self, *stop, *step, start.unwrap_or(0.0), *max_step)?,
             AnalysisCommand::Ac {
                 variation,

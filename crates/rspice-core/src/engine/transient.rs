@@ -530,9 +530,28 @@ impl Engine {
             .current_sources
             .set_transient_context(source_step_hint, tstop);
 
+        // `.TRAN ... UIC` skips the operating point: integration starts
+        // from zero everywhere except user-supplied .IC node voltages
+        // (applied below) and per-element IC= values (applied after the
+        // reactive-history seeding), matching ngspice's MODEUIC semantics.
+        let uic_requested = resume.is_none()
+            && netlist.analyses.iter().any(|analysis| {
+                matches!(
+                    analysis,
+                    crate::netlist::AnalysisCommand::Tran { uic: true, .. }
+                )
+            });
+
         // Get DC operating point as initial condition.
-        let (mut solution, initial_solution_mode) =
-            self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?;
+        let (mut solution, initial_solution_mode) = if uic_requested {
+            log::info!("Transient UIC startup: skipping the operating point");
+            (
+                vec![0.0; circuit.matrix_size()],
+                startup::InitialSolutionMode::LinearizedSeed,
+            )
+        } else {
+            self.solve_transient_initial_solution(netlist, &mut circuit, &mut matrix, abort)?
+        };
 
         // Resume: the standard initial-solution machinery above still ran
         // (its device-state priming is wanted), but time, solution, and the
@@ -580,6 +599,25 @@ impl Engine {
         } else {
             0
         };
+        // UIC: per-element IC= values shape the t=0 state itself. Writing
+        // them into the solution here means the recorded first point, the
+        // device priming below, and the reactive-history seeding all see
+        // one consistent state (ngspice holds UIC capacitors at their IC
+        // value at the first instant).
+        if uic_requested {
+            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+                if let Some(ic) = circuit.capacitors.ic[cap_idx] {
+                    let np = cap.pp.row;
+                    let nn = cap.nn.row;
+                    if np != 0 {
+                        let base = if nn != 0 { solution[nn - 1] } else { 0.0 };
+                        solution[np - 1] = base + ic;
+                    } else if nn != 0 {
+                        solution[nn - 1] = -ic;
+                    }
+                }
+            }
+        }
         if circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(&solution);
         }

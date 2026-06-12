@@ -91,12 +91,14 @@ pub(super) fn parse_command(
             let stop = expect_value(stream, line_num, params)?;
             let start = try_value(stream, params);
             let max_step = try_value(stream, params);
+            let uic = consume_uic_keyword(stream);
 
             analyses.push(AnalysisCommand::Tran {
                 step,
                 stop,
                 start,
                 max_step,
+                uic,
             });
         }
         ".MODEL" => {
@@ -1135,4 +1137,16 @@ pub(super) fn parse_func_statement(
     log::debug!("Defined function: {}(...) = {}", func_name, body);
 
     Ok(())
+}
+
+/// Consume a trailing `UIC` keyword on a `.TRAN` card.
+pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
+    skip_commas(stream);
+    if let TokenKind::Ident(word) = &stream.peek().kind
+        && word.eq_ignore_ascii_case("UIC")
+    {
+        stream.advance();
+        return true;
+    }
+    false
 }

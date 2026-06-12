@@ -991,12 +991,15 @@ pub enum AnalysisCommand {
         f2_over_f1: Option<Value>,
     },
 
-    /// Transient analysis: .TRAN tstep tstop [tstart [tmaxstep]]
+    /// Transient analysis: .TRAN tstep tstop [tstart [tmaxstep]] [UIC]
     Tran {
         step: Value,
         stop: Value,
         start: Option<Value>,
         max_step: Option<Value>,
+        /// Skip the operating point and integrate from user initial
+        /// conditions (.IC node voltages, per-element IC= values).
+        uic: bool,
     },
 
     /// Noise analysis: .NOISE V(out) Vsource DEC|LIN|OCT np fstart fstop

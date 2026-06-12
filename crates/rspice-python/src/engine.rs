@@ -348,6 +348,7 @@ impl PyEngine {
                     stop,
                     start,
                     max_step,
+                    uic: _,
                 } => {
                     let tstart = start.unwrap_or(0.0);
                     let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);

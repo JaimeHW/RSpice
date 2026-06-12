@@ -91,11 +91,26 @@ pub fn parse_command(
             let start = try_value(stream, params);
             let max_step = try_value(stream, params);
 
+            let uic = {
+                skip_commas(stream);
+                if let TokenKind::Ident(word) = &stream.peek().kind {
+                    if word.eq_ignore_ascii_case("UIC") {
+                        stream.advance();
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            };
+
             analyses.push(AnalysisCommand::Tran {
                 step,
                 stop,
                 start,
                 max_step,
+                uic,
             });
         }
         ".MODEL" => {
