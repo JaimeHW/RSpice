@@ -407,12 +407,12 @@ pub(super) fn run_transient(
     let pb = if ctx.quiet {
         indicatif::ProgressBar::hidden()
     } else if ctx.show_progress {
-        // The engine does not report per-step progress to the CLI yet, so
-        // show honest elapsed time rather than a bar that never advances.
-        let pb = indicatif::ProgressBar::new_spinner();
+        // The engine reports its completed fraction at the abort-poll
+        // cadence, so this is a real percentage, not a spinner.
+        let pb = indicatif::ProgressBar::new(crate::abort::ProgressAbort::SCALE);
         pb.set_style(
-            indicatif::ProgressStyle::default_spinner()
-                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+            indicatif::ProgressStyle::default_bar()
+                .template("{bar:30.green} {percent:>3}% [{elapsed_precise}] {msg}")
                 .unwrap(),
         );
         pb.set_message(format!(
@@ -497,7 +497,7 @@ pub(super) fn run_transient(
             tstop,
             internal_max_step,
             compression,
-            &crate::abort::ProcessAbort,
+            &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
         match result {
@@ -518,7 +518,7 @@ pub(super) fn run_transient(
             ctx.netlist,
             tstop,
             internal_max_step,
-            &crate::abort::ProcessAbort,
+            &crate::abort::ProgressAbort::new(&pb),
         );
         pb.finish_and_clear();
         result

@@ -51,6 +51,33 @@ impl AbortSignal for ProcessAbort {
     }
 }
 
+/// Abort signal that also drives a progress bar from the engine's
+/// completed-fraction reports.
+pub struct ProgressAbort<'a> {
+    bar: &'a indicatif::ProgressBar,
+}
+
+impl<'a> ProgressAbort<'a> {
+    /// `bar` should have a length of [`Self::SCALE`].
+    pub const SCALE: u64 = 1000;
+
+    pub fn new(bar: &'a indicatif::ProgressBar) -> Self {
+        Self { bar }
+    }
+}
+
+impl AbortSignal for ProgressAbort<'_> {
+    #[inline]
+    fn is_aborted(&self) -> bool {
+        STATE.load(Ordering::Relaxed) != NONE
+    }
+
+    fn observe_progress(&self, fraction: f64) {
+        self.bar
+            .set_position((fraction * Self::SCALE as f64) as u64);
+    }
+}
+
 /// Install the Ctrl-C handler. Safe to call once per process; errors are
 /// ignored (the default handler then terminates the process, which is the
 /// pre-existing behavior).

@@ -56,6 +56,13 @@ pub trait AbortSignal: Send + Sync {
     /// Returns `true` if the simulation should stop immediately.
     /// Implementations must be thread-safe and lock-free for performance.
     fn is_aborted(&self) -> bool;
+
+    /// Observe analysis progress as a completed fraction in `[0, 1]`.
+    ///
+    /// The engine reports at the same low cadence it polls for aborts, so
+    /// implementations may update UI state directly. The default ignores
+    /// progress, keeping existing implementors unchanged.
+    fn observe_progress(&self, _fraction: f64) {}
 }
 
 //=============================================================================

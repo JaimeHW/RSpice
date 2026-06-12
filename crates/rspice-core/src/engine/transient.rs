@@ -947,6 +947,9 @@ impl Engine {
 
             // Abort check - check every ABORT_CHECK_INTERVAL iterations for minimal overhead
             if total_iterations % ABORT_CHECK_INTERVAL == 0 {
+                if tstop > 0.0 {
+                    abort.observe_progress((t / tstop).clamp(0.0, 1.0));
+                }
                 let is_aborted = abort.is_aborted();
                 if total_iterations == 0 {
                     log::debug!("First abort check, is_aborted={}", is_aborted);
