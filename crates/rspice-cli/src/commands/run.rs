@@ -115,13 +115,20 @@ impl<'a> RunContext<'a> {
         if self.args.meas && !self.quiet {
             println!("  Measurement Results ({}, {}):", analysis, results.len());
             for mr in &results {
-                match mr.value {
-                    Some(value) => println!(
+                match (mr.value, mr.passed) {
+                    (Some(value), true) => println!(
                         "    {} = {}",
                         mr.name,
                         crate::report::format_spice_exponent(value)
                     ),
-                    None => println!(
+                    // Evaluated, but missed a declared GOAL.
+                    (Some(value), false) => println!(
+                        "    {} = {} FAILED ({})",
+                        mr.name,
+                        crate::report::format_spice_exponent(value),
+                        mr.error.as_deref().unwrap_or("missed goal")
+                    ),
+                    (None, _) => println!(
                         "    {} = FAILED ({})",
                         mr.name,
                         mr.error.as_deref().unwrap_or("not evaluated")
@@ -135,9 +142,9 @@ impl<'a> RunContext<'a> {
             .extend(results.into_iter().map(|mr| MeasurementReport {
                 name: mr.name,
                 value: mr.value,
-                expected: None,
-                tolerance: None,
-                passed: mr.value.is_some(),
+                expected: mr.expected,
+                tolerance: mr.tolerance,
+                passed: mr.passed,
                 error: mr.error,
             }));
     }
@@ -158,8 +165,10 @@ impl<'a> RunContext<'a> {
 
         for analysis in analyses {
             let reason = match analysis.as_str() {
-                "TRAN" | "DC" | "AC" => format!("{analysis} analysis did not run"),
-                other => format!("{other} measurements are not supported by `rspice run` yet"),
+                "TRAN" | "DC" | "AC" | "NOISE" => {
+                    format!("{analysis} analysis did not run")
+                }
+                other => format!("unknown .MEAS analysis kind '{other}'"),
             };
             let results = rspice_core::analysis::advanced::unevaluated_measurements(
                 self.netlist,

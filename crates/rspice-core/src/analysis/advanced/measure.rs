@@ -158,6 +158,12 @@ pub struct MeasureStatement {
     pub measure_type: MeasureType,
     /// Analysis type (TRAN, AC, DC)
     pub analysis: String,
+    /// Expected value (`GOAL=`): a computed value that misses the goal
+    /// fails the measurement.
+    pub goal: Option<Value>,
+    /// Allowed deviation from the goal (`TOL=`). Defaults to
+    /// max(1% of |goal|, 1e-12) when a goal is given without a tolerance.
+    pub tolerance: Option<Value>,
 }
 
 /// Result of a measurement
@@ -169,6 +175,13 @@ pub struct MeasureResult {
     pub value: Option<Value>,
     /// Error message if failed
     pub error: Option<String>,
+    /// Whether the measurement passed: a value was computed and, when a
+    /// GOAL was declared, it landed within tolerance.
+    pub passed: bool,
+    /// The declared goal, when the statement carried one.
+    pub expected: Option<Value>,
+    /// The effective tolerance applied to the goal check.
+    pub tolerance: Option<Value>,
 }
 
 impl MeasureResult {
@@ -177,6 +190,9 @@ impl MeasureResult {
             name: name.to_string(),
             value: Some(value),
             error: None,
+            passed: true,
+            expected: None,
+            tolerance: None,
         }
     }
 
@@ -185,7 +201,31 @@ impl MeasureResult {
             name: name.to_string(),
             value: None,
             error: Some(error.to_string()),
+            passed: false,
+            expected: None,
+            tolerance: None,
         }
+    }
+
+    /// Apply a statement's GOAL/TOL contract to a computed result.
+    fn check_goal(mut self, statement: &MeasureStatement) -> Self {
+        let Some(goal) = statement.goal else {
+            return self;
+        };
+        let tolerance = statement
+            .tolerance
+            .unwrap_or_else(|| (goal.abs() * 0.01).max(1e-12));
+        self.expected = Some(goal);
+        self.tolerance = Some(tolerance);
+        if let Some(value) = self.value
+            && (value - goal).abs() > tolerance
+        {
+            self.passed = false;
+            self.error = Some(format!(
+                "value {value:e} misses GOAL {goal:e} (tolerance {tolerance:e})"
+            ));
+        }
+        self
     }
 }
 
@@ -246,6 +286,16 @@ impl MeasureEngine {
     }
 
     fn evaluate_one(
+        &self,
+        measurement: &MeasureStatement,
+        time: &[Value],
+        signals: &HashMap<String, &[Value]>,
+    ) -> MeasureResult {
+        self.evaluate_kind(measurement, time, signals)
+            .check_goal(measurement)
+    }
+
+    fn evaluate_kind(
         &self,
         measurement: &MeasureStatement,
         time: &[Value],
@@ -721,6 +771,8 @@ mod tests {
 
     fn max_statement(signal: &str) -> MeasureStatement {
         MeasureStatement {
+            goal: None,
+            tolerance: None,
             name: "peak".to_string(),
             measure_type: MeasureType::Max {
                 signal: signal.to_string(),

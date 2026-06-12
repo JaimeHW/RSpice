@@ -724,6 +724,14 @@ pub(super) fn parse_meas_command(
                                 }
                                 when_value = Some(expect_value(stream, line_num, params)?);
                             }
+                            // Verification options belong to the statement,
+                            // not the FIND clause.
+                            TokenKind::Ident(s)
+                                if s.eq_ignore_ascii_case("GOAL")
+                                    || s.eq_ignore_ascii_case("TOL") =>
+                            {
+                                break;
+                            }
                             _ => {
                                 stream.advance();
                             }
@@ -747,11 +755,54 @@ pub(super) fn parse_meas_command(
         }
     };
 
+    let (goal, tolerance) = parse_meas_goal_options(stream, line_num, params)?;
+
     Ok(MeasureStatement {
         name,
         measure_type,
         analysis,
+        goal,
+        tolerance,
     })
+}
+
+/// Scan the remainder of a .MEAS line for `GOAL=value` / `TOL=value`
+/// verification options, skipping tokens it does not recognize.
+fn parse_meas_goal_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(Option<Value>, Option<Value>), ParseError> {
+    let mut goal = None;
+    let mut tolerance = None;
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        match &stream.peek().kind {
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("GOAL") => {
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Expected '=' after GOAL in .MEAS".to_string(),
+                    });
+                }
+                goal = Some(expect_value(stream, line_num, params)?);
+            }
+            TokenKind::Ident(s) if s.eq_ignore_ascii_case("TOL") => {
+                stream.advance();
+                if !stream.consume(&TokenKind::Equals) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "Expected '=' after TOL in .MEAS".to_string(),
+                    });
+                }
+                tolerance = Some(expect_value(stream, line_num, params)?);
+            }
+            _ => {
+                stream.advance();
+            }
+        }
+    }
+    Ok((goal, tolerance))
 }
 
 pub(super) fn parse_meas_delay_spec(
@@ -775,6 +826,13 @@ pub(super) fn parse_meas_delay_spec(
                 stream.advance();
             }
             TokenKind::Ident(s) if stop_at_targ && s.eq_ignore_ascii_case("TARG") => break,
+            // Verification options end the spec; the statement parser
+            // consumes them.
+            TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("GOAL") || s.eq_ignore_ascii_case("TOL") =>
+            {
+                break;
+            }
             TokenKind::Ident(s) if s.eq_ignore_ascii_case("VAL") => {
                 stream.advance();
                 if !stream.consume(&TokenKind::Equals) {

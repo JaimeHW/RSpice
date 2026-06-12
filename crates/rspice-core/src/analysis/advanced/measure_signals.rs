@@ -256,6 +256,76 @@ impl AcSweepSeries {
     }
 }
 
+/// Owned series derived from a noise sweep: output and input-referred
+/// spectral densities addressable as `ONOISE`/`INOISE` (also with the
+/// `_SPECTRUM` suffix, matching the exported column names), with the
+/// frequency axis as `TIME`/`FREQUENCY`/`FREQ`.
+pub struct NoiseSweepSeries {
+    axis: Vec<Value>,
+    onoise: Vec<Value>,
+    inoise: Vec<Value>,
+}
+
+impl NoiseSweepSeries {
+    /// Collect spectral-density series across the sweep. Returns `None`
+    /// for an empty sweep.
+    pub fn from_sweep(sweep: &[crate::analysis::NoiseResult]) -> Option<Self> {
+        if sweep.is_empty() {
+            return None;
+        }
+        Some(Self {
+            axis: sweep.iter().map(|point| point.frequency).collect(),
+            onoise: sweep.iter().map(|point| point.output_noise_rms()).collect(),
+            inoise: sweep
+                .iter()
+                .map(|point| point.input_referred_rms())
+                .collect(),
+        })
+    }
+
+    /// The sweep frequencies, used as the measurement abscissa.
+    pub fn axis(&self) -> &[Value] {
+        &self.axis
+    }
+
+    /// Borrowed signal table over the collected series.
+    pub fn signal_map(&self) -> HashMap<String, &[Value]> {
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        insert_case_variants(&mut signals, "Time", self.axis.as_slice());
+        insert_case_variants(&mut signals, "Frequency", self.axis.as_slice());
+        insert_case_variants(&mut signals, "Freq", self.axis.as_slice());
+        for key in ["Onoise", "Onoise_Spectrum"] {
+            insert_case_variants(&mut signals, key, self.onoise.as_slice());
+        }
+        for key in ["Inoise", "Inoise_Spectrum"] {
+            insert_case_variants(&mut signals, key, self.inoise.as_slice());
+        }
+        signals
+    }
+}
+
+/// Evaluate the netlist's NOISE .MEAS statements against a sweep.
+///
+/// Returns an empty vector when the netlist has no NOISE measurements; an
+/// empty sweep fails every statement explicitly rather than skipping it.
+pub fn evaluate_noise_measurements(
+    netlist: &Netlist,
+    sweep: &[crate::analysis::NoiseResult],
+) -> Vec<MeasureResult> {
+    let statements = measurements_for_analysis(netlist, "NOISE");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    let Some(series) = NoiseSweepSeries::from_sweep(sweep) else {
+        return statements
+            .iter()
+            .map(|m| MeasureResult::failed(&m.name, "noise sweep produced no points"))
+            .collect();
+    };
+    let signals = series.signal_map();
+    evaluate_statements(&statements, series.axis(), &signals)
+}
+
 /// The netlist's measurement statements for one analysis kind
 /// (`"TRAN"`, `"DC"`, `"AC"`, ...).
 pub fn measurements_for_analysis<'a>(

@@ -325,6 +325,14 @@ pub(super) fn run_noise(
                 }
             }
 
+            ctx.record_measurements(
+                "NOISE",
+                rspice_core::analysis::advanced::evaluate_noise_measurements(
+                    ctx.netlist,
+                    &results,
+                ),
+            );
+
             if !ctx.quiet {
                 println!("Noise Analysis: {} frequency points", results.len());
                 if let Some(reference) = reference_node {

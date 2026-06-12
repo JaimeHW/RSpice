@@ -228,6 +228,60 @@ fn ac_measurements_evaluate() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// NOISE measurements address the spectral densities; GOAL/TOL turns a
+/// measurement into a pass-fail check that gates the exit code.
+#[test]
+fn noise_measurements_and_goal_checks() {
+    let dir = test_dir("noise_goal");
+    let deck = dir.join("rc_noise.sp");
+    // 1k resistor at 300.15K: sqrt(4kTR) = 4.071e-9 V/sqrt(Hz), flat well
+    // below the 1591 Hz corner.
+    std::fs::write(
+        &deck,
+        "* RC noise\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100n\n\
+         .NOISE V(out) V1 DEC 20 10 100k\n\
+         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=4.07e-9 TOL=1e-11\n\
+         .END\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "in-tolerance GOAL must pass: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // The same measurement with an impossible goal gates the exit code.
+    let bad = dir.join("rc_noise_bad.sp");
+    std::fs::write(
+        &bad,
+        "* RC noise, wrong goal\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100n\n\
+         .NOISE V(out) V1 DEC 20 10 100k\n\
+         .MEAS NOISE spot FIND ONOISE AT=10 GOAL=9e-9 TOL=1e-11\n\
+         .END\n",
+    )
+    .expect("write deck");
+    let output = run_rspice(&["--quiet", "run", bad.to_str().unwrap()]);
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "missed GOAL must exit 3: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("SPOT"), "failure names the measurement: {stderr}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn meas_file_writers_keep_full_precision() {
     let dir = test_dir("files");

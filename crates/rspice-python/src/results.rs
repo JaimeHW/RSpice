@@ -1703,8 +1703,9 @@ impl PyTransferFunctionResult {
 
 /// Result of a single .MEAS statement
 ///
-/// `passed` is true when the measurement evaluated to a value. A failed
-/// measurement carries an `error` message instead.
+/// `passed` is true when the measurement evaluated to a value and, if the
+/// statement declared `GOAL=` (optionally `TOL=`), the value landed within
+/// tolerance. A failed measurement carries an `error` message.
 ///
 /// Example:
 ///     >>> m = report.measurement("trise")
@@ -1724,6 +1725,13 @@ pub struct PyMeasurement {
     /// Failure description when evaluation failed
     #[pyo3(get)]
     pub error: Option<String>,
+    /// Declared GOAL, when the statement carried one
+    #[pyo3(get)]
+    pub expected: Option<f64>,
+    /// Effective tolerance applied to the GOAL check
+    #[pyo3(get)]
+    pub tolerance: Option<f64>,
+    pub(crate) ok: bool,
 }
 
 impl PyMeasurement {
@@ -1733,6 +1741,9 @@ impl PyMeasurement {
             analysis: analysis.to_string(),
             value: result.value,
             error: result.error.clone(),
+            expected: result.expected,
+            tolerance: result.tolerance,
+            ok: result.passed,
         }
     }
 
@@ -1742,16 +1753,19 @@ impl PyMeasurement {
             analysis: analysis.to_string(),
             value: None,
             error: Some(reason.to_string()),
+            expected: None,
+            tolerance: None,
+            ok: false,
         }
     }
 }
 
 #[pymethods]
 impl PyMeasurement {
-    /// True when the measurement produced a value
+    /// True when the measurement produced a value within any declared GOAL
     #[getter]
     fn passed(&self) -> bool {
-        self.value.is_some()
+        self.ok
     }
 
     /// Convert to float; raises ValueError when the measurement failed

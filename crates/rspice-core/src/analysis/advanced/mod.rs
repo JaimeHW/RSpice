@@ -42,9 +42,9 @@ pub use measure::{
     EdgeType, MeasureEngine, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
 };
 pub use measure_signals::{
-    AcSweepSeries, DcSweepSeries, evaluate_ac_measurements, evaluate_dc_measurements,
-    evaluate_tran_measurements, measurements_for_analysis, transient_signal_map,
-    unevaluated_measurements,
+    AcSweepSeries, DcSweepSeries, NoiseSweepSeries, evaluate_ac_measurements,
+    evaluate_dc_measurements, evaluate_noise_measurements, evaluate_tran_measurements,
+    measurements_for_analysis, transient_signal_map, unevaluated_measurements,
 };
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
