@@ -18,14 +18,13 @@ use crate::state::pdk_config::{DiscoveredFile, LibraryPathEntry};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, IconButton, chip};
+use crate::ui::widgets::{
+    Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W,
+    PaneSide, chip, pane_footer, pane_header, pane_section_label, two_pane,
+};
 
 /// Height of the two-pane region.
 const PANE_HEIGHT: f32 = 340.0;
-/// Width of the sources rail.
-const RAIL_WIDTH: f32 = 244.0;
-/// Height of the pane headers.
-const HEADER_H: f32 = 34.0;
 /// Height of source rows.
 const ROW_H: f32 = 26.0;
 /// Height of environment rows.
@@ -87,15 +86,9 @@ pub fn render_pdk_settings_dialog(
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut load: Option<PathBuf> = None;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 8.0;
-                pane(ui, RAIL_WIDTH, |ui| {
-                    sources_rail(ui, state);
-                });
-                let remaining = ui.available_width();
-                pane(ui, remaining, |ui| {
-                    load = detail_pane(ui, state);
-                });
+            two_pane(ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
+                PaneSide::Rail => sources_rail(ui, state),
+                PaneSide::Detail => load = detail_pane(ui, state),
             });
             if let Some(path) = load {
                 result = PdkSettingsDialogResult::LoadFile(path);
@@ -173,7 +166,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
         ENV_ROW_H
     };
     let env_list_h = (env.len() as f32 * ENV_ROW_H + trailing_h).min(96.0);
-    let sources_h = PANE_HEIGHT - HEADER_H - 23.0 - env_list_h;
+    let sources_h = PANE_HEIGHT - PANE_HEADER_H - 23.0 - env_list_h;
 
     let mut action: Option<SourceAction> = None;
     egui::ScrollArea::vertical()
@@ -219,7 +212,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) {
     ui.painter()
         .hline(ui.max_rect().x_range(), sep_y, Stroke::new(1.0, c.border));
     ui.add_space(1.0);
-    section_label(ui, "Environment");
+    pane_section_label(ui, "Environment");
 
     let mut env_action: Option<EnvAction> = None;
     egui::ScrollArea::vertical()
@@ -715,7 +708,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
     let mut toggle_recursive = false;
     pane_header(ui, |ui| {
         let chip_reserve = if selected_entry.is_some() { 84.0 } else { 0.0 };
-        let path_w = (ui.available_width() - chip_reserve - 186.0).max(40.0);
+        let path_w = (ui.available_width() - chip_reserve - 196.0).max(40.0);
         let (text, color) = match &selected_entry {
             Some(entry) => (entry.path.clone(), c.text_dim),
             None => ("all sources".to_owned(), c.text_faint),
@@ -781,7 +774,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         .collect();
 
     let mut load: Option<PathBuf> = None;
-    let scroll_h = PANE_HEIGHT - HEADER_H - FILE_ROW_H - 26.0;
+    let scroll_h = PANE_HEIGHT - PANE_HEADER_H - FILE_ROW_H - PANE_FOOTER_H;
     egui::ScrollArea::vertical()
         .id_salt("volta.pdk.files")
         .max_height(scroll_h)
@@ -1000,68 +993,8 @@ fn fmt_ago(secs: u64) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// pane chrome (the spec's .panes / .hd / .seclab vocabulary, mirrored from
-// panels/calculator.rs)
+// pane captions (pane chrome lives in ui/widgets/pane.rs)
 // ---------------------------------------------------------------------------
-
-/// A bordered pane of the fixed two-pane layout.
-fn pane(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::none()
-        .fill(c.bg_panel)
-        .stroke(Stroke::new(1.0, c.border))
-        .rounding(t.radius)
-        .show(ui, |ui| {
-            ui.set_width(width);
-            ui.set_height(PANE_HEIGHT);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            add_contents(ui);
-        });
-}
-
-fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let response = ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), HEADER_H),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(8.0);
-            add_contents(ui);
-            ui.add_space(8.0);
-        },
-    );
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom() - 0.5,
-        Stroke::new(1.0, c.border),
-    );
-}
-
-fn pane_footer(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), 26.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(text)
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
-                );
-            },
-        );
-        ui.painter().hline(
-            ui.min_rect().x_range(),
-            ui.min_rect().top() + 0.5,
-            Stroke::new(1.0, c.border),
-        );
-    });
-}
 
 /// Mono uppercase caption used inside pane headers.
 fn header_caption(ui: &mut Ui, text: &str) {
@@ -1078,29 +1011,6 @@ fn header_caption(ui: &mut Ui, text: &str) {
         },
     );
     ui.label(job);
-}
-
-/// The spec's `.seclab` — small uppercase section label inside the rail.
-fn section_label(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &text.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(9.5, FontWeight::Medium),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.1 * 9.5,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts(|f| f.layout_job(job));
-    ui.painter().galley(
-        egui::pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 2.0),
-        galley,
-        t.color.text_faint,
-    );
 }
 
 // ---------------------------------------------------------------------------
