@@ -672,28 +672,33 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         }
     }
 
-    let mut results: Vec<(String, bool)> = Vec::new();
+    let jobs = ctx.args.jobs.unwrap_or(1).max(1);
+    let results: Vec<(String, bool)> = if jobs > 1 && corners.len() > 1 {
+        run_corners_parallel(ctx, &corners, corner_lib.as_deref(), jobs)?
+    } else {
+        let mut results = Vec::with_capacity(corners.len());
+        for (i, name) in corners.iter().enumerate() {
+            if !ctx.quiet {
+                println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
+            }
 
-    for (i, name) in corners.iter().enumerate() {
-        if !ctx.quiet {
-            println!("\n[{}/{}] Corner: {}", i + 1, corners.len(), name);
-        }
-
-        let corner_passed = match corner_lib.as_deref() {
-            Some(lib) => match run_corner_with_lib(ctx, lib, name) {
-                Ok(passed) => passed,
-                Err(e) => {
-                    if !ctx.quiet {
-                        eprintln!("  Corner '{}' failed: {}", name, e);
+            let corner_passed = match corner_lib.as_deref() {
+                Some(lib) => match run_corner_with_lib(ctx, lib, name) {
+                    Ok(passed) => passed,
+                    Err(e) => {
+                        if !ctx.quiet {
+                            eprintln!("  Corner '{}' failed: {}", name, e);
+                        }
+                        false
                     }
-                    false
-                }
-            },
-            None => run_corner_nominal(ctx),
-        };
+                },
+                None => run_corner_nominal(ctx),
+            };
 
-        results.push((name.clone(), corner_passed));
-    }
+            results.push((name.clone(), corner_passed));
+        }
+        results
+    };
 
     if !ctx.quiet {
         println!("\n┌─────────────────────────────────────┐");
@@ -726,6 +731,207 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
             "Corners",
         ))
     }
+}
+
+/// The result of one corner run, returned from worker threads so the
+/// parent context merges everything deterministically in corner order.
+struct CornerOutcome {
+    passed: bool,
+    error: Option<String>,
+    measurements: Vec<crate::report::MeasurementReport>,
+    outputs: Vec<std::path::PathBuf>,
+}
+
+/// Everything a corner worker needs, free of the parent context's interior
+/// mutability so corners can run on threads.
+struct CornerSetup<'a> {
+    args: &'a crate::cli::RunArgs,
+    config: rspice_core::SimulationConfig,
+    source: String,
+    base: std::path::PathBuf,
+    output: Option<std::path::PathBuf>,
+    format: crate::cli::OutputFormat,
+    compress: bool,
+    compress_tol: f64,
+}
+
+fn corner_setup<'a>(ctx: &RunContext<'a>) -> Result<CornerSetup<'a>, CliError> {
+    let source = ctx
+        .netlist
+        .source_text
+        .clone()
+        .ok_or_else(|| CliError::InternalError {
+            message: "netlist source unavailable for corner re-elaboration".to_string(),
+        })?;
+    Ok(CornerSetup {
+        args: ctx.args,
+        config: ctx.engine.config().clone(),
+        source,
+        base: ctx
+            .netlist
+            .source_path
+            .clone()
+            .unwrap_or_else(|| ctx.args.input.clone()),
+        output: ctx.output.clone(),
+        format: ctx.format,
+        compress: ctx.compress,
+        compress_tol: ctx.compress_tol,
+    })
+}
+
+/// Run one corner in isolation: re-elaborate, simulate every analysis,
+/// evaluate measurements. Quiet by construction — workers must not
+/// interleave solver chatter — and self-contained so it can run on any
+/// thread.
+fn run_corner_job(
+    setup: &CornerSetup<'_>,
+    lib: Option<&std::path::Path>,
+    corner: &str,
+) -> CornerOutcome {
+    let corner_source = match lib {
+        Some(lib) => {
+            // Inject the corner's library section right below the title so
+            // its models and parameters are defined before first use.
+            let mut corner_source = String::with_capacity(setup.source.len() + 64);
+            let mut lines = setup.source.lines();
+            if let Some(title) = lines.next() {
+                corner_source.push_str(title);
+                corner_source.push('\n');
+            }
+            corner_source.push_str(&format!(".lib \"{}\" {}\n", lib.display(), corner));
+            for line in lines {
+                corner_source.push_str(line);
+                corner_source.push('\n');
+            }
+            corner_source
+        }
+        None => setup.source.clone(),
+    };
+
+    let corner_netlist = match rspice_core::Netlist::parse_with_path(&corner_source, &setup.base)
+    {
+        Ok(netlist) => netlist,
+        Err(e) => {
+            return CornerOutcome {
+                passed: false,
+                error: Some(format!("corner '{}': {}", corner, e)),
+                measurements: Vec::new(),
+                outputs: Vec::new(),
+            };
+        }
+    };
+
+    let corner_engine = rspice_core::Engine::new(setup.config.clone());
+    let corner_ctx = RunContext {
+        engine: &corner_engine,
+        netlist: &corner_netlist,
+        args: setup.args,
+        format: setup.format,
+        output: corner_output_path(setup.output.as_deref(), corner),
+        show_progress: false,
+        compress: setup.compress,
+        compress_tol: setup.compress_tol,
+        multi_analysis: corner_netlist.analyses.len() > 1,
+        verbose: false,
+        quiet: true,
+        measurements: std::cell::RefCell::new(Vec::new()),
+        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
+        outputs: std::cell::RefCell::new(Vec::new()),
+    };
+
+    let mut passed = true;
+    let mut error: Option<String> = None;
+    if corner_netlist.analyses.is_empty() {
+        if let Err(e) = run_dc_op(&corner_ctx) {
+            passed = false;
+            error.get_or_insert(e.to_string());
+        }
+    } else {
+        for analysis in &corner_netlist.analyses {
+            if let Err(e) = corner_ctx.run_analysis(analysis) {
+                passed = false;
+                error.get_or_insert(e.to_string());
+            }
+        }
+    }
+
+    corner_ctx.record_unevaluated_measurements();
+    let measurements = corner_ctx
+        .measurements
+        .into_inner()
+        .into_iter()
+        .map(|mut m| {
+            m.name = format!("{}:{}", corner, m.name);
+            m
+        })
+        .collect();
+
+    CornerOutcome {
+        passed,
+        error,
+        measurements,
+        outputs: corner_ctx.outputs.into_inner(),
+    }
+}
+
+/// Fan corners out over worker threads. Per-corner output files carry the
+/// corner tag, so workers never write the same path; solver stdout is
+/// suppressed and results merge into the parent in corner order, keeping
+/// reports and exports deterministic regardless of completion order.
+fn run_corners_parallel(
+    ctx: &RunContext<'_>,
+    corners: &[String],
+    lib: Option<&std::path::Path>,
+    jobs: usize,
+) -> Result<Vec<(String, bool)>, CliError> {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let setup = corner_setup(ctx)?;
+    let workers = jobs.min(corners.len());
+    if !ctx.quiet {
+        println!(
+            "  {} corners across {} workers (per-corner solver output suppressed)",
+            corners.len(),
+            workers
+        );
+    }
+
+    let next = AtomicUsize::new(0);
+    let slots: Vec<Mutex<Option<CornerOutcome>>> =
+        (0..corners.len()).map(|_| Mutex::new(None)).collect();
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| {
+                loop {
+                    let index = next.fetch_add(1, Ordering::SeqCst);
+                    if index >= corners.len() {
+                        break;
+                    }
+                    let outcome = run_corner_job(&setup, lib, &corners[index]);
+                    *slots[index].lock().expect("corner slot") = Some(outcome);
+                }
+            });
+        }
+    });
+
+    let mut results = Vec::with_capacity(corners.len());
+    for (name, slot) in corners.iter().zip(slots) {
+        let outcome = slot
+            .into_inner()
+            .expect("corner slot lock")
+            .expect("worker filled its slot");
+        if let Some(ref err) = outcome.error {
+            if !ctx.quiet {
+                eprintln!("  Corner '{}' failed: {}", name, err);
+            }
+        }
+        ctx.measurements.borrow_mut().extend(outcome.measurements);
+        ctx.outputs.borrow_mut().extend(outcome.outputs);
+        results.push((name.clone(), outcome.passed));
+    }
+    Ok(results)
 }
 
 /// Re-elaborate the deck with the corner's `.lib` section applied and run

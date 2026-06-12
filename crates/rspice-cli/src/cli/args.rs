@@ -322,6 +322,12 @@ pub struct RunArgs {
     )]
     pub corners: Option<String>,
 
+    /// Parallel workers for corner sweeps (default: 1). Corner outputs are
+    /// tagged per corner, so workers never collide; solver output is
+    /// suppressed while corners run concurrently.
+    #[arg(short = 'j', long, value_name = "N")]
+    pub jobs: Option<usize>,
+
     /// Library file containing corner definitions
     #[arg(long, value_name = "FILE", requires = "corners")]
     pub corner_lib: Option<PathBuf>,
