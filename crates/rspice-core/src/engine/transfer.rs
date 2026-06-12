@@ -104,8 +104,10 @@ impl Engine {
         let output_impedance = if output_is_current {
             NGSPICE_INFINITE_IMPEDANCE
         } else {
-            let probe_pos = output_node.to_string();
-            let probe_neg = reference_node.unwrap_or("0").to_string();
+            // The parser canonicalizes node names to upper case; the probe
+            // element must match or it lands on a new, disconnected node.
+            let probe_pos = output_node.to_ascii_uppercase();
+            let probe_neg = reference_node.unwrap_or("0").to_ascii_uppercase();
             let mut zout_deck = base;
             zout_deck.elements.push(Element {
                 name: ZOUT_PROBE_NAME.to_string(),
