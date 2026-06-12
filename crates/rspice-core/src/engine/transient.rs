@@ -886,6 +886,27 @@ impl Engine {
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
+        // Newton phase accounting: cumulative stamp/solve time across the
+        // whole run, reported once at completion so a single info-level run
+        // splits assembly cost from linear-solve cost without a profiler.
+        let transient_wall_start = crate::time_compat::Instant::now();
+        let mut total_stamp_nanos: u128 = 0;
+        let mut total_solve_nanos: u128 = 0;
+        let mut total_trunc_nanos: u128 = 0;
+        let mut total_trap_trial_nanos: u128 = 0;
+        let mut total_history_nanos: u128 = 0;
+        let mut total_merit_nanos: u128 = 0;
+        let mut total_postsolve_nanos: u128 = 0;
+        let mut total_setup_nanos: u128 = 0;
+        let mut total_postloop_nanos: u128 = 0;
+        let mut total_top_nanos: u128 = 0;
+        let mut total_tail_nanos: u128 = 0;
+        let mut total_middle_nanos: u128 = 0;
+        let mut total_merit_trials: usize = 0;
+        let mut total_failed_attempts: usize = 0;
+        let mut failed_voltage_conv: usize = 0;
+        let mut failed_device_conv: usize = 0;
+        let mut failed_residual_only: usize = 0;
 
         // Runs after every accepted point (all acceptance paths): counts the
         // floor-dt streak and performs the livelock restart when it trips.
@@ -962,6 +983,7 @@ impl Engine {
         }
 
         while t < tstop && total_iterations < max_total_iterations {
+            let attempt_top_start = crate::time_compat::Instant::now();
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
@@ -1106,6 +1128,8 @@ impl Engine {
             let conservative_limiting_active = requires_conservative_nonlinear_limiting
                 && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
 
+            total_top_nanos += attempt_top_start.elapsed().as_nanos();
+            let setup_phase_start = crate::time_compat::Instant::now();
             // A new timestep attempt begins: the first Newton iterate must
             // fully re-evaluate every bypass-capable device (ngspice's
             // MODEINITPRED discipline), so bypass deltas are always measured
@@ -1213,6 +1237,7 @@ impl Engine {
             // companion histories never are; linear decks already converge in
             // exactly one direct solve below, so the bypass bought one linear
             // solve per step at the cost of wrong waveforms. Removed.
+            total_setup_nanos += setup_phase_start.elapsed().as_nanos();
             for _iter in 0..tran_max_iterations {
                 if converged {
                     break;
@@ -1266,6 +1291,7 @@ impl Engine {
                 // basin — the saturation-boundary limit cycles this breaks
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
+                let merit_phase_start = crate::time_compat::Instant::now();
                 if circuit.has_nonlinear_devices() {
                     let current_merit = match matrix.scaled_residual_inf_norm(
                         &new_solution,
@@ -1295,6 +1321,8 @@ impl Engine {
                                     .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some(search);
+                                total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                                total_merit_trials += 1;
                                 continue;
                             }
                             globalization::BacktrackAction::Accept => {}
@@ -1328,15 +1356,19 @@ impl Engine {
                         circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some(search);
+                        total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                        total_merit_trials += 1;
                         continue;
                     }
                     last_stamped_iterate.clone_from(&new_solution);
                     last_stamped_merit = current_merit;
                     have_stamped_iterate = true;
                 }
+                total_merit_nanos += merit_phase_start.elapsed().as_nanos();
 
                 // Solve and check convergence
                 let newton_stamp_elapsed = newton_stamp_start.elapsed();
+                total_stamp_nanos += newton_stamp_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 if newton_stamp_elapsed.as_millis() >= 100 {
@@ -1359,6 +1391,7 @@ impl Engine {
                     matrix.solve(&rhs)
                 };
                 let newton_solve_elapsed = newton_solve_start.elapsed();
+                total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 if newton_solve_elapsed.as_millis() >= 100 {
@@ -1375,6 +1408,7 @@ impl Engine {
                     }
                 }
 
+                let postsolve_phase_start = crate::time_compat::Instant::now();
                 match solve_result {
                     Ok(mut sol) => {
                         had_solver_candidate = true;
@@ -1512,6 +1546,7 @@ impl Engine {
 
                         let device_converged = !circuit.has_nonlinear_devices()
                             || self.transient_static_device_convergence_met(&circuit);
+                        total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
                         if voltage_converged && device_converged && residual_converged {
                             converged = true;
@@ -1531,6 +1566,7 @@ impl Engine {
                 }
             }
 
+            let postloop_phase_start = crate::time_compat::Instant::now();
             if !converged {
                 retry_count += 1;
                 trap_order = 1;
@@ -1684,6 +1720,20 @@ impl Engine {
             }
 
             if !converged {
+                total_failed_attempts += 1;
+                if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
+                    // Voltage settled but a device/residual criterion held the
+                    // point back — the interesting bucket for criteria tuning.
+                    if !circuit.has_nonlinear_devices()
+                        || self.transient_static_device_convergence_met(&circuit)
+                    {
+                        failed_residual_only += 1;
+                    } else {
+                        failed_device_conv += 1;
+                    }
+                } else {
+                    failed_voltage_conv += 1;
+                }
                 // Diagnostic logging for debugging timestep issues
                 if total_iterations < 100 || total_iterations % 10000 == 0 {
                     log::debug!(
@@ -1710,6 +1760,7 @@ impl Engine {
                         );
                         return Err(SimulationError::ConvergenceFailed(total_iterations));
                     }
+                    total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                     continue;
                 }
 
@@ -2096,9 +2147,12 @@ impl Engine {
                     }
                     livelock_check!(dt);
                 }
+                total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                 continue;
             }
 
+            total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
+            let truncation_phase_start = crate::time_compat::Instant::now();
             let first_accepted_transient_step =
                 Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
                     // Post-livelock-restart warmup: the re-seeded histories
@@ -2279,6 +2333,8 @@ impl Engine {
                 Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
                 activity_limit,
             );
+            total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
+            let middle_phase_start = crate::time_compat::Instant::now();
 
             if locked_grid.is_none()
                 && let Some(limit) = candidate_truncation_limit
@@ -2328,6 +2384,7 @@ impl Engine {
                     trap_order =
                         Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
                     timestep.force_step(retry_dt);
+                    total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                     continue;
                 }
             }
@@ -2748,6 +2805,7 @@ impl Engine {
                     }
                     livelock_check!(dt);
                 }
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
 
@@ -2778,6 +2836,7 @@ impl Engine {
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
                 trap_order = 1;
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
             stale_accept_count = 0;
@@ -2808,6 +2867,8 @@ impl Engine {
                 circuit.update_nonlinear(&new_solution);
             }
 
+            total_middle_nanos += middle_phase_start.elapsed().as_nanos();
+            let trap_trial_phase_start = crate::time_compat::Instant::now();
             let trapezoidal_order_trial = if !first_accepted_transient_step
                 && !linearized_startup_recovery_points
                 && matches!(
@@ -2837,7 +2898,9 @@ impl Engine {
             } else {
                 None
             };
+            total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
+            let history_phase_start = crate::time_compat::Instant::now();
             Self::update_reactive_history(
                 &mut circuit,
                 &new_solution,
@@ -2862,6 +2925,8 @@ impl Engine {
                 &mut dynamic_tline_breakpoints_added,
                 &mut warned_dynamic_tline_breakpoint_cap,
             );
+            total_history_nanos += history_phase_start.elapsed().as_nanos();
+            let tail_phase_start = crate::time_compat::Instant::now();
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_timestep();
@@ -2975,6 +3040,7 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
         if t < tstop {
@@ -2990,6 +3056,44 @@ impl Engine {
         log::info!(
             "Transient complete: {} time points computed",
             result.time.len()
+        );
+        let transient_wall = transient_wall_start.elapsed();
+        log::info!(
+            "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            total_iterations,
+            total_merit_trials,
+            total_failed_attempts,
+            failed_voltage_conv,
+            failed_device_conv,
+            failed_residual_only,
+            total_top_nanos as f64 * 1e-9,
+            total_setup_nanos as f64 * 1e-9,
+            total_stamp_nanos as f64 * 1e-9,
+            total_solve_nanos as f64 * 1e-9,
+            total_merit_nanos as f64 * 1e-9,
+            total_postsolve_nanos as f64 * 1e-9,
+            total_postloop_nanos as f64 * 1e-9,
+            total_trunc_nanos as f64 * 1e-9,
+            total_trap_trial_nanos as f64 * 1e-9,
+            total_history_nanos as f64 * 1e-9,
+            total_tail_nanos as f64 * 1e-9,
+            total_middle_nanos as f64 * 1e-9,
+            (transient_wall.as_nanos().saturating_sub(
+                total_top_nanos
+                    + total_setup_nanos
+                    + total_stamp_nanos
+                    + total_solve_nanos
+                    + total_merit_nanos
+                    + total_postsolve_nanos
+                    + total_postloop_nanos
+                    + total_trunc_nanos
+                    + total_trap_trial_nanos
+                    + total_history_nanos
+                    + total_tail_nanos
+                    + total_middle_nanos
+            )) as f64
+                * 1e-9,
+            transient_wall.as_secs_f64(),
         );
 
         // Debug: verify stored voltage range for node 0 (SIN source)
