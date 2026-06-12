@@ -34,6 +34,11 @@ pub struct LibraryCellInstance {
     /// Terminal order used for schematic connectivity and netlist emission.
     #[serde(default)]
     pub terminal_order: Vec<String>,
+    /// Per-terminal directions, parallel to `terminal_order`. When present
+    /// and consistent, the instance renders with the direction-aware
+    /// generated symbol instead of the generic distributed block.
+    #[serde(default)]
+    pub terminal_dirs: Vec<super::port::PortDirection>,
 }
 
 impl LibraryCellInstance {
@@ -50,7 +55,34 @@ impl LibraryCellInstance {
             source_path: None,
             module_name: None,
             terminal_order: Vec::new(),
+            terminal_dirs: Vec::new(),
         }
+    }
+
+    /// Bind this instance to a cell interface: terminal order and
+    /// directions in one move, so the pair can never go out of step.
+    pub fn bind_interface(&mut self, ports: &[super::port::PortSpec]) {
+        self.terminal_order = ports.iter().map(|port| port.name.clone()).collect();
+        self.terminal_dirs = ports.iter().map(|port| port.direction).collect();
+    }
+
+    /// The bound interface as port specs, when directions are available
+    /// and consistent with the terminal order.
+    pub fn interface(&self) -> Option<Vec<super::port::PortSpec>> {
+        if self.terminal_order.is_empty() || self.terminal_dirs.len() != self.terminal_order.len()
+        {
+            return None;
+        }
+        Some(
+            self.terminal_order
+                .iter()
+                .zip(&self.terminal_dirs)
+                .map(|(name, &direction)| super::port::PortSpec {
+                    name: name.clone(),
+                    direction,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -206,13 +238,19 @@ impl Component {
     /// - Netlist generation
     /// - Rubber-banding during component moves
     pub fn terminal_positions(&self) -> Vec<(&'static str, Point)> {
-        if let Some(cell) = &self.library_cell {
-            let pin_count = if cell.terminal_order.is_empty() {
-                self.kind.terminal_count()
-            } else {
-                cell.terminal_order.len()
-            };
-            return self.dynamic_terminal_positions(pin_count);
+        if self.library_cell.is_some() {
+            return self
+                .instance_pin_layout()
+                .into_iter()
+                .enumerate()
+                .map(|(idx, (_, offset))| {
+                    let transformed = self.transform_point(offset);
+                    (
+                        Self::terminal_label(idx),
+                        Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
+                    )
+                })
+                .collect();
         }
 
         // Terminal offsets are component-type specific and defined in ComponentType
@@ -229,18 +267,33 @@ impl Component {
             .collect()
     }
 
-    fn dynamic_terminal_positions(&self, pin_count: usize) -> Vec<(&'static str, Point)> {
-        let offsets = self.dynamic_terminal_offsets(pin_count);
-        offsets
+    /// Local pin layout of a bound cell instance, in interface order:
+    /// `(port name when known, unrotated offset)`. Direction-aware when the
+    /// binding carries directions; the legacy distributed block otherwise.
+    /// Drawing and terminal extraction both read this, so the symbol and
+    /// the connectivity can never disagree.
+    pub(crate) fn instance_pin_layout(&self) -> Vec<(Option<String>, Point)> {
+        let Some(cell) = &self.library_cell else {
+            return Vec::new();
+        };
+
+        if let Some(ports) = cell.interface() {
+            return super::symbol_gen::generate_symbol(&ports)
+                .pins
+                .into_iter()
+                .map(|pin| (Some(pin.name), pin.offset))
+                .collect();
+        }
+
+        let pin_count = if cell.terminal_order.is_empty() {
+            self.kind.terminal_count()
+        } else {
+            cell.terminal_order.len()
+        };
+        self.dynamic_terminal_offsets(pin_count)
             .into_iter()
             .enumerate()
-            .map(|(idx, offset)| {
-                let transformed = self.transform_point(offset);
-                (
-                    Self::terminal_label(idx),
-                    Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
-                )
-            })
+            .map(|(idx, offset)| (cell.terminal_order.get(idx).cloned(), offset))
             .collect()
     }
 
@@ -298,8 +351,11 @@ impl Component {
     }
 
     /// Effective symbol dimensions, allowing generic block scaling for bound library cells.
-    fn symbol_dimensions(&self) -> (i32, i32) {
+    pub(crate) fn symbol_dimensions(&self) -> (i32, i32) {
         if let Some(cell) = &self.library_cell {
+            if let Some(ports) = cell.interface() {
+                return super::symbol_gen::generate_symbol(&ports).dimensions();
+            }
             let pin_count = if cell.terminal_order.is_empty() {
                 2
             } else {

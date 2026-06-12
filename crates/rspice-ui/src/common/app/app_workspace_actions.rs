@@ -1,5 +1,5 @@
 use crate::common::app::{AppState, ConsoleMessage, RSpiceApp};
-use crate::state::{CellViewRef, ComponentType, SchematicState, ViewType};
+use crate::state::{CellViewRef, ComponentType, SchematicState, View, ViewType};
 
 fn view_type_for_reference(state: &AppState, reference: &CellViewRef) -> ViewType {
     state
@@ -94,6 +94,58 @@ impl AppState {
 
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
         self.workspace.save_active_schematic(&self.schematic);
+        self.sync_generated_symbol_view();
+    }
+
+    /// Keep the active cell's generated "symbol" view in step with its
+    /// schematic interface — created when ports exist, refreshed when they
+    /// change, removed when the last port goes. A hand-authored symbol
+    /// view (no `generated` marker) is never touched: the user owns it.
+    fn sync_generated_symbol_view(&mut self) {
+        const GENERATED_KEY: &str = "generated";
+        const PORTS_KEY: &str = "ports";
+
+        let reference = self.workspace.active_view.clone();
+        if !reference.view.eq_ignore_ascii_case("schematic") {
+            return;
+        }
+        let ports = self.schematic.interface_ports();
+        let Some(cell) = self
+            .library_manager
+            .get_library_mut(&reference.library)
+            .and_then(|library| library.get_cell_mut(&reference.cell))
+        else {
+            return;
+        };
+
+        if ports.is_empty() {
+            if cell
+                .get_view("symbol")
+                .is_some_and(|view| view.metadata.contains_key(GENERATED_KEY))
+            {
+                cell.remove_view("symbol");
+            }
+            return;
+        }
+
+        let encoded: String = ports
+            .iter()
+            .map(|port| format!("{}:{}", port.name, port.direction.keyword()))
+            .collect::<Vec<_>>()
+            .join(" ");
+        match cell.get_view_mut("symbol") {
+            Some(view) if view.metadata.contains_key(GENERATED_KEY) => {
+                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
+            }
+            Some(_) => {} // hand-authored symbol: leave it alone
+            None => {
+                let mut view = View::new("symbol", ViewType::Symbol);
+                view.metadata
+                    .insert(GENERATED_KEY.to_owned(), "ports".to_owned());
+                view.metadata.insert(PORTS_KEY.to_owned(), encoded);
+                cell.add_view(view);
+            }
+        }
     }
 
     pub(crate) fn restore_active_schematic_from_workspace(&mut self) {

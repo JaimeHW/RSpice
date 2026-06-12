@@ -349,14 +349,16 @@ fn place_entry(state: &mut AppState, entry: &CellEntry) {
             state.schematic.tool = Tool::Place(*kind);
         }
         CellEntry::LibraryCell(lib, cell) => {
-            state.schematic.pending_library_cell = Some(crate::state::LibraryCellInstance {
-                library: lib.clone(),
-                cell: cell.clone(),
-                view: "schematic".to_owned(),
-                source_path: None,
-                module_name: None,
-                terminal_order: Vec::new(),
-            });
+            let mut binding =
+                crate::state::LibraryCellInstance::new(lib.clone(), cell.clone(), "schematic");
+            // Bind the master's interface at placement time: the instance
+            // gets its real pin count, names and directions, and the
+            // generated symbol replaces the anonymous two-pin block.
+            let key = format!("{lib}/{cell}/schematic");
+            if let Some(master) = state.workspace.schematic_buffers.get(&key) {
+                binding.bind_interface(&master.interface_ports());
+            }
+            state.schematic.pending_library_cell = Some(binding);
             state.schematic.tool = Tool::Place(ComponentType::CellInstance);
         }
     }

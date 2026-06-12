@@ -182,4 +182,37 @@ mod tests {
         assert_eq!(PortDirection::parse("power"), PortDirection::Supply);
         assert_eq!(PortDirection::parse("weird"), PortDirection::InOut);
     }
+
+    /// A bound instance's electrical terminals follow the generated,
+    /// direction-aware symbol layout, in interface order.
+    #[test]
+    fn bound_instance_terminals_follow_the_generated_layout() {
+        use crate::state::LibraryCellInstance;
+
+        let specs = vec![
+            PortSpec { name: "inp".into(), direction: PortDirection::In },
+            PortSpec { name: "inn".into(), direction: PortDirection::In },
+            PortSpec { name: "out".into(), direction: PortDirection::Out },
+            PortSpec { name: "vdd".into(), direction: PortDirection::Supply },
+            PortSpec { name: "vss".into(), direction: PortDirection::Supply },
+        ];
+        let mut binding = LibraryCellInstance::new("work", "ota_5t", "schematic");
+        binding.bind_interface(&specs);
+
+        let mut state = SchematicState::default();
+        let id = state.add_library_cell_component(Point::new(100, 100), binding);
+        let component = state
+            .components
+            .iter()
+            .find(|c| c.id == id)
+            .expect("instance exists");
+
+        let terminals = component.terminal_positions();
+        assert_eq!(terminals.len(), 5);
+        assert_eq!(terminals[0].1, Point::new(70, 90)); // inp — left, first
+        assert_eq!(terminals[1].1, Point::new(70, 110)); // inn — left, second
+        assert_eq!(terminals[2].1, Point::new(130, 100)); // out — right
+        assert_eq!(terminals[3].1, Point::new(100, 80)); // vdd — top rail
+        assert_eq!(terminals[4].1, Point::new(100, 120)); // vss — bottom rail
+    }
 }

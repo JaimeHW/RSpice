@@ -188,42 +188,76 @@ fn draw_port_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation_index: i3
     painter.circle_filled(rotate(-10.0, 0.0), 1.6 * scale, stroke.color);
 }
 
-/// Hierarchical cell instance: a block body with pin stubs matching the
-/// declared terminal offsets, and the master cell's name inside — the
+/// Hierarchical cell instance: a block body with pin stubs and pin names
+/// matching the bound interface, and the master cell's name inside — the
 /// symbol must read as "descend into me", not as an anonymous square.
+///
+/// Geometry comes from the same `instance_pin_layout` the netlister reads,
+/// transformed through the component's full mirror+rotation, so the drawn
+/// stubs land exactly on the electrical terminals in every orientation.
 fn draw_cell_instance_symbol(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
-    rotation_index: i32,
+    _rotation_index: i32,
     component: &Component,
     stroke: Stroke,
 ) {
-    // Local geometry per symbol_dimensions (60 × 40): body ±20 × ±15,
-    // pin stubs out to the ±30 terminals.
-    let rotate = |dx: f32, dy: f32| -> Pos2 {
-        let (x, y) = match rotation_index.rem_euclid(4) {
-            0 => (dx, dy),
-            1 => (-dy, dx),
-            2 => (-dx, -dy),
-            _ => (dy, -dx),
-        };
-        Pos2::new(pos.x + x * scale, pos.y + y * scale)
+    use crate::state::Point;
+
+    let to_screen = |p: Point| -> Pos2 {
+        let t = component.transform_point(p);
+        Pos2::new(pos.x + t.x as f32 * scale, pos.y + t.y as f32 * scale)
     };
 
+    let (_, height) = component.symbol_dimensions();
+    let hh_body = (height / 2 - 5).max(15);
     let corners = [
-        rotate(-20.0, -15.0),
-        rotate(20.0, -15.0),
-        rotate(20.0, 15.0),
-        rotate(-20.0, 15.0),
+        to_screen(Point::new(-20, -hh_body)),
+        to_screen(Point::new(20, -hh_body)),
+        to_screen(Point::new(20, hh_body)),
+        to_screen(Point::new(-20, hh_body)),
     ];
     for i in 0..4 {
         painter.line_segment([corners[i], corners[(i + 1) % 4]], stroke);
     }
-    // Pin stubs with a small connection dot at the terminal.
-    for side in [-1.0f32, 1.0] {
-        painter.line_segment([rotate(side * 30.0, 0.0), rotate(side * 20.0, 0.0)], stroke);
-        painter.circle_filled(rotate(side * 30.0, 0.0), 1.6 * scale, stroke.color);
+
+    // Pin stubs from each terminal to the body edge, a connection dot at
+    // the terminal, and the port name just inside the body.
+    let label_font = 6.5 * scale;
+    for (name, offset) in component.instance_pin_layout() {
+        let inner = if offset.y.abs() > hh_body {
+            Point::new(offset.x, offset.y.signum() * hh_body) // supply rail
+        } else {
+            Point::new(offset.x.signum() * 20, offset.y) // side pin
+        };
+        painter.line_segment([to_screen(offset), to_screen(inner)], stroke);
+        painter.circle_filled(to_screen(offset), 1.6 * scale, stroke.color);
+
+        let Some(name) = name else { continue };
+        if label_font < 4.0 {
+            continue;
+        }
+        // Anchor the text toward the body center from the pin's edge.
+        let (anchor, text_pos) = if offset.y.abs() > hh_body {
+            let inset = Point::new(inner.x, inner.y - inner.y.signum() * 3);
+            (egui::Align2::CENTER_CENTER, to_screen(inset))
+        } else {
+            let inset = Point::new(inner.x - inner.x.signum() * 3, inner.y);
+            let anchor = if component.transform_point(inner).x < 0 {
+                egui::Align2::LEFT_CENTER
+            } else {
+                egui::Align2::RIGHT_CENTER
+            };
+            (anchor, to_screen(inset))
+        };
+        painter.text(
+            text_pos,
+            anchor,
+            name,
+            crate::ui::theme::mono(label_font, crate::ui::theme::FontWeight::Regular),
+            stroke.color.gamma_multiply(0.75),
+        );
     }
 
     // Master cell name inside the body, elided to fit; legible from ~60 %

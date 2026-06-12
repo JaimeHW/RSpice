@@ -269,14 +269,9 @@ mod tests {
     }
 
     fn binding(cell: &str, terminals: &[&str]) -> LibraryCellInstance {
-        LibraryCellInstance {
-            library: "work".to_owned(),
-            cell: cell.to_owned(),
-            view: "schematic".to_owned(),
-            source_path: None,
-            module_name: None,
-            terminal_order: terminals.iter().map(|t| t.to_string()).collect(),
-        }
+        let mut binding = LibraryCellInstance::new("work", cell, "schematic");
+        binding.terminal_order = terminals.iter().map(|t| t.to_string()).collect();
+        binding
     }
 
     /// `div`: resistor between ports a and b. Port terminals coincide with

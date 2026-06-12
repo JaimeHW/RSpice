@@ -27,6 +27,7 @@ mod rotation;
 mod selection;
 mod snap;
 mod state;
+mod symbol_gen;
 mod tool;
 mod undo_history;
 mod wire;
@@ -44,6 +45,7 @@ pub use rotation::Rotation;
 pub use selection::{JunctionSelection, Selection, WireSegmentSelection, WireVertexSelection};
 pub use snap::{SnapEngine, SnapResult, SnapTarget, SnapTargetType};
 pub use state::SchematicState;
+pub use symbol_gen::{GeneratedPin, GeneratedSymbol, generate_symbol};
 pub use tool::Tool;
 pub use undo_history::{MAX_UNDO_STEPS, SchematicSnapshot, UndoHistory};
 pub use wire::{
