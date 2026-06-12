@@ -2877,24 +2877,36 @@ impl Engine {
                 )
                 && !hit_breakpoint
             {
-                Self::trapezoidal_order_trial_timestep_limit(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    dt,
-                    is_strictly_linear_transient,
-                    &bjt_history,
-                    &jfet_history,
-                    &diode_history,
-                    &mosfet_history,
-                    &lte_estimator,
-                    &vbic_snapshot_cache,
-                    self.voltage_abstol(),
-                    self.voltage_reltol(),
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
-                )
+                if step_trap_order == 2 && device_truncation_limit.is_some() {
+                    // The order-2 trial truncation walk is the order-2 device
+                    // truncation walk: when this step already ran at order 2,
+                    // the candidate limits were just computed above on the
+                    // same solution — re-walking every device would derive
+                    // the identical numbers.
+                    device_truncation_limit.map(|limit| TrapezoidalOrderTrial {
+                        limit,
+                        promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
+                    })
+                } else {
+                    Self::trapezoidal_order_trial_timestep_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        dt,
+                        is_strictly_linear_transient,
+                        &bjt_history,
+                        &jfet_history,
+                        &diode_history,
+                        &mosfet_history,
+                        &lte_estimator,
+                        &vbic_snapshot_cache,
+                        self.voltage_abstol(),
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                }
             } else {
                 None
             };
