@@ -130,6 +130,13 @@ pub struct HbConfig {
     /// Enable source stepping for difficult convergence
     pub source_stepping: bool,
 
+    /// Solve Newton steps with the exact real-split Jacobian (Toeplitz plus
+    /// conjugate/Hankel coupling). `false` selects the legacy Toeplitz-only
+    /// complex Jacobian, kept for A/B comparison and the large-system Krylov
+    /// fast path; both converge to identical spectra, the exact path just
+    /// gets there in fewer iterations.
+    pub use_exact_jacobian: bool,
+
     /// Verbose logging
     pub verbose: bool,
 }
@@ -154,24 +161,65 @@ impl HbConfig {
             use_krylov: false,
             gmres_restart: 30,
             source_stepping: false,
+            use_exact_jacobian: true,
             verbose: false,
         }
     }
 
     /// Create a multi-tone HB configuration
     ///
+    /// The spectral basis is the common fundamental of all tones (their
+    /// approximate greatest common divisor), so every tone lands on an
+    /// integer harmonic: 900 MHz + 800 MHz resolves to a 100 MHz basis with
+    /// the tones at harmonics 9 and 8. The harmonic count covers each tone's
+    /// requested order against that basis. Taking the first tone's frequency
+    /// as the basis (the previous behaviour) rejected every genuinely
+    /// multi-tone configuration at run time.
+    ///
     /// # Arguments
     /// * `tones` - Vector of tone configurations
     pub fn multi_tone(tones: Vec<HbTone>) -> Self {
-        let fundamental = tones.first().map(|t| t.frequency).unwrap_or(1e9);
-        let max_harmonics = tones.iter().map(|t| t.num_harmonics).max().unwrap_or(9);
+        let basis = Self::common_basis(&tones);
+        let num_harmonics = tones
+            .iter()
+            .map(|t| {
+                let tone_harmonic = if basis > 0.0 {
+                    (t.frequency / basis).round().max(1.0) as usize
+                } else {
+                    1
+                };
+                tone_harmonic * t.num_harmonics.max(1)
+            })
+            .max()
+            .unwrap_or(9)
+            .min(4096);
 
         Self {
-            fundamental_freq: fundamental,
-            num_harmonics: max_harmonics,
+            fundamental_freq: basis,
+            num_harmonics,
             tones,
-            ..Self::new(fundamental)
+            ..Self::new(basis)
         }
+    }
+
+    /// Approximate greatest common divisor of the tone frequencies.
+    fn common_basis(tones: &[HbTone]) -> Value {
+        fn float_gcd(a: Value, b: Value) -> Value {
+            let (mut a, mut b) = (a.abs(), b.abs());
+            let tol = 1e-9 * a.max(b).max(f64::MIN_POSITIVE);
+            while b > tol {
+                let r = a % b;
+                a = b;
+                b = r;
+            }
+            a
+        }
+
+        let mut basis = tones.first().map(|t| t.frequency).unwrap_or(1e9);
+        for tone in tones.iter().skip(1) {
+            basis = float_gcd(basis, tone.frequency);
+        }
+        basis
     }
 
     /// Set number of harmonics
@@ -276,5 +324,53 @@ impl HbConfig {
 impl Default for HbConfig {
     fn default() -> Self {
         Self::new(1e9) // 1 GHz default
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multi_tone_derives_the_common_basis() {
+        // The mixer case from the type documentation: 900 + 800 MHz.
+        let config = HbConfig::multi_tone(vec![
+            HbTone::new(900e6, 5).with_name("RF"),
+            HbTone::new(800e6, 5).with_name("LO"),
+        ]);
+        assert!(
+            (config.fundamental_freq - 100e6).abs() < 1.0,
+            "basis must be the 100 MHz common fundamental, got {}",
+            config.fundamental_freq
+        );
+        // Both tones map to exact integer harmonics of the basis.
+        for tone in &config.tones {
+            let ratio = tone.frequency / config.fundamental_freq;
+            assert!(
+                (ratio - ratio.round()).abs() < 1e-9,
+                "tone {} must land on an integer harmonic, got ratio {}",
+                tone.name,
+                ratio
+            );
+            let harmonic = ratio.round() as usize;
+            assert!(
+                harmonic * tone.num_harmonics <= config.num_harmonics,
+                "harmonic budget must cover tone {} order {} at harmonic {}",
+                tone.name,
+                tone.num_harmonics,
+                harmonic
+            );
+        }
+    }
+
+    #[test]
+    fn multi_tone_with_harmonically_related_tones_keeps_the_lower_tone() {
+        let config = HbConfig::multi_tone(vec![HbTone::new(1e9, 4), HbTone::new(2e9, 3)]);
+        assert!(
+            (config.fundamental_freq - 1e9).abs() < 1.0,
+            "basis of harmonically related tones is the lower tone, got {}",
+            config.fundamental_freq
+        );
+        assert!(config.num_harmonics >= 6);
     }
 }

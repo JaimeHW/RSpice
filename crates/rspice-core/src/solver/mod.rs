@@ -4,6 +4,7 @@ pub mod arc_length;
 pub mod convergence;
 pub mod damping;
 pub mod enhanced_newton;
+pub mod klu;
 mod newton;
 mod sparse;
 
@@ -37,6 +38,9 @@ pub enum SolverError {
 
     #[error("Invalid circuit configuration: {0}")]
     InvalidCircuit(String),
+
+    #[error("Stored pivot sequence is numerically inadequate for the new values")]
+    PivotGrowth,
 }
 
 /// Simulation result containing node voltages and branch currents

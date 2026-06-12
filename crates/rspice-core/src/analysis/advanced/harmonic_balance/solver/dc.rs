@@ -93,8 +93,9 @@ impl HbSolver {
 
                 // Verify final residual at the best achievable GMIN
                 self.compute_dc_residual(state, last_good_gmin.max(target_gmin));
-                let rel_norm = state.residual_norm / (self.dc_solution_norm(state) + dc_abstol);
-                if state.residual_norm < dc_abstol || rel_norm < dc_reltol {
+                if state.residual_norm < dc_abstol
+                    || state.dc_rows_converged(dc_reltol, dc_abstol)
+                {
                     return Ok(self.extract_dc_solution(state));
                 }
             }
@@ -163,7 +164,7 @@ impl HbSolver {
 
     /// Solve DC for linear circuit (no nonlinear devices)
     fn solve_dc_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
-        // Build DC conductance matrix (G only, no jÏ‰C or 1/jÏ‰L at DC)
+        // Build DC conductance matrix (G plus inductor DC shorts)
         let n = self.num_nodes;
         let mut g_dc = vec![vec![0.0; n]; n];
 
@@ -171,6 +172,15 @@ impl HbSolver {
         for &(row, col, g) in &self.g_matrix {
             if row < n && col < n {
                 g_dc[row][col] += g;
+            }
+        }
+
+        // Inductors are DC shorts, with the same conductance the
+        // full-spectrum residual uses; leaving them open would seed Newton
+        // with the operating point of a different circuit.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && l.abs() > 1e-30 {
+                g_dc[row][col] += DC_SHORT_CONDUCTANCE;
             }
         }
 
@@ -208,7 +218,7 @@ impl HbSolver {
     ///
     /// Uses the same algorithm as the full HB Newton but operates only on harmonic 0.
     fn dc_newton_inner_loop(
-        &self,
+        &mut self,
         state: &mut HbSolverState,
         gmin: Value,
         max_iterations: usize,
@@ -221,28 +231,12 @@ impl HbSolver {
             // Compute DC residual
             self.compute_dc_residual(state, gmin);
 
-            // Check convergence using standard criteria:
-            // - Absolute: residual < abstol (current tolerance)
-            // - Relative: residual < reltol * max_current_in_circuit
-            // The relative tolerance should be against CURRENT, not voltage
-            let max_source_current: f64 = self
-                .source_spectra
-                .iter()
-                .filter_map(|s| s.first())
-                .map(|c| c.re.abs())
-                .fold(0.0, |a: f64, b| a.max(b));
-
-            // Scale for relative convergence: max of source currents or minimum threshold
-            let current_scale = max_source_current.max(abstol);
-            let rel_current_norm = state.residual_norm / current_scale;
-
-            // Converge if:
-            // 1. Absolute residual is tiny (< 1e-9 A), OR
-            // 2. Both: relative residual is small (<1%) AND absolute residual is reasonable (<1mA)
-            // This prevents declaring convergence with large absolute current imbalance
-            let converged = state.residual_norm < abstol
-                || (rel_current_norm < tol && state.residual_norm < 1e-3);
-            if converged {
+            // Check convergence per KCL row: |res| <= abstol + reltol*scale
+            // with the scale built from that row's own current contributions.
+            // Any circuit-wide reference (a norm, the max source current)
+            // lets a microamp imbalance at a high-impedance node hide under
+            // the amp scale of stiff Norton source rows.
+            if state.residual_norm < abstol || state.dc_rows_converged(tol, abstol) {
                 return true;
             }
 
@@ -276,10 +270,11 @@ impl HbSolver {
     }
 
     /// Compute DC residual: R = I_source_dc - G*V_dc - I_nonlinear(V_dc) - gmin*V_dc
-    fn compute_dc_residual(&self, state: &mut HbSolverState, gmin: Value) {
+    fn compute_dc_residual(&mut self, state: &mut HbSolverState, gmin: Value) {
         let n = self.num_nodes;
 
-        // Initialize residual with DC sources
+        // Initialize residual with DC sources; the per-row scale accumulates
+        // |contribution| alongside every term for the KCL convergence test.
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
                 let source = self
@@ -289,6 +284,9 @@ impl HbSolver {
                     .map(|c| c.re)
                     .unwrap_or(0.0);
                 state.residual[node][0] = Complex64::new(source, 0.0);
+                if !state.residual_scale[node].is_empty() {
+                    state.residual_scale[node][0] = source.abs();
+                }
             }
         }
 
@@ -309,6 +307,16 @@ impl HbSolver {
             if row < n && col < n && row < state.residual.len() {
                 let contribution = g * v_dc[col];
                 state.residual[row][0] -= Complex64::new(contribution, 0.0);
+                state.residual_scale[row][0] += contribution.abs();
+            }
+        }
+
+        // Inductor DC shorts, consistent with the full-spectrum residual.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
+                state.residual[row][0] -=
+                    Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
+                state.residual_scale[row][0] += DC_SHORT_CONDUCTANCE * v_dc[col].abs();
             }
         }
 
@@ -316,6 +324,7 @@ impl HbSolver {
         for node in 0..n {
             if node < state.residual.len() && !state.residual[node].is_empty() {
                 state.residual[node][0] -= Complex64::new(gmin * v_dc[node], 0.0);
+                state.residual_scale[node][0] += gmin * v_dc[node].abs();
             }
         }
 
@@ -327,6 +336,28 @@ impl HbSolver {
             for (node, current) in currents {
                 if node < state.residual.len() && !state.residual[node].is_empty() {
                     state.residual[node][0] += Complex64::new(current, 0.0);
+                    state.residual_scale[node][0] += current.abs();
+                }
+            }
+        }
+
+        // Verilog-A devices participate in the DC seed too; skipping them
+        // here let the seed "converge" on a circuit without their currents.
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            for device in &mut self.veriloga_nonlinear_devices {
+                device.device.update_all_voltages(&v_dc);
+                let values = device.device.evaluate();
+                for (program_idx, value) in values.iter().enumerate() {
+                    let Some(rows) = device.rhs_rows.get(program_idx) else {
+                        continue;
+                    };
+                    for &(row, sign) in rows {
+                        if row < n && row < state.residual.len() {
+                            state.residual[row][0] += Complex64::new(sign * *value, 0.0);
+                            state.residual_scale[row][0] += value.abs();
+                        }
+                    }
                 }
             }
         }
@@ -346,7 +377,7 @@ impl HbSolver {
     }
 
     /// Build DC Jacobian: J = -G - dI_nonlinear/dV - gmin*I
-    fn build_dc_jacobian(&self, state: &HbSolverState, gmin: Value) -> Vec<Vec<Value>> {
+    fn build_dc_jacobian(&mut self, state: &HbSolverState, gmin: Value) -> Vec<Vec<Value>> {
         let n = self.num_nodes;
         let mut jacobian = vec![vec![0.0; n]; n];
 
@@ -354,6 +385,13 @@ impl HbSolver {
         for &(row, col, g) in &self.g_matrix {
             if row < n && col < n {
                 jacobian[row][col] -= g;
+            }
+        }
+
+        // Inductor DC shorts, matching compute_dc_residual.
+        for &(row, col, l) in &self.l_matrix {
+            if row < n && col < n && l.abs() > 1e-30 {
+                jacobian[row][col] -= DC_SHORT_CONDUCTANCE;
             }
         }
 
@@ -389,12 +427,34 @@ impl HbSolver {
             }
         }
 
+        #[cfg(feature = "veriloga")]
+        if !self.veriloga_nonlinear_devices.is_empty() {
+            for device in &mut self.veriloga_nonlinear_devices {
+                device.device.update_all_voltages(&v_dc);
+                let jac_entries = device.device.compute_jacobian();
+                for entry in jac_entries {
+                    let Some(prog_locs) = device.jacobian_locs.get(entry.program_idx) else {
+                        continue;
+                    };
+                    let Some(&(row, col)) = prog_locs.get(entry.jacobian_idx) else {
+                        continue;
+                    };
+                    if let (Some(i), Some(j)) = (row, col)
+                        && i < n
+                        && j < n
+                    {
+                        jacobian[i][j] -= entry.value;
+                    }
+                }
+            }
+        }
+
         jacobian
     }
 
     /// Apply DC line search with voltage limiting
     fn apply_dc_line_search(
-        &self,
+        &mut self,
         state: &mut HbSolverState,
         delta_x: &[Value],
         gmin: Value,
@@ -483,7 +543,7 @@ impl HbSolver {
     }
 
     /// Solve real linear system using Gaussian elimination with partial pivoting
-    fn solve_real_linear_system(
+    pub(super) fn solve_real_linear_system(
         &self,
         a: &[Vec<Value>],
         b: &[Value],
@@ -558,21 +618,6 @@ impl HbSolver {
                     .unwrap_or(0.0)
             })
             .collect()
-    }
-
-    /// Compute DC solution norm
-    fn dc_solution_norm(&self, state: &HbSolverState) -> Value {
-        let sum_sq: Value = (0..self.num_nodes)
-            .map(|node| {
-                state
-                    .x
-                    .get(node)
-                    .and_then(|x| x.first())
-                    .map(|c| c.re * c.re)
-                    .unwrap_or(0.0)
-            })
-            .sum();
-        sum_sq.sqrt()
     }
 
     /// Initialize node voltages for diode circuits

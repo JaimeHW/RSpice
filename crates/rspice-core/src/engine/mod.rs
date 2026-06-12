@@ -31,9 +31,11 @@ mod error;
 mod hb;
 mod matrix;
 mod pss;
+mod pss_noise;
 mod result;
 mod source_values;
 mod stamping;
+mod stb;
 mod transfer;
 mod transient;
 
@@ -52,9 +54,11 @@ pub use config_resolver::{
 };
 pub use core::Engine;
 pub use error::SimulationError;
-pub use hb::HbAnalysisResult;
+pub use hb::{HbAnalysisResult, PacAnalysisResult, PnoiseAnalysisResult};
 pub use pss::{PssAnalysisResult, PssError};
+pub use pss_noise::OscPnoiseResult;
 pub use result::TransientResult;
+pub use stb::StbAnalysisResult;
 pub use transient::{TransientCheckpoint, netlist_fingerprint};
 
 pub(crate) use source_values::{extract_ac_value, extract_dc_value};

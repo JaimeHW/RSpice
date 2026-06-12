@@ -209,6 +209,13 @@ impl Engine {
     #[inline]
     fn should_try_configured_dc_startup_aids(circuit: &crate::circuit::Circuit) -> bool {
         const MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE: usize = 160;
+        // Junction-limited (legacy GP) circuits take ngspice's full-step
+        // Newton; the configured aid chain is their proven startup path and
+        // the linearized t=0 seed cannot substitute for a real operating
+        // point, so the size heuristic must not skip the aids for them.
+        if Self::junction_limiting_owns_newton_steps(circuit) {
+            return true;
+        }
         circuit.matrix_size() <= MAX_CONFIGURED_DC_STARTUP_MATRIX_SIZE
     }
 

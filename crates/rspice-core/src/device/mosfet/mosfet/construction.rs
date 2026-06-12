@@ -44,15 +44,18 @@ impl Mosfet {
             w: 10e-6,
             ld: 0.0,
 
-            // Level 1 parameters
-            vto: 0.7,       // Threshold voltage
-            kp: 110e-6,     // Transconductance (NMOS typical)
-            gamma: 0.4,     // Body effect
-            phi: 0.65,      // Surface potential
+            // Level 1 parameters (mos1set.c model-card defaults; level 2/6
+            // reset their own below in with_params)
+            vto: 0.0,    // Threshold voltage
+            kp: 2e-5,    // Transconductance
+            gamma: 0.0,  // Body effect
+            phi: 0.6,    // Surface potential
             lambda: 0.0, // Channel-length modulation (mos1set.c default)
             is_bulk: 1e-14, // Bulk diode saturation current
             js_bulk: 0.0,
-            cox: 7e-4, // Oxide capacitance
+            // Oxide capacitance per area at the mos1set.c default
+            // TOX = 1e-7 m.
+            cox: 3.9 * 8.854214871e-12 / 1e-7,
             cj: 0.0,
             cjsw: 0.0,
             pb: 0.8,
@@ -72,8 +75,8 @@ impl Mosfet {
             level: 1, // Default to Level 1
             legacy_bsim_model: None,
             legacy_bsim_sized: None,
-            u0: 400.0,    // Low-field mobility (cm^2/V*s)
-            u0_card: 400.0,
+            u0: 600.0, // Low-field mobility (cm^2/V*s), mos1set.c default
+            u0_card: 600.0,
             ua: 2.25e-9,  // Mobility degradation coefficient
             ub: 5.87e-19, // Second-order mobility coefficient
             vsat: 1.5e5,  // Saturation velocity (m/s)
@@ -99,10 +102,15 @@ impl Mosfet {
             dvt2: -0.032,  // Body-bias dependent roll-off
             k1: 0.53,      // First body effect coefficient
             k2: -0.186,    // Second body effect coefficient
-            cgso: 2.4e-10, // Gate-source overlap cap (F/m)
-            cgdo: 2.4e-10, // Gate-drain overlap cap (F/m)
-            cgbo: 0.0,     // Gate-bulk overlap cap (F/m)
+            cgso: 0.0, // Gate-source overlap cap (F/m), mos1set.c default
+            cgdo: 0.0, // Gate-drain overlap cap (F/m)
+            cgbo: 0.0, // Gate-bulk overlap cap (F/m)
             rsh: 0.0,      // Sheet resistance (ohm/sq)
+            rd_model: 0.0,
+            rs_model: 0.0,
+            nrd: 1.0,
+            nrs: 1.0,
+            noise_temperature_offset: 0.0,
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
@@ -837,6 +845,20 @@ impl Mosfet {
             self.rsh = v;
         }
         if let Some(v) = params
+            .get("RD")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.rd_model = v;
+        }
+        if let Some(v) = params
+            .get("RS")
+            .copied()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+        {
+            self.rs_model = v;
+        }
+        if let Some(v) = params
             .get("KF")
             .copied()
             .filter(|v| v.is_finite() && *v >= 0.0)
@@ -1071,6 +1093,16 @@ impl Mosfet {
 
             if name.eq_ignore_ascii_case("NF") && *value > 0.0 {
                 nf = *value;
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("NRD") && *value >= 0.0 {
+                self.nrd = *value;
+                continue;
+            }
+
+            if name.eq_ignore_ascii_case("NRS") && *value >= 0.0 {
+                self.nrs = *value;
                 continue;
             }
 

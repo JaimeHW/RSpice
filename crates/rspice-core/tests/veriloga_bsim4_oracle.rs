@@ -30,8 +30,18 @@ fn bsim4_path() -> Option<PathBuf> {
 
 /// Solve the single-transistor bias circuit and return the drain current
 fn drain_current(model: &Path, vgs: f64, vds: f64) -> f64 {
+    drain_current_at(model, vgs, vds, None)
+}
+
+/// Bias-point drain current with an optional circuit temperature (C)
+fn drain_current_at(model: &Path, vgs: f64, vds: f64, temp_c: Option<f64>) -> f64 {
+    let temp_line = match temp_c {
+        Some(t) => format!(".options temp={t}\n"),
+        None => String::new(),
+    };
     let deck = format!(
         "* bsim4 va bias point\n\
+         {temp_line}\
          vg g 0 {vgs}\n\
          vd d 0 {vds}\n\
          XM1 d g 0 0 bsim4va l=1e-7 w=1e-6\n\
@@ -97,6 +107,25 @@ fn bsim4_idvg_tracks_ngspice_oracle() {
         7.12754641e-4,
         0.03,
     );
+}
+
+#[test]
+fn bsim4_temperature_law_tracks_ngspice_oracle() {
+    let Some(model) = bsim4_path() else {
+        eprintln!("bsim4.va not present; skipping oracle pins");
+        return;
+    };
+
+    // ngspice-46, .options tnom=25 (matching the VA's DEFAULT_TNOM),
+    // vgs=1.0 vds=1.2: mobility-dominated negative tempco
+    for (temp_c, oracle) in [(-40.0, 6.124726e-4), (27.0, 5.377553e-4), (125.0, 4.425617e-4)] {
+        assert_within(
+            &format!("Id(vgs=1.0, vds=1.2, T={temp_c}C)"),
+            drain_current_at(&model, 1.0, 1.2, Some(temp_c)),
+            oracle,
+            0.04,
+        );
+    }
 }
 
 #[test]

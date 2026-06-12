@@ -2,7 +2,78 @@
 
 use super::*;
 
+/// Pre-resolved matrix slots for one two-terminal companion branch.
+///
+/// `stamp_two_terminal_companion` pays four position-map hash lookups per
+/// branch per Newton iteration; on device-heavy decks those lookups dominate
+/// the assembly. The slots are resolved once per transient run (the matrix
+/// pattern is frozen) and stamped through direct CSC indices afterwards.
+#[derive(Clone, Copy, Default)]
+pub(super) struct TwoTerminalStampSlots {
+    pub(super) pos: usize,
+    pub(super) neg: usize,
+    pub(super) pp: Option<crate::solver::CscIndex>,
+    pub(super) pn: Option<crate::solver::CscIndex>,
+    pub(super) np: Option<crate::solver::CscIndex>,
+    pub(super) nn: Option<crate::solver::CscIndex>,
+}
+
+impl TwoTerminalStampSlots {
+    pub(super) fn link(
+        matrix: &crate::solver::StaticMatrix,
+        node_pos: usize,
+        node_neg: usize,
+    ) -> Self {
+        let mut slots = Self {
+            pos: node_pos,
+            neg: node_neg,
+            ..Self::default()
+        };
+        if node_pos > 0 {
+            slots.pp = matrix.get_index(node_pos - 1, node_pos - 1);
+            if node_neg > 0 {
+                slots.pn = matrix.get_index(node_pos - 1, node_neg - 1);
+            }
+        }
+        if node_neg > 0 {
+            if node_pos > 0 {
+                slots.np = matrix.get_index(node_neg - 1, node_pos - 1);
+            }
+            slots.nn = matrix.get_index(node_neg - 1, node_neg - 1);
+        }
+        slots
+    }
+}
+
 impl Engine {
+    /// Index-resolved twin of [`Engine::stamp_two_terminal_companion`].
+    #[inline]
+    pub(super) fn stamp_two_terminal_companion_direct(
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        slots: &TwoTerminalStampSlots,
+        geq: Value,
+        i_eq: Value,
+    ) {
+        if let Some(idx) = slots.pp {
+            matrix.stamp_direct(idx, geq);
+        }
+        if let Some(idx) = slots.pn {
+            matrix.stamp_direct(idx, -geq);
+        }
+        if let Some(idx) = slots.np {
+            matrix.stamp_direct(idx, -geq);
+        }
+        if let Some(idx) = slots.nn {
+            matrix.stamp_direct(idx, geq);
+        }
+        if slots.pos > 0 {
+            rhs[slots.pos - 1] += i_eq;
+        }
+        if slots.neg > 0 {
+            rhs[slots.neg - 1] -= i_eq;
+        }
+    }
     #[inline]
     pub(super) fn tline_transient_port_impedance(tl: &crate::device::TransmissionLine) -> Value {
         // Keep the local port relation anchored to the characteristic

@@ -89,6 +89,18 @@ impl From<PssError> for SimulationError {
     }
 }
 
+/// Reactive-state and node-solution trajectory recorded on the fixed
+/// integration grid, used by the oscillator phase-noise (PPV) machinery.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct PssStateTrace {
+    /// Grid times, starting at 0.
+    pub times: Vec<Value>,
+    /// Reactive state (cap voltages then inductor currents) per grid point.
+    pub states: Vec<Vec<Value>>,
+    /// Full node/branch solution per grid point.
+    pub solutions: Vec<Vec<Value>>,
+}
+
 /// PSS analysis result with detailed convergence info
 #[derive(Debug)]
 pub struct PssAnalysisResult {
@@ -129,6 +141,17 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
     ) -> Result<PssAnalysisResult, SimulationError> {
+        self.run_pss_with_state(netlist, config).map(|(result, _, _, _)| result)
+    }
+
+    /// `run_pss` plus the converged artifacts the oscillator phase-noise
+    /// machinery needs: the prepared circuit/matrix pair and the converged
+    /// shooting state x0.
+    pub(in crate::engine) fn run_pss_with_state(
+        &self,
+        netlist: &Netlist,
+        config: PssConfig,
+    ) -> Result<(PssAnalysisResult, Circuit, StaticMatrix, Vec<Value>), SimulationError> {
         // Build and prepare circuit
         let mut circuit = self.build_circuit(netlist)?;
         let mut matrix = self.build_matrix(&circuit)?;
@@ -156,8 +179,13 @@ impl Engine {
         // ==================================================================
         // Phase 2: Period Detection (for autonomous oscillators)
         // ==================================================================
-        let detected_period = if config.is_autonomous() && config.auto_period {
-            self.pss_detect_oscillator_period(&stabilized_waveform, &config)?
+        let mut detected_period = if config.is_autonomous() && config.auto_period {
+            // Detection only seeds the Newton iteration (the period is now a
+            // shooting unknown closed by the phase condition), so a low-
+            // confidence detection falls back to the configured guess
+            // instead of aborting the analysis.
+            self.pss_detect_oscillator_period(&stabilized_waveform, &config)
+                .unwrap_or_else(|_| config.period())
         } else {
             period
         };
@@ -198,17 +226,32 @@ impl Engine {
             // Compute Newton step using a finite-difference Jacobian whose
             // columns integrate perturbed periods in parallel on per-worker
             // circuit clones (pure per-column work — deterministic).
-            let (delta, jacobian) = self.pss_compute_newton_step(
-                &circuit,
-                &shooting_state,
-                detected_period,
-                &config,
-                FD_STEP,
-            )?;
-            last_jacobian = Some(jacobian);
-
-            // Update state with damping
-            shooting_state.update_x0(&delta, solver.damping);
+            if config.is_autonomous() {
+                // Oscillators: the period is a Newton unknown alongside the
+                // state, closed by a Poincare phase condition.
+                let (delta, delta_t, jacobian) = self.pss_compute_autonomous_newton_step(
+                    &circuit,
+                    &shooting_state,
+                    detected_period,
+                    &config,
+                    FD_STEP,
+                )?;
+                last_jacobian = Some(jacobian);
+                shooting_state.update_x0(&delta, solver.damping);
+                let max_dt = config.max_period_change * detected_period;
+                detected_period += (solver.damping * delta_t).clamp(-max_dt, max_dt);
+                shooting_state.period = detected_period;
+            } else {
+                let (delta, jacobian) = self.pss_compute_newton_step(
+                    &circuit,
+                    &shooting_state,
+                    detected_period,
+                    &config,
+                    FD_STEP,
+                )?;
+                last_jacobian = Some(jacobian);
+                shooting_state.update_x0(&delta, solver.damping);
+            }
             final_waveform = Some(waveform);
 
             iteration += 1;
@@ -233,15 +276,30 @@ impl Engine {
         // reuse it instead of re-integrating N+1 periods; the fresh-FD path
         // remains for the zero-iteration case (initial state was already
         // periodic, so no Jacobian was ever built).
-        let monodromy = match last_jacobian {
-            Some(jacobian) => monodromy_from_newton_jacobian(jacobian),
-            None => self.pss_compute_monodromy(
+        // Autonomous orbits get a FRESH monodromy at the converged (x0, T):
+        // the structural unity Floquet multiplier exists only on the closed
+        // orbit, so the recycled pre-convergence Jacobian (off-orbit, stale
+        // period) is not accurate enough for stability classification there.
+        let monodromy = if config.is_autonomous() {
+            self.pss_set_reactive_state(&mut circuit, &shooting_state.x0);
+            self.pss_compute_monodromy(
                 &circuit,
                 &shooting_state,
                 detected_period,
                 &config,
                 FD_STEP,
-            )?,
+            )?
+        } else {
+            match last_jacobian {
+                Some(jacobian) => monodromy_from_newton_jacobian(jacobian),
+                None => self.pss_compute_monodromy(
+                    &circuit,
+                    &shooting_state,
+                    detected_period,
+                    &config,
+                    FD_STEP,
+                )?,
+            }
         };
         let floquet_multipliers = solver.compute_floquet_multipliers(&monodromy);
         let is_stable = floquet_multipliers.iter().all(|m| m.norm() <= 1.0 + 1e-6);
@@ -254,15 +312,20 @@ impl Engine {
             shooting_state.residual_norm(),
         );
 
-        Ok(PssAnalysisResult {
-            result: pss_result,
-            iterations: iteration,
-            final_residual: shooting_state.residual_norm(),
-            period: detected_period,
-            monodromy,
-            floquet_multipliers,
-            is_stable,
-        })
+        Ok((
+            PssAnalysisResult {
+                result: pss_result,
+                iterations: iteration,
+                final_residual: shooting_state.residual_norm(),
+                period: detected_period,
+                monodromy,
+                floquet_multipliers,
+                is_stable,
+            },
+            circuit,
+            matrix,
+            shooting_state.x0.clone(),
+        ))
     }
 
     /// Initialize reactive element state from DC solution
@@ -335,7 +398,7 @@ impl Engine {
     /// function of the shooting state. Leaving stale history in place would
     /// leak the previous trajectory into the next one and corrupt both the
     /// shooting residual and the finite-difference Jacobian columns.
-    fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
+    pub(in crate::engine) fn pss_set_reactive_state(&self, circuit: &mut Circuit, state: &[Value]) {
         let n_caps = circuit.capacitors.len();
 
         // Set capacitor voltages
@@ -367,7 +430,15 @@ impl Engine {
         if tstab > 0.0 {
             let max_step = period / 50.0;
             let waveform =
-                self.pss_run_tran_internal(circuit, matrix, dc_solution.to_vec(), tstab, max_step)?;
+                self.pss_run_tran_internal(
+                    circuit,
+                    matrix,
+                    dc_solution.to_vec(),
+                    tstab,
+                    max_step,
+                    false,
+                    None,
+                )?;
 
             let final_state = self.pss_extract_reactive_state(circuit);
             Ok((waveform, final_state))
@@ -440,7 +511,10 @@ impl Engine {
         // the first Newton solve and become the genuine t=0 waveform sample.
         let solution = self.pss_initial_node_solution(circuit, matrix, period)?;
 
-        let waveform = self.pss_run_tran_internal(circuit, matrix, solution, period, max_step)?;
+        // The period map must vary smoothly with the shooting state: run on
+        // the fixed grid (see pss_run_tran_internal).
+        let waveform =
+            self.pss_run_tran_internal(circuit, matrix, solution, period, max_step, true, None)?;
 
         let final_state = self.pss_extract_reactive_state(circuit);
         Ok((final_state, waveform))
@@ -454,7 +528,7 @@ impl Engine {
     /// the nonlinear devices settle to node voltages consistent with that
     /// state. Without this, the waveform's first sample and the Newton seed
     /// were all zeros.
-    fn pss_initial_node_solution(
+    pub(in crate::engine) fn pss_initial_node_solution(
         &self,
         circuit: &mut Circuit,
         matrix: &mut StaticMatrix,
@@ -471,10 +545,13 @@ impl Engine {
         }
     }
 
-    /// Compute all finite-difference sensitivity columns
-    /// `(x_T(x0 + h*e_j) - base) / h` for `j = 0..n`, where `base` is the
-    /// caller's shared base point (the residual for Newton columns, the
-    /// converged `x_T(x0)` for monodromy columns).
+    /// Compute the shooting sensitivity columns by CENTRAL differences on
+    /// the fixed-grid period map: column j is
+    /// `(F(x0 + h e_j) - F(x0 - h e_j)) / 2h` with `F = Phi - I` when
+    /// `subtract_identity` is set (Newton Jacobian) or `F = Phi` otherwise
+    /// (monodromy). The fixed integration grid makes Phi smooth in x0, so
+    /// the O(h^2) central difference reaches derivative accuracy the
+    /// adaptive-grid forward difference never could.
     ///
     /// Columns are pure functions of `(x0, j)`, so they parallelize across
     /// per-worker circuit clones with deterministic results. `CircuitData`
@@ -482,7 +559,6 @@ impl Engine {
     /// chunked AC-sweep-style: one owned clone per worker chunk, matrix
     /// rebuilt per worker (StaticMatrix holds factorization workspaces and
     /// is intentionally not Clone).
-    #[allow(clippy::too_many_arguments)]
     fn pss_sensitivity_columns(
         &self,
         circuit: &Circuit,
@@ -491,7 +567,6 @@ impl Engine {
         config: &PssConfig,
         fd_step: Value,
         subtract_identity: bool,
-        base: &[Value],
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let n = x0.len();
         if n == 0 {
@@ -502,22 +577,33 @@ impl Engine {
                       worker_matrix: &mut StaticMatrix,
                       j: usize|
          -> Result<Vec<Value>, SimulationError> {
-            let mut x_perturbed = x0.to_vec();
             let h = fd_step * (1.0 + x0[j].abs());
-            x_perturbed[j] += h;
 
-            self.pss_set_reactive_state(worker_circuit, &x_perturbed);
-            let (x_t_perturbed, _) =
+            let mut x_plus = x0.to_vec();
+            x_plus[j] += h;
+            self.pss_set_reactive_state(worker_circuit, &x_plus);
+            let (x_t_plus, _) =
+                self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config)?;
+
+            let mut x_minus = x0.to_vec();
+            x_minus[j] -= h;
+            self.pss_set_reactive_state(worker_circuit, &x_minus);
+            let (x_t_minus, _) =
                 self.pss_simulate_one_period(worker_circuit, worker_matrix, period, config)?;
 
             Ok((0..n)
                 .map(|i| {
-                    let f_perturbed = if subtract_identity {
-                        x_t_perturbed[i] - x_perturbed[i]
+                    let f_plus = if subtract_identity {
+                        x_t_plus[i] - x_plus[i]
                     } else {
-                        x_t_perturbed[i]
+                        x_t_plus[i]
                     };
-                    (f_perturbed - base[i]) / h
+                    let f_minus = if subtract_identity {
+                        x_t_minus[i] - x_minus[i]
+                    } else {
+                        x_t_minus[i]
+                    };
+                    (f_plus - f_minus) / (2.0 * h)
                 })
                 .collect())
         };
@@ -573,15 +659,8 @@ impl Engine {
         fd_step: Value,
     ) -> Result<(Vec<Value>, Vec<Vec<Value>>), SimulationError> {
         let n = state.dimension();
-        let columns = self.pss_sensitivity_columns(
-            circuit,
-            &state.x0,
-            period,
-            config,
-            fd_step,
-            true,
-            &state.residual,
-        )?;
+        let columns =
+            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true)?;
 
         let mut jacobian = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -594,6 +673,73 @@ impl Engine {
         let delta = self.pss_solve_linear_system(&jacobian, &state.residual)?;
 
         Ok((delta, jacobian))
+    }
+
+    /// Newton step for AUTONOMOUS shooting: the period T joins the state as
+    /// an unknown, closed by the Poincare phase condition f(x(T))^T ds = 0
+    /// (no update component along the orbit, where the period map is
+    /// neutrally stable). The augmented system is
+    ///
+    /// ```text
+    /// [ M - I        dPhi/dT ] [ds]   [-r]
+    /// [ f(x(T))^T    0       ] [dT] = [ 0]
+    /// ```
+    ///
+    /// with dPhi/dT differenced in T on the fixed grid (the step count stays
+    /// constant, so the map is smooth in T) and f(x(T)) = dPhi/dT itself,
+    /// the orbit tangent at the endpoint.
+    fn pss_compute_autonomous_newton_step(
+        &self,
+        circuit: &Circuit,
+        state: &ShootingState,
+        period: Value,
+        config: &PssConfig,
+        fd_step: Value,
+    ) -> Result<(Vec<Value>, Value, Vec<Vec<Value>>), SimulationError> {
+        let n = state.dimension();
+        let columns =
+            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, true)?;
+
+        // dPhi/dT by forward difference; Phi_T(x0) is already in state.x_t.
+        let h_t = period * 1e-7;
+        let mut worker = circuit.clone();
+        let m = self.build_matrix(&worker)?;
+        worker.link_indices(&m);
+        let mut worker_matrix = m;
+        self.pss_set_reactive_state(&mut worker, &state.x0);
+        let (x_t_plus, _) =
+            self.pss_simulate_one_period(&mut worker, &mut worker_matrix, period + h_t, config)?;
+        let dphi_dt: Vec<Value> = (0..n)
+            .map(|i| (x_t_plus[i] - state.x_t[i]) / h_t)
+            .collect();
+
+        let mut jacobian = vec![vec![0.0; n + 1]; n + 1];
+        for (j, column) in columns.iter().enumerate() {
+            for i in 0..n {
+                jacobian[i][j] = column[i];
+            }
+        }
+        for i in 0..n {
+            jacobian[i][n] = dphi_dt[i];
+            jacobian[n][i] = dphi_dt[i]; // phase row: orbit tangent
+        }
+
+        let mut rhs = state.residual.clone();
+        rhs.push(0.0); // phase condition has zero residual by construction
+
+        let solution = self.pss_solve_linear_system(&jacobian, &rhs)?;
+        let delta_state = solution[..n].to_vec();
+        let delta_t = solution[n];
+
+        // Monodromy reuse: the top-left block is M - I at the current T.
+        let mut state_jacobian = vec![vec![0.0; n]; n];
+        for i in 0..n {
+            for j in 0..n {
+                state_jacobian[i][j] = jacobian[i][j];
+            }
+        }
+
+        Ok((delta_state, delta_t, state_jacobian))
     }
 
     /// Compute the monodromy matrix via finite differences — the fallback
@@ -610,15 +756,8 @@ impl Engine {
         fd_step: Value,
     ) -> Result<Vec<Vec<Value>>, SimulationError> {
         let n = state.dimension();
-        let columns = self.pss_sensitivity_columns(
-            circuit,
-            &state.x0,
-            period,
-            config,
-            fd_step,
-            false,
-            &state.x_t,
-        )?;
+        let columns =
+            self.pss_sensitivity_columns(circuit, &state.x0, period, config, fd_step, false)?;
 
         let mut monodromy = vec![vec![0.0; n]; n];
         for (j, column) in columns.iter().enumerate() {
@@ -631,7 +770,7 @@ impl Engine {
     }
 
     /// Solve linear system using Gaussian elimination
-    fn pss_solve_linear_system(
+    pub(in crate::engine) fn pss_solve_linear_system(
         &self,
         a: &[Vec<Value>],
         b: &[Value],
@@ -714,98 +853,7 @@ impl Engine {
         let mut rhs = vec![0.0; size];
 
         for _iter in 0..self.config.max_iterations {
-            matrix.clear_values();
-            rhs.fill(0.0);
-
-            for i in 0..size {
-                matrix.add(i, i, 1e-12);
-            }
-
-            circuit.stamp_transient_linear_direct(matrix, &mut rhs);
-
-            // Time-varying independent sources: the static stamp wrote DC
-            // values; overwrite the source rows with their value at the
-            // end of this step. This is what makes driven PSS periodic —
-            // without it a SIN drive stamps as its DC offset and the
-            // "steady state" collapses to the DC solution.
-            let num_nodes = circuit.num_nodes();
-            circuit
-                .voltage_sources
-                .update_transient_rhs(&mut rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
-            circuit.current_sources.update_transient_rhs(&mut rhs, t_next);
-
-            // Stamp capacitors
-            for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
-                let capacitance = circuit.capacitors.capacitances[cap_idx];
-                let np = cap.pp.row;
-                let nn = cap.nn.row;
-                let v_n = circuit.capacitors.v_prev[cap_idx];
-                let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
-
-                let geq = coeff.capacitor_geq(capacitance, dt);
-                let i_n_cap = circuit.capacitors.i_prev[cap_idx];
-                let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
-
-                if np > 0 {
-                    matrix.add(np - 1, np - 1, geq);
-                    if nn > 0 {
-                        matrix.add(np - 1, nn - 1, -geq);
-                    }
-                }
-                if nn > 0 {
-                    if np > 0 {
-                        matrix.add(nn - 1, np - 1, -geq);
-                    }
-                    matrix.add(nn - 1, nn - 1, geq);
-                }
-                if np > 0 {
-                    rhs[np - 1] += ieq;
-                }
-                if nn > 0 {
-                    rhs[nn - 1] -= ieq;
-                }
-            }
-
-            // Stamp inductors
-            for l_idx in 0..circuit.inductors.names.len() {
-                let np = circuit.inductors.node_pos[l_idx];
-                let nn = circuit.inductors.node_neg[l_idx];
-                let br = circuit.inductors.branch_indices[l_idx];
-                let inductance = circuit.inductors.inductances[l_idx];
-                let i_n = circuit.inductors.i_prev[l_idx];
-                let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
-                let v_n = circuit.inductors.v_prev[l_idx];
-
-                let req = coeff.inductor_req(inductance, dt);
-                let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
-
-                if np > 0 && br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, np - 1, 1.0);
-                    matrix.add(np - 1, br_idx, 1.0);
-                }
-                if nn > 0 && br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, nn - 1, -1.0);
-                    matrix.add(nn - 1, br_idx, -1.0);
-                }
-                if br > 0 {
-                    let br_idx = circuit.num_nodes() + br - 1;
-                    matrix.add(br_idx, br_idx, -req);
-                    // Branch row sign convention: v - r_eq*i = -v_eq (see
-                    // Inductors::stamp_transient_companion).
-                    rhs[br_idx] = -veq;
-                }
-            }
-
-            // Mutual coupling overlays on top of the standalone inductors.
-            circuit.stamp_coupled_inductor_pairs_transient(matrix, &mut rhs, dt, coeff);
-
-            if circuit.has_nonlinear_devices() {
-                circuit.update_nonlinear(&new_solution);
-                circuit.stamp_nonlinear(matrix, &mut rhs, &new_solution);
-                circuit.stamp_behavioral(matrix, &mut rhs, &new_solution, t_next);
-            }
+            self.pss_stamp_system(circuit, matrix, &mut rhs, coeff, t_next, dt, &new_solution);
 
             match matrix.solve(&rhs) {
                 Ok(sol) => {
@@ -834,21 +882,151 @@ impl Engine {
         Ok(None)
     }
 
+    /// Stamp the full companion-linearized system at one time point:
+    /// linear network, time-varying sources, reactive companions for the
+    /// given coefficients, and the nonlinear Jacobian linearized at
+    /// `linearize_at`. Shared by the Newton iteration and by the
+    /// injection-sensitivity solves of the oscillator noise machinery,
+    /// which ignore the RHS and solve the stamped matrix against unit
+    /// current injections.
+    #[allow(clippy::too_many_arguments)]
+    pub(in crate::engine) fn pss_stamp_system(
+        &self,
+        circuit: &mut Circuit,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        coeff: &CompanionCoefficients,
+        t_next: Value,
+        dt: Value,
+        linearize_at: &[Value],
+    ) {
+        let size = circuit.matrix_size();
+        matrix.clear_values();
+        rhs.fill(0.0);
+
+        for i in 0..size {
+            matrix.add(i, i, 1e-12);
+        }
+
+        circuit.stamp_transient_linear_direct(matrix, rhs);
+
+        // Time-varying independent sources: the static stamp wrote DC
+        // values; overwrite the source rows with their value at the
+        // end of this step. This is what makes driven PSS periodic —
+        // without it a SIN drive stamps as its DC offset and the
+        // "steady state" collapses to the DC solution.
+        let num_nodes = circuit.num_nodes();
+        circuit
+            .voltage_sources
+            .update_transient_rhs(rhs, t_next, |br_ordinal| num_nodes + br_ordinal);
+        circuit.current_sources.update_transient_rhs(rhs, t_next);
+
+        // Stamp capacitors
+        for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
+            let capacitance = circuit.capacitors.capacitances[cap_idx];
+            let np = cap.pp.row;
+            let nn = cap.nn.row;
+            let v_n = circuit.capacitors.v_prev[cap_idx];
+            let v_n_minus_1 = circuit.capacitors.v_prev_prev[cap_idx];
+
+            let geq = coeff.capacitor_geq(capacitance, dt);
+            let i_n_cap = circuit.capacitors.i_prev[cap_idx];
+            let ieq = coeff.capacitor_ieq(capacitance, dt, v_n, v_n_minus_1, i_n_cap);
+
+            if np > 0 {
+                matrix.add(np - 1, np - 1, geq);
+                if nn > 0 {
+                    matrix.add(np - 1, nn - 1, -geq);
+                }
+            }
+            if nn > 0 {
+                if np > 0 {
+                    matrix.add(nn - 1, np - 1, -geq);
+                }
+                matrix.add(nn - 1, nn - 1, geq);
+            }
+            if np > 0 {
+                rhs[np - 1] += ieq;
+            }
+            if nn > 0 {
+                rhs[nn - 1] -= ieq;
+            }
+        }
+
+        // Stamp inductors
+        for l_idx in 0..circuit.inductors.names.len() {
+            let np = circuit.inductors.node_pos[l_idx];
+            let nn = circuit.inductors.node_neg[l_idx];
+            let br = circuit.inductors.branch_indices[l_idx];
+            let inductance = circuit.inductors.inductances[l_idx];
+            let i_n = circuit.inductors.i_prev[l_idx];
+            let i_n_minus_1 = circuit.inductors.i_prev_prev[l_idx];
+            let v_n = circuit.inductors.v_prev[l_idx];
+
+            let req = coeff.inductor_req(inductance, dt);
+            let veq = coeff.inductor_veq(inductance, dt, i_n, i_n_minus_1, v_n);
+
+            if np > 0 && br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, np - 1, 1.0);
+                matrix.add(np - 1, br_idx, 1.0);
+            }
+            if nn > 0 && br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, nn - 1, -1.0);
+                matrix.add(nn - 1, br_idx, -1.0);
+            }
+            if br > 0 {
+                let br_idx = circuit.num_nodes() + br - 1;
+                matrix.add(br_idx, br_idx, -req);
+                // Branch row sign convention: v - r_eq*i = -v_eq (see
+                // Inductors::stamp_transient_companion).
+                rhs[br_idx] = -veq;
+            }
+        }
+
+        // Mutual coupling overlays on top of the standalone inductors.
+        circuit.stamp_coupled_inductor_pairs_transient(matrix, rhs, dt, coeff);
+
+        if circuit.has_nonlinear_devices() {
+            circuit.update_nonlinear(linearize_at);
+            circuit.stamp_nonlinear(matrix, rhs, linearize_at);
+            circuit.stamp_behavioral(matrix, rhs, linearize_at, t_next);
+        }
+    }
+
     /// Internal transient simulation
-    fn pss_run_tran_internal(
+    /// `fixed_grid` integrates on a uniform time grid with a deterministic
+    /// method sequence (backward Euler first step, trapezoidal after): the
+    /// period map then varies SMOOTHLY with the initial state, which is what
+    /// makes finite-difference shooting Jacobians and monodromy columns
+    /// accurate — an LTE-adaptive grid changes its step decisions
+    /// discontinuously under perturbation and floors the achievable
+    /// derivative accuracy.
+    pub(in crate::engine) fn pss_run_tran_internal(
         &self,
         circuit: &mut Circuit,
         matrix: &mut StaticMatrix,
         mut solution: Vec<Value>,
         tstop: Value,
         max_step: Value,
+        fixed_grid: bool,
+        mut trace: Option<&mut PssStateTrace>,
     ) -> Result<TransientResult, SimulationError> {
         let num_nodes = circuit.num_nodes();
+
+        let fixed_steps = (tstop / max_step).round().max(1.0) as usize;
+        let fixed_dt = tstop / fixed_steps as Value;
 
         let initial_step = (max_step / 10.0).min(tstop / 100.0);
         let mut timestep =
             TimestepController::new(initial_step, self.config.min_timestep, max_step);
+        // Register source-waveform breakpoints (PULSE edges, PWL corners,
+        // SIN delay starts) so the integrator lands on them instead of
+        // stepping across; without this, hard-edged drives shift the PSS
+        // orbit by up to one LTE-sized step per edge.
         let mut breakpoints = BreakpointManager::new();
+        Self::collect_transient_source_breakpoints(circuit, tstop, max_step, &mut breakpoints);
         let mut lte_estimator =
             LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
         let mut trapgear = TrapGearController::new();
@@ -870,16 +1048,34 @@ impl Engine {
         let mut total_iterations = 0;
         let mut first_step = true;
 
+        if let Some(tr) = trace.as_deref_mut() {
+            tr.times.push(0.0);
+            tr.states.push(self.pss_extract_reactive_state(circuit));
+            tr.solutions.push(solution.clone());
+        }
+
+        let mut fixed_index = 0usize;
         while t < tstop && total_iterations < MAX_ITERATIONS {
             total_iterations += 1;
-            let (dt, _) = breakpoints.limit_step(t, timestep.dt());
-            let dt = dt.min(tstop - t);
+            let dt = if fixed_grid {
+                if fixed_index >= fixed_steps {
+                    break;
+                }
+                // Anchor each step to the grid so rounding cannot drift the
+                // endpoint: t_next = (i+1)*dt exactly.
+                (fixed_index + 1) as Value * fixed_dt - t
+            } else {
+                let (dt, _) = breakpoints.limit_step(t, timestep.dt());
+                dt.min(tstop - t)
+            };
 
             // First step runs backward Euler: it reads no capacitor-current or
             // inductor-voltage history, so the trajectory depends only on the
             // shooting state that pss_set_reactive_state installed.
             let current_method = if first_step {
                 crate::analysis::IntegrationMethod::BackwardEuler
+            } else if fixed_grid {
+                crate::analysis::IntegrationMethod::Trapezoidal
             } else {
                 trapgear.current_method()
             };
@@ -888,9 +1084,18 @@ impl Engine {
             let Some(new_solution) =
                 self.pss_newton_solve(circuit, matrix, &coeff, t + dt, dt, &solution)?
             else {
+                if fixed_grid {
+                    // The grid is the contract: a Newton failure on it is a
+                    // hard error rather than a silent step change that would
+                    // destroy map smoothness.
+                    return Err(SimulationError::ConvergenceFailed(total_iterations));
+                }
                 timestep.force_step(dt * 0.25);
                 continue;
             };
+            if fixed_grid {
+                fixed_index += 1;
+            }
 
             t += dt;
             first_step = false;
@@ -940,14 +1145,22 @@ impl Engine {
 
             solution = new_solution;
 
+            if let Some(tr) = trace.as_deref_mut() {
+                tr.times.push(t);
+                tr.states.push(self.pss_extract_reactive_state(circuit));
+                tr.solutions.push(solution.clone());
+            }
+
             result.time.push(t);
             for (i, voltages) in result.voltages.iter_mut().enumerate() {
                 voltages.push(solution.get(i).copied().unwrap_or(0.0));
             }
 
-            let (lte, _) = lte_estimator.estimate(&solution, dt);
-            let scale = lte_estimator.recommend_scale(lte);
-            timestep.adjust(lte / scale);
+            if !fixed_grid {
+                let (lte, _) = lte_estimator.estimate(&solution, dt);
+                let scale = lte_estimator.recommend_scale(lte);
+                timestep.adjust(lte / scale);
+            }
         }
 
         Ok(result)

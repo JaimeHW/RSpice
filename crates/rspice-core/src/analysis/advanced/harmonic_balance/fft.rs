@@ -46,8 +46,12 @@ impl HbFft {
     /// # Arguments
     /// * `num_harmonics` - Number of harmonics (not including DC)
     /// * `oversample` - Oversampling factor (typically 2 or 4)
+    ///
+    /// The oversampling factor is floored at 2: below that the top
+    /// harmonics collide with the conjugate half of the spectrum and would
+    /// be silently dropped from the solution representation.
     pub fn new(num_harmonics: usize, oversample: usize) -> Self {
-        let min_size = (num_harmonics + 1) * oversample;
+        let min_size = (num_harmonics + 1) * oversample.max(2);
         let fft_size = min_size.next_power_of_two();
 
         let mut planner = FftPlanner::new();
@@ -115,6 +119,29 @@ impl HbFft {
 
         // Extract real part and normalize
         full_spectrum.iter().map(|c| c.re).collect()
+    }
+
+    /// Convert time-domain waveform to spectral coefficients, keeping
+    /// `count + 1` entries (DC through harmonic `count`, capped at the
+    /// alias-free half of the grid).
+    ///
+    /// The Newton Jacobian's conjugate (Hankel) coupling needs conductance
+    /// harmonics up to 2H, beyond the solution representation's H.
+    pub fn to_frequency_domain_n(&mut self, waveform: &[Value], count: usize) -> Vec<Complex64> {
+        let n = self.fft_size;
+        let mut buffer: Vec<Complex64> = waveform
+            .iter()
+            .take(n)
+            .map(|&x| Complex64::new(x, 0.0))
+            .collect();
+        buffer.resize(n, Complex64::new(0.0, 0.0));
+        self.fft.process_with_scratch(&mut buffer, &mut self.scratch);
+
+        let norm = 1.0 / n as f64;
+        let max_kept = (n / 2).saturating_sub(1);
+        (0..=count.min(max_kept))
+            .map(|k| buffer[k] * norm)
+            .collect()
     }
 
     /// Convert time-domain waveform to spectral coefficients

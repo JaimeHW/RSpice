@@ -457,14 +457,18 @@ fn view_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
         state.schematic.zoom = 1.0;
     }
     separator(ui);
-    let grid_label = if state.shell.show_grid {
-        "Hide grid"
-    } else {
-        "Show grid"
-    };
-    if item(ui, grid_label, None) {
-        state.shell.show_grid = !state.shell.show_grid;
-    }
+    submenu(ui, "Grid", |ui| {
+        for style in crate::shell::GridStyle::ALL {
+            let label = if state.shell.grid == style {
+                format!("●  {}", style.label())
+            } else {
+                format!("    {}", style.label())
+            };
+            if item(ui, &label, None) {
+                state.shell.grid = style;
+            }
+        }
+    });
     let console_label = if state.shell.console.collapsed {
         "Show console"
     } else {

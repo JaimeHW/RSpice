@@ -13,13 +13,15 @@ use crate::{CircuitData, Netlist};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 #[cfg(feature = "veriloga")]
-use std::io::{Read, Write};
+use std::io::Read;
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
+use std::io::Write;
 #[cfg(feature = "veriloga")]
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 #[cfg(feature = "veriloga")]
 use std::sync::RwLock;
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 use std::time::{Duration, Instant};
 
 mod model_resolution;
@@ -157,30 +159,35 @@ impl Engine {
             );
         }
 
+        // One shared Arc per model: instances share the (megabyte-scale)
+        // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<String, rspice_veriloga::CompiledModel> = HashMap::new();
+        let mut veriloga_models: HashMap<String, std::sync::Arc<rspice_veriloga::CompiledModel>> =
+            HashMap::new();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let model = resolve_cached_or_compile_veriloga(&include.file_path)?;
+                let model = std::sync::Arc::new(resolve_cached_or_compile_veriloga(
+                    &include.file_path,
+                )?);
 
                 let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
                     .entry(model_key)
-                    .or_insert_with(|| model.clone());
+                    .or_insert_with(|| std::sync::Arc::clone(&model));
 
                 if let Some(alias) = include.model_name.as_deref() {
                     veriloga_models
                         .entry(normalize_model_key(alias))
-                        .or_insert_with(|| model.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 if let Some(stem) = include.file_path.file_stem().and_then(|s| s.to_str()) {
                     veriloga_models
                         .entry(normalize_model_key(stem))
-                        .or_insert_with(|| model.clone());
+                        .or_insert_with(|| std::sync::Arc::clone(&model));
                 }
 
                 log::info!(
@@ -259,6 +266,23 @@ impl Engine {
                         circuit
                             .resistors
                             .set_last_noise_temperature_offset(noise_dtemp);
+                    }
+                    // ngspice `noisy` instance switch (default on): a quiet
+                    // resistor produces no noise at all.
+                    if let Some(noisy) = instance_param(instance_params, &["NOISY", "NOISE"]) {
+                        circuit.resistors.set_last_noisy(noisy != 0.0);
+                    }
+                    // Model-card flicker noise (resnoise.c), folded with the
+                    // effective noise area at build time.
+                    if let Some((coefficient, af, ef)) = resolve_resistor_flicker_noise(
+                        netlist,
+                        model.as_deref(),
+                        instance_params,
+                        self.config.temperature,
+                    )? {
+                        circuit
+                            .resistors
+                            .set_last_flicker_noise(coefficient, af, ef);
                     }
                 }
                 ElementKind::Capacitor {
@@ -425,7 +449,11 @@ impl Engine {
                 } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
-                    let mut diode = crate::device::Diode::new(element.name.clone(), anode, cathode);
+                    // Model cards start from ngspice's defaults: parameters a
+                    // card omits must mean what they mean in SPICE, not
+                    // inherit the 1N4148-like convenience values.
+                    let mut diode =
+                        crate::device::Diode::spice_defaults(element.name.clone(), anode, cathode);
 
                     // Look up model and apply parameters
                     let rs_given;
@@ -594,6 +622,10 @@ impl Engine {
 
                     bjt = bjt.with_instance_params(instance_params);
                     bjt.set_temperature(self.config.temperature);
+                    bjt.refresh_noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
                     bjt.set_substrate_node(substrate);
 
                     // VBIC instances solve their internal states as MNA
@@ -608,17 +640,17 @@ impl Engine {
                             ))
                         });
                     } else {
-                        // Legacy GP: externalize the constant collector and
-                        // emitter resistances onto real internal nodes (the
-                        // diode/JFET/MOSFET pattern), so their thermal noise
-                        // rides the resistor walk and junction noise injects
-                        // at the true internal terminals. Values are taken
-                        // after model, instance, and temperature application,
-                        // and the zeroed device fields collapse the matching
-                        // internal states, so the solved system is identical.
-                        // The bias-dependent base resistance (qb-modulated,
-                        // ngspice BJTgx) stays folded pending the base-prime
-                        // promotion.
+                        // Legacy GP: externalize the constant collector,
+                        // emitter, and base resistances onto real internal
+                        // nodes (the diode/JFET/MOSFET pattern), so their
+                        // thermal noise rides the resistor walk and junction
+                        // noise injects at the true internal terminals.
+                        // Values are taken after model, instance, and
+                        // temperature application, and the zeroed device
+                        // fields collapse the matching internal states, so
+                        // the solved system is identical. Only the
+                        // bias-dependent base part (qb-modulated, ngspice
+                        // BJTgx, nonzero when RBM < RB) stays folded.
                         if bjt.rcx.is_finite() && bjt.rcx > 0.0 {
                             let cint_name = format!("{}.__cint", element.name);
                             let cint = circuit.get_or_create_node(&cint_name);
@@ -626,6 +658,11 @@ impl Engine {
                             circuit.resistors.add(rc_name, collector, cint, bjt.rcx);
                             bjt.node_collector = cint;
                             bjt.clear_collector_series_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
                         }
                         if bjt.re.is_finite() && bjt.re > 0.0 {
                             let eint_name = format!("{}.__eint", element.name);
@@ -634,6 +671,32 @@ impl Engine {
                             circuit.resistors.add(re_name, emitter, eint, bjt.re);
                             bjt.node_emitter = eint;
                             bjt.clear_emitter_series_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
+                        }
+                        // The constant base part is RBM, which ngspice
+                        // defaults to RB (bjttemp.c) so the folded remainder
+                        // is zero for common cards. Junction limiting moves
+                        // with the topology: the device update applies
+                        // pnjlim to its junction state against the previous
+                        // iterate (bjtload.c's discipline at the prime
+                        // nodes), and the engine-side external scale clamp
+                        // skips GP devices.
+                        if bjt.rbx.is_finite() && bjt.rbx > 0.0 {
+                            let bint_name = format!("{}.__bint", element.name);
+                            let bint = circuit.get_or_create_node(&bint_name);
+                            let rb_name = format!("{}.__rb", element.name);
+                            circuit.resistors.add(rb_name, base, bint, bjt.rbx);
+                            bjt.node_base = bint;
+                            bjt.clear_base_constant_resistance();
+                            if bjt.noise_temperature_offset != 0.0 {
+                                circuit.resistors.set_last_noise_temperature_offset(
+                                    bjt.noise_temperature_offset,
+                                );
+                            }
                         }
                     }
 
@@ -868,6 +931,76 @@ impl Engine {
                     };
                     mosfet.set_temperature(temp_k, tnom_k);
 
+                    // mos1noi.c heats every thermal source by the instance
+                    // offset: DTEMP directly, or temp − CKTtemp + tnom in
+                    // Celsius terms when TEMP is given (ngspice's quirk).
+                    mosfet.noise_temperature_offset =
+                        if instance_param(instance_params, &["TEMP"]).is_some() {
+                            temp_k - self.config.temperature
+                                + netlist.options.tnom.unwrap_or(27.0)
+                        } else {
+                            temp_k - self.config.temperature
+                        };
+
+                    // Drain/source ohmic resistances, mos1temp.c precedence:
+                    // RD (or RS) when given, else RSH times the diffusion
+                    // squares. ngspice stamps the conductance at internal
+                    // prime nodes scaled by the multiplicity; the explicit
+                    // resistor uses the reciprocal equivalent R/m, and the
+                    // repointed device terminals make junction noise and
+                    // limiting act at the true internal nodes.
+                    // Legacy BSIM1/BSIM2 instances keep their historical
+                    // terminal topology; their sheet-resistance handling is
+                    // part of the bsim parity program.
+                    let multiplicity = mosfet.multiplicity.max(1e-12);
+                    let resistances_apply = !mosfet.uses_legacy_bsim();
+                    let drain_r = if !resistances_apply {
+                        0.0
+                    } else if mosfet.rd_model > 0.0 {
+                        mosfet.rd_model
+                    } else if mosfet.rsh > 0.0 {
+                        mosfet.rsh * mosfet.nrd.max(0.0)
+                    } else {
+                        0.0
+                    };
+                    if drain_r > 0.0 {
+                        let dint_name = format!("{}.__dint", element.name);
+                        let dint = circuit.get_or_create_node(&dint_name);
+                        let rd_name = format!("{}.__rd", element.name);
+                        circuit
+                            .resistors
+                            .add(rd_name, drain, dint, drain_r / multiplicity);
+                        mosfet.node_drain = dint;
+                        if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.resistors.set_last_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
+                        }
+                    }
+                    let source_r = if !resistances_apply {
+                        0.0
+                    } else if mosfet.rs_model > 0.0 {
+                        mosfet.rs_model
+                    } else if mosfet.rsh > 0.0 {
+                        mosfet.rsh * mosfet.nrs.max(0.0)
+                    } else {
+                        0.0
+                    };
+                    if source_r > 0.0 {
+                        let sint_name = format!("{}.__sint", element.name);
+                        let sint = circuit.get_or_create_node(&sint_name);
+                        let rs_name = format!("{}.__rs", element.name);
+                        circuit
+                            .resistors
+                            .add(rs_name, source, sint, source_r / multiplicity);
+                        mosfet.node_source = sint;
+                        if mosfet.noise_temperature_offset != 0.0 {
+                            circuit.resistors.set_last_noise_temperature_offset(
+                                mosfet.noise_temperature_offset,
+                            );
+                        }
+                    }
+
                     circuit.mosfets.add(mosfet);
                 }
                 ElementKind::Jfet {
@@ -935,6 +1068,14 @@ impl Engine {
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_model_order(model_order);
 
+                    // jfetnoi.c heats the thermal sources by the instance
+                    // offset; resolve it once for the channel source and the
+                    // externalized resistors below.
+                    jfet.noise_dtemp = jfet.noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+
                     // Realistic extrinsic JFET series resistances (RD/RS) are modeled by
                     // inserting explicit linear resistors and connecting the intrinsic JFET
                     // to generated internal drain/source nodes.
@@ -952,6 +1093,11 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
                     if rs > 0.0 {
                         let sint_name = format!("{}.__sint", element.name);
@@ -960,6 +1106,11 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
 
                     circuit.jfets.push(jfet);
@@ -1051,6 +1202,14 @@ impl Engine {
                     jfet = jfet.with_instance_params(instance_params);
                     jfet.set_model_order(model_order);
 
+                    // jfetnoi.c heats the thermal sources by the instance
+                    // offset; resolve it once for the channel source and the
+                    // externalized resistors below.
+                    jfet.noise_dtemp = jfet.noise_temperature_offset(
+                        self.config.temperature,
+                        netlist.options.tnom.unwrap_or(27.0),
+                    );
+
                     // ngspice stamps model RD/RS as conductance scaled by the
                     // instance area/multiplicity. Explicit resistors therefore
                     // use the reciprocal equivalent, R / scale.
@@ -1065,6 +1224,11 @@ impl Engine {
                         circuit.resistors.add(rd_name, drain, dint, rd);
                         jfet.drain = dint;
                         jfet.params.rd = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
                     if rs > 0.0 {
                         let sint_name = format!("{}.__sint", element.name);
@@ -1073,6 +1237,11 @@ impl Engine {
                         circuit.resistors.add(rs_name, source, sint, rs);
                         jfet.source = sint;
                         jfet.params.rs = 0.0;
+                        if jfet.noise_dtemp != 0.0 {
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(jfet.noise_dtemp);
+                        }
                     }
 
                     circuit.jfets.push(jfet);
@@ -1224,7 +1393,7 @@ impl Engine {
 
                         let mut device = crate::device::veriloga::VerilogADevice::new(
                             element.name.clone(),
-                            model.clone(),
+                            std::sync::Arc::clone(model),
                             &node_ids,
                         );
 
@@ -1264,7 +1433,15 @@ impl Engine {
                                         })?
                                 }
                             };
-                            let _ = device.set_parameter(name, resolved);
+                            // `m=` on an instance whose model does not
+                            // declare an m parameter is the standard
+                            // parallel-multiplicity ($mfactor); models
+                            // declaring their own m keep handling it
+                            if !device.set_parameter(name, resolved)
+                                && name.eq_ignore_ascii_case("m")
+                            {
+                                device.set_multiplicity(resolved);
+                            }
                         }
                         // Dependent parameter defaults must see the instance
                         // overrides applied above

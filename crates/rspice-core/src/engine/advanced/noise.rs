@@ -38,8 +38,45 @@ impl Engine {
     ) -> Vec<NoiseSource> {
         let mut noise_sources = Vec::new();
 
-        // Thermal noise from resistors (4kT/R).
+        // Verilog-A white_noise()/flicker_noise() sources, with PSDs
+        // evaluated at the operating point. Potential-contribution noise
+        // arrives as a series EMF on the branch-equation row, which is an
+        // ordinary system unknown here, so both kinds inject the same way.
+        #[cfg(feature = "veriloga")]
+        for device in circuit.veriloga_devices().iter() {
+            let mut probe = device.clone();
+            let instance = probe.name.clone();
+            for source in probe.noise_sources(dc_solution) {
+                let name = format!("{instance}:{}", source.name);
+                noise_sources.push(match (source.table, source.exponent) {
+                    (Some((points, log_interp)), _) => NoiseSource::tabulated(
+                        name,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        points,
+                        log_interp,
+                    ),
+                    (None, None) => {
+                        NoiseSource::white(name, source.node_pos, source.node_neg, source.psd)
+                    }
+                    (None, Some(ef)) => NoiseSource::flicker_psd(
+                        name,
+                        source.node_pos,
+                        source.node_neg,
+                        source.psd,
+                        ef,
+                    ),
+                });
+            }
+        }
+
+        // Resistor thermal noise (4kT/R) and model-card flicker noise
+        // (resnoise.c), both gated by the per-instance `noisy` switch.
         for (i, stamp) in circuit.resistors.stamps.iter().enumerate() {
+            if !circuit.resistors.noisy.get(i).copied().unwrap_or(true) {
+                continue;
+            }
             let conductance = circuit.resistors.small_signal_conductance(i);
             let resistance = if conductance.abs() > 0.0 {
                 1.0 / conductance
@@ -56,9 +93,28 @@ impl Engine {
                 .get(i)
                 .cloned()
                 .unwrap_or_else(|| format!("R{}", i + 1));
-            let mut source = NoiseSource::thermal(name, stamp.pp.row, stamp.nn.row, resistance);
+            let mut source =
+                NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
             noise_sources.push(source);
+
+            if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
+                let v_pos = Self::noise_node_voltage(dc_solution, stamp.pp.row);
+                let v_neg = Self::noise_node_voltage(dc_solution, stamp.nn.row);
+                let current = circuit.resistors.conductances.get(i).copied().unwrap_or(0.0)
+                    * (v_pos - v_neg);
+                if current.abs() > 1e-18 {
+                    noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
+                        format!("{}:flicker", name),
+                        stamp.pp.row,
+                        stamp.nn.row,
+                        coefficient,
+                        af,
+                        ef,
+                        current,
+                    ));
+                }
+            }
         }
 
         // Diode shot noise (2qI) and KF flicker, both across the junction
@@ -108,12 +164,14 @@ impl Engine {
             if let Some(model) = bjt.vbic_noise_operating_model() {
                 for (suffix, node_pos, node_neg, conductance) in model.thermal {
                     if conductance.is_finite() && conductance > 1e-30 {
-                        noise_sources.push(NoiseSource::thermal(
+                        let mut source = NoiseSource::thermal(
                             format!("{}:{}", bjt.name, suffix),
                             node_pos,
                             node_neg,
                             1.0 / conductance,
-                        ));
+                        );
+                        source.temperature_offset = bjt.noise_temperature_offset;
+                        noise_sources.push(source);
                     }
                 }
                 for (suffix, node_pos, node_neg, current) in model.shot {
@@ -205,12 +263,14 @@ impl Engine {
             let gamma = mos.channel_thermal_noise_gamma();
             if gm > 1e-18 && gamma > 0.0 {
                 let resistance = 1.0 / (gamma * gm).max(1e-30);
-                noise_sources.push(NoiseSource::thermal(
+                let mut source = NoiseSource::thermal(
                     format!("{}:thermal", mos.name),
                     mos.node_drain,
                     mos.node_source,
                     resistance,
-                ));
+                );
+                source.temperature_offset = mos.noise_temperature_offset;
+                noise_sources.push(source);
             }
 
             // SPICE NLEV flicker laws (mos1noi.c; NLEV defaults to 2, whose
@@ -244,12 +304,14 @@ impl Engine {
             let (ids, gm, _) = jfet.calculate(vgs, vds, temp);
             if gm.abs() > 1e-18 {
                 let resistance = 1.0 / ((2.0 / 3.0) * gm.abs()).max(1e-30);
-                noise_sources.push(NoiseSource::thermal(
+                let mut source = NoiseSource::thermal(
                     format!("{}:thermal", jfet.name),
                     jfet.drain,
                     jfet.source,
                     resistance,
-                ));
+                );
+                source.temperature_offset = jfet.noise_dtemp;
+                noise_sources.push(source);
             }
 
             let (igs, igd) = jfet.gate_current(vgs, vgd, temp);
@@ -753,6 +815,129 @@ Q1 C B 0 QN
 .END
 ";
 
+    /// onoise table of [`MOS_RDRS_NOISE_DECK`] from the official ngspice-46
+    /// binary.
+    const MOS_RDRS_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/mos_rdrs_noise_ngspice46.dat");
+
+    /// A common-source stage whose card carries RD=2k and RS=1k: the source
+    /// degeneration reshapes the operating point and gain while both
+    /// resistances add thermal noise at the internal nodes, so the rows pin
+    /// the previously unparsed drain/source ohmic resistances end to end.
+    const MOS_RDRS_NOISE_DECK: &str = "\
+MOS drain source resistance noise testbench
+
+V1 VDD 0 5
+VIN G 0 DC 1.5 AC 1
+RD VDD D 10k
+M1 D G 0 0 NM W=20u L=2u
+
+.OPTIONS NOACCT
+
+.NOISE v(d) VIN DEC 2 1k 100k
+
+.MODEL NM NMOS LEVEL=1 VTO=1.0 KP=60u TOX=20n LD=0.2u RD=2k RS=1k
++ CGSO=2e-10 CGDO=2e-10
+
+.END
+";
+
+    /// onoise table of the DTEMP=150 variant of [`MOS_RDRS_NOISE_DECK`]
+    /// from the official ngspice-46 binary.
+    const MOS_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/mos_dtemp_noise_ngspice46.dat");
+
+    /// Instance DTEMP must heat the channel thermal source and both
+    /// externalized drain/source resistances exactly as mos1noi.c does
+    /// (shot-free deck: every noise source is temperature-bearing).
+    #[test]
+    fn mos_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = MOS_RDRS_NOISE_DECK.replace("M1 D G 0 0 NM W=20u L=2u", "M1 D G 0 0 NM W=20u L=2u DTEMP=150");
+        assert_ne!(deck, MOS_RDRS_NOISE_DECK);
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            2,
+            1e3,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = MOS_DTEMP_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// The externalized MOS drain/source resistances must reproduce the
+    /// official binary's operating point and noise.
+    #[test]
+    fn mos_rdrs_noise_matches_the_ngspice46_oracle() {
+        let netlist = Netlist::parse(MOS_RDRS_NOISE_DECK).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name("d").expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            2,
+            1e3,
+            1e5,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
+            .expect("noise analysis runs");
+
+        let oracle: Vec<(f64, f64)> = MOS_RDRS_NOISE_ORACLE
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= 5e-3,
+                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
     /// onoise table of [`DIODE_DTEMP_NOISE_DECK`] from the official
     /// ngspice-46 binary.
     const DIODE_DTEMP_NOISE_ORACLE: &str =
@@ -920,14 +1105,18 @@ Q1 C B 0 QN
 .END
 ";
 
-    /// The standing acceptance gate for the GP base-resistance increment:
-    /// closing the factor-five deficit requires the base node in the matrix,
-    /// and a first externalization attempt passed this gate but shifted the
-    /// junction-limiting Newton trajectories on reference-sensitive decks
-    /// (general suite 8/8 -> 5/8), so it was reverted. The increment lands
-    /// when this passes with the full suite green.
+    /// The acceptance gate for the GP base-resistance increment: closing
+    /// the factor-five deficit required the base-prime node in the matrix.
+    /// The promotion lands as one piece with its limiting discipline: the
+    /// constant base part externalizes onto a real resistor, the device
+    /// update replaces its junction voltages per Newton iterate via pnjlim
+    /// against the previous iterate (bjtload.c), the companion anchors at
+    /// the limited point, a limited iterate reports nonconvergence
+    /// (CKTnoncon), and Newton takes full node steps for GP circuits. A
+    /// first topology-only attempt passed this gate but broke the general
+    /// suite 8/8 -> 5/8 through the engine-side clamp acting on the bare
+    /// junction.
     #[test]
-    #[ignore = "pending the GP base-node promotion; see the test doc"]
     fn gp_rb_noise_matches_the_ngspice46_oracle() {
         let netlist = Netlist::parse(GP_RB_NOISE_DECK).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
@@ -967,6 +1156,108 @@ Q1 C B 0 QN
                 relative,
             );
         }
+    }
+
+    /// onoise tables of the DTEMP=150 variants of the VBIC rb deck and the
+    /// GP rc/re deck from the official ngspice-46 binary.
+    const VBIC_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/vbic_dtemp_noise_ngspice46.dat");
+    const GP_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/gp_dtemp_noise_ngspice46.dat");
+
+    fn assert_onoise_matches(
+        deck: &str,
+        oracle_table: &str,
+        output_node: &str,
+        input_source: &str,
+        points_per_decade: usize,
+        fstart: f64,
+        fstop: f64,
+        gate: f64,
+        label: &str,
+    ) {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let output = circuit.get_node_by_name(output_node).expect("output node");
+        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
+            crate::netlist::FreqVariation::Dec,
+            points_per_decade,
+            fstart,
+            fstop,
+        );
+        let results = engine
+            .run_noise_with_input_source(&netlist, output, None, input_source, &frequencies, 300.15)
+            .expect("noise analysis runs");
+        let oracle: Vec<(f64, f64)> = oracle_table
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
+            .map(|line| {
+                let mut fields = line.split_whitespace();
+                (
+                    fields.next().unwrap().parse().unwrap(),
+                    fields.next().unwrap().parse().unwrap(),
+                )
+            })
+            .collect();
+        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
+        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let onoise = result.output_noise_rms();
+            let relative = (onoise - onoise_ref).abs() / onoise_ref;
+            assert!(
+                relative <= gate,
+                "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
+                freq_ref,
+                onoise,
+                onoise_ref,
+                relative,
+            );
+        }
+    }
+
+    /// Instance DTEMP must heat the VBIC internal-resistance thermal model
+    /// sources and reshape the operating point through the device
+    /// temperature scaling exactly as the official binary does.
+    #[test]
+    fn vbic_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = RB_NOISE_DECK.replace("Q1 C B 0 0 N1", "Q1 C B 0 0 N1 DTEMP=150");
+        assert_ne!(deck, RB_NOISE_DECK);
+        assert_onoise_matches(
+            &deck,
+            VBIC_DTEMP_NOISE_ORACLE,
+            "c",
+            "VIN",
+            5,
+            1e5,
+            1e7,
+            1e-2,
+            "vbic-dtemp",
+        );
+    }
+
+    /// Instance DTEMP must heat the externalized GP collector/emitter
+    /// resistances exactly as bjtnoise.c does. The band stops at 10 MHz:
+    /// above it the +150 K junction-capacitance temperature scaling
+    /// diverges from the binary by ~1.7 percent at 100 MHz, a GP
+    /// cap-temperature fidelity boundary separate from the noise heating
+    /// under test here.
+    #[test]
+    fn gp_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = GP_RCRE_NOISE_DECK
+            .replace("Q1 C B 0 QN", "Q1 C B 0 QN DTEMP=150")
+            .replace(".NOISE v(c) VIN DEC 5 10k 100Meg", ".NOISE v(c) VIN DEC 5 10k 10Meg");
+        assert_ne!(deck, GP_RCRE_NOISE_DECK);
+        assert_onoise_matches(
+            &deck,
+            GP_DTEMP_NOISE_ORACLE,
+            "c",
+            "VIN",
+            5,
+            1e4,
+            1e7,
+            1e-2,
+            "gp-dtemp",
+        );
     }
 
     /// The externalized GP collector/emitter resistances must reproduce the
@@ -1038,6 +1329,95 @@ J1 D G 0 JN M=2
 
 .END
 ";
+
+    /// onoise tables of [`RES_FLICKER_DECK`] and its quiet-R2 variant from
+    /// the official ngspice-46 binary.
+    const RES_FLICKER_ORACLE: &str =
+        include_str!("../../../tests/testdata/res_flicker_ngspice46.dat");
+    const RES_QUIET_ORACLE: &str =
+        include_str!("../../../tests/testdata/res_quiet_ngspice46.dat");
+
+    /// A current-carrying semiconductor resistor with model-card flicker:
+    /// KF at AF=1.5 over the effective noise area
+    /// `(L−2·SHORT)^LF·(W−2·NARROW)^WF`, lifting the low-frequency rows
+    /// well above the thermal floor.
+    const RES_FLICKER_DECK: &str = "\
+Resistor flicker noise testbench
+
+V1 IN 0 DC 2 AC 1
+R1 IN OUT RMOD L=20u W=2u
+R2 OUT 0 1k
+
+.OPTIONS NOACCT
+
+.NOISE v(out) V1 DEC 5 10 100k
+
+.MODEL RMOD R RSH=100 KF=1e-22 AF=1.5 SHORT=0.5u NARROW=0.2u
+
+.END
+";
+
+    /// resnoise.c flicker (with the effective-noise-area folding) must
+    /// reproduce the official binary.
+    #[test]
+    fn resistor_flicker_noise_matches_the_ngspice46_oracle() {
+        assert_onoise_matches(
+            RES_FLICKER_DECK,
+            RES_FLICKER_ORACLE,
+            "out",
+            "V1",
+            5,
+            10.0,
+            1e5,
+            5e-3,
+            "res-flicker",
+        );
+    }
+
+    /// The `noisy=0` instance switch must silence a resistor's thermal and
+    /// flicker noise exactly as resnoise.c skips quiet instances.
+    #[test]
+    fn quiet_resistor_noise_matches_the_ngspice46_oracle() {
+        let deck = RES_FLICKER_DECK.replace("R2 OUT 0 1k", "R2 OUT 0 1k NOISY=0");
+        assert_ne!(deck, RES_FLICKER_DECK);
+        assert_onoise_matches(
+            &deck,
+            RES_QUIET_ORACLE,
+            "out",
+            "V1",
+            5,
+            10.0,
+            1e5,
+            5e-3,
+            "res-quiet",
+        );
+    }
+
+    /// onoise table of the DTEMP=150 variant of [`JFET_FLICKER_DECK`] from
+    /// the official ngspice-46 binary.
+    const JFET_DTEMP_NOISE_ORACLE: &str =
+        include_str!("../../../tests/testdata/jfet_dtemp_noise_ngspice46.dat");
+
+    /// Instance DTEMP must heat the JFET channel thermal source and the
+    /// externalized drain/source resistances exactly as jfetnoi.c does
+    /// (the flicker component is temperature-free, isolating the heating
+    /// to the white floor).
+    #[test]
+    fn jfet_dtemp_noise_matches_the_ngspice46_oracle() {
+        let deck = JFET_FLICKER_DECK.replace("J1 D G 0 JN M=2", "J1 D G 0 JN M=2 DTEMP=150");
+        assert_ne!(deck, JFET_FLICKER_DECK);
+        assert_onoise_matches(
+            &deck,
+            JFET_DTEMP_NOISE_ORACLE,
+            "d",
+            "VIN",
+            5,
+            10.0,
+            1e5,
+            1e-2,
+            "jfet-dtemp",
+        );
+    }
 
     /// The jfetnoi.c flicker law (per-finger current with an explicit
     /// multiplicity factor) must reproduce the official binary under this

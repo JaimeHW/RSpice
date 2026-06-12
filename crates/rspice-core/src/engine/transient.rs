@@ -31,6 +31,7 @@ fn newton_merit_debug_enabled() -> bool {
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
+pub(self) use companion_stamps::TwoTerminalStampSlots;
 mod globalization;
 mod noise;
 mod rescue;
@@ -148,6 +149,21 @@ struct JfetTransientHistory {
     qds_prev: Vec<Value>,
     qds_prev_prev: Vec<Value>,
     cqds_prev: Vec<Value>,
+    accepted_dt_prev: Value,
+    accepted_dt_prev_prev: Value,
+}
+
+/// Junction charge history for diodes (ngspice `DIOcapCharge` state):
+/// the depletion+diffusion charge is integrated with the same companion
+/// discipline as the JFET/MOSFET gate charges.
+#[derive(Debug, Clone, Default)]
+struct DiodeTransientHistory {
+    vd_prev: Vec<Value>,
+    vd_prev_prev: Vec<Value>,
+    qd_prev: Vec<Value>,
+    qd_prev_prev: Vec<Value>,
+    qd_prev_prev_prev: Vec<Value>,
+    cqd_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }
@@ -490,6 +506,19 @@ impl Engine {
         let hinted_max_step = circuit
             .transient_max_step_hint
             .map_or(max_step, |hint| max_step.min(hint));
+        // Honor an explicitly configured maximum timestep (CLI --max-step,
+        // netlist options, bindings). The default constant is a sentinel for
+        // "not set" -- the same convention the CLI TOML merge uses -- so
+        // default configs keep the caller-provided step unchanged.
+        let config_max_step = self.config.max_timestep;
+        let hinted_max_step = if config_max_step.is_finite()
+            && config_max_step > 0.0
+            && config_max_step != crate::constants::MAX_TIMESTEP
+        {
+            hinted_max_step.min(config_max_step)
+        } else {
+            hinted_max_step
+        };
         let mut matrix = self.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -590,6 +619,11 @@ impl Engine {
             requires_conservative_nonlinear_limiting || circuit.has_xspice_devices();
         let is_strictly_linear_transient =
             !circuit.has_nonlinear_devices() && !circuit.has_xspice_devices();
+        // ngspice's flat transient Newton: when junction devices replace
+        // their own iterate voltages (legacy GP pnjlim in update), the full
+        // node step is the algorithm; per-iteration node-delta clamps walk
+        // the junction against frozen nodes and livelock turn-on edges.
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(&circuit);
         let prefer_dense_solver = Self::should_prefer_dense_transient_solver(
             is_strictly_linear_transient,
             size,
@@ -820,6 +854,14 @@ impl Engine {
         let mut jfet_history = Self::initialize_jfet_history(&circuit, &solution);
         jfet_history.accepted_dt_prev = hinted_max_step;
         jfet_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut diode_history = Self::initialize_diode_history(&circuit, &solution);
+        diode_history.accepted_dt_prev = hinted_max_step;
+        diode_history.accepted_dt_prev_prev = hinted_max_step;
+        // Companion stamp slots resolved once against the frozen pattern:
+        // the per-iteration charge companions then stamp through direct CSC
+        // indices instead of a hash lookup per matrix entry.
+        let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
+        let mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -855,6 +897,32 @@ impl Engine {
         let mut last_progress_log = crate::time_compat::Instant::now();
         let mut rhs = vec![0.0; size];
         let mut new_solution = solution.clone();
+        // Newton phase accounting: cumulative stamp/solve time across the
+        // whole run, reported once at completion so a single info-level run
+        // splits assembly cost from linear-solve cost without a profiler.
+        let transient_wall_start = crate::time_compat::Instant::now();
+        let mut total_stamp_nanos: u128 = 0;
+        let mut total_solve_nanos: u128 = 0;
+        let mut total_trunc_nanos: u128 = 0;
+        let mut total_trap_trial_nanos: u128 = 0;
+        let mut total_history_nanos: u128 = 0;
+        let mut total_merit_nanos: u128 = 0;
+        let mut total_postsolve_nanos: u128 = 0;
+        let mut total_setup_nanos: u128 = 0;
+        let mut total_postloop_nanos: u128 = 0;
+        let mut total_top_nanos: u128 = 0;
+        let mut total_tail_nanos: u128 = 0;
+        let mut total_middle_nanos: u128 = 0;
+        let mut total_merit_trials: usize = 0;
+        let mut total_failed_attempts: usize = 0;
+        // Meyer capacitance halves captured by the device-truncation walk on
+        // the candidate solution; valid only for the accept path of the same
+        // loop pass (reset every attempt).
+        let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
+        let mut mosfet_caps_valid;
+        let mut failed_voltage_conv: usize = 0;
+        let mut failed_device_conv: usize = 0;
+        let mut failed_residual_only: usize = 0;
 
         // Runs after every accepted point (all acceptance paths): counts the
         // floor-dt streak and performs the livelock restart when it trips.
@@ -903,6 +971,7 @@ impl Engine {
                         hinted_max_step,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
                     );
@@ -930,6 +999,8 @@ impl Engine {
         }
 
         while t < tstop && total_iterations < max_total_iterations {
+            let attempt_top_start = crate::time_compat::Instant::now();
+            mosfet_caps_valid = false;
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
@@ -1077,6 +1148,8 @@ impl Engine {
             let conservative_limiting_active = requires_conservative_nonlinear_limiting
                 && (startup_recovery || retry_count >= CONSERVATIVE_LIMITING_RETRY_THRESHOLD);
 
+            total_top_nanos += attempt_top_start.elapsed().as_nanos();
+            let setup_phase_start = crate::time_compat::Instant::now();
             // A new timestep attempt begins: the first Newton iterate must
             // fully re-evaluate every bypass-capable device (ngspice's
             // MODEINITPRED discipline), so bypass deltas are always measured
@@ -1184,6 +1257,7 @@ impl Engine {
             // companion histories never are; linear decks already converge in
             // exactly one direct solve below, so the bypass bought one linear
             // solve per step at the cost of wrong waveforms. Removed.
+            total_setup_nanos += setup_phase_start.elapsed().as_nanos();
             for _iter in 0..tran_max_iterations {
                 if converged {
                     break;
@@ -1213,7 +1287,10 @@ impl Engine {
                         trap_order: step_trap_order,
                         bjt_history: &bjt_history,
                         jfet_history: &jfet_history,
+                        diode_history: &diode_history,
+                        diode_companion_slots: &diode_companion_slots,
                         mosfet_history: &mosfet_history,
+                        mosfet_companion_slots: &mosfet_companion_slots,
                         b3soi_history: &b3soi_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
@@ -1236,6 +1313,7 @@ impl Engine {
                 // basin — the saturation-boundary limit cycles this breaks
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
+                let merit_phase_start = crate::time_compat::Instant::now();
                 if circuit.has_nonlinear_devices() {
                     let current_merit = match matrix.scaled_residual_inf_norm(
                         &new_solution,
@@ -1265,6 +1343,8 @@ impl Engine {
                                     .enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                                 nonlinear_state_matches_new_solution = false;
                                 merit_backtrack = Some(search);
+                                total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                                total_merit_trials += 1;
                                 continue;
                             }
                             globalization::BacktrackAction::Accept => {}
@@ -1298,15 +1378,19 @@ impl Engine {
                         circuit.enforce_ideal_voltage_constraints(&mut new_solution, t + dt);
                         nonlinear_state_matches_new_solution = false;
                         merit_backtrack = Some(search);
+                        total_stamp_nanos += newton_stamp_start.elapsed().as_nanos();
+                        total_merit_trials += 1;
                         continue;
                     }
                     last_stamped_iterate.clone_from(&new_solution);
                     last_stamped_merit = current_merit;
                     have_stamped_iterate = true;
                 }
+                total_merit_nanos += merit_phase_start.elapsed().as_nanos();
 
                 // Solve and check convergence
                 let newton_stamp_elapsed = newton_stamp_start.elapsed();
+                total_stamp_nanos += newton_stamp_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_STAMP_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 if newton_stamp_elapsed.as_millis() >= 100 {
@@ -1329,6 +1413,7 @@ impl Engine {
                     matrix.solve(&rhs)
                 };
                 let newton_solve_elapsed = newton_solve_start.elapsed();
+                total_solve_nanos += newton_solve_elapsed.as_nanos();
                 static TRANSIENT_NEWTON_SOLVE_LOG_COUNT: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(0);
                 if newton_solve_elapsed.as_millis() >= 100 {
@@ -1345,6 +1430,7 @@ impl Engine {
                     }
                 }
 
+                let postsolve_phase_start = crate::time_compat::Instant::now();
                 match solve_result {
                     Ok(mut sol) => {
                         had_solver_candidate = true;
@@ -1404,24 +1490,7 @@ impl Engine {
                             }
                         }
 
-                        // ngspice-style per-junction limiting runs on every
-                        // Newton iterate regardless of the global trust-region
-                        // policy; this is what keeps full node updates safe
-                        // around exponential junctions (pnjlim discipline).
-                        if !circuit.bjts.devices.is_empty() {
-                            let junction_limited = Self::limit_bjt_junction_external_updates(
-                                &circuit,
-                                &mut sol,
-                                &new_solution,
-                                num_nodes,
-                                Some(&force_accept_protected_nodes),
-                            );
-                            if junction_limited {
-                                circuit.enforce_ideal_voltage_constraints(&mut sol, t + dt);
-                            }
-                        }
-
-                        if conservative_limiting_active {
+                        if conservative_limiting_active && !junction_owns_steps {
                             // Trust-region damping is critical for stiff semiconductor
                             // nonlinearities, but it should not throttle linear decks or
                             // break ideal voltage-source equations by independently clipping
@@ -1482,6 +1551,7 @@ impl Engine {
 
                         let device_converged = !circuit.has_nonlinear_devices()
                             || self.transient_static_device_convergence_met(&circuit);
+                        total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
 
                         if voltage_converged && device_converged && residual_converged {
                             converged = true;
@@ -1501,6 +1571,7 @@ impl Engine {
                 }
             }
 
+            let postloop_phase_start = crate::time_compat::Instant::now();
             if !converged {
                 retry_count += 1;
                 trap_order = 1;
@@ -1541,7 +1612,10 @@ impl Engine {
                                 trap_order: step_trap_order,
                                 bjt_history: &bjt_history,
                                 jfet_history: &jfet_history,
+                                diode_history: &diode_history,
+                                diode_companion_slots: &diode_companion_slots,
                                 mosfet_history: &mosfet_history,
+                                mosfet_companion_slots: &mosfet_companion_slots,
                                 b3soi_history: &b3soi_history,
                                 suppress_gate_charge,
                                 tline_dc_refs: &tline_dc_refs,
@@ -1623,7 +1697,10 @@ impl Engine {
                             trap_order: step_trap_order,
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
+                            diode_history: &diode_history,
+                            diode_companion_slots: &diode_companion_slots,
                             mosfet_history: &mosfet_history,
+                            mosfet_companion_slots: &mosfet_companion_slots,
                             b3soi_history: &b3soi_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,
@@ -1652,6 +1729,20 @@ impl Engine {
             }
 
             if !converged {
+                total_failed_attempts += 1;
+                if self.node_voltage_convergence_met(&solution, &new_solution, num_nodes) {
+                    // Voltage settled but a device/residual criterion held the
+                    // point back — the interesting bucket for criteria tuning.
+                    if !circuit.has_nonlinear_devices()
+                        || self.transient_static_device_convergence_met(&circuit)
+                    {
+                        failed_residual_only += 1;
+                    } else {
+                        failed_device_conv += 1;
+                    }
+                } else {
+                    failed_voltage_conv += 1;
+                }
                 // Diagnostic logging for debugging timestep issues
                 if total_iterations < 100 || total_iterations % 10000 == 0 {
                     log::debug!(
@@ -1678,6 +1769,7 @@ impl Engine {
                         );
                         return Err(SimulationError::ConvergenceFailed(total_iterations));
                     }
+                    total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                     continue;
                 }
 
@@ -1905,6 +1997,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
+                        Self::diode_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &diode_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -1918,6 +2027,7 @@ impl Engine {
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
+                                None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -1944,10 +2054,13 @@ impl Engine {
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
-                                    force_accept_capacitor_truncation_limit,
-                                    force_accept_bjt_truncation_limit,
+                                    Self::min_truncation_limit(
+                                        force_accept_capacitor_truncation_limit,
+                                        force_accept_bjt_truncation_limit,
+                                    ),
+                                    force_accept_jfet_truncation_limit,
                                 ),
-                                force_accept_jfet_truncation_limit,
+                                force_accept_diode_truncation_limit,
                             ),
                             force_accept_mosfet_truncation_limit,
                         ),
@@ -1970,8 +2083,10 @@ impl Engine {
                         accepted_step_trap_order,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2043,9 +2158,12 @@ impl Engine {
                     }
                     livelock_check!(dt);
                 }
+                total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
                 continue;
             }
 
+            total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
+            let truncation_phase_start = crate::time_compat::Instant::now();
             let first_accepted_transient_step =
                 Self::should_skip_post_accept_timestep_control_on_first_step(result.time.len())
                     // Post-livelock-restart warmup: the re-seeded histories
@@ -2134,11 +2252,29 @@ impl Engine {
             } else {
                 None
             };
+            let diode_truncation_limit =
+                if !first_accepted_transient_step && !circuit.diodes.is_empty() {
+                    Self::diode_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &diode_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let mosfet_truncation_limit = if !first_accepted_transient_step
                 && !suppress_gate_charge
                 && !circuit.mosfets.is_empty()
             {
-                Self::mosfet_ngspice_truncation_limit(
+                let limit = Self::mosfet_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
                     current_method,
@@ -2149,8 +2285,11 @@ impl Engine {
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
+                    Some(&mut mosfet_caps_scratch),
                 )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
+                .filter(|limit| limit.is_finite() && *limit > 0.0);
+                mosfet_caps_valid = mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
+                limit
             } else {
                 None
             };
@@ -2175,8 +2314,14 @@ impl Engine {
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
-                        Self::min_truncation_limit(capacitor_truncation_limit, bjt_truncation_limit),
-                        jfet_truncation_limit,
+                        Self::min_truncation_limit(
+                            Self::min_truncation_limit(
+                                capacitor_truncation_limit,
+                                bjt_truncation_limit,
+                            ),
+                            jfet_truncation_limit,
+                        ),
+                        diode_truncation_limit,
                     ),
                     mosfet_truncation_limit,
                 ),
@@ -2202,6 +2347,8 @@ impl Engine {
                 Self::min_truncation_limit(device_truncation_limit, ltra_truncation_limit),
                 activity_limit,
             );
+            total_trunc_nanos += truncation_phase_start.elapsed().as_nanos();
+            let middle_phase_start = crate::time_compat::Instant::now();
 
             if locked_grid.is_none()
                 && let Some(limit) = candidate_truncation_limit
@@ -2234,13 +2381,14 @@ impl Engine {
                     // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
                             capacitor_truncation_limit,
                             bjt_truncation_limit,
                             jfet_truncation_limit,
+                            diode_truncation_limit,
                             mosfet_truncation_limit,
                             ltra_truncation_limit,
                             current_method,
@@ -2253,6 +2401,7 @@ impl Engine {
                     trap_order =
                         Self::trapezoidal_order_after_timestep_control_reject(step_trap_order);
                     timestep.force_step(retry_dt);
+                    total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                     continue;
                 }
             }
@@ -2277,6 +2426,7 @@ impl Engine {
                     capacitor_truncation_limit,
                     bjt_truncation_limit,
                     jfet_truncation_limit,
+                    diode_truncation_limit,
                     mosfet_truncation_limit,
                 );
             let (lte, accept) = if locked_grid.is_some() {
@@ -2524,6 +2674,23 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_diode_truncation_limit = if !circuit.diodes.is_empty() {
+                        Self::diode_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &diode_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_mosfet_truncation_limit =
                         if !suppress_gate_charge && !circuit.mosfets.is_empty() {
                             Self::mosfet_ngspice_truncation_limit(
@@ -2537,6 +2704,7 @@ impl Engine {
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
+                                None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -2563,10 +2731,13 @@ impl Engine {
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
-                                    force_accept_capacitor_truncation_limit,
-                                    force_accept_bjt_truncation_limit,
+                                    Self::min_truncation_limit(
+                                        force_accept_capacitor_truncation_limit,
+                                        force_accept_bjt_truncation_limit,
+                                    ),
+                                    force_accept_jfet_truncation_limit,
                                 ),
-                                force_accept_jfet_truncation_limit,
+                                force_accept_diode_truncation_limit,
                             ),
                             force_accept_mosfet_truncation_limit,
                         ),
@@ -2589,8 +2760,10 @@ impl Engine {
                         accepted_step_trap_order,
                         &mut bjt_history,
                         &mut jfet_history,
+                        &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2651,6 +2824,7 @@ impl Engine {
                     }
                     livelock_check!(dt);
                 }
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
 
@@ -2681,6 +2855,7 @@ impl Engine {
                     return Err(SimulationError::ConvergenceFailed(total_iterations));
                 }
                 trap_order = 1;
+                total_middle_nanos += middle_phase_start.elapsed().as_nanos();
                 continue;
             }
             stale_accept_count = 0;
@@ -2711,6 +2886,8 @@ impl Engine {
                 circuit.update_nonlinear(&new_solution);
             }
 
+            total_middle_nanos += middle_phase_start.elapsed().as_nanos();
+            let trap_trial_phase_start = crate::time_compat::Instant::now();
             let trapezoidal_order_trial = if !first_accepted_transient_step
                 && !linearized_startup_recovery_points
                 && matches!(
@@ -2719,27 +2896,42 @@ impl Engine {
                 )
                 && !hit_breakpoint
             {
-                Self::trapezoidal_order_trial_timestep_limit(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    dt,
-                    is_strictly_linear_transient,
-                    &bjt_history,
-                    &jfet_history,
-                    &mosfet_history,
-                    &lte_estimator,
-                    &vbic_snapshot_cache,
-                    self.voltage_abstol(),
-                    self.voltage_reltol(),
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
-                )
+                if step_trap_order == 2 && device_truncation_limit.is_some() {
+                    // The order-2 trial truncation walk is the order-2 device
+                    // truncation walk: when this step already ran at order 2,
+                    // the candidate limits were just computed above on the
+                    // same solution — re-walking every device would derive
+                    // the identical numbers.
+                    device_truncation_limit.map(|limit| TrapezoidalOrderTrial {
+                        limit,
+                        promote: Self::should_promote_ngspice_charge_truncation(limit, dt),
+                    })
+                } else {
+                    Self::trapezoidal_order_trial_timestep_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        dt,
+                        is_strictly_linear_transient,
+                        &bjt_history,
+                        &jfet_history,
+                        &diode_history,
+                        &mosfet_history,
+                        &lte_estimator,
+                        &vbic_snapshot_cache,
+                        self.voltage_abstol(),
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                }
             } else {
                 None
             };
+            total_trap_trial_nanos += trap_trial_phase_start.elapsed().as_nanos();
 
+            let history_phase_start = crate::time_compat::Instant::now();
             Self::update_reactive_history(
                 &mut circuit,
                 &new_solution,
@@ -2749,9 +2941,11 @@ impl Engine {
                 step_trap_order,
                 &mut bjt_history,
                 &mut jfet_history,
+                &mut diode_history,
                 &mut mosfet_history,
                 &mut b3soi_history,
                 Some(&vbic_snapshot_cache),
+                mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
                 &tline_dc_refs,
                 &coupled_tline_refs,
@@ -2763,14 +2957,18 @@ impl Engine {
                 &mut dynamic_tline_breakpoints_added,
                 &mut warned_dynamic_tline_breakpoint_cap,
             );
+            total_history_nanos += history_phase_start.elapsed().as_nanos();
+            let tail_phase_start = crate::time_compat::Instant::now();
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
                 circuit.accept_xspice_timestep();
             }
             #[cfg(feature = "veriloga")]
-            if circuit.has_veriloga_devices() {
-                circuit.accept_veriloga_timestep();
-            }
+            let veriloga_discontinuity = if circuit.has_veriloga_devices() {
+                circuit.accept_veriloga_timestep()
+            } else {
+                false
+            };
 
             solution.clone_from(&new_solution);
 
@@ -2829,6 +3027,23 @@ impl Engine {
                 }
                 timestep.force_step(limit);
             }
+            // Verilog-A timestep control: $bound_step caps the next step;
+            // a newly raised $discontinuity restarts fine like a
+            // breakpoint so the corner resolves sharply
+            #[cfg(feature = "veriloga")]
+            if circuit.has_veriloga_devices() {
+                if let Some(bound) = circuit.veriloga_timestep_bound()
+                    && bound + 1e-18 < timestep.dt()
+                {
+                    timestep.force_step(bound.min(max_step));
+                }
+                if veriloga_discontinuity {
+                    let restart = (dt * 0.1).max(1e-15);
+                    if restart < timestep.dt() {
+                        timestep.force_step(restart.min(max_step));
+                    }
+                }
+            }
             if first_accepted_transient_step
                 && matches!(
                     current_method,
@@ -2857,6 +3072,7 @@ impl Engine {
 
             lte_warmup_skips = lte_warmup_skips.saturating_sub(1);
             livelock_check!(dt);
+            total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
         if t < tstop {
@@ -2872,6 +3088,44 @@ impl Engine {
         log::info!(
             "Transient complete: {} time points computed",
             result.time.len()
+        );
+        let transient_wall = transient_wall_start.elapsed();
+        log::info!(
+            "Transient Newton phases: {} iterations, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, history {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            total_iterations,
+            total_merit_trials,
+            total_failed_attempts,
+            failed_voltage_conv,
+            failed_device_conv,
+            failed_residual_only,
+            total_top_nanos as f64 * 1e-9,
+            total_setup_nanos as f64 * 1e-9,
+            total_stamp_nanos as f64 * 1e-9,
+            total_solve_nanos as f64 * 1e-9,
+            total_merit_nanos as f64 * 1e-9,
+            total_postsolve_nanos as f64 * 1e-9,
+            total_postloop_nanos as f64 * 1e-9,
+            total_trunc_nanos as f64 * 1e-9,
+            total_trap_trial_nanos as f64 * 1e-9,
+            total_history_nanos as f64 * 1e-9,
+            total_tail_nanos as f64 * 1e-9,
+            total_middle_nanos as f64 * 1e-9,
+            (transient_wall.as_nanos().saturating_sub(
+                total_top_nanos
+                    + total_setup_nanos
+                    + total_stamp_nanos
+                    + total_solve_nanos
+                    + total_merit_nanos
+                    + total_postsolve_nanos
+                    + total_postloop_nanos
+                    + total_trunc_nanos
+                    + total_trap_trial_nanos
+                    + total_history_nanos
+                    + total_tail_nanos
+                    + total_middle_nanos
+            )) as f64
+                * 1e-9,
+            transient_wall.as_secs_f64(),
         );
 
         // Debug: verify stored voltage range for node 0 (SIN source)
@@ -3020,5 +3274,48 @@ mod tests {
         );
         assert_eq!(Engine::transient_newton_iteration_budget(250, false), 250);
         assert_eq!(Engine::transient_newton_iteration_budget(250, true), 128);
+    }
+
+    /// An explicitly configured `max_timestep` must cap the accepted step
+    /// even when the caller passes a coarser per-run maximum (the CLI
+    /// --max-step path resolves into the config, not the argument).
+    #[test]
+    fn configured_max_timestep_caps_accepted_steps() {
+        let deck = "RC step\n\
+                    V1 1 0 DC 1\n\
+                    R1 1 2 1k\n\
+                    C1 2 0 1u\n\
+                    .end\n";
+        let netlist = crate::Netlist::parse(deck).expect("deck parses");
+
+        let mut config = crate::SimulationConfig::default();
+        config.max_timestep = 2.0e-6;
+        let engine = Engine::new(config);
+        let result = engine
+            .run_tran(&netlist, 100.0e-6, 20.0e-6)
+            .expect("transient runs");
+
+        let mut worst_dt: Value = 0.0;
+        for pair in result.time.windows(2) {
+            worst_dt = worst_dt.max(pair[1] - pair[0]);
+        }
+        assert!(
+            worst_dt <= 2.0e-6 + 1e-12,
+            "configured max_timestep ignored: worst accepted dt {worst_dt:.3e}"
+        );
+
+        // Default config: the caller-provided maximum governs unchanged.
+        let default_engine = Engine::new(crate::SimulationConfig::default());
+        let free = default_engine
+            .run_tran(&netlist, 100.0e-6, 20.0e-6)
+            .expect("transient runs");
+        let mut free_worst: Value = 0.0;
+        for pair in free.time.windows(2) {
+            free_worst = free_worst.max(pair[1] - pair[0]);
+        }
+        assert!(
+            free_worst > 2.0e-6,
+            "default config must not silently cap the caller's max step (worst dt {free_worst:.3e})"
+        );
     }
 }

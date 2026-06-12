@@ -87,7 +87,7 @@ fn toolbar_separator(ui: &mut Ui) {
 
 fn schematic_tools(ui: &mut Ui, state: &mut AppState) {
     let on_schematic = state.shell.view == WorkspaceView::Schematic;
-    let tool = state.schematic.tool.clone();
+    let tool = state.schematic.tool;
 
     let select_on = on_schematic && tool.is_select();
     if IconButton::new(Icon::Select)
@@ -153,13 +153,24 @@ fn view_controls(ui: &mut Ui, state: &mut AppState) {
     {
         state.schematic.needs_fit = true;
     }
-    if IconButton::new(Icon::Grid)
-        .on(state.shell.show_grid)
-        .tooltip("Toggle grid")
+    // The glyph mirrors the active style; clicking cycles dots → lines → off.
+    let grid = state.shell.grid;
+    let icon = match grid {
+        crate::shell::GridStyle::Dots => Icon::GridDots,
+        _ => Icon::Grid,
+    };
+    let tooltip = match grid {
+        crate::shell::GridStyle::Dots => "Grid: dots — click for lines",
+        crate::shell::GridStyle::Lines => "Grid: lines — click to hide",
+        crate::shell::GridStyle::Off => "Grid: off — click for dots",
+    };
+    if IconButton::new(icon)
+        .on(grid.visible())
+        .tooltip(tooltip)
         .show(ui)
         .clicked()
     {
-        state.shell.show_grid = !state.shell.show_grid;
+        state.shell.grid = grid.cycled();
     }
 }
 

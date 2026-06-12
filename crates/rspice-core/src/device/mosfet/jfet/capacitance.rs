@@ -266,6 +266,16 @@ impl Jfet {
         (igs, igd)
     }
 
+    /// Thermal-noise temperature offset in kelvin, jfetnoi.c semantics:
+    /// DTEMP directly, or with an absolute instance TEMP given,
+    /// temp − CKTtemp + tnom in Celsius terms (ngspice's quirk, mirrored).
+    pub fn noise_temperature_offset(&self, analysis_temp_k: Value, tnom_c: Value) -> Value {
+        match self.instance_temp.filter(|v| v.is_finite() && *v > 0.0) {
+            Some(temp_k) => temp_k - analysis_temp_k + tnom_c,
+            None => self.instance_dtemp,
+        }
+    }
+
     /// Return the flicker-noise coefficients `(KF, AF, EF)`.
     ///
     /// jfetnoi.c applies KF directly — `m·KF·|cd|^AF / f` — with no

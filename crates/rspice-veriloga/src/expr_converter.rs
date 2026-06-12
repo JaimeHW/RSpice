@@ -24,6 +24,14 @@ fn autodiff_fold(expr: IrExpr) -> IrExpr {
     crate::ir::autodiff::simplify(expr)
 }
 
+/// Map a z-root expansion failure into a compile error
+fn zi_root_error(message: String) -> crate::error::CompileError {
+    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+        "zi filter roots: {message}"
+    )))
+    .into()
+}
+
 /// Sentinel node index for the global reference (ground) node.
 ///
 /// `V(a)` measures the potential of `a` against this reference, never
@@ -46,6 +54,8 @@ pub struct ConversionContext {
     param_map: HashMap<SmolStr, usize>,
     /// Map from variable name to index
     var_map: HashMap<SmolStr, usize>,
+    /// Array layouts: name -> (base, lower, len)
+    arrays: HashMap<SmolStr, (usize, i64, usize)>,
     /// Number of external terminals (ports)
     num_terminals: usize,
     /// Number of internal nodes
@@ -100,11 +110,18 @@ impl ConversionContext {
             var_map.insert(var.name.clone(), idx);
         }
 
+        // Array layouts (elements occupy contiguous variable slots)
+        let mut arrays = HashMap::new();
+        for (name, layout) in &module.arrays {
+            arrays.insert(name.clone(), (layout.base, layout.lower, layout.len));
+        }
+
         Self {
             node_map,
             branch_map,
             param_map,
             var_map,
+            arrays,
             num_terminals,
             num_internal,
         }
@@ -128,6 +145,11 @@ impl ConversionContext {
     /// Get variable index by name
     pub fn var_index(&self, name: &str) -> Option<usize> {
         self.var_map.get(name).copied()
+    }
+
+    /// Get an array layout (base, lower, len) by name
+    pub fn array(&self, name: &str) -> Option<(usize, i64, usize)> {
+        self.arrays.get(name).copied()
     }
 
     /// Global ground (reference) node index
@@ -159,6 +181,11 @@ impl<'a> ExprConverter<'a> {
         Self { ctx }
     }
 
+    /// Array layout (base, lower, len) by name
+    pub fn array_layout(&self, name: &str) -> Option<(usize, i64, usize)> {
+        self.ctx.array(name)
+    }
+
     /// Convert an AST expression to an IR expression
     pub fn convert(&self, expr: &Expression) -> CompileResult<IrExpr> {
         match expr {
@@ -174,10 +201,22 @@ impl<'a> ExprConverter<'a> {
             Expression::Conditional(cond) => self.convert_conditional(cond),
             Expression::Call(call) => self.convert_call(call),
             Expression::BranchAccess(access) => self.convert_branch_access(access),
-            Expression::ArrayAccess(_) => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature("Array access in expressions".into()),
-            )
-            .into()),
+            Expression::ArrayAccess(access) => {
+                let Some((base, lower, len)) = self.ctx.array(&access.array) else {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("'{}' is not a declared array variable", access.array),
+                    ))
+                    .into());
+                };
+                let index = self.convert(&access.index)?;
+                Ok(IrExpr::VarIndexed {
+                    array: access.array.clone(),
+                    base,
+                    len,
+                    lower,
+                    index: Box::new(index),
+                })
+            }
             Expression::ArrayLiteral(_) => Err(CodeGenError::new(
                 CodeGenErrorKind::UnsupportedFeature(
                     "Array literals are only supported as analog filter coefficient lists".into(),
@@ -249,6 +288,7 @@ impl<'a> ExprConverter<'a> {
             "$temperature" => Ok(IrExpr::Temperature),
             "$abstime" => Ok(IrExpr::Time),
             "$realtime" => Ok(IrExpr::Time),
+            "$mfactor" => Ok(IrExpr::Mfactor),
             "$simparam" => {
                 // $simparam("name"[, default]) - simulator parameter query.
                 // The explicit default argument wins; otherwise return a
@@ -284,10 +324,6 @@ impl<'a> ExprConverter<'a> {
             }
             "$port_connected" => {
                 // Check if port is connected (always true for now)
-                Ok(IrExpr::Const(1.0))
-            }
-            "$mfactor" => {
-                // Multiplicity factor (default 1.0)
                 Ok(IrExpr::Const(1.0))
             }
             "$limit" => {
@@ -481,6 +517,25 @@ impl<'a> ExprConverter<'a> {
                 Ok(IrExpr::FlickerNoise {
                     power: Box::new(power),
                     exponent: Box::new(exponent),
+                    name,
+                })
+            }
+            "$noise_table" | "noise_table" | "$noise_table_log" | "noise_table_log" => {
+                let log_interp = func.name.contains("log");
+                if func.args.is_empty() {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        "noise_table requires a {f, p, ...} pair list".into(),
+                    ))
+                    .into());
+                }
+                let name = match func.args.get(1) {
+                    Some(crate::ast::Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                let points = self.noise_table_points(&func.args[0], log_interp)?;
+                Ok(IrExpr::NoiseTable {
+                    points,
+                    log_interp,
                     name,
                 })
             }
@@ -796,25 +851,33 @@ impl<'a> ExprConverter<'a> {
                 let Expression::BranchAccess(BranchAccess::Nodes { access, pos, neg, .. }) = probe
                 else {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        "ddx probe must be a branch access like V(node)".into(),
+                        "ddx probe must be a branch access like V(node) or V(a,b)".into(),
                     ))
                     .into());
                 };
-                if access != "V" || neg.is_some() {
+                // Potential probes of any discipline differentiate w.r.t.
+                // the node unknowns (V, Temp, ...); flow probes (I, Pwr)
+                // would need a branch-flow axis
+                if access == "I" || access == "Pwr" {
                     return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
-                        "ddx probes other than a single node potential V(node)".into(),
+                        "ddx with a flow probe (differentiate w.r.t. a potential instead)".into(),
                     ))
                     .into());
                 }
-                let node = self.ctx.node_index(pos).ok_or_else(|| {
+                let unknown_node = |name: &str| {
                     CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                        "Unknown node: {}",
-                        pos
+                        "Unknown node: {name}"
                     )))
-                })?;
+                };
+                let pos_node = self.ctx.node_index(pos).ok_or_else(|| unknown_node(pos))?;
+                let neg_node = neg
+                    .as_ref()
+                    .map(|n| self.ctx.node_index(n).ok_or_else(|| unknown_node(n)))
+                    .transpose()?;
                 Ok(IrExpr::Ddx {
                     expr: Box::new(inner),
-                    node,
+                    pos: pos_node,
+                    neg: neg_node,
                 })
             }
             "absdelay" => {
@@ -951,6 +1014,19 @@ impl<'a> ExprConverter<'a> {
                     name,
                 })
             }
+            "noise_table" | "noise_table_log" => {
+                let log_interp = call.name.ends_with("log");
+                let name = match call.args.get(1) {
+                    Some(Expression::StringLit(s)) => Some(s.value.to_string()),
+                    _ => None,
+                };
+                let points = self.noise_table_points(require_arg(0)?, log_interp)?;
+                Ok(IrExpr::NoiseTable {
+                    points,
+                    log_interp,
+                    name,
+                })
+            }
             "laplace_nd" => {
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
@@ -1015,17 +1091,67 @@ impl<'a> ExprConverter<'a> {
                     denominator,
                 })
             }
-            "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!(
-                    "Z-domain filter {} (use laplace_* instead)",
-                    call.name
-                )),
-            )
-            .into()),
-            "noise_table" | "noise_table_log" => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(format!("{}()", call.name)),
-            )
-            .into()),
+            // Z-domain filters: zi_xx(expr, num, den, T). Coefficient
+            // arrays ascend in z^-1; zero/pole pair lists expand into
+            // polynomials. The sample period must fold to a constant
+            // (per-instance periods would reshape the filter state).
+            "zi_nd" | "zi_zp" | "zi_zd" | "zi_np" => {
+                let expr = self.convert(require_arg(0)?)?;
+                let (numerator, denominator) = match call.name.as_str() {
+                    "zi_nd" => (
+                        self.const_real_array(require_arg(1)?)?,
+                        self.const_real_array(require_arg(2)?)?,
+                    ),
+                    "zi_zp" => (
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(1)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(2)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                    ),
+                    "zi_zd" => (
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(1)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                        self.const_real_array(require_arg(2)?)?,
+                    ),
+                    _ => (
+                        self.const_real_array(require_arg(1)?)?,
+                        crate::zfilter::z_roots_to_coefficients(
+                            &self.const_complex_pairs(require_arg(2)?)?,
+                        )
+                        .map_err(zi_root_error)?,
+                    ),
+                };
+                if denominator.first().copied().unwrap_or(0.0) == 0.0 {
+                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                        format!("{}: leading denominator coefficient must be nonzero", call.name),
+                    ))
+                    .into());
+                }
+                let period = match autodiff_fold(self.convert(require_arg(3)?)?) {
+                    IrExpr::Const(t) if t > 0.0 && t.is_finite() => t,
+                    _ => {
+                        return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                            format!(
+                                "{}: the sample period must be a positive compile-time constant",
+                                call.name
+                            ),
+                        ))
+                        .into());
+                    }
+                };
+                Ok(IrExpr::ZiFilter {
+                    expr: Box::new(expr),
+                    numerator,
+                    denominator,
+                    period,
+                })
+            }
             _ => Err(
                 CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(format!(
                     "Function: {}",
@@ -1034,6 +1160,43 @@ impl<'a> ExprConverter<'a> {
                 .into(),
             ),
         }
+    }
+
+    /// Parse a noise_table pair list `{f1, p1, f2, p2, ...}` into sorted
+    /// (frequency, power) points. String (file) input and non-constant
+    /// entries are clean unsupported errors.
+    fn noise_table_points(
+        &self,
+        arg: &Expression,
+        log_interp: bool,
+    ) -> CompileResult<Vec<(f64, f64)>> {
+        if matches!(arg, Expression::StringLit(_)) {
+            return Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
+                "noise_table file input (inline the {f, p, ...} pairs instead)".into(),
+            ))
+            .into());
+        }
+        let flat = self.const_real_array(arg)?;
+        if flat.is_empty() || flat.len() % 2 != 0 {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table needs a non-empty, even-length {f, p, ...} list".into(),
+            ))
+            .into());
+        }
+        let mut points: Vec<(f64, f64)> =
+            flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        if log_interp
+            && points
+                .iter()
+                .any(|&(f, p)| f <= 0.0 || p <= 0.0)
+        {
+            return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
+                "noise_table_log requires strictly positive frequencies and powers".into(),
+            ))
+            .into());
+        }
+        Ok(points)
     }
 
     /// Evaluate an array-literal argument to constant reals

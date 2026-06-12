@@ -196,6 +196,17 @@ pub struct Mosfet {
     pub cgbo: Value,
     /// Source/drain sheet resistance (RSH) in ohm/square
     pub rsh: Value,
+    /// Drain ohmic resistance (RD); takes precedence over RSH·NRD
+    pub rd_model: Value,
+    /// Source ohmic resistance (RS); takes precedence over RSH·NRS
+    pub rs_model: Value,
+    /// Drain diffusion squares (NRD instance parameter)
+    pub nrd: Value,
+    /// Source diffusion squares (NRS instance parameter)
+    pub nrs: Value,
+    /// Thermal-noise temperature offset in kelvin (ngspice `dtemp`
+    /// semantics for the channel and parasitic thermal sources).
+    pub noise_temperature_offset: Value,
     /// Flicker noise coefficient (KF)
     pub kf: Value,
     /// Flicker noise current exponent (AF)
@@ -263,4 +274,12 @@ pub struct Mosfet {
 
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: MosfetIndices,
+}
+
+impl Mosfet {
+    /// True when this instance runs the legacy BSIM1/BSIM2 equations rather
+    /// than the classic level 1/2/3/6 models.
+    pub fn uses_legacy_bsim(&self) -> bool {
+        self.legacy_bsim_model.is_some()
+    }
 }

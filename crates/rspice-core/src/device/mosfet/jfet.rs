@@ -358,6 +358,9 @@ pub struct Jfet {
     instance_temp: Option<Value>,
     /// Optional instance DTEMP offset added when TEMP is not given.
     instance_dtemp: Value,
+    /// Builder-resolved thermal-noise temperature offset in kelvin
+    /// (jfetnoi.c `dtemp` semantics).
+    pub noise_dtemp: Value,
     /// Optional instance source terminal temperature override.
     instance_ts: Option<Value>,
     /// Optional instance drain terminal temperature override.

@@ -150,10 +150,6 @@
   .bg-bezel  { background: var(--bezel); --run-ink: var(--yellow); }
   .bg-mono   { background: transparent; --run-ink: var(--ink); }
 
-  [data-detail="on"] .bg-yellow { --detail-stroke: var(--yellow); }
-  [data-detail="on"] .bg-bezel  { --detail-stroke: var(--bezel); }
-  [data-detail="on"] .bg-mono   { --detail-stroke: var(--canvas); }
-
   .tile-hero { width: 248px; height: 248px; }
 
   .spec dl {
@@ -243,7 +239,6 @@
     justify-content: center;
   }
   .splash svg { width: 76px; height: 76px; display: block; }
-  [data-detail="on"] .splash { --detail-stroke: var(--bezel); }
 
   footer {
     margin-top: var(--space-2xl);
@@ -267,23 +262,39 @@
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <!-- Run · standard cut (32px and above) -->
+    <!-- Run · standard cut (48px and above): port-ring terminals, equal pins -->
     <symbol id="run" viewBox="0 0 96 96">
-      <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="8"
-         stroke-linecap="round" stroke-linejoin="round">
-        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
-        <path d="M 9 34 H 30" fill="none"></path>
-        <path d="M 9 62 H 30" fill="none"></path>
-        <path d="M 77 48 H 87" fill="none"></path>
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="8">
+        <path d="M 14 34 H 27.5"></path>
+        <path d="M 14 62 H 27.5"></path>
+        <path d="M 69.5 48 H 82"></path>
       </g>
-      <g fill="none" stroke="var(--detail-stroke, transparent)" stroke-width="4.5" stroke-linecap="round">
-        <path d="M 38 34 H 47"></path>
-        <path d="M 38 62 H 47"></path>
-        <path d="M 42.5 57.5 V 66.5"></path>
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="4">
+        <circle cx="8" cy="34" r="6"></circle>
+        <circle cx="8" cy="62" r="6"></circle>
+        <circle cx="88" cy="48" r="6"></circle>
       </g>
+      <path d="M 25.5 20.61 L 25.5 75.39 L 70.5 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="8" stroke-linejoin="round"></path>
     </symbol>
 
-    <!-- Run · small cut (16px): heavier stroke, wider input spacing, no inner detail -->
+    <!-- Run · mid cut (24-32px): dot-tip terminals on the heavy small-cut stroke -->
+    <symbol id="run-m" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="10.5">
+        <path d="M 8 32 H 29"></path>
+        <path d="M 8 64 H 29"></path>
+        <path d="M 70 48 H 88"></path>
+      </g>
+      <g fill="var(--run-ink, #17181A)">
+        <circle cx="8" cy="32" r="8"></circle>
+        <circle cx="8" cy="64" r="8"></circle>
+        <circle cx="88" cy="48" r="8"></circle>
+      </g>
+      <path d="M 25 20 L 25 76 L 71 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="10.5" stroke-linejoin="round"></path>
+    </symbol>
+
+    <!-- Run · small cut (16px): heavier stroke, wider input spacing, no terminals -->
     <symbol id="run-s" viewBox="0 0 96 96">
       <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="10.5"
          stroke-linecap="round" stroke-linejoin="round">
@@ -301,10 +312,9 @@
     <div>
       <p class="kicker">Mark refinement · Run</p>
       <h1>Run — op-amp as the go signal</h1>
-      <p class="brief">Geometry tightened to optical center on a 96-unit grid. Engineers read the schematic symbol; everyone else reads play. Press run, simulate.</p>
+      <p class="brief">Geometry tightened to optical center on a 96-unit grid, leads landing on open-port terminals the way a schematic draws its pins. Engineers read the schematic symbol; everyone else reads play. Press run, simulate.</p>
     </div>
     <div class="controls">
-      <button class="toggle" id="detailToggle" type="button" aria-pressed="false">+/− detail</button>
       <button class="toggle" id="canvasToggle" type="button" aria-pressed="false">Light canvas</button>
     </div>
   </header>
@@ -321,8 +331,9 @@
           <dt>schematic ink</dt><dd><span class="swatch" style="background:#17181A"></span>#17181A</dd>
           <dt>bezel</dt><dd><span class="swatch" style="background:#101418"></span>#101418</dd>
           <dt>grid</dt><dd>96 units · corner radius 22%</dd>
-          <dt>stroke</dt><dd>8 units · 10.5 in the 16 px cut</dd>
-          <dt>inputs</dt><dd>±14 units from center, edge-connected</dd>
+          <dt>stroke</dt><dd>8 units · 10.5 in the small cuts</dd>
+          <dt>terminals</dt><dd>open ports r 6 · ring 4 · pins equal at 5.5 units</dd>
+          <dt>inputs</dt><dd>±14 units from center</dd>
         </dl>
         <h2>Variants</h2>
         <div class="variants">
@@ -347,10 +358,10 @@
     <h2>Scale</h2>
     <div class="ladder" aria-label="Run mark at 64, 32, and 16 pixels">
       <div class="rung"><div class="tile s64 bg-yellow"><svg aria-hidden="true"><use href="#run"></use></svg></div><span class="label">64</span></div>
-      <div class="rung"><div class="tile s32 bg-yellow"><svg aria-hidden="true"><use href="#run"></use></svg></div><span class="label">32</span></div>
+      <div class="rung"><div class="tile s32 bg-yellow"><svg aria-hidden="true"><use href="#run-m"></use></svg></div><span class="label">32</span></div>
       <div class="rung"><div class="tile s16 bg-yellow"><svg aria-hidden="true"><use href="#run-s"></use></svg></div><span class="label">16</span></div>
     </div>
-    <p class="caption">The 16 px favicon uses a dedicated cut — heavier stroke, inputs spread two units wider — so the leads stay legible instead of dissolving into the triangle.</p>
+    <p class="caption">Three cuts, by size: port rings from 48 px up, filled dot tips at 24–32 px where ring holes would smear shut, and the bare heavy cut at 16 px so the leads stay legible instead of dissolving into the triangle.</p>
   </section>
 
   <section>
@@ -375,7 +386,7 @@
   </section>
 
   <footer>
-    The +/− toggle previews input polarity markers knocked out of the triangle — extra authenticity at splash scale, omitted from the small cut and the default exports.
+    Terminal recut, June 2026: open-port rings with all three pins equal at 5.5 units; the dot-tip mid cut covers 24–32 px, the bare heavy cut covers 16 px. Exports regenerate via design/tools/export_icons.py; the decision record lives in run-mark-terminals.html.
   </footer>
 </div>
 
@@ -402,22 +413,6 @@
       localStorage.setItem("markSheetCanvas", next);
     });
 
-    var detailToggle = document.getElementById("detailToggle");
-    function applyDetail(mode) {
-      if (mode === "on") {
-        root.setAttribute("data-detail", "on");
-        detailToggle.setAttribute("aria-pressed", "true");
-      } else {
-        root.removeAttribute("data-detail");
-        detailToggle.setAttribute("aria-pressed", "false");
-      }
-    }
-    if (localStorage.getItem("runMarkDetail") === "on") { applyDetail("on"); }
-    detailToggle.addEventListener("click", function () {
-      var next = root.getAttribute("data-detail") === "on" ? "off" : "on";
-      applyDetail(next);
-      localStorage.setItem("runMarkDetail", next);
-    });
   })();
 </script>
 

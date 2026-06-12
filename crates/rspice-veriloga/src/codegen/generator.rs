@@ -19,6 +19,7 @@ impl CodeGenerator {
             cross_detector_count: std::cell::Cell::new(0),
             above_detector_count: std::cell::Cell::new(0),
             timer_state_count: std::cell::Cell::new(0),
+            zi_filters: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -40,6 +41,7 @@ impl CodeGenerator {
     fn generate_from_ir(&self, ir: &DeviceIR) -> CompileResult<CompiledModel> {
         self.lookup_tables.borrow_mut().clear();
         self.laplace_filters.borrow_mut().clear();
+        self.zi_filters.borrow_mut().clear();
         self.limit_state_count.set(0);
         self.delay_buffer_count.set(0);
         self.transition_filter_count.set(0);
@@ -84,9 +86,12 @@ impl CodeGenerator {
                 .map(|b| CompiledBranchSource {
                     pos: Self::node_stamp_index(ir, b.pos),
                     neg: Self::node_stamp_index(ir, b.neg),
+                    indirect: b.indirect,
                 })
                 .collect(),
             laplace_filters: Vec::new(),
+            zi_filters: Vec::new(),
+            noise_sources: Vec::new(),
         };
 
         // Generate evaluation steps (executed in order before contributions)
@@ -98,8 +103,34 @@ impl CodeGenerator {
             model.stamp_programs.push(program);
         }
 
+        // Compile noise-source PSD programs (evaluated at the operating
+        // point during noise analysis)
+        for source in &ir.noise_sources {
+            let psd_program = self.compile_expr(&source.psd, ir)?;
+            let exponent_program = source
+                .exponent
+                .as_ref()
+                .map(|e| self.compile_expr(e, ir))
+                .transpose()?;
+            model.noise_sources.push(CompiledNoiseSource {
+                pos: Self::node_stamp_index(ir, source.branch.pos_terminal),
+                neg: Self::node_stamp_index(ir, source.branch.neg_terminal),
+                is_current: source.is_current,
+                branch_ordinal: source.branch_ordinal,
+                program_idx: source.equation_index,
+                psd_program,
+                exponent_program,
+                table: source
+                    .table
+                    .as_ref()
+                    .map(|t| (t.points.clone(), t.log_interp)),
+                name: source.name.clone(),
+            });
+        }
+
         model.laplace_filters = self.laplace_filters.take();
         model.lookup_tables = self.lookup_tables.take();
+        model.zi_filters = self.zi_filters.take();
 
         Ok(model)
     }
@@ -115,10 +146,19 @@ impl CodeGenerator {
             .map(|item| match item {
                 crate::ir::IrAssignmentItem::Assign(assign) => {
                     let program = self.compile_expr(&assign.expr, ir)?;
-                    Ok(AssignmentStep::Assign(AssignmentProgram {
-                        var_index: assign.var_index,
-                        program,
-                    }))
+                    match &assign.index {
+                        Some(target) => Ok(AssignmentStep::AssignIndexed {
+                            base: assign.var_index,
+                            len: target.len,
+                            lower: target.lower,
+                            index: self.compile_expr(&target.index, ir)?,
+                            value: program,
+                        }),
+                        None => Ok(AssignmentStep::Assign(AssignmentProgram {
+                            var_index: assign.var_index,
+                            program,
+                        })),
+                    }
                 }
                 crate::ir::IrAssignmentItem::Loop { condition, body } => {
                     let condition = self.compile_expr(condition, ir)?;
@@ -176,6 +216,59 @@ impl CodeGenerator {
 
         let mut jacobian_programs = Vec::new();
 
+        if eq.indirect {
+            // Indirect contribution: the branch row carries the constraint
+            // f(x) = 0, stamped exactly like a single KCL row at the
+            // branch unknown's equation (+df/dx entries; the device's
+            // companion RHS gives rhs[br] -= f - sum df/dx * x)
+            let ordinal = eq.branch_ordinal.ok_or_else(|| {
+                CodeGenError::new(CodeGenErrorKind::Internal(
+                    "indirect equation without a branch unknown".into(),
+                ))
+            })?;
+            let branch_row = StampIndex::Branch(ordinal);
+            for deriv in &eq.derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                jacobian_programs.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: 1.0,
+                    program,
+                });
+            }
+
+            let mut reactive_jacobians = Vec::new();
+            for deriv in &eq.reactive_derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                reactive_jacobians.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: 1.0,
+                    program,
+                });
+            }
+
+            let stamp_locations = vec![StampLocation {
+                row: branch_row,
+                col: StampIndex::Ground,
+                sign: -1.0,
+            }];
+
+            return Ok(StampProgram {
+                stamp_locations,
+                value_program,
+                jacobian_programs,
+                reactive_jacobians,
+                branch_ordinal: Some(ordinal),
+                indirect: true,
+                static_condition,
+            });
+        }
+
         if let Some(ordinal) = eq.branch_ordinal {
             // Potential contribution: constitutive row of the branch
             // unknown receives -dE/dx for every axis
@@ -184,6 +277,21 @@ impl CodeGenerator {
                 let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
                 let program = self.compile_expr(&deriv.expr, ir)?;
                 jacobian_programs.push(JacobianEntry {
+                    row: branch_row.clone(),
+                    col,
+                    col_axis,
+                    sign: -1.0,
+                    program,
+                });
+            }
+
+            // Reactive part of the source (flux: V <+ ddt(L*i)) stamps
+            // -jw * dQ/dx into the branch row in AC
+            let mut reactive_jacobians = Vec::new();
+            for deriv in &eq.reactive_derivatives {
+                let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+                let program = self.compile_expr(&deriv.expr, ir)?;
+                reactive_jacobians.push(JacobianEntry {
                     row: branch_row.clone(),
                     col,
                     col_axis,
@@ -203,7 +311,9 @@ impl CodeGenerator {
                 stamp_locations,
                 value_program,
                 jacobian_programs,
+                reactive_jacobians,
                 branch_ordinal: Some(ordinal),
+                indirect: false,
                 static_condition,
             });
         }
@@ -223,6 +333,28 @@ impl CodeGenerator {
                 program: program.clone(),
             });
             jacobian_programs.push(JacobianEntry {
+                row: neg.clone(),
+                col,
+                col_axis,
+                sign: -1.0,
+                program,
+            });
+        }
+
+        // Reactive (capacitance) entries: AC stamps jw * dQ/dx with the
+        // same KCL row pairing
+        let mut reactive_jacobians = Vec::new();
+        for deriv in &eq.reactive_derivatives {
+            let (col, col_axis) = Self::axis_stamp_column(ir, &deriv.wrt);
+            let program = self.compile_expr(&deriv.expr, ir)?;
+            reactive_jacobians.push(JacobianEntry {
+                row: pos.clone(),
+                col: col.clone(),
+                col_axis,
+                sign: 1.0,
+                program: program.clone(),
+            });
+            reactive_jacobians.push(JacobianEntry {
                 row: neg.clone(),
                 col,
                 col_axis,
@@ -251,7 +383,9 @@ impl CodeGenerator {
             stamp_locations,
             value_program,
             jacobian_programs,
+            reactive_jacobians,
             branch_ordinal: None,
+            indirect: false,
             static_condition,
         })
     }
@@ -324,6 +458,20 @@ impl CodeGenerator {
                     })?;
                 program.instructions.push(Instruction::PushVariable(idx));
             }
+            IrExpr::VarIndexed {
+                base,
+                len,
+                lower,
+                index,
+                ..
+            } => {
+                self.emit_expr(index, ir, program)?;
+                program.instructions.push(Instruction::PushVariableDyn {
+                    base: *base,
+                    len: *len,
+                    lower: *lower,
+                });
+            }
             IrExpr::Voltage(p, n) => {
                 program.instructions.push(Instruction::PushVoltage(*p, *n));
             }
@@ -343,6 +491,9 @@ impl CodeGenerator {
             }
             IrExpr::Time => {
                 program.instructions.push(Instruction::PushTime);
+            }
+            IrExpr::Mfactor => {
+                program.instructions.push(Instruction::PushMfactor);
             }
             IrExpr::Binary(op, left, right) => {
                 self.emit_expr(left, ir, program)?;
@@ -376,6 +527,16 @@ impl CodeGenerator {
             IrExpr::Unary(crate::ast::UnaryOp::Neg, inner) => {
                 self.emit_expr(inner, ir, program)?;
                 program.instructions.push(Instruction::Neg);
+            }
+            // Unary plus is the identity
+            IrExpr::Unary(crate::ast::UnaryOp::Pos, inner) => {
+                self.emit_expr(inner, ir, program)?;
+            }
+            // Bitwise complement truncates to integer: ~x = -x - 1
+            IrExpr::Unary(crate::ast::UnaryOp::BitNot, inner) => {
+                self.emit_expr(inner, ir, program)?;
+                program.instructions.push(Instruction::PushConst(-1.0));
+                program.instructions.push(Instruction::BitXor);
             }
             IrExpr::Call(func, args) => {
                 for arg in args {
@@ -607,6 +768,29 @@ impl CodeGenerator {
                 self.emit_expr(power, ir, program)?;
                 program.instructions.push(Instruction::WhiteNoise);
             }
+            IrExpr::NoiseTable { .. } => {
+                // Like the other noise functions, the large-signal value
+                // is zero; the table feeds the noise-analysis sources
+                program.instructions.push(Instruction::PushConst(0.0));
+            }
+            IrExpr::ZiFilter {
+                expr,
+                numerator,
+                denominator,
+                period,
+            } => {
+                self.emit_expr(expr, ir, program)?;
+                let filter_id = {
+                    let mut filters = self.zi_filters.borrow_mut();
+                    filters.push(crate::zfilter::ZiFilter::new(
+                        numerator.clone(),
+                        denominator.clone(),
+                        *period,
+                    ));
+                    filters.len() - 1
+                };
+                program.instructions.push(Instruction::ZiState(filter_id));
+            }
             IrExpr::FlickerNoise {
                 power,
                 exponent,
@@ -656,11 +840,6 @@ impl CodeGenerator {
                 }
                 let timer_id = Self::allocate_slot(&self.timer_state_count);
                 program.instructions.push(Instruction::TimerState(timer_id));
-            }
-            IrExpr::Unary(op, _) => {
-                return Err(CompileError::CodeGen(CodeGenError::new(
-                    CodeGenErrorKind::UnsupportedFeature(format!("Unary op {:?}", op)),
-                )));
             }
             IrExpr::LaplaceZP {
                 expr,

@@ -10,6 +10,7 @@ mod chip;
 mod dialog;
 mod docbar;
 mod form;
+mod pane;
 mod pill;
 mod section;
 mod select;
@@ -22,6 +23,10 @@ pub use chip::chip;
 pub use dialog::{Dialog, DialogChoice, DialogSize, dialog_tabs};
 pub use docbar::{crumb_text, docbar};
 pub use form::{check_row, choice_row, input_row, input_row_readonly, kv_row, mono_input};
+pub use pane::{
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
+    pane_section_label, two_pane,
+};
 pub use pill::{Pill, PillState};
 pub use section::section_header;
 pub use select::select;

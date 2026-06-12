@@ -170,6 +170,13 @@ impl HbSolver {
     }
 
     /// Set AC source contribution at an arbitrary harmonic for a node.
+    ///
+    /// `magnitude` is the physical source amplitude. The solver stores
+    /// Fourier coefficients internally (harmonic k contributes
+    /// `2*Re(c_k e^{jkwt})` to the synthesized waveform), so amplitudes
+    /// convert with a factor 1/2 at this boundary; DC passes through.
+    /// Stamping the full amplitude as the coefficient made every nonlinear
+    /// device see twice the true voltage swing.
     pub fn set_harmonic_source(
         &mut self,
         node: usize,
@@ -178,11 +185,14 @@ impl HbSolver {
         phase: Value,
     ) {
         if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
-            self.source_spectra[node][harmonic] = Complex64::from_polar(magnitude, phase);
+            let scale = if harmonic == 0 { 1.0 } else { 0.5 };
+            self.source_spectra[node][harmonic] = Complex64::from_polar(magnitude * scale, phase);
         }
     }
 
     /// Add AC source contribution at an arbitrary harmonic for a node.
+    ///
+    /// Same amplitude-to-coefficient conversion as `set_harmonic_source`.
     pub fn add_harmonic_source(
         &mut self,
         node: usize,
@@ -191,7 +201,8 @@ impl HbSolver {
         phase: Value,
     ) {
         if node < self.source_spectra.len() && harmonic < self.source_spectra[node].len() {
-            self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude, phase);
+            let scale = if harmonic == 0 { 1.0 } else { 0.5 };
+            self.source_spectra[node][harmonic] += Complex64::from_polar(magnitude * scale, phase);
         }
     }
 
@@ -227,6 +238,13 @@ impl HbSolver {
                 *c = Complex64::new(0.0, 0.0);
             }
         }
+        // The per-row current scale accumulates |contribution| alongside
+        // every residual term (the SPICE KCL convergence reference).
+        for node_scale in &mut state.residual_scale {
+            for s in node_scale.iter_mut() {
+                *s = 0.0;
+            }
+        }
 
         // Add source contributions first
         for (node, source) in self.source_spectra.iter().enumerate() {
@@ -234,6 +252,7 @@ impl HbSolver {
                 for (k, &s) in source.iter().enumerate() {
                     if k < state.residual[node].len() {
                         state.residual[node][k] += s; // Source current INTO node
+                        state.residual_scale[node][k] += s.norm();
                     }
                 }
             }
@@ -245,6 +264,7 @@ impl HbSolver {
                 for k in 0..=self.num_harmonics {
                     if k < state.x[j].len() && k < state.residual[i].len() {
                         state.residual[i][k] -= g * state.x[j][k];
+                        state.residual_scale[i][k] += g.abs() * state.x[j][k].norm();
                     }
                 }
             }
@@ -258,6 +278,7 @@ impl HbSolver {
                         let omega_k = (k as f64) * omega0;
                         let j_omega = Complex64::new(0.0, omega_k);
                         state.residual[i][k] -= j_omega * c * state.x[j][k];
+                        state.residual_scale[i][k] += omega_k * c.abs() * state.x[j][k].norm();
                     }
                 }
             }
@@ -274,12 +295,15 @@ impl HbSolver {
                         if k == 0 {
                             // DC: inductor is short circuit
                             // Add very large conductance to force V_i = V_j
-                            const DC_SHORT_CONDUCTANCE: Value = 1e6;
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
+                            state.residual_scale[i][k] +=
+                                DC_SHORT_CONDUCTANCE * state.x[j][k].norm();
                         } else {
                             // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                             state.residual[i][k] -= y_l * state.x[j][k];
+                            state.residual_scale[i][k] +=
+                                state.x[j][k].norm() / (omega_k * l.abs());
                         }
                     }
                 }
@@ -289,6 +313,10 @@ impl HbSolver {
         state.compute_residual_norm();
     }
 
+    /// Source value entering the branch KVL constraint at one harmonic, in
+    /// the solver's internal Fourier-coefficient convention: stored AC
+    /// entries are physical amplitudes, so harmonics k >= 1 convert with a
+    /// factor 1/2 (see `set_harmonic_source`).
     fn voltage_source_value_at_harmonic(
         branch: &VoltageSourceBranch,
         harmonic: usize,
@@ -299,7 +327,7 @@ impl HbSolver {
             branch
                 .ac_harmonics
                 .iter()
-                .find_map(|(index, value)| (*index == harmonic).then_some(*value))
+                .find_map(|(index, value)| (*index == harmonic).then_some(*value * 0.5))
                 .unwrap_or_else(|| Complex64::new(0.0, 0.0))
         }
     }
@@ -354,7 +382,6 @@ impl HbSolver {
                 for k in 0..h {
                     if k < state.x[j].len() && k < state.residual[i].len() {
                         if k == 0 {
-                            const DC_SHORT_CONDUCTANCE: Value = 1e6;
                             state.residual[i][k] -= DC_SHORT_CONDUCTANCE * state.x[j][k];
                         } else {
                             let omega_k = (k as f64) * omega0;
@@ -442,7 +469,6 @@ impl HbSolver {
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     if k == 0 {
-                        const DC_SHORT_CONDUCTANCE: Value = 1e6;
                         y_matrix[i][j] += DC_SHORT_CONDUCTANCE;
                     } else {
                         let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));

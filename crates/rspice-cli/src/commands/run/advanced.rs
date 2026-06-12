@@ -672,7 +672,7 @@ pub(super) fn run_corner_sweep(ctx: &RunContext<'_>, corners_str: &str) -> Resul
         }
     }
 
-    let jobs = ctx.args.jobs.unwrap_or(1).max(1);
+    let jobs = super::effective_jobs(ctx.args.jobs, corners.len());
     let results: Vec<(String, bool)> = if jobs > 1 && corners.len() > 1 {
         run_corners_parallel(ctx, &corners, corner_lib.as_deref(), jobs)?
     } else {

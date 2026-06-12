@@ -19,7 +19,16 @@ mod linear;
 mod linear_algebra;
 mod newton;
 mod nonlinear_api;
+mod periodic_ac;
 mod result_builder;
+
+pub use periodic_ac::{PeriodicAcExcitation, PeriodicNoiseSource};
+
+/// Conductance used to model an inductor as a DC short across every solve
+/// path (full-spectrum residual, Jacobian, DC seed, linear solve). One value
+/// everywhere keeps the operating point and the seed solving the same
+/// circuit.
+pub(super) const DC_SHORT_CONDUCTANCE: Value = 1e6;
 
 /// Error types specific to Harmonic Balance solver
 #[derive(Debug, Clone)]
@@ -65,11 +74,24 @@ pub struct HbSolverState {
     /// Residual vector [node][harmonic]
     pub residual: Vec<Vec<Complex64>>,
 
+    /// Per-row current scale [node][harmonic]: the sum of the magnitudes of
+    /// every individual current contribution into the row, accumulated
+    /// alongside the residual. Convergence is judged per row against
+    /// abstol + reltol * scale (the SPICE KCL criterion), which a global
+    /// norm cannot do: a microamp imbalance at a megohm node hides under
+    /// the norm of a circuit whose stiff rows carry amps.
+    pub residual_scale: Vec<Vec<Value>>,
+
     /// Current residual norm
     pub residual_norm: Value,
 
     /// Number of iterations
     pub iteration: usize,
+
+    /// Total harmonic Newton iterations accumulated across every phase of
+    /// the convergence strategy (never reset by the ladder), for honest
+    /// convergence-cost reporting.
+    pub total_iterations: usize,
 
     /// Converged flag
     pub converged: bool,
@@ -81,8 +103,10 @@ impl HbSolverState {
         Self {
             x: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
             residual: vec![vec![Complex64::new(0.0, 0.0); num_harmonics + 1]; num_nodes],
+            residual_scale: vec![vec![0.0; num_harmonics + 1]; num_nodes],
             residual_norm: f64::INFINITY,
             iteration: 0,
+            total_iterations: 0,
             converged: false,
         }
     }
@@ -96,6 +120,35 @@ impl HbSolverState {
             .map(|c| c.norm_sqr())
             .sum();
         self.residual_norm = sum.sqrt();
+    }
+
+    /// SPICE-style per-row KCL convergence: every residual entry must
+    /// satisfy |res| <= abstol + reltol * (sum of |contribution| into the
+    /// row), using the scale accumulated during residual assembly.
+    pub fn rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        self.residual
+            .iter()
+            .zip(self.residual_scale.iter())
+            .all(|(res_row, scale_row)| {
+                res_row
+                    .iter()
+                    .zip(scale_row.iter())
+                    .all(|(r, s)| r.norm() <= abstol + reltol * s)
+            })
+    }
+
+    /// Per-row KCL convergence restricted to the DC (k = 0) entries, for
+    /// the DC operating-point pre-solve which only assembles harmonic 0.
+    pub fn dc_rows_converged(&self, reltol: Value, abstol: Value) -> bool {
+        self.residual
+            .iter()
+            .zip(self.residual_scale.iter())
+            .all(|(res_row, scale_row)| {
+                match (res_row.first(), scale_row.first()) {
+                    (Some(r), Some(s)) => r.norm() <= abstol + reltol * s,
+                    _ => true,
+                }
+            })
     }
 
     /// Compute solution norm for relative tolerance
@@ -287,6 +340,50 @@ pub enum NonlinearDeviceType {
     CurrentSwitch,
 }
 
+/// Depletion-capacitance parameter set for one junction.
+///
+/// `cj0 = 0` disables the junction charge entirely; `fc` is the forward-bias
+/// linearization knee (SPICE FC, default 0.5).
+#[derive(Debug, Clone, Copy)]
+pub struct DepletionCap {
+    /// Zero-bias junction capacitance (F)
+    pub cj0: Value,
+    /// Built-in potential (V)
+    pub vj: Value,
+    /// Grading coefficient
+    pub m: Value,
+    /// Forward-bias depletion linearization coefficient
+    pub fc: Value,
+}
+
+impl DepletionCap {
+    /// A disabled junction (no charge).
+    pub fn none() -> Self {
+        Self {
+            cj0: 0.0,
+            vj: 1.0,
+            m: 0.5,
+            fc: 0.5,
+        }
+    }
+
+    /// Junction parameters with SPICE-standard clamping.
+    pub fn new(cj0: Value, vj: Value, m: Value, fc: Value) -> Self {
+        Self {
+            cj0: cj0.max(0.0),
+            vj: vj.max(0.01),
+            m: m.clamp(0.01, 0.95),
+            fc: fc.clamp(0.0, 0.99),
+        }
+    }
+}
+
+impl Default for DepletionCap {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
 /// Device parameters for nonlinear devices
 #[derive(Debug, Clone)]
 pub struct NonlinearDeviceParams {
@@ -310,6 +407,10 @@ pub struct NonlinearDeviceParams {
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,
+    /// Body-effect coefficient gamma (MOSFET, V^0.5)
+    pub gamma: Value,
+    /// Surface potential phi (MOSFET, V)
+    pub phi: Value,
     /// Early voltage (BJT)
     pub vaf: Value,
     /// Switch ON resistance
@@ -322,6 +423,21 @@ pub struct NonlinearDeviceParams {
     pub smooth: Value,
     /// Control conversion gain (e.g. sense conductance A/V)
     pub control_gain: Value,
+    /// Primary junction depletion capacitance (diode junction, BJT B-E,
+    /// JFET G-S)
+    pub cap_a: DepletionCap,
+    /// Secondary junction depletion capacitance (BJT B-C, JFET G-D)
+    pub cap_b: DepletionCap,
+    /// Secondary-junction saturation current (MOS drain-bulk diode; the
+    /// source-bulk diode rides on `is`)
+    pub is2: Value,
+    /// Total intrinsic oxide capacitance Cox' * W * Leff (MOS channel
+    /// charge model; zero disables it)
+    pub cox_wl: Value,
+    /// Forward transit time: diode TT / BJT TF (diffusion charge tau_f * i_f)
+    pub tt_f: Value,
+    /// Reverse transit time: BJT TR (diffusion charge tau_r * i_r)
+    pub tt_r: Value,
 }
 
 impl Default for NonlinearDeviceParams {
@@ -337,12 +453,20 @@ impl Default for NonlinearDeviceParams {
             vth: 0.7,
             kp: 2e-5,
             lambda: 0.0,
+            gamma: 0.0,
+            phi: 0.6,
             vaf: f64::INFINITY,
             ron: 1.0,
             roff: 1e6,
             vh: 0.0,
             smooth: 0.1,
             control_gain: 1.0,
+            cap_a: DepletionCap::none(),
+            cap_b: DepletionCap::none(),
+            is2: 1e-14,
+            cox_wl: 0.0,
+            tt_f: 0.0,
+            tt_r: 0.0,
         }
     }
 }

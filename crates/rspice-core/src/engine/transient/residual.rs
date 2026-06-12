@@ -17,7 +17,10 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) trap_order: u8,
     pub(super) bjt_history: &'a BjtTransientHistory,
     pub(super) jfet_history: &'a JfetTransientHistory,
+    pub(super) diode_history: &'a DiodeTransientHistory,
+    pub(super) diode_companion_slots: &'a [TwoTerminalStampSlots],
     pub(super) mosfet_history: &'a MosfetTransientHistory,
+    pub(super) mosfet_companion_slots: &'a [[TwoTerminalStampSlots; 5]],
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
     pub(super) suppress_gate_charge: bool,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
@@ -107,6 +110,17 @@ impl Engine {
             ctx.jfet_history,
             ctx.suppress_gate_charge,
         );
+        Self::stamp_diode_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            ctx.method,
+            ctx.trap_order,
+            dt,
+            ctx.diode_history,
+            ctx.diode_companion_slots,
+        );
         Self::stamp_mosfet_transient_companions(
             circuit,
             matrix,
@@ -117,6 +131,7 @@ impl Engine {
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
+            ctx.mosfet_companion_slots,
         );
         Self::stamp_b3soi_transient_companions(
             circuit,
@@ -318,6 +333,9 @@ Q1 C B E 0 QN
         let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base);
         jfet_history.accepted_dt_prev = dt;
         jfet_history.accepted_dt_prev_prev = dt;
+        let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
+        diode_history.accepted_dt_prev = dt;
+        diode_history.accepted_dt_prev_prev = dt;
         let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
         mosfet_history.accepted_dt_prev = dt;
         mosfet_history.accepted_dt_prev_prev = dt;
@@ -332,13 +350,18 @@ Q1 C B E 0 QN
         let coeff = CompanionCoefficients::for_method(Engine::effective_companion_method(
             method, trap_order,
         ));
+        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+        let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
             method,
             trap_order,
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
+            diode_history: &diode_history,
+            diode_companion_slots: &diode_companion_slots,
             mosfet_history: &mosfet_history,
+            mosfet_companion_slots: &mosfet_companion_slots,
             b3soi_history: &b3soi_history,
             suppress_gate_charge: false,
             tline_dc_refs: &tline_dc_refs,
@@ -728,6 +751,7 @@ Q1 C B E 0 QN
                 Engine::initialize_coupled_tline_history(&mut circuit, &base, 0.0);
             let bjt_history = Engine::initialize_bjt_history(&circuit, &base);
             let jfet_history = Engine::initialize_jfet_history(&circuit, &base);
+            let diode_history = Engine::initialize_diode_history(&circuit, &base);
             let mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
             let b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
             let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
@@ -735,13 +759,18 @@ Q1 C B E 0 QN
                 engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
             );
             let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+            let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+            let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
                 method: IntegrationMethod::BackwardEuler,
                 trap_order: 1,
                 bjt_history: &bjt_history,
                 jfet_history: &jfet_history,
+                diode_history: &diode_history,
+                diode_companion_slots: &diode_companion_slots,
                 mosfet_history: &mosfet_history,
+                mosfet_companion_slots: &mosfet_companion_slots,
                 b3soi_history: &b3soi_history,
                 suppress_gate_charge: false,
                 tline_dc_refs: &tline_dc_refs,

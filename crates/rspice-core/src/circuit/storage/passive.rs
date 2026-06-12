@@ -14,6 +14,14 @@ pub struct Resistors {
     /// Per-instance thermal-noise temperature offsets in kelvin (ngspice
     /// `dtemp` semantics: noise runs at the analysis temperature plus this).
     pub noise_temperature_offsets: Vec<Value>,
+    /// Per-instance noise enable (ngspice `noisy`, default on): a quiet
+    /// resistor produces neither thermal nor flicker noise.
+    pub noisy: Vec<bool>,
+    /// Per-instance flicker noise as `(coefficient, AF, EF)` for a density
+    /// of `coefficient·|I|^AF / f^EF`, with the model KF, multiplicity
+    /// folding, and effective noise area pre-folded into the coefficient
+    /// (resnoise.c semantics).
+    pub flicker: Vec<Option<(Value, Value, Value)>>,
 }
 
 impl Resistors {
@@ -39,6 +47,22 @@ impl Resistors {
         self.small_signal_conductances
             .push(1.0 / small_signal_resistance);
         self.noise_temperature_offsets.push(0.0);
+        self.noisy.push(true);
+        self.flicker.push(None);
+    }
+
+    /// Set the noise enable of the most recently added resistor.
+    pub fn set_last_noisy(&mut self, noisy: bool) {
+        if let Some(slot) = self.noisy.last_mut() {
+            *slot = noisy;
+        }
+    }
+
+    /// Set the flicker-noise terms of the most recently added resistor.
+    pub fn set_last_flicker_noise(&mut self, coefficient: Value, af: Value, ef: Value) {
+        if let Some(slot) = self.flicker.last_mut() {
+            *slot = Some((coefficient, af, ef));
+        }
     }
 
     /// Set the thermal-noise temperature offset of the most recently added

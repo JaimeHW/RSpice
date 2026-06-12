@@ -112,6 +112,12 @@ impl Engine {
         let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
         let requires_conservative_nonlinear_limiting =
             circuit.requires_conservative_solution_damping();
+        // ngspice's flat Newton: when junction devices replace their own
+        // iterate voltages (pnjlim), the full node step IS the algorithm and
+        // merit-based step shrinking livelocks turn-on (the raw residual
+        // transiently rises along the convergent direction). The +/-1kV node
+        // containment below stays active regardless.
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit);
         // Use 10x more iterations for DC nonlinear since damping limits voltage change per step
         // With MAX_DELTA_V=2V and standard max_iterations=50, we can only move 100V
         // Need 500+ iterations to traverse the full +/-1000V range if starting from a poor guess
@@ -153,7 +159,9 @@ impl Engine {
             // semiconductor nonlinearities, but it can unnecessarily throttle
             // behavioral-only fixed-point updates (e.g., B-source macros that
             // legitimately require kilovolt-level solution jumps).
-            let mut new_solution = if requires_conservative_nonlinear_limiting {
+            let mut new_solution = if requires_conservative_nonlinear_limiting
+                && !junction_owns_steps
+            {
                 self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
                     self.nonlinear_merit(circuit, matrix, trial)
                 })
@@ -201,6 +209,23 @@ impl Engine {
             // Device convergence must be checked at the candidate iterate, not the prior iterate.
             self.update_device_states_for_dc(circuit, &new_solution);
             let device_converged = circuit.nonlinear_converged(self.device_convergence_criteria());
+            if std::env::var("RSPICE_DC_TRACE").as_deref() == Ok("1") {
+                let max_dv = solution
+                    .iter()
+                    .zip(new_solution.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                let limited = circuit
+                    .bjts
+                    .devices
+                    .iter()
+                    .filter(|bjt| bjt.legacy_junction_limited_for_trace())
+                    .count();
+                let nl_res = self.nonlinear_merit(circuit, matrix, &new_solution);
+                eprintln!(
+                    "DCTRACE iter={iteration} max_dv={max_dv:.3e} vconv={voltage_converged} dconv={device_converged} linres={linearized_residual_converged} limited_bjts={limited} merit={nl_res:?}"
+                );
+            }
             let nonlinear_residual_converged = voltage_converged
                 && device_converged
                 && self.nonlinear_residual_converged(circuit, matrix, &new_solution);
@@ -623,7 +648,15 @@ impl Engine {
             circuit.requires_conservative_solution_damping();
         let mut rhs = vec![0.0; size];
         let mut damping_state = NewtonDampingState::default();
-        let tranop_max_iterations = self.continuation_iteration_budget(1, 32);
+        let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit);
+        // ngspice floors every NIiter call to 100 iterations (ITL1); the
+        // per-iterate junction walk of pnjlim devices legitimately needs
+        // tens of iterations on deep TTL chains before the residual settles.
+        let tranop_max_iterations = if junction_owns_steps {
+            self.continuation_iteration_budget(1, 100)
+        } else {
+            self.continuation_iteration_budget(1, 32)
+        };
 
         for iteration in 0..tranop_max_iterations {
             if Self::should_abort_iteration(abort, iteration) {
@@ -648,7 +681,9 @@ impl Engine {
             );
 
             let raw_solution = matrix.solve(&rhs).map_err(SimulationError::Solver)?;
-            let mut new_solution = if requires_conservative_nonlinear_limiting {
+            let mut new_solution = if requires_conservative_nonlinear_limiting
+                && !junction_owns_steps
+            {
                 self.apply_damping_strategy(&solution, &raw_solution, &mut damping_state, |trial| {
                     self.nonlinear_merit_with_linear_stamp(
                         circuit,

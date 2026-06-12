@@ -319,12 +319,68 @@ fn run_pnoise_analysis_with_config_typed(
     )
     .map_err(PnoiseRunError::Data)?;
 
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
 
     let mut output_noise = folded_output_noise.clone();
+    let mut exact_contributors: Option<Vec<(String, f64)>> = None;
+    // The primary output curve and the contributor breakdown come from the
+    // engine's cyclostationary conversion-matrix pnoise: it carries the
+    // LO-modulated transfers and modulated shot/thermal intensities the
+    // stationary sideband fold cannot represent. The fold remains only as
+    // the failure fallback and behind the input-referred estimate.
+    let pnoise_ref = config
+        .output_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|node| !node.is_empty() && !is_ground_like(node));
+    let pnoise_input = (config.noise_ref == PnoiseReference::Input)
+        .then(|| config.input_source.trim())
+        .filter(|name| !name.is_empty());
+    let mut exact_input_noise: Option<Vec<Value>> = None;
+    match engine.run_pnoise(
+        &netlist,
+        pss_data.frequency,
+        &frequencies,
+        config.output_node.trim(),
+        pnoise_ref,
+        pnoise_input,
+        config.max_sideband.max(1) as i32,
+    ) {
+        Ok(exact) => {
+            if config.noise_summary {
+                let total: f64 = exact.output_noise.iter().sum();
+                exact_contributors = Some(
+                    exact
+                        .contributors
+                        .iter()
+                        .map(|(name, psds)| {
+                            let share: f64 = psds.iter().sum();
+                            let pct = if total > 0.0 {
+                                100.0 * share / total
+                            } else {
+                                0.0
+                            };
+                            (name.clone(), pct)
+                        })
+                        .collect(),
+                );
+            }
+            exact_input_noise = exact.input_noise.clone();
+            output_noise = exact.output_noise;
+        }
+        Err(e) => warnings.push(format!(
+            "PNOISE conversion-matrix solve unavailable ({e}); using the stationary sideband approximation"
+        )),
+    }
+    if config.noise_ref == PnoiseReference::Input && exact_input_noise.is_none() {
+        warnings.push(
+            "PNOISE input-referred estimate uses the stationary sideband approximation"
+                .to_string(),
+        );
+    }
     let mut input_noise = None;
     let total_output_noise = if config.integrated_noise {
-        Some(integrate_noise_rms(&frequencies, &folded_output_noise))
+        Some(integrate_noise_rms(&frequencies, &output_noise))
     } else {
         None
     };
@@ -332,20 +388,56 @@ fn run_pnoise_analysis_with_config_typed(
     match config.noise_ref {
         PnoiseReference::Output => {}
         PnoiseReference::Input => {
-            let estimate = compute_input_referred_pnoise(
-                &engine,
-                &netlist,
-                output_idx,
-                output_ref_idx,
-                config,
-                frequencies.len(),
-                &translated_frequencies,
-                sideband_stride,
-                noise_temperature,
-            )?;
-            input_noise = Some(estimate);
+            if let Some(exact) = exact_input_noise.take() {
+                input_noise = Some(exact);
+            } else {
+                let estimate = compute_input_referred_pnoise(
+                    &engine,
+                    &netlist,
+                    output_idx,
+                    output_ref_idx,
+                    config,
+                    frequencies.len(),
+                    &translated_frequencies,
+                    sideband_stride,
+                    noise_temperature,
+                )?;
+                input_noise = Some(estimate);
+            }
         }
         PnoiseReference::Phase => {
+            // True oscillator phase noise first: the Demir PPV path solves
+            // the autonomous orbit and the phase diffusion constant, which
+            // the driven carrier-normalization below cannot represent (the
+            // conversion matrix degenerates at the carrier). Falls back to
+            // the carrier-normalized driven conversion for forced circuits.
+            let osc_config = rspice_core::analysis::PssConfig::autonomous()
+                .with_period_guess(1.0 / config.pss_fundamental_freq)
+                .with_tstab_periods(30)
+                .with_tolerance(config.pss_tolerance)
+                .with_max_iterations(60);
+            match engine.run_pnoise_oscillator(&netlist, osc_config, &frequencies) {
+                Ok(osc) => {
+                    return Ok(PnoiseData {
+                        frequencies,
+                        output_noise: osc.phase_noise_dbc,
+                        input_noise,
+                        // The integral of the driven-fold PSD does not
+                        // describe the PPV spectrum; omit rather than mix
+                        // models.
+                        total_output_noise: None,
+                        contributors: Vec::new(),
+                        carrier_frequency: 1.0 / osc.period,
+                        sideband_factor,
+                        reference: config.noise_ref,
+                        warnings,
+                    });
+                }
+                Err(e) => warnings.push(format!(
+                    "PNOISE oscillator (PPV) analysis unavailable ({e}); reporting \
+                     carrier-normalized driven noise instead"
+                )),
+            }
             let carrier_rms = estimate_carrier_rms_for_output(
                 &pss_data,
                 config.output_node.trim(),
@@ -373,8 +465,17 @@ fn run_pnoise_analysis_with_config_typed(
     }
 
     let contributors = if config.noise_summary {
-        fold_sideband_contributors(&translated_noise_results, sideband_stride)
-            .map_err(PnoiseRunError::Data)?
+        match exact_contributors {
+            Some(exact) => exact,
+            None => {
+                warnings.push(
+                    "PNOISE contributor breakdown uses the stationary sideband approximation"
+                        .to_string(),
+                );
+                fold_sideband_contributors(&translated_noise_results, sideband_stride)
+                    .map_err(PnoiseRunError::Data)?
+            }
+        }
     } else {
         Vec::new()
     };

@@ -33,7 +33,9 @@ mod views;
 mod wtabs;
 
 pub use results::{ResultViewer, ResultsState};
-pub use state::{ConsoleUiState, NavMode, RailTab, ShellState, ShellStateSer, WorkspaceView};
+pub use state::{
+    ConsoleUiState, GridStyle, NavMode, RailTab, ShellState, ShellStateSer, WorkspaceView,
+};
 
 use egui::Context;
 

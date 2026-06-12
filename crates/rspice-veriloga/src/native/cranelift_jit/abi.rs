@@ -25,6 +25,9 @@ pub struct EvalContext {
     pub timestep: f64,
     /// Previous state values (for ddt/idt)
     pub state_prev: *const f64,
+    /// Current state values, written by ddt/idt operators (sized by the
+    /// device's preallocation scan; null only when no program holds state)
+    pub state_values: *mut f64,
     /// Lookup tables pointer (for $table_model)
     /// Points to a slice of LookupTable structs
     pub lookup_tables: *const crate::codegen::LookupTable,
@@ -34,6 +37,17 @@ pub struct EvalContext {
     pub laplace_filters: *mut crate::laplace::StateSpaceFilter,
     /// Number of Laplace filters
     pub laplace_filters_len: usize,
+    /// Whether each parameter was explicitly given (one byte per
+    /// parameter, same length as `params`)
+    pub param_given: *const u8,
+    /// Branch-current unknown values of potential contributions (sized to
+    /// the model's branch unknown count)
+    pub branch_unknowns: *const f64,
+    /// Analysis type code (0=dc, 1=ac, 2=tran, 3=noise, 4=ic), matching
+    /// `VmContext::analysis_type`
+    pub analysis_type: u8,
+    /// Instance multiplicity ($mfactor)
+    pub multiplicity: f64,
 }
 
 /// External helper function for table lookup interpolation.

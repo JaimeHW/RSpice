@@ -96,10 +96,16 @@ rand = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Default features on: faer-parallel/parallel/simd so the desktop app gets
-# the same fast solver paths as the CLI.
-rspice-core = { path = "../rspice-core", features = ["veriloga"] }
+# the same fast solver paths as the CLI (incl. the Verilog-A JIT).
+rspice-core = { path = "../rspice-core", features = ["veriloga-native"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+[target.'cfg(windows)'.build-dependencies]
+# Embeds design/brand/export/rspice.ico as the Windows .exe icon resource so
+# Explorer / the file shell shows the brand mark. Windows-only; build.rs
+# degrades to a cargo:warning if the resource compiler is unavailable.
+winresource = "0.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen and the

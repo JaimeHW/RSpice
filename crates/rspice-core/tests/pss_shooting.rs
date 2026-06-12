@@ -73,16 +73,129 @@ fn rc_floquet_multiplier_matches_exp_minus_t_over_rc() {
     );
     let mu = result.floquet_multipliers[0].norm();
     let expected = (-(1.0 / F0) / (R * C)).exp();
-    // The multiplier is tiny (exp(-2*pi) ~ 1.9e-3) and comes from a
-    // finite-difference Jacobian, so demand the right order of magnitude
-    // and sign rather than tight relative accuracy — a zero or order-one
-    // multiplier must fail.
+    // The fixed-grid period map is smooth in the initial state, so the
+    // central-difference monodromy reaches real derivative accuracy: demand
+    // 1% on exp(-T/RC) ~ 1.87e-3, which the adaptive-grid forward
+    // difference could never deliver.
     assert!(
-        mu > 0.5 * expected && mu < 2.0 * expected,
-        "Floquet multiplier within 2x of exp(-T/RC): got {mu}, want {expected}"
+        (mu - expected).abs() < 0.01 * expected,
+        "Floquet multiplier within 1% of exp(-T/RC): got {mu}, want {expected}"
     );
     assert!(
         result.floquet_multipliers[0].im.abs() < 1e-6,
         "RC multiplier is real"
+    );
+}
+
+/// A square-wave-driven RC has a closed-form periodic steady state: with
+/// a = exp(-T/(2RC)), the capacitor rides exponential segments between
+/// V_min = a/(1+a) and V_max = 1/(1+a). Landing on the PULSE edges requires
+/// the PSS integrator to honor source breakpoints; without them the orbit
+/// smears by an LTE-sized step at every edge.
+#[test]
+fn pulse_driven_rc_matches_the_closed_form_steady_state() {
+    // T = 1us, RC = T/2 -> a = exp(-1).
+    let deck = "\
+* square-wave rc
+v1 in 0 pulse(0 1 0 1n 1n 0.499u 1u)
+r1 in out 1k
+c1 out 0 0.5n
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let config = PssConfig::new(1.0e6)
+        .with_tstab_periods(8)
+        .with_tolerance(1e-7);
+    let result = engine.run_pss(&netlist, config).expect("PSS converges");
+
+    let pss = &result.result;
+    let out_idx = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out node present");
+    let values = &pss.waveforms[out_idx].values;
+    let v_max = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let v_min = values.iter().cloned().fold(f64::INFINITY, f64::min);
+
+    let a = (-1.0f64).exp();
+    let expected_max = 1.0 / (1.0 + a);
+    let expected_min = a / (1.0 + a);
+
+    assert!(
+        (v_max - expected_max).abs() < 0.015 * expected_max,
+        "steady-state peak must be 1/(1+e^-1): got {v_max:.5}, want {expected_max:.5}"
+    );
+    assert!(
+        (v_min - expected_min).abs() < 0.015 * expected_min,
+        "steady-state trough must be e^-1/(1+e^-1): got {v_min:.5}, want {expected_min:.5}"
+    );
+}
+
+
+/// Autonomous shooting: a weakly nonlinear LC negative-resistance oscillator
+/// (van der Pol form, eps = g1*sqrt(L/C) = 0.05) has period
+/// T = 2*pi*sqrt(LC)*(1 + eps^2/16 + ...), within 0.02% of 2*pi*sqrt(LC),
+/// and a describing-function amplitude sqrt(4*g1/(3*g3)). The period must
+/// come out of the (n+1)-unknown Newton, not the coarse detector, and the
+/// Floquet spectrum must carry the structural unity multiplier of an
+/// autonomous orbit.
+#[test]
+fn lc_oscillator_period_solves_to_the_analytic_value() {
+    // L = C = 1u -> sqrt(LC) = 1us, T0 = 6.28319us, sqrt(L/C) = 1 ohm.
+    let deck = "* negative-resistance lc oscillator
+l1 osc 0 1u
+c1 osc 0 1u
+b1 osc 0 i=-0.05*v(osc)+0.025*v(osc)*v(osc)*v(osc)
+i1 0 osc pulse(0 1 10u 10n 10n 1u 1)
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let config = PssConfig::autonomous()
+        .with_period_guess(6.3e-6)
+        .with_tstab_periods(30)
+        .with_tolerance(1e-6)
+        .with_max_iterations(60);
+    let result = engine.run_pss(&netlist, config).expect("PSS converges");
+
+    let t0 = 2.0 * std::f64::consts::PI * 1.0e-6;
+    let eps: f64 = 0.05;
+    let t_expected = t0 * (1.0 + eps * eps / 16.0);
+    assert!(
+        (result.period - t_expected).abs() < 1e-3 * t_expected,
+        "oscillator period must solve to the van der Pol value: got {:.6e}, want {:.6e}",
+        result.period,
+        t_expected
+    );
+
+    // Structural unity Floquet multiplier of the autonomous orbit.
+    let unity_error = result
+        .floquet_multipliers
+        .iter()
+        .map(|m| (m - num_complex::Complex64::new(1.0, 0.0)).norm())
+        .fold(f64::INFINITY, f64::min);
+    assert!(
+        unity_error < 0.05,
+        "autonomous orbit must carry a unity Floquet multiplier; nearest is {unity_error:.3} away; all: {:?}",
+        result.floquet_multipliers
+    );
+
+    // Describing-function amplitude sqrt(4*0.05/(3*0.025)) = 1.633 V.
+    let pss = &result.result;
+    let osc_idx = pss
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("osc"))
+        .expect("osc node present");
+    let amplitude = pss.waveforms[osc_idx]
+        .values
+        .iter()
+        .fold(0.0f64, |acc, v| acc.max(v.abs()));
+    let a_expected = (4.0f64 * 0.05 / (3.0 * 0.025)).sqrt();
+    assert!(
+        (amplitude - a_expected).abs() < 0.04 * a_expected,
+        "limit-cycle amplitude must match the describing function: got {amplitude:.4}, want {a_expected:.4}"
     );
 }

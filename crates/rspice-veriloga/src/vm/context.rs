@@ -50,6 +50,11 @@ pub struct VmContext {
     pub analysis_type: u8,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
+    /// Instance multiplicity ($mfactor): the number of parallel copies
+    /// this instance represents
+    pub multiplicity: f64,
+    /// Z-domain (sampled-data) filters for the zi_* operators
+    pub zi_filters: Vec<crate::zfilter::ZiFilter>,
 }
 
 impl Default for VmContext {
@@ -76,6 +81,8 @@ impl Default for VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0, // DC by default
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
+            zi_filters: Vec::new(),
         }
     }
 }
@@ -105,6 +112,8 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
+            zi_filters: Vec::new(),
         }
     }
 
@@ -132,6 +141,8 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
+            zi_filters: Vec::new(),
         }
     }
 
@@ -159,12 +170,19 @@ impl VmContext {
             cross_detectors: Vec::new(),
             analysis_type: 0,
             laplace_filters: Vec::new(),
+            multiplicity: 1.0,
+            zi_filters: Vec::new(),
         }
     }
 
     /// Advance state for a new timestep (copy current to prev).
     pub fn advance_state(&mut self) {
         self.state_values_prev.clone_from(&self.state_values);
+        // Commit sampled-data filter candidates for the accepted step
+        let time = self.time;
+        for filter in &mut self.zi_filters {
+            filter.commit(time);
+        }
     }
 
     /// Set the timestep for transient analysis.

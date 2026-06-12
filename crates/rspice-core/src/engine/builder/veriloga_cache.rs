@@ -1,14 +1,14 @@
 use super::*;
 
 #[cfg(feature = "veriloga")]
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 4;
-#[cfg(feature = "veriloga")]
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 8;
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(15);
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_STALE_TIMEOUT: Duration = Duration::from_secs(180);
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(feature = "veriloga")]
 pub(super) const VERILOGA_CACHE_DEFAULT_MAX_ENTRIES: usize = 512;
@@ -222,7 +222,11 @@ pub(super) fn veriloga_cache_limits() -> (usize, u64) {
     )
 }
 
-#[cfg(feature = "veriloga")]
+// `std::env::temp_dir` (and the lock's `Instant`/`thread::sleep`) abort on
+// wasm32-unknown-unknown rather than erroring, so the entire disk side of
+// the cache only exists on native targets; `with_veriloga_cache_disk_lock`
+// is the single gate.
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn veriloga_cache_root() -> PathBuf {
     if let Some(override_dir) = std::env::var_os("RSPICE_VERILOGA_CACHE_DIR") {
         return PathBuf::from(override_dir);
@@ -235,7 +239,7 @@ pub(super) fn veriloga_cache_root() -> PathBuf {
     std::env::temp_dir().join("rspice-veriloga-cache")
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn cache_record_path_with_root(source_path: &Path, cache_root: &Path) -> PathBuf {
     let canonical = canonicalize_for_cache(source_path);
     let mut hasher = blake3::Hasher::new();
@@ -252,13 +256,13 @@ pub(super) struct VerilogACacheFileInfo {
     modified_ns: Option<u128>,
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 #[derive(Debug)]
 pub(super) struct VerilogACacheDiskLock {
     lock_path: PathBuf,
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 impl VerilogACacheDiskLock {
     fn acquire(root: &Path) -> Result<Self, String> {
         std::fs::create_dir_all(root).map_err(|e| {
@@ -318,14 +322,14 @@ impl VerilogACacheDiskLock {
     }
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 impl Drop for VerilogACacheDiskLock {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.lock_path);
     }
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn cache_lock_is_stale(lock_path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(lock_path) else {
         return false;
@@ -344,10 +348,21 @@ pub(super) fn with_veriloga_cache_disk_lock<T>(
     operation: &str,
     f: impl FnOnce(&Path) -> Result<T, String>,
 ) -> Result<T, String> {
-    let root = veriloga_cache_root();
-    let _lock =
-        VerilogACacheDiskLock::acquire(&root).map_err(|e| format!("{}: {}", operation, e))?;
-    f(&root)
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = f;
+        Err(format!(
+            "{}: the Verilog-A disk cache is unavailable in the browser build",
+            operation
+        ))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let root = veriloga_cache_root();
+        let _lock =
+            VerilogACacheDiskLock::acquire(&root).map_err(|e| format!("{}: {}", operation, e))?;
+        f(&root)
+    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -417,7 +432,7 @@ pub(super) fn read_cache_record(path: &Path) -> Result<VerilogADiskCacheRecord, 
     })
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn persist_model_to_disk_locked(
     source_path: &Path,
     entry: &CachedVerilogAModel,
@@ -547,6 +562,13 @@ pub(super) fn persist_model_to_disk(
     source_path: &Path,
     entry: &CachedVerilogAModel,
 ) -> Result<(), String> {
+    // No disk in the browser build: the in-memory cache is the cache.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (source_path, entry);
+        return Ok(());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     with_veriloga_cache_disk_lock("persist Verilog-A cache record", |cache_root| {
         persist_model_to_disk_locked(source_path, entry, cache_root)?;
         if let Err(err) = prune_veriloga_cache_locked(cache_root) {
@@ -556,7 +578,7 @@ pub(super) fn persist_model_to_disk(
     })
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn load_model_from_disk_locked(
     source_path: &Path,
     cache_root: &Path,
@@ -598,6 +620,13 @@ pub(super) fn load_model_from_disk_locked(
 
 #[cfg(feature = "veriloga")]
 pub(super) fn load_model_from_disk(source_path: &Path) -> Option<CachedVerilogAModel> {
+    // No disk in the browser build: only the in-memory cache can hit.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = source_path;
+        return None;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     match with_veriloga_cache_disk_lock("load Verilog-A cache record", |cache_root| {
         load_model_from_disk_locked(source_path, cache_root)
     }) {
@@ -766,12 +795,24 @@ pub fn register_precompiled_veriloga_model_with_dependencies(
     model: rspice_veriloga::CompiledModel,
 ) -> Result<(), String> {
     let canonical_source = canonicalize_for_cache(source_path.as_ref());
-    let mut dependency_paths = dependencies.to_vec();
-    if dependency_paths.is_empty() {
-        dependency_paths.push(canonical_source.clone());
-    }
-    let dependency_fingerprints = fingerprint_paths(&dependency_paths)
-        .map_err(|e| format!("dependency fingerprinting failed: {}", e))?;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let dependency_fingerprints = {
+        let mut dependency_paths = dependencies.to_vec();
+        if dependency_paths.is_empty() {
+            dependency_paths.push(canonical_source.clone());
+        }
+        fingerprint_paths(&dependency_paths)
+            .map_err(|e| format!("dependency fingerprinting failed: {}", e))?
+    };
+    // The browser build has no filesystem to fingerprint against; an empty
+    // dependency set always reads as fresh, so the registered artifact is
+    // simply trusted for the session.
+    #[cfg(target_arch = "wasm32")]
+    let dependency_fingerprints = {
+        let _ = dependencies;
+        Vec::new()
+    };
 
     let entry = CachedVerilogAModel {
         dependencies: dependency_fingerprints,

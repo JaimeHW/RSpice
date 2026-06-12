@@ -279,6 +279,54 @@ impl Bjt {
         }
     }
 
+    /// ngspice bjtload.c discipline for the promoted legacy topology: every
+    /// Newton iterate limits the junction voltages via pnjlim against the
+    /// previous iterate's limited values and the model evaluates and stamps
+    /// at the limited bias. With the constant series resistances
+    /// externalized the junction nodes are external matrix unknowns taking
+    /// full Newton steps, so without this per-iterate replacement an update
+    /// could overshoot the exponential junctions arbitrarily. When no
+    /// previous iterate exists the reference is ngspice's MODEINITJCT seed
+    /// (`vbe = tVcrit`, `vbc = 0`) so even the first evaluation of a fresh
+    /// Newton solve cannot land on an unbounded exponential.
+    pub(in crate::device::semiconductor::bjt) fn limit_legacy_terminal_state_against_iterate(
+        &self,
+        state: IntrinsicTerminalState,
+        previous_iterate_available: bool,
+    ) -> IntrinsicTerminalState {
+        let raw = [
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
+            state.vrth,
+        ];
+        let previous = if previous_iterate_available {
+            [
+                self.vcx, self.vci, self.vbx, self.vbi, self.vei, self.vbp, self.vsi, self.vrth,
+            ]
+        } else {
+            let p = self.polarity();
+            let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
+            let vbi_seed = state.vei + p * vcrit;
+            [
+                state.vcx, vbi_seed, state.vbx, vbi_seed, state.vei, state.vbp, state.vsi,
+                state.vrth,
+            ]
+        };
+        if !previous.iter().all(|value| value.is_finite()) {
+            return state;
+        }
+        let limited = self.limit_legacy_internal_state_to_previous(raw, previous);
+        IntrinsicTerminalState {
+            vcx: limited[IDX_VCX],
+            vci: limited[IDX_VCI],
+            vbx: limited[IDX_VBX],
+            vbi: limited[IDX_VBI],
+            vei: limited[IDX_VEI],
+            vbp: limited[IDX_VBP],
+            vsi: limited[IDX_VSI],
+            vrth: limited[IDX_VRTH],
+        }
+    }
+
     pub(in crate::device::semiconductor::bjt) fn limit_legacy_internal_state_to_previous(
         &self,
         raw: [Value; INTERNAL_DIM],
@@ -543,24 +591,6 @@ impl Bjt {
     }
 
     #[inline]
-    pub(in crate::device::semiconductor::bjt) fn vbic_cached_external_matches(
-        &self,
-        external: [Value; EXTERNAL_DIM],
-        voltage_abstol: Value,
-        reltol: Value,
-    ) -> bool {
-        let cached = [self.vc_ext, self.vb_ext, self.ve_ext, self.vs_ext];
-        cached
-            .iter()
-            .zip(external.iter())
-            .all(|(cached, external)| {
-                let diff = (cached - external).abs();
-                let tol = reltol * cached.abs().max(external.abs()) + voltage_abstol;
-                diff <= tol
-            })
-    }
-
-    #[inline]
     pub(in crate::device::semiconductor::bjt) fn vbic_branch_limit_scale(
         previous: Value,
         raw: Value,
@@ -675,132 +705,19 @@ impl Bjt {
         engaged.then_some(scale.max(0.0))
     }
 
-    /// Legacy Gummel-Poon analog of the VBIC external step-limit scale.
-    ///
-    /// Mirrors ngspice's per-iteration `pnjlim` discipline: predict where the
-    /// internal junction voltages would land for a proposed external update,
-    /// apply SPICE junction limiting against the previous iterate, and derive
-    /// the largest external step fraction that respects the limited junction
-    /// motion. This is what allows the transient Newton loop to take full
-    /// node updates (no global trust region) without exponential-junction
-    /// overshoot, matching ngspice's flat-MNA-plus-pnjlim behavior.
-    pub(crate) fn legacy_external_step_limit_scale_from_state(
-        &self,
-        previous_external: [Value; EXTERNAL_DIM],
-        previous_internal: [Value; INTERNAL_DIM],
-        proposed_external: [Value; EXTERNAL_DIM],
-    ) -> Option<Value> {
-        if self.charge_model != BjtChargeModel::LegacyGummelPoon {
-            return None;
-        }
-
-        let delta_external = [
-            proposed_external[EXT_C] - previous_external[EXT_C],
-            proposed_external[EXT_B] - previous_external[EXT_B],
-            proposed_external[EXT_E] - previous_external[EXT_E],
-            proposed_external[EXT_S] - previous_external[EXT_S],
-        ];
-        let max_delta = delta_external
-            .iter()
-            .map(|value| value.abs())
-            .fold(0.0, Value::max);
-        if !max_delta.is_finite() || max_delta <= 1e-15 {
-            return None;
-        }
-
-        let Some(raw_internal) = self
-            .predict_intrinsic_state_from_previous_external_bias_unlimited(
-                previous_external,
-                previous_internal,
-                proposed_external,
-            )
-        else {
-            return Some(0.5);
-        };
-        if !raw_internal.iter().all(|value| value.is_finite()) {
-            return Some(0.5);
-        }
-
-        let limited_internal =
-            self.limit_legacy_internal_state_to_previous(raw_internal, previous_internal);
-        let previous_branches = self.legacy_nonlinear_branch_voltages(previous_internal);
-        let raw_branches = self.legacy_nonlinear_branch_voltages(raw_internal);
-        let limited_branches = self.legacy_nonlinear_branch_voltages(limited_internal);
-
-        let mut scale: Value = 1.0;
-        let mut engaged = false;
-        for branch_scale in [
-            Self::vbic_branch_limit_scale(
-                previous_branches.vbe,
-                raw_branches.vbe,
-                limited_branches.vbe,
-            ),
-            Self::vbic_branch_limit_scale(
-                previous_branches.vbc,
-                raw_branches.vbc,
-                limited_branches.vbc,
-            ),
-            Self::vbic_branch_limit_scale(
-                previous_branches.vsub,
-                raw_branches.vsub,
-                limited_branches.vsub,
-            ),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if branch_scale + 1e-15 < 1.0 {
-                engaged = true;
-            }
-            scale = scale.min(branch_scale);
-        }
-
-        engaged.then_some(scale.max(0.0))
-    }
-
     /// Per-iteration junction-limiting scale for any BJT charge model.
     ///
-    /// Dispatches to the legacy Gummel-Poon limiter; returns `None` when the
-    /// proposed update needs no limiting. MNA-promoted VBIC devices run
-    /// ngspice's pnjlim discipline on their own internal junctions inside
-    /// `update`, so their external nodes take full Newton steps.
+    /// Always `None`: both charge models run ngspice's pnjlim discipline on
+    /// their own junction state inside `update` (the VBIC MNA promotion and
+    /// the legacy per-iterate junction replacement), so their external nodes
+    /// take full Newton steps exactly like ngspice's flat MNA.
     pub(crate) fn junction_external_step_limit_scale_against_previous(
         &self,
-        previous_external: [Value; EXTERNAL_DIM],
-        proposed_external: [Value; EXTERNAL_DIM],
+        _previous_external: [Value; EXTERNAL_DIM],
+        _proposed_external: [Value; EXTERNAL_DIM],
     ) -> Option<Value> {
         match self.charge_model {
-            BjtChargeModel::Vbic => None,
-            BjtChargeModel::LegacyGummelPoon => {
-                let previous_internal = if self
-                    .vbic_cached_external_matches(previous_external, 1e-12, 1e-9)
-                {
-                    self.internal_state_vector()
-                } else {
-                    let solved_previous = self.solve_intrinsic_terminal_state(
-                        previous_external[EXT_C],
-                        previous_external[EXT_B],
-                        previous_external[EXT_E],
-                        previous_external[EXT_S],
-                    );
-                    [
-                        solved_previous.vcx,
-                        solved_previous.vci,
-                        solved_previous.vbx,
-                        solved_previous.vbi,
-                        solved_previous.vei,
-                        solved_previous.vbp,
-                        solved_previous.vsi,
-                        solved_previous.vrth,
-                    ]
-                };
-                self.legacy_external_step_limit_scale_from_state(
-                    previous_external,
-                    previous_internal,
-                    proposed_external,
-                )
-            }
+            BjtChargeModel::Vbic | BjtChargeModel::LegacyGummelPoon => None,
         }
     }
-
 }

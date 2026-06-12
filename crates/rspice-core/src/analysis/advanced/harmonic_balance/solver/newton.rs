@@ -26,9 +26,12 @@ impl HbSolver {
             return self.solve_linear(state);
         }
 
-        // Use constant GMIN for numerical stability
-        // Larger gmin provides better Jacobian conditioning for difficult circuits
-        let gmin = 1e-9;
+        // Target GMIN for the converged solution: the SPICE-standard 1e-12.
+        // The stabilizer stays in the final residual, so anything larger
+        // would leave a visible leak at high-impedance nodes; difficult
+        // circuits get their conditioning help from the GMIN ladder below,
+        // which always refines back to this target.
+        let gmin = 1e-12;
 
         // Step 0: Solve DC operating point first
         // This establishes the nonlinear device operating points and provides a much
@@ -94,8 +97,7 @@ impl HbSolver {
                 }
                 // Recompute residual with target GMIN to check tolerance
                 self.compute_full_residual_with_gmin(state, gmin);
-                let rel_norm = state.residual_norm / (state.solution_norm() + abstol);
-                if state.residual_norm < abstol || rel_norm < tol {
+                if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
                     state.converged = true;
                     return Ok(());
                 }
@@ -226,25 +228,34 @@ impl HbSolver {
     ) -> bool {
         for iter in 0..max_iter {
             state.iteration = iter;
+            state.total_iterations += 1;
 
             // 1. Compute full residual: linear + nonlinear + GMIN contributions
             self.compute_full_residual_with_gmin(state, gmin);
 
-            // 2. Check convergence
-            let sol_norm = state.solution_norm();
-            let rel_norm = state.residual_norm / (sol_norm + abstol);
-
-            if state.residual_norm < abstol || rel_norm < tol {
+            // 2. Check convergence: per-row KCL test. A global norm hides a
+            // microamp imbalance at a high-impedance node behind the amp
+            // scale of stiff source rows, accepting grossly wrong bias.
+            if state.residual_norm < abstol || state.rows_converged(tol, abstol) {
                 return true;
             }
 
-            // 3. Build full Jacobian (linear + nonlinear + GMIN)
-            let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
-
-            // 4. Solve J * Î”X = -R for Newton update
-            let delta_x = match self.solve_jacobian_system(&jacobian, state) {
-                Ok(dx) => dx,
-                Err(_) => return false, // Singular matrix
+            // 3+4. Build the Jacobian and solve J * dX = -R. The exact path
+            // carries the conjugate (Hankel) coupling in a real-split system
+            // and restores quadratic convergence; the Toeplitz-only complex
+            // path remains selectable for A/B comparison and for the large-
+            // system Krylov fast path.
+            let delta_x = if self.config.use_exact_jacobian {
+                match self.solve_jacobian_system_exact(state, gmin) {
+                    Ok(dx) => dx,
+                    Err(_) => return false, // Singular matrix
+                }
+            } else {
+                let jacobian = self.build_full_jacobian_with_gmin(state, gmin);
+                match self.solve_jacobian_system(&jacobian, state) {
+                    Ok(dx) => dx,
+                    Err(_) => return false, // Singular matrix
+                }
             };
 
             // 5. Apply line search for robust convergence
@@ -272,6 +283,7 @@ impl HbSolver {
             for k in 0..=self.num_harmonics {
                 if node < state.residual.len() && k < state.residual[node].len() {
                     state.residual[node][k] -= gmin * state.x[node][k];
+                    state.residual_scale[node][k] += gmin * state.x[node][k].norm();
                 }
             }
         }
@@ -449,6 +461,40 @@ impl HbSolver {
             for (k, &i_k) in i_spectrum.iter().enumerate() {
                 if k <= self.num_harmonics && node < state.residual.len() {
                     state.residual[node][k] += i_k;
+                    state.residual_scale[node][k] += i_k.norm();
+                }
+            }
+        }
+
+        // Charge storage: the capacitive current delivered into a node is
+        // d/dt of the delivered charge, i.e. jw_k * Q_k per harmonic. The
+        // charge waveform comes from the same time grid as the resistive
+        // currents, so charge and current stay phase-consistent.
+        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+            let omega0 = 2.0 * PI * self.config.fundamental_freq;
+            let mut q_time = vec![vec![0.0; n_time]; self.num_nodes];
+            let mut node_voltages = vec![0.0; self.num_nodes];
+            for t in 0..n_time {
+                for node in 0..self.num_nodes {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for (node, charge) in device.charge(&node_voltages) {
+                        if node < q_time.len() {
+                            q_time[node][t] += charge;
+                        }
+                    }
+                }
+            }
+
+            for node in 0..self.num_nodes {
+                let q_spectrum = self.fft.to_frequency_domain(&q_time[node]);
+                for (k, &q_k) in q_spectrum.iter().enumerate() {
+                    if k <= self.num_harmonics && node < state.residual.len() {
+                        let omega_k = (k as f64) * omega0;
+                        state.residual[node][k] += Complex64::new(0.0, omega_k) * q_k;
+                        state.residual_scale[node][k] += omega_k * q_k.norm();
+                    }
                 }
             }
         }
@@ -502,7 +548,7 @@ impl HbSolver {
                     let col = j * h + k;
                     if k == 0 {
                         // DC: short circuit
-                        jac[row][col] -= 1e6;
+                        jac[row][col] -= DC_SHORT_CONDUCTANCE;
                     } else {
                         // AC: Y_L = -j/(Ï‰L)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));
@@ -628,6 +674,184 @@ impl HbSolver {
                 }
             }
         }
+
+        // Charge-storage coupling: the residual carries jw_k * Q_k, so its
+        // derivative is jw_k * C[k-m] - the same Toeplitz structure as the
+        // conductances with the ROW harmonic's frequency in front.
+        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+            let omega0 = 2.0 * PI * self.config.fundamental_freq;
+            let mut c_time = vec![vec![vec![0.0; n_time]; n]; n];
+            let mut node_voltages = vec![0.0; n];
+            for t in 0..n_time {
+                for node in 0..n {
+                    node_voltages[node] = v_time[node][t];
+                }
+                for device in &self.nonlinear_devices {
+                    for ((i, j), c) in device.charge_jacobian(&node_voltages) {
+                        if i < n && j < n {
+                            c_time[i][j][t] += c;
+                        }
+                    }
+                }
+            }
+
+            for i in 0..n {
+                for j in 0..n {
+                    let max_c: Value = c_time[i][j].iter().fold(0.0, |a, &b| a.max(b.abs()));
+                    if max_c < 1e-30 {
+                        continue;
+                    }
+
+                    let c_spectrum = self.fft.to_frequency_domain(&c_time[i][j]);
+
+                    for k in 0..h {
+                        let omega_k = (k as f64) * omega0;
+                        let jw = Complex64::new(0.0, omega_k);
+                        for l in 0..h {
+                            let row = i * h + k;
+                            let col = j * h + l;
+
+                            let diff = k as isize - l as isize;
+                            let c_idx = diff.unsigned_abs();
+                            if c_idx < c_spectrum.len() {
+                                let c_val = if diff >= 0 {
+                                    c_spectrum[c_idx]
+                                } else {
+                                    c_spectrum[c_idx].conj()
+                                };
+                                // Residual carries +jw_k*Q_k; J = d(res)/dV
+                                // gets -(jw_k * dQ/dV) like the linear caps.
+                                jac[row][col] -= jw * c_val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Solve the Newton step with the EXACT Jacobian in real-split form.
+    ///
+    /// The one-sided residual depends on both `c_m` and `c_m*` (perturbing a
+    /// coefficient perturbs its implied conjugate), so the exact derivative
+    /// carries a Toeplitz part `T = dI_k/dc_m = -G[k-m]` AND a Hankel part
+    /// `H = dI_k/dc_m* = -G[k+m]` (plus the matching `jw_k*C` charge terms).
+    /// `H` is antilinear, so the system is assembled over real unknowns
+    /// `[a_0, a_1, b_1, ...]` per node (`c_k = a_k + j b_k`, `b_0 = 0`):
+    /// the Toeplitz block maps to `[[Re T, -Im T], [Im T, Re T]]` and the
+    /// Hankel block to `[[Re H, Im H], [Im H, -Re H]]`; the DC row keeps only
+    /// its real equation and the DC column only its real unknown. Hankel
+    /// indices reach `k + m = 2H`, so the coupling spectra are sampled out to
+    /// twice the solution's harmonic count (alias-capped by the FFT grid).
+    fn solve_jacobian_system_exact(
+        &mut self,
+        state: &HbSolverState,
+        gmin: Value,
+    ) -> Result<Vec<Vec<Complex64>>, HbError> {
+        let n = self.num_nodes;
+        let h = self.num_harmonics + 1; // complex components per node
+        let w = 2 * self.num_harmonics + 1; // real unknowns per node
+        let size = n * w;
+        let omega0 = 2.0 * PI * self.config.fundamental_freq;
+
+        // Row/column index helpers in the real layout.
+        let re_idx = |node: usize, k: usize| -> usize {
+            if k == 0 { node * w } else { node * w + 2 * k - 1 }
+        };
+        let im_idx = |node: usize, k: usize| -> usize { node * w + 2 * k };
+
+        // Toeplitz part (linear + GMIN + nonlinear G and charge), expanded
+        // from the existing complex assembly.
+        let jac_c = self.build_full_jacobian_with_gmin(state, gmin);
+        let mut a = vec![vec![0.0; size]; size];
+        for i in 0..n {
+            for k in 0..h {
+                for j in 0..n {
+                    for l in 0..h {
+                        let t = jac_c[i * h + k][j * h + l];
+                        if t.re == 0.0 && t.im == 0.0 {
+                            continue;
+                        }
+                        let row_re = re_idx(i, k);
+                        let col_re = re_idx(j, l);
+                        a[row_re][col_re] += t.re;
+                        if l > 0 {
+                            a[row_re][im_idx(j, l)] += -t.im;
+                        }
+                        if k > 0 {
+                            let row_im = im_idx(i, k);
+                            a[row_im][col_re] += t.im;
+                            if l > 0 {
+                                a[row_im][im_idx(j, l)] += t.re;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Hankel part: H = -(G[k+m]) and -(jw_k * C[k+m]), m >= 1.
+        if self.has_nonlinear_devices() {
+            let extended = 2 * self.num_harmonics;
+            let g_spectra = self.conductance_spectra(state, extended);
+            let c_spectra = self.capacitance_spectra(state, extended);
+
+            let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {
+                let row_re = re_idx(i, k);
+                a[row_re][re_idx(j, m)] += hval.re;
+                a[row_re][im_idx(j, m)] += hval.im;
+                if k > 0 {
+                    let row_im = im_idx(i, k);
+                    a[row_im][re_idx(j, m)] += hval.im;
+                    a[row_im][im_idx(j, m)] += -hval.re;
+                }
+            };
+
+            for (i, j, spec) in &g_spectra {
+                for k in 0..h {
+                    for m in 1..h {
+                        if let Some(&g) = spec.get(k + m) {
+                            add_hankel(*i, *j, k, m, -g);
+                        }
+                    }
+                }
+            }
+            for (i, j, spec) in &c_spectra {
+                for k in 0..h {
+                    let jw = Complex64::new(0.0, (k as f64) * omega0);
+                    for m in 1..h {
+                        if let Some(&c) = spec.get(k + m) {
+                            add_hankel(*i, *j, k, m, -(jw * c));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Realified RHS: -residual, DC keeps only its real equation.
+        let mut rhs = vec![0.0; size];
+        for node in 0..n {
+            for k in 0..h {
+                let r = state.residual[node][k];
+                rhs[re_idx(node, k)] = -r.re;
+                if k > 0 {
+                    rhs[im_idx(node, k)] = -r.im;
+                }
+            }
+        }
+
+        let solution = self.solve_real_linear_system(&a, &rhs)?;
+
+        let mut delta_x = vec![vec![Complex64::new(0.0, 0.0); h]; n];
+        for node in 0..n {
+            for k in 0..h {
+                let re = solution[re_idx(node, k)];
+                let im = if k > 0 { solution[im_idx(node, k)] } else { 0.0 };
+                delta_x[node][k] = Complex64::new(re, im);
+            }
+        }
+
+        Ok(delta_x)
     }
 
     /// Solve the Jacobian system: J * ΔX = -R
@@ -780,6 +1004,7 @@ impl HbSolver {
             for (k, &i) in i_spec.iter().enumerate() {
                 if node < state.residual.len() && k < state.residual[node].len() {
                     state.residual[node][k] += i;
+                    state.residual_scale[node][k] += i.norm();
                 }
             }
         }
@@ -787,9 +1012,8 @@ impl HbSolver {
         state.compute_residual_norm();
         state.iteration += 1;
 
-        // Check convergence
-        let rel_norm = state.residual_norm / (state.solution_norm() + self.config.abstol);
-        state.converged = rel_norm < self.config.tolerance;
+        // Check convergence per KCL row.
+        state.converged = state.rows_converged(self.config.tolerance, self.config.abstol);
 
         Ok(())
     }

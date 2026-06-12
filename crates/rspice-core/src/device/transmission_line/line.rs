@@ -516,6 +516,23 @@ impl TransmissionLine {
         self.distributed_rlc_cache.set(None);
     }
 
+    /// Total series resistance, inductance, and shunt capacitance for the
+    /// native LTRA RLC kernel, reconstructed from the stored characteristic
+    /// impedance, delay, and kernel attenuation constant: `Ltot = Z0*TD`,
+    /// `Ctot = TD/Z0`, `Rtot = 2*alpha*Ltot` (ngspice LTRAtemp, G = 0).
+    /// Used by the exact small-signal load (ltraacld.c form).
+    pub(crate) fn ltra_ac_total_rlc(&self) -> Option<(Value, Value, Value)> {
+        let kernel = self.distributed_rlc.as_ref()?;
+        if self.txl.is_some() {
+            return None;
+        }
+        let ltot = self.z0 * self.td;
+        let ctot = self.td / self.z0;
+        let rtot = 2.0 * kernel.alpha * ltot;
+        (ltot.is_finite() && ctot.is_finite() && rtot.is_finite() && ltot > 0.0 && ctot > 0.0)
+            .then_some((ltot, ctot, rtot))
+    }
+
     /// Configure ngspice LTRA derivative-change breakpoint tolerances.
     pub fn set_ltra_breakpoint_tolerances(&mut self, reltol: Value, abstol: Value) {
         self.ltra_breakpoint_reltol = if reltol.is_finite() && reltol >= 0.0 {

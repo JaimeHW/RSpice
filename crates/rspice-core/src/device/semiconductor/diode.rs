@@ -48,6 +48,8 @@ pub struct Diode {
     pub m: Value,
     /// Transit time for diffusion capacitance (TT)
     pub tt: Value,
+    /// Forward-bias depletion capacitance coefficient (FC)
+    pub fc: Value,
 
     // Temperature parameters
     /// Saturation-current temperature exponent (XTI)
@@ -72,6 +74,16 @@ pub struct Diode {
     prev_vd_old: Value,
     /// Previous iteration current
     prev_id: Value,
+    /// Engine-supplied junction shunt conductance (ngspice `CKTgmin`):
+    /// zero in plain solves, raised by gmin-stepping/rescue ladders so the
+    /// continuation can deform the diode system like every other junction.
+    junction_gmin: Value,
+    /// Junction voltage the last stamp linearized at — the `vold` of the
+    /// pnjlim iteration-limiting history.
+    last_limited_vd: std::cell::Cell<Value>,
+    /// The last stamp's pnjlim clamped the junction; a limited step forces
+    /// another Newton iteration (ngspice `Check` semantics).
+    limited: std::cell::Cell<bool>,
     /// Pre-computed matrix indices for O(1) stamping
     pub indices: DiodeIndices,
 }
@@ -95,6 +107,7 @@ impl Diode {
             vj: 0.7,    // Built-in potential
             m: 0.5,     // Grading coefficient
             tt: 8e-9,   // Transit time (8ns)
+            fc: 0.5,    // Forward-bias depletion coefficient (SPICE default)
 
             // SPICE temperature defaults
             xti: 3.0,
@@ -109,8 +122,69 @@ impl Diode {
             prev_vd: 0.0,
             prev_vd_old: 0.0,
             prev_id: 0.0,
+            junction_gmin: 0.0,
+            last_limited_vd: std::cell::Cell::new(0.0),
+            limited: std::cell::Cell::new(false),
             indices: DiodeIndices::default(),
         }
+    }
+
+    /// Engine hook: junction gmin for continuation ladders (mirrors the
+    /// MOSFET/JFET/BJT `set_junction_gmin` convention).
+    pub fn set_junction_gmin(&mut self, gmin: Value) {
+        self.junction_gmin = if gmin.is_finite() { gmin.max(0.0) } else { 0.0 };
+    }
+
+    /// ngspice `DEVpnjlim` (devsup.c): junction-voltage iteration limiting.
+    /// Returns the limited voltage and whether limiting engaged. The same
+    /// math as the validated JFET port; the guard `|vnew-vold| > 2·vte`
+    /// keeps the log arguments positive.
+    fn pnjlim(vnew: Value, vold: Value, vte: Value, vcrit: Value) -> (Value, bool) {
+        if vnew > vcrit && (vnew - vold).abs() > vte + vte {
+            if vold > 0.0 {
+                let arg = (vnew - vold) / vte;
+                if arg > 0.0 {
+                    return (vold + vte * (2.0 + (arg - 2.0).ln()), true);
+                }
+                return (vold - vte * (2.0 + (2.0 - arg).ln()), true);
+            }
+            return (vte * (vnew / vte).ln(), true);
+        }
+        if vnew < 0.0 {
+            let arg = if vold > 0.0 {
+                -vold - 1.0
+            } else {
+                2.0 * vold - 1.0
+            };
+            if vnew < arg {
+                return (arg, true);
+            }
+        }
+        (vnew, false)
+    }
+
+    /// Limit the junction voltage against the previous iterate and
+    /// linearize there, folding the engine junction gmin in (dioload.c:
+    /// `gd += CKTgmin; cd += CKTgmin·vd`). Returns `(vd, id, gd)`.
+    ///
+    /// Breakdown diodes keep the raw voltage: ngspice limits those through
+    /// a dedicated branch around `-BV`, and clamping them with the plain
+    /// forward law would fight the breakdown exponential.
+    fn limited_linearization(&self, vd_raw: Value) -> (Value, Value, Value) {
+        let vd = if self.bv.is_none() {
+            let vte = self.n * self.vt;
+            let vcrit = vte * (vte / (std::f64::consts::SQRT_2 * self.is.max(1e-300))).ln();
+            let (vd, limited) = Self::pnjlim(vd_raw, self.last_limited_vd.get(), vte, vcrit);
+            self.limited.set(limited);
+            self.last_limited_vd.set(vd);
+            vd
+        } else {
+            self.limited.set(false);
+            self.last_limited_vd.set(vd_raw);
+            vd_raw
+        };
+        let (id, gd) = self.current_and_conductance(vd);
+        (vd, id + self.junction_gmin * vd, gd + self.junction_gmin)
     }
 
     /// Return the flicker-noise coefficients `(KF, AF)`, if enabled by the
@@ -123,6 +197,27 @@ impl Diode {
         } else {
             None
         }
+    }
+
+    /// Create a diode carrying ngspice's model-card defaults.
+    ///
+    /// `.model` parsing must start from these (IS=1e-14, N=1, RS=0, CJO=0,
+    /// VJ=1, M=0.5, TT=0, IBV=1mA) so a card that omits a parameter gets
+    /// SPICE semantics; `new()` keeps its 1N4148-like values as a standalone
+    /// convenience, but seeding model cards from it silently gave every bare
+    /// card 4 pF of junction capacitance, 8 ns of transit time, and half an
+    /// ohm of series resistance that ngspice does not have.
+    pub fn spice_defaults(name: String, node_anode: usize, node_cathode: usize) -> Self {
+        let mut diode = Self::new(name, node_anode, node_cathode);
+        diode.is = 1e-14;
+        diode.n = 1.0;
+        diode.rs = 0.0;
+        diode.ibv = 1e-3;
+        diode.cj0 = 0.0;
+        diode.vj = 1.0;
+        diode.m = 0.5;
+        diode.tt = 0.0;
+        diode
     }
 
     /// Create diode with custom DC model parameters
@@ -184,6 +279,12 @@ impl Diode {
         }
         if let Some(&v) = params.get("TT") {
             self.tt = v;
+        }
+        if let Some(&v) = params.get("FC")
+            && v.is_finite()
+            && v >= 0.0
+        {
+            self.fc = v;
         }
         if let Some(&v) = params.get("XTI") {
             self.xti = v;
@@ -293,6 +394,47 @@ impl Diode {
         self
     }
 
+    /// Junction charge and capacitance at `vd` for transient integration
+    /// (dioload.c): depletion charge with the F1/F2/F3 polynomial
+    /// continuation above `FC·VJ`, plus diffusion charge `TT·id` riding the
+    /// conduction current. Returns `(qd, capd)`.
+    ///
+    /// `vj`/`cj0` are already temperature-adjusted by `set_temperature`, so
+    /// the F-coefficients computed here match ngspice's `DIOtF1`/`DIOf2`/
+    /// `DIOf3` (diotemp.c evaluates them from the adjusted junction
+    /// potential).
+    pub fn junction_charge_and_capacitance(&self, vd: Value) -> (Value, Value) {
+        let mut qd = 0.0;
+        let mut capd = 0.0;
+        if self.cj0 > 0.0 && self.vj > 0.0 && self.m < 1.0 {
+            let fc = self.fc.clamp(0.0, 0.95);
+            let dep_cap_knee = fc * self.vj;
+            if vd < dep_cap_knee {
+                let arg = 1.0 - vd / self.vj;
+                let sarg = (-self.m * arg.ln()).exp();
+                qd += self.vj * self.cj0 * (1.0 - arg * sarg) / (1.0 - self.m);
+                capd += self.cj0 * sarg;
+            } else {
+                let f1 = self.vj * (1.0 - (1.0 - fc).powf(1.0 - self.m)) / (1.0 - self.m);
+                let f2 = (1.0 - fc).powf(1.0 + self.m);
+                let f3 = 1.0 - fc * (1.0 + self.m);
+                let czof2 = self.cj0 / f2;
+                qd += self.cj0 * f1
+                    + czof2
+                        * (f3 * (vd - dep_cap_knee)
+                            + (self.m / (2.0 * self.vj))
+                                * (vd * vd - dep_cap_knee * dep_cap_knee));
+                capd += czof2 * (f3 + self.m * vd / self.vj);
+            }
+        }
+        if self.tt > 0.0 {
+            let (id, gd) = self.current_and_conductance(vd);
+            qd += self.tt * id;
+            capd += self.tt * gd;
+        }
+        (qd, capd)
+    }
+
     /// Calculate junction capacitance: Cj = CJ0 / (1 - Vd/VJ)^M
     /// Includes depletion (junction) and diffusion capacitance
     pub fn junction_capacitance(&self, vd: Value) -> Value {
@@ -354,10 +496,8 @@ impl Diode {
         } else {
             voltages[self.node_cathode - 1]
         };
-        let vd = va - vc;
-
-        // Linearize around current operating point (one fused evaluation)
-        let (id, gd) = self.current_and_conductance(vd);
+        // Iteration-limited linearization with junction gmin folded in.
+        let (vd, id, gd) = self.limited_linearization(va - vc);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -493,10 +633,8 @@ impl NonlinearDevice for Diode {
         } else {
             voltages[self.node_cathode - 1]
         };
-        let vd = va - vc;
-
-        // Linearize around current operating point (one fused evaluation)
-        let (id, gd) = self.current_and_conductance(vd);
+        // Iteration-limited linearization with junction gmin folded in.
+        let (vd, id, gd) = self.limited_linearization(va - vc);
 
         // Equivalent current source: ieq = id - gd * vd
         let ieq = id - gd * vd;
@@ -514,7 +652,9 @@ impl NonlinearDevice for Diode {
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
         let tolerance = criteria.voltage_tolerance();
-        (self.prev_vd - self.prev_vd_old).abs() < tolerance
+        // A pnjlim-clamped step must iterate again regardless of the
+        // voltage delta (ngspice `Check` semantics).
+        !self.limited.get() && (self.prev_vd - self.prev_vd_old).abs() < tolerance
     }
 }
 

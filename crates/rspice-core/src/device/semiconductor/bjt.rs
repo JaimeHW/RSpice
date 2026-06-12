@@ -746,6 +746,9 @@ pub struct Bjt {
     pub af: Value,
     /// Flicker noise frequency exponent (EF)
     pub ef: Value,
+    /// Thermal-noise temperature offset in kelvin (ngspice `dtemp`
+    /// semantics for the parasitic-resistance thermal sources).
+    pub noise_temperature_offset: Value,
     /// VBIC base-emitter flicker noise coefficient (KFN)
     pub kfn: Value,
     /// VBIC base-emitter flicker noise current exponent (AFN)
@@ -868,6 +871,18 @@ pub struct Bjt {
     vb_ext: Value,
     ve_ext: Value,
     vs_ext: Value,
+    /// External-terminal voltages consistent with the state the cached
+    /// linearization and currents were evaluated at. Equal to the raw
+    /// solution biases except on iterates where the legacy per-iterate
+    /// junction limiter engaged: the companion then anchors at the limited
+    /// point (ngspice's `ceqbe` uses the limited junction voltages).
+    eval_anchor: [Value; EXTERNAL_DIM],
+    /// The last legacy update's pnjlim materially replaced a junction
+    /// voltage. ngspice sets `CKTnoncon` for this, forcing another Newton
+    /// iteration: the limited companion intentionally disagrees with the
+    /// raw solution, so convergence and residual acceptance must wait until
+    /// the limiter disengages.
+    legacy_junction_limited: bool,
     ic: Value,
     ib: Value,
     ie: Value,
@@ -1071,6 +1086,7 @@ impl Bjt {
             kf: 0.0,
             af: 1.0,
             ef: 1.0,
+            noise_temperature_offset: 0.0,
             kfn: 0.0,
             afn: 1.0,
             bfn: 1.0,
@@ -1139,6 +1155,8 @@ impl Bjt {
             vb_ext: 0.0,
             ve_ext: 0.0,
             vs_ext: 0.0,
+            eval_anchor: [0.0; EXTERNAL_DIM],
+            legacy_junction_limited: false,
             ic: 0.0,
             ib: 0.0,
             ie: 0.0,
@@ -1186,6 +1204,21 @@ impl Bjt {
             && Self::same_cached_bias(vb, self.vb_ext)
             && Self::same_cached_bias(ve, self.ve_ext)
             && Self::same_cached_bias(vs, self.vs_ext)
+    }
+
+    /// External voltages the companion equivalent current anchors at. When
+    /// the call matches the cached evaluation, the cached anchor carries the
+    /// per-iterate junction-limited point (raw biases otherwise); off-cache
+    /// callers evaluate fresh at the raw biases, so those anchor raw.
+    #[inline]
+    fn companion_anchor(&self, vc: Value, vb: Value, ve: Value, vs: Value) -> [Value; EXTERNAL_DIM] {
+        if self.reduced_linearization_cache_valid.get()
+            && self.cache_matches_external_biases(vc, vb, ve, vs)
+        {
+            self.eval_anchor
+        } else {
+            [vc, vb, ve, vs]
+        }
     }
 
     #[inline]
@@ -1410,7 +1443,42 @@ impl NonlinearDevice for Bjt {
         self.isub_prev = self.isub;
         self.intrinsic_linearization_prev = self.intrinsic_linearization;
 
-        let state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        let mut state = self.solve_intrinsic_terminal_state(vc, vb, ve, vs);
+        // ngspice bjtload.c: each NIiter iteration limits the junction
+        // voltages via pnjlim against the previous iterate's limited values
+        // and evaluates the model there. With the constant series
+        // resistances externalized the junctions are external matrix
+        // unknowns, so this per-iterate replacement is the junction step
+        // control (the engine-side external scale clamp skips GP devices).
+        // The companion anchor follows the limited point: ngspice's ceqbe
+        // subtracts conductance times the LIMITED junction voltages, so on
+        // terminals whose internal node is identity-collapsed the anchor is
+        // the limited state value rather than the raw solution bias.
+        let mut anchor = [vc, vb, ve, vs];
+        self.legacy_junction_limited = false;
+        if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+            let raw_vbe = state.vbi - state.vei;
+            let raw_vbc = state.vbi - state.vci;
+            state = self.limit_legacy_terminal_state_against_iterate(
+                state,
+                self.reduced_linearization_cache_valid.get(),
+            );
+            self.legacy_junction_limited = (state.vbi - state.vei - raw_vbe).abs() > 1e-12
+                || (state.vbi - state.vci - raw_vbc).abs() > 1e-12;
+            if !Self::series_active(self.rcx) && !Self::series_active(self.rci) {
+                anchor[EXT_C] = state.vci;
+            }
+            if !Self::series_active(self.rbx) && !Self::series_active(self.rbi) {
+                anchor[EXT_B] = state.vbi;
+            }
+            if !Self::series_active(self.re) {
+                anchor[EXT_E] = state.vei;
+            }
+            if !Self::series_active(self.rs) {
+                anchor[EXT_S] = state.vsi;
+            }
+        }
+        self.eval_anchor = anchor;
         let eval = self.evaluate_state(
             vc, vb, ve, vs, state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp,
             state.vsi, state.vrth,
@@ -1460,13 +1528,15 @@ impl NonlinearDevice for Bjt {
             biases[EXT_E],
             biases[EXT_S],
         );
+        let anchor =
+            self.companion_anchor(biases[EXT_C], biases[EXT_B], biases[EXT_E], biases[EXT_S]);
         let nodes = self.external_terminal_nodes();
         let currents = [self.ic, self.ib, self.ie, self.isub];
 
         for row_idx in 0..EXTERNAL_DIM {
             let ieq = currents[row_idx]
                 - (0..EXTERNAL_DIM)
-                    .map(|col_idx| rows[row_idx][col_idx] * biases[col_idx])
+                    .map(|col_idx| rows[row_idx][col_idx] * anchor[col_idx])
                     .sum::<Value>();
             for col_idx in 0..EXTERNAL_DIM {
                 matrix.stamp(nodes[row_idx], nodes[col_idx], rows[row_idx][col_idx]);
@@ -1487,5 +1557,21 @@ impl NonlinearDevice for Bjt {
         }
 
         self.legacy_bjt_is_converged(criteria)
+    }
+}
+
+impl Bjt {
+    /// Diagnostic accessor for DC iteration tracing.
+    pub(crate) fn legacy_junction_limited_for_trace(&self) -> bool {
+        self.legacy_junction_limited
+    }
+
+    /// Whether this device runs the legacy Gummel-Poon iterate-replacement
+    /// junction limiting (ngspice bjtload.c pnjlim discipline). Newton must
+    /// take full node steps for these devices: the per-iterate junction
+    /// replacement is the globalization, and merit-based step shrinking
+    /// fights it (junction turn-on transiently raises the raw residual).
+    pub(crate) fn uses_legacy_gummel_poon(&self) -> bool {
+        self.charge_model == BjtChargeModel::LegacyGummelPoon
     }
 }

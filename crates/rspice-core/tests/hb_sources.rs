@@ -84,3 +84,43 @@ c1 b 0 1p
         "driven node fundamental must be nearly real, got {a_fund}"
     );
 }
+
+#[test]
+fn devices_see_the_physical_voltage_swing() {
+    // Diode clipper driven at 0.45 V amplitude: the diode barely conducts
+    // (peak current ~0.4 uA into 1k), so the DC shift and second harmonic at
+    // the diode node must be sub-millivolt. Before the amplitude-to-Fourier-
+    // coefficient boundary conversion, devices were evaluated at twice the
+    // drive (an effective 0.9 V swing), which clips hard and parks tens of
+    // millivolts of DC and HD2 here.
+    let deck = "\
+* clipper swing pin (conduction only: junction charge pinned off so this
+* test isolates the amplitude convention through the exponential)
+v1 in 0 sin(0 0.45 1meg)
+r1 in d 1k
+d1 d 0 dmod
+c1 d 0 1p
+.model dmod D IS=1e-14 N=1.0 CJ0=0 TT=0
+.end
+";
+    let result = run_hb(deck, 1.0e6, 8);
+    assert!(result.converged, "HB must converge");
+
+    let dc = coefficient(&result, "d", 0).re;
+    let h1 = coefficient(&result, "d", 1);
+    let h2 = coefficient(&result, "d", 2).norm();
+
+    assert!(
+        dc.abs() < 2e-3,
+        "a 0.45 V drive must not rectify visibly at the diode node: dc = {dc:.6}"
+    );
+    assert!(
+        (h1.norm() - 0.45).abs() < 0.01 * 0.45,
+        "fundamental must pass at the physical amplitude: |h1| = {:.6}",
+        h1.norm()
+    );
+    assert!(
+        h2 < 2e-3,
+        "second harmonic must be sub-millivolt at this drive: |h2| = {h2:.6}"
+    );
+}

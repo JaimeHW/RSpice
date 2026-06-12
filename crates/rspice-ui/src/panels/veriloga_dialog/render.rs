@@ -37,10 +37,11 @@ pub fn render_veriloga_load_dialog(
     let was_compiling = matches!(state.compilation_state, CompilationState::Compiling);
     poll_compile(state);
     let now = ctx.input(|i| i.time);
-    if was_compiling && !matches!(state.compilation_state, CompilationState::Compiling) {
-        if let Some(started) = state.compile_started_at.take() {
-            state.last_compile_secs = Some((now - started).max(0.0));
-        }
+    if was_compiling
+        && !matches!(state.compilation_state, CompilationState::Compiling)
+        && let Some(started) = state.compile_started_at.take()
+    {
+        state.last_compile_secs = Some((now - started).max(0.0));
     }
 
     let mut result = VerilogADialogResult::None;
@@ -59,6 +60,8 @@ pub fn render_veriloga_load_dialog(
         .ghost("Cancel")
         .hint(&hint)
         .primary_enabled(state.is_success())
+        // The browser build's source editor owns the Enter key.
+        .primary_on_enter(cfg!(not(target_arch = "wasm32")))
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
 
@@ -128,6 +131,7 @@ fn footer_hint(state: &VerilogALoadDialogState) -> String {
 // source + options
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_arch = "wasm32"))]
 fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -143,9 +147,6 @@ fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
             if mono_input(ui, &mut state.file_path_text, width).changed() {
                 sync_file_path_text(state);
             }
-            // Native file pickers don't exist in the browser build; the
-            // mono path input remains the entry point there.
-            #[cfg(not(target_arch = "wasm32"))]
             if Button::new("Browse…").ghost().show(ui).clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("Verilog-A", &["va", "vams"])
@@ -167,17 +168,41 @@ fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
     }
 }
 
+/// The browser build has no filesystem: the module text is pasted into a
+/// mono editor and compiled from memory (`include is not resolved).
+#[cfg(target_arch = "wasm32")]
+fn render_source_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {
+    let c = Tokens::get(ui.ctx()).color;
+
+    caption(ui, "SOURCE");
+    let response = ui.add(
+        egui::TextEdit::multiline(&mut state.source_text)
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .hint_text("paste Verilog-A source — `module … endmodule`")
+            .desired_rows(10)
+            .desired_width(f32::INFINITY),
+    );
+    if response.changed() {
+        state.reset_compile_outcome();
+    }
+    ui.add_space(2.0);
+    ui.label(
+        egui::RichText::new(
+            "compiles the pasted text — `include directives are not resolved in the browser",
+        )
+        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+        .color(c.text_faint),
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn sync_file_path_text(state: &mut VerilogALoadDialogState) {
     if state.file_path_text.is_empty() {
         state.file_path = None;
     } else {
         state.file_path = Some(PathBuf::from(&state.file_path_text));
     }
-    state.errors.clear();
-    state.compiled_module = None;
-    state.compiled_artifact = None;
-    state.compiled_dependencies = None;
-    state.compilation_state = CompilationState::Idle;
+    state.reset_compile_outcome();
 }
 
 fn render_options_section(ui: &mut Ui, state: &mut VerilogALoadDialogState) {

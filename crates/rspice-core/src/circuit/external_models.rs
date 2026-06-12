@@ -277,12 +277,39 @@ impl CircuitData {
         }
     }
 
-    /// Commit Verilog-A integrator state after an accepted timestep
+    /// Commit Verilog-A integrator state after an accepted timestep.
+    ///
+    /// Returns whether any device newly raised `$discontinuity` at this
+    /// step (a rising edge against the previous accepted step), so the
+    /// stepper can place a fine restart without a level-true region
+    /// pinning tiny steps forever.
     #[cfg(feature = "veriloga")]
-    pub fn accept_veriloga_timestep(&mut self) {
+    pub fn accept_veriloga_timestep(&mut self) -> bool {
+        let mut discontinuity = false;
         for device in self.veriloga_devices.iter_mut() {
+            discontinuity |= device.discontinuity_rising();
             device.advance_state();
         }
+        discontinuity
+    }
+
+    /// Tightest `$bound_step` request across Verilog-A devices at the
+    /// latest evaluation (None when nothing bounds the next step)
+    #[cfg(feature = "veriloga")]
+    pub fn veriloga_timestep_bound(&self) -> Option<Value> {
+        self.veriloga_devices
+            .iter()
+            .filter_map(|device| device.transient_bound_step())
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+    }
+
+    /// Whether any Verilog-A device flagged `$discontinuity` at the
+    /// latest evaluation
+    #[cfg(feature = "veriloga")]
+    pub fn veriloga_discontinuity_pending(&self) -> bool {
+        self.veriloga_devices
+            .iter()
+            .any(|device| device.discontinuity_pending())
     }
 
     /// Check if all XSPICE instances have converged

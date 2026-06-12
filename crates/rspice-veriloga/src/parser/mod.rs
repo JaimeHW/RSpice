@@ -1287,7 +1287,8 @@ impl<'a> Parser<'a> {
         let saved_pos = self.pos; // Save position for backtracking
 
         // Any access function (V, I, Pwr, Temp, ...) followed by a node list
-        // and `<+` is a contribution
+        // and `<+` is a contribution; `:` introduces an indirect
+        // contribution `V(x): lhs == rhs;`
         if self.check(TokenKind::Identifier) && self.peek_is(TokenKind::LParen) {
             // Try to parse as branch access
             if let Ok(access) = self.try_parse_branch_access() {
@@ -1299,6 +1300,35 @@ impl<'a> Parser<'a> {
                         value,
                         span: start.extend(self.previous_span()),
                     }));
+                } else if self.match_token(TokenKind::Colon) {
+                    // Indirect branch assignment: the equation parses as a
+                    // single expression whose top-level operator must be ==
+                    let equation = self.parse_expression()?;
+                    self.expect(TokenKind::Semicolon)?;
+                    let Expression::Binary(BinaryExpr {
+                        op: BinaryOp::Eq,
+                        left,
+                        right,
+                        ..
+                    }) = equation
+                    else {
+                        return Err(ParseError::new(
+                            ParseErrorKind::Expected {
+                                expected: "lhs == rhs equation in indirect contribution"
+                                    .to_string(),
+                                found: "expression without a top-level ==".to_string(),
+                            },
+                            start.extend(self.previous_span()),
+                        ));
+                    };
+                    return Ok(AnalogStatement::IndirectContribution(
+                        IndirectContributionStmt {
+                            branch: access,
+                            lhs: *left,
+                            rhs: *right,
+                            span: start.extend(self.previous_span()),
+                        },
+                    ));
                 } else {
                     // Not a contribution, restore position and parse as normal
                     self.pos = saved_pos;
@@ -1828,7 +1858,9 @@ impl<'a> Parser<'a> {
             base = Some(self.expect_identifier("base nature")?.into());
         }
 
-        self.expect(TokenKind::Semicolon)?;
+        // The semicolon after the nature name is optional (pre-LRM-2.2
+        // headers like the EKV2.6 distribution omit it)
+        self.match_token(TokenKind::Semicolon);
 
         while !self.check(TokenKind::Endnature) && !self.at_end() {
             if self.match_token(TokenKind::Access) {

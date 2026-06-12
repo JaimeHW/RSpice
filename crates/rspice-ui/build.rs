@@ -35,4 +35,39 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let generated_path = out_dir.join("embedded_symbols.rs");
     fs::write(generated_path, generated).expect("embedded symbol table should be writable");
+
+    // Embed the brand icon as the Windows .exe resource (what Explorer shows).
+    // The `#[cfg(windows)]` gate is on the *host* (where winresource is a
+    // build-dep); the TARGET_OS check ensures we only emit MSVC resource link
+    // args when actually building a Windows binary — never when this same
+    // Windows host cross-compiles to wasm. Non-fatal: a missing resource
+    // compiler degrades to a warning so SDK-less environments still build.
+    #[cfg(windows)]
+    {
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+        if target_os == "windows" {
+            let icon = manifest_dir
+                .join("..")
+                .join("..")
+                .join("design")
+                .join("brand")
+                .join("export")
+                .join("rspice.ico");
+            println!("cargo:rerun-if-changed={}", icon.display());
+            match icon.to_str() {
+                Some(path) => {
+                    let mut res = winresource::WindowsResource::new();
+                    res.set_icon(path);
+                    if let Err(e) = res.compile() {
+                        println!(
+                            "cargo:warning=rspice-ui: could not embed Windows .exe icon: {e}"
+                        );
+                    }
+                }
+                None => {
+                    println!("cargo:warning=rspice-ui: icon path is not valid UTF-8, skipping")
+                }
+            }
+        }
+    }
 }

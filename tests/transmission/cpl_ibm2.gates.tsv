@@ -1,0 +1,18 @@
+# Measure gates for cpl_ibm2 (validation-manifest contract: measures).
+#
+# Why measures: the v(v3) crosstalk trace peaks near 0.56 mV, and
+# ngspice-46's own peak moves -38 to -43 percent when tmax is halved or
+# quartered (the 2010 reference itself is one sample of that family);
+# RSpice's peak sits inside the band at -24 percent. Pointwise sub-mV
+# samples there gate solver-grid reproduction, not coupling physics --
+# the CPL kernel's coupling is exercised by the driven-line gates and
+# the peak envelope below. The driven line v(v1) carries tight timing
+# and level gates.
+#
+# Source: VES pulses 0->1 V at t=0 (1.5 ns edges), falls 6.0-7.5 ns.
+# v(v1) = driven line far end (~0.67 V scale); v(v3) = victim-line
+# crosstalk (~0.5 mV scale).
+v(v1)	cross	level=0.3	dir=rise	n=1	tol=200e-12
+v(v1)	cross	level=0.3	dir=fall	n=1	tol=300e-12
+v(v1)	mean	t0=14e-9	t1=20e-9	tol_abs=0.02
+v(v3)	peak_abs	t0=0	t1=20e-9	tol_rel=0.45	tol_abs=1e-4

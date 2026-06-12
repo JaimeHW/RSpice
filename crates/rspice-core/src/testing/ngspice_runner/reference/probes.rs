@@ -37,8 +37,10 @@ impl TestRunner {
             "mag" | "vm" | "v" | "i" => value.norm(),
             "vr" | "ir" => value.re,
             "vi" | "ii" => value.im,
-            "ph" => value.arg(),
-            "vp" | "ip" => value.arg().to_degrees(),
+            // ngspice prints all phase outputs in radians unless the
+            // interactive `units` variable is set to degrees, which batch
+            // reference runs cannot do.
+            "ph" | "vp" | "ip" => value.arg(),
             "db" | "vdb" => {
                 let mag = value.norm().max(abs_tol);
                 20.0 * mag.log10()
@@ -128,7 +130,32 @@ impl TestRunner {
                 if let Some(branch) = Self::parse_current_probe(inner) {
                     return Some(AcProbe::Current { func, branch });
                 }
-                return None;
+                // ngspice table headers print the bare argument: vm(2),
+                // vp(out), ip(vin). Voltage-prefixed funcs take it as a
+                // node (optionally differential), current-prefixed ones as
+                // a source branch.
+                if inner.is_empty() {
+                    return None;
+                }
+                if func.starts_with('v') || matches!(func, "db" | "mag" | "ph") {
+                    return Some(if let Some((a, b)) = inner.split_once(',') {
+                        AcProbe::Voltage {
+                            func,
+                            node_pos: a.to_string(),
+                            node_neg: Some(b.to_string()),
+                        }
+                    } else {
+                        AcProbe::Voltage {
+                            func,
+                            node_pos: inner.to_string(),
+                            node_neg: None,
+                        }
+                    });
+                }
+                return Some(AcProbe::Current {
+                    func,
+                    branch: inner.to_string(),
+                });
             }
         }
 
@@ -184,5 +211,71 @@ impl TestRunner {
         node: &str,
     ) -> bool {
         node_to_idx.contains_key(&node.to_ascii_lowercase())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ac_probe_accepts_bare_arguments_like_ngspice_table_headers() {
+        match TestRunner::parse_ac_probe("vm(2)") {
+            Some(AcProbe::Voltage {
+                func: "vm",
+                node_pos,
+                node_neg: None,
+            }) => assert_eq!(node_pos, "2"),
+            other => panic!("vm(2) parsed as {other:?}"),
+        }
+        match TestRunner::parse_ac_probe("vp(out)") {
+            Some(AcProbe::Voltage {
+                func: "vp",
+                node_pos,
+                node_neg: None,
+            }) => assert_eq!(node_pos, "out"),
+            other => panic!("vp(out) parsed as {other:?}"),
+        }
+        match TestRunner::parse_ac_probe("vm(2,3)") {
+            Some(AcProbe::Voltage {
+                func: "vm",
+                node_pos,
+                node_neg: Some(neg),
+            }) => {
+                assert_eq!(node_pos, "2");
+                assert_eq!(neg, "3");
+            }
+            other => panic!("vm(2,3) parsed as {other:?}"),
+        }
+        match TestRunner::parse_ac_probe("ip(vin)") {
+            Some(AcProbe::Current { func: "ip", branch }) => assert_eq!(branch, "vin"),
+            other => panic!("ip(vin) parsed as {other:?}"),
+        }
+        // Wrapped forms keep their existing parse.
+        match TestRunner::parse_ac_probe("vdb(v(4))") {
+            Some(AcProbe::Voltage {
+                func: "vdb",
+                node_pos,
+                node_neg: None,
+            }) => assert_eq!(node_pos, "4"),
+            other => panic!("vdb(v(4)) parsed as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ac_phase_values_evaluate_in_radians() {
+        let value = num_complex::Complex64::new(0.0, 1.0);
+        assert!(
+            (TestRunner::evaluate_ac_complex_value("vp", value, 1e-12)
+                - std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-15
+        );
+        assert!(
+            (TestRunner::evaluate_ac_complex_value("ph", value, 1e-12)
+                - std::f64::consts::FRAC_PI_2)
+                .abs()
+                < 1e-15
+        );
     }
 }

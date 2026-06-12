@@ -8,7 +8,9 @@
 pub mod cranelift_jit;
 
 #[cfg(feature = "native")]
-pub use cranelift_jit::{EvalContext, JitCompiler, JitError, JitResult, NativeModel};
+pub use cranelift_jit::{
+    EvalContext, JitCompiler, JitError, JitResult, NativeModel, PlanStats, PlanStep, StampFn,
+};
 
 use crate::codegen::CompiledModel;
 
@@ -20,24 +22,39 @@ use crate::codegen::CompiledModel;
 pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
     log::debug!("[JIT] Compiling model '{}' with Cranelift...", model.name);
 
-    match JitCompiler::new() {
-        Ok(compiler) => match compiler.compile(model) {
-            Ok(native_model) => {
-                log::info!(
-                    "[JIT] Successfully compiled '{}': {} assignments, {} stamps",
-                    model.name,
-                    model.assignment_steps.len(),
-                    model.stamp_programs.len()
-                );
-                Some(native_model)
-            }
+    // A compiler panic (e.g. a register-allocator limit on a pathological
+    // function) must degrade to the interpreter, never kill a simulation
+    let compiled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        match JitCompiler::new() {
+            Ok(compiler) => match compiler.compile(model) {
+                Ok(native_model) => {
+                    log::info!(
+                        "[JIT] Compiled '{}': {} assignment chunks, {}/{} native stamps",
+                        model.name,
+                        native_model.chunk_count(),
+                        native_model.native_stamp_count(),
+                        model.stamp_programs.len()
+                    );
+                    Some(native_model)
+                }
+                Err(e) => {
+                    log::warn!("[JIT] Compilation failed for '{}': {}", model.name, e);
+                    None
+                }
+            },
             Err(e) => {
-                log::warn!("[JIT] Compilation failed for '{}': {}", model.name, e);
+                log::warn!("[JIT] Failed to create compiler: {}", e);
                 None
             }
-        },
-        Err(e) => {
-            log::warn!("[JIT] Failed to create compiler: {}", e);
+        }
+    }));
+    match compiled {
+        Ok(result) => result,
+        Err(_) => {
+            log::warn!(
+                "[JIT] Compiler panicked on '{}'; falling back to the interpreter",
+                model.name
+            );
             None
         }
     }

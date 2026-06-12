@@ -243,6 +243,12 @@ pub enum SemanticErrorKind {
 
     #[error("Unknown function: '{0}'")]
     UnknownFunction(String),
+
+    #[error("Unsupported feature: {0}")]
+    UnsupportedFeature(String),
+
+    #[error("Array index out of bounds: {0}")]
+    IndexOutOfBounds(String),
 }
 
 /// Code generation error

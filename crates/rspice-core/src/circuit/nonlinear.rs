@@ -136,6 +136,9 @@ impl CircuitData {
         for bjt in &mut self.bjts.devices {
             bjt.set_junction_gmin(gmin);
         }
+        for diode in &mut self.diodes.devices {
+            diode.set_junction_gmin(gmin);
+        }
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate

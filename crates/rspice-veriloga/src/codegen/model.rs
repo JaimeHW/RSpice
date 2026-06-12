@@ -20,6 +20,8 @@ pub struct CodeGenerator {
     pub(super) above_detector_count: std::cell::Cell<usize>,
     /// Stateful slot allocator for `timer`.
     pub(super) timer_state_count: std::cell::Cell<usize>,
+    /// Collected z-domain filters (`zi_*`).
+    pub(super) zi_filters: std::cell::RefCell<Vec<crate::zfilter::ZiFilter>>,
 }
 
 /// Compiled device model ready for simulation
@@ -52,6 +54,39 @@ pub struct CompiledModel {
     pub branch_sources: Vec<CompiledBranchSource>,
     /// Laplace state-space filters
     pub laplace_filters: Vec<StateSpaceFilter>,
+    /// Z-domain (sampled-data) filters
+    pub zi_filters: Vec<crate::zfilter::ZiFilter>,
+    /// Small-signal noise sources extracted from contributions
+    pub noise_sources: Vec<CompiledNoiseSource>,
+}
+
+/// Compiled noise source: PSD evaluated at the operating point, injected
+/// at the originating contribution's branch during noise analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompiledNoiseSource {
+    /// Positive injection node
+    pub pos: StampIndex,
+    /// Negative injection node
+    pub neg: StampIndex,
+    /// Current contribution (true) injects across the nodes; a potential
+    /// contribution injects at its branch-equation row as a series EMF
+    pub is_current: bool,
+    /// Branch ordinal for potential contributions
+    pub branch_ordinal: Option<usize>,
+    /// Originating stamp program (activation gates with it)
+    pub program_idx: usize,
+    /// Power spectral density at the operating point (A²/Hz for current
+    /// contributions, V²/Hz for potential contributions). For table
+    /// sources this is the amplitude-squared scale on the interpolated
+    /// value.
+    pub psd_program: BytecodeProgram,
+    /// Flicker frequency exponent program (None = white)
+    pub exponent_program: Option<BytecodeProgram>,
+    /// Frequency-interpolated PSD table: sorted (f, p) points and whether
+    /// interpolation runs in log-log coordinates
+    pub table: Option<(Vec<(f64, f64)>, bool)>,
+    /// Source label from the noise function's name argument
+    pub name: Option<SmolStr>,
 }
 
 /// Lookup table for $table_model interpolation
@@ -91,9 +126,17 @@ pub struct StampProgram {
     pub value_program: BytecodeProgram,
     /// Jacobian programs (one per derivative)
     pub jacobian_programs: Vec<JacobianEntry>,
+    /// Reactive Jacobian programs: dQ/dx of the contribution's ddt()
+    /// operand. AC analysis stamps these as jw * dQ/dx (capacitances for
+    /// current contributions, inductances for potential contributions).
+    pub reactive_jacobians: Vec<JacobianEntry>,
     /// For potential contributions: the branch-current unknown this
     /// equation defines. None for current contributions.
     pub branch_ordinal: Option<usize>,
+    /// Indirect contribution: the value program computes a constraint
+    /// residual stamped current-style onto the branch row (the device
+    /// accumulates its companion RHS like a KCL row, not a source row)
+    pub indirect: bool,
     /// Instance-static activation condition (parameter-only). When it
     /// evaluates to zero the program is skipped entirely - for potential
     /// contributions this leaves the branch open instead of shorting it.
@@ -114,6 +157,21 @@ pub struct AssignmentProgram {
 pub enum AssignmentStep {
     /// Compute a value and store it in a variable
     Assign(AssignmentProgram),
+    /// Compute an element index and a value, then store the value in
+    /// element `index - lower` of the contiguous variable run at `base`.
+    /// Out-of-range indexes are a runtime error (never a silent skip).
+    AssignIndexed {
+        /// First element's variable slot
+        base: usize,
+        /// Number of elements
+        len: usize,
+        /// Declared lower bound
+        lower: i64,
+        /// Element index program
+        index: BytecodeProgram,
+        /// Value program
+        value: BytecodeProgram,
+    },
     /// Execute the body steps while the condition program evaluates
     /// nonzero (re-checked before every iteration)
     Loop {
@@ -156,6 +214,10 @@ pub struct CompiledBranchSource {
     pub pos: StampIndex,
     /// Negative node of the source branch
     pub neg: StampIndex,
+    /// Constrained by an indirect contribution: the branch row holds the
+    /// constraint equation, so the structural V(p)-V(n) row entries are
+    /// not stamped (the KCL column couplings remain)
+    pub indirect: bool,
 }
 
 /// Jacobian entry
@@ -196,12 +258,24 @@ pub enum Instruction {
     PushInternalVoltage(usize),
     /// Push variable value
     PushVariable(usize),
+    /// Pop an element index, then push the value of element
+    /// `index - lower` from the contiguous variable run at `base`.
+    /// Out-of-range indexes are a runtime error.
+    PushVariableDyn {
+        base: usize,
+        len: usize,
+        lower: i64,
+    },
     /// Push temperature
     PushTemperature,
     /// Push thermal voltage
     PushVt,
     /// Push time
     PushTime,
+    /// Push the instance multiplicity ($mfactor)
+    PushMfactor,
+    /// Z-domain filter: pop the input, push the sampled-data output
+    ZiState(usize),
     /// Binary operations
     Add,
     Sub,

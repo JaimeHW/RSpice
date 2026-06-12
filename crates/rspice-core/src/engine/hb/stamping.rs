@@ -7,28 +7,43 @@ impl Engine {
         solver: &mut HbSolver,
         num_nodes: usize,
     ) {
+        use crate::analysis::advanced::harmonic_balance::{DepletionCap, NonlinearDeviceInstance};
+
         for diode in &circuit.diodes.devices {
             let anode = Self::hb_node_to_solver_index(diode.node_anode, num_nodes);
             let cathode = Self::hb_node_to_solver_index(diode.node_cathode, num_nodes);
-            solver.add_diode(anode, cathode, diode.is, diode.n);
+            solver.add_nonlinear_device(
+                NonlinearDeviceInstance::diode(anode, cathode, diode.is, diode.n)
+                    .with_thermal_voltage(diode.vt)
+                    .with_junction_caps(
+                        DepletionCap::new(diode.cj0, diode.vj, diode.m, 0.5),
+                        DepletionCap::none(),
+                        diode.tt,
+                        0.0,
+                    ),
+            );
         }
 
         for bjt in &circuit.bjts.devices {
             let collector = Self::hb_node_to_solver_index(bjt.node_collector, num_nodes);
             let base = Self::hb_node_to_solver_index(bjt.node_base, num_nodes);
             let emitter = Self::hb_node_to_solver_index(bjt.node_emitter, num_nodes);
-            match bjt.bjt_type {
-                crate::device::BjtType::Npn => {
-                    solver.add_npn_bjt(
-                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                    );
-                }
-                crate::device::BjtType::Pnp => {
-                    solver.add_pnp_bjt(
-                        collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
-                    );
-                }
-            }
+            let instance = match bjt.bjt_type {
+                crate::device::BjtType::Npn => NonlinearDeviceInstance::npn_bjt(
+                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                ),
+                crate::device::BjtType::Pnp => NonlinearDeviceInstance::pnp_bjt(
+                    collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
+                ),
+            };
+            solver.add_nonlinear_device(
+                instance.with_thermal_voltage(bjt.vt).with_junction_caps(
+                    DepletionCap::new(bjt.cje, bjt.vje, bjt.mje, bjt.fc),
+                    DepletionCap::new(bjt.cjc, bjt.vjc, bjt.mjc, bjt.fc),
+                    bjt.tf,
+                    bjt.tr,
+                ),
+            );
         }
 
         for mos in &circuit.mosfets.devices {
@@ -37,15 +52,67 @@ impl Engine {
             let source = Self::hb_node_to_solver_index(mos.node_source, num_nodes);
             let bulk = Self::hb_node_to_solver_index(mos.node_bulk, num_nodes);
             let kp = mos.kp.max(1e-18);
-            match mos.mos_type {
-                crate::device::MosType::Nmos => {
-                    solver.add_nmos(drain, gate, source, bulk, kp, mos.vto, mos.lambda);
-                }
-                crate::device::MosType::Pmos => {
-                    // The solver works in the polarity frame: the effective
-                    // threshold is -VTO, which keeps depletion PMOS negative.
-                    solver.add_pmos(drain, gate, source, bulk, kp, -mos.vto, mos.lambda);
-                }
+            let instance = match mos.mos_type {
+                crate::device::MosType::Nmos => NonlinearDeviceInstance::nmos(
+                    drain, gate, source, bulk, mos.vto, kp, mos.lambda,
+                ),
+                // The solver works in the polarity frame: the effective
+                // threshold is -VTO, which keeps depletion PMOS negative.
+                crate::device::MosType::Pmos => NonlinearDeviceInstance::pmos(
+                    drain, gate, source, bulk, -mos.vto, kp, mos.lambda,
+                ),
+            };
+            // Effective bulk-junction zero-bias capacitances: explicit
+            // CBD/CBS overrides, else bottom density times area, plus the
+            // sidewall density times perimeter folded at the bottom grading.
+            let cbs0 = mos
+                .source_bulk_cap_zero_bias
+                .unwrap_or(mos.cj * mos.source_area)
+                .max(0.0)
+                + (mos.cjsw * mos.source_perimeter).max(0.0);
+            let cbd0 = mos
+                .drain_bulk_cap_zero_bias
+                .unwrap_or(mos.cj * mos.drain_area)
+                .max(0.0)
+                + (mos.cjsw * mos.drain_perimeter).max(0.0);
+            let is_s = if mos.js_bulk > 0.0 && mos.source_area > 0.0 {
+                mos.js_bulk * mos.source_area
+            } else {
+                mos.is_bulk
+            };
+            let is_d = if mos.js_bulk > 0.0 && mos.drain_area > 0.0 {
+                mos.js_bulk * mos.drain_area
+            } else {
+                mos.is_bulk
+            };
+            // Intrinsic channel charge: total oxide capacitance over the
+            // effective (lateral-diffusion-shortened) channel.
+            let leff = (mos.l - 2.0 * mos.ld).max(1e-12);
+            solver.add_nonlinear_device(
+                instance
+                    .with_body_effect(mos.gamma, mos.phi)
+                    .with_intrinsic_gate(mos.cox * mos.w * leff)
+                    .with_bulk_junctions(
+                        DepletionCap::new(cbs0, mos.pb, mos.mj, mos.fc),
+                        DepletionCap::new(cbd0, mos.pb, mos.mj, mos.fc),
+                        is_s,
+                        is_d,
+                    ),
+            );
+
+            // Gate overlap capacitances are bias-independent in level 1:
+            // stamp them as ordinary linear capacitors.
+            let cgs_ov = (mos.cgso * mos.w).max(0.0);
+            let cgd_ov = (mos.cgdo * mos.w).max(0.0);
+            let cgb_ov = (mos.cgbo * leff).max(0.0);
+            if cgs_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_source, cgs_ov, false);
+            }
+            if cgd_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_drain, cgd_ov, false);
+            }
+            if cgb_ov > 0.0 {
+                self.hb_stamp_admittance(solver, mos.node_gate, mos.node_bulk, cgb_ov, false);
             }
         }
 
@@ -54,30 +121,36 @@ impl Engine {
             let gate = Self::hb_node_to_solver_index(jfet.gate, num_nodes);
             let source = Self::hb_node_to_solver_index(jfet.source, num_nodes);
             let beta = jfet.params.beta.max(1e-18);
-            match jfet.jfet_type {
-                crate::device::JfetType::NJF => {
-                    solver.add_njfet(
-                        drain,
-                        gate,
-                        source,
-                        jfet.params.vto,
-                        beta,
-                        jfet.params.lambda,
-                        jfet.params.is,
-                    );
-                }
-                crate::device::JfetType::PJF => {
-                    solver.add_pjfet(
-                        drain,
-                        gate,
-                        source,
-                        jfet.params.vto,
-                        beta,
-                        jfet.params.lambda,
-                        jfet.params.is,
-                    );
-                }
-            }
+            let instance = match jfet.jfet_type {
+                crate::device::JfetType::NJF => NonlinearDeviceInstance::njfet(
+                    drain,
+                    gate,
+                    source,
+                    jfet.params.vto,
+                    beta,
+                    jfet.params.lambda,
+                    jfet.params.is,
+                ),
+                crate::device::JfetType::PJF => NonlinearDeviceInstance::pjfet(
+                    drain,
+                    gate,
+                    source,
+                    jfet.params.vto,
+                    beta,
+                    jfet.params.lambda,
+                    jfet.params.is,
+                ),
+            };
+            let vt_jfet = crate::constants::K_BOLTZMANN * self.config.temperature
+                / crate::constants::Q_ELECTRON;
+            solver.add_nonlinear_device(
+                instance.with_thermal_voltage(vt_jfet).with_junction_caps(
+                    DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
+                    DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
+                    0.0,
+                    0.0,
+                ),
+            );
         }
 
         for sw in &circuit.vswitches {

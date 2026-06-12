@@ -170,6 +170,9 @@ pub(super) fn parse_resistor(
         });
     }
 
+    let mut instance_params = instance_params;
+    let mut nodes = vec![node_pos, node_neg];
+    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
     elements.push(Element {
         name,
         kind: ElementKind::Resistor {
@@ -178,7 +181,7 @@ pub(super) fn parse_resistor(
             model,
             instance_params,
         },
-        nodes: vec![node_pos, node_neg],
+        nodes,
     });
 
     Ok(())
@@ -196,6 +199,75 @@ struct PassiveTail {
     model: Option<String>,
     ic: Option<Value>,
     instance_params: Vec<(String, Value)>,
+}
+
+/// Remove one instance parameter by name, returning its value.
+fn extract_instance_param(params: &mut Vec<(String, Value)>, key: &str) -> Option<Value> {
+    let idx = params
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case(key))?;
+    Some(params.remove(idx).1)
+}
+
+/// LTspice-style passive parasitics: peel explicit `Rser`/`Rpar`/`Cpar`
+/// instance parameters off an R/L/C and synthesize them as real elements
+/// (`Rser` inserts an internal series node `NAME#SER`). Only *explicit*
+/// parameters expand — LTspice's implicit defaults are never imposed on
+/// a deck that didn't ask for them.
+fn expand_passive_parasitics(
+    elements: &mut Vec<Element>,
+    name: &str,
+    nodes: &mut [String],
+    instance_params: &mut Vec<(String, Value)>,
+) {
+    let tag = name.to_ascii_uppercase();
+
+    if let Some(rser) =
+        extract_instance_param(instance_params, "RSER").filter(|v| v.is_finite() && *v > 0.0)
+    {
+        let internal = format!("{tag}#SER");
+        let outer_pos = std::mem::replace(&mut nodes[0], internal.clone());
+        elements.push(Element {
+            name: format!("R{tag}#SER"),
+            kind: ElementKind::Resistor {
+                value: rser,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+            },
+            nodes: vec![outer_pos, internal],
+        });
+    }
+
+    if let Some(rpar) =
+        extract_instance_param(instance_params, "RPAR").filter(|v| v.is_finite() && *v > 0.0)
+    {
+        elements.push(Element {
+            name: format!("R{tag}#PAR"),
+            kind: ElementKind::Resistor {
+                value: rpar,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+            },
+            nodes: vec![nodes[0].clone(), nodes[1].clone()],
+        });
+    }
+
+    if let Some(cpar) =
+        extract_instance_param(instance_params, "CPAR").filter(|v| v.is_finite() && *v > 0.0)
+    {
+        elements.push(Element {
+            name: format!("C{tag}#PAR"),
+            kind: ElementKind::Capacitor {
+                value: cpar,
+                initial_voltage: None,
+                model: None,
+                instance_params: Vec::new(),
+            },
+            nodes: vec![nodes[0].clone(), nodes[1].clone()],
+        });
+    }
 }
 
 fn parse_passive_tail(
@@ -310,15 +382,18 @@ pub(super) fn parse_capacitor(
         });
     }
 
+    let mut instance_params = tail.instance_params;
+    let mut nodes = vec![node_pos, node_neg];
+    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
     elements.push(Element {
         name,
         kind: ElementKind::Capacitor {
             value: tail.value.unwrap_or(Value::NAN),
             initial_voltage: tail.ic,
             model: tail.model,
-            instance_params: tail.instance_params,
+            instance_params,
         },
-        nodes: vec![node_pos, node_neg],
+        nodes,
     });
 
     Ok(())
@@ -347,15 +422,18 @@ pub(super) fn parse_inductor(
     // Magnetic-core (Jiles-Atherton) vs linear model-card dispatch happens at
     // circuit-build time based on the referenced model's type; the parser
     // records the reference only.
+    let mut instance_params = tail.instance_params;
+    let mut nodes = vec![node_pos, node_neg];
+    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
     elements.push(Element {
         name,
         kind: ElementKind::Inductor {
             value: tail.value.unwrap_or(Value::NAN),
             initial_current: tail.ic,
             model: tail.model,
-            instance_params: tail.instance_params,
+            instance_params,
         },
-        nodes: vec![node_pos, node_neg],
+        nodes,
     });
 
     Ok(())

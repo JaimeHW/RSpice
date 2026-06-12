@@ -1,5 +1,4 @@
 use super::{build_engine_config, parse_runner_netlist};
-use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::engine::Engine;
 use std::path::Path;
@@ -82,14 +81,14 @@ impl StbData {
 /// phase margin and gain margin using AC analysis data.
 pub fn run_stb_analysis(
     netlist_text: &str,
-    probe_node: &str,
+    probe: &str,
     start_freq: Value,
     stop_freq: Value,
     points_per_decade: usize,
 ) -> Result<StbData, String> {
     run_stb_analysis_with_source_path(
         netlist_text,
-        probe_node,
+        probe,
         start_freq,
         stop_freq,
         points_per_decade,
@@ -99,43 +98,35 @@ pub fn run_stb_analysis(
 
 /// Run STB (loop stability) analysis with a source path used to resolve
 /// relative includes and model file references.
+///
+/// `probe` names a 0 V voltage source placed in the feedback loop; the
+/// engine measures the true loop gain at that break via Tian's
+/// double-injection method. An unknown probe is a hard error — there is no
+/// meaningful fallback quantity.
 pub fn run_stb_analysis_with_source_path(
     netlist_text: &str,
-    probe_node: &str,
+    probe: &str,
     start_freq: Value,
     stop_freq: Value,
     points_per_decade: usize,
     source_path: Option<&Path>,
 ) -> Result<StbData, String> {
-    use rspice_core::analysis::advanced::stb::{StbAnalyzer, StbConfig};
+    use rspice_core::analysis::advanced::stb::StbConfig;
 
     let netlist = parse_runner_netlist(netlist_text, source_path)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
 
     let stb_config = StbConfig::new()
         .with_sweep(start_freq, stop_freq, points_per_decade)
-        .with_probe(probe_node)
+        .with_probe(probe)
         .with_nyquist(true);
-    let frequencies = stb_config.frequency_points();
 
-    let ac_results = engine
-        .run_ac(&netlist, &frequencies)
-        .map_err(|e| format!("AC analysis error: {}", e))?;
-    let probe_idx = probe_node.parse::<usize>().unwrap_or(1).saturating_sub(1);
-    let loop_gains: Vec<Complex64> = ac_results
-        .iter()
-        .map(|result| {
-            result
-                .voltages
-                .get(probe_idx)
-                .copied()
-                .unwrap_or(Complex64::new(1.0, 0.0))
-        })
-        .collect();
+    let analysis = engine
+        .run_stb(&netlist, stb_config)
+        .map_err(|e| format!("STB analysis error: {}", e))?;
 
-    let result_frequencies: Vec<Value> = ac_results.iter().map(|result| result.frequency).collect();
-    let analyzer = StbAnalyzer::new(stb_config);
-    let stb_result = analyzer.analyze(&result_frequencies, &loop_gains);
+    let result_frequencies = analysis.frequencies;
+    let stb_result = analysis.result;
 
     let loop_gain_db: Vec<Value> = stb_result
         .bode_points

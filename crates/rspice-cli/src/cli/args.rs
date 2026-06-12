@@ -153,6 +153,13 @@ pub struct RunArgs {
     #[arg(long, value_name = "TOL", requires = "compress", value_parser = spice_value)]
     pub compress_tol: Option<f64>,
 
+    /// Parallel workers for multi-run plans (.alter/.data variants) and
+    /// corner sweeps; 0 = all cores. With more than one worker, per-run
+    /// console output reduces to status lines (files and reports carry
+    /// the data)
+    #[arg(short = 'j', long, value_name = "N", default_value_t = 1)]
+    pub jobs: usize,
+
     /// Maximum Newton-Raphson iterations
     #[arg(long, value_name = "N")]
     pub maxiter: Option<usize>,
@@ -336,12 +343,6 @@ pub struct RunArgs {
         help = "Run simulation for each specified corner"
     )]
     pub corners: Option<String>,
-
-    /// Parallel workers for corner sweeps (default: 1). Corner outputs are
-    /// tagged per corner, so workers never collide; solver output is
-    /// suppressed while corners run concurrently.
-    #[arg(short = 'j', long, value_name = "N")]
-    pub jobs: Option<usize>,
 
     /// Two-port S-parameter extraction: four port nodes as
     /// "P1+,P1-,P2+,P2-" (use 0 for grounded references). Uses the deck's

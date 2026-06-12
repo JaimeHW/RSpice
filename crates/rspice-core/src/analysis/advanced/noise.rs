@@ -31,7 +31,7 @@ use crate::analysis::AnalysisConfig;
 pub const K_BOLTZMANN: Value = 1.380649e-23;
 /// Electron charge (C)
 pub const Q_ELECTRON: Value = 1.602176634e-19;
-/// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
+/// Default temperature (K): 27Â°C = 300.15K (SPICE convention, ngspice REFTEMP)
 pub const T_NOMINAL: Value = 300.15;
 
 //=============================================================================
@@ -50,6 +50,12 @@ pub enum NoiseSourceType {
     /// Burst (popcorn) noise: KB * I^AB / (1 + (f/FB)^2)
     /// Lorentzian spectrum with corner frequency FB
     Burst,
+    /// Frequency-flat source with an explicitly given spectral density
+    /// (Verilog-A `white_noise(pwr)`): Si = pwr, temperature-independent
+    White,
+    /// Frequency-interpolated spectral density (Verilog-A `noise_table` /
+    /// `noise_table_log`)
+    Table,
 }
 
 /// A noise source in the circuit
@@ -77,6 +83,9 @@ pub struct NoiseSource {
     /// semantics, where the source runs at the analysis temperature plus
     /// this per-instance offset (nevalsrc.c THERMNOISE).
     pub temperature_offset: Value,
+    /// Tabulated PSD for [`NoiseSourceType::Table`]: sorted (f, p) points
+    /// and the log-log interpolation flag, scaled by `parameter`
+    pub table: Option<std::sync::Arc<(Vec<(Value, Value)>, bool)>>,
 }
 
 impl NoiseSource {
@@ -98,6 +107,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            table: None,
         }
     }
 
@@ -114,6 +124,7 @@ impl NoiseSource {
             current: 0.0,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            table: None,
         }
     }
 
@@ -150,6 +161,62 @@ impl NoiseSource {
             current,
             corner_freq: 1.0,
             temperature_offset: 0.0,
+            table: None,
+        }
+    }
+
+    /// Create a frequency-flat source from an explicit spectral density
+    /// (AÂ²/Hz for current injection, VÂ²/Hz when injected at a branch row)
+    pub fn white(device_name: String, node_pos: usize, node_neg: usize, psd: Value) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::White,
+            node_pos,
+            node_neg,
+            parameter: psd,
+            af: 1.0,
+            ef: 1.0,
+            current: 0.0,
+            corner_freq: 1.0,
+            temperature_offset: 0.0,
+            table: None,
+        }
+    }
+
+    /// Create a 1/f^EF source from an explicit spectral density at 1 Hz:
+    /// Si(f) = psd / f^ef (Verilog-A `flicker_noise(pwr, exp)`)
+    pub fn flicker_psd(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        psd: Value,
+        ef: Value,
+    ) -> Self {
+        Self::flicker_with_frequency_exponent(device_name, node_pos, node_neg, psd, 1.0, ef, 1.0)
+    }
+
+    /// Create a frequency-interpolated source from sorted (f, p) points
+    /// (Verilog-A `noise_table` / `noise_table_log`), scaled by `scale`
+    pub fn tabulated(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        scale: Value,
+        points: Vec<(Value, Value)>,
+        log_interp: bool,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Table,
+            node_pos,
+            node_neg,
+            parameter: scale,
+            af: 1.0,
+            ef: 1.0,
+            current: 0.0,
+            corner_freq: 1.0,
+            temperature_offset: 0.0,
+            table: Some(std::sync::Arc::new((points, log_interp))),
         }
     }
 
@@ -178,16 +245,17 @@ impl NoiseSource {
             current,
             corner_freq,
             temperature_offset: 0.0,
+            table: None,
         }
     }
 
-    /// Compute current noise spectral density (A²/Hz) at given frequency
+    /// Compute current noise spectral density (AÂ²/Hz) at given frequency
     pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
         match self.noise_type {
             NoiseSourceType::Thermal => {
                 // Thermal noise: Si = 4kT/R (current noise spectral density)
                 // at the instance temperature, ngspice nevalsrc.c THERMNOISE:
-                // 4k·(CKTtemp + dtemp)·g.
+                // 4kÂ·(CKTtemp + dtemp)Â·g.
                 if self.parameter > 0.0 {
                     4.0 * K_BOLTZMANN * (temperature + self.temperature_offset) / self.parameter
                 } else {
@@ -195,11 +263,11 @@ impl NoiseSource {
                 }
             }
             NoiseSourceType::Shot => {
-                // Shot noise: Si = 2qI (A²/Hz)
+                // Shot noise: Si = 2qI (AÂ²/Hz)
                 2.0 * Q_ELECTRON * self.parameter
             }
             NoiseSourceType::Flicker => {
-                // Flicker noise: Si = KF * I^AF / f^EF (A²/Hz)
+                // Flicker noise: Si = KF * I^AF / f^EF (AÂ²/Hz)
                 if frequency > 0.0 {
                     self.parameter * self.current.abs().powf(self.af) / frequency.powf(self.ef)
                 } else {
@@ -215,6 +283,48 @@ impl NoiseSource {
                 let f_ratio = frequency / fb;
                 kb * self.current.abs().powf(ab) / (1.0 + f_ratio * f_ratio)
             }
+            // Explicit spectral density evaluated at the operating point
+            NoiseSourceType::White => self.parameter.max(0.0),
+            // Interpolated table, clamped to the endpoints outside the
+            // covered range; log-log when flagged
+            NoiseSourceType::Table => {
+                let Some(table) = &self.table else { return 0.0 };
+                let (points, log_interp) = (&table.0, table.1);
+                (self.parameter * Self::interpolate_table(points, log_interp, frequency))
+                    .max(0.0)
+            }
+        }
+    }
+
+    /// Interpolate a sorted (f, p) table at `frequency`, clamping to the
+    /// endpoints outside the covered range
+    fn interpolate_table(points: &[(Value, Value)], log_interp: bool, frequency: Value) -> Value {
+        match points {
+            [] => return 0.0,
+            [only] => return only.1,
+            _ => {}
+        }
+        let first = points[0];
+        let last = points[points.len() - 1];
+        if frequency <= first.0 {
+            return first.1;
+        }
+        if frequency >= last.0 {
+            return last.1;
+        }
+        let upper = points.partition_point(|&(f, _)| f < frequency);
+        let (f0, p0) = points[upper - 1];
+        let (f1, p1) = points[upper];
+        if f1 == f0 {
+            return p0;
+        }
+        if log_interp {
+            // Strict positivity was validated at compile time
+            let t = (frequency.ln() - f0.ln()) / (f1.ln() - f0.ln());
+            (p0.ln() + t * (p1.ln() - p0.ln())).exp()
+        } else {
+            let t = (frequency - f0) / (f1 - f0);
+            p0 + t * (p1 - p0)
         }
     }
 }
@@ -325,9 +435,9 @@ impl Default for NoiseAnalysis {
 pub struct NoiseResult {
     /// Frequency (Hz)
     pub frequency: Value,
-    /// Total output voltage noise spectral density (V²/Hz)
+    /// Total output voltage noise spectral density (VÂ²/Hz)
     pub output_noise_density: Value,
-    /// Input-referred noise spectral density (V²/Hz)
+    /// Input-referred noise spectral density (VÂ²/Hz)
     pub input_referred_density: Value,
     /// Individual noise contributions from each source
     pub contributions: Vec<NoiseContribution>,
@@ -340,7 +450,7 @@ pub struct NoiseContribution {
     pub device_name: String,
     /// Noise type
     pub noise_type: NoiseSourceType,
-    /// Contribution to output noise (V²/Hz)
+    /// Contribution to output noise (VÂ²/Hz)
     pub output_contribution: Value,
     /// Percentage of total noise
     pub percentage: Value,
@@ -354,11 +464,13 @@ impl NoiseSourceType {
             NoiseSourceType::Shot => "shot",
             NoiseSourceType::Flicker => "flicker",
             NoiseSourceType::Burst => "burst",
+            NoiseSourceType::White => "white",
+            NoiseSourceType::Table => "table",
         }
     }
 }
 
-/// Band-integrated contribution of one device/mechanism pair — one row of
+/// Band-integrated contribution of one device/mechanism pair â€” one row of
 /// the classic ranked noise-summary table.
 #[derive(Debug, Clone)]
 pub struct IntegratedContribution {
@@ -366,19 +478,19 @@ pub struct IntegratedContribution {
     pub device_name: String,
     /// Noise mechanism.
     pub noise_type: NoiseSourceType,
-    /// Output-referred noise power integrated over the band (V²).
+    /// Output-referred noise power integrated over the band (VÂ²).
     pub integrated_power: Value,
     /// Share of total integrated output noise (percent).
     pub percentage: Value,
 }
 
 impl NoiseResult {
-    /// Get total output noise in V/√Hz (RMS voltage noise density)
+    /// Get total output noise in V/âˆšHz (RMS voltage noise density)
     pub fn output_noise_rms(&self) -> Value {
         self.output_noise_density.sqrt()
     }
 
-    /// Get input-referred noise in V/√Hz
+    /// Get input-referred noise in V/âˆšHz
     pub fn input_referred_rms(&self) -> Value {
         self.input_referred_density.sqrt()
     }
@@ -442,7 +554,7 @@ impl IntegratedNoise {
 
     /// Per-device, per-mechanism output-noise contributions integrated over
     /// the analysis band (trapezoidal, matching `total_output_noise`),
-    /// ranked descending by integrated power — the ranked noise-summary
+    /// ranked descending by integrated power â€” the ranked noise-summary
     /// table analog designers read first.
     pub fn contribution_summary(&self) -> Vec<IntegratedContribution> {
         use std::collections::HashMap;
@@ -481,7 +593,7 @@ impl IntegratedNoise {
                 let power = 0.5 * (contribution.output_contribution + s_right) * df;
                 let entry = totals
                     .entry((contribution.device_name.clone(), contribution.noise_type.label()))
-                    .or_insert((contribution.noise_type.clone(), 0.0));
+                    .or_insert((contribution.noise_type, 0.0));
                 entry.1 += power;
             }
         }
@@ -551,13 +663,13 @@ impl IntegratedNoise {
 // Helper Functions
 //=============================================================================
 
-/// Calculate thermal noise voltage spectral density for a resistor (V²/Hz)
+/// Calculate thermal noise voltage spectral density for a resistor (VÂ²/Hz)
 #[inline]
 pub fn thermal_voltage_noise(resistance: Value, temperature: Value) -> Value {
     4.0 * K_BOLTZMANN * temperature * resistance
 }
 
-/// Calculate thermal noise current spectral density for a resistor (A²/Hz)
+/// Calculate thermal noise current spectral density for a resistor (AÂ²/Hz)
 #[inline]
 pub fn thermal_current_noise(resistance: Value, temperature: Value) -> Value {
     if resistance > 0.0 {
@@ -567,7 +679,7 @@ pub fn thermal_current_noise(resistance: Value, temperature: Value) -> Value {
     }
 }
 
-/// Calculate shot noise current spectral density (A²/Hz)
+/// Calculate shot noise current spectral density (AÂ²/Hz)
 #[inline]
 pub fn shot_noise(current: Value) -> Value {
     2.0 * Q_ELECTRON * current.abs()

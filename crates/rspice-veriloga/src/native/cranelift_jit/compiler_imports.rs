@@ -38,7 +38,7 @@ impl JitCompiler {
         }
 
         // Import two-arg math functions
-        for name in ["pow", "atan2", "fmin", "fmax"] {
+        for name in ["pow", "atan2", "fmin", "fmax", "fmod"] {
             let id = module
                 .declare_function(name, Linkage::Import, &math2_sig)
                 .map_err(|e| JitError::Module(e.to_string()))?;

@@ -67,6 +67,26 @@ impl Bjt {
         ve: Value,
         vs: Value,
     ) -> IntrinsicTerminalState {
+        if !self.has_intrinsic_state_unknowns() {
+            // Every series element is externalized or absent and there are
+            // no parasitic-transport or self-heating unknowns: the internal
+            // nodes ARE the terminals. The post-solve collapse below would
+            // overwrite every branch with exactly these identities anyway,
+            // so the 8-dim internal Newton (whose vcrit-style legacy seed
+            // makes it iterate on every uncached call) has nothing to say —
+            // this is bjtload's direct evaluation case, and on promoted GP
+            // decks it is the difference between ~1 µs and ~25 µs per call.
+            return IntrinsicTerminalState {
+                vcx: vc,
+                vci: vc,
+                vbx: vb,
+                vbi: vb,
+                vei: ve,
+                vbp: vc,
+                vsi: vs,
+                vrth: 0.0,
+            };
+        }
         let has_rcx = Self::series_active(self.rcx);
         let has_rci = Self::series_active(self.rci);
         let has_rbx = Self::series_active(self.rbx);
@@ -850,6 +870,13 @@ impl Bjt {
         if !self.previous_reduced_linearization_valid {
             return false;
         }
+        // ngspice CKTnoncon: an iterate whose junction voltages pnjlim
+        // replaced is by definition not converged -- the stamped companion
+        // intentionally disagrees with the raw solution until the limiter
+        // disengages.
+        if self.legacy_junction_limited {
+            return false;
+        }
 
         let reltol = criteria.relative_tolerance();
         let current_tol = criteria.current_tolerance();
@@ -919,13 +946,13 @@ impl Bjt {
         vs: Value,
     ) -> (BjtConductanceMatrix, [Value; EXTERNAL_DIM]) {
         let rows = self.small_signal_row_coefficients(vc, vb, ve, vs);
-        let biases = [vc, vb, ve, vs];
+        let anchor = self.companion_anchor(vc, vb, ve, vs);
         let currents = self.external_terminal_currents_at_bias(vc, vb, ve, vs);
         let mut rhs = [0.0; EXTERNAL_DIM];
         for row in 0..EXTERNAL_DIM {
             rhs[row] = -currents[row];
             for col in 0..EXTERNAL_DIM {
-                rhs[row] += rows[row][col] * biases[col];
+                rhs[row] += rows[row][col] * anchor[col];
             }
         }
         (rows, rhs)
