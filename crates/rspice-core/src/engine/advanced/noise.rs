@@ -1105,14 +1105,18 @@ Q1 C B 0 QN
 .END
 ";
 
-    /// The standing acceptance gate for the GP base-resistance increment:
-    /// closing the factor-five deficit requires the base node in the matrix,
-    /// and a first externalization attempt passed this gate but shifted the
-    /// junction-limiting Newton trajectories on reference-sensitive decks
-    /// (general suite 8/8 -> 5/8), so it was reverted. The increment lands
-    /// when this passes with the full suite green.
+    /// The acceptance gate for the GP base-resistance increment: closing
+    /// the factor-five deficit required the base-prime node in the matrix.
+    /// The promotion lands as one piece with its limiting discipline: the
+    /// constant base part externalizes onto a real resistor, the device
+    /// update replaces its junction voltages per Newton iterate via pnjlim
+    /// against the previous iterate (bjtload.c), the companion anchors at
+    /// the limited point, a limited iterate reports nonconvergence
+    /// (CKTnoncon), and Newton takes full node steps for GP circuits. A
+    /// first topology-only attempt passed this gate but broke the general
+    /// suite 8/8 -> 5/8 through the engine-side clamp acting on the bare
+    /// junction.
     #[test]
-    #[ignore = "pending the GP base-node promotion; see the test doc"]
     fn gp_rb_noise_matches_the_ngspice46_oracle() {
         let netlist = Netlist::parse(GP_RB_NOISE_DECK).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
