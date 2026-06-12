@@ -763,8 +763,63 @@ impl Engine {
         slots: &[[TwoTerminalStampSlots; 5]],
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
+
+        // NOTE (M3.2, measured 2026-06-12 on mos_array_4096): evaluating
+        // these per-device terms on the rayon pool — par_chunks(256) with a
+        // serial in-order apply, bit-identical to this loop at any thread
+        // count — was 29% SLOWER than this serial walk (stamp 0.52s → 0.67s
+        // over the run). Per-iteration term buffers plus fork/join overhead
+        // exceed what ~100 ns level-1 evaluations can save even at 4096
+        // devices. Parallel device evaluation only pays once a section
+        // carries microsecond-scale models (VBIC/BSIM tiers) or the whole
+        // iteration (companions + conduction + update) is fused into one
+        // pool pass over persistent scratch. The terms helper below stays
+        // pure precisely so that fused pass can be built when the model
+        // tiers justify it.
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
-            let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
+            let device_terms = Self::mosfet_companion_branch_terms(
+                mos,
+                idx,
+                voltages,
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                suppress_gate_charge,
+            );
+            for (branch, &(geq, ieq)) in device_terms.iter().enumerate() {
+                if geq > 0.0 {
+                    Self::stamp_two_terminal_companion_direct(
+                        matrix,
+                        rhs,
+                        &slots[idx][branch],
+                        geq,
+                        ieq,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Charge-companion `(geq, ieq)` for one MOSFET's five reactive branches
+    /// (gate-source, gate-drain, gate-bulk, body-source, body-drain) at the
+    /// given iterate. Pure: no engine or device state is touched, which is
+    /// what lets the transient assembly evaluate devices on the thread pool.
+    #[allow(clippy::too_many_arguments)]
+    fn mosfet_companion_branch_terms(
+        mos: &crate::device::Mosfet,
+        idx: usize,
+        voltages: &[Value],
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &MosfetTransientHistory,
+        suppress_gate_charge: bool,
+    ) -> [(Value, Value); 5] {
+        let mut terms = [(0.0, 0.0); 5];
+        let (vgs_eval, vds_eval, vbs_eval) = mos.eval_branch_voltages_at(voltages);
+
+        if !suppress_gate_charge {
             let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(voltages);
             let (cgs_half, cgd_half, cgb_half) =
                 mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
@@ -773,119 +828,78 @@ impl Engine {
             let cgd = cgd_half + history.capgd_prev_half[idx] + cgd_ov;
             let cgb = cgb_half + history.capgb_prev_half[idx] + cgb_ov;
 
-            if !suppress_gate_charge {
-                let (geq_gs, ieq_gs, _qgs_curr, _cqgs_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    cgs,
-                    vgs,
-                    history.vgs_prev[idx],
-                    history.qgs_prev[idx],
-                    history.qgs_prev_prev[idx],
-                    history.cqgs_prev[idx],
-                );
-                if geq_gs > 0.0 {
-                    Self::stamp_two_terminal_companion_direct(
-                        matrix,
-                        rhs,
-                        &slots[idx][0],
-                        geq_gs,
-                        ieq_gs,
-                    );
-                }
-
-                let (geq_gd, ieq_gd, _qgd_curr, _cqgd_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    cgd,
-                    vgd,
-                    history.vgd_prev[idx],
-                    history.qgd_prev[idx],
-                    history.qgd_prev_prev[idx],
-                    history.cqgd_prev[idx],
-                );
-                if geq_gd > 0.0 {
-                    Self::stamp_two_terminal_companion_direct(
-                        matrix,
-                        rhs,
-                        &slots[idx][1],
-                        geq_gd,
-                        ieq_gd,
-                    );
-                }
-
-                let (geq_gb, ieq_gb, _qgb_curr, _cqgb_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    cgb,
-                    vgb,
-                    history.vgb_prev[idx],
-                    history.qgb_prev[idx],
-                    history.qgb_prev_prev[idx],
-                    history.cqgb_prev[idx],
-                );
-                if geq_gb > 0.0 {
-                    Self::stamp_two_terminal_companion_direct(
-                        matrix,
-                        rhs,
-                        &slots[idx][2],
-                        geq_gb,
-                        ieq_gb,
-                    );
-                }
-            }
-
-            let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
-            let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
-            let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
-            let (qbd_curr, cbd) =
-                mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
-
-            let (geq_bs, ieq_bs, _qbs_curr, _cqbs_curr) = Self::nonlinear_charge_companion_terms(
+            let (geq_gs, ieq_gs, _q, _cq) = Self::jfet_companion_terms(
                 effective_method,
                 trap_order,
                 dt,
-                cbs,
-                vbs_j,
-                qbs_curr,
-                history.qbs_prev[idx],
-                history.qbs_prev_prev[idx],
-                history.cqbs_prev[idx],
+                cgs,
+                vgs,
+                history.vgs_prev[idx],
+                history.qgs_prev[idx],
+                history.qgs_prev_prev[idx],
+                history.cqgs_prev[idx],
             );
-            if geq_bs > 0.0 {
-                Self::stamp_two_terminal_companion_direct(
-                    matrix,
-                    rhs,
-                    &slots[idx][3],
-                    geq_bs,
-                    ieq_bs,
-                );
-            }
+            terms[0] = (geq_gs, ieq_gs);
 
-            let (geq_bd, ieq_bd, _qbd_curr, _cqbd_curr) = Self::nonlinear_charge_companion_terms(
+            let (geq_gd, ieq_gd, _q, _cq) = Self::jfet_companion_terms(
                 effective_method,
                 trap_order,
                 dt,
-                cbd,
-                vbd_j,
-                qbd_curr,
-                history.qbd_prev[idx],
-                history.qbd_prev_prev[idx],
-                history.cqbd_prev[idx],
+                cgd,
+                vgd,
+                history.vgd_prev[idx],
+                history.qgd_prev[idx],
+                history.qgd_prev_prev[idx],
+                history.cqgd_prev[idx],
             );
-            if geq_bd > 0.0 {
-                Self::stamp_two_terminal_companion_direct(
-                    matrix,
-                    rhs,
-                    &slots[idx][4],
-                    geq_bd,
-                    ieq_bd,
-                );
-            }
+            terms[1] = (geq_gd, ieq_gd);
+
+            let (geq_gb, ieq_gb, _q, _cq) = Self::jfet_companion_terms(
+                effective_method,
+                trap_order,
+                dt,
+                cgb,
+                vgb,
+                history.vgb_prev[idx],
+                history.qgb_prev[idx],
+                history.qgb_prev_prev[idx],
+                history.cqgb_prev[idx],
+            );
+            terms[2] = (geq_gb, ieq_gb);
         }
+
+        let vbs_j = mos.body_source_charge_branch_voltage(vbs_eval);
+        let vbd_j = mos.body_drain_charge_branch_voltage(vds_eval, vbs_eval);
+        let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
+        let (qbd_curr, cbd) = mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
+
+        let (geq_bs, ieq_bs, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cbs,
+            vbs_j,
+            qbs_curr,
+            history.qbs_prev[idx],
+            history.qbs_prev_prev[idx],
+            history.cqbs_prev[idx],
+        );
+        terms[3] = (geq_bs, ieq_bs);
+
+        let (geq_bd, ieq_bd, _q, _cq) = Self::nonlinear_charge_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cbd,
+            vbd_j,
+            qbd_curr,
+            history.qbd_prev[idx],
+            history.qbd_prev_prev[idx],
+            history.cqbd_prev[idx],
+        );
+        terms[4] = (geq_bd, ieq_bd);
+
+        terms
     }
 
     #[inline]
