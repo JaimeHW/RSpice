@@ -121,35 +121,72 @@ impl Default for OutputConfig {
     }
 }
 
+/// One configuration file's contents: every field optional, so a layer
+/// only overrides what it actually sets. This is what distinguishes
+/// "explicitly set back to the default" from "not mentioned" — comparing
+/// concrete values against defaults cannot.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct ConfigLayer {
+    simulation: SimulationLayer,
+    output: OutputLayer,
+    paths: PathConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct SimulationLayer {
+    temperature: Option<f64>,
+    max_iterations: Option<usize>,
+    abstol: Option<f64>,
+    reltol: Option<f64>,
+    residual_reltol: Option<f64>,
+    min_timestep: Option<f64>,
+    max_timestep: Option<f64>,
+    compress_waveforms: Option<bool>,
+    compression_tolerance: Option<f64>,
+    convergence_mode: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct OutputLayer {
+    format: Option<String>,
+    show_progress: Option<bool>,
+    include_node_names: Option<bool>,
+    output_directory: Option<PathBuf>,
+}
+
 impl Config {
     /// Load configuration from default locations
     ///
     /// Configuration is loaded in order of priority (lowest to highest):
     /// 1. Default values
-    /// 2. User config (~/.rspicerc or ~/.config/rspice/config.toml)
+    /// 2. User config (~/.config/rspice/config.toml or ~/.rspicerc)
     /// 3. Project config (./.rspicerc)
     /// 4. Environment variables
     pub fn load() -> Self {
         let mut config = Config::default();
 
-        // Try to load user config
-        if let Some(user_config) = Self::load_user_config() {
-            config = config.merge(user_config);
+        if let Some(user_layer) = Self::load_user_layer() {
+            config.apply_layer(user_layer);
+        }
+        if let Some(project_layer) = Self::load_project_layer() {
+            config.apply_layer(project_layer);
         }
 
-        // Try to load project config
-        if let Some(project_config) = Self::load_project_config() {
-            config = config.merge(project_config);
-        }
-
-        // Apply environment variables
         config.apply_env();
-
         config
     }
 
-    /// Load configuration from a specific file
+    /// Load configuration from a specific file (applied over defaults)
     pub fn load_file(path: &std::path::Path) -> Result<Self, ConfigError> {
+        let mut config = Config::default();
+        config.apply_layer(Self::load_layer(path)?);
+        Ok(config)
+    }
+
+    fn load_layer(path: &std::path::Path) -> Result<ConfigLayer, ConfigError> {
         let content = std::fs::read_to_string(path).map_err(|e| ConfigError::IoError {
             path: path.to_path_buf(),
             source: e,
@@ -162,24 +199,24 @@ impl Config {
     }
 
     /// Load user configuration from standard locations
-    fn load_user_config() -> Option<Self> {
-        // Try ~/.config/rspice/config.toml first
+    fn load_user_layer() -> Option<ConfigLayer> {
         if let Some(config_dir) = dirs::config_dir() {
             let config_path = config_dir.join("rspice").join("config.toml");
-            if config_path.exists()
-                && let Ok(config) = Self::load_file(&config_path)
-            {
-                return Some(config);
+            if config_path.exists() {
+                match Self::load_layer(&config_path) {
+                    Ok(layer) => return Some(layer),
+                    Err(e) => log::warn!("ignoring unreadable config {}: {e}", config_path.display()),
+                }
             }
         }
 
-        // Try ~/.rspicerc
         if let Some(home) = dirs::home_dir() {
             let rc_path = home.join(".rspicerc");
-            if rc_path.exists()
-                && let Ok(config) = Self::load_file(&rc_path)
-            {
-                return Some(config);
+            if rc_path.exists() {
+                match Self::load_layer(&rc_path) {
+                    Ok(layer) => return Some(layer),
+                    Err(e) => log::warn!("ignoring unreadable config {}: {e}", rc_path.display()),
+                }
             }
         }
 
@@ -187,66 +224,70 @@ impl Config {
     }
 
     /// Load project configuration from current directory
-    fn load_project_config() -> Option<Self> {
+    fn load_project_layer() -> Option<ConfigLayer> {
         let rc_path = PathBuf::from(".rspicerc");
-        if rc_path.exists()
-            && let Ok(config) = Self::load_file(&rc_path)
-        {
-            return Some(config);
+        if rc_path.exists() {
+            match Self::load_layer(&rc_path) {
+                Ok(layer) => return Some(layer),
+                Err(e) => log::warn!("ignoring unreadable config {}: {e}", rc_path.display()),
+            }
         }
         None
     }
 
-    /// Merge another config into this one (other takes priority)
-    fn merge(mut self, other: Self) -> Self {
-        // Simulation settings - only override if non-default
-        if other.simulation.temperature != SimulationConfig::default().temperature {
-            self.simulation.temperature = other.simulation.temperature;
+    /// Apply one file layer; only the fields the file set are overridden.
+    fn apply_layer(&mut self, layer: ConfigLayer) {
+        let sim = layer.simulation;
+        if let Some(v) = sim.temperature {
+            self.simulation.temperature = v;
         }
-        if other.simulation.max_iterations != SimulationConfig::default().max_iterations {
-            self.simulation.max_iterations = other.simulation.max_iterations;
+        if let Some(v) = sim.max_iterations {
+            self.simulation.max_iterations = v;
         }
-        if other.simulation.abstol != SimulationConfig::default().abstol {
-            self.simulation.abstol = other.simulation.abstol;
+        if let Some(v) = sim.abstol {
+            self.simulation.abstol = v;
         }
-        if other.simulation.reltol != SimulationConfig::default().reltol {
-            self.simulation.reltol = other.simulation.reltol;
+        if let Some(v) = sim.reltol {
+            self.simulation.reltol = v;
         }
-        if other.simulation.residual_reltol != SimulationConfig::default().residual_reltol {
-            self.simulation.residual_reltol = other.simulation.residual_reltol;
+        if let Some(v) = sim.residual_reltol {
+            self.simulation.residual_reltol = v;
         }
-        if other.simulation.min_timestep != SimulationConfig::default().min_timestep {
-            self.simulation.min_timestep = other.simulation.min_timestep;
+        if let Some(v) = sim.min_timestep {
+            self.simulation.min_timestep = v;
         }
-        if other.simulation.max_timestep != SimulationConfig::default().max_timestep {
-            self.simulation.max_timestep = other.simulation.max_timestep;
+        if let Some(v) = sim.max_timestep {
+            self.simulation.max_timestep = v;
         }
-        self.simulation.compress_waveforms |= other.simulation.compress_waveforms;
-        if other.simulation.compression_tolerance != SimulationConfig::default().compression_tolerance {
-            self.simulation.compression_tolerance = other.simulation.compression_tolerance;
+        if let Some(v) = sim.compress_waveforms {
+            self.simulation.compress_waveforms = v;
         }
-        if other.simulation.convergence_mode != SimulationConfig::default().convergence_mode {
-            self.simulation.convergence_mode = other.simulation.convergence_mode.clone();
+        if let Some(v) = sim.compression_tolerance {
+            self.simulation.compression_tolerance = v;
         }
-
-        // Output settings
-        if other.output.format != OutputConfig::default().format {
-            self.output.format = other.output.format;
-        }
-        self.output.show_progress |= other.output.show_progress;
-        self.output.include_node_names |= other.output.include_node_names;
-        if other.output.output_directory.is_some() {
-            self.output.output_directory = other.output.output_directory;
+        if let Some(v) = sim.convergence_mode {
+            self.simulation.convergence_mode = v;
         }
 
-        // Paths - append
-        self.paths.include_paths.extend(other.paths.include_paths);
-        self.paths.library_paths.extend(other.paths.library_paths);
+        let out = layer.output;
+        if let Some(v) = out.format {
+            self.output.format = v;
+        }
+        if let Some(v) = out.show_progress {
+            self.output.show_progress = v;
+        }
+        if let Some(v) = out.include_node_names {
+            self.output.include_node_names = v;
+        }
+        if let Some(v) = out.output_directory {
+            self.output.output_directory = Some(v);
+        }
+
+        self.paths.include_paths.extend(layer.paths.include_paths);
+        self.paths.library_paths.extend(layer.paths.library_paths);
         self.paths
             .veriloga_includes
-            .extend(other.paths.veriloga_includes);
-
-        self
+            .extend(layer.paths.veriloga_includes);
     }
 
     /// Apply environment variable overrides
