@@ -1037,6 +1037,11 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
         return Ok(true);
     }
 
+    if let Some(ports) = ctx.args.sparam.as_deref() {
+        advanced::run_sparam(ctx, ports, ctx.args.sparam_z0.unwrap_or(50.0))?;
+        return Ok(true);
+    }
+
     if let Some(corners_str) = ctx.args.corners.as_deref() {
         advanced::run_corner_sweep(ctx, corners_str)?;
         return Ok(true);

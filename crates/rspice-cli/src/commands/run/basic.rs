@@ -399,6 +399,9 @@ pub(super) fn run_transient(
     tstart: f64,
     max_step: Option<f64>,
 ) -> Result<(), CliError> {
+    // --tran-stop overrides the deck's stop time so checkpoint segments can
+    // share byte-identical source (the checkpoint fingerprint covers it).
+    let tstop = ctx.args.tran_stop.unwrap_or(tstop);
     let internal_max_step = resolve_transient_max_step(tstep, tstop, tstart, max_step);
 
     let pb = if ctx.quiet {
@@ -433,7 +436,55 @@ pub(super) fn run_transient(
         pb
     };
 
-    let result = if ctx.compress {
+    let checkpointing = ctx.args.checkpoint.is_some() || ctx.args.resume.is_some();
+    let result = if checkpointing {
+        // Segmented integration: restore the saved state (when resuming),
+        // run to this segment's stop time, and persist the new state (when
+        // checkpointing). The core validates the netlist fingerprint, so a
+        // checkpoint can never silently continue a different circuit.
+        let run = if let Some(ref resume_path) = ctx.args.resume {
+            let checkpoint =
+                rspice_core::engine::TransientCheckpoint::load(resume_path).map_err(|e| {
+                    CliError::SimulationError {
+                        message: format!(
+                            "cannot resume from {}: {e}",
+                            resume_path.display()
+                        ),
+                        analysis: Some("Transient".to_string()),
+                    }
+                })?;
+            ctx.engine
+                .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
+        } else {
+            ctx.engine
+                .run_tran_checkpointed(ctx.netlist, tstop, internal_max_step)
+        };
+        pb.finish_and_clear();
+        match run {
+            Ok((result, checkpoint)) => {
+                if let Some(ref checkpoint_path) = ctx.args.checkpoint {
+                    checkpoint.save(checkpoint_path).map_err(|e| {
+                        CliError::SimulationError {
+                            message: format!(
+                                "cannot save checkpoint to {}: {e}",
+                                checkpoint_path.display()
+                            ),
+                            analysis: Some("Transient".to_string()),
+                        }
+                    })?;
+                    if !ctx.quiet {
+                        println!(
+                            "  Checkpoint saved (t={:.6e}s): {}",
+                            checkpoint.time,
+                            checkpoint_path.display()
+                        );
+                    }
+                }
+                Ok(result)
+            }
+            Err(e) => Err(e),
+        }
+    } else if ctx.compress {
         let compression_tol = ctx.compress_tol;
         let compression = rspice_core::engine::CompressionConfig {
             enabled: true,

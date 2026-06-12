@@ -126,6 +126,21 @@ pub struct RunArgs {
     #[arg(long, value_name = "SECONDS", value_parser = spice_value)]
     pub timeout: Option<f64>,
 
+    /// Override the .TRAN stop time without editing the deck (checkpoint
+    /// segments must keep identical source text)
+    #[arg(long, value_name = "TIME", value_parser = spice_value)]
+    pub tran_stop: Option<f64>,
+
+    /// Save the transient integrator state to FILE when the run completes,
+    /// for later --resume
+    #[arg(long, value_name = "FILE")]
+    pub checkpoint: Option<PathBuf>,
+
+    /// Resume a transient from a checkpoint written by --checkpoint; the
+    /// deck must be byte-identical to the one that wrote it
+    #[arg(long, value_name = "FILE")]
+    pub resume: Option<PathBuf>,
+
     /// Show progress bar with ETA for transient simulation
     #[arg(long)]
     pub progress: bool,
@@ -327,6 +342,17 @@ pub struct RunArgs {
     /// suppressed while corners run concurrently.
     #[arg(short = 'j', long, value_name = "N")]
     pub jobs: Option<usize>,
+
+    /// Two-port S-parameter extraction: four port nodes as
+    /// "P1+,P1-,P2+,P2-" (use 0 for grounded references). Uses the deck's
+    /// .AC card for the sweep; ports are driven through Z0 with the other
+    /// port terminated in Z0
+    #[arg(long, value_name = "NODES")]
+    pub sparam: Option<String>,
+
+    /// S-parameter reference impedance in ohms (default: 50)
+    #[arg(long, value_name = "OHMS", requires = "sparam", value_parser = spice_value)]
+    pub sparam_z0: Option<f64>,
 
     /// Library file containing corner definitions
     #[arg(long, value_name = "FILE", requires = "corners")]

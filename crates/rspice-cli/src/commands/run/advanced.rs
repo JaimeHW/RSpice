@@ -1069,3 +1069,240 @@ fn corner_output_path(
     }
     Some(path.with_file_name(file_name))
 }
+
+/// Two-port S-parameter extraction over the deck's `.AC` sweep.
+///
+/// Standard matched-termination wave method: for each drive port, a source
+/// of 2 V AC behind Z0 excites the port (incident wave of 1 V) while the
+/// other port is terminated in Z0. The port voltages then read off the
+/// S-parameters directly — `Sjj = Vj − 1`, `Sij = Vi` — with no matrix
+/// inversion and no floating-port hazard. The deck supplies the bias
+/// network and sweep; its own sources must not carry AC specifications.
+pub(super) fn run_sparam(
+    ctx: &RunContext<'_>,
+    ports_spec: &str,
+    z0: f64,
+) -> Result<(), CliError> {
+    if !z0.is_finite() || z0 <= 0.0 {
+        return Err(CliError::InvalidArgument {
+            message: format!("--sparam-z0 must be a positive impedance, got {z0}"),
+            suggestion: Some("e.g. --sparam-z0 50".to_string()),
+        });
+    }
+    let port_nodes: Vec<String> = ports_spec
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if port_nodes.len() != 4 {
+        return Err(CliError::InvalidArgument {
+            message: format!(
+                "--sparam needs four comma-separated port nodes (P1+,P1-,P2+,P2-), got {}",
+                port_nodes.len()
+            ),
+            suggestion: Some("e.g. --sparam \"in,0,out,0\"".to_string()),
+        });
+    }
+
+    // The deck's .AC card defines the sweep.
+    let Some(rspice_core::netlist::AnalysisCommand::Ac {
+        variation,
+        points,
+        start_freq,
+        stop_freq,
+    }) = ctx
+        .netlist
+        .analyses
+        .iter()
+        .find(|a| matches!(a, rspice_core::netlist::AnalysisCommand::Ac { .. }))
+        .cloned()
+    else {
+        return Err(CliError::SimulationError {
+            message: "--sparam requires a .AC card in the deck to define the sweep".to_string(),
+            analysis: Some("S-Parameters".to_string()),
+        });
+    };
+    let frequencies =
+        super::shared::generate_frequency_sweep(variation, points, start_freq, stop_freq);
+
+    let source = ctx
+        .netlist
+        .source_text
+        .as_deref()
+        .ok_or_else(|| CliError::InternalError {
+            message: "netlist source unavailable for S-parameter excitation".to_string(),
+        })?;
+    let base = ctx
+        .netlist
+        .source_path
+        .clone()
+        .unwrap_or_else(|| ctx.args.input.clone());
+
+    if !ctx.quiet {
+        println!(
+            "Running 2-port S-parameter extraction: Z0={}Ω, {} frequency points",
+            z0,
+            frequencies.len()
+        );
+    }
+
+    // One AC sweep per driven port, with the excitation network appended.
+    let drive = |drive_port: usize| -> Result<Vec<rspice_core::analysis::AcResult>, CliError> {
+        let (dp, dm) = (
+            &port_nodes[2 * drive_port],
+            &port_nodes[2 * drive_port + 1],
+        );
+        let (lp, lm) = (
+            &port_nodes[2 * (1 - drive_port)],
+            &port_nodes[2 * (1 - drive_port) + 1],
+        );
+        let mut excited = String::with_capacity(source.len() + 128);
+        for line in source.lines() {
+            if line.trim().eq_ignore_ascii_case(".end") {
+                excited.push_str(&format!(
+                    "VSPDRV spdrv_node {dm} AC 2\nRSPSRC spdrv_node {dp} {z0}\nRSPLOAD {lp} {lm} {z0}\n"
+                ));
+            }
+            excited.push_str(line);
+            excited.push('\n');
+        }
+        let netlist = rspice_core::Netlist::parse_with_path(&excited, &base).map_err(|e| {
+            CliError::ParseError {
+                message: format!("S-parameter excitation: {e}"),
+                line: None,
+                suggestion: None,
+            }
+        })?;
+        ctx.engine
+            .run_ac(&netlist, &frequencies)
+            .map_err(|e| CliError::simulation_error_in(e.to_string(), "S-Parameters"))
+    };
+
+    let drive1 = drive(0)?;
+    let drive2 = drive(1)?;
+
+    // Differential port voltage at one sweep point.
+    let port_v = |result: &rspice_core::analysis::AcResult,
+                  plus: &str,
+                  minus: &str|
+     -> Result<rspice_core::Complex64, CliError> {
+        let lookup = |node: &str| -> Result<rspice_core::Complex64, CliError> {
+            if node == "0" || node.eq_ignore_ascii_case("gnd") {
+                return Ok(rspice_core::Complex64::new(0.0, 0.0));
+            }
+            result
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case(node))
+                .and_then(|index| result.voltages.get(index).copied())
+                .ok_or_else(|| CliError::SimulationError {
+                    message: format!("S-parameter port node '{node}' not found in the circuit"),
+                    analysis: Some("S-Parameters".to_string()),
+                })
+        };
+        Ok(lookup(plus)? - lookup(minus)?)
+    };
+
+    // With Vs = 2 V behind Z0, the incident wave at the driven port is 1 V:
+    // Sjj = Vj - 1, Sij = Vi.
+    let one = rspice_core::Complex64::new(1.0, 0.0);
+    let mut s11 = Vec::with_capacity(frequencies.len());
+    let mut s21 = Vec::with_capacity(frequencies.len());
+    let mut s12 = Vec::with_capacity(frequencies.len());
+    let mut s22 = Vec::with_capacity(frequencies.len());
+    for (point1, point2) in drive1.iter().zip(&drive2) {
+        s11.push(port_v(point1, &port_nodes[0], &port_nodes[1])? - one);
+        s21.push(port_v(point1, &port_nodes[2], &port_nodes[3])?);
+        s22.push(port_v(point2, &port_nodes[2], &port_nodes[3])? - one);
+        s12.push(port_v(point2, &port_nodes[0], &port_nodes[1])?);
+    }
+
+    if !ctx.quiet {
+        if let (Some(first_s11), Some(first_s21)) = (s11.first(), s21.first()) {
+            println!(
+                "  @ {:e} Hz: |S11|={:.4} |S21|={:.4}",
+                frequencies.first().copied().unwrap_or(0.0),
+                first_s11.norm(),
+                first_s21.norm()
+            );
+        }
+    }
+
+    if let Some(ref output_path) = ctx.output_path_for("sparam") {
+        if output_path.extension().is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("s2p") || ext.eq_ignore_ascii_case("snp")
+        }) {
+            write_touchstone_2port(output_path, z0, &frequencies, [&s11, &s21, &s12, &s22])?;
+        } else {
+            let signal = |name: &str, values: &[rspice_core::Complex64]| {
+                crate::commands::run_signals::ComplexSignal {
+                    display_name: name.to_string(),
+                    raw_name: name.to_string(),
+                    kind: crate::commands::run_signals::SignalKind::Voltage,
+                    real: values.iter().map(|c| c.re).collect(),
+                    imag: values.iter().map(|c| c.im).collect(),
+                }
+            };
+            let signals = vec![
+                signal("S11", &s11),
+                signal("S21", &s21),
+                signal("S12", &s12),
+                signal("S22", &s22),
+            ];
+            if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
+                let mut data = crate::hdf5::Hdf5SimulationData::new();
+                data.title = "S-Parameters".to_string();
+                let mut section = crate::hdf5::Hdf5AcSection::new(frequencies.clone());
+                for s in &signals {
+                    section.add_signal(s.display_name.clone(), s.real.clone(), s.imag.clone());
+                }
+                data.ac = Some(section);
+                crate::hdf5::write_hdf5(output_path, &data)
+                    .map_err(|err| super::shared::map_hdf5_output_error(output_path, err))?;
+            } else {
+                super::export::complex_table(
+                    "sparam",
+                    "S-Parameters",
+                    frequencies.clone(),
+                    &signals,
+                )
+                .write(output_path, ctx.format)?;
+            }
+        }
+        if !ctx.quiet {
+            println!("  S-parameters exported to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// Touchstone v1 two-port file (`# HZ S RI R <z0>`, S11 S21 S12 S22 order).
+fn write_touchstone_2port(
+    path: &std::path::Path,
+    z0: f64,
+    frequencies: &[f64],
+    s: [&[rspice_core::Complex64]; 4],
+) -> Result<(), CliError> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path).map_err(|e| CliError::output_error(path, e))?;
+    writeln!(file, "! 2-port S-parameters").map_err(|e| CliError::output_error(path, e))?;
+    writeln!(file, "# HZ S RI R {z0}").map_err(|e| CliError::output_error(path, e))?;
+    let [s11, s21, s12, s22] = s;
+    for (index, freq) in frequencies.iter().enumerate() {
+        let entry = |values: &[rspice_core::Complex64]| {
+            values
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| rspice_core::Complex64::new(0.0, 0.0))
+        };
+        let (a, b, c, d) = (entry(s11), entry(s21), entry(s12), entry(s22));
+        writeln!(
+            file,
+            "{freq:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
+            a.re, a.im, b.re, b.im, c.re, c.im, d.re, d.im
+        )
+        .map_err(|e| CliError::output_error(path, e))?;
+    }
+    Ok(())
+}
