@@ -1,7 +1,12 @@
+#[cfg(windows)]
 use std::env;
+#[cfg(windows)]
 use std::ffi::OsString;
+#[cfg(windows)]
 use std::fs;
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 fn main() {
