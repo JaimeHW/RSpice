@@ -37,10 +37,11 @@ pub fn render_veriloga_load_dialog(
     let was_compiling = matches!(state.compilation_state, CompilationState::Compiling);
     poll_compile(state);
     let now = ctx.input(|i| i.time);
-    if was_compiling && !matches!(state.compilation_state, CompilationState::Compiling) {
-        if let Some(started) = state.compile_started_at.take() {
-            state.last_compile_secs = Some((now - started).max(0.0));
-        }
+    if was_compiling
+        && !matches!(state.compilation_state, CompilationState::Compiling)
+        && let Some(started) = state.compile_started_at.take()
+    {
+        state.last_compile_secs = Some((now - started).max(0.0));
     }
 
     let mut result = VerilogADialogResult::None;
