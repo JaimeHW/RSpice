@@ -255,6 +255,24 @@ impl StaticMatrix {
         }
     }
 
+    /// Rows whose entries are all exactly zero (or absent): the immediate
+    /// structural suspects when factorization reports a singular system.
+    pub fn deficient_rows(&self) -> Vec<usize> {
+        let mut row_max = vec![0.0f64; self.nrows];
+        for (&(row, _col), &idx) in &self.position_map {
+            let magnitude = self.values[idx].abs();
+            if magnitude > row_max[row] {
+                row_max[row] = magnitude;
+            }
+        }
+        row_max
+            .iter()
+            .enumerate()
+            .filter(|entry| *entry.1 == 0.0)
+            .map(|(row, _)| row)
+            .collect()
+    }
+
     /// Get CSC index for (row, col) - for pre-indexed stamping
     #[inline]
     pub fn get_index(&self, row: usize, col: usize) -> Option<CscIndex> {
@@ -627,6 +645,7 @@ impl ComplexMatrix {
             rhs: Mat::zeros(nrows, 1),
         })
     }
+
 
     /// Zero all values
     #[inline]

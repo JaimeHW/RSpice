@@ -2,6 +2,47 @@
 
 use super::*;
 
+/// Name the matrix rows behind a singular linear system so the user sees
+/// which node or branch carries no constraining equation instead of a bare
+/// "matrix is singular".
+pub(crate) fn singular_system_message(circuit: &CircuitData, matrix: &StaticMatrix) -> String {
+    let rows = matrix.deficient_rows();
+    if rows.is_empty() {
+        return "matrix is singular with no structurally empty rows; the usual causes are \
+                loops of ideal voltage sources/inductors or duplicate constraints on one \
+                node pair (run `rspice check` for a topology report)"
+            .to_string();
+    }
+    let node_names = circuit.node_names_sorted();
+    let branch_names = circuit.branch_names_sorted();
+    let num_nodes = circuit.num_nodes();
+    let mut names: Vec<String> = rows
+        .iter()
+        .take(8)
+        .map(|&row| {
+            if row < num_nodes {
+                match node_names.get(row) {
+                    Some(name) => format!("node '{name}'"),
+                    None => format!("node #{}", row + 1),
+                }
+            } else {
+                match branch_names.get(row - num_nodes) {
+                    Some(name) => format!("branch '{name}'"),
+                    None => format!("branch #{}", row - num_nodes + 1),
+                }
+            }
+        })
+        .collect();
+    if rows.len() > 8 {
+        names.push(format!("... {} more", rows.len() - 8));
+    }
+    format!(
+        "matrix is singular: no equation constrains {} — the node(s) are floating or the \
+         element wiring is inconsistent",
+        names.join(", ")
+    )
+}
+
 impl Engine {
     /// Solve a linear circuit (no nonlinear devices)
     pub(crate) fn solve_linear(
@@ -35,11 +76,20 @@ impl Engine {
         }
 
         if conv_cfg.source_stepping {
-            return self
-                .source_stepping(circuit, matrix)
-                .map_err(SimulationError::Solver);
+            return self.source_stepping(circuit, matrix).map_err(|err| {
+                if matches!(err, crate::solver::SolverError::SingularMatrix) {
+                    SimulationError::Circuit(singular_system_message(circuit, matrix))
+                } else {
+                    SimulationError::Solver(err)
+                }
+            });
         }
 
+        if matches!(last_err, crate::solver::SolverError::SingularMatrix) {
+            return Err(SimulationError::Circuit(singular_system_message(
+                circuit, matrix,
+            )));
+        }
         Err(SimulationError::Solver(last_err))
     }
 

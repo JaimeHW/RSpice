@@ -129,6 +129,88 @@ fn native_bulk_mos_level(level: i32) -> bool {
     matches!(level, 1 | 2 | 4 | 5 | 6)
 }
 
+/// Warn about nodes with no conductive path to ground: the unconditional
+/// matrix gmin keeps such systems numerically solvable, so without this
+/// notice a forgotten connection simulates silently with a meaningless bias.
+/// Capacitors and current sources do not conduct DC; every other element's
+/// terminals are treated as connected, which never produces a false alarm.
+fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
+    use crate::netlist::ElementKind;
+    use std::collections::HashMap;
+
+    let canonical = |node: &str| -> String {
+        let lower = node.to_ascii_lowercase();
+        if lower == "gnd" { "0".to_string() } else { lower }
+    };
+
+    let mut parent: HashMap<String, String> = HashMap::new();
+    fn find(parent: &mut HashMap<String, String>, node: &str) -> String {
+        let mut current = node.to_string();
+        loop {
+            let up = parent
+                .entry(current.clone())
+                .or_insert_with(|| current.clone())
+                .clone();
+            if up == current {
+                return current;
+            }
+            let grand = parent.get(&up).cloned().unwrap_or_else(|| up.clone());
+            parent.insert(current, grand);
+            current = up;
+        }
+    }
+
+    let mut all_nodes: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for element in flat_elements {
+        let conducts = !matches!(
+            element.kind,
+            ElementKind::Capacitor { .. } | ElementKind::CurrentSource(_)
+        );
+        let nodes: Vec<String> = element.nodes.iter().map(|n| canonical(n)).collect();
+        for node in &nodes {
+            if seen.insert(node.clone()) {
+                all_nodes.push(node.clone());
+            }
+        }
+        if conducts && nodes.len() >= 2 {
+            let first = find(&mut parent, &nodes[0]);
+            for other in &nodes[1..] {
+                let root = find(&mut parent, other);
+                if root != first {
+                    parent.insert(root, first.clone());
+                }
+            }
+        }
+    }
+
+    if !seen.contains("0") {
+        // No ground reference at all; other validation owns that report.
+        return;
+    }
+    let ground_root = find(&mut parent, "0");
+    let floating: Vec<&String> = all_nodes
+        .iter()
+        .filter(|node| node.as_str() != "0" && find(&mut parent, node) != ground_root)
+        .collect();
+    if floating.is_empty() {
+        return;
+    }
+    let shown: Vec<&str> = floating.iter().take(8).map(|s| s.as_str()).collect();
+    let suffix = if floating.len() > shown.len() {
+        format!(" (and {} more)", floating.len() - shown.len())
+    } else {
+        String::new()
+    };
+    log::warn!(
+        "node(s) {}{} have no conductive path to ground (capacitors and current sources \
+         do not conduct DC); their bias is set by the matrix gmin only and is not \
+         physically meaningful",
+        shown.join(", "),
+        suffix
+    );
+}
+
 /// Diagnostic descriptor for well-known MOS model levels.
 fn mos_level_descriptor(level: i32) -> String {
     match level {
@@ -197,6 +279,8 @@ impl Engine {
                 );
             }
         }
+
+        warn_floating_nodes(&flat_elements);
 
         // Deduplicates the loud simplified-MOS warnings to one per model card.
         let mut simplified_mos_warned: std::collections::HashSet<String> =
