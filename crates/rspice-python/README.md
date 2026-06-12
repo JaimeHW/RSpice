@@ -1,18 +1,27 @@
 # RSpice Python Bindings
 
-Python bindings for the RSpice circuit simulation engine, enabling automation,
-scripting, and integration with the Python scientific ecosystem.
+Python bindings for the RSpice circuit simulation engine, built for
+automation, scripting, and automated circuit verification — running SPICE
+regression tests in CI the same way you run unit tests.
 
 ## Features
 
-- **Full simulation API** — DC operating point, DC sweep, AC, transient, noise,
-  pole-zero, Monte Carlo, sensitivity, and parametric step analysis
-- **NumPy integration** — waveforms, spectra, and complex AC phasors as ndarrays
-- **Releases the GIL** — long simulations run with the GIL released, so other
-  Python threads (GUIs, progress reporting, parallel workers) stay live
-- **Typed** — ships a complete `.pyi` stub with a `py.typed` marker for IDEs
-  and type checkers
-- **Typed exceptions** — a proper exception hierarchy rooted at `RSpiceError`
+- **Simulation API** — DC operating point, DC sweep, AC, transient, noise,
+  pole-zero, Monte Carlo, sensitivity (DC and AC), transfer function,
+  Fourier/THD, and parametric step analysis
+- **Verification first** — `engine.run(netlist)` executes the netlist's own
+  analysis directives, evaluates `.MEAS` statements, and
+  `report.assert_passed()` turns them into a CI gate
+- **NumPy integration** — waveforms, spectra, and complex AC phasors as
+  ndarrays
+- **Releases the GIL** — long simulations run with the GIL released; other
+  Python threads stay live, and engines can simulate in parallel threads
+- **Ctrl-C works** — transient and DC sweep runs are cancellable with
+  KeyboardInterrupt instead of blocking until completion
+- **Strict error discipline** — accessors raise `IndexError`/`KeyError` for
+  invalid nodes; argument errors raise `ValueError`; nothing fabricates
+  silent zeros
+- **Typed** — ships a complete `.pyi` stub with a `py.typed` marker
 
 ## Installation
 
@@ -35,9 +44,9 @@ import rspice
 
 netlist = rspice.Netlist.parse("""
 * Voltage divider
-V1 1 0 10
-R1 1 2 1k
-R2 2 0 1k
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
 .end
 """)
 
@@ -45,13 +54,63 @@ engine = rspice.Engine()
 
 # DC operating point
 result = engine.run_dc_op(netlist)
-print(f"V(2) = {result.voltage(2):.3f} V")     # 5.000 V
+print(f"V(out) = {result.voltage('out'):.3f} V")     # 5.000 V
 
 # Transient analysis (max_step defaults to stop_time / 50)
 tran = engine.run_tran(netlist, stop_time=1e-3)
 time = tran.time                                # NumPy array
-v_out = tran.voltage_waveform(2)                # NumPy array
+v_out = tran.voltage_waveform("out")            # NumPy array
+i_v1 = tran.branch_current_waveform("V1")       # branch currents too
 ```
+
+## Automated Verification (analog CI)
+
+Put the pass/fail criteria in the netlist as `.MEAS` statements, run the
+deck, and assert on the report — from pytest, a script, or a CI job:
+
+```python
+DECK = """* RC step response regression
+V1 in 0 PULSE(0 1 0 1n 1n 1 2)
+R1 in out 1k
+C1 out 0 100n
+.tran 1u 1m
+.meas tran t_half FIND TIME WHEN V(out)=0.5
+.meas tran v_final MAX V(out)
+.meas tran trise TRIG V(out) VAL=0.1 RISE=1 TARG V(out) VAL=0.9 RISE=1
+.end
+"""
+
+def test_rc_step_response():
+    report = rspice.Engine().run(rspice.Netlist.parse(DECK))
+    report.assert_passed()                       # raises MeasurementError on failure
+    assert report.measurement("trise").value == pytest.approx(219.7e-6, rel=0.02)
+```
+
+`engine.run` executes the netlist's `.op`, `.dc`, `.ac`, `.tran`, `.noise`,
+`.tf`, and `.four` directives in order and returns a `RunReport`:
+
+- `report.tran` / `report.ac` / `report.op` / `report.dc` / `report.noise` /
+  `report.tf` / `report.fourier` — the analysis results
+- `report.measurements`, `report.measurement(name)`, `report.failures`,
+  `report.all_passed` — `.MEAS` outcomes (TRAN and DC supported; AC not yet)
+- `report.records` — one record per directive; anything the engine could not
+  execute is listed with `skipped=True` and a reason, never dropped silently
+- `report.assert_passed()` — raises `MeasurementError` unless at least one
+  measurement ran and all of them passed, so a deck whose measurements were
+  skipped cannot green-wash a pipeline
+
+Measurements can also run against results you already have:
+
+```python
+tran = engine.run_tran(netlist, stop_time=1e-3)
+for m in engine.measure(netlist, tran):
+    print(m.name, m.value, m.passed)
+```
+
+Supported `.MEAS` forms: `MAX`, `MIN`, `AVG`, `RMS`, `PP`, `INTEG`
+(`FROM=`/`TO=` windows), `FIND ... AT=` / `FIND ... WHEN ...` (including
+`FIND TIME WHEN ...`), and `TRIG ... TARG ...` delay measurements. Signals
+address node voltages (`V(out)`) and branch currents (`I(V1)`).
 
 ## API Overview
 
@@ -60,31 +119,50 @@ v_out = tran.voltage_waveform(2)                # NumPy array
 ```python
 netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 
+# Raw SPICE deck: first line is always the title
+netlist = rspice.Netlist.parse_spice("My Amplifier\nV1 1 0 10\n.end")
+
 # From a file, expanding .include/.lib relative to its location;
 # accepts str or os.PathLike
 netlist = rspice.Netlist.parse_file(pathlib.Path("circuits") / "amplifier.sp")
 
-# From a string, resolving includes against an explicit base path
+# From a string, resolving includes against a directory
 netlist = rspice.Netlist.parse_with_includes(content, "circuits/")
 
-netlist.num_elements, netlist.num_models, netlist.num_analyses, netlist.title
+netlist.element_names, netlist.model_names, netlist.analyses
+netlist.measurement_names, netlist.title
 ```
+
+`Netlist.parse` treats its input as statements: if the first non-blank line
+is not a `*` comment, a synthetic title is prepended, so a malformed first
+element raises `ParseError` instead of silently becoming the title. Use
+`parse_spice` when you need classic first-line-title semantics.
 
 ### Engine and Configuration
 
 ```python
 engine = rspice.Engine()                      # defaults
 
-config = rspice.SimulationConfig()
-config.tolerance = 1e-12
-config.temperature = 300.15                   # Kelvin
-config.convergence = rspice.ConvergenceConfig.robust()
+config = rspice.SimulationConfig(
+    tolerance=1e-12,
+    temperature=300.15,                       # Kelvin
+    integration_method=rspice.IntegrationMethod.GEAR2,
+    convergence=rspice.ConvergenceConfig.robust(),
+    bypass=rspice.BypassConfig(enabled=True),
+)
 engine = rspice.Engine(config)
 ```
 
+All configuration classes take keyword arguments. Property getters for
+nested configs return *copies*: `config.convergence.verbose = True` modifies
+a temporary and is lost — assign a whole `ConvergenceConfig` back, or build
+with keywords.
+
 `ConvergenceConfig` exposes the DC convergence aids (GMIN stepping, source
-stepping, pseudo-transient, arc-length continuation, damping strategies);
-`BypassConfig` controls latent-device bypass.
+stepping, pseudo-transient, arc-length continuation, damping strategies,
+tolerance knobs including `charge_abstol`); `BypassConfig` controls
+latent-device bypass; `SimulationConfig` adds `transient_max_iterations`
+(ITL4), `transient_trtol`, and the integration method.
 
 ### Analyses
 
@@ -96,38 +174,59 @@ i = op.branch_current("V1")
 
 # DC sweep — iterable, indexable
 sweep = engine.run_dc_sweep(netlist, "V1", 0, 5, 0.1)
-for v_in, sol in sweep:                        # or sweep.points()
+for v_in, sol in sweep:
     print(f"{v_in:.1f} V -> {sol.voltage('out'):.3f} V")
-v_curve = sweep.voltage_array(2)               # NumPy array across the sweep
+v_curve = sweep.voltage_array("out")           # NumPy array across the sweep
 
-# AC analysis
-ac = engine.run_ac(netlist, np.logspace(0, 6, 121).tolist())
-gain_db = ac.voltage_db(2)                     # 20*log10|V|, NumPy array
-phase = ac.voltage_phase_degrees(2)
-h = ac.voltage_complex(2)                      # complex128 ndarray
+# AC analysis — explicit frequencies or dec/oct/lin sweeps
+ac = engine.run_ac(netlist, np.logspace(0, 6, 121))
+ac = engine.run_ac_sweep(netlist, "dec", 20, 1.0, 1e6)
+gain_db = ac.voltage_db("out")                 # 20*log10|V|, NumPy array
+phase = ac.voltage_phase_degrees("out")
+h = ac.voltage_complex("out")                  # complex128 ndarray
+i_in = ac.branch_current_complex("V1")         # complex branch currents
 
-# Transient
+# Transient — Ctrl-C cancellable
 tran = engine.run_tran(netlist, stop_time=1e-3, max_step=1e-6)
+four = tran.fourier("out", fundamental=1e3)    # harmonics + THD
+print(f"THD = {four.thd_percent:.2f}%")
 
 # Noise (temperature defaults to the engine configuration)
-for r in engine.run_noise(netlist, output_node=2, frequencies=[1e3, 1e4]):
+for r in engine.run_noise(netlist, "out", [1e3, 1e4]):
     print(f"{r.frequency:.0f} Hz: {r.output_noise_rms*1e9:.2f} nV/sqrt(Hz)")
     print(f"  dominant: {r.dominant_source()}")
 
-# Pole-zero
-pz = engine.run_pz(netlist, input_node=1, output_node=2)
-print(pz.is_stable, pz.dc_gain, pz.bandwidth_hz)
+# Pole-zero (input is a unit current: dc_gain is a transimpedance)
+pz = engine.run_pz(netlist, "in", "out")
+print(pz.is_stable, pz.bandwidth_hz, pz.poles_array)
 
-# Monte Carlo
-mc = engine.run_monte_carlo(netlist, num_runs=1000, seed=42)
-stats = mc.get_variable("V(2)")
+# Transfer function (.TF): gain, input and output impedance
+tf = engine.run_transfer_function(netlist, "out", "V1")
+print(f"Av={tf.gain:.3f}  Zin={tf.input_impedance:.0f}  Zout={tf.output_impedance:.0f}")
+
+# Monte Carlo over .param values bound via {...}
+mc = engine.run_monte_carlo(netlist, num_runs=1000, seed=42,
+                            distribution="gaussian", spread=0.01)
+stats = mc.get_variable("V(OUT)")
 print(f"{stats.mean:.4f} +/- {stats.std_dev:.4f}  (p99 = {stats.percentile(99):.4f})")
 
-# Sensitivity and parametric step
-s = engine.run_sensitivity(netlist, output_node=2, param_name="R1", param_value=1e3)
-for value, sol in engine.run_step(netlist, "R1", [1e3, 2e3, 5e3]):
-    print(value, sol.voltage(2))
+# Sensitivity and parametric step vary a .param referenced via {...}
+divider = rspice.Netlist.parse("""
+* Parametric divider
+.param rval=1k
+V1 in 0 10
+R1 in out {rval}
+R2 out 0 1k
+.end
+""")
+s = engine.run_sensitivity(divider, "out", "rval", 1e3)
+s_ac = engine.run_sensitivity_ac(divider, "out", "rval", 1e3, [1e3, 1e4])
+for value, sol in engine.run_step(divider, "rval", [1e3, 2e3, 5e3]):
+    print(value, sol.voltage("out"))
 ```
+
+Node arguments accept names or indices everywhere, including the advanced
+analyses.
 
 ## Error Handling
 
@@ -135,9 +234,10 @@ All errors derive from `rspice.RSpiceError`:
 
 ```text
 RSpiceError
-├── ParseError          # netlist syntax/semantic errors
-└── SimulationError     # circuit or solver failure
-    └── ConvergenceError  # Newton-Raphson failed to converge
+├── ParseError           # netlist syntax/semantic errors
+├── SimulationError      # circuit or solver failure
+│   └── ConvergenceError # Newton-Raphson failed to converge
+└── MeasurementError     # RunReport.assert_passed() failures
 ```
 
 ```python
@@ -150,13 +250,31 @@ except rspice.RSpiceError as e:
 ```
 
 Result accessors raise standard Python exceptions: `IndexError` for
-out-of-range node indices, `KeyError` for unknown node names.
+out-of-range node indices, `KeyError` for unknown node or branch names —
+in every result type, including AC. Invalid arguments (empty frequency
+lists, non-positive stop times, zero sweep steps) raise `ValueError` before
+the simulation starts.
 
-## Threading
+## Threading and Cancellation
 
 Simulation calls release the GIL, so a long transient can run in a worker
 thread while the main thread stays responsive, and several engines can
 simulate different netlists in parallel threads.
+
+`run_tran` and `run_dc_sweep` poll Python signal handlers while they run:
+Ctrl-C (KeyboardInterrupt) cancels the simulation promptly instead of
+arriving after it completes.
+
+## Testing
+
+The binding test suite lives in `tests/` and runs against a development
+build:
+
+```bash
+cd crates/rspice-python
+maturin develop
+python -m pytest tests/
+```
 
 ## License
 
