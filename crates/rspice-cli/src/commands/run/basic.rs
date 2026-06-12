@@ -180,11 +180,11 @@ fn write_dc_op_output(
                 "analysis": "dc_op",
                 "variables": vars,
             });
-            writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(|e| {
-                CliError::OutputError {
-                    path: path.to_path_buf(),
-                    source: e,
-                }
+            let text = serde_json::to_string_pretty(&json)
+                .map_err(|e| CliError::output_json_error(path, e))?;
+            writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
+                path: path.to_path_buf(),
+                source: e,
             })?;
         }
         OutputFormat::Csv => {
@@ -753,7 +753,9 @@ fn write_fourier_output(
                 "num_harmonics": num_harmonics,
                 "results": results,
             });
-            writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(io_err)?;
+            let text = serde_json::to_string_pretty(&json)
+                .map_err(|e| CliError::output_json_error(path, e))?;
+            writeln!(file, "{}", text).map_err(io_err)?;
         }
     }
 
@@ -881,12 +883,12 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                         })
                     }).collect::<Vec<_>>(),
                 });
-                writeln!(file, "{}", serde_json::to_string_pretty(&json).unwrap()).map_err(
-                    |e| CliError::OutputError {
-                        path: output_path.clone(),
-                        source: e,
-                    },
-                )?;
+                let text = serde_json::to_string_pretty(&json)
+                    .map_err(|e| CliError::output_json_error(output_path, e))?;
+                writeln!(file, "{}", text).map_err(|e| CliError::OutputError {
+                    path: output_path.clone(),
+                    source: e,
+                })?;
             }
             _ => {
                 for (temp, voltages) in &results {
