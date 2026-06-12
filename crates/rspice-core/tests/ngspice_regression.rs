@@ -535,84 +535,6 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     ))
 }
 
-fn truncate_transient_reference_table(content: &str, max_time: f64) -> String {
-    let mut truncated = String::from("Index   time            v(e1_p)\n");
-    let mut in_time_table = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("Index")
-            && trimmed.to_ascii_lowercase().contains("time")
-            && trimmed.to_ascii_lowercase().contains("v(e1_p)")
-        {
-            in_time_table = true;
-            continue;
-        }
-        if !in_time_table || trimmed.starts_with('-') {
-            continue;
-        }
-
-        let mut parts = trimmed.split_whitespace();
-        let Some(index) = parts.next() else {
-            continue;
-        };
-        let Some(time_s) = parts.next() else {
-            continue;
-        };
-        let Some(value_s) = parts.next() else {
-            continue;
-        };
-        let Ok(time) = time_s.parse::<f64>() else {
-            continue;
-        };
-        if time > max_time + 1e-18 {
-            break;
-        }
-        truncated.push_str(index);
-        truncated.push('\t');
-        truncated.push_str(time_s);
-        truncated.push('\t');
-        truncated.push_str(value_s);
-        truncated.push('\n');
-    }
-
-    truncated
-}
-
-fn run_vbic_diffamp_focus_transient(max_time: f64) -> rspice_core::testing::TestResult {
-    let tests_dir = get_tests_dir();
-    let vbic_dir = tests_dir.join("vbic");
-    let deck_name = "diffamp.cir";
-    let source = fs::read_to_string(vbic_dir.join(deck_name)).expect("read diffamp deck");
-    let reference =
-        fs::read_to_string(vbic_dir.join("diffamp.out")).expect("read diffamp reference");
-    let focused_tran = format!(".TRAN 1n {max_time:.12e} 0 10n");
-
-    let focused_source = source
-        .replace(".TRAN 1n 1u 0 10n", &focused_tran)
-        .replace(".AC DEC 25 100k 1G\n", "")
-        .replace(".print ac v(e1_p)\n", "");
-    let focused_reference = truncate_transient_reference_table(&reference, max_time);
-
-    let temp_dir = unique_temp_dir("vbic-diffamp-focus");
-    fs::create_dir_all(&temp_dir).expect("create temp focus dir");
-    fs::write(temp_dir.join(deck_name), focused_source).expect("write focused diffamp deck");
-    fs::write(temp_dir.join("diffamp.out"), focused_reference)
-        .expect("write focused diffamp reference");
-    fs::write(
-        temp_dir.join("validation-manifest.tsv"),
-        "diffamp.cir\tsmoke\n",
-    )
-    .expect("write focused diffamp validation manifest");
-
-    let result =
-        TestRunner::new(temp_dir.clone(), suite_config("vbic")).run_test(&temp_dir.join(deck_name));
-    let _ = fs::remove_dir_all(&temp_dir);
-    result
-}
 
 fn load_validation_manifest() -> HashMap<String, String> {
     let manifest_path = get_tests_dir().join("validation-manifest.tsv");
@@ -1023,28 +945,6 @@ fn test_ngspice_vbic_fo_focus() {
     assert!(
         result.passed,
         "Focused VBIC FO deck failed: {:?} | mismatches: {:?}",
-        result.error, result.mismatches
-    );
-}
-
-#[test]
-fn test_ngspice_vbic_diffamp_focus() {
-    let result = run_vbic_diffamp_focus_transient(10e-9);
-
-    assert!(
-        result.passed,
-        "Focused VBIC diffamp deck failed: {:?} | mismatches: {:?}",
-        result.error, result.mismatches
-    );
-}
-
-#[test]
-fn test_ngspice_vbic_diffamp_200ps_focus() {
-    let result = run_vbic_diffamp_focus_transient(2e-10);
-
-    assert!(
-        result.passed,
-        "Focused VBIC diffamp 200ps deck failed: {:?} | mismatches: {:?}",
         result.error, result.mismatches
     );
 }

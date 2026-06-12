@@ -75,3 +75,4 @@ transmission/cpl_ibm2.cir	measures
 transmission/ltra1_1_line.cir	locked_grid
 transmission/ltra2_2_line.cir	measures
 vbic/diffamp.cir	expected_unsolvable
+general/mosamp.cir	locked_grid
