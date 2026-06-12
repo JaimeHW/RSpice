@@ -215,10 +215,27 @@ impl Engine {
         // Create solver state
         let mut state = HbSolverState::new(num_nodes, config.num_harmonics);
 
-        // Initialize DC components to zero (proper approach would use DC OP first)
-        for node in 0..num_nodes {
-            if node < state.x.len() && !state.x[node].is_empty() {
-                state.x[node][0] = Complex64::new(0.0, 0.0);
+        // Seed harmonic 0 with the DC operating point: Newton starts on the
+        // bias trajectory instead of from zero, which is the difference
+        // between converging and wandering for strongly biased circuits. A
+        // failed OP falls back to the zero seed with a warning — HB's own
+        // continuation may still succeed.
+        if has_supported_nonlinear {
+            match self.run_dc_op(netlist) {
+                Ok(dc) => {
+                    for node in 0..num_nodes {
+                        if node < state.x.len() && !state.x[node].is_empty() {
+                            let v = dc.node_voltages.get(node + 1).copied().unwrap_or(0.0);
+                            state.x[node][0] = Complex64::new(v, 0.0);
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "HB: DC operating point for the harmonic-0 seed failed ({err}); \
+                         starting from zero"
+                    );
+                }
             }
         }
 
