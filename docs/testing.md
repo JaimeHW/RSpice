@@ -36,6 +36,10 @@ Because reference tables sample each binary's internally chosen timesteps, two n
 
 Each deck runs in an isolated watchdog-supervised process (`rspice-ngspice-case-runner`), so a hung simulation cannot stall the suite.
 
+### Debug builds and the watchdog
+
+The per-deck watchdog budget (30 s by default) is sized for release builds, where every conformance deck finishes inside it. Unoptimized builds run the heavy decks — `fourbitadder`, the 51-stage SOI ring oscillators, `mesa-12` — many times slower than that budget, so in a **debug** build a watchdog abort measures the build profile, not the deck. The harness therefore reports debug-build watchdog timeouts as an explicitly named skip class (`SKIPPED: debug-build watchdog …`, shown with the original diagnostic), and the suite assertions admit exactly that class and nothing else. Release builds — including the nightly conformance run, which is the gauge that gates these decks — keep every timeout a genuine failure. To actually execute a heavy deck in a debug build, raise `RSPICE_NGSPICE_HARD_CASE_TIMEOUT_MS`.
+
 ## Debug environment variables
 
 | Variable | Effect |
