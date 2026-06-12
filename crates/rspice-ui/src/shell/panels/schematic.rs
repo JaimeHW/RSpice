@@ -196,16 +196,25 @@ fn nameplate(ui: &mut Ui, state: &mut AppState) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(
-                    egui::RichText::new(format!("{} /", reference.library))
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
+                // Budgeted: prefix + cell + chip must fit the row — labels
+                // in horizontal layouts extend, and overflow ratchets the
+                // panel wider (see fit_text).
+                let lib_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                let cell_font = theme::mono(tokens::FS_2, FontWeight::Medium);
+                let chip_width =
+                    text_width(ui, &reference.view, &theme::mono(10.0, FontWeight::Regular))
+                        + 10.0;
+                let budget = (ui.available_width() - chip_width - 18.0).max(50.0);
+                let lib_text = fit_text(
+                    ui,
+                    &format!("{} /", reference.library),
+                    &lib_font,
+                    budget * 0.4,
                 );
-                ui.label(
-                    egui::RichText::new(&reference.cell)
-                        .font(theme::mono(tokens::FS_2, FontWeight::Medium))
-                        .color(c.text),
-                );
+                let cell_budget = budget - text_width(ui, &lib_text, &lib_font);
+                let cell_text = fit_text(ui, &reference.cell, &cell_font, cell_budget);
+                ui.label(egui::RichText::new(lib_text).font(lib_font).color(c.text_faint));
+                ui.label(egui::RichText::new(cell_text).font(cell_font).color(c.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     view_chip(ui, &reference.view);
                 });
@@ -270,37 +279,90 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                for (index, label) in labels.iter().enumerate() {
-                    let display = if index == 0 { "TOP" } else { label.as_str() };
-                    if index == last {
-                        ui.label(
-                            egui::RichText::new(display)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                                .color(c.accent),
-                        );
-                    } else {
-                        if ui
-                            .link(
-                                egui::RichText::new(display)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                    .color(c.accent),
-                            )
-                            .clicked()
-                        {
-                            focus = Some(index);
+                let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+                let font_medium = theme::mono(tokens::FS_0, FontWeight::Medium);
+
+                // The path mid-collapses, never the endpoints: deep
+                // occurrences hide crumbs after TOP behind one '…' (the
+                // tooltip carries them) so the row always fits — an
+                // overflowing row would ratchet the panel wider.
+                let sep_w = text_width(ui, "▸", &font) + 8.0;
+                let ascend_w = text_width(ui, "↑ ascend", &font) + 12.0;
+                let avail = (ui.available_width() - ascend_w).max(40.0);
+
+                let mut visible: Vec<(String, usize)> = labels
+                    .iter()
+                    .enumerate()
+                    .map(|(index, label)| {
+                        let display = if index == 0 { "TOP".to_owned() } else { label.clone() };
+                        (display, index)
+                    })
+                    .collect();
+                let mut hidden: Vec<String> = Vec::new();
+                let row_width = |ui: &Ui, visible: &[(String, usize)], hidden: &[String]| {
+                    let mut width = 0.0;
+                    for (position, (display, index)) in visible.iter().enumerate() {
+                        if position > 0 {
+                            width += sep_w;
                         }
+                        let crumb_font = if *index == last { &font_medium } else { &font };
+                        width += text_width(ui, display, crumb_font);
+                    }
+                    if !hidden.is_empty() {
+                        width += text_width(ui, "…", &font) + sep_w;
+                    }
+                    width
+                };
+                while row_width(ui, &visible, &hidden) > avail && visible.len() > 2 {
+                    hidden.push(visible.remove(1).0);
+                }
+                // Last resort: a single oversized crumb gets elided too.
+                if let Some((display, index)) = visible.last().cloned() {
+                    let others = row_width(ui, &visible[..visible.len() - 1], &hidden)
+                        + if visible.len() > 1 { sep_w } else { 0.0 };
+                    let budget = (avail - others).max(24.0);
+                    let crumb_font = if index == last { &font_medium } else { &font };
+                    let fitted = fit_text(ui, &display, crumb_font, budget);
+                    visible.last_mut().expect("non-empty").0 = fitted;
+                }
+
+                for (position, (display, index)) in visible.iter().enumerate() {
+                    if position > 0 {
                         ui.label(
                             egui::RichText::new("▸")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .font(font.clone())
                                 .color(c.accent.gamma_multiply(0.5)),
                         );
+                    }
+                    if *index == last {
+                        ui.label(
+                            egui::RichText::new(display)
+                                .font(font_medium.clone())
+                                .color(c.accent),
+                        );
+                    } else if ui
+                        .link(egui::RichText::new(display).font(font.clone()).color(c.accent))
+                        .clicked()
+                    {
+                        focus = Some(*index);
+                    }
+                    if position == 0 && !hidden.is_empty() {
+                        ui.label(
+                            egui::RichText::new("▸")
+                                .font(font.clone())
+                                .color(c.accent.gamma_multiply(0.5)),
+                        );
+                        ui.label(
+                            egui::RichText::new("…").font(font.clone()).color(c.accent),
+                        )
+                        .on_hover_text(hidden.join(" ▸ "));
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .link(
                             egui::RichText::new("↑ ascend")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .font(font.clone())
                                 .color(c.accent),
                         )
                         .on_hover_text("Up one level (U)")
@@ -342,13 +404,15 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
     );
 
     ui.add_space(7.0);
-    let width = ui.available_width() - 24.0;
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), 21.0),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
+            // The three segments plus the layout's inter-item gaps must
+            // total exactly the row — overflow ratchets the panel wider.
+            ui.spacing_mut().item_spacing.x = 2.0;
             ui.add_space(12.0);
-            let third = width / 3.0;
+            let third = (ui.available_width() - 12.0 - 2.0 * 2.0) / 3.0;
             for (mode, label, count) in [
                 (NavMode::Instances, "INSTANCES", counts.0),
                 (NavMode::Nets, "NETS", counts.1),
@@ -1171,7 +1235,12 @@ fn preview_card(
     let pinned = state.shell.lib_pins.contains(&entry_ref);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
-        let place_width = ui.available_width() - 54.0;
+        // Measured, not guessed: Place + the pin chip must fill the row
+        // exactly — one extra pixel here ratchets the panel wider.
+        let pin_label = if pinned { "★ pinned" } else { "☆ pin" };
+        let chip_width =
+            text_width(ui, pin_label, &theme::mono(tokens::FS_0, FontWeight::Regular)) + 18.0;
+        let place_width = ui.available_width() - chip_width - 6.0;
         if Button::new("Place")
             .min_width(place_width.max(60.0))
             .show(ui)
@@ -1179,7 +1248,7 @@ fn preview_card(
         {
             arm_ref(state, &entry_ref);
         }
-        if chip(ui, if pinned { "★ pinned" } else { "☆ pin" }, pinned).clicked() {
+        if chip(ui, pin_label, pinned).clicked() {
             if let Some(index) = state.shell.lib_pins.iter().position(|p| *p == entry_ref) {
                 state.shell.lib_pins.remove(index);
             } else {
@@ -1256,6 +1325,37 @@ fn arm_ref(state: &mut AppState, entry_ref: &str) {
     if let Some(entry) = entry_from_ref(state, entry_ref) {
         place_entry(state, &entry);
     }
+}
+
+/// Pixel width of `text` at `font`.
+fn text_width(ui: &Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.fonts(|f| {
+        f.layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE)
+            .size()
+            .x
+    })
+}
+
+/// Elide `text` with '…' to fit `budget` px at `font`.
+///
+/// For one-line labels inside horizontal layouts, where egui labels extend
+/// instead of wrapping — an overflowing row is not just clipped: egui
+/// persists the content rect as the panel's next-frame width, so a single
+/// too-wide row ratchets the rail toward its maximum and fights the user's
+/// resize. Every horizontal row in this panel must fit its budget.
+fn fit_text(ui: &Ui, text: &str, font: &egui::FontId, budget: f32) -> String {
+    if text_width(ui, text, font) <= budget {
+        return text.to_owned();
+    }
+    let mut out = text.to_owned();
+    while !out.is_empty() {
+        out.pop();
+        let candidate = format!("{out}…");
+        if text_width(ui, &candidate, font) <= budget {
+            return candidate;
+        }
+    }
+    "…".to_owned()
 }
 
 /// Short chip label for a ref ("Resistor" → "Resistor", cells → cell name).
@@ -1379,8 +1479,18 @@ fn place_strip(
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
+            // Chips render until the row is full, never past it — a chip
+            // that doesn't fit is dropped, not clipped (an overflowing row
+            // ratchets the panel wider).
+            let chip_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+            let mut budget = ui.available_width();
             let recents = state.shell.lib_recents.clone();
             for entry_ref in recents.iter().take(6) {
+                let chip_width = text_width(ui, ref_chip_label(entry_ref), &chip_font) + 18.0;
+                if chip_width > budget {
+                    break;
+                }
+                budget -= chip_width + 4.0;
                 let armed = match (&state.schematic.tool, entry_from_ref(state, entry_ref)) {
                     (Tool::Place(active), Some(CellEntry::Primitive(kind, _))) => {
                         *active == kind && kind != ComponentType::CellInstance
@@ -1572,5 +1682,74 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
     // Enter, Tab out of the panel).
     if !fields_focused && state.shell.inspector_edit.is_some() {
         commit_inspector_edit(state);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// egui persists the CONTENT rect as a panel's next-frame width, so any
+    /// row wider than the rail ratchets the panel toward its maximum and
+    /// fights the user's resize. Lay the rail out at the minimum panel
+    /// width with worst-case state and assert nothing claims extra width.
+    #[test]
+    fn rail_content_never_overflows_panel_width() {
+        const WIDTH: f32 = 232.0; // panels::PANEL_MIN
+
+        let ctx = egui::Context::default();
+        crate::ui::fonts::install(&ctx);
+
+        let mut state = AppState::default();
+        // Worst case: six recents, a pinned selection in the preview, a
+        // deep occurrence path, and long library/cell names everywhere.
+        state.shell.lib_recents = vec![
+            "prim:Transmission Line".into(),
+            "prim:Saturable Inductor".into(),
+            "prim:Capacitor".into(),
+            "prim:Resistor".into(),
+            "prim:Ground".into(),
+            "prim:NMOS".into(),
+        ];
+        state.shell.lib_pins = state.shell.lib_recents.clone();
+        state.shell.cell_selected = Some("prim:Transmission Line".into());
+        state.workspace.active_view.library = "a_long_library_name".into();
+        state.workspace.active_view.cell = "an_extremely_long_cell_name_that_cannot_fit".into();
+        for index in 0..6 {
+            state.workspace.descend_into(
+                format!("XLONGINSTANCENAME{index}"),
+                CellViewRef::new("work", format!("deep_subcell_{index}"), "schematic"),
+                crate::state::ViewType::Schematic,
+            );
+        }
+
+        for tab in [RailTab::Navigator, RailTab::Library] {
+            state.shell.rail_tab = tab;
+            let mut content_width: f32 = 0.0;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let rect = egui::Rect::from_min_size(
+                        ui.max_rect().min,
+                        egui::vec2(WIDTH, 700.0),
+                    );
+                    let mut rail = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    left(&mut rail, &mut state, None);
+                    content_width = rail.min_rect().width();
+                });
+            });
+            assert!(
+                content_width <= WIDTH + 0.5,
+                "{tab:?} rail content claims {content_width}px in a {WIDTH}px panel — \
+                 this overflow ratchets the panel to its maximum width"
+            );
+        }
     }
 }
