@@ -90,6 +90,19 @@ pub enum MeasureType {
         when_value: Option<Value>,
     },
 
+    /// Time-derivative of a signal at a point
+    /// .MEAS TRAN name DERIV V(out) AT=time | WHEN sig=value
+    Derivative {
+        signal: String,
+        at: Option<Value>,
+        when_signal: Option<String>,
+        when_value: Option<Value>,
+    },
+
+    /// Expression over previously evaluated measurement results
+    /// .MEAS TRAN name PARAM='expr'
+    Param { expression: String },
+
     /// Minimum value over range
     Min {
         signal: String,
@@ -279,10 +292,25 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> Vec<MeasureResult> {
-        self.measurements
+        // Expression measures (PARAM='...') read other results by name, so
+        // they evaluate in a second pass over the directly computed set —
+        // and in statement order, so a PARAM may reference an earlier PARAM.
+        let mut results: Vec<MeasureResult> = self
+            .measurements
             .iter()
-            .map(|m| self.evaluate_one(m, time, signals))
-            .collect()
+            .map(|m| match &m.measure_type {
+                MeasureType::Param { .. } => {
+                    MeasureResult::failed(&m.name, "PARAM expression not yet evaluated")
+                }
+                _ => self.evaluate_one(m, time, signals),
+            })
+            .collect();
+        for (idx, m) in self.measurements.iter().enumerate() {
+            if let MeasureType::Param { expression } = &m.measure_type {
+                results[idx] = self.eval_param(&m.name, expression, &results).check_goal(m);
+            }
+        }
+        results
     }
 
     fn evaluate_one(
@@ -305,6 +333,24 @@ impl MeasureEngine {
             MeasureType::Delay { trig, targ } => {
                 self.eval_delay(&measurement.name, trig, targ, time, signals)
             }
+            MeasureType::Derivative {
+                signal,
+                at,
+                when_signal,
+                when_value,
+            } => self.eval_derivative(
+                &measurement.name,
+                signal,
+                *at,
+                when_signal.as_deref(),
+                *when_value,
+                time,
+                signals,
+            ),
+            MeasureType::Param { .. } => MeasureResult::failed(
+                &measurement.name,
+                "PARAM measures evaluate after the directly computed set",
+            ),
             MeasureType::Min { signal, from, to } => {
                 self.eval_min_max(&measurement.name, signal, *from, *to, time, signals, false)
             }
@@ -655,6 +701,72 @@ impl MeasureEngine {
         match (t1, t2) {
             (Some(t1), Some(t2)) => MeasureResult::success(name, (t2 - t1).abs()),
             _ => MeasureResult::failed(name, "Rise/fall transition not found"),
+        }
+    }
+
+    /// Segment slope of the interpolating polyline at the requested time —
+    /// the same piecewise-linear data model every other measure uses.
+    #[allow(clippy::too_many_arguments)]
+    fn eval_derivative(
+        &self,
+        name: &str,
+        signal_name: &str,
+        at: Option<Value>,
+        when_signal: Option<&str>,
+        when_value: Option<Value>,
+        time: &[Value],
+        signals: &HashMap<String, &[Value]>,
+    ) -> MeasureResult {
+        let signal = match lookup_signal(signals, signal_name) {
+            Some(s) => s,
+            None => {
+                return MeasureResult::failed(name, &format!("Signal '{}' not found", signal_name));
+            }
+        };
+        if time.len() < 2 {
+            return MeasureResult::failed(name, "Not enough points for a derivative");
+        }
+        let target_time = if at.is_some() {
+            at
+        } else if let (Some(when_name), Some(threshold)) = (when_signal, when_value) {
+            let when_sig = match lookup_signal(signals, when_name) {
+                Some(s) => s,
+                None => {
+                    return MeasureResult::failed(
+                        name,
+                        &format!("When signal '{}' not found", when_name),
+                    );
+                }
+            };
+            self.find_crossing(time, when_sig, threshold, EdgeType::Cross, 1, None)
+        } else {
+            return MeasureResult::failed(name, "DERIV requires AT=time or WHEN signal=value");
+        };
+        let Some(t_star) = target_time else {
+            return MeasureResult::failed(name, "WHEN condition never met");
+        };
+        for i in 0..time.len() - 1 {
+            if time[i] <= t_star && time[i + 1] >= t_star && time[i + 1] > time[i] {
+                let slope = (signal[i + 1] - signal[i]) / (time[i + 1] - time[i]);
+                return MeasureResult::success(name, slope);
+            }
+        }
+        MeasureResult::failed(name, "Time point not in simulation range")
+    }
+
+    /// Evaluate a PARAM expression against the named results computed so far.
+    fn eval_param(&self, name: &str, expression: &str, prior: &[MeasureResult]) -> MeasureResult {
+        let mut ctx = crate::netlist::ParamContext::new();
+        for result in prior {
+            if let Some(value) = result.value {
+                ctx.set(&result.name, value);
+            }
+        }
+        match crate::netlist::expr::eval_expression(expression, &ctx) {
+            Ok(value) => MeasureResult::success(name, value),
+            Err(err) => {
+                MeasureResult::failed(name, &format!("PARAM expression failed: {err}"))
+            }
         }
     }
 

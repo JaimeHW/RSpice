@@ -689,6 +689,38 @@ pub(super) fn parse_meas_command(
             let targ = parse_meas_delay_spec(stream, line_num, params, "TARG", false)?;
             MeasureType::Delay { trig, targ }
         }
+        "PARAM" => {
+            // .MEAS <an> name PARAM='expr' — an expression over previously
+            // evaluated measurement results.
+            if !stream.consume(&TokenKind::Equals) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Expected '=' after PARAM in .MEAS".to_string(),
+                });
+            }
+            let expression = match &stream.peek().kind {
+                TokenKind::Expression(expr) => {
+                    let expr = expr.clone();
+                    stream.advance();
+                    expr
+                }
+                TokenKind::StringLit(expr) => {
+                    let expr = expr.clone();
+                    stream.advance();
+                    expr
+                }
+                other => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            ".MEAS PARAM expects a quoted or braced expression, found {:?}",
+                            other
+                        ),
+                    });
+                }
+            };
+            MeasureType::Param { expression }
+        }
         _ => {
             // Parse signal name - handle V(node), V(pos,neg), or just node
             let signal = parse_meas_signal(stream, line_num)?;
@@ -788,6 +820,57 @@ pub(super) fn parse_meas_command(
                     }
 
                     MeasureType::Find {
+                        signal: signal.clone(),
+                        at,
+                        when_signal,
+                        when_value,
+                    }
+                }
+                "DERIV" | "DERIVATIVE" => {
+                    let mut at = None;
+                    let mut when_signal = None;
+                    let mut when_value = None;
+
+                    while !stream.is_eof()
+                        && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof)
+                    {
+                        match &stream.peek().kind {
+                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("AT") => {
+                                stream.advance();
+                                if !stream.consume(&TokenKind::Equals) {
+                                    return Err(ParseError::Syntax {
+                                        line: line_num,
+                                        message: "Expected '=' after AT in .MEAS DERIV"
+                                            .to_string(),
+                                    });
+                                }
+                                at = Some(expect_value(stream, line_num, params)?);
+                            }
+                            TokenKind::Ident(s) if s.eq_ignore_ascii_case("WHEN") => {
+                                stream.advance();
+                                when_signal = Some(parse_meas_signal(stream, line_num)?);
+                                if !stream.consume(&TokenKind::Equals) {
+                                    return Err(ParseError::Syntax {
+                                        line: line_num,
+                                        message: "Expected '=' after WHEN signal in .MEAS DERIV"
+                                            .to_string(),
+                                    });
+                                }
+                                when_value = Some(expect_value(stream, line_num, params)?);
+                            }
+                            TokenKind::Ident(s)
+                                if s.eq_ignore_ascii_case("GOAL")
+                                    || s.eq_ignore_ascii_case("TOL") =>
+                            {
+                                break;
+                            }
+                            _ => {
+                                stream.advance();
+                            }
+                        }
+                    }
+
+                    MeasureType::Derivative {
                         signal: signal.clone(),
                         at,
                         when_signal,
