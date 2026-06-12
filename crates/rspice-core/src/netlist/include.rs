@@ -76,7 +76,7 @@ impl IncludeProcessor {
             base_dir,
             active_includes: HashSet::new(),
             lib_paths: Vec::new(),
-            max_depth: 10, // Reasonable limit for include nesting
+            max_depth: 64, // Foundry PDK trees nest .include/.lib deeply
             current_depth: 0,
         }
     }
@@ -319,27 +319,40 @@ impl IncludeProcessor {
     /// .ENDL [section_name]
     /// ```
     fn extract_section(&self, content: &str, section: &str) -> Result<String, ParseError> {
-        let _section_upper = section.to_uppercase();
         let mut in_section = false;
         let mut section_content = Vec::new();
         let mut found = false;
+        // Section *definitions* nested inside the requested one (a 2-token
+        // `.LIB name` line, as opposed to the 3-token `.LIB file section`
+        // call form) open their own `.ENDL` scope; counting them keeps an
+        // inner `.ENDL` from terminating the outer section early.
+        let mut nested_definitions = 0usize;
 
         for line in content.lines() {
             let trimmed = line.trim();
             let upper = trimmed.to_uppercase();
 
             if upper.starts_with(".LIB") && !upper.starts_with(".LIBS") {
-                // Check if this is our section start
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(section) {
-                    in_section = true;
-                    found = true;
-                    continue;
+                if !in_section {
+                    // Check if this is our section start
+                    if parts.len() >= 2 && parts[1].eq_ignore_ascii_case(section) {
+                        in_section = true;
+                        found = true;
+                        continue;
+                    }
+                } else if parts.len() == 2 {
+                    nested_definitions += 1;
                 }
             }
 
             if in_section {
                 if upper.starts_with(".ENDL") {
+                    if nested_definitions > 0 {
+                        nested_definitions -= 1;
+                        section_content.push(line);
+                        continue;
+                    }
                     // Check if this ends our section
                     let parts: Vec<&str> = trimmed.split_whitespace().collect();
                     if parts.len() == 1
@@ -348,6 +361,11 @@ impl IncludeProcessor {
                         in_section = false;
                         break;
                     }
+                    log::warn!(
+                        ".ENDL '{}' does not match the open library section '{}'",
+                        parts.get(1).copied().unwrap_or(""),
+                        section
+                    );
                 }
                 section_content.push(line);
             }
@@ -492,3 +510,69 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn extract(content: &str, section: &str) -> String {
+        IncludeProcessor::new(std::path::Path::new("."))
+            .extract_section(content, section)
+            .expect("section extracts")
+    }
+
+    #[test]
+    fn nested_section_definition_does_not_terminate_outer() {
+        let lib = "\
+.lib outer
+r1 a b 1k
+.lib inner
+r2 b c 2k
+.endl
+r3 c d 3k
+.endl outer
+";
+        let body = extract(lib, "outer");
+        assert!(body.contains("r1"), "outer head kept: {body}");
+        assert!(
+            body.contains(".lib inner") && body.contains("r2"),
+            "nested definition preserved intact: {body}"
+        );
+        assert!(
+            body.contains("r3"),
+            "content after the nested definition still belongs to outer: {body}"
+        );
+    }
+
+    #[test]
+    fn bare_endl_still_terminates_unnested_section() {
+        let lib = "\
+.lib tt
+r1 a b 1k
+.endl
+.lib ss
+r2 a b 9k
+.endl
+";
+        let tt = extract(lib, "tt");
+        assert!(tt.contains("r1") && !tt.contains("r2"), "{tt}");
+        let ss = extract(lib, "ss");
+        assert!(ss.contains("r2") && !ss.contains("r1"), "{ss}");
+    }
+
+    #[test]
+    fn mismatched_endl_name_does_not_end_the_section() {
+        let lib = "\
+.lib tt
+r1 a b 1k
+.endl ff
+r2 a b 2k
+.endl tt
+";
+        let tt = extract(lib, "tt");
+        assert!(
+            tt.contains("r1") && tt.contains("r2"),
+            "mismatched .endl is content, not a terminator: {tt}"
+        );
+    }
+}
