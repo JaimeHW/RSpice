@@ -213,7 +213,7 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
   margin-left: auto; flex: none; font-family: var(--font-mono); font-size: 10px; line-height: 15px;
   color: var(--text-faint); border: 1px solid var(--border); border-radius: var(--radius); padding: 0 5px;
 }
-.np-meta { margin-top: 3px; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); }
+.np-meta { margin-top: 3px; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* occurrence path (descended state) */
 .pathbar {
@@ -395,7 +395,9 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
   font-family: var(--font-mono); font-size: var(--fs-1); color: var(--text);
 }
 .cmd-slot input::placeholder { color: var(--text-faint); }
-.chips { display: flex; gap: 4px; margin-top: 7px; flex-wrap: nowrap; overflow: hidden; }
+.chips { display: flex; gap: 4px; margin-top: 7px; flex-wrap: nowrap; overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 18px), transparent); }
 .chip {
   flex: none; display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px;
   border: 1px solid var(--border); border-radius: var(--radius);
@@ -689,7 +691,7 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
       <div class="zone"><span class="zpip">2</span>
         <div class="nameplate">
           <div class="np-cell"><span class="lib">work_amp /</span><span class="cell">ota_5t</span><span class="viewchip">schematic</span></div>
-          <div class="np-meta">6 instances · 8 nets · 5 ports · sheet 1/1</div>
+          <div class="np-meta">6 inst · 8 nets · 5 ports · sheet 1/1</div>
         </div>
       </div>
       <div class="zone"><span class="zpip">3</span>
@@ -814,7 +816,7 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
           <button class="ascend">↑ <kbd>U</kbd></button></div>
         <div class="nameplate">
           <div class="np-cell"><span class="lib">work_amp /</span><span class="cell">bias_2t</span><span class="viewchip">schematic</span></div>
-          <div class="np-meta">3 instances · 4 nets · 3 ports · sheet 1/1</div>
+          <div class="np-meta">3 inst · 4 nets · 3 ports · sheet 1/1</div>
         </div>
       </div>
       <div class="statecap"><b>Deep occurrence.</b> The path mid-collapses, never the endpoints — you always see TOP and where you stand. The ellipsis tooltip carries the middle.</div>
@@ -1201,7 +1203,7 @@ function renderNameplate() {
       <span class="cell">${esc(cur())}</span>
       <span class="viewchip">schematic</span>
     </div>
-    <div class="np-meta">${insts} instances · ${c.nets.length} nets · ${c.ports.length ? c.ports.length + " ports" : "testbench"} · sheet 1/1</div>`;
+    <div class="np-meta">${insts} inst · ${c.nets.length} nets · ${c.ports.length} ports · sheet 1/1</div>`;
   const pb = $("pathbar");
   if (S.path.length === 1) { pb.hidden = true; }
   else {
