@@ -27,8 +27,15 @@ impl RSpiceApp {
             return;
         }
 
+        let license_line = match &self.state.license {
+            Some(info) => format!("{} · until {}", info.tier, info.updates_until),
+            None => "—".to_owned(),
+        };
+
+        let license_for_body = license_line.clone();
         let choice = Dialog::new("RSpice", "About", "Close")
             .size(DialogSize::Sm)
+            .ghost("Copy diagnostics")
             .show(ctx, |ui| {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
@@ -44,13 +51,33 @@ impl RSpiceApp {
                 );
                 ui.add_space(10.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
-                kv_row(ui, "Version", env!("CARGO_PKG_VERSION"));
+                kv_row(
+                    ui,
+                    "Version",
+                    concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH")),
+                );
                 kv_row(ui, "Engine", concat!("rspice-core ", env!("CARGO_PKG_VERSION")));
                 kv_row(ui, "Matrix pkg", "faer sparse");
+                kv_row(ui, "License", &license_for_body);
             });
 
-        if choice != DialogChoice::None {
-            self.state.dialogs.about = false;
+        match choice {
+            DialogChoice::None => {}
+            DialogChoice::Ghost => {
+                // The first thing support asks for, one click to produce.
+                let diagnostics = format!(
+                    "RSpice {} ({}) · rspice-core {} · faer sparse · license {} · {}-{}",
+                    env!("CARGO_PKG_VERSION"),
+                    env!("RSPICE_BUILD_HASH"),
+                    env!("CARGO_PKG_VERSION"),
+                    license_line,
+                    std::env::consts::OS,
+                    std::env::consts::ARCH,
+                );
+                ctx.copy_text(diagnostics);
+                self.state.shell.toasts.info(ctx, "Diagnostics copied");
+            }
+            _ => self.state.dialogs.about = false,
         }
     }
 

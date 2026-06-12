@@ -5,6 +5,25 @@ use std::path::PathBuf;
 fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
+
+    // Short commit hash for About / Copy diagnostics; "unknown" outside a
+    // git checkout (release tarballs).
+    let build_hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short=9", "HEAD"])
+        .current_dir(&manifest_dir)
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|hash| hash.trim().to_owned())
+        .filter(|hash| !hash.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+    println!("cargo:rustc-env=RSPICE_BUILD_HASH={build_hash}");
+    let git_head = manifest_dir.join("..").join("..").join(".git").join("HEAD");
+    if git_head.exists() {
+        println!("cargo:rerun-if-changed={}", git_head.display());
+    }
+
     let assets_dir = manifest_dir.join("assets").join("component_symbols");
 
     println!("cargo:rerun-if-changed={}", assets_dir.display());
