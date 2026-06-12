@@ -6,26 +6,29 @@
 //! - Transient time-domain analysis (Ctrl-C interruptible)
 //! - Noise, pole-zero, Monte Carlo, sensitivity, parametric step
 //! - Transfer function (.TF)
+//! - `run()`: execute the netlist's own analysis directives and evaluate
+//!   .MEAS statements — the automated-verification entry point
 //!
 //! All simulation calls release the GIL. `run_tran` and `run_dc_sweep`
 //! additionally poll Python signals so KeyboardInterrupt cancels them.
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use rspice_core::analysis::Distribution;
 use rspice_core::analysis::ac::ac_sweep_frequencies;
-use rspice_core::netlist::FreqVariation;
+use rspice_core::netlist::{AnalysisCommand, FreqVariation};
 use rspice_core::{Engine, SimulationConfigOverrides, resolve_simulation_config};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 
 use crate::abort::run_interruptible;
 use crate::config::PySimulationConfig;
+use crate::measure;
 use crate::netlist::PyNetlist;
 use crate::results::{
-    NodeIdentifier, PyAcResult, PyDcSweepResult, PyMonteCarloResult, PyNoiseResult,
-    PyPoleZeroResult, PySimulationResult, PyTransferFunctionResult, PyTransientResult,
-    is_ground_name,
+    NodeIdentifier, PyAcResult, PyAnalysisRecord, PyDcSweepResult, PyFourierResult,
+    PyMonteCarloResult, PyNoiseResult, PyPoleZeroResult, PyRunReport, PySimulationResult,
+    PyTransferFunctionResult, PyTransientResult, is_ground_name,
 };
 
 /// Validate that every frequency is finite and non-negative.
@@ -52,6 +55,23 @@ fn parse_variation(variation: &str) -> PyResult<FreqVariation> {
             "variation must be 'dec', 'oct', or 'lin', got '{other}'"
         ))),
     }
+}
+
+/// SPICE default transient max step: explicit value, else
+/// min(tstep, window/50), floored at 1e-18 s.
+fn resolve_tran_max_step(tstep: f64, tstop: f64, tstart: f64, explicit: Option<f64>) -> f64 {
+    explicit
+        .filter(|step| step.is_finite() && *step > 0.0)
+        .unwrap_or_else(|| {
+            let window = tstop - tstart;
+            let window = if window.is_finite() && window > 0.0 {
+                window
+            } else {
+                tstop.abs().max(tstep.abs())
+            };
+            (window / 50.0).min(if tstep > 0.0 { tstep } else { f64::INFINITY })
+        })
+        .max(1e-18)
 }
 
 /// Generate frequency points for an analysis directive's sweep spec.
@@ -250,6 +270,312 @@ impl PyEngine {
             None => Engine::default(),
         };
         Self { inner }
+    }
+
+    /// Run every analysis directive in the netlist and evaluate .MEAS
+    ///
+    /// Executes the netlist's own `.op`, `.dc`, `.ac`, `.tran`, `.noise`,
+    /// `.tf`, and `.four` directives in order, then evaluates `.MEAS`
+    /// statements against the corresponding results. Directives the engine
+    /// cannot execute are reported in `records` with `skipped=True` and a
+    /// reason — nothing is dropped silently.
+    ///
+    /// Measurements whose analysis did not run are reported as failed with
+    /// an explanatory error, so `assert_passed()` cannot green-wash a CI
+    /// pipeline.
+    ///
+    /// Args:
+    ///     netlist: Parsed netlist with analysis directives
+    ///
+    /// Returns:
+    ///     RunReport: results, per-directive records, and measurements
+    ///
+    /// Example:
+    ///     >>> report = engine.run(netlist)
+    ///     >>> report.assert_passed()
+    ///     >>> print(report.measurement("tpd").value)
+    pub fn run(&self, py: Python<'_>, netlist: &PyNetlist) -> PyResult<PyRunReport> {
+        let net = &netlist.inner;
+        let mut records: Vec<PyAnalysisRecord> = Vec::new();
+        let mut op: Option<Py<PySimulationResult>> = None;
+        let mut dc: Option<Py<PyDcSweepResult>> = None;
+        let mut tran: Option<Py<PyTransientResult>> = None;
+        let mut ac: Option<Py<PyAcResult>> = None;
+        let mut noise: Option<Vec<PyNoiseResult>> = None;
+        let mut tf: Option<PyTransferFunctionResult> = None;
+        let mut fourier: Vec<PyFourierResult> = Vec::new();
+        let mut pending_fourier: Vec<(f64, Vec<String>, usize)> = Vec::new();
+
+        for analysis in &net.analyses {
+            match analysis {
+                AnalysisCommand::Op => {
+                    let result = self.run_dc_op(py, netlist)?;
+                    op = Some(Py::new(py, result)?);
+                    records.push(PyAnalysisRecord::executed("op", ".op".to_string()));
+                }
+                AnalysisCommand::Dc {
+                    source,
+                    start,
+                    stop,
+                    step,
+                } => {
+                    let result = self.run_dc_sweep(py, netlist, source, *start, *stop, *step)?;
+                    dc = Some(Py::new(py, result)?);
+                    records.push(PyAnalysisRecord::executed(
+                        "dc",
+                        format!(".dc {source} {start} {stop} {step}"),
+                    ));
+                }
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                } => {
+                    let tstart = start.unwrap_or(0.0);
+                    let resolved = resolve_tran_max_step(*step, *stop, tstart, *max_step);
+                    let result = self.tran_impl(py, netlist, *stop, resolved)?;
+                    tran = Some(Py::new(py, result)?);
+                    let mut detail = format!(".tran {step} {stop}");
+                    if tstart > 0.0 {
+                        detail.push_str(&format!(
+                            " (tstart={tstart} requested; full waveform returned)"
+                        ));
+                    }
+                    records.push(PyAnalysisRecord::executed("tran", detail));
+                }
+                AnalysisCommand::Ac {
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                } => {
+                    let frequencies =
+                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                    let result = self.ac_impl(py, netlist, frequencies)?;
+                    ac = Some(Py::new(py, result)?);
+                    records.push(PyAnalysisRecord::executed(
+                        "ac",
+                        format!(
+                            ".ac {} {points} {start_freq} {stop_freq}",
+                            format!("{variation:?}").to_lowercase()
+                        ),
+                    ));
+                }
+                AnalysisCommand::Noise {
+                    output_node,
+                    reference_node,
+                    input_source,
+                    variation,
+                    points,
+                    start_freq,
+                    stop_freq,
+                } => {
+                    let engine = self.engine_for_netlist(net);
+                    let output = self.resolve_node(
+                        &engine,
+                        net,
+                        &NodeIdentifier::Name(output_node.clone()),
+                        "noise output",
+                    )?;
+                    let output_neg = match reference_node {
+                        Some(reference) => Some(self.resolve_node(
+                            &engine,
+                            net,
+                            &NodeIdentifier::Name(reference.clone()),
+                            "noise reference",
+                        )?),
+                        None => None,
+                    };
+                    let frequencies =
+                        sweep_frequencies(*variation, *points, *start_freq, *stop_freq)?;
+                    let source = if input_source.is_empty() {
+                        None
+                    } else {
+                        Some(input_source.as_str())
+                    };
+                    let results = self.noise_impl(
+                        py,
+                        netlist,
+                        output,
+                        output_neg,
+                        source,
+                        &frequencies,
+                        None,
+                    )?;
+                    noise = Some(results);
+                    records.push(PyAnalysisRecord::executed(
+                        "noise",
+                        format!(".noise V({output_node}) {input_source}"),
+                    ));
+                }
+                AnalysisCommand::Tf {
+                    output_node,
+                    reference_node,
+                    output_is_current,
+                    input_source,
+                } => {
+                    let result = self.tf_impl(
+                        py,
+                        netlist,
+                        output_node,
+                        reference_node.as_deref(),
+                        *output_is_current,
+                        input_source,
+                    )?;
+                    tf = Some(result);
+                    records.push(PyAnalysisRecord::executed(
+                        "tf",
+                        format!(".tf {output_node} {input_source}"),
+                    ));
+                }
+                AnalysisCommand::Four {
+                    fundamental,
+                    outputs,
+                    num_harmonics,
+                } => {
+                    pending_fourier.push((*fundamental, outputs.clone(), *num_harmonics));
+                }
+                other => {
+                    let kind = match other {
+                        AnalysisCommand::Disto { .. } => "disto",
+                        AnalysisCommand::PoleZero { .. } => "pz",
+                        AnalysisCommand::Sensitivity { .. } => "sens",
+                        AnalysisCommand::MonteCarlo(_) => "mc",
+                        AnalysisCommand::Step(_) => "step",
+                        AnalysisCommand::Temp { .. } => "temp",
+                        _ => "unknown",
+                    };
+                    records.push(PyAnalysisRecord::skipped(
+                        kind,
+                        format!("{other:?}"),
+                        "not executed by Engine.run() yet; use the dedicated run_* method",
+                    ));
+                }
+            }
+        }
+
+        // .FOUR needs a transient result; evaluate after the loop so a
+        // .four directive may precede its .tran in the deck.
+        for (fundamental, outputs, num_harmonics) in pending_fourier {
+            match &tran {
+                Some(tran_obj) => {
+                    let tran_ref = tran_obj.borrow(py);
+                    for output in &outputs {
+                        let node_name = strip_probe_wrapper(output);
+                        match tran_ref.waveform_for(&NodeIdentifier::Name(node_name.to_string())) {
+                            Ok(waveform) => {
+                                let analysis = rspice_core::analysis::FourierAnalysis::new(
+                                    rspice_core::analysis::FourierConfig::new(fundamental)
+                                        .with_harmonics(num_harmonics),
+                                );
+                                let result = analysis.analyze(&tran_ref.inner.time, &waveform);
+                                fourier.push(PyFourierResult::from_core(&result));
+                                records.push(PyAnalysisRecord::executed(
+                                    "four",
+                                    format!(".four {fundamental} {output}"),
+                                ));
+                            }
+                            Err(err) => {
+                                records.push(PyAnalysisRecord::skipped(
+                                    "four",
+                                    format!(".four {fundamental} {output}"),
+                                    &format!("output not found: {err}"),
+                                ));
+                            }
+                        }
+                    }
+                }
+                None => {
+                    records.push(PyAnalysisRecord::skipped(
+                        "four",
+                        format!(".four {fundamental} {}", outputs.join(" ")),
+                        "requires a .tran analysis in the netlist",
+                    ));
+                }
+            }
+        }
+
+        // Evaluate measurements; report unevaluated ones as failures so CI
+        // cannot silently skip checks.
+        let mut measurements = Vec::new();
+        match &tran {
+            Some(tran_obj) => {
+                let tran_ref = tran_obj.borrow(py);
+                measurements.extend(measure::evaluate_tran_measurements(net, &tran_ref.inner));
+            }
+            None => measurements.extend(measure::unevaluated_measurements(
+                net,
+                "TRAN",
+                "requires a .tran analysis in the netlist",
+            )),
+        }
+        match &dc {
+            Some(dc_obj) => {
+                let dc_ref = dc_obj.borrow(py);
+                measurements.extend(measure::evaluate_dc_measurements(net, &dc_ref.results));
+            }
+            None => measurements.extend(measure::unevaluated_measurements(
+                net,
+                "DC",
+                "requires a .dc analysis in the netlist",
+            )),
+        }
+        measurements.extend(measure::unevaluated_measurements(
+            net,
+            "AC",
+            "AC measurements are not supported yet",
+        ));
+
+        Ok(PyRunReport {
+            op,
+            dc,
+            tran,
+            ac,
+            noise,
+            tf,
+            fourier,
+            records,
+            measurements,
+        })
+    }
+
+    /// Evaluate the netlist's .MEAS statements against an existing result
+    ///
+    /// Accepts a TransientResult (evaluates TRAN measurements) or a
+    /// DcSweepResult (evaluates DC measurements).
+    ///
+    /// Args:
+    ///     netlist: Netlist containing .MEAS statements
+    ///     result: TransientResult or DcSweepResult to measure
+    ///
+    /// Returns:
+    ///     list[Measurement]: One entry per applicable .MEAS statement
+    ///
+    /// Example:
+    ///     >>> tran = engine.run_tran(netlist, stop_time=1e-3)
+    ///     >>> for m in engine.measure(netlist, tran):
+    ///     ...     print(m)
+    pub fn measure(
+        &self,
+        netlist: &PyNetlist,
+        result: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<crate::results::PyMeasurement>> {
+        if let Ok(tran) = result.downcast::<PyTransientResult>() {
+            return Ok(measure::evaluate_tran_measurements(
+                &netlist.inner,
+                &tran.borrow().inner,
+            ));
+        }
+        if let Ok(sweep) = result.downcast::<PyDcSweepResult>() {
+            return Ok(measure::evaluate_dc_measurements(
+                &netlist.inner,
+                &sweep.borrow().results,
+            ));
+        }
+        Err(PyTypeError::new_err(
+            "measure() expects a TransientResult or DcSweepResult",
+        ))
     }
 
     /// Run DC operating point analysis
@@ -791,5 +1117,16 @@ impl PyEngine {
             self.inner.config().tolerance,
             self.inner.config().max_iterations
         )
+    }
+}
+
+/// Strip `V(...)` / `I(...)` probe wrappers from a .four output spec.
+fn strip_probe_wrapper(spec: &str) -> &str {
+    let trimmed = spec.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if (lower.starts_with("v(") || lower.starts_with("i(")) && trimmed.ends_with(')') {
+        &trimmed[2..trimmed.len() - 1]
+    } else {
+        trimmed
     }
 }

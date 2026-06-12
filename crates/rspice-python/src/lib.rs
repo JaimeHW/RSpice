@@ -1,16 +1,17 @@
 //! # RSpice Python Bindings
 //!
-//! Python bindings for the RSpice circuit simulation engine,
-//! providing automation, scripting, and integration with the Python scientific ecosystem.
+//! Python bindings for the RSpice circuit simulation engine, built for
+//! automation, scripting, and automated circuit verification (analog CI).
 //!
 //! ## Architecture
 //!
 //! The bindings are organized into focused modules:
 //!
-//! - [`netlist`] - Netlist parsing and manipulation
+//! - [`netlist`] - Netlist parsing and introspection
 //! - [`engine`] - Simulation engine and analysis runners
 //! - [`config`] - Simulation and convergence configuration
 //! - [`results`] - Simulation results with NumPy array support
+//! - [`measure`] - .MEAS evaluation against simulation results
 //! - [`abort`] - Ctrl-C cancellation plumbing
 //! - [`errors`] - Python exception types
 //!
@@ -29,6 +30,7 @@ mod abort;
 mod config;
 mod engine;
 mod errors;
+mod measure;
 mod netlist;
 mod results;
 
@@ -82,7 +84,9 @@ fn ac_frequencies<'py>(
 /// RSpice Python module - circuit simulation engine
 ///
 /// This module provides Python bindings for the RSpice SPICE-compatible
-/// circuit simulation engine, supporting DC, AC, and transient analysis.
+/// circuit simulation engine, supporting DC, AC, transient, noise,
+/// pole-zero, Monte Carlo, sensitivity, transfer-function, and Fourier
+/// analyses, plus .MEAS-based automated verification.
 #[pymodule]
 fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Version information
@@ -114,6 +118,9 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyFourierResult>()?;
     m.add_class::<results::PyHarmonic>()?;
     m.add_class::<results::PyTransferFunctionResult>()?;
+    m.add_class::<results::PyMeasurement>()?;
+    m.add_class::<results::PyAnalysisRecord>()?;
+    m.add_class::<results::PyRunReport>()?;
 
     // Module-level functions
     m.add_function(wrap_pyfunction!(ac_frequencies, m)?)?;
@@ -128,6 +135,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add(
         "ConvergenceError",
         m.py().get_type::<errors::ConvergenceError>(),
+    )?;
+    m.add(
+        "MeasurementError",
+        m.py().get_type::<errors::MeasurementError>(),
     )?;
 
     // __all__ drives the package __init__'s star-import: dunders must be
@@ -157,11 +168,15 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "FourierResult",
             "Harmonic",
             "TransferFunctionResult",
+            "Measurement",
+            "AnalysisRecord",
+            "RunReport",
             "ac_frequencies",
             "RSpiceError",
             "ParseError",
             "SimulationError",
             "ConvergenceError",
+            "MeasurementError",
         ],
     )?;
 
