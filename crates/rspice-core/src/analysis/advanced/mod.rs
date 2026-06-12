@@ -9,6 +9,7 @@ pub mod envelope;
 pub mod fourier;
 pub mod harmonic_balance;
 pub mod measure;
+pub mod measure_signals;
 pub mod monte_carlo;
 pub mod multirate;
 pub mod noise;
@@ -39,6 +40,10 @@ pub use harmonic_balance::{
 };
 pub use measure::{
     EdgeType, MeasureEngine, MeasureResult, MeasureStatement, MeasureType, TrigSpec,
+};
+pub use measure_signals::{
+    DcSweepSeries, evaluate_dc_measurements, evaluate_tran_measurements,
+    measurements_for_analysis, transient_signal_map, unevaluated_measurements,
 };
 pub use monte_carlo::{
     Distribution, MonteCarloConfig, MonteCarloResult, MonteCarloRunner, Tolerance,
