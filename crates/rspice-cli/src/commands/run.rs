@@ -297,7 +297,8 @@ impl<'a> RunContext<'a> {
 }
 
 pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Result<(), CliError> {
-    if !args.input.exists() {
+    let from_stdin = crate::commands::is_stdin(&args.input);
+    if !from_stdin && !args.input.exists() {
         return Err(CliError::InputNotFound {
             path: args.input.clone(),
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
@@ -316,11 +317,15 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     }
 
     log::info!("Loading netlist: {}", args.input.display());
-    let source = Netlist::read_source(&args.input).map_err(|e| CliError::ParseError {
-        message: e.to_string(),
-        line: None,
-        suggestion: None,
-    })?;
+    let source = if from_stdin {
+        crate::commands::read_stdin_source()?
+    } else {
+        Netlist::read_source(&args.input).map_err(|e| CliError::ParseError {
+            message: e.to_string(),
+            line: None,
+            suggestion: None,
+        })?
+    };
 
     // HSPICE `.ALTER` / `.DATA` constructs expand into several concrete
     // runs; a plain deck passes through as a single unlabeled run.
@@ -426,7 +431,8 @@ fn run_deck(
         .input
         .file_stem()
         .and_then(|s| s.to_str())
-        .unwrap_or("simulation")
+        .filter(|stem| *stem != "-")
+        .unwrap_or("stdin")
         .to_string();
     let name = match run_label {
         Some(label) => format!("{base_name} [{label}]"),
@@ -611,6 +617,36 @@ fn load_netlist_from_source(
         for (name, value) in &defines {
             netlist.params.set(name, *value);
         }
+    }
+
+    // --save replaces the deck's output selection outright: the caller is
+    // asking for exactly these signals. Applied after any -D re-parse so the
+    // override always wins.
+    if !args.saves.is_empty() {
+        let mut saves = rspice_core::netlist::SaveSet::default();
+        for spec in &args.saves {
+            // The netlist parser falls back to a bare vector name for
+            // anything unrecognized; a spec with parentheses that didn't
+            // parse as V(...)/I(...) is a typo, not a vector name.
+            let parsed = rspice_core::netlist::parse_save_probe(spec);
+            let malformed = match &parsed {
+                None => true,
+                Some(rspice_core::netlist::SaveSignal::Raw(_)) => {
+                    spec.contains('(') || spec.contains(')')
+                }
+                Some(_) => false,
+            };
+            if malformed {
+                return Err(CliError::InvalidArgument {
+                    message: format!("invalid --save probe '{spec}'"),
+                    suggestion: Some(
+                        "use forms like V(out), V(a,b), I(v1), @m1[id], or all".to_string(),
+                    ),
+                });
+            }
+            saves.signals.push(parsed.expect("checked above"));
+        }
+        netlist.saves = saves;
     }
 
     Ok(netlist)
@@ -810,21 +846,31 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         .unwrap_or(&config.simulation.convergence_mode);
     let convergence_preset = ConvergencePreset::from_mode_name(convergence_mode);
 
+    let integration_method = args.integration_method.as_deref().map(|method| {
+        use rspice_core::analysis::IntegrationMethod;
+        match method {
+            "euler" => IntegrationMethod::BackwardEuler,
+            "trap" => IntegrationMethod::Trapezoidal,
+            "gear" => IntegrationMethod::Gear2,
+            _ => IntegrationMethod::TrapGear,
+        }
+    });
+
     let overrides = SimulationConfigOverrides {
         temperature_kelvin: args.temp.map(|temp_c| temp_c + 273.15),
         max_iterations: args.maxiter,
         min_timestep: args.min_step,
         max_timestep: args.max_step,
-        integration_method: None,
-        transient_trtol: None,
+        integration_method,
+        transient_trtol: args.trtol,
         convergence_preset,
         reltol: args.reltol,
         abstol: args.abstol,
-        voltage_abstol: None,
-        current_abstol: None,
-        charge_abstol: None,
+        voltage_abstol: args.voltage_abstol,
+        current_abstol: args.current_abstol,
+        charge_abstol: args.charge_abstol,
         residual_reltol: args.residual_reltol,
-        gmin_initial: None,
+        gmin_initial: args.gmin,
     };
 
     resolve_simulation_config(&base, Some(&netlist.options), &overrides)

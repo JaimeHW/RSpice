@@ -5,6 +5,12 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
+/// Parse a numeric flag value, accepting SPICE suffixes (`4.7k`, `1u`,
+/// `100meg`) alongside plain and scientific notation.
+pub fn spice_value(s: &str) -> Result<f64, String> {
+    rspice_core::netlist::lexer::parse_spice_value(s).map_err(|e| e.to_string())
+}
+
 /// Version string with build metadata for `--version`.
 const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -98,7 +104,7 @@ pub struct RunArgs {
     pub format: Option<OutputFormat>,
 
     /// Override simulation temperature (Celsius)
-    #[arg(long, value_name = "TEMP")]
+    #[arg(long, value_name = "TEMP", value_parser = spice_value)]
     pub temp: Option<f64>,
 
     /// Print .MEAS measurement results
@@ -117,7 +123,7 @@ pub struct RunArgs {
 
     /// Abort the run after this many seconds (exit code 124). Transient
     /// and DC sweep analyses stop at the next safe point.
-    #[arg(long, value_name = "SECONDS")]
+    #[arg(long, value_name = "SECONDS", value_parser = spice_value)]
     pub timeout: Option<f64>,
 
     /// Show progress bar with ETA for transient simulation
@@ -129,7 +135,7 @@ pub struct RunArgs {
     pub compress: bool,
 
     /// Compression tolerance (default: 1e-4)
-    #[arg(long, value_name = "TOL", requires = "compress")]
+    #[arg(long, value_name = "TOL", requires = "compress", value_parser = spice_value)]
     pub compress_tol: Option<f64>,
 
     /// Maximum Newton-Raphson iterations
@@ -137,28 +143,61 @@ pub struct RunArgs {
     pub maxiter: Option<usize>,
 
     /// Convergence tolerance
-    #[arg(long, value_name = "TOL")]
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
     pub abstol: Option<f64>,
 
     /// Relative tolerance
-    #[arg(long, value_name = "TOL")]
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
     pub reltol: Option<f64>,
 
     /// Relative residual tolerance for equation convergence checks
-    #[arg(long, value_name = "TOL")]
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
     pub residual_reltol: Option<f64>,
 
     /// Minimum timestep for transient analysis
-    #[arg(long, value_name = "TIME")]
+    #[arg(long, value_name = "TIME", value_parser = spice_value)]
     pub min_step: Option<f64>,
 
     /// Maximum timestep for transient analysis
-    #[arg(long, value_name = "TIME")]
+    #[arg(long, value_name = "TIME", value_parser = spice_value)]
     pub max_step: Option<f64>,
 
     /// DC convergence mode: fast, default, or robust
     #[arg(long, value_name = "MODE", value_parser = ["fast", "default", "robust"])]
     pub convergence: Option<String>,
+
+    /// Transient integration method (default: trapgear auto-switching)
+    #[arg(
+        long,
+        value_name = "METHOD",
+        value_parser = ["trap", "gear", "trapgear", "euler"]
+    )]
+    pub integration_method: Option<String>,
+
+    /// Transient truncation-error tolerance (TRTOL)
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
+    pub trtol: Option<f64>,
+
+    /// Initial GMIN conductance for convergence aids
+    #[arg(long, value_name = "G", value_parser = spice_value)]
+    pub gmin: Option<f64>,
+
+    /// Voltage absolute tolerance (VNTOL)
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
+    pub voltage_abstol: Option<f64>,
+
+    /// Current absolute tolerance
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
+    pub current_abstol: Option<f64>,
+
+    /// Charge absolute tolerance (CHGTOL)
+    #[arg(long, value_name = "TOL", value_parser = spice_value)]
+    pub charge_abstol: Option<f64>,
+
+    /// Limit exported signals (repeatable; overrides the netlist
+    /// .SAVE/.PROBE/.PRINT selection), e.g. --save "V(out)" --save "I(v1)"
+    #[arg(long = "save", value_name = "SIGNAL")]
+    pub saves: Vec<String>,
 
     /// Additional search directories for .include/.lib directives (repeatable)
     #[arg(short = 'I', long = "include", value_name = "DIR")]
@@ -187,7 +226,7 @@ pub struct RunArgs {
 
     /// Monte Carlo relative spread: sigma for gaussian, tolerance for
     /// uniform/worst-case (default: 0.01 = 1%)
-    #[arg(long, value_name = "SPREAD", requires = "monte_carlo")]
+    #[arg(long, value_name = "SPREAD", requires = "monte_carlo", value_parser = spice_value)]
     pub mc_spread: Option<f64>,
 
     /// Restrict Monte Carlo variation to specific parameters (repeatable)
@@ -217,7 +256,8 @@ pub struct RunArgs {
     #[arg(
         long,
         value_name = "FREQ",
-        help = "Enable PSS analysis at specified frequency"
+        help = "Enable PSS analysis at specified frequency",
+        value_parser = spice_value
     )]
     pub pss_freq: Option<f64>,
 
@@ -226,14 +266,15 @@ pub struct RunArgs {
     pub pss_harmonics: usize,
 
     /// PSS stabilization time before shooting method (default: auto)
-    #[arg(long, value_name = "TIME", requires = "pss_freq")]
+    #[arg(long, value_name = "TIME", requires = "pss_freq", value_parser = spice_value)]
     pub pss_tstab: Option<f64>,
 
     /// HB (Harmonic Balance) fundamental frequency in Hz
     #[arg(
         long,
         value_name = "FREQ",
-        help = "Enable HB analysis at specified frequency"
+        help = "Enable HB analysis at specified frequency",
+        value_parser = spice_value
     )]
     pub hb_freq: Option<f64>,
 
@@ -262,7 +303,7 @@ pub struct RunArgs {
     pub sens_param: Option<String>,
 
     /// Sensitivity analysis parameter nominal value
-    #[arg(long, value_name = "VALUE", requires = "sens_param")]
+    #[arg(long, value_name = "VALUE", requires = "sens_param", value_parser = spice_value)]
     pub sens_value: Option<f64>,
 
     // =========================================================================
@@ -316,7 +357,7 @@ pub struct CompileVaArgs {
     #[arg(value_name = "FILE")]
     pub input: PathBuf,
 
-    /// Output compiled model (optional, for caching)
+    /// Write a JSON interface summary (model name, terminals, parameters)
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 
@@ -385,11 +426,11 @@ pub struct ConvertArgs {
     pub variables: Vec<String>,
 
     /// Time/frequency range start
-    #[arg(long, value_name = "VALUE")]
+    #[arg(long, value_name = "VALUE", value_parser = spice_value)]
     pub start: Option<f64>,
 
     /// Time/frequency range end
-    #[arg(long, value_name = "VALUE")]
+    #[arg(long, value_name = "VALUE", value_parser = spice_value)]
     pub stop: Option<f64>,
 }
 
@@ -405,11 +446,11 @@ pub struct CompareArgs {
     pub golden: PathBuf,
 
     /// Absolute tolerance (default: 1e-9)
-    #[arg(long, value_name = "TOL", default_value = "1e-9")]
+    #[arg(long, value_name = "TOL", default_value = "1e-9", value_parser = spice_value)]
     pub abstol: f64,
 
     /// Relative tolerance (default: 1e-6)
-    #[arg(long, value_name = "TOL", default_value = "1e-6")]
+    #[arg(long, value_name = "TOL", default_value = "1e-6", value_parser = spice_value)]
     pub reltol: f64,
 
     /// Variables to compare (default: all)
