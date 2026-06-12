@@ -36,7 +36,18 @@ impl RSpiceApp {
                     state.schematic.grid_size = [5, 10, 20][pitch_index];
                     state.schematic.is_dirty = true;
                 }
-                check_row(ui, "Show grid dots", &mut state.shell.show_grid);
+
+                let grid_labels: Vec<&str> = crate::shell::GridStyle::ALL
+                    .iter()
+                    .map(|style| style.label())
+                    .collect();
+                let mut grid_index = crate::shell::GridStyle::ALL
+                    .iter()
+                    .position(|style| *style == state.shell.grid)
+                    .unwrap_or(0);
+                if choice_row(ui, "Grid", &grid_labels, &mut grid_index) {
+                    state.shell.grid = crate::shell::GridStyle::ALL[grid_index];
+                }
 
                 ui.add_space(tokens::SP_3);
                 section_label(ui, "Appearance");

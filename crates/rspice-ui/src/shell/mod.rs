@@ -33,7 +33,7 @@ mod views;
 mod wtabs;
 
 pub use results::{ResultViewer, ResultsState};
-pub use state::{ConsoleUiState, ShellState, ShellStateSer, WorkspaceView};
+pub use state::{ConsoleUiState, GridStyle, ShellState, ShellStateSer, WorkspaceView};
 
 use egui::Context;
 

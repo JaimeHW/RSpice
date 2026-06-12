@@ -72,6 +72,47 @@ impl WorkspaceView {
     }
 }
 
+/// Canvas grid rendering style. The toolbar grid button and the View
+/// menu cycle Dots → Lines → Off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GridStyle {
+    /// One dot per snap point (default).
+    #[default]
+    Dots,
+    /// Hairline rules per snap point.
+    Lines,
+    /// No grid.
+    Off,
+}
+
+impl GridStyle {
+    /// All styles in cycle order.
+    pub const ALL: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
+
+    /// The next style in the Dots → Lines → Off cycle.
+    pub fn cycled(self) -> Self {
+        match self {
+            GridStyle::Dots => GridStyle::Lines,
+            GridStyle::Lines => GridStyle::Off,
+            GridStyle::Off => GridStyle::Dots,
+        }
+    }
+
+    /// Menu / preferences label.
+    pub fn label(self) -> &'static str {
+        match self {
+            GridStyle::Dots => "Dots",
+            GridStyle::Lines => "Lines",
+            GridStyle::Off => "Off",
+        }
+    }
+
+    /// Whether any grid renders.
+    pub fn visible(self) -> bool {
+        self != GridStyle::Off
+    }
+}
+
 /// Console severity filter (the console's tab strip).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ConsoleFilter {
@@ -155,8 +196,8 @@ pub struct ShellState {
     /// Selected analysis row in the Simulate view (drives the right-panel
     /// analysis inspector).
     pub selected_analysis: Option<usize>,
-    /// Canvas dot-grid visibility.
-    pub show_grid: bool,
+    /// Canvas grid style (dots / lines / off).
+    pub grid: GridStyle,
     /// Hide both contextual side panels (focus mode).
     pub panels_hidden: bool,
     /// One-shot request to focus the component search box (Create ▸ Instance,
@@ -186,11 +227,10 @@ pub struct ShellState {
 
 impl ShellState {
     /// New shell state with defaults (Instrument dark, compact, schematic
-    /// view, "tt" corner, grid on).
+    /// view, "tt" corner, dot grid).
     pub fn new() -> Self {
         Self {
             corner: "tt".to_owned(),
-            show_grid: true,
             cell_lib_filter: "All libs".to_owned(),
             ..Self::default()
         }
@@ -209,7 +249,7 @@ impl ShellState {
     pub fn reset_layout(&mut self) {
         self.console = ConsoleUiState::default();
         self.panels_hidden = false;
-        self.show_grid = true;
+        self.grid = GridStyle::Dots;
     }
 }
 
@@ -225,8 +265,12 @@ pub struct ShellStateSer {
     console: ConsoleUiState,
     #[serde(default = "default_corner")]
     corner: String,
+    /// Legacy on/off flag, still written so older builds keep their
+    /// setting; `grid_style` wins when present.
     #[serde(default = "default_true")]
     show_grid: bool,
+    #[serde(default)]
+    grid_style: Option<GridStyle>,
     #[serde(default)]
     panels_hidden: bool,
     #[serde(default)]
@@ -268,7 +312,8 @@ impl From<&ShellState> for ShellStateSer {
             theme: shell.theme,
             console: shell.console.clone(),
             corner: shell.corner.clone(),
-            show_grid: shell.show_grid,
+            show_grid: shell.grid.visible(),
+            grid_style: Some(shell.grid),
             panels_hidden: shell.panels_hidden,
             result_viewer: shell.results.viewer,
             expr_traces,
@@ -278,12 +323,17 @@ impl From<&ShellState> for ShellStateSer {
 
 impl From<ShellStateSer> for ShellState {
     fn from(ser: ShellStateSer) -> Self {
+        let grid = ser.grid_style.unwrap_or(if ser.show_grid {
+            GridStyle::Dots
+        } else {
+            GridStyle::Off
+        });
         let mut shell = Self {
             view: ser.view,
             theme: ser.theme,
             console: ser.console,
             corner: ser.corner,
-            show_grid: ser.show_grid,
+            grid,
             panels_hidden: ser.panels_hidden,
             ..Self::new()
         };
