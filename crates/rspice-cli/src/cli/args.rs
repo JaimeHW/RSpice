@@ -171,6 +171,24 @@ pub struct RunArgs {
     #[arg(long, value_name = "SEED", requires = "monte_carlo")]
     pub seed: Option<u64>,
 
+    /// Monte Carlo parameter distribution (default: gaussian)
+    #[arg(
+        long,
+        value_name = "DIST",
+        requires = "monte_carlo",
+        value_parser = ["gaussian", "uniform", "worst-case"]
+    )]
+    pub mc_distribution: Option<String>,
+
+    /// Monte Carlo relative spread: sigma for gaussian, tolerance for
+    /// uniform/worst-case (default: 0.01 = 1%)
+    #[arg(long, value_name = "SPREAD", requires = "monte_carlo")]
+    pub mc_spread: Option<f64>,
+
+    /// Restrict Monte Carlo variation to specific parameters (repeatable)
+    #[arg(long = "mc-param", value_name = "PARAM", requires = "monte_carlo")]
+    pub mc_params: Vec<String>,
+
     /// CI/CD report format (junit, tap)
     #[arg(long, value_name = "FORMAT")]
     pub report_format: Option<ReportFormat>,
@@ -218,21 +236,21 @@ pub struct RunArgs {
     #[arg(long, value_name = "N", default_value = "9", requires = "hb_freq")]
     pub hb_harmonics: usize,
 
-    /// PZ (Pole-Zero) analysis input node
+    /// PZ (Pole-Zero) analysis input node (name or index)
     #[arg(long, value_name = "NODE", help = "Input node for pole-zero analysis")]
-    pub pz_input: Option<usize>,
+    pub pz_input: Option<String>,
 
-    /// PZ (Pole-Zero) analysis output node
+    /// PZ (Pole-Zero) analysis output node (name or index)
     #[arg(long, value_name = "NODE", requires = "pz_input")]
-    pub pz_output: Option<usize>,
+    pub pz_output: Option<String>,
 
-    /// Sensitivity analysis output node
+    /// Sensitivity analysis output node (name or index)
     #[arg(
         long,
         value_name = "NODE",
         help = "Output node for sensitivity analysis"
     )]
-    pub sens_output: Option<usize>,
+    pub sens_output: Option<String>,
 
     /// Sensitivity analysis parameter name
     #[arg(long, value_name = "PARAM", requires = "sens_output")]

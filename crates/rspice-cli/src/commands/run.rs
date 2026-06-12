@@ -809,12 +809,33 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
 
 fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, CliError> {
     if let Some(num_runs) = ctx.args.monte_carlo {
+        let spread = ctx.args.mc_spread.unwrap_or(0.01);
+        if !spread.is_finite() || spread <= 0.0 {
+            return Err(CliError::InvalidArgument {
+                message: format!("--mc-spread must be a positive value, got {spread}"),
+                suggestion: Some("e.g. --mc-spread 0.05 for 5% variation".to_string()),
+            });
+        }
+        let distribution = match ctx.args.mc_distribution.as_deref() {
+            Some("uniform") => {
+                rspice_core::analysis::Distribution::Uniform { tolerance: spread }
+            }
+            Some("worst-case") => {
+                rspice_core::analysis::Distribution::WorstCase { tolerance: spread }
+            }
+            _ => rspice_core::analysis::Distribution::Gaussian { sigma: spread },
+        };
+        let parameter_filter = if ctx.args.mc_params.is_empty() {
+            None
+        } else {
+            Some(ctx.args.mc_params.as_slice())
+        };
         advanced::run_monte_carlo(
             ctx,
             num_runs,
             ctx.args.seed.unwrap_or(1),
-            rspice_core::analysis::Distribution::Gaussian { sigma: 0.01 },
-            None,
+            distribution,
+            parameter_filter,
         )?;
         return Ok(true);
     }
@@ -829,13 +850,18 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
         return Ok(true);
     }
 
-    if let (Some(input), Some(output)) = (ctx.args.pz_input, ctx.args.pz_output) {
+    if let (Some(input), Some(output)) =
+        (ctx.args.pz_input.as_deref(), ctx.args.pz_output.as_deref())
+    {
+        let (input, output) = resolve_node_pair(ctx, input, output, "--pz-input/--pz-output")?;
         frequency::run_pz(ctx, input, output)?;
         return Ok(true);
     }
 
-    if let (Some(output_node), Some(param)) = (ctx.args.sens_output, ctx.args.sens_param.as_deref())
+    if let (Some(output_node), Some(param)) =
+        (ctx.args.sens_output.as_deref(), ctx.args.sens_param.as_deref())
     {
+        let output_node = resolve_node(ctx, output_node, "--sens-output")?;
         frequency::run_sensitivity(ctx, output_node, param, ctx.args.sens_value.unwrap_or(1.0))?;
         return Ok(true);
     }
@@ -846,4 +872,27 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
     }
 
     Ok(false)
+}
+
+/// Resolve a node given by name or index for analysis flags.
+fn resolve_node(ctx: &RunContext<'_>, node: &str, flag: &str) -> Result<usize, CliError> {
+    let resolver = shared::NodeResolver::from_netlist(ctx.engine, ctx.netlist)?;
+    resolver
+        .resolve_node(node)
+        .ok_or_else(|| CliError::InvalidArgument {
+            message: format!("unknown node '{node}' for {flag}"),
+            suggestion: Some("pass a node name from the netlist or a node index".to_string()),
+        })
+}
+
+fn resolve_node_pair(
+    ctx: &RunContext<'_>,
+    first: &str,
+    second: &str,
+    flag: &str,
+) -> Result<(usize, usize), CliError> {
+    Ok((
+        resolve_node(ctx, first, flag)?,
+        resolve_node(ctx, second, flag)?,
+    ))
 }

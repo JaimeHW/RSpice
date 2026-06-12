@@ -47,6 +47,54 @@ pub(super) fn run_tf_from_command(
         println!("{source}#input_impedance = {zin}");
     }
 
+    if let Some(ref output_path) = ctx.output_path_for("tf") {
+        reject_hdf5(ctx.format, "transfer function")?;
+        use super::export::{ColumnData, ExportColumn, ExportTable};
+
+        let scalar = |name: &str, var_type: &str, value: f64| ExportColumn {
+            name: name.to_string(),
+            var_type: var_type.to_string(),
+            data: ColumnData::Real(vec![value]),
+        };
+        ExportTable {
+            analysis: "tf".to_string(),
+            plot_name: "DC Transfer Function".to_string(),
+            scale_name: "point".to_string(),
+            scale_type: "index".to_string(),
+            scale: vec![0.0],
+            columns: vec![
+                scalar("transfer_function", "gain", result.gain),
+                scalar(
+                    &format!("{source}#input_impedance"),
+                    "impedance",
+                    result.input_impedance,
+                ),
+                scalar(
+                    &format!("output_impedance_at_{probe}"),
+                    "impedance",
+                    result.output_impedance,
+                ),
+            ],
+        }
+        .write(output_path, ctx.format)?;
+
+        if !ctx.quiet {
+            println!("  Transfer function exported to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
+}
+
+/// The report-shaped analyses (TF, PZ, sensitivity) have no natural HDF5
+/// section; fail with a clear message instead of writing a misleading file.
+fn reject_hdf5(format: OutputFormat, what: &str) -> Result<(), CliError> {
+    if matches!(format, OutputFormat::Hdf5) {
+        return Err(CliError::InvalidArgument {
+            message: format!("HDF5 output is not supported for {what} results"),
+            suggestion: Some("use --format csv, json, or raw".to_string()),
+        });
+    }
     Ok(())
 }
 
@@ -423,39 +471,91 @@ pub(super) fn run_pz(
 
     match ctx.engine.run_pz(ctx.netlist, input_node, output_node) {
         Ok(result) => {
-            if !ctx.quiet {
-                println!("✓ Pole-Zero analysis complete");
-                println!("  Poles: {}", result.poles.len());
-                println!("  Zeros: {}", result.zeros.len());
-
-                if ctx.verbose {
-                    println!("\n  Poles:");
-                    for (i, pole) in result.poles.iter().enumerate() {
-                        let freq = pole.im / (2.0 * std::f64::consts::PI);
-                        let q = if pole.re.abs() > 1e-15 {
-                            -pole.im / (2.0 * pole.re)
-                        } else {
-                            f64::INFINITY
-                        };
-                        println!(
-                            "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
-                            i,
-                            pole.re,
-                            pole.im,
-                            freq.abs(),
-                            q
-                        );
-                    }
-                    println!("\n  Zeros:");
-                    for (i, zero) in result.zeros.iter().enumerate() {
-                        println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
-                    }
-                }
-            }
+            report_pz(ctx, &result.poles, &result.zeros)?;
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
     }
+}
+
+/// Print the pole/zero summary and export the singularities.
+///
+/// The export follows the rawfile convention for .PZ results: a single
+/// point with one complex variable per pole/zero (`pole(1)`, `zero(1)`, ...).
+fn report_pz(
+    ctx: &RunContext<'_>,
+    poles: &[rspice_core::analysis::advanced::pole_zero::Complex],
+    zeros: &[rspice_core::analysis::advanced::pole_zero::Complex],
+) -> Result<(), CliError> {
+    if !ctx.quiet {
+        println!("✓ Pole-Zero analysis complete");
+        println!("  Poles: {}", poles.len());
+        println!("  Zeros: {}", zeros.len());
+
+        if ctx.verbose {
+            println!("\n  Poles:");
+            for (i, pole) in poles.iter().enumerate() {
+                let freq = pole.im / (2.0 * std::f64::consts::PI);
+                let q = if pole.re.abs() > 1e-15 {
+                    -pole.im / (2.0 * pole.re)
+                } else {
+                    f64::INFINITY
+                };
+                println!(
+                    "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
+                    i,
+                    pole.re,
+                    pole.im,
+                    freq.abs(),
+                    q
+                );
+            }
+            println!("\n  Zeros:");
+            for (i, zero) in zeros.iter().enumerate() {
+                println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
+            }
+        }
+    }
+
+    if let Some(ref output_path) = ctx.output_path_for("pz") {
+        reject_hdf5(ctx.format, "pole-zero")?;
+        use super::export::{ColumnData, ExportColumn, ExportTable};
+
+        let singularity = |label: &str,
+                           index: usize,
+                           value: &rspice_core::analysis::advanced::pole_zero::Complex| {
+            ExportColumn {
+                name: format!("{label}({})", index + 1),
+                var_type: "frequency".to_string(),
+                data: ColumnData::Complex {
+                    real: vec![value.re],
+                    imag: vec![value.im],
+                },
+            }
+        };
+        let columns: Vec<ExportColumn> = poles
+            .iter()
+            .enumerate()
+            .map(|(i, p)| singularity("pole", i, p))
+            .chain(zeros.iter().enumerate().map(|(i, z)| singularity("zero", i, z)))
+            .collect();
+
+        ExportTable {
+            analysis: "pz".to_string(),
+            plot_name: "Pole-Zero Analysis".to_string(),
+            scale_name: "point".to_string(),
+            scale_type: "index".to_string(),
+            scale: vec![0.0],
+            columns,
+        }
+        .write(output_path, ctx.format)?;
+
+        if !ctx.quiet {
+            println!("  Poles/zeros exported to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) fn run_pz_from_command(
@@ -511,35 +611,7 @@ pub(super) fn run_pz_from_command(
         compute_zeros,
     ) {
         Ok(result) => {
-            if !ctx.quiet {
-                println!("✓ Pole-Zero analysis complete");
-                println!("  Poles: {}", result.poles.len());
-                println!("  Zeros: {}", result.zeros.len());
-
-                if ctx.verbose {
-                    println!("\n  Poles:");
-                    for (i, pole) in result.poles.iter().enumerate() {
-                        let freq = pole.im / (2.0 * std::f64::consts::PI);
-                        let q = if pole.re.abs() > 1e-15 {
-                            -pole.im / (2.0 * pole.re)
-                        } else {
-                            f64::INFINITY
-                        };
-                        println!(
-                            "    P{}: {:.3e} + j{:.3e}  (f={:.3e} Hz, Q={:.2})",
-                            i,
-                            pole.re,
-                            pole.im,
-                            freq.abs(),
-                            q
-                        );
-                    }
-                    println!("\n  Zeros:");
-                    for (i, zero) in result.zeros.iter().enumerate() {
-                        println!("    Z{}: {:.3e} + j{:.3e}", i, zero.re, zero.im);
-                    }
-                }
-            }
+            report_pz(ctx, &result.poles, &result.zeros)?;
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Pole-Zero")),
@@ -579,6 +651,8 @@ pub(super) fn run_sensitivity(
                     );
                 }
             }
+
+            export_dc_sensitivities(ctx, &[(param_name.to_string(), sensitivity)])?;
             Ok(())
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Sensitivity")),
@@ -647,6 +721,7 @@ pub(super) fn run_sensitivity_from_command(
             );
         }
 
+        let mut series: Vec<(String, Vec<f64>)> = Vec::with_capacity(params.len());
         for (param_name, param_value) in &params {
             let pos = ctx
                 .engine
@@ -692,6 +767,34 @@ pub(super) fn run_sensitivity_from_command(
                     .fold(0.0_f64, |acc, v| acc.max(v));
                 println!("    peak |d|V|/d{}| = {:.6e}", param_name, peak);
             }
+
+            series.push((param_name.clone(), combined));
+        }
+
+        if let Some(ref output_path) = ctx.output_path_for("sens") {
+            reject_hdf5(ctx.format, "sensitivity")?;
+            use super::export::{ColumnData, ExportColumn, ExportTable};
+
+            ExportTable {
+                analysis: "sens_ac".to_string(),
+                plot_name: "AC Sensitivity".to_string(),
+                scale_name: "frequency".to_string(),
+                scale_type: "frequency".to_string(),
+                scale: freqs.clone(),
+                columns: series
+                    .into_iter()
+                    .map(|(name, values)| ExportColumn {
+                        name: format!("dV/d({name})"),
+                        var_type: "sensitivity".to_string(),
+                        data: ColumnData::Real(values),
+                    })
+                    .collect(),
+            }
+            .write(output_path, ctx.format)?;
+
+            if !ctx.quiet {
+                println!("  Sensitivities exported to: {}", output_path.display());
+            }
         }
 
         return Ok(());
@@ -736,5 +839,41 @@ pub(super) fn run_sensitivity_from_command(
         }
     }
 
+    export_dc_sensitivities(ctx, &results)?;
+    Ok(())
+}
+
+/// Write DC sensitivities: a single-point table with one `dV/d(param)`
+/// column per parameter.
+fn export_dc_sensitivities(
+    ctx: &RunContext<'_>,
+    results: &[(String, f64)],
+) -> Result<(), CliError> {
+    let Some(ref output_path) = ctx.output_path_for("sens") else {
+        return Ok(());
+    };
+    reject_hdf5(ctx.format, "sensitivity")?;
+    use super::export::{ColumnData, ExportColumn, ExportTable};
+
+    ExportTable {
+        analysis: "sens".to_string(),
+        plot_name: "DC Sensitivity".to_string(),
+        scale_name: "point".to_string(),
+        scale_type: "index".to_string(),
+        scale: vec![0.0],
+        columns: results
+            .iter()
+            .map(|(name, value)| ExportColumn {
+                name: format!("dV/d({name})"),
+                var_type: "sensitivity".to_string(),
+                data: ColumnData::Real(vec![*value]),
+            })
+            .collect(),
+    }
+    .write(output_path, ctx.format)?;
+
+    if !ctx.quiet {
+        println!("  Sensitivities exported to: {}", output_path.display());
+    }
     Ok(())
 }
