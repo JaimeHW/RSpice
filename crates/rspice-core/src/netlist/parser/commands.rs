@@ -262,6 +262,8 @@ pub(super) fn parse_save_command(
                             TokenKind::Ident(s) => probe.push_str(s),
                             TokenKind::Number(n) => probe.push_str(&format!("{}", n)),
                             TokenKind::Comma => probe.push(','),
+                            // Hierarchy wildcard: `v(x1.*)` must keep its star.
+                            TokenKind::Star => probe.push('*'),
                             _ => {}
                         }
                         stream.advance();

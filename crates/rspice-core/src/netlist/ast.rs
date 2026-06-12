@@ -410,6 +410,12 @@ impl SaveSet {
     /// `variable` follows raw-file conventions: `v(out)`, `V(OUT)`, `i(v1)`,
     /// `vd#branch`, `time`, `frequency`. Matching is case-insensitive and
     /// scale vectors are always selected.
+    ///
+    /// Voltage, current and raw selections may carry `*` wildcards with
+    /// Spectre `save` semantics: `*` matches within one hierarchy level and
+    /// never crosses a `.` separator, so `v(x1.*)` selects every net directly
+    /// inside `X1` while leaving `x1.xb.nref` to `v(x1.*.*)` or an explicit
+    /// probe.
     pub fn selects(&self, variable: &str) -> bool {
         if self.keeps_everything() {
             return true;
@@ -432,7 +438,7 @@ impl SaveSet {
                 SaveSignal::All => return true,
                 SaveSignal::Voltage(node) => {
                     let node = node.to_ascii_lowercase();
-                    if inner_v == Some(node.as_str()) || var == node {
+                    if pattern_selects(&node, inner_v.unwrap_or(var.as_str())) {
                         return true;
                     }
                 }
@@ -445,7 +451,7 @@ impl SaveSet {
                 }
                 SaveSignal::Current(elem) => {
                     let elem = elem.to_ascii_lowercase();
-                    if inner_i == Some(elem.as_str()) || branch == Some(elem.as_str()) {
+                    if inner_i.or(branch).is_some_and(|t| pattern_selects(&elem, t)) {
                         return true;
                     }
                 }
@@ -461,7 +467,9 @@ impl SaveSet {
                 }
                 SaveSignal::Raw(name) => {
                     let name = name.to_ascii_lowercase();
-                    if var == name || inner_v == Some(name.as_str()) {
+                    if pattern_selects(&name, &var)
+                        || inner_v.is_some_and(|t| pattern_selects(&name, t))
+                    {
                         return true;
                     }
                 }
@@ -469,6 +477,46 @@ impl SaveSet {
         }
         false
     }
+}
+
+/// Match a save selection against a vector name, honoring `*` wildcards.
+///
+/// Without a `*` this is plain equality. With one, `*` matches any run of
+/// characters except the `.` hierarchy separator (Spectre `save` semantics),
+/// so `x1.*` covers `x1.ntail` but not `x1.xb.nref`. Inputs are expected
+/// pre-lowercased by the caller.
+fn pattern_selects(pattern: &str, text: &str) -> bool {
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+
+    // Iterative glob with single-star backtracking; the star is forbidden
+    // from swallowing '.' so wildcards stay within one hierarchy level.
+    let (pattern, text) = (pattern.as_bytes(), text.as_bytes());
+    let (mut p, mut t) = (0usize, 0usize);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        if p < pattern.len() && (pattern[p] == text[t] && pattern[p] != b'*') {
+            p += 1;
+            t += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            star = Some((p, t));
+            p += 1;
+        } else if let Some((star_p, star_t)) = star {
+            if text[star_t] == b'.' {
+                return false;
+            }
+            star = Some((star_p, star_t + 1));
+            p = star_p + 1;
+            t = star_t + 1;
+        } else {
+            return false;
+        }
+    }
+    while p < pattern.len() && pattern[p] == b'*' {
+        p += 1;
+    }
+    p == pattern.len()
 }
 
 //=============================================================================
