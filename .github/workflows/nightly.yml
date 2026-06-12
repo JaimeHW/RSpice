@@ -28,15 +28,31 @@ jobs:
       - name: Full test suite (release)
         run: >-
           cargo test --workspace --exclude rspice-python --exclude rspice-wasm
-          --release -- --skip ngspice
-      - name: ngspice conformance report (non-gating until 113/113)
+          --release -- --skip test_ngspice_ --skip test_full_ngspice
+      - name: ngspice conformance report
         # Serial test threads: each deck spawns a case-runner subprocess with
         # a hard per-case timeout; parallel threads oversubscribe the runner
-        # and trip the caps.
+        # and trip the caps. The command's own exit status is advisory — the
+        # ratchet step below is the gate.
         continue-on-error: true
         run: >-
           cargo test -p rspice-core --release --test ngspice_regression
           -- --nocapture --test-threads 1 | tee conformance.log
+      - name: Conformance ratchet
+        # Accuracy can only move forward: fail the nightly when the full
+        # suite reports more failing decks than the recorded watermark
+        # (105/113 passing in release). Raise the floor as decks are fixed;
+        # never lower it.
+        env:
+          MAX_FAILING: "8"
+        run: |
+          failed=$(grep -E 'Test Summary: 113 total' conformance.log | grep -Eo '[0-9]+ failed' | grep -Eo '[0-9]+' | tail -1)
+          if [ -z "$failed" ]; then
+            echo "full-suite summary line missing from conformance.log" >&2
+            exit 1
+          fi
+          echo "failing decks: $failed (watermark allows <= $MAX_FAILING)"
+          [ "$failed" -le "$MAX_FAILING" ]
       - name: Upload conformance log
         if: always()
         uses: actions/upload-artifact@v4

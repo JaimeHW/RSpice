@@ -32,9 +32,13 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
       - name: Test (fast tier)
+        # Skip only the vendored conformance suites (their test names start
+        # with test_ngspice_ / test_full_ngspice). A bare "ngspice" filter
+        # used to swallow seven oracle-pinned tests in unrelated files whose
+        # names merely mention ngspice.
         run: >-
           cargo test --workspace --exclude rspice-python --exclude rspice-wasm
-          -- --skip ngspice
+          -- --skip test_ngspice_ --skip test_full_ngspice
 
   test-windows:
     name: Build & unit test (Windows)
