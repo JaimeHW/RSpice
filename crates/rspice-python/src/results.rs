@@ -1581,6 +1581,8 @@ impl PyFourierResult {
     pub fn from_core(result: &rspice_core::analysis::FourierResult) -> Self {
         // Core's harmonic 0 is the DC term; expose it via `dc_component`
         // and keep the list at n >= 1 so harmonics[0] is the fundamental.
+        // Core reports phase in degrees; this API uses radians plus
+        // *_degrees helpers everywhere.
         let harmonics = result
             .harmonics
             .iter()
@@ -1589,7 +1591,7 @@ impl PyFourierResult {
                 n: h.harmonic_number,
                 frequency: h.frequency,
                 magnitude: h.magnitude,
-                phase: h.phase,
+                phase: h.phase.to_radians(),
             })
             .collect();
         Self {

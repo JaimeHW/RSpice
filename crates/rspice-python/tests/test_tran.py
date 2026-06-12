@@ -111,6 +111,17 @@ class TestFourier:
         assert four.harmonics[0].frequency == pytest.approx(1e3, rel=1e-6)
         assert len(four.magnitudes) == len(four.harmonics)
 
+    def test_fundamental_phase_units(self, engine):
+        # v(t) = A sin(wt) decomposes with a1=0, b1=A, so the fundamental
+        # phase is atan2(-b, a) = -90 degrees = -pi/2 radians. Pins the
+        # radians/degrees convention (core reports degrees; the binding
+        # normalizes to radians with a *_degrees helper).
+        netlist = rspice.Netlist.parse(SINE)
+        tran = engine.run_tran(netlist, stop_time=10e-3, max_step=2e-6)
+        fund = tran.fourier("out", fundamental=1e3).harmonics[0]
+        assert fund.phase == pytest.approx(-math.pi / 2, abs=0.02)
+        assert fund.phase_degrees == pytest.approx(-90.0, abs=1.0)
+
     def test_fourier_validation(self, engine, rc_lowpass):
         tran = engine.run_tran(rc_lowpass, stop_time=1e-4)
         with pytest.raises(ValueError):
