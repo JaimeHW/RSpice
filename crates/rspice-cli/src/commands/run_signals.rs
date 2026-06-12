@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rspice_core::{
     Complex64, Value, analysis::AcResult, engine::TransientResult, netlist::SaveSet,
     solver::SimulationResult,
@@ -252,71 +250,3 @@ pub(crate) fn ac_signals(results: &[AcResult]) -> Vec<ComplexSignal> {
     signals
 }
 
-fn insert_case_variants<'a>(
-    signals: &mut HashMap<String, &'a [Value]>,
-    key: &str,
-    waveform: &'a [Value],
-) {
-    if key.is_empty() {
-        return;
-    }
-
-    signals.insert(key.to_string(), waveform);
-
-    let lower = key.to_ascii_lowercase();
-    if lower != key {
-        signals.insert(lower, waveform);
-    }
-
-    let upper = key.to_ascii_uppercase();
-    if upper != key {
-        signals.insert(upper, waveform);
-    }
-}
-
-fn insert_wrapped_voltage_variants<'a>(
-    signals: &mut HashMap<String, &'a [Value]>,
-    raw_name: &str,
-    waveform: &'a [Value],
-) {
-    if raw_name.is_empty() {
-        return;
-    }
-
-    for key in [
-        format!("V({raw_name})"),
-        format!("V({})", raw_name.to_ascii_lowercase()),
-        format!("V({})", raw_name.to_ascii_uppercase()),
-        format!("v({raw_name})"),
-        format!("v({})", raw_name.to_ascii_lowercase()),
-        format!("v({})", raw_name.to_ascii_uppercase()),
-    ] {
-        signals.insert(key, waveform);
-    }
-}
-
-pub(crate) fn insert_transient_measurement_aliases<'a>(
-    signals: &mut HashMap<String, &'a [Value]>,
-    result: &'a TransientResult,
-) {
-    for (index, waveform) in result.voltages.iter().enumerate() {
-        let fallback_index = index + 1;
-        let raw_name = result.node_names.get(index).map_or_else(
-            || fallback_index.to_string(),
-            |name| voltage_raw_name(name, fallback_index),
-        );
-        let display_name = format!("V({raw_name})");
-        let numeric_display = format!("V({fallback_index})");
-        let numeric_raw = fallback_index.to_string();
-
-        insert_wrapped_voltage_variants(signals, &raw_name, waveform.as_slice());
-        insert_case_variants(signals, &raw_name, waveform.as_slice());
-
-        if numeric_display != display_name {
-            insert_wrapped_voltage_variants(signals, &numeric_raw, waveform.as_slice());
-        }
-        if numeric_raw != raw_name {
-            insert_case_variants(signals, &numeric_raw, waveform.as_slice());
-        }
-    }
-}

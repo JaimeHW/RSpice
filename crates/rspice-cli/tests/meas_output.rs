@@ -68,6 +68,114 @@ fn meas_summary_displays_sub_microsecond_values() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Transient measurements can address the time axis (`FIND TIME WHEN`) and
+/// branch currents (`I(v1)`), and DC measurements evaluate against the sweep.
+#[test]
+fn time_current_and_dc_measurements_evaluate() {
+    let dir = test_dir("signals");
+    let deck = dir.join("rc_signals.sp");
+    // tau = 100ns; V(out) crosses 2.5V (half of 5V) at ln(2)*tau ~= 69.3ns.
+    std::fs::write(
+        &deck,
+        "* RC low-pass, time and current measurements\n\
+         V1 in 0 PULSE(0 5 0 1n 1n 1u 2u)\n\
+         R1 in out 1k\n\
+         C1 out 0 100p\n\
+         .TRAN 1n 2u\n\
+         .MEAS TRAN tcross FIND TIME WHEN V(out)=2.5\n\
+         .MEAS TRAN ipeak MIN I(v1)\n\
+         .END\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["run", deck.to_str().unwrap(), "--meas"]);
+    assert!(
+        output.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let tcross_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("TCROSS ="))
+        .unwrap_or_else(|| panic!("no TCROSS line in output:\n{stdout}"));
+    assert!(
+        !tcross_line.contains("FAILED"),
+        "TIME-based measurement must evaluate: {tcross_line}"
+    );
+    let tcross: f64 = tcross_line
+        .split('=')
+        .nth(1)
+        .expect("value field")
+        .trim()
+        .parse()
+        .expect("numeric tcross");
+    assert!(
+        (tcross - 6.93e-8).abs() < 2e-9,
+        "half-rail crossing should be ~ln(2)*tau = 69.3ns, got {tcross}"
+    );
+
+    // Charging current peaks at -5V/1k = -5mA (out of the source).
+    let ipeak_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("IPEAK ="))
+        .unwrap_or_else(|| panic!("no IPEAK line in output:\n{stdout}"));
+    assert!(
+        !ipeak_line.contains("FAILED"),
+        "current-based measurement must evaluate: {ipeak_line}"
+    );
+    let ipeak: f64 = ipeak_line
+        .split('=')
+        .nth(1)
+        .expect("value field")
+        .trim()
+        .parse()
+        .expect("numeric ipeak");
+    assert!(
+        (ipeak + 5e-3).abs() < 5e-4,
+        "peak charging current should be ~-5mA, got {ipeak}"
+    );
+
+    // DC sweep measurement: divider halves the swept source.
+    let dc_deck = dir.join("divider.sp");
+    std::fs::write(
+        &dc_deck,
+        "* divider\n\
+         V1 in 0 5\n\
+         R1 in out 1k\n\
+         R2 out 0 1k\n\
+         .DC V1 0 5 0.5\n\
+         .MEAS DC vhalf FIND V(out) AT=2.5\n\
+         .END\n",
+    )
+    .expect("write dc deck");
+    let output = run_rspice(&["run", dc_deck.to_str().unwrap(), "--meas"]);
+    assert!(
+        output.status.success(),
+        "dc run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let vhalf_line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("VHALF ="))
+        .unwrap_or_else(|| panic!("no VHALF line in output:\n{stdout}"));
+    let vhalf: f64 = vhalf_line
+        .split('=')
+        .nth(1)
+        .expect("value field")
+        .trim()
+        .parse()
+        .expect("numeric vhalf");
+    assert!(
+        (vhalf - 1.25).abs() < 1e-6,
+        "V(out) at V1=2.5 through the divider should be 1.25V, got {vhalf}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn meas_file_writers_keep_full_precision() {
     let dir = test_dir("files");

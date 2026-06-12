@@ -48,8 +48,11 @@ struct RunContext<'a> {
     verbose: bool,
     quiet: bool,
     /// .MEAS results collected while analyses run, for CI/CD reporting
-    /// (`--report-file` / `--meas-file`).
+    /// (`--report-file` / `--meas-file`) and the process exit status.
     measurements: std::cell::RefCell<Vec<MeasurementReport>>,
+    /// Analysis tags (upper-case) whose .MEAS statements were evaluated,
+    /// so leftover measurements can fail loudly instead of being skipped.
+    evaluated_meas: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 impl<'a> RunContext<'a> {
@@ -87,7 +90,80 @@ impl<'a> RunContext<'a> {
             verbose,
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
+            evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
         })
+    }
+
+    /// Record evaluated .MEAS results: print them under `--meas` and keep
+    /// them for report files and the exit status.
+    fn record_measurements(
+        &self,
+        analysis: &str,
+        results: Vec<rspice_core::MeasureResult>,
+    ) {
+        if results.is_empty() {
+            return;
+        }
+        self.evaluated_meas
+            .borrow_mut()
+            .insert(analysis.to_ascii_uppercase());
+
+        if self.args.meas && !self.quiet {
+            println!("  Measurement Results ({}, {}):", analysis, results.len());
+            for mr in &results {
+                match mr.value {
+                    Some(value) => println!(
+                        "    {} = {}",
+                        mr.name,
+                        crate::report::format_spice_exponent(value)
+                    ),
+                    None => println!(
+                        "    {} = FAILED ({})",
+                        mr.name,
+                        mr.error.as_deref().unwrap_or("not evaluated")
+                    ),
+                }
+            }
+        }
+
+        self.measurements
+            .borrow_mut()
+            .extend(results.into_iter().map(|mr| MeasurementReport {
+                name: mr.name,
+                value: mr.value,
+                expected: None,
+                tolerance: None,
+                passed: mr.value.is_some(),
+                error: mr.error,
+            }));
+    }
+
+    /// Convert .MEAS statements whose analysis never evaluated them into
+    /// explicit failures, so automation cannot mistake a skipped check for
+    /// a passing one.
+    fn record_unevaluated_measurements(&self) {
+        let mut analyses: Vec<String> = self
+            .netlist
+            .measurements
+            .iter()
+            .map(|m| m.analysis.to_ascii_uppercase())
+            .collect();
+        analyses.sort();
+        analyses.dedup();
+        analyses.retain(|analysis| !self.evaluated_meas.borrow().contains(analysis));
+
+        for analysis in analyses {
+            let reason = match analysis.as_str() {
+                "TRAN" | "DC" => format!("{analysis} analysis did not run"),
+                other => format!("{other} measurements are not supported by `rspice run` yet"),
+            };
+            let results = rspice_core::analysis::advanced::unevaluated_measurements(
+                self.netlist,
+                &analysis,
+                &reason,
+            );
+            self.record_measurements(&analysis, results);
+        }
     }
 
     /// Output path for one analysis.
@@ -356,6 +432,11 @@ fn run_deck(
             simulation_error = Some(e.to_string());
         }
     }
+
+    if args.meas && !quiet && netlist.measurements.is_empty() {
+        println!("  No .MEAS statements found in netlist");
+    }
+    ctx.record_unevaluated_measurements();
 
     let duration = start_time.elapsed().as_secs_f64();
     let passed = simulation_error.is_none();

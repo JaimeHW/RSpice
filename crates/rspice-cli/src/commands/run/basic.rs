@@ -3,11 +3,9 @@ use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
     dc_operating_point_current_signals, dc_operating_point_signals,
-    dc_operating_point_voltage_signals, insert_transient_measurement_aliases,
-    transient_voltage_signals,
+    dc_operating_point_voltage_signals, transient_voltage_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
-use rspice_core::Netlist;
 use std::path::Path;
 
 pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
@@ -279,6 +277,14 @@ pub(super) fn run_dc_sweep(
                 println!("DC Sweep: {} points computed", results.len());
             }
 
+            ctx.record_measurements(
+                "DC",
+                rspice_core::analysis::advanced::evaluate_dc_measurements(
+                    ctx.netlist,
+                    &results,
+                ),
+            );
+
             if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 let signals = crate::commands::run_signals::apply_save_set(
@@ -424,16 +430,13 @@ pub(super) fn run_transient(
                 );
             }
 
-            let collect_reports =
-                ctx.args.meas_file.is_some() || ctx.args.report_file.is_some();
-            if ctx.args.meas || collect_reports {
-                // Only print measurement results to stdout when --meas was given.
-                let print_quiet = ctx.quiet || !ctx.args.meas;
-                let reports = run_measurements(ctx.netlist, &result, print_quiet);
-                if collect_reports {
-                    ctx.measurements.borrow_mut().extend(reports);
-                }
-            }
+            ctx.record_measurements(
+                "TRAN",
+                rspice_core::analysis::advanced::evaluate_tran_measurements(
+                    ctx.netlist,
+                    &result,
+                ),
+            );
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {
                 let signals = crate::commands::run_signals::apply_save_set(
@@ -495,72 +498,6 @@ pub(super) fn run_transient(
         }
         Err(e) => Err(CliError::simulation_error_in(e.to_string(), "Transient")),
     }
-}
-
-pub(super) fn run_measurements(
-    netlist: &Netlist,
-    result: &rspice_core::engine::TransientResult,
-    quiet: bool,
-) -> Vec<crate::report::MeasurementReport> {
-    use crate::report::MeasurementReport;
-
-    let transient_measurements: Vec<_> = netlist
-        .measurements
-        .iter()
-        .filter(|measurement| measurement.analysis.eq_ignore_ascii_case("TRAN"))
-        .cloned()
-        .collect();
-
-    let mut signals: std::collections::HashMap<String, &[f64]> = std::collections::HashMap::new();
-    insert_transient_measurement_aliases(&mut signals, result);
-
-    let mut meas_engine = rspice_core::MeasureEngine::new();
-    for measurement in &transient_measurements {
-        meas_engine.add(measurement.clone());
-    }
-    let meas_results = meas_engine.evaluate(&result.time, &signals);
-
-    let mut reports = Vec::new();
-
-    if !quiet {
-        if meas_results.is_empty() && transient_measurements.is_empty() {
-            if netlist.measurements.is_empty() {
-                println!("  No .MEAS statements found in netlist");
-            } else {
-                println!("  No transient .MEAS statements found in netlist");
-            }
-        } else {
-            println!("  Measurement Results ({}):", meas_results.len());
-            for mr in &meas_results {
-                if let Some(value) = mr.value {
-                    println!(
-                        "    {} = {}",
-                        mr.name,
-                        crate::report::format_spice_exponent(value)
-                    );
-                } else {
-                    println!(
-                        "    {} = FAILED ({})",
-                        mr.name,
-                        mr.error.as_ref().unwrap_or(&String::new())
-                    );
-                }
-            }
-        }
-    }
-
-    for mr in meas_results {
-        reports.push(MeasurementReport {
-            name: mr.name,
-            value: mr.value,
-            expected: None,
-            tolerance: None,
-            passed: mr.value.is_some(),
-            error: mr.error,
-        });
-    }
-
-    reports
 }
 
 pub(super) fn run_fourier(

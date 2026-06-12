@@ -412,6 +412,7 @@ fn run_corner_with_lib(
         verbose: ctx.verbose,
         quiet: ctx.quiet,
         measurements: std::cell::RefCell::new(Vec::new()),
+        evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
     };
 
     let mut passed = true;
@@ -434,6 +435,7 @@ fn run_corner_with_lib(
     }
 
     // Surface this corner's measurements in CI reports under tagged names.
+    corner_ctx.record_unevaluated_measurements();
     let corner_measurements = corner_ctx.measurements.into_inner();
     ctx.measurements
         .borrow_mut()
