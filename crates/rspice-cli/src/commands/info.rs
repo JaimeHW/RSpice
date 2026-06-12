@@ -5,18 +5,7 @@ use rspice_core::Netlist;
 
 /// Execute the info command
 pub fn execute(args: InfoArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
-    if !args.input.exists() {
-        return Err(CliError::InputNotFound {
-            path: args.input.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
-        });
-    }
-
-    let netlist = Netlist::parse_file(&args.input).map_err(|e| CliError::ParseError {
-        message: e.to_string(),
-        line: None,
-        suggestion: None,
-    })?;
+    let netlist = crate::commands::parse_netlist_input(&args.input)?;
 
     if args.json {
         print_json(&netlist, &args)?;

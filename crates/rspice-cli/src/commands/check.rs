@@ -32,19 +32,15 @@ impl ValidationResult {
 
 /// Execute the check command
 pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliError> {
-    if !args.input.exists() {
-        return Err(CliError::InputNotFound {
-            path: args.input.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
-        });
-    }
-
     if !quiet {
         println!("Checking: {}", args.input.display());
     }
 
-    let netlist = match Netlist::parse_file(&args.input) {
+    let netlist = match crate::commands::parse_netlist_input(&args.input) {
         Ok(n) => n,
+        Err(e @ CliError::InputNotFound { .. } | e @ CliError::InputReadError { .. }) => {
+            return Err(e);
+        }
         Err(e) => {
             if args.json {
                 println!(
@@ -59,6 +55,10 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
     };
 
     let mut result = ValidationResult::default();
+
+    // Always-on topology checks: these decks produce singular systems, so
+    // catching them statically beats a NaN at runtime.
+    check_topology(&netlist, &mut result);
 
     if args.connectivity {
         check_connectivity(&netlist, &mut result);
@@ -88,6 +88,94 @@ pub fn execute(args: CheckArgs, _verbose: bool, quiet: bool) -> Result<(), CliEr
             "{} error(s)",
             result.errors.len()
         )))
+    }
+}
+
+/// Detect circuit topologies that make the MNA matrix singular:
+/// loops of ideal voltage sources (and DC-shorted inductors), and nodes
+/// whose only connections are current sources.
+fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
+    use rspice_core::netlist::ElementKind;
+
+    let canonical = |node: &str| -> String {
+        let lower = node.to_ascii_lowercase();
+        if lower == "gnd" { "0".to_string() } else { lower }
+    };
+
+    // Union-find over voltage-source/inductor edges: an edge that joins two
+    // already-connected nodes closes a loop the DC matrix cannot solve.
+    let mut parent: HashMap<String, String> = HashMap::new();
+    fn find(parent: &mut HashMap<String, String>, node: &str) -> String {
+        let mut current = node.to_string();
+        loop {
+            let up = parent
+                .entry(current.clone())
+                .or_insert_with(|| current.clone())
+                .clone();
+            if up == current {
+                return current;
+            }
+            let grand = parent.get(&up).cloned().unwrap_or_else(|| up.clone());
+            parent.insert(current, grand);
+            current = up;
+        }
+    }
+
+    for elem in &netlist.elements {
+        let is_vsrc_edge = matches!(
+            elem.kind,
+            ElementKind::VoltageSource(_) | ElementKind::Inductor { .. }
+        );
+        if !is_vsrc_edge || elem.nodes.len() < 2 {
+            continue;
+        }
+        let a = find(&mut parent, &canonical(&elem.nodes[0]));
+        let b = find(&mut parent, &canonical(&elem.nodes[1]));
+        if a == b {
+            result.errors.push(ValidationIssue {
+                message: format!(
+                    "'{}' closes a loop of voltage sources/inductors — the DC \
+                     system is singular",
+                    elem.name
+                ),
+                element: Some(elem.name.clone()),
+            });
+        } else {
+            parent.insert(a, b);
+        }
+    }
+
+    // A node touched only by current sources has no element defining its
+    // voltage; KCL there may even be unsatisfiable.
+    let mut only_current: HashMap<String, bool> = HashMap::new();
+    for elem in &netlist.elements {
+        let is_current_source = matches!(elem.kind, ElementKind::CurrentSource(_));
+        for node in &elem.nodes {
+            let node = canonical(node);
+            if node == "0" {
+                continue;
+            }
+            only_current
+                .entry(node)
+                .and_modify(|flag| *flag &= is_current_source)
+                .or_insert(is_current_source);
+        }
+    }
+    let mut current_only_nodes: Vec<&String> = only_current
+        .iter()
+        .filter(|(_, only)| **only)
+        .map(|(node, _)| node)
+        .collect();
+    current_only_nodes.sort();
+    for node in current_only_nodes {
+        result.warnings.push(ValidationIssue {
+            message: format!(
+                "node '{}' connects only to current sources; its voltage is \
+                 undefined without a conductive path",
+                node
+            ),
+            element: None,
+        });
     }
 }
 
@@ -157,7 +245,10 @@ fn output_json(result: &ValidationResult) {
         "errors": result.errors.iter().map(|e| serde_json::json!({"message": e.message})).collect::<Vec<_>>(),
         "warnings": result.warnings.iter().map(|w| serde_json::json!({"message": w.message, "element": w.element})).collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    match serde_json::to_string_pretty(&json) {
+        Ok(text) => println!("{text}"),
+        Err(e) => eprintln!("Error: failed to serialize check report: {e}"),
+    }
 }
 
 fn output_text(result: &ValidationResult, quiet: bool) {
