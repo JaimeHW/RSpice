@@ -453,7 +453,68 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
 }
 .canvas-status b { color: var(--text-dim); font-weight: 500; }
 
-/* states grid + figures arrive in later sections */
+/* ============================================================ anatomy */
+.anat { display: flex; gap: 44px; align-items: flex-start; }
+.anat-rail {
+  width: 288px; flex: none; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  position: relative; overflow: visible;
+}
+.zone { position: relative; }
+.zpip {
+  position: absolute; right: -32px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; border-radius: 50%; z-index: 2;
+  background: var(--accent); color: var(--accent-ink);
+  font: 600 10px/18px var(--font-mono); text-align: center;
+}
+.anat-legend { flex: 1; min-width: 0; max-width: 64ch; list-style: none; display: flex; flex-direction: column; gap: 11px; }
+.anat-legend li { display: flex; gap: 10px; font-size: var(--fs-1); color: var(--text-dim); text-wrap: pretty; }
+.anat-legend li b { color: var(--text); font-weight: 500; }
+.anat-legend .lpip {
+  flex: none; width: 18px; height: 18px; border-radius: 50%; margin-top: 1px;
+  background: var(--accent); color: var(--accent-ink);
+  font: 600 10px/18px var(--font-mono); text-align: center;
+}
+
+/* ============================================================ edge states */
+.stategrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-4); }
+@media (max-width: 1000px) { .stategrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.statecard { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-panel); overflow: hidden; display: flex; flex-direction: column; }
+.statebody { flex: 1; padding: 6px 0 10px; }
+.statecap { border-top: 1px solid var(--border); padding: 8px 12px; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); line-height: 1.5; }
+.statecap b { color: var(--text); font-weight: 500; }
+.pv-stage.errstage { border-color: var(--err); border-style: dashed; }
+.pv-stage .pv-err { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--err); }
+.ghost-btn {
+  display: inline-flex; align-items: center; justify-content: center; height: var(--ctl-h); padding: 0 9px;
+  border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-dim); font-size: var(--fs-1);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.ghost-btn:hover { background: var(--bg-hover); color: var(--text); }
+.pop-static { position: static; margin: 0 var(--sp-3) 6px; box-shadow: var(--shadow); }
+
+/* ============================================================ interaction map */
+.keytable { border-collapse: collapse; font-size: var(--fs-1); min-width: 560px; }
+.keytable th {
+  text-align: left; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.09em;
+  text-transform: uppercase; font-weight: 400; color: var(--text-faint);
+  padding: 6px 14px 6px 0; border-bottom: 1px solid var(--border-strong);
+}
+.keytable td { padding: 7px 14px 7px 0; border-bottom: 1px solid var(--border); color: var(--text-dim); vertical-align: baseline; }
+.keytable td:first-child { white-space: nowrap; }
+.keytable b { color: var(--text); font-weight: 500; }
+.tag { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; padding: 0 5px; border-radius: var(--radius); border: 1px solid; }
+.tag.today { color: var(--ok); border-color: var(--ok); background: var(--ok-dim); }
+.tag.new { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.tag.ext { color: var(--text-dim); border-color: var(--border-strong); background: none; }
+.flow { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin: var(--sp-3) 0 0; }
+.flow .fstep {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel);
+  font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim);
+}
+.flow .fstep b { color: var(--text); font-weight: 500; }
+.flow .farr { color: var(--text-faint); font-size: var(--fs-1); }
 </style>
 </head>
 <body>
@@ -604,6 +665,238 @@ section > h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: 4px; }
     <code>ShellState</code>, persisted with the workspace. The place strip reuses the
     <code>focus_cell_search</code> one-shot; Enter arms the same
     <code>Tool::Place</code> path the Place button uses today.
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ 02 · anatomy -->
+<section id="s-anatomy">
+  <div class="sec-label">02 · Anatomy</div>
+  <h2>Seven zones, one reading order</h2>
+  <p class="sec-note">
+    The rail reads top-to-bottom the way an engineer asks questions: <b>which context</b>
+    → <b>which cell</b> → <b>where in the hierarchy</b> → <b>what am I looking for</b> →
+    <b>the design itself</b> → <b>what do I place next</b>. The descended state shown here
+    is the busiest the rail ever gets — there is no fourth tab, no second accent, and
+    nothing that appears or disappears except the occurrence path, which is the one
+    state worth shouting about.
+  </p>
+
+  <div class="anat">
+    <div class="anat-rail" aria-label="Annotated navigator, descended into ota_5t">
+      <div class="zone"><span class="zpip">1</span>
+        <div class="rtabs"><button class="rtab" aria-selected="true">Navigator</button><button class="rtab" aria-selected="false">Library</button></div>
+      </div>
+      <div class="zone"><span class="zpip">2</span>
+        <div class="nameplate">
+          <div class="np-cell"><span class="lib">work_amp /</span><span class="cell">ota_5t</span><span class="viewchip">schematic</span></div>
+          <div class="np-meta">6 instances · 8 nets · 5 ports · sheet 1/1</div>
+        </div>
+      </div>
+      <div class="zone"><span class="zpip">3</span>
+        <div class="pathbar"><button class="crumb-btn">TOP</button><span class="psep">▸</span><span class="crumb-cur">X1</span>
+          <button class="ascend">↑ ascend <kbd>U</kbd></button></div>
+      </div>
+      <div class="zone"><span class="zpip">4</span>
+        <div class="dsearch"><div class="search-slot">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+          <input type="text" placeholder="find in design" aria-label="Find in design (figure)"><kbd>/</kbd>
+        </div></div>
+      </div>
+      <div class="zone"><span class="zpip">5</span>
+        <div class="seg"><button aria-pressed="true">Instances<span class="n">6</span></button><button aria-pressed="false">Nets<span class="n">8</span></button><button aria-pressed="false">Ports<span class="n">5</span></button></div>
+      </div>
+      <div class="zone"><span class="zpip">6</span>
+        <div class="tree" style="overflow:visible">
+          <button class="row open" style="--indent:0"><span class="twist">▶</span><span class="nm">ota_5t</span><span class="meta">6 inst</span></button>
+          <button class="row" style="--indent:1"><span class="twist"></span><span class="nm">M1</span><span class="meta">W 24µ</span></button>
+          <button class="row" aria-current="true" style="--indent:1"><span class="twist"></span><span class="nm">M2</span><span class="meta">W 24µ</span></button>
+          <button class="row" style="--indent:1"><span class="twist"></span><span class="nm">M5</span><span class="meta">W 8µ</span></button>
+          <button class="row open" style="--indent:1"><span class="twist">▶</span><span class="nm">XB</span><span class="descend" style="display:inline-flex">⌄ <span>E</span></span><span class="meta">bias_2t</span></button>
+          <button class="row ghost" style="--indent:2"><span class="guide" style="left:32px"></span><span class="twist"></span><span class="nm">MB1</span><span class="meta">W 4µ</span></button>
+          <button class="row ghost" style="--indent:2"><span class="guide" style="left:32px"></span><span class="twist"></span><span class="nm">RB</span><span class="meta">62k</span></button>
+          <button class="row ghost" style="--indent:2"><span class="guide" style="left:32px"></span><span class="twist"></span><span class="nm" style="color:var(--accent)">descend to edit ⌄</span></button>
+        </div>
+      </div>
+      <div class="zone"><span class="zpip">7</span>
+        <div class="place">
+          <div class="ph">Place <span class="spacer"></span><kbd>i</kbd></div>
+          <div class="cmd-slot"><span class="caret"></span><input type="text" placeholder="type to place — r, nmos, ota…" aria-label="Place command (figure)"></div>
+          <div class="chips"><button class="chip">Resistor</button><button class="chip">Capacitor</button><button class="chip">Ground</button><button class="chip armed">NMOS</button></div>
+        </div>
+      </div>
+    </div>
+
+    <ol class="anat-legend">
+      <li><span class="lpip">1</span><span><b>Context tabs.</b> Two contexts, never more: the design you are editing, the shelf
+        you place from. Both keep the place strip, so switching is rare by design.</span></li>
+      <li><span class="lpip">2</span><span><b>Nameplate.</b> Library, cell and view of the open sheet plus live counts — the
+        counts come from the same model as the tree, so they can never disagree with it.</span></li>
+      <li><span class="lpip">3</span><span><b>Occurrence path.</b> Appears only when descended — the single stateful surface,
+        and the only accent-washed one. Crumbs jump, <kbd>U</kbd> ascends. Maps 1:1 to
+        <code style="font-family:var(--font-mono);font-size:var(--fs-0)">workspace.hierarchy_stack</code>.</span></li>
+      <li><span class="lpip">4</span><span><b>Find in design.</b> One query across instances, nets and ports; matches are
+        marked in place, grouped by kind, and stay click-to-cross-probe.</span></li>
+      <li><span class="lpip">5</span><span><b>Kind segments.</b> Instance-centric and net-centric navigation are equal
+        citizens — Spectre users debug by net name as often as by instance.</span></li>
+      <li><span class="lpip">6</span><span><b>Hierarchy rows.</b> The twist peeks into a master (ghost rows, read-only —
+        cheap to look, impossible to edit by accident); <kbd>E</kbd> or double-click descends.
+        Meta column carries value or master, right-aligned, always mono.</span></li>
+      <li><span class="lpip">7</span><span><b>Place strip.</b> The most-used action in any schematic session gets permanent
+        geometry: command slot with typeahead, recents as chips. The armed chip is the
+        same accent-dim treatment as a pressed tool.</span></li>
+    </ol>
+  </div>
+
+  <div class="impl">
+    <b>Implementation.</b> Zones 2–3 are two short widgets over
+    <code>CellViewRef</code> + <code>hierarchy_stack</code>; zone 5 is a three-way
+    <code>seg</code> on the existing selection model; zone 6 extends
+    <code>TreeRow</code> with a twist slot and a ghost style — peek resolves the master
+    via <code>LibraryManager</code> exactly like <code>open_selected_instance_master()</code>
+    but renders instead of navigating. The descend affordance reuses the canvas gesture
+    in <code>schematic/view/interaction.rs</code>. Row heights stay
+    <code>t.metrics.row_h</code>, type stays FS_0/FS_1, and every fill in this figure is
+    an existing token from <code>ui/palette.rs</code> — no new colors were introduced.
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ 03 · edge states -->
+<section id="s-states">
+  <div class="sec-label">03 · Edge states</div>
+  <h2>The states that make a tool feel senior</h2>
+  <p class="sec-note">
+    Premium is mostly what happens when things are missing, locked, or wrong. Each state
+    below is reachable in the hero; none of them dead-ends — every empty or error state
+    carries its own way out.
+  </p>
+
+  <div class="stategrid">
+    <div class="statecard">
+      <div class="statebody">
+        <div class="dsearch"><div class="search-slot has-q">
+          <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>
+          <input type="text" value="lm393" aria-label="Search with no match (figure)"><button class="clear">×</button>
+        </div></div>
+        <div class="tree-empty">No match for “lm393” in tb_ota.<br><span class="lnk">Clear search</span></div>
+      </div>
+      <div class="statecap"><b>No match.</b> Says where it looked, offers the way back. Never an empty void.</div>
+    </div>
+
+    <div class="statecard">
+      <div class="statebody">
+        <button class="lib-grouph open"><span class="twist">▶</span>xfab_180
+          <span class="ro"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="1"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>ro</span>
+          <span class="n">2</span></button>
+        <button class="lrow"><span class="thumb"><svg width="26" height="16" viewBox="0 0 26 16"><rect x="6" y="2" width="14" height="12"/><path d="M1 5h5M1 11h5M20 5h5M20 11h5"/></svg></span>
+          <span class="nm">nch_18</span><span class="meta">symbol · model</span></button>
+        <button class="lrow"><span class="thumb"><svg width="26" height="16" viewBox="0 0 26 16"><rect x="6" y="2" width="14" height="12"/><path d="M1 5h5M1 11h5M20 5h5M20 11h5"/></svg></span>
+          <span class="nm">pch_18</span><span class="meta">symbol · model</span></button>
+      </div>
+      <div class="statecap"><b>Read-only library.</b> Placeable, never editable; descend opens read-only. Copy to work_amp to fork.</div>
+    </div>
+
+    <div class="statecard">
+      <div class="statebody">
+        <button class="row" aria-current="true" style="--indent:1"><span class="twist"></span><span class="pip err"></span><span class="nm">X9</span><span class="meta">ota_3t ?</span></button>
+        <div class="pv" style="border-top:none;min-height:0">
+          <div class="pv-stage errstage"><span class="pv-err">master not found</span></div>
+          <div class="pv-name"><span class="nm">X9</span><span class="lib">work_amp / ota_3t</span></div>
+          <div class="pv-meta"><span class="viewtag miss">view “schematic” missing from library</span></div>
+          <div class="pv-act"><button class="place-btn">Relink master…</button><button class="ghost-btn">Open library</button></div>
+        </div>
+      </div>
+      <div class="statecap"><b>Missing master.</b> Surfaced at load — not at netlist time, three steps later. The err pip is the netlist gutter's grammar.</div>
+    </div>
+
+    <div class="statecard">
+      <div class="statebody">
+        <div class="pathbar"><button class="crumb-btn">TOP</button><span class="psep">▸</span><button class="crumb-btn" title="X1 ▸ X3 ▸ X4">…</button><span class="psep">▸</span><button class="crumb-btn">X4</button><span class="psep">▸</span><span class="crumb-cur">XB</span>
+          <button class="ascend">↑ <kbd>U</kbd></button></div>
+        <div class="nameplate">
+          <div class="np-cell"><span class="lib">work_amp /</span><span class="cell">bias_2t</span><span class="viewchip">schematic</span></div>
+          <div class="np-meta">3 instances · 4 nets · 3 ports · sheet 1/1</div>
+        </div>
+      </div>
+      <div class="statecap"><b>Deep occurrence.</b> The path mid-collapses, never the endpoints — you always see TOP and where you stand. The ellipsis tooltip carries the middle.</div>
+    </div>
+
+    <div class="statecard">
+      <div class="statebody">
+        <button class="lib-grouph open"><span class="twist">▶</span>work_amp<span class="n">0</span></button>
+        <div class="lib-empty">No cells yet.<br><span class="lnk">New cell…</span> · <span class="lnk">Import netlist…</span></div>
+      </div>
+      <div class="statecap"><b>Empty project library.</b> The first-run state sells the workflow: a cell is one click away, importing a .cir is the other.</div>
+    </div>
+
+    <div class="statecard">
+      <div class="statebody">
+        <div class="popover pop-static">
+          <button class="pop-item active"><span class="thumb"><img src="../crates/rspice-ui/assets/component_symbols/mos_n_chan_enh_no_substrate.svg" alt=""></span>
+            <span class="nm"><mark>NM</mark>OS</span><span class="meta">Semiconductors</span></button>
+          <button class="pop-item"><span class="thumb"><img src="../crates/rspice-ui/assets/component_symbols/mos_n_chan_enh_body_diode_discrete.svg" alt=""></span>
+            <span class="nm"><mark>N</mark>-VDMOS</span><span class="meta">Semiconductors</span></button>
+        </div>
+        <div class="place" style="border-top:none">
+          <div class="cmd-slot" style="border-color:var(--accent)"><span class="caret"></span><input type="text" value="nm" aria-label="Place command with matches (figure)"></div>
+          <div class="chips"><button class="chip armed">NMOS</button><button class="chip">Resistor</button><button class="chip">Ground</button></div>
+        </div>
+      </div>
+      <div class="statecap"><b>Placing.</b> Typeahead is the one shadowed surface; <kbd>⏎</kbd> arms, the chip echoes the armed state, the canvas ghost snaps to grid until <kbd>Esc</kbd>.</div>
+    </div>
+  </div>
+
+  <div class="impl">
+    <b>Implementation.</b> Read-only rides the existing <code>show_read_only</code> +
+    per-library flag. Missing master is detectable at placement and at document load
+    (<code>binding.source_path</code> / view lookup) — today it surfaces as a netlist-gen
+    error in <code>netlist_gen/instances.rs</code>; the pip and relink card move that
+    error to where the user can act on it. Mid-collapse for the path is plain
+    string-width math at layout time, the same elision <code>TreeRow</code> already does
+    for names. Empty-library actions call <code>LibraryManager::create_cell</code> and
+    the existing netlist importer.
+  </div>
+</section>
+
+<!-- ════════════════════════════════════════════ 04 · interaction map -->
+<section id="s-keys">
+  <div class="sec-label">04 · Interaction map</div>
+  <h2>Keyboard-first, mouse-equal</h2>
+  <p class="sec-note">
+    Every rail action has a key, and every key has a mouse path of equal rank. Nothing
+    here invents a new grammar: <kbd>W</kbd>/<kbd>N</kbd>/<kbd>P</kbd> ship today,
+    descend extends the double-click the canvas already owns, and <kbd>i</kbd> extends
+    the Create-menu search focus that exists in the shell.
+  </p>
+
+  <table class="keytable">
+    <thead><tr><th>Key</th><th>Action</th><th>Mouse path</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>i</kbd></td><td><b>Focus the place command</b></td><td>click the command slot</td><td><span class="tag ext">extends</span></td></tr>
+      <tr><td><kbd>/</kbd></td><td><b>Find in design</b></td><td>click the search slot</td><td><span class="tag new">new</span></td></tr>
+      <tr><td><kbd>⏎</kbd></td><td><b>Arm placement</b> (top match / selected cell)</td><td>Place button · double-click row · chip</td><td><span class="tag ext">extends</span></td></tr>
+      <tr><td><kbd>E</kbd></td><td><b>Descend</b> into the selected instance</td><td>double-click row or canvas instance</td><td><span class="tag ext">extends</span></td></tr>
+      <tr><td><kbd>U</kbd></td><td><b>Ascend</b> one level</td><td>↑ ascend · path crumbs</td><td><span class="tag new">new</span></td></tr>
+      <tr><td><kbd>R</kbd></td><td><b>Rotate</b> the placement ghost</td><td>—</td><td><span class="tag today">ships</span></td></tr>
+      <tr><td><kbd>Esc</kbd></td><td><b>Cancel</b> placement · clear selection</td><td>right-click</td><td><span class="tag today">ships</span></td></tr>
+      <tr><td><kbd>W</kbd> <kbd>N</kbd> <kbd>P</kbd></td><td><b>Wire · net label · probe</b></td><td>canvas toolbar</td><td><span class="tag today">ships</span></td></tr>
+      <tr><td><kbd>drag</kbd></td><td><b>Resize rail</b> 232–520 px, double-click resets</td><td>grab the divider</td><td><span class="tag ext">extends</span></td></tr>
+    </tbody>
+  </table>
+
+  <div class="flow" aria-label="Placement in three beats">
+    <span class="fstep"><kbd>i</kbd> <b>nm</b> — typeahead ranks NMOS first</span><span class="farr">→</span>
+    <span class="fstep"><kbd>⏎</kbd> armed — ghost snaps to grid, <kbd>R</kbd> rotates</span><span class="farr">→</span>
+    <span class="fstep">click — drops <b>M6</b>, stays armed for the next</span><span class="farr">→</span>
+    <span class="fstep"><kbd>Esc</kbd> done — recents remember</span>
+  </div>
+
+  <div class="impl">
+    <b>Implementation.</b> All bindings route through the shell's existing shortcut
+    table; <kbd>E</kbd>/<kbd>U</kbd> call <code>open_selected_instance_master()</code> /
+    <code>focus_breadcrumb()</code> which both exist. Repeat-placement-until-Esc is the
+    current <code>Tool::Place</code> behavior, unchanged. The only new state the keymap
+    needs is the typeahead's active index — everything else is selection the rail
+    already tracks.
   </div>
 </section>
 
