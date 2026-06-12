@@ -192,7 +192,7 @@ rspice run filter.sp -D CLOAD=2.2p -o fast.csv -f csv
 
 ### `rspice info` — Netlist Information
 
-Display a netlist summary without running a simulation.
+Display a netlist summary without running a simulation. Accepts `-` for stdin.
 
 ```bash
 rspice info <NETLIST> [OPTIONS]
