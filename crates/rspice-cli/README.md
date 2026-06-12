@@ -48,9 +48,16 @@ Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G
 
 ### Measurements and the exit status
 
-`.MEAS TRAN` statements evaluate against the transient result (node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works); `.MEAS DC` statements evaluate against the DC sweep with the swept value as the abscissa; `.MEAS AC` statements evaluate against the AC sweep through the derived real series — `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` — with the frequency axis addressable as `FREQUENCY`, `FREQ`, or `TIME`. Results print under `--meas` and are always collected for report files.
+`.MEAS` statements evaluate for every analysis that produces data:
 
-**A failed measurement fails the run with exit code 3** — including measurements whose analysis never ran (and NOISE measurements, which `rspice run` cannot evaluate yet; they are recorded as explicit failures rather than skipped). Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
+- **TRAN** against the transient result — node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works
+- **DC** against the sweep, with the swept value as the abscissa
+- **AC** against the derived real series — `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` — with the frequency axis addressable as `FREQUENCY`, `FREQ`, or `TIME`
+- **NOISE** against the spectral densities `ONOISE`/`INOISE` (also `*_SPECTRUM`)
+
+Any statement may add `GOAL=value [TOL=value]`: a computed value that misses its goal fails the measurement (TOL defaults to max(1% of |goal|, 1e-12)). Results print under `--meas` and are always collected for report files.
+
+**A failed measurement fails the run with exit code 3** — a missed GOAL, an unevaluated statement, or a measurement whose analysis never ran. Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
 
 ### Output files for every mode
 
@@ -87,7 +94,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
 | `--summary <FILE>` | Write a JSON run summary — tool version, per-run status, every measurement, the result files written, overall verdict — to FILE, or stdout with `-` |
-| `--progress` | Show a live elapsed-time indicator during transient analysis |
+| `--progress` | Show a live percentage bar during transient analysis (the engine reports its completed fraction) |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
 
@@ -98,6 +105,9 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--timeout <SECONDS>` | Abort the run after this budget; exits 124. Transient and DC sweeps stop at the next safe point. Ctrl-C stops the same way and exits 130 |
 | `--allow-failed-meas` | Exit 0 even when `.MEAS` measurements fail (default: exit 3) |
 | `--allow-nonfinite` | Export results containing NaN/Inf instead of failing (default: simulation error) |
+| `--checkpoint <FILE>` | Save the transient integrator state when the run completes, for later `--resume` |
+| `--resume <FILE>` | Continue a transient from a saved checkpoint; the deck must be byte-identical (fingerprint-checked) and a segmented run reproduces the uninterrupted waveform |
+| `--tran-stop <TIME>` | Override the `.TRAN` stop time without editing the deck, so checkpoint segments share identical source |
 
 **Simulation options:**
 
@@ -124,7 +134,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 
 | Flag | Description |
 | :--- | :--- |
-| `--monte-carlo <N>` | Run N Monte Carlo iterations (operating-point variation) |
+| `--monte-carlo <N>` | Run N Monte Carlo iterations (operating-point variation); independent runs solve in parallel across cores with seed-stable sampling |
 | `--seed <SEED>` | Random seed for Monte Carlo; the default seed 1 makes runs reproducible (requires `--monte-carlo`) |
 | `--mc-distribution <D>` | Variation distribution: `gaussian` (default), `uniform`, `worst-case` |
 | `--mc-spread <S>` | Relative spread: sigma for gaussian, tolerance otherwise (default: 0.01) |
@@ -139,6 +149,8 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--sens-output <NODE>` | Sensitivity analysis output node (name or index) |
 | `--sens-param <PARAM>` | Parameter name for sensitivity analysis (requires `--sens-output`) |
 | `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
+| `--sparam <NODES>` | Two-port S-parameter extraction over the deck's `.AC` sweep: four port nodes as `"P1+,P1-,P2+,P2-"` (use `0` for grounded references). Writes Touchstone when `-o` ends in `.s2p`, else the standard complex table formats |
+| `--sparam-z0 <OHMS>` | S-parameter reference impedance (default: 50) |
 | `--corners <LIST>` | Process corners, comma-separated, e.g. `tt,ss,ff` |
 | `--corner-lib <FILE>` | Library with one `.lib <corner> ... .endl` section per corner; each corner re-elaborates the deck with its section applied (requires `--corners`) |
 | `-j, --jobs <N>` | Parallel workers for corner sweeps (default: 1). Corner outputs are tagged per corner so workers never collide; results are byte-identical to a serial sweep |
