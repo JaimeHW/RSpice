@@ -672,6 +672,44 @@ impl Engine {
         }
     }
 
+    /// Resolve the matrix slots every diode junction-charge companion will
+    /// stamp into; the pattern is frozen for the whole transient run.
+    pub(super) fn link_diode_companion_slots(
+        circuit: &crate::circuit::Circuit,
+        matrix: &crate::solver::StaticMatrix,
+    ) -> Vec<TwoTerminalStampSlots> {
+        circuit
+            .diodes
+            .devices
+            .iter()
+            .map(|diode| TwoTerminalStampSlots::link(matrix, diode.node_anode, diode.node_cathode))
+            .collect()
+    }
+
+    /// Resolve the matrix slots for the five MOSFET charge companions
+    /// (gate-source, gate-drain, gate-bulk, body-source, body-drain).
+    pub(super) fn link_mosfet_companion_slots(
+        circuit: &crate::circuit::Circuit,
+        matrix: &crate::solver::StaticMatrix,
+    ) -> Vec<[TwoTerminalStampSlots; 5]> {
+        circuit
+            .mosfets
+            .devices
+            .iter()
+            .map(|mos| {
+                let (bs_pos, bs_neg) = mos.body_source_charge_nodes();
+                let (bd_pos, bd_neg) = mos.body_drain_charge_nodes();
+                [
+                    TwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_source),
+                    TwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_drain),
+                    TwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_bulk),
+                    TwoTerminalStampSlots::link(matrix, bs_pos, bs_neg),
+                    TwoTerminalStampSlots::link(matrix, bd_pos, bd_neg),
+                ]
+            })
+            .collect()
+    }
+
     /// Stamp the diode junction-charge companions (ngspice dioload.c's
     /// `DIOcapCharge` integration). The charge is evaluated from the raw
     /// junction voltage: the conduction stamp's pnjlim limiting is a Newton
@@ -687,6 +725,7 @@ impl Engine {
         trap_order: u8,
         dt: Value,
         history: &DiodeTransientHistory,
+        slots: &[TwoTerminalStampSlots],
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, diode) in circuit.diodes.devices.iter().enumerate() {
@@ -706,14 +745,7 @@ impl Engine {
                 history.qd_prev_prev[idx],
                 history.cqd_prev[idx],
             );
-            Self::stamp_two_terminal_companion(
-                matrix,
-                rhs,
-                diode.node_anode,
-                diode.node_cathode,
-                geq,
-                ieq,
-            );
+            Self::stamp_two_terminal_companion_direct(matrix, rhs, &slots[idx], geq, ieq);
         }
     }
 
@@ -728,6 +760,7 @@ impl Engine {
         dt: Value,
         history: &MosfetTransientHistory,
         suppress_gate_charge: bool,
+        slots: &[[TwoTerminalStampSlots; 5]],
     ) {
         let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, mos) in circuit.mosfets.devices.iter().enumerate() {
@@ -753,11 +786,10 @@ impl Engine {
                     history.cqgs_prev[idx],
                 );
                 if geq_gs > 0.0 {
-                    Self::stamp_two_terminal_companion(
+                    Self::stamp_two_terminal_companion_direct(
                         matrix,
                         rhs,
-                        mos.node_gate,
-                        mos.node_source,
+                        &slots[idx][0],
                         geq_gs,
                         ieq_gs,
                     );
@@ -775,11 +807,10 @@ impl Engine {
                     history.cqgd_prev[idx],
                 );
                 if geq_gd > 0.0 {
-                    Self::stamp_two_terminal_companion(
+                    Self::stamp_two_terminal_companion_direct(
                         matrix,
                         rhs,
-                        mos.node_gate,
-                        mos.node_drain,
+                        &slots[idx][1],
                         geq_gd,
                         ieq_gd,
                     );
@@ -797,11 +828,10 @@ impl Engine {
                     history.cqgb_prev[idx],
                 );
                 if geq_gb > 0.0 {
-                    Self::stamp_two_terminal_companion(
+                    Self::stamp_two_terminal_companion_direct(
                         matrix,
                         rhs,
-                        mos.node_gate,
-                        mos.node_bulk,
+                        &slots[idx][2],
                         geq_gb,
                         ieq_gb,
                     );
@@ -813,8 +843,6 @@ impl Engine {
             let (qbs_curr, cbs) = mos.body_source_junction_charge_and_capacitance_at(vbs_eval);
             let (qbd_curr, cbd) =
                 mos.body_drain_junction_charge_and_capacitance_at(vds_eval, vbs_eval);
-            let (bs_pos, bs_neg) = mos.body_source_charge_nodes();
-            let (bd_pos, bd_neg) = mos.body_drain_charge_nodes();
 
             let (geq_bs, ieq_bs, _qbs_curr, _cqbs_curr) = Self::nonlinear_charge_companion_terms(
                 effective_method,
@@ -828,7 +856,13 @@ impl Engine {
                 history.cqbs_prev[idx],
             );
             if geq_bs > 0.0 {
-                Self::stamp_two_terminal_companion(matrix, rhs, bs_pos, bs_neg, geq_bs, ieq_bs);
+                Self::stamp_two_terminal_companion_direct(
+                    matrix,
+                    rhs,
+                    &slots[idx][3],
+                    geq_bs,
+                    ieq_bs,
+                );
             }
 
             let (geq_bd, ieq_bd, _qbd_curr, _cqbd_curr) = Self::nonlinear_charge_companion_terms(
@@ -843,7 +877,13 @@ impl Engine {
                 history.cqbd_prev[idx],
             );
             if geq_bd > 0.0 {
-                Self::stamp_two_terminal_companion(matrix, rhs, bd_pos, bd_neg, geq_bd, ieq_bd);
+                Self::stamp_two_terminal_companion_direct(
+                    matrix,
+                    rhs,
+                    &slots[idx][4],
+                    geq_bd,
+                    ieq_bd,
+                );
             }
         }
     }

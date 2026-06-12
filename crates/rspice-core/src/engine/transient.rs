@@ -31,6 +31,7 @@ fn newton_merit_debug_enabled() -> bool {
 mod breakpoints;
 mod checkpoint;
 mod companion_stamps;
+pub(self) use companion_stamps::TwoTerminalStampSlots;
 mod globalization;
 mod noise;
 mod rescue;
@@ -856,6 +857,11 @@ impl Engine {
         let mut diode_history = Self::initialize_diode_history(&circuit, &solution);
         diode_history.accepted_dt_prev = hinted_max_step;
         diode_history.accepted_dt_prev_prev = hinted_max_step;
+        // Companion stamp slots resolved once against the frozen pattern:
+        // the per-iteration charge companions then stamp through direct CSC
+        // indices instead of a hash lookup per matrix entry.
+        let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
+        let mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
@@ -1279,7 +1285,9 @@ impl Engine {
                         bjt_history: &bjt_history,
                         jfet_history: &jfet_history,
                         diode_history: &diode_history,
+                        diode_companion_slots: &diode_companion_slots,
                         mosfet_history: &mosfet_history,
+                        mosfet_companion_slots: &mosfet_companion_slots,
                         b3soi_history: &b3soi_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
@@ -1602,7 +1610,9 @@ impl Engine {
                                 bjt_history: &bjt_history,
                                 jfet_history: &jfet_history,
                                 diode_history: &diode_history,
+                                diode_companion_slots: &diode_companion_slots,
                                 mosfet_history: &mosfet_history,
+                                mosfet_companion_slots: &mosfet_companion_slots,
                                 b3soi_history: &b3soi_history,
                                 suppress_gate_charge,
                                 tline_dc_refs: &tline_dc_refs,
@@ -1685,7 +1695,9 @@ impl Engine {
                             bjt_history: &bjt_history,
                             jfet_history: &jfet_history,
                             diode_history: &diode_history,
+                            diode_companion_slots: &diode_companion_slots,
                             mosfet_history: &mosfet_history,
+                            mosfet_companion_slots: &mosfet_companion_slots,
                             b3soi_history: &b3soi_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,

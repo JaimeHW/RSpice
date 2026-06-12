@@ -18,7 +18,9 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) bjt_history: &'a BjtTransientHistory,
     pub(super) jfet_history: &'a JfetTransientHistory,
     pub(super) diode_history: &'a DiodeTransientHistory,
+    pub(super) diode_companion_slots: &'a [TwoTerminalStampSlots],
     pub(super) mosfet_history: &'a MosfetTransientHistory,
+    pub(super) mosfet_companion_slots: &'a [[TwoTerminalStampSlots; 5]],
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
     pub(super) suppress_gate_charge: bool,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
@@ -117,6 +119,7 @@ impl Engine {
             ctx.trap_order,
             dt,
             ctx.diode_history,
+            ctx.diode_companion_slots,
         );
         Self::stamp_mosfet_transient_companions(
             circuit,
@@ -128,6 +131,7 @@ impl Engine {
             dt,
             ctx.mosfet_history,
             ctx.suppress_gate_charge,
+            ctx.mosfet_companion_slots,
         );
         Self::stamp_b3soi_transient_companions(
             circuit,
@@ -346,6 +350,8 @@ Q1 C B E 0 QN
         let coeff = CompanionCoefficients::for_method(Engine::effective_companion_method(
             method, trap_order,
         ));
+        let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+        let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
             method,
@@ -353,7 +359,9 @@ Q1 C B E 0 QN
             bjt_history: &bjt_history,
             jfet_history: &jfet_history,
             diode_history: &diode_history,
+            diode_companion_slots: &diode_companion_slots,
             mosfet_history: &mosfet_history,
+            mosfet_companion_slots: &mosfet_companion_slots,
             b3soi_history: &b3soi_history,
             suppress_gate_charge: false,
             tline_dc_refs: &tline_dc_refs,
@@ -751,6 +759,8 @@ Q1 C B E 0 QN
                 engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
             );
             let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
+            let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
+            let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
                 method: IntegrationMethod::BackwardEuler,
@@ -758,7 +768,9 @@ Q1 C B E 0 QN
                 bjt_history: &bjt_history,
                 jfet_history: &jfet_history,
                 diode_history: &diode_history,
+                diode_companion_slots: &diode_companion_slots,
                 mosfet_history: &mosfet_history,
+                mosfet_companion_slots: &mosfet_companion_slots,
                 b3soi_history: &b3soi_history,
                 suppress_gate_charge: false,
                 tline_dc_refs: &tline_dc_refs,
