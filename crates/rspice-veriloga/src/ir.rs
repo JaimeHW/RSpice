@@ -625,13 +625,26 @@ impl DeviceIR {
         // parameters) may participate in topology guards
         let static_vars = Self::compute_instance_static_vars(&ir.assignments, &ir.variables);
 
+        // Shadow liveness roots: only variables that contribution
+        // expressions (the equation Jacobians chain through them) or
+        // ddx() operands read need derivative shadows. Everything else —
+        // operating-point reporting variables above all — keeps its
+        // primal value but never costs shadow slots or updates.
+        let mut shadow_roots: HashSet<SmolStr> = HashSet::new();
+        for contrib in &module.contributions {
+            let expr = converter.convert(&contrib.expression)?;
+            autodiff::collect_var_names(&expr, &mut shadow_roots);
+        }
+        autodiff::collect_ddx_operand_names(&ir.assignments, &mut shadow_roots);
+
         // Forward-mode AD over the assignment sequence: build shadow
         // assignments holding each variable's partial derivative w.r.t.
         // every node voltage and branch-current unknown, so equation
         // Jacobians chain through intermediate variables. Shadow updates
         // recurse into loop bodies so loop-carried dependencies
         // differentiate correctly.
-        let shadows = autodiff::build_shadow_assignments(&mut ir, num_nodes, num_branches);
+        let shadows =
+            autodiff::build_shadow_assignments(&mut ir, num_nodes, num_branches, &shadow_roots);
 
         // Resolve ddx() operators now that the shadow context exists
         autodiff::resolve_ddx_in_items(&mut ir.assignments, &shadows);
@@ -1455,6 +1468,47 @@ pub mod autodiff {
             .chain((0..num_branches).map(DerivativeWrt::BranchCurrent))
     }
 
+    /// Collect every variable (and array) name an expression reads
+    pub(crate) fn collect_var_names(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
+        map_expr(expr, &mut |e| {
+            match e {
+                IrExpr::Var(name) => {
+                    out.insert(name.clone());
+                }
+                IrExpr::VarIndexed { array, .. } => {
+                    out.insert(array.clone());
+                }
+                _ => {}
+            }
+            None
+        });
+    }
+
+    /// Collect variable names appearing inside ddx() operands across an
+    /// assignment tree (their derivative resolution reads shadows)
+    pub(crate) fn collect_ddx_operand_names(
+        items: &[IrAssignmentItem],
+        out: &mut HashSet<SmolStr>,
+    ) {
+        fn scan(expr: &IrExpr, out: &mut HashSet<SmolStr>) {
+            map_expr(expr, &mut |e| {
+                if let IrExpr::Ddx { expr, .. } = e {
+                    collect_var_names(expr, out);
+                }
+                None
+            });
+        }
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => scan(&assign.expr, out),
+                IrAssignmentItem::Loop { condition, body } => {
+                    scan(condition, out);
+                    collect_ddx_operand_names(body, out);
+                }
+            }
+        }
+    }
+
     /// Check whether an expression can have a nonzero derivative along any
     /// node/branch axis, directly or through already-shadowed variables.
     ///
@@ -1592,6 +1646,43 @@ pub mod autodiff {
         }
     }
 
+    /// Backward liveness step for shadow pruning: every variable read by
+    /// an assignment to a live variable becomes live (indexed writes use
+    /// the array name; the caller expands families afterwards)
+    fn propagate_liveness(
+        items: &[IrAssignmentItem],
+        variables: &[VarDef],
+        live: &mut HashSet<SmolStr>,
+        changed: &mut bool,
+    ) {
+        for item in items {
+            match item {
+                IrAssignmentItem::Assign(assign) => {
+                    let target_live = match &assign.index {
+                        Some(target) => live.contains(&target.array),
+                        None => live.contains(&variables[assign.var_index].name),
+                    };
+                    if !target_live {
+                        continue;
+                    }
+                    let mut reads = HashSet::new();
+                    collect_var_names(&assign.expr, &mut reads);
+                    if let Some(target) = &assign.index {
+                        collect_var_names(&target.index, &mut reads);
+                    }
+                    for name in reads {
+                        if live.insert(name) {
+                            *changed = true;
+                        }
+                    }
+                }
+                IrAssignmentItem::Loop { body, .. } => {
+                    propagate_liveness(body, variables, live, changed);
+                }
+            }
+        }
+    }
+
     /// Interleave shadow derivative updates before each original
     /// assignment, recursing into loop bodies so loop-carried voltage
     /// dependencies accumulate their derivatives per iteration
@@ -1684,6 +1775,7 @@ pub mod autodiff {
         ir: &mut DeviceIR,
         num_nodes: usize,
         num_branches: usize,
+        shadow_roots: &HashSet<SmolStr>,
     ) -> ShadowContext {
         // Fixpoint: a variable depends on an axis if any assignment to it
         // reads a probe of that axis or another variable depending on it.
@@ -1702,6 +1794,38 @@ pub mod autodiff {
                 break;
             }
         }
+
+        // Backward liveness: a shadow matters only when the equation
+        // Jacobians can reach it — the variable feeds a contribution (or
+        // ddx operand) directly, or feeds an assignment to a live
+        // variable. Dead shadows (operating-point reporting chains) are
+        // dropped before any slot is allocated.
+        let mut live: HashSet<SmolStr> = shadow_roots.clone();
+        loop {
+            let mut changed = false;
+            propagate_liveness(&ir.assignments, &ir.variables, &mut live, &mut changed);
+            // Array families share their mask; share liveness the same
+            // way (one live element keeps the whole family)
+            for array in &ir.arrays {
+                let family_live = live.contains(&array.name)
+                    || (array.lower..array.lower + array.len as i64)
+                        .any(|k| live.contains(format!("{}[{k}]", array.name).as_str()));
+                if family_live && live.insert(array.name.clone()) {
+                    changed = true;
+                }
+                if family_live {
+                    for k in array.lower..array.lower + array.len as i64 {
+                        if live.insert(format!("{}[{k}]", array.name).into()) {
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        deps.retain(|name, _| live.contains(name));
 
         if deps.is_empty() {
             return ShadowContext::default();
