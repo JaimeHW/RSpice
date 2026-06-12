@@ -1,0 +1,34 @@
+# Measure gates for ltra2_2_line (validation-manifest contract: measures).
+#
+# Why measures: the LTRA convolution kernel is pinned to <1e-6 against
+# ngspice's own committed history (device::transmission_line oracle
+# replay), but the mV-scale post-edge tails of this two-stage deck are
+# chaotic amplifications of sub-reltol Newton differences through the
+# convolution memory: ngspice-46's own tail values move 22-52 percent
+# when tmax is refined 2-8x, and RSpice's fine-step values match
+# ngspice's fine-step values to ~0.05 percent. Pointwise tail samples
+# therefore measure grid reproduction, not physics. These gates assert
+# the engineering content: edge timing through both line stages and
+# settled logic levels, with 50 mV (1 percent of the 5 V swing) level
+# floors that still fail on any real level error.
+#
+# Source: VS pulses 0->5 V at 15.9 ns (0.2 ns edges), falls at 31.9 ns.
+# v(2) = first driver output (inverts VS), v(3) = far end of line 1,
+# v(4) = second driver output (inverts v(3)), v(5) = far end of line 2.
+# Line delay TD = sqrt(L*C)*len = 1.037 ns per stage.
+v(2)	cross	level=2.5	dir=fall	n=1	tol=200e-12
+v(2)	cross	level=2.5	dir=rise	n=1	tol=200e-12
+v(3)	cross	level=2.5	dir=fall	n=1	tol=300e-12
+v(3)	cross	level=2.5	dir=rise	n=1	tol=300e-12
+v(4)	cross	level=2.5	dir=rise	n=1	tol=400e-12
+v(4)	cross	level=2.5	dir=fall	n=1	tol=400e-12
+v(5)	cross	level=2.5	dir=rise	n=1	tol=500e-12
+v(5)	cross	level=2.5	dir=fall	n=1	tol=500e-12
+v(2)	mean	t0=22e-9	t1=30e-9	tol_abs=0.05
+v(3)	mean	t0=22e-9	t1=30e-9	tol_abs=0.05
+v(4)	mean	t0=22e-9	t1=30e-9	tol_abs=0.05
+v(5)	mean	t0=22e-9	t1=30e-9	tol_abs=0.05
+v(2)	mean	t0=40e-9	t1=46e-9	tol_abs=0.05
+v(3)	mean	t0=40e-9	t1=46e-9	tol_abs=0.05
+v(4)	mean	t0=40e-9	t1=46e-9	tol_abs=0.05
+v(5)	mean	t0=40e-9	t1=46e-9	tol_abs=0.05
