@@ -123,10 +123,13 @@ impl Engine {
             }
         }
 
+        // Phase 1 (serial): draw every run's variations from the seeded
+        // stream and build the perturbed netlists. Sampling order is
+        // byte-identical to the historical serial implementation, so a
+        // given seed reproduces the same runs regardless of how phase 2
+        // schedules them.
         let mut rng = Xorshift128Plus::new(seed);
-        let mut results = Vec::with_capacity(num_runs);
-        let mut first_node_names: Option<Vec<String>> = None;
-
+        let mut run_netlists = Vec::with_capacity(num_runs);
         for _run in 0..num_runs {
             let netlist_for_run = if monte_params.is_empty() {
                 netlist.clone()
@@ -142,18 +145,66 @@ impl Engine {
                 let (perturbed, _) = Self::create_perturbed_netlist_multi(netlist, &overrides)?;
                 perturbed
             };
+            run_netlists.push(netlist_for_run);
+        }
 
-            match self.run_dc_op(&netlist_for_run) {
-                Ok(result) => {
-                    if first_node_names.is_none() {
-                        first_node_names = Some(result.node_names.clone());
-                    }
-                    results.push(result.node_voltages.clone());
-                }
-                Err(_) => {
-                    // Skip failed runs
-                }
+        // Phase 2 (parallel): solve the independent runs across worker
+        // threads, each with its own engine. Index-addressed slots keep
+        // results in run order, so statistics match a serial sweep exactly;
+        // failed runs are skipped just as before.
+        let workers = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+            .min(num_runs.max(1));
+        let mut run_outcomes: Vec<Option<(Vec<Value>, Vec<String>)>> = Vec::new();
+        if workers <= 1 {
+            for run_netlist in &run_netlists {
+                run_outcomes.push(
+                    self.run_dc_op(run_netlist)
+                        .ok()
+                        .map(|result| (result.node_voltages, result.node_names)),
+                );
             }
+        } else {
+            use std::sync::Mutex;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            let next = AtomicUsize::new(0);
+            let slots: Vec<Mutex<Option<(Vec<Value>, Vec<String>)>>> =
+                (0..run_netlists.len()).map(|_| Mutex::new(None)).collect();
+            let config = self.config().clone();
+
+            std::thread::scope(|scope| {
+                for _ in 0..workers {
+                    scope.spawn(|| {
+                        let engine = Self::new(config.clone());
+                        loop {
+                            let index = next.fetch_add(1, Ordering::SeqCst);
+                            if index >= run_netlists.len() {
+                                break;
+                            }
+                            if let Ok(result) = engine.run_dc_op(&run_netlists[index]) {
+                                *slots[index].lock().expect("mc slot") =
+                                    Some((result.node_voltages, result.node_names));
+                            }
+                        }
+                    });
+                }
+            });
+
+            run_outcomes = slots
+                .into_iter()
+                .map(|slot| slot.into_inner().expect("mc slot lock"))
+                .collect();
+        }
+
+        let mut results = Vec::with_capacity(num_runs);
+        let mut first_node_names: Option<Vec<String>> = None;
+        for (node_voltages, node_names) in run_outcomes.into_iter().flatten() {
+            if first_node_names.is_none() {
+                first_node_names = Some(node_names);
+            }
+            results.push(node_voltages);
         }
 
         // Compute statistics for each non-ground node.
