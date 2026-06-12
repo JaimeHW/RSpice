@@ -9,6 +9,7 @@ pub(super) fn parse_command(
 ) -> Result<(), ParseError> {
     let ParseCommandContext {
         analyses,
+        unknown_warned,
         models,
         params,
         initial_conditions,
@@ -160,7 +161,7 @@ pub(super) fn parse_command(
             analyses.push(parse_tf_command(stream, line_num)?);
         }
         ".OPTIONS" | ".OPTION" | ".OPT" => {
-            parse_options_command(stream, line_num, params, options)?;
+            parse_options_command(stream, line_num, params, options, unknown_warned)?;
         }
         ".MEAS" | ".MEASURE" => {
             // Parse measurement statement: .MEAS TRAN name TYPE signal [options]
@@ -175,8 +176,15 @@ pub(super) fn parse_command(
             parse_save_command(stream, line_num, saves, true)?;
         }
         _ => {
-            // Ignore unknown commands
-            log::debug!("Ignoring unknown command: {}", cmd);
+            // An unrecognized dot-command means whatever it requests will not
+            // happen; that must be visible, not a debug-level whisper.
+            let key = cmd.to_ascii_uppercase();
+            if unknown_warned.insert(key) {
+                log::warn!(
+                    "line {line_num}: unsupported dot-command '{cmd}' ignored - \
+                     whatever it requests (analysis, option, output) will not run"
+                );
+            }
         }
     }
 
@@ -410,6 +418,7 @@ pub(super) fn parse_options_command(
     line_num: usize,
     params: &ParamContext,
     options: &mut super::SimulationOptions,
+    unknown_warned: &mut std::collections::HashSet<String>,
 ) -> Result<(), ParseError> {
     while !stream.is_eof() {
         skip_commas(stream);
@@ -483,7 +492,15 @@ pub(super) fn parse_options_command(
                 options.allow_simplified_mos = Some(enabled);
             }
             _ => {
-                // Unknown option: allow bare flags; consume value only when explicitly assigned.
+                // Unknown option: allow bare flags; consume value only when
+                // explicitly assigned. Silently swallowing tolerance or
+                // compatibility knobs misleads users into thinking they took
+                // effect, so say so once per key.
+                if unknown_warned.insert(format!(".options {key_upper}")) {
+                    log::warn!(
+                        "line {line_num}: unknown .options key '{key}' ignored"
+                    );
+                }
                 if has_equals
                     && try_value(stream, params).is_none()
                     && matches!(stream.peek().kind, TokenKind::Ident(_))

@@ -29,6 +29,9 @@ pub(super) struct ParseState {
     pub(super) subckt_stack: Vec<SubcktFrame>,
     /// Open `.if`/`.elseif`/`.else` blocks, innermost last.
     pub(super) conditional_stack: Vec<ConditionalFrame>,
+    /// Unknown dot-commands and `.options` keys already warned about, so a
+    /// deck repeating one card does not flood the log.
+    pub(super) unknown_warned: HashSet<String>,
 }
 
 impl ParseState {
@@ -49,6 +52,7 @@ impl ParseState {
             options: super::SimulationOptions::default(),
             subckt_stack: Vec::new(),
             conditional_stack: Vec::new(),
+            unknown_warned: HashSet::new(),
         }
     }
 
@@ -92,6 +96,7 @@ impl ParseState {
 
 pub(super) struct ParseLineContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,
     pub(super) node_sets: &'a mut Vec<NodeSet>,
@@ -103,6 +108,7 @@ pub(super) struct ParseLineContext<'a> {
 
 pub(super) struct ParseCommandContext<'a> {
     pub(super) analyses: &'a mut Vec<AnalysisCommand>,
+    pub(super) unknown_warned: &'a mut HashSet<String>,
     pub(super) models: &'a mut Vec<ModelDef>,
     pub(super) params: &'a mut ParamContext,
     pub(super) initial_conditions: &'a mut Vec<InitialCondition>,

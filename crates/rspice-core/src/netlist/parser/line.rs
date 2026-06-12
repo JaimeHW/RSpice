@@ -200,6 +200,7 @@ pub(super) fn process_line(
 
         {
             let analyses = &mut state.analyses;
+            let unknown_warned = &mut state.unknown_warned;
             let models = &mut state.models;
             let initial_conditions = &mut state.initial_conditions;
             let node_sets = &mut state.node_sets;
@@ -223,6 +224,7 @@ pub(super) fn process_line(
                 &mut dummy_measurements,
                 ParseLineContext {
                     analyses,
+                    unknown_warned,
                     models,
                     initial_conditions,
                     node_sets,
@@ -247,6 +249,7 @@ pub(super) fn process_line(
         &mut state.measurements,
         ParseLineContext {
             analyses: &mut state.analyses,
+            unknown_warned: &mut state.unknown_warned,
             models: &mut state.models,
             initial_conditions: &mut state.initial_conditions,
             node_sets: &mut state.node_sets,
@@ -269,6 +272,7 @@ pub(super) fn parse_line(
 ) -> Result<(), ParseError> {
     let ParseLineContext {
         analyses,
+        unknown_warned,
         models,
         initial_conditions,
         node_sets,
@@ -307,6 +311,7 @@ pub(super) fn parse_line(
             line_num,
             ParseCommandContext {
                 analyses,
+                unknown_warned,
                 models,
                 params,
                 initial_conditions,
