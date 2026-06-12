@@ -1,0 +1,870 @@
+<!doctype html>
+<!--
+  VOLTA — Schematic editor: canvas & document bar
+  ································································
+  The desktop schematic editor center view. Until now this surface was
+  designed directly in code; this file makes it a design of record.
+
+  Sources of truth ported here:
+    · crates/rspice-ui/src/shell/views/schematic.rs   (docbar, breadcrumb, ERC pill)
+    · crates/rspice-ui/src/schematic/view/*           (canvas, violations, previews)
+    · crates/rspice-ui/src/common/app/app_shortcuts/* (bindings)
+  Companions:
+    · design/app/volta-schematic-rail.html  (left rail: navigator · library · place strip)
+    · design/app/volta-symbols.html         (terminal-grid symbol artwork, reused verbatim)
+    · design/app/volta-dialogs.html §05     (instance properties dialog, opened by E)
+  Status tags: "ships" = implemented today · "spec" = proposed here, not yet built.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOLTA — Schematic editor: canvas &amp; document bar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+/* ───────────────────────── tokens (volta-schematic-rail.html lineage) ── */
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --fs-0: 11px; --fs-1: 12px; --fs-2: 13px; --fs-3: 14px; --fs-4: 16px;
+  --ctl-h: 24px; --row-h: 26px; --t-fast: 0.16s; --t-med: 0.22s;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 2px; --radius-lg: 3px;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #11171B; --bg-panel: #1A2024; --bg-inset: #0B1115;
+  --bg-elevated: #21292E; --bg-hover: #262E33; --bg-active: #2E3A41;
+  --border: #2B3136; --border-strong: #444C50;
+  --text: #D7DBDE; --text-dim: #93999E; --text-faint: #646A6E;
+  --accent: #F2B824; --accent-ink: #17181A; --accent-dim: rgba(242,184,36,0.13);
+  --ok: #65D68A; --warn: #EA9344; --err: #E06C5A;
+  --ok-dim: rgba(101,214,138,0.12); --err-dim: rgba(224,108,90,0.13);
+  --warn-dim: rgba(234,147,68,0.13);
+  --canvas-bg: #070C10; --canvas-grid: #1C2327;
+  --wire: #7FBF95; --symbol: #C9D2D8; --net-label: #DCB155;
+  --shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #E8ECEE; --bg-panel: #F5F7F8; --bg-inset: #E1E5E7;
+  --bg-elevated: #FBFDFE; --bg-hover: #E6EAED; --bg-active: #D4DCE2;
+  --border: #D1D5D8; --border-strong: #A6ACAF;
+  --text: #1F2528; --text-dim: #53595D; --text-faint: #7F8487;
+  --accent: #8F6400; --accent-ink: #FCFAF6; --accent-dim: rgba(143,100,0,0.10);
+  --ok: #007C3A; --warn: #C26E12; --err: #C03A28;
+  --ok-dim: rgba(0,124,58,0.10); --err-dim: rgba(192,58,40,0.10);
+  --warn-dim: rgba(194,110,18,0.12);
+  --canvas-bg: #FBFDFE; --canvas-grid: #DFE5E8;
+  --wire: #724E00; --symbol: #2C3135; --net-label: #6F5600;
+  --shadow: 0 6px 24px rgba(3,4,5,0.18);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-ui); font-size: var(--fs-2); line-height: 1.55;
+  background: var(--bg-app); color: var(--text);
+  transition: background var(--t-med) ease, color var(--t-med) ease;
+}
+
+/* ───────────────────────── spec-document scaffold ── */
+header.mast { max-width: 1240px; margin: 0 auto; padding: 48px var(--sp-5) 8px; }
+.brand { font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.18em; color: var(--accent); }
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; margin: var(--sp-2) 0 var(--sp-3); }
+.lede { color: var(--text-dim); max-width: 76ch; text-wrap: pretty; }
+.mast-row { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); flex-wrap: wrap; }
+.src { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); }
+section { padding: 44px var(--sp-5) 0; max-width: 1240px; margin: 0 auto; }
+section:last-of-type { padding-bottom: 88px; }
+.kicker { font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--sp-2); }
+h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: var(--sp-3); }
+h3 { font-size: var(--fs-2); font-weight: 600; margin: var(--sp-5) 0 var(--sp-2); }
+p.note { color: var(--text-dim); font-size: var(--fs-1); max-width: 76ch; margin-top: var(--sp-2); text-wrap: pretty; }
+table.spec { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); font-size: var(--fs-1); }
+table.spec th { text-align: left; font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border-strong); }
+table.spec td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-dim); }
+table.spec td:first-child { font-family: var(--font-mono); color: var(--text); white-space: nowrap; }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; border-radius: 999px; padding: 1px 8px; vertical-align: 1px; }
+.tag.today { color: var(--ok); background: var(--ok-dim); border: 1px solid transparent; }
+.tag.spec { color: var(--warn); background: var(--warn-dim); border: 1px solid transparent; }
+kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text); background: var(--bg-inset); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+.demo { margin-top: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-inset); padding: var(--sp-5); position: relative; }
+.demo-label { position: absolute; top: -9px; left: 12px; background: var(--bg-app); padding: 0 8px; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); letter-spacing: 0.1em; }
+.demo .hint { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); margin-top: var(--sp-2); }
+.theme-toggle { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; cursor: pointer; transition: color var(--t-fast) ease, border-color var(--t-fast) ease; }
+.theme-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ───────────────────────── IDE frame ── */
+.frame { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-panel); overflow: hidden; margin-top: var(--sp-4); }
+.docbar { display: flex; align-items: center; gap: var(--sp-3); height: 34px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.crumb { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-1); min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+.crumb .lib { color: var(--text-faint); }
+.crumb .sep { color: var(--text-faint); }
+.crumb a.hop { color: var(--text-dim); text-decoration: none; border-radius: var(--radius); padding: 1px 3px; cursor: pointer; }
+.crumb a.hop:hover { color: var(--text); background: var(--bg-hover); }
+.crumb a.hop:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.crumb .here { color: var(--text); font-weight: 600; }
+.crumb .master { color: var(--text-faint); }
+.crumb .view { color: var(--text-faint); }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-0); border-radius: 999px; padding: 2px 10px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.pill.ok { color: var(--ok); border-color: transparent; background: var(--ok-dim); } .pill.ok::before { background: var(--ok); }
+.pill.err { color: var(--err); border-color: transparent; background: var(--err-dim); } .pill.err::before { background: var(--err); }
+.pill.warn { color: var(--warn); border-color: transparent; background: var(--warn-dim); } .pill.warn::before { background: var(--warn); }
+.docbar .grow { flex: 1; }
+
+/* ───────────────────────── schematic canvas ── */
+.canvas-wrap { position: relative; background: var(--canvas-bg); }
+svg.schem { display: block; width: 100%; height: auto; user-select: none; }
+.schem .wire { stroke: var(--wire); stroke-width: 1.1; fill: none; stroke-linecap: round; }
+.schem .wire.sel { stroke: var(--accent); stroke-width: 2; }
+.schem .wire.hot { stroke: var(--warn); stroke-width: 2; }
+.schem .junction { fill: var(--wire); stroke: none; }
+.schem .sym { color: var(--symbol); cursor: default; }
+.schem .sym.sel { color: var(--accent); }
+/* symbol artwork lives in <defs> and renders through <use> shadow trees, which
+   descendant selectors cannot reach — keep these rules boundary-free */
+.body { stroke: currentColor; stroke-width: 1.3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.f { fill: currentColor; stroke: none; }
+.schem .ghost { color: var(--accent); opacity: 0.55; pointer-events: none; }
+.schem text.inst { font-family: var(--font-mono); font-size: 10.5px; fill: var(--text-dim); }
+.schem text.inst .dim { fill: var(--text-faint); }
+.schem text.net { font-family: var(--font-mono); font-size: 10.5px; fill: var(--net-label); }
+.schem text.port-name { font-family: var(--font-mono); font-size: 10.5px; fill: var(--symbol); font-weight: 500; }
+.port-flag { stroke: var(--symbol); stroke-width: 1.3; fill: none; stroke-linejoin: round; }
+.schem .marquee { fill: var(--accent-dim); stroke: var(--accent); stroke-width: 1; }
+.schem .viol { cursor: help; }
+.schem .viol .tri { stroke: var(--canvas-bg); stroke-width: 1; }
+.schem .viol .glyph { stroke: var(--canvas-bg); stroke-width: 1.6; stroke-linecap: round; }
+.schem .empty-1 { font-family: var(--font-ui); font-size: 15px; font-weight: 500; fill: var(--text-dim); }
+.schem .empty-2 { font-family: var(--font-ui); font-size: 12px; fill: var(--text-faint); }
+.viol-card { position: absolute; max-width: 380px; background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: 3px; box-shadow: var(--shadow); padding: 8px 10px; pointer-events: none; opacity: 0; transition: opacity var(--t-fast) ease; z-index: 10; }
+.viol-card.show { opacity: 1; }
+.viol-card .t { font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+.viol-card .m { font-size: 11px; color: var(--text); margin-top: 2px; }
+.viol-card .fix { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+
+/* ───────────────────────── context menu (spec) ── */
+.cmenu { position: absolute; min-width: 224px; background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 4px; z-index: 20; display: none; }
+.cmenu.open { display: block; }
+.cmenu .mi { display: flex; align-items: center; gap: 10px; width: 100%; border: none; background: none; text-align: left; font-family: var(--font-ui); font-size: var(--fs-1); color: var(--text); padding: 5px 10px; border-radius: var(--radius); cursor: pointer; }
+.cmenu .mi .sc { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); }
+.cmenu .mi:hover, .cmenu .mi:focus-visible { background: var(--bg-hover); outline: none; }
+.cmenu .mi[aria-disabled="true"] { color: var(--text-faint); cursor: default; }
+.cmenu .mi[aria-disabled="true"]:hover { background: none; }
+.cmenu hr { border: none; border-top: 1px solid var(--border); margin: 4px 6px; }
+.cmenu .mh { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); padding: 4px 10px 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body data-theme="dark">
+
+<header class="mast">
+  <div class="brand">VOLTA · SCHEMATIC EDITOR</div>
+  <h1>Canvas &amp; document bar — the editing surface, specified</h1>
+  <p class="lede">
+    The schematic canvas has spoken VOLTA since the first cut, but it was designed in code —
+    nothing on this surface had a drawing to answer to. This file is that drawing: the document
+    bar grammar, the canvas vocabulary (wires, symbols, labels, junctions), selection, placement,
+    wiring, the check overlay, hierarchy, and the two things the editor still owes its users —
+    context menus and a reconciled empty state.
+  </p>
+  <div class="mast-row">
+    <span class="src">ports shell/views/schematic.rs · schematic/view/*</span>
+    <button class="theme-toggle" id="themeToggle" type="button">theme: dark</button>
+  </div>
+</header>
+
+<!-- ════════════════════════ HERO — the editor at work ═══════════════════ -->
+<section id="hero">
+  <div class="kicker">00</div>
+  <h2>The editor, descended one level into a design</h2>
+  <p class="lede">
+    A five-transistor OTA opened by descending into instance <span style="font-family:var(--font-mono)">X1</span>
+    of its testbench. M2 is selected. One check finding is live — hover the triangle.
+    Click any device to move the selection; click the breadcrumb's parent to “ascend.”
+  </p>
+
+  <div class="frame" id="heroFrame">
+    <div class="docbar">
+      <nav class="crumb" aria-label="Hierarchy breadcrumb">
+        <span class="lib">rspice-examples</span><span class="sep">›</span>
+        <a class="hop" href="#s7" title="Ascend to TB_OTA (U)">TB_OTA</a><span class="sep">›</span>
+        <span class="here">X1</span>
+        <span class="master">‹ OTA5T ›</span>
+        <span class="view">· schematic</span>
+      </nav>
+      <div class="grow"></div>
+      <span class="src" id="heroSel">Sel: M2 (W=24u L=1u)</span>
+      <span class="pill ok">ERC clean · 1 warn</span>
+    </div>
+
+    <div class="canvas-wrap" id="heroCanvasWrap">
+      <svg class="schem" viewBox="210 50 660 480" id="heroSvg" role="img"
+           aria-label="OTA5T schematic: five-transistor operational transconductance amplifier with input, bias and output ports">
+        <defs>
+          <pattern id="griddots" width="20" height="20" patternUnits="userSpaceOnUse">
+            <circle cx="10" cy="10" r="0.7" fill="var(--canvas-grid)"></circle>
+          </pattern>
+          <!-- terminal-grid artwork — design/app/volta-symbols.html -->
+          <g id="d-nmos">
+            <path class="body" d="M 0,0 H 13 M 13,-28 V 28 M 17,-28 V -10 M 17,-4 V 4 M 17,10 V 28 M 40,-40 V -28 H 17 M 40,40 V 28 H 17 M 40,0 H 17 M 40,0 H 46 V 40 H 40"></path>
+            <path class="f" d="M 17.6,0 L 25.4,-2.6 L 25.4,2.6 Z"></path><circle class="f" cx="40" cy="40" r="1.7"></circle>
+          </g>
+          <g id="d-pmos">
+            <path class="body" d="M 0,0 H 13 M 13,-28 V 28 M 17,-28 V -10 M 17,-4 V 4 M 17,10 V 28 M 40,-40 V -28 H 17 M 40,40 V 28 H 17 M 40,0 H 17 M 40,0 H 46 V -40 H 40"></path>
+            <path class="f" d="M 25.4,0 L 17.6,-2.6 L 17.6,2.6 Z"></path><circle class="f" cx="40" cy="-40" r="1.7"></circle>
+          </g>
+          <g id="d-gnd"><path class="body" d="M 0,0 V 8 M -9,8 H 9 M -5.5,12 H 5.5 M -2,16 H 2"></path></g>
+          <g id="d-res"><path class="body" d="M 0,0 H 6.2 L 8.5,-4 L 13.1,4 L 17.7,-4 L 22.3,4 L 26.9,-4 L 31.5,4 L 33.8,0 H 40"></path></g>
+          <g id="d-capv"><path class="body" d="M 0,0 V 16.4 M -12,16.4 H 12 M -12,23.6 H 12 M 0,23.6 V 40"></path></g>
+          <g id="d-vsin"><path class="body" d="M 0,0 V 7 M 0,33 V 40"></path><circle class="body" cx="0" cy="20" r="13"></circle><path class="body" d="M -7,20 C -4,13 -1,13 0,20 C 1,27 4,27 7,20"></path></g>
+          <!-- port flag: filled tip distinguishes ports from net labels -->
+          <g id="d-port-l"><path class="port-flag" d="M 0,0 L -8,-6 H -26 V 6 H -8 Z"></path><path class="tip" d="M 0,0 L -6,-4.5 V 4.5 Z" fill="var(--symbol)" stroke="none"></path></g>
+          <g id="d-port-r"><path class="port-flag" d="M 0,0 L 8,-6 H 26 V 6 H 8 Z"></path><path class="tip" d="M 0,0 L 6,-4.5 V 4.5 Z" fill="var(--symbol)" stroke="none"></path></g>
+        </defs>
+
+        <rect x="210" y="50" width="660" height="480" fill="url(#griddots)"></rect>
+
+        <!-- wires -->
+        <g>
+          <path class="wire" d="M 300,100 H 780"></path>                      <!-- VDD rail -->
+          <path class="wire" d="M 300,480 H 780"></path>                      <!-- VSS rail -->
+          <path class="wire" d="M 620,180 V 240"></path>                      <!-- M4.d → M2.d -->
+          <path class="wire" d="M 380,180 V 240"></path>                      <!-- M3.d → M1.d -->
+          <path class="wire" d="M 420,140 H 580"></path>                      <!-- pmos gate tie -->
+          <path class="wire" d="M 380,180 H 440 V 140"></path>                <!-- diode tap -->
+          <path class="wire" d="M 260,280 H 340"></path>                      <!-- INP → M1.g -->
+          <path class="wire" d="M 660,280 H 740"></path>                      <!-- M2.g ← INN -->
+          <path class="wire" d="M 380,320 V 360 H 620 V 320"></path>          <!-- tail -->
+          <path class="wire" d="M 500,440 V 480"></path>                      <!-- M5.s → VSS -->
+          <path class="wire" d="M 260,400 H 460"></path>                      <!-- IBIAS → M5.g -->
+          <path class="wire" d="M 620,210 H 740"></path>                      <!-- OUT tap -->
+        </g>
+
+        <!-- junction dots: vertices where ≥3 segments meet -->
+        <g>
+          <circle class="junction" cx="380" cy="100" r="2"></circle>
+          <circle class="junction" cx="620" cy="100" r="2"></circle>
+          <circle class="junction" cx="380" cy="180" r="2"></circle>
+          <circle class="junction" cx="440" cy="140" r="2"></circle>
+          <circle class="junction" cx="500" cy="360" r="2"></circle>
+          <circle class="junction" cx="500" cy="480" r="2"></circle>
+          <circle class="junction" cx="620" cy="210" r="2"></circle>
+        </g>
+
+        <!-- devices (click to select) -->
+        <g class="sym inst-hit" id="dev-M3" transform="translate(420,140) scale(-1,1)" tabindex="0" role="button" aria-label="Select M3"><use href="#d-pmos"></use></g>
+        <g class="sym inst-hit" id="dev-M4" transform="translate(580,140)" tabindex="0" role="button" aria-label="Select M4"><use href="#d-pmos"></use></g>
+        <g class="sym inst-hit" id="dev-M1" transform="translate(340,280)" tabindex="0" role="button" aria-label="Select M1"><use href="#d-nmos"></use></g>
+        <g class="sym inst-hit sel" id="dev-M2" transform="translate(660,280) scale(-1,1)" tabindex="0" role="button" aria-label="Select M2, currently selected"><use href="#d-nmos"></use></g>
+        <g class="sym inst-hit" id="dev-M5" transform="translate(460,400)" tabindex="0" role="button" aria-label="Select M5"><use href="#d-nmos"></use></g>
+
+        <!-- instance labels: name + dims, placed clear of body and terminals -->
+        <text class="inst" x="366" y="118" text-anchor="end">M3 <tspan class="dim">48u/1u</tspan></text>
+        <text class="inst" x="634" y="118">M4 <tspan class="dim">48u/1u</tspan></text>
+        <text class="inst" x="346" y="262" text-anchor="end">M1 <tspan class="dim">24u/1u</tspan></text>
+        <text class="inst" x="664" y="262">M2 <tspan class="dim">24u/1u</tspan></text>
+        <text class="inst" x="512" y="416">M5 <tspan class="dim">12u/2u</tspan></text>
+
+        <!-- net labels -->
+        <text class="net" x="508" y="350">tail</text>
+        <text class="net" id="orphanLabel" x="468" y="232">net7</text>
+
+        <!-- ports -->
+        <g transform="translate(300,100)"><use href="#d-port-l"></use></g>
+        <text class="port-name" x="274" y="91" text-anchor="start">VDD</text>
+        <g transform="translate(300,480)"><use href="#d-port-l"></use></g>
+        <text class="port-name" x="274" y="471" text-anchor="start">VSS</text>
+        <g transform="translate(260,280)"><use href="#d-port-l"></use></g>
+        <text class="port-name" x="234" y="271" text-anchor="start">INP</text>
+        <g transform="translate(740,280)"><use href="#d-port-r"></use></g>
+        <text class="port-name" x="792" y="271" text-anchor="end">INN</text>
+        <g transform="translate(260,400)"><use href="#d-port-l"></use></g>
+        <text class="port-name" x="234" y="391" text-anchor="start">IBIAS</text>
+        <g transform="translate(740,210)"><use href="#d-port-r"></use></g>
+        <text class="port-name" x="792" y="201" text-anchor="end">OUT</text>
+
+        <!-- check finding: orphan net label (screen-constant badge) -->
+        <g class="viol" id="violBadge" transform="translate(506,222)" tabindex="0" role="img"
+           aria-label="Warning: net label net7 has no connections">
+          <path class="tri" d="M 0,-7 L 7,7 H -7 Z" fill="var(--warn)"></path>
+          <path class="glyph" d="M 0,-1.5 V 2"></path><circle cx="0" cy="4.6" r="0.9" fill="var(--canvas-bg)" stroke="none"></circle>
+        </g>
+      </svg>
+      <div class="viol-card" id="violCard" role="tooltip">
+        <div class="t" style="color:var(--warn)">WARNING · ORPHAN NET LABEL</div>
+        <div class="m">Net label 'net7' has no connections.</div>
+        <div class="fix">Fix: move the label onto a wire, or delete it.</div>
+      </div>
+    </div>
+  </div>
+  <p class="note">
+    Everything above ships <span class="tag today">ships</span> except the in-canvas selection echo at the
+    docbar's right edge, which today lives only in the status bar — duplicated here because the eye is on
+    the canvas when the selection changes <span class="tag spec">spec</span>.
+  </p>
+</section>
+
+<!-- ════════════════════════ 01 — document bar ═══════════════════════════ -->
+<section id="s1">
+  <div class="kicker">01</div>
+  <h2>Document bar — where am I, and is it clean</h2>
+  <p class="lede">
+    One 34&nbsp;px bar answers exactly two questions. Left: the breadcrumb — library, then the
+    occurrence path when descended. Right: the check pill. Nothing else competes for this strip.
+  </p>
+  <table class="spec">
+    <tr><th>Element</th><th>Rule</th><th>Status</th></tr>
+    <tr><td>lib · CELL · view</td><td>Top of hierarchy: library faint, cell bold, view faint. None clickable — there is nowhere to go.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>lib › TOP › X1 ‹ MASTER ›</td><td>Descended: every intermediate hop is a link that pops back to that level. The focused instance is bold; its master cell follows in ‹ › when the names differ.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>ERC pill</td><td>Idle “ERC not run” · idle “ERC stale · re-run” when topology changed since the last check · ok “ERC clean” · ok “ERC clean · N warn” · err “ERC N errors”. Click runs checks (<kbd>Ctrl+E</kbd>).</td><td><span class="tag today">ships</span> click-to-run <span class="tag spec">spec</span></td></tr>
+    <tr><td>Selection echo</td><td>“Sel: M2 (W=24u L=1u)” mirrored from the status bar at the docbar's right edge, faint mono.</td><td><span class="tag spec">spec</span></td></tr>
+  </table>
+  <div class="demo">
+    <span class="demo-label">PILL STATES</span>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <span class="pill">ERC not run</span>
+      <span class="pill">ERC stale · re-run</span>
+      <span class="pill ok">ERC clean</span>
+      <span class="pill ok">ERC clean · 2 warn</span>
+      <span class="pill err">ERC 3 errors</span>
+    </div>
+    <div class="hint">stale = results exist but the schematic's topology version moved on; canvas badges hide until re-run</div>
+  </div>
+</section>
+
+<!-- ════════════════════════ 02 — canvas vocabulary ══════════════════════ -->
+<section id="s2">
+  <div class="kicker">02</div>
+  <h2>Canvas vocabulary — four inks on a quiet field</h2>
+  <p class="lede">
+    The canvas spends color where electricity flows. Wires get the green ink, symbols a neutral one,
+    net labels the brass, and the accent is reserved for selection and live previews. The grid never
+    competes: dots by default, auto-coarsening as you zoom out, gone below legibility.
+  </p>
+  <table class="spec">
+    <tr><th>Ink</th><th>Token</th><th>Used for</th></tr>
+    <tr><td>wire</td><td>--wire · 1.1&nbsp;px ×zoom</td><td>Wires, junction dots (r 1.5 ×zoom at vertices joining ≥3 segments)</td></tr>
+    <tr><td>symbol</td><td>--symbol · 1.3&nbsp;px ×zoom</td><td>Device bodies, port flags. Bodies stroke <span style="font-family:var(--font-mono)">currentColor</span> so selection is one class flip.</td></tr>
+    <tr><td>net-label</td><td>--net-label · mono 10.5</td><td>Net names. Ports are not labels: a port flag carries a filled tip.</td></tr>
+    <tr><td>accent</td><td>--accent · 1.5–2&nbsp;px ×zoom</td><td>Selection strokes, marquee, placement ghosts, wire-in-progress</td></tr>
+    <tr><td>warn</td><td>--warn · 2&nbsp;px ×zoom</td><td>Cross-probe net highlight (probe tool <kbd>P</kbd>)</td></tr>
+  </table>
+  <table class="spec">
+    <tr><th>Grid</th><th>Rule</th></tr>
+    <tr><td>Dots</td><td>One dot per snap point, ~0.9&nbsp;px. Default.</td></tr>
+    <tr><td>Lines</td><td>Hairline rules at 0.55× grid tint — quieter than dots, for dense sheets.</td></tr>
+    <tr><td>Auto-coarsen</td><td>When pitch ×zoom &lt; 9&nbsp;px, step the lattice 10×, then 100×; below that, fade the grid entirely. The grid mesh is cached per pitch/style and translated on pan.</td></tr>
+    <tr><td>Off</td><td>No grid. Snap still applies — the grid is a display, not the snap.</td></tr>
+  </table>
+  <p class="note">All ship today. Zoom is cursor-centered at 1.1× per wheel notch; pan is middle-drag or <kbd>Shift</kbd>+drag.</p>
+</section>
+
+<!-- ════════════════════════ 03 — selection ══════════════════════════════ -->
+<section id="s3">
+  <div class="kicker">03</div>
+  <h2>Selection — stroke promotion, no halos</h2>
+  <p class="lede">
+    Selection is not an overlay; the object itself changes. Selected geometry re-strokes in accent at
+    1.5× weight. The marquee is the only filled rectangle the canvas ever draws. Try it below.
+  </p>
+  <table class="spec">
+    <tr><th>Gesture</th><th>Result</th></tr>
+    <tr><td>click</td><td>Select one; previous selection drops. <kbd>Esc</kbd> clears.</td></tr>
+    <tr><td>drag on empty</td><td>Marquee: accent fill at 14% over accent 1&nbsp;px stroke. Releases into a multi-selection.</td></tr>
+    <tr><td>Ctrl+A</td><td>Select all. Status bar echoes “Sel: N items”.</td></tr>
+    <tr><td>E</td><td>Open properties for the selected instance — volta-dialogs.html §05.</td></tr>
+  </table>
+  <div class="demo">
+    <span class="demo-label">LIVE — DRAG A MARQUEE</span>
+    <div class="canvas-wrap" style="border:1px solid var(--border); border-radius:3px;">
+      <svg class="schem" viewBox="0 0 560 180" id="marqueeSvg" style="touch-action:none">
+        <rect x="0" y="0" width="560" height="180" fill="url(#griddots)"></rect>
+        <path class="wire" d="M 60,90 H 140 M 180,90 H 240 M 280,90 H 460"></path>
+        <g class="sym mq" transform="translate(140,90)"><use href="#d-res"></use></g>
+        <g class="sym mq" transform="translate(280,90) rotate(90)"><use href="#d-capv"></use></g>
+        <g class="sym mq" transform="translate(380,90) scale(1,-1)"><use href="#d-vsin"></use></g>
+        <rect class="marquee" id="marqueeRect" x="0" y="0" width="0" height="0" style="display:none"></rect>
+      </svg>
+    </div>
+    <div class="hint" id="marqueeHint">drag across devices — release to select · click empty space to clear</div>
+  </div>
+</section>
+
+<!-- ════════════════════════ 04 — placement ══════════════════════════════ -->
+<section id="s4">
+  <div class="kicker">04</div>
+  <h2>Placement — the ghost commits on click</h2>
+  <p class="lede">
+    Arming a part (palette, place strip, or a key) attaches its ghost to the cursor at 55% accent.
+    The ghost snaps to grid, <kbd>R</kbd> rotates it in quarter turns, <kbd>H</kbd>/<kbd>Y</kbd> mirror,
+    click drops an instance and keeps the tool armed, <kbd>Esc</kbd> disarms. The status bar narrates:
+    “Placing resistor — click to drop, R rotates, Esc finishes.”
+  </p>
+  <div class="demo">
+    <span class="demo-label">LIVE — MOVE · R ROTATES · CLICK DROPS · ESC ENDS</span>
+    <div class="canvas-wrap" style="border:1px solid var(--border); border-radius:3px;">
+      <svg class="schem" viewBox="0 0 560 200" id="placeSvg" tabindex="0" style="touch-action:none; outline:none"
+           aria-label="Placement demo canvas. Move the mouse to position a resistor ghost, R rotates, click places.">
+        <rect x="0" y="0" width="560" height="200" fill="url(#griddots)"></rect>
+        <g id="placed"></g>
+        <g class="ghost" id="ghost" style="display:none"><use href="#d-res"></use></g>
+      </svg>
+    </div>
+    <div class="hint" id="placeHint">hover the canvas to arm a resistor ghost</div>
+  </div>
+  <p class="note">
+    Ships today, including the live narration. The place strip at the rail's foot (volta-schematic-rail.html)
+    recalls the last part with one click.
+  </p>
+</section>
+
+<!-- ════════════════════════ 05 — wiring ═════════════════════════════════ -->
+<section id="s5">
+  <div class="kicker">05</div>
+  <h2>Wiring — click to bend, right-click to let go</h2>
+  <p class="lede">
+    <kbd>W</kbd> arms the wire tool. Each click pins a vertex; the segment chasing the cursor draws at
+    60% accent until pinned. Right-click or <kbd>Esc</kbd> finishes the run. Junction dots appear only
+    where three or more segments actually meet — corners stay clean.
+  </p>
+  <div class="demo">
+    <span class="demo-label">LIVE — CLICK TO PIN · RIGHT-CLICK FINISHES</span>
+    <div class="canvas-wrap" style="border:1px solid var(--border); border-radius:3px;">
+      <svg class="schem" viewBox="0 0 560 200" id="wireSvg" style="touch-action:none"
+           aria-label="Wire drawing demo canvas. Click to pin wire vertices, right-click to finish.">
+        <rect x="0" y="0" width="560" height="200" fill="url(#griddots)"></rect>
+        <path class="wire" d="M 100,140 H 460"></path>
+        <g id="wires"></g>
+        <g id="wireJunctions"></g>
+        <path class="wire" id="wirePreview" style="opacity:0.6; display:none"></path>
+      </svg>
+    </div>
+    <div class="hint" id="wireHint">click anywhere to start a wire · land on the existing wire to make a junction</div>
+  </div>
+  <table class="spec">
+    <tr><th>Rule</th><th>Detail</th></tr>
+    <tr><td>vertices</td><td>User-pinned. The tool never reroutes a pinned segment — the path you click is the path you get.</td></tr>
+    <tr><td>start dot</td><td>The first vertex draws a 4&nbsp;px ×zoom accent dot while the run is open.</td></tr>
+    <tr><td>junctions</td><td>Created where a run ends on existing copper, and at any vertex joining ≥3 segments.</td></tr>
+    <tr><td>labels</td><td><kbd>N</kbd> arms a net label; dropping it on copper names the net (brass ink, §02).</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 06 — checks overlay ═════════════════════════ -->
+<section id="s6">
+  <div class="kicker">06</div>
+  <h2>Checks overlay — findings live where the fault is</h2>
+  <p class="lede">
+    <kbd>Ctrl+E</kbd> runs the electrical rule checks. Every finding with a location pins a
+    screen-constant triangle badge to it — 7&nbsp;px half-extent, never scaling with zoom, filled by
+    severity. Hover explains and proposes the fix. Findings without a location (global checks) report
+    to the console and the pill only.
+  </p>
+  <div class="demo">
+    <span class="demo-label">BADGE ANATOMY — HOVER EACH</span>
+    <div class="canvas-wrap" style="border:1px solid var(--border); border-radius:3px; position:relative">
+      <svg class="schem" viewBox="0 0 560 120" id="badgeSvg">
+        <rect x="0" y="0" width="560" height="120" fill="url(#griddots)"></rect>
+        <g class="viol demoViol" data-sev="CRITICAL" data-type="MISSING GROUND" data-msg="Circuit has no ground reference (node 0)." data-fix="Place a ground symbol (G) on the reference net." transform="translate(120,60)" tabindex="0">
+          <path class="tri" d="M 0,-7 L 7,7 H -7 Z" fill="var(--err)"></path><path class="glyph" d="M 0,-1.5 V 2"></path><circle cx="0" cy="4.6" r="0.9" fill="var(--canvas-bg)" stroke="none"></circle>
+        </g>
+        <g class="viol demoViol" data-sev="ERROR" data-type="SHORTED OUTPUTS" data-msg="Multiple voltage sources connected to same net." data-fix="Separate the sources or add series impedance." transform="translate(280,60)" tabindex="0">
+          <path class="tri" d="M 0,-7 L 7,7 H -7 Z" fill="var(--err)"></path><path class="glyph" d="M 0,-1.5 V 2"></path><circle cx="0" cy="4.6" r="0.9" fill="var(--canvas-bg)" stroke="none"></circle>
+        </g>
+        <g class="viol demoViol" data-sev="WARNING" data-type="UNCONNECTED PIN" data-msg="Component pin is not connected." data-fix="Wire the pin, or mark it no-connect." transform="translate(440,60)" tabindex="0">
+          <path class="tri" d="M 0,-7 L 7,7 H -7 Z" fill="var(--warn)"></path><path class="glyph" d="M 0,-1.5 V 2"></path><circle cx="0" cy="4.6" r="0.9" fill="var(--canvas-bg)" stroke="none"></circle>
+        </g>
+      </svg>
+      <div class="viol-card" id="badgeCard" role="tooltip"></div>
+    </div>
+    <div class="hint">critical and error share the red fill — the card's first word carries the difference; info findings use the dim ink</div>
+  </div>
+
+  <h3>The full rule set</h3>
+  <table class="spec">
+    <tr><th>Check</th><th>Severity</th><th>Anchored to</th></tr>
+    <tr><td>MissingGround</td><td>critical</td><td>global — pill + console only</td></tr>
+    <tr><td>DuplicateName</td><td>critical</td><td>each offending component</td></tr>
+    <tr><td>ShortedOutputs · ShortCircuit · SourceToSource</td><td>error</td><td>net / node</td></tr>
+    <tr><td>FloatingNode · MissingParameter</td><td>error</td><td>node · component</td></tr>
+    <tr><td>UnconnectedPin · DanglingWire · OrphanNetLabel · ValueOutOfRange</td><td>warning</td><td>pin · wire · label · component</td></tr>
+    <tr><td>EmptyName · InvalidName · UnknownComponent</td><td>info</td><td>component</td></tr>
+  </table>
+  <table class="spec">
+    <tr><th>Behavior</th><th>Rule</th><th>Status</th></tr>
+    <tr><td>staleness</td><td>Badges hide the moment topology changes; the pill flips to “ERC stale · re-run”. No stale marker ever points at fresh copper.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>console link</td><td>Each finding is also a console row; clicking the row zooms the canvas to the anchor.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>cycle</td><td><kbd>F4</kbd> jumps to the next finding, <kbd>Shift+F4</kbd> previous, ordered by severity.</td><td><span class="tag spec">spec</span></td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 07 — hierarchy ══════════════════════════════ -->
+<section id="s7">
+  <div class="kicker">07</div>
+  <h2>Hierarchy — descend in place, ascend by breadcrumb</h2>
+  <p class="lede">
+    Double-click a cell instance — or select it and press <kbd>Shift+E</kbd> — to descend. The canvas
+    swaps to the master's schematic, the breadcrumb grows one hop, and the rail's nameplate mirrors the
+    occurrence path. <kbd>U</kbd> ascends one level; clicking any breadcrumb hop pops straight back to it.
+    Edits made while descended land in the master cell — every instance of it everywhere.
+  </p>
+  <table class="spec">
+    <tr><th>State</th><th>Breadcrumb</th></tr>
+    <tr><td>top level</td><td><span style="font-family:var(--font-mono)">rspice-examples · <b>TB_OTA</b> · schematic</span></td></tr>
+    <tr><td>descended ×1</td><td><span style="font-family:var(--font-mono)">rspice-examples › TB_OTA › <b>X1</b> ‹ OTA5T › · schematic</span></td></tr>
+    <tr><td>descended ×2</td><td><span style="font-family:var(--font-mono)">rspice-examples › TB_OTA › X1 › <b>XBIAS</b> ‹ BIAS_CORE › · schematic</span></td></tr>
+  </table>
+  <p class="note">
+    Ships today. Deliberate scope note: descend is <kbd>Shift+E</kbd>, not Virtuoso's bare <kbd>E</kbd> —
+    <kbd>E</kbd> is properties here and overloading it was rejected. A read-only banner for descents into
+    read-only-library masters is <span class="tag spec">spec</span>: amber strip under the docbar,
+    “Read-only — ‹PDK› masters cannot be edited”, with a “Copy to editable library…” action.
+  </p>
+</section>
+
+<!-- ════════════════════════ 08 — context menus ══════════════════════════ -->
+<section id="s8">
+  <div class="kicker">08</div>
+  <h2>Context menus — the third hand <span class="tag spec">spec</span></h2>
+  <p class="lede">
+    Today right-click only finishes a wire. That stays — when the wire tool is live, right-click means
+    “done.” In every other state, right-click should open the menu for what's under the cursor.
+    Every item is a shortcut the menu teaches: nothing appears here that lacks a keyboard or menubar route.
+  </p>
+  <div class="demo" style="min-height: 280px">
+    <span class="demo-label">LIVE — RIGHT-CLICK THE INSTANCE, THE WIRE, OR EMPTY CANVAS</span>
+    <div class="canvas-wrap" id="ctxWrap" style="border:1px solid var(--border); border-radius:3px; position:relative">
+      <svg class="schem" viewBox="0 0 560 220" id="ctxSvg" style="touch-action:none">
+        <rect x="0" y="0" width="560" height="220" fill="url(#griddots)"></rect>
+        <path class="wire ctx-wire" d="M 80,110 H 200" style="pointer-events:stroke"></path>
+        <path class="wire ctx-wire" d="M 240,110 H 480" style="pointer-events:stroke"></path>
+        <g class="sym ctx-inst" transform="translate(200,110)"><use href="#d-res"></use></g>
+        <text class="inst" x="206" y="92">R1 <tspan class="dim">10k</tspan></text>
+      </svg>
+      <div class="cmenu" id="menuInstance" role="menu" aria-label="Instance menu">
+        <div class="mh">R1 · resistor</div>
+        <button class="mi" role="menuitem">Properties…<span class="sc">E</span></button>
+        <button class="mi" role="menuitem">Rotate<span class="sc">R</span></button>
+        <button class="mi" role="menuitem">Mirror horizontal<span class="sc">H</span></button>
+        <button class="mi" role="menuitem">Mirror vertical<span class="sc">Y</span></button>
+        <hr>
+        <button class="mi" role="menuitem">Cut<span class="sc">Ctrl+X</span></button>
+        <button class="mi" role="menuitem">Copy<span class="sc">Ctrl+C</span></button>
+        <button class="mi" role="menuitem">Delete<span class="sc">Del</span></button>
+        <hr>
+        <button class="mi" role="menuitem" aria-disabled="true">Descend into master<span class="sc">Shift+E</span></button>
+      </div>
+      <div class="cmenu" id="menuWire" role="menu" aria-label="Wire menu">
+        <div class="mh">wire · net n4</div>
+        <button class="mi" role="menuitem">Add net label<span class="sc">N</span></button>
+        <button class="mi" role="menuitem">Highlight net<span class="sc">P</span></button>
+        <hr>
+        <button class="mi" role="menuitem">Delete segment<span class="sc">Del</span></button>
+      </div>
+      <div class="cmenu" id="menuCanvas" role="menu" aria-label="Canvas menu">
+        <button class="mi" role="menuitem">Paste<span class="sc">Ctrl+V</span></button>
+        <button class="mi" role="menuitem">Select all<span class="sc">Ctrl+A</span></button>
+        <hr>
+        <button class="mi" role="menuitem">Zoom to fit<span class="sc">F</span></button>
+        <button class="mi" role="menuitem">Zoom 100 %<span class="sc">Ctrl+0</span></button>
+        <hr>
+        <button class="mi" role="menuitem">Run design checks<span class="sc">Ctrl+E</span></button>
+      </div>
+    </div>
+    <div class="hint">menus close on Esc, on click-away, and after any action · descend is disabled on primitives, enabled on cell instances</div>
+  </div>
+  <table class="spec">
+    <tr><th>Target</th><th>Menu</th></tr>
+    <tr><td>instance</td><td>Properties… · Rotate · Mirror H/V · — · Cut · Copy · Delete · — · Descend into master (cell instances only)</td></tr>
+    <tr><td>wire</td><td>Add net label · Highlight net · — · Delete segment</td></tr>
+    <tr><td>port / label</td><td>Properties… · — · Delete</td></tr>
+    <tr><td>empty canvas</td><td>Paste · Select all · — · Zoom to fit · Zoom 100 % · — · Run design checks</td></tr>
+    <tr><td>wire tool live</td><td>No menu. Right-click finishes the run — the shipped behavior wins.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 09 — empty state ════════════════════════════ -->
+<section id="s9">
+  <div class="kicker">09</div>
+  <h2>Empty state — three lines, no ceremony</h2>
+  <p class="lede">
+    A new schematic offers its three fastest exits: the palette, the placement keys, and a worked example.
+    Centered, quiet, gone the moment the first part lands.
+  </p>
+  <div class="frame">
+    <div class="docbar">
+      <nav class="crumb"><span class="lib">analog-lib</span><span class="sep">·</span><span class="here">amp_stage</span><span class="view">· schematic</span></nav>
+      <div class="grow"></div>
+      <span class="pill">ERC not run</span>
+    </div>
+    <div class="canvas-wrap">
+      <svg class="schem" viewBox="0 0 1180 360">
+        <rect x="0" y="0" width="1180" height="360" fill="url(#griddots)"></rect>
+        <text class="empty-1" x="590" y="160" text-anchor="middle">Empty schematic</text>
+        <text class="empty-2" x="590" y="186" text-anchor="middle">Pick a part from the left panel, or press Shift+R · C · Shift+L · V · G to place one</text>
+        <text class="empty-2" x="590" y="206" text-anchor="middle">File ▸ Open example loads a ready-to-run circuit</text>
+      </svg>
+    </div>
+  </div>
+  <p class="note">
+    Reconciliation <span class="tag spec">spec</span>: the shipped copy reads “press R · C · L · V · G”,
+    but the shipped bindings are <kbd>Shift+R</kbd> resistor, <kbd>C</kbd> capacitor, <kbd>Shift+L</kbd>
+    inductor, <kbd>V</kbd> source, <kbd>G</kbd> ground (<kbd>R</kbd> is rotate, <kbd>L</kbd> would
+    collide). The copy shown here matches the bindings; fix the string, not the keymap.
+  </p>
+</section>
+
+<!-- ════════════════════════ 10 — keyboard reference ═════════════════════ -->
+<section id="s10">
+  <div class="kicker">10</div>
+  <h2>Editor keymap — the full deck</h2>
+  <p class="lede">All ship today. Single letters are live only when no text field has focus.</p>
+  <table class="spec">
+    <tr><th>Group</th><th>Bindings</th></tr>
+    <tr><td>tools</td><td><kbd>S</kbd> select · <kbd>W</kbd> wire · <kbd>N</kbd> net label · <kbd>P</kbd> probe · <kbd>Esc</kbd> cancel/clear</td></tr>
+    <tr><td>place</td><td><kbd>Shift+R</kbd> resistor · <kbd>C</kbd> capacitor · <kbd>Shift+L</kbd> inductor · <kbd>G</kbd> ground · <kbd>V</kbd> v-source · <kbd>I</kbd> i-source · <kbd>D</kbd> diode · <kbd>M</kbd> NMOS · <kbd>Q</kbd> NPN</td></tr>
+    <tr><td>transform</td><td><kbd>R</kbd> rotate 90° · <kbd>H</kbd> mirror horizontal · <kbd>Y</kbd> mirror vertical</td></tr>
+    <tr><td>edit</td><td><kbd>E</kbd> properties · <kbd>Del</kbd> delete · <kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Shift+Z</kbd> undo/redo · <kbd>Ctrl+X</kbd>/<kbd>C</kbd>/<kbd>V</kbd> clipboard · <kbd>Ctrl+A</kbd> all</td></tr>
+    <tr><td>view</td><td><kbd>F</kbd> fit · <kbd>Ctrl+0</kbd> 100 % · <kbd>Ctrl++</kbd>/<kbd>Ctrl+-</kbd> zoom · wheel = cursor-centered zoom · middle-drag / <kbd>Shift</kbd>+drag = pan</td></tr>
+    <tr><td>hierarchy</td><td><kbd>Shift+E</kbd> descend · <kbd>U</kbd> ascend · double-click instance descends</td></tr>
+    <tr><td>find</td><td><kbd>/</kbd> design search · <kbd>Shift+I</kbd> cell search</td></tr>
+    <tr><td>checks · run</td><td><kbd>Ctrl+E</kbd> checks · <kbd>F5</kbd> run · <kbd>Shift+F5</kbd> stop</td></tr>
+  </table>
+</section>
+
+<script>
+/* theme toggle */
+(function () {
+  var btn = document.getElementById("themeToggle");
+  btn.addEventListener("click", function () {
+    var b = document.body;
+    var next = b.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    b.setAttribute("data-theme", next);
+    btn.textContent = "theme: " + next;
+  });
+})();
+
+/* hero: instance selection + violation hover card */
+(function () {
+  var sel = document.getElementById("dev-M2");
+  var echo = document.getElementById("heroSel");
+  var dims = { M1: "24u/1u", M2: "24u/1u", M3: "48u/1u", M4: "48u/1u", M5: "12u/2u" };
+  document.querySelectorAll("#heroSvg .inst-hit").forEach(function (g) {
+    function pick() {
+      if (sel) sel.classList.remove("sel");
+      sel = g; g.classList.add("sel");
+      var name = g.id.replace("dev-", "");
+      echo.textContent = "Sel: " + name + " (W=" + dims[name].split("/")[0] + " L=" + dims[name].split("/")[1] + ")";
+    }
+    g.addEventListener("click", pick);
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+  });
+  var badge = document.getElementById("violBadge");
+  var card = document.getElementById("violCard");
+  var wrap = document.getElementById("heroCanvasWrap");
+  function showCard() {
+    var b = badge.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    card.classList.add("show");
+    var x = b.left - w.left + b.width / 2 - card.offsetWidth / 2;
+    x = Math.max(8, Math.min(x, w.width - card.offsetWidth - 8));
+    card.style.left = x + "px";
+    card.style.top = (b.top - w.top - card.offsetHeight - 6) + "px";
+  }
+  function hideCard() { card.classList.remove("show"); }
+  badge.addEventListener("mouseenter", showCard);
+  badge.addEventListener("mouseleave", hideCard);
+  badge.addEventListener("focus", showCard);
+  badge.addEventListener("blur", hideCard);
+})();
+
+/* §03 marquee */
+(function () {
+  var svg = document.getElementById("marqueeSvg");
+  var rect = document.getElementById("marqueeRect");
+  var hint = document.getElementById("marqueeHint");
+  var start = null;
+  function pt(e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  svg.addEventListener("pointerdown", function (e) {
+    if (e.button !== 0) return;
+    start = pt(e); svg.setPointerCapture(e.pointerId);
+    rect.style.display = ""; rect.setAttribute("width", 0); rect.setAttribute("height", 0);
+    document.querySelectorAll("#marqueeSvg .mq").forEach(function (s) { s.classList.remove("sel"); });
+  });
+  svg.addEventListener("pointermove", function (e) {
+    if (!start) return;
+    var p = pt(e);
+    var x = Math.min(start.x, p.x), y = Math.min(start.y, p.y);
+    rect.setAttribute("x", x); rect.setAttribute("y", y);
+    rect.setAttribute("width", Math.abs(p.x - start.x)); rect.setAttribute("height", Math.abs(p.y - start.y));
+  });
+  svg.addEventListener("pointerup", function () {
+    if (!start) return;
+    /* compare in screen space so rotated/mirrored symbols hit-test correctly */
+    var ctm = svg.getScreenCTM();
+    function toScreen(x, y) { var p = svg.createSVGPoint(); p.x = x; p.y = y; return p.matrixTransform(ctm); }
+    var a = toScreen(+rect.getAttribute("x"), +rect.getAttribute("y"));
+    var b2 = toScreen(+rect.getAttribute("x") + +rect.getAttribute("width"), +rect.getAttribute("y") + +rect.getAttribute("height"));
+    var n = 0, big = +rect.getAttribute("width") > 4;
+    document.querySelectorAll("#marqueeSvg .mq").forEach(function (s) {
+      var r = s.getBoundingClientRect();
+      if (big && r.left < b2.x && r.right > a.x && r.top < b2.y && r.bottom > a.y) { s.classList.add("sel"); n++; }
+    });
+    hint.textContent = n ? "Sel: " + n + (n > 1 ? " items" : " item") + " — status bar echoes this" : "drag across devices — release to select · click empty space to clear";
+    rect.style.display = "none"; start = null;
+  });
+})();
+
+/* §04 placement ghost */
+(function () {
+  var svg = document.getElementById("placeSvg");
+  var ghost = document.getElementById("ghost");
+  var placed = document.getElementById("placed");
+  var hint = document.getElementById("placeHint");
+  var rot = 0, armed = true, GRID = 20;
+  function pt(e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function snap(v) { return Math.round(v / GRID) * GRID; }
+  svg.addEventListener("pointermove", function (e) {
+    if (!armed) return;
+    var p = pt(e);
+    ghost.style.display = "";
+    ghost.setAttribute("transform", "translate(" + snap(p.x - 20) + "," + snap(p.y) + ") rotate(" + rot + " 20 0)");
+    hint.textContent = "Placing resistor — click to drop, R rotates, Esc finishes";
+  });
+  svg.addEventListener("pointerleave", function () { ghost.style.display = "none"; });
+  svg.addEventListener("click", function () {
+    if (!armed || ghost.style.display === "none") return;
+    var g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "sym");
+    g.setAttribute("transform", ghost.getAttribute("transform"));
+    g.innerHTML = '<use href="#d-res"></use>';
+    placed.appendChild(g);
+  });
+  svg.addEventListener("pointerenter", function () { svg.focus({ preventScroll: true }); });
+  svg.addEventListener("keydown", function (e) {
+    if (e.key === "r" || e.key === "R") { rot = (rot + 90) % 360; e.preventDefault(); }
+    if (e.key === "Escape") { armed = false; ghost.style.display = "none"; hint.textContent = "tool disarmed — click the canvas to re-arm"; }
+  });
+  svg.addEventListener("pointerdown", function () { if (!armed) { armed = true; hint.textContent = "Placing resistor — click to drop, R rotates, Esc finishes"; } });
+})();
+
+/* §05 wire tool */
+(function () {
+  var svg = document.getElementById("wireSvg");
+  var wires = document.getElementById("wires");
+  var junctions = document.getElementById("wireJunctions");
+  var preview = document.getElementById("wirePreview");
+  var hint = document.getElementById("wireHint");
+  var run = null, GRID = 20;
+  function pt(e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  function snap(v) { return Math.round(v / GRID) * GRID; }
+  function onExisting(x, y) { return y === 140 && x >= 100 && x <= 460; }
+  svg.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  svg.addEventListener("pointerdown", function (e) {
+    var p = pt(e), x = snap(p.x), y = snap(p.y);
+    if (e.button === 2) { /* finish */
+      if (run) { run = null; preview.style.display = "none"; hint.textContent = "right-click finished the run — click to start another"; }
+      return;
+    }
+    if (e.button !== 0) return;
+    if (!run) {
+      run = [[x, y]];
+      hint.textContent = "click to pin a vertex · right-click or Esc finishes";
+    } else {
+      var last = run[run.length - 1];
+      var path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("class", "wire");
+      path.setAttribute("d", "M " + last[0] + "," + last[1] + " L " + x + "," + y);
+      wires.appendChild(path);
+      run.push([x, y]);
+      if (onExisting(x, y)) {
+        var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        c.setAttribute("class", "junction"); c.setAttribute("cx", x); c.setAttribute("cy", y); c.setAttribute("r", 2);
+        junctions.appendChild(c);
+        run = null; preview.style.display = "none";
+        hint.textContent = "landed on copper — junction dot placed, run finished";
+      }
+    }
+  });
+  svg.addEventListener("pointermove", function (e) {
+    if (!run) return;
+    var p = pt(e), last = run[run.length - 1];
+    preview.style.display = "";
+    preview.setAttribute("d", "M " + last[0] + "," + last[1] + " L " + snap(p.x) + "," + snap(p.y));
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && run) { run = null; preview.style.display = "none"; hint.textContent = "Esc finished the run"; }
+  });
+})();
+
+/* §06 badge hover cards */
+(function () {
+  var card = document.getElementById("badgeCard");
+  var wrap = card.parentElement;
+  document.querySelectorAll(".demoViol").forEach(function (v) {
+    function show() {
+      var sev = v.getAttribute("data-sev");
+      var color = sev === "WARNING" ? "var(--warn)" : "var(--err)";
+      card.innerHTML = '<div class="t" style="color:' + color + '">' + sev + " · " + v.getAttribute("data-type") + '</div>' +
+        '<div class="m">' + v.getAttribute("data-msg") + '</div>' +
+        '<div class="fix">Fix: ' + v.getAttribute("data-fix") + '</div>';
+      var b = v.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+      card.classList.add("show");
+      var x = b.left - w.left + b.width / 2 - card.offsetWidth / 2;
+      x = Math.max(8, Math.min(x, w.width - card.offsetWidth - 8));
+      card.style.left = x + "px";
+      card.style.top = (b.top - w.top - card.offsetHeight - 6) + "px";
+    }
+    function hide() { card.classList.remove("show"); }
+    v.addEventListener("mouseenter", show);
+    v.addEventListener("mouseleave", hide);
+    v.addEventListener("focus", show);
+    v.addEventListener("blur", hide);
+  });
+})();
+
+/* §08 context menus */
+(function () {
+  var wrap = document.getElementById("ctxWrap");
+  var svg = document.getElementById("ctxSvg");
+  var menus = { instance: document.getElementById("menuInstance"), wire: document.getElementById("menuWire"), canvas: document.getElementById("menuCanvas") };
+  function closeAll() { Object.keys(menus).forEach(function (k) { menus[k].classList.remove("open"); }); }
+  svg.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    closeAll();
+    var which = "canvas";
+    if (e.target.closest(".ctx-inst")) which = "instance";
+    else if (e.target.closest(".ctx-wire")) which = "wire";
+    var m = menus[which], w = wrap.getBoundingClientRect();
+    m.classList.add("open");
+    var x = Math.min(e.clientX - w.left, w.width - m.offsetWidth - 8);
+    var y = Math.min(e.clientY - w.top, w.height - m.offsetHeight - 8);
+    m.style.left = Math.max(4, x) + "px"; m.style.top = Math.max(4, y) + "px";
+    var first = m.querySelector(".mi:not([aria-disabled])"); if (first) first.focus();
+  });
+  document.addEventListener("pointerdown", function (e) { if (!e.target.closest(".cmenu")) closeAll(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAll(); });
+  document.querySelectorAll(".cmenu .mi").forEach(function (mi) {
+    mi.addEventListener("click", function () { if (mi.getAttribute("aria-disabled") !== "true") closeAll(); });
+  });
+})();
+</script>
+</body>
+</html>
