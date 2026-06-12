@@ -24,17 +24,79 @@ impl CodeGenerator {
     }
 
     /// Generate compiled model from analyzed file
+    ///
+    /// The file must contain exactly one module; files declaring several
+    /// require an explicit selection via [`Self::generate_module`].
     pub fn generate(&self, analyzed: &AnalyzedFile) -> CompileResult<CompiledModel> {
-        // Get the first module (for now, single module per file)
-        let module = analyzed.modules.values().next().ok_or_else(|| {
-            CodeGenError::new(CodeGenErrorKind::Internal("No modules found".into()))
-        })?;
+        self.generate_module(analyzed, None)
+    }
+
+    /// Generate compiled model for one module of an analyzed file
+    ///
+    /// `module_name` selects the module to compile (foundry releases ship
+    /// several modules per file). Without a name the file must contain
+    /// exactly one module: picking an arbitrary one would be
+    /// nondeterministic, so that case is an error naming the candidates.
+    pub fn generate_module(
+        &self,
+        analyzed: &AnalyzedFile,
+        module_name: Option<&str>,
+    ) -> CompileResult<CompiledModel> {
+        let module = Self::select_module(analyzed, module_name)?;
 
         // Build IR
         let ir = DeviceIR::from_analyzed(module)?;
 
         // Generate code from IR
         self.generate_from_ir(&ir)
+    }
+
+    /// Resolve which analyzed module to compile
+    fn select_module<'a>(
+        analyzed: &'a AnalyzedFile,
+        module_name: Option<&str>,
+    ) -> CompileResult<&'a AnalyzedModule> {
+        // The modules map iterates in arbitrary order; list candidates in
+        // declaration order so diagnostics are deterministic
+        let declared: Vec<&str> = analyzed
+            .source
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                crate::ast::Item::Module(module) => Some(module.name.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        match module_name {
+            Some(name) => analyzed.modules.get(name).ok_or_else(|| {
+                let candidates = if declared.is_empty() {
+                    "none".to_string()
+                } else {
+                    declared.join(", ")
+                };
+                CompileError::ModuleSelection(format!(
+                    "module '{}' not found; the file declares: {}",
+                    name, candidates
+                ))
+            }),
+            None => match declared.as_slice() {
+                [] => Err(CompileError::ModuleSelection(
+                    "no modules found in source".into(),
+                )),
+                [name] => analyzed.modules.get(*name).ok_or_else(|| {
+                    CodeGenError::new(CodeGenErrorKind::Internal(format!(
+                        "module '{}' was parsed but not analyzed",
+                        name
+                    )))
+                    .into()
+                }),
+                names => Err(CompileError::ModuleSelection(format!(
+                    "the file declares multiple modules: {}; select one by name",
+                    names.join(", ")
+                ))),
+            },
+        }
     }
 
     /// Generate from IR
@@ -61,6 +123,7 @@ impl CodeGenerator {
                     .transpose()?;
                 Ok(CompiledParameter {
                     name: p.name.clone(),
+                    aliases: p.aliases.clone(),
                     default: p.default,
                     default_program,
                     min: p.min,

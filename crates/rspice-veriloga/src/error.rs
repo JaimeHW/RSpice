@@ -32,6 +32,11 @@ pub enum CompileError {
     #[error("{}", .0)]
     CodeGen(#[from] CodeGenError),
 
+    /// Module selection error: the requested module does not exist, or a
+    /// multi-module file was compiled without naming a module
+    #[error("Module selection error: {0}")]
+    ModuleSelection(String),
+
     /// Multiple errors collected during compilation
     #[error("Compilation failed with {} error(s)", .0.len())]
     Multiple(Vec<CompileError>),

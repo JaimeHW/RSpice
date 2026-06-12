@@ -52,6 +52,9 @@ pub struct InternalNodeDef {
 #[derive(Debug, Clone)]
 pub struct ParamDef {
     pub name: SmolStr,
+    /// Alternate instance-facing names (aliasparam); setting an alias
+    /// writes this parameter
+    pub aliases: Vec<SmolStr>,
     pub default: f64,
     /// Default expression when it does not fold to a constant (may
     /// reference previously declared parameters)
@@ -486,11 +489,17 @@ impl DeviceIR {
 
             ir.parameters.push(ParamDef {
                 name: param.name.clone(),
+                aliases: Vec::new(),
                 default: param.default.unwrap_or(0.0),
                 default_expr: None,
                 min,
                 max,
             });
+        }
+
+        // Attach aliasparam names to their target parameters
+        for alias in &module.param_aliases {
+            ir.parameters[alias.target].aliases.push(alias.alias.clone());
         }
 
         // Build variables

@@ -252,6 +252,10 @@ impl<'a> Parser<'a> {
                 let params = self.parse_parameter(&attributes)?;
                 module.localparams.extend(params);
             }
+            TokenKind::Aliasparam => {
+                let alias = self.parse_aliasparam()?;
+                module.aliasparams.push(alias);
+            }
             TokenKind::Real | TokenKind::Integer | TokenKind::String => {
                 let var = self.parse_variable_decl()?;
                 module.variables.push(var);
@@ -521,6 +525,26 @@ impl<'a> Parser<'a> {
 
         self.expect(TokenKind::Semicolon)?;
         Ok(decls)
+    }
+
+    /// Parse a parameter alias declaration: aliasparam alias = target ;
+    ///
+    /// The right-hand side is strictly a parameter identifier (not an
+    /// expression); the semantic phase validates that the target exists.
+    fn parse_aliasparam(&mut self) -> Result<AliasParamDecl, ParseError> {
+        let start = self.current_span();
+        self.advance(); // consume 'aliasparam'
+
+        let alias = self.expect_identifier("alias name")?;
+        self.expect(TokenKind::Assign_)?;
+        let target = self.expect_identifier("target parameter name")?;
+        self.expect(TokenKind::Semicolon)?;
+
+        Ok(AliasParamDecl {
+            alias: alias.into(),
+            target: target.into(),
+            span: start.extend(self.previous_span()),
+        })
     }
 
     /// Extract `desc`/`units` strings from an attribute list

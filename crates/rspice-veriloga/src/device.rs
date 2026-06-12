@@ -392,20 +392,29 @@ impl VerilogADevice {
     }
 
     /// Set a parameter value by name
+    ///
+    /// aliasparam names resolve to their target parameter, so setting an
+    /// alias is identical to setting the target directly.
     pub fn set_parameter(&mut self, name: &str, value: f64) -> bool {
         // Verilog-A is case-sensitive but SPICE decks are not: prefer an
-        // exact match, then accept a case-insensitive one (industry
-        // netlists write PSP's TOXO as toxo)
-        let index = self
-            .model
-            .parameters
+        // exact match (parameter, then alias), then accept a
+        // case-insensitive one (industry netlists write PSP's TOXO as
+        // toxo). Aliases cannot collide with parameter names, so the
+        // ordering only arbitrates between case-insensitive candidates.
+        let params = &self.model.parameters;
+        let index = params
             .iter()
             .position(|p| p.name == name)
             .or_else(|| {
-                self.model
-                    .parameters
+                params
                     .iter()
-                    .position(|p| p.name.eq_ignore_ascii_case(name))
+                    .position(|p| p.aliases.iter().any(|a| a.as_str() == name))
+            })
+            .or_else(|| params.iter().position(|p| p.name.eq_ignore_ascii_case(name)))
+            .or_else(|| {
+                params
+                    .iter()
+                    .position(|p| p.aliases.iter().any(|a| a.eq_ignore_ascii_case(name)))
             });
         let Some(i) = index else { return false };
         let param = &self.model.parameters[i];

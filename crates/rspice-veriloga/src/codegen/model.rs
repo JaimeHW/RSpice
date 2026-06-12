@@ -109,6 +109,9 @@ pub struct LookupTable {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompiledParameter {
     pub name: SmolStr,
+    /// Alternate instance-facing names (aliasparam); setting an alias
+    /// writes this parameter
+    pub aliases: Vec<SmolStr>,
     pub default: f64,
     /// Program computing the default from other parameters (evaluated in
     /// declaration order for parameters the instance did not set)

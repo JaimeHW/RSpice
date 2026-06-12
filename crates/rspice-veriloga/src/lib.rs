@@ -173,17 +173,37 @@ impl VerilogACompiler {
     /// Compile Verilog-A source code to a device model
     ///
     /// The source is preprocessed first, so `include/`define/`ifdef work
-    /// identically whether compiling from a string or from a file.
+    /// identically whether compiling from a string or from a file. The
+    /// source must contain exactly one module; multi-module sources
+    /// require [`Self::compile_module`].
     pub fn compile(&self, source: &str) -> CompileResult<CompiledModel> {
+        self.compile_module(source, None)
+    }
+
+    /// Compile one module of a (possibly multi-module) Verilog-A source
+    ///
+    /// Foundry releases ship several modules per file; `module_name`
+    /// selects which one to compile. With `None` the source must contain
+    /// exactly one module - anything else is an error listing the
+    /// declared module names.
+    pub fn compile_module(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<CompiledModel> {
         let mut pp = self.configured_preprocessor();
         let preprocessed = pp
             .preprocess_source(source)
             .map_err(|e| CompileError::io_error(format!("Preprocessor error: {}", e)))?;
-        self.compile_preprocessed(&preprocessed)
+        self.compile_preprocessed(&preprocessed, module_name)
     }
 
     /// Compile already-preprocessed Verilog-A source.
-    fn compile_preprocessed(&self, source: &str) -> CompileResult<CompiledModel> {
+    fn compile_preprocessed(
+        &self,
+        source: &str,
+        module_name: Option<&str>,
+    ) -> CompileResult<CompiledModel> {
         // Phase 1: Lexical analysis
         let source_map = SourceMap::new();
         let source_id = source_map.add_source("<input>", source);
@@ -196,15 +216,29 @@ impl VerilogACompiler {
         let analyzed = SemanticAnalyzer::new().analyze(&source_file)?;
 
         // Phase 4 & 5: IR generation and code generation
-        let model = CodeGenerator::new().generate(&analyzed)?;
+        let model = CodeGenerator::new().generate_module(&analyzed, module_name)?;
 
         Ok(model)
     }
 
     /// Compile a source file from disk with preprocessing and dependency metadata.
+    ///
+    /// The file must contain exactly one module; multi-module files
+    /// require [`Self::compile_file_module_with_metadata`].
     pub fn compile_file_with_metadata(
         &self,
         path: &std::path::Path,
+    ) -> CompileResult<CompiledFile> {
+        self.compile_file_module_with_metadata(path, None)
+    }
+
+    /// Compile one module of a source file from disk with preprocessing
+    /// and dependency metadata. See [`Self::compile_module`] for the
+    /// module selection rules.
+    pub fn compile_file_module_with_metadata(
+        &self,
+        path: &std::path::Path,
+        module_name: Option<&str>,
     ) -> CompileResult<CompiledFile> {
         let mut pp = self.configured_preprocessor();
 
@@ -225,7 +259,7 @@ impl VerilogACompiler {
         }
 
         // Compile the preprocessed source
-        let model = self.compile_preprocessed(&preprocessed)?;
+        let model = self.compile_preprocessed(&preprocessed, module_name)?;
         Ok(CompiledFile {
             model,
             dependencies,
@@ -233,8 +267,22 @@ impl VerilogACompiler {
     }
 
     /// Compile a source file from disk with preprocessing
+    ///
+    /// The file must contain exactly one module; multi-module files
+    /// require [`Self::compile_file_module`].
     pub fn compile_file(&self, path: &std::path::Path) -> CompileResult<CompiledModel> {
         self.compile_file_with_metadata(path)
+            .map(|compiled| compiled.model)
+    }
+
+    /// Compile one module of a source file from disk. See
+    /// [`Self::compile_module`] for the module selection rules.
+    pub fn compile_file_module(
+        &self,
+        path: &std::path::Path,
+        module_name: Option<&str>,
+    ) -> CompileResult<CompiledModel> {
+        self.compile_file_module_with_metadata(path, module_name)
             .map(|compiled| compiled.model)
     }
 }

@@ -47,6 +47,8 @@ pub struct Module {
     pub parameters: Vec<ParameterDecl>,
     /// Local parameter declarations
     pub localparams: Vec<ParameterDecl>,
+    /// Parameter alias declarations (aliasparam)
+    pub aliasparams: Vec<AliasParamDecl>,
     /// Variable declarations
     pub variables: Vec<VariableDecl>,
     /// Net declarations (electrical nodes, etc.)
@@ -77,6 +79,7 @@ impl Module {
             port_declarations: Vec::new(),
             parameters: Vec::new(),
             localparams: Vec::new(),
+            aliasparams: Vec::new(),
             variables: Vec::new(),
             nets: Vec::new(),
             branches: Vec::new(),
@@ -136,6 +139,21 @@ pub struct ParameterDecl {
     pub description: Option<SmolStr>,
     /// Attributes
     pub attributes: Vec<Attribute>,
+    /// Source span
+    pub span: Span,
+}
+
+/// Parameter alias declaration: `aliasparam alias = target;`
+///
+/// The alias is an alternate instance-facing name for an existing
+/// parameter. Per the LRM it is not a parameter itself - it carries no
+/// default and no storage - and the module body may not reference it.
+#[derive(Debug, Clone)]
+pub struct AliasParamDecl {
+    /// Alias name
+    pub alias: SmolStr,
+    /// Name of the target parameter
+    pub target: SmolStr,
     /// Source span
     pub span: Span,
 }

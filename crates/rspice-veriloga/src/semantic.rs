@@ -52,6 +52,9 @@ pub struct Symbol {
 pub enum SymbolKind {
     Port,
     Parameter,
+    /// aliasparam name: reserves the identifier so nothing else may
+    /// reuse it; not referenceable in the module body
+    ParamAlias,
     Variable,
     Node,
     Branch,
@@ -216,6 +219,9 @@ pub struct AnalyzedModule {
     pub name: SmolStr,
     pub ports: Vec<AnalyzedPort>,
     pub parameters: Vec<AnalyzedParameter>,
+    /// Parameter aliases (aliasparam): alternate instance-facing names
+    /// resolving to entries of `parameters`
+    pub param_aliases: Vec<AnalyzedParamAlias>,
     pub variables: Vec<AnalyzedVariable>,
     pub branches: Vec<AnalyzedBranch>,
     pub contributions: Vec<AnalyzedContribution>,
@@ -285,6 +291,18 @@ pub struct AnalyzedParameter {
     /// Full default expression (may reference previously declared parameters)
     pub default_expr: Option<Expression>,
     pub range: Option<TypedParameterRange>,
+}
+
+/// Analyzed parameter alias (aliasparam): an alternate instance-facing
+/// name for an existing parameter. Setting the alias on an instance
+/// writes the target; the alias itself is not a parameter and the module
+/// body may not reference it.
+#[derive(Debug, Clone)]
+pub struct AnalyzedParamAlias {
+    /// Alias name
+    pub alias: SmolStr,
+    /// Index of the target in the parameters list
+    pub target: usize,
 }
 
 /// Analyzed variable
@@ -423,6 +441,7 @@ impl SemanticAnalyzer {
             name: module.name.clone(),
             ports: Vec::new(),
             parameters: Vec::new(),
+            param_aliases: Vec::new(),
             variables: Vec::new(),
             branches: Vec::new(),
             contributions: Vec::new(),
@@ -655,6 +674,40 @@ impl SemanticAnalyzer {
                     ..Default::default()
                 },
             })?;
+        }
+
+        // Phase 7b: Parameter aliases (aliasparam). The target must be a
+        // declared parameter; the alias name must not collide with any
+        // other declaration. The alias enters the symbol table only to
+        // reserve its name - it is not a parameter, so the module body
+        // cannot reference it and it gets no storage or default.
+        for decl in &module.aliasparams {
+            let Some(target) = analyzed
+                .parameters
+                .iter()
+                .position(|p| p.name == decl.target)
+            else {
+                self.record_error_at(
+                    SemanticErrorKind::UndeclaredSymbol {
+                        name: decl.target.clone(),
+                    },
+                    decl.span,
+                );
+                continue;
+            };
+
+            self.define_symbol(Symbol {
+                name: decl.alias.clone(),
+                kind: SymbolKind::ParamAlias,
+                value_type: analyzed.parameters[target].value_type,
+                span: decl.span,
+                attrs: Default::default(),
+            })?;
+
+            analyzed.param_aliases.push(AnalyzedParamAlias {
+                alias: decl.alias.clone(),
+                target,
+            });
         }
 
         // Pre-pass for Phase 8: seed the constant environments with
