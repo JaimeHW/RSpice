@@ -37,6 +37,21 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Create and select virtualenv
+        shell: bash
+        run: |
+          # maturin develop requires an active virtualenv; create one at the repo
+          # root (a parent of every working-directory below) and put it on PATH so
+          # all later steps resolve pip/python/pytest/maturin to it. cygpath emits a
+          # native path so the entry also works in the runner's default shell.
+          python -m venv .venv
+          if [ -d .venv/Scripts ]; then
+            echo "VIRTUAL_ENV=$(cygpath -w "$PWD/.venv")" >> "$GITHUB_ENV"
+            cygpath -w "$PWD/.venv/Scripts" >> "$GITHUB_PATH"
+          else
+            echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          fi
       - name: Install binding (release) and test deps
         working-directory: crates/rspice-python
         run: |
