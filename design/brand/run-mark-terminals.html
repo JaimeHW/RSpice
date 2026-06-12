@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Run — Terminals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 40px;
+    --space-2xl: 64px;
+
+    --text-xs: 12px;
+    --text-sm: 14px;
+    --text-base: 16px;
+    --text-lg: 18px;
+    --text-2xl: 24px;
+
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Helvetica, sans-serif;
+
+    --yellow: #F2B824;
+    --schematic-ink: #17181A;
+    --bezel: #101418;
+
+    /* dark canvas (default) */
+    --canvas: #101317;
+    --ink: #E9EBEE;
+    --ink-soft: #99A1AB;
+    --hairline: rgba(233, 235, 238, 0.14);
+    --chip: rgba(233, 235, 238, 0.05);
+    --warn: #E8927C;
+  }
+  [data-canvas="light"] {
+    --canvas: #F2F1ED;
+    --ink: #1B1D20;
+    --ink-soft: #62686F;
+    --hairline: rgba(27, 29, 32, 0.16);
+    --chip: rgba(27, 29, 32, 0.04);
+    --warn: #B4543A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--canvas);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--text-base);
+    line-height: 1.55;
+    transition: background 0.25s ease, color 0.25s ease;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: var(--space-xl) var(--space-lg) var(--space-2xl);
+  }
+
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--space-lg);
+    flex-wrap: wrap;
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--hairline);
+    margin-bottom: var(--space-xl);
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 var(--space-sm);
+  }
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 var(--space-xs);
+  }
+  .brief {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 58ch;
+    text-wrap: pretty;
+  }
+
+  .controls { display: flex; gap: var(--space-sm); flex: none; }
+  .toggle {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    letter-spacing: 0.08em;
+    color: var(--ink);
+    background: var(--chip);
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    padding: 10px 18px;
+    min-height: 44px;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  }
+  .toggle:hover { border-color: var(--ink-soft); transform: translateY(-1px); }
+  .toggle:active { transform: translateY(0); }
+  .toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .toggle[aria-pressed="true"] { border-color: var(--ink); }
+
+  section { margin-bottom: var(--space-2xl); }
+  section:last-of-type { margin-bottom: 0; }
+  h2 {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 var(--space-lg);
+  }
+
+  .tile {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 22%;
+    border: 1px solid var(--hairline);
+    flex: none;
+  }
+  .tile svg { display: block; width: 70%; height: 70%; }
+  .bg-yellow { background: var(--yellow); }
+  .bg-bezel  { background: var(--bezel); --run-ink: var(--yellow); }
+  .bg-mono   { background: transparent; --run-ink: var(--ink); }
+
+  .hero-row {
+    display: grid;
+    grid-template-columns: auto auto 1fr;
+    gap: var(--space-xl);
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .hero-row { grid-template-columns: 1fr; }
+  }
+  .hero-cell { display: flex; flex-direction: column; gap: var(--space-sm); align-items: center; }
+  .tile-hero { width: 220px; height: 220px; }
+  .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+
+  .diagnosis h2 { margin-bottom: var(--space-md); }
+  .diagnosis dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-sm) var(--space-lg);
+    margin: 0;
+    font-size: var(--text-sm);
+  }
+  .diagnosis dt {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
+    padding-top: 2px;
+    white-space: nowrap;
+  }
+  .diagnosis dd { margin: 0; max-width: 44ch; text-wrap: pretty; }
+
+  .options {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--space-lg);
+  }
+  @media (max-width: 860px) {
+    .options { grid-template-columns: repeat(2, 1fr); }
+  }
+  .option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-lg) var(--space-md);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    text-align: center;
+  }
+  .option[data-recommended] { border-color: var(--ink-soft); }
+  .option .tile { width: 120px; height: 120px; }
+  .option .name {
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    color: var(--ink);
+    margin-top: var(--space-xs);
+  }
+  .option .rec {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--canvas);
+    background: var(--ink);
+    border-radius: 999px;
+    padding: 2px 10px;
+  }
+  .option .note {
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
+    margin: 0;
+    max-width: 24ch;
+    text-wrap: pretty;
+  }
+
+  .tweak-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xl);
+    align-items: start;
+  }
+  @media (max-width: 860px) {
+    .tweak-row { grid-template-columns: 1fr; }
+  }
+  .tweaks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-lg);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+  }
+  .tweak {
+    display: grid;
+    grid-template-columns: 120px 1fr 56px;
+    align-items: center;
+    gap: var(--space-md);
+  }
+  .tweak label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-soft);
+  }
+  .tweak output {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink);
+    text-align: right;
+  }
+  input[type="range"] {
+    width: 100%;
+    accent-color: var(--yellow);
+    min-height: 24px;
+    cursor: pointer;
+  }
+  input[type="range"]:disabled { opacity: 0.35; cursor: not-allowed; }
+  input[type="range"]:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .tweak-buttons { display: flex; gap: var(--space-sm); margin-top: var(--space-xs); }
+
+  .readout {
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.7;
+    color: var(--ink-soft);
+    background: var(--chip);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: var(--space-lg);
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-x: auto;
+  }
+  .readout .ok { color: var(--ink); }
+  .readout .bad { color: var(--warn); }
+
+  .ladders { display: flex; flex-direction: column; gap: var(--space-xl); }
+  .ladder-block { display: flex; flex-direction: column; gap: var(--space-md); }
+  .ladder { display: flex; align-items: flex-end; gap: var(--space-lg); flex-wrap: wrap; }
+  .rung { display: flex; flex-direction: column; align-items: center; gap: var(--space-sm); }
+  .s64 { width: 64px; height: 64px; }
+  .s48 { width: 48px; height: 48px; }
+  .s32 { width: 32px; height: 32px; border-radius: 24%; }
+  .s24 { width: 24px; height: 24px; border-radius: 25%; }
+  .s16 { width: 16px; height: 16px; border-radius: 26%; }
+  .caption {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+    margin: var(--space-md) 0 0;
+    max-width: 58ch;
+    text-wrap: pretty;
+  }
+
+  .context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-xl);
+    align-items: start;
+  }
+  @media (max-width: 720px) {
+    .context-row { grid-template-columns: 1fr; }
+  }
+  .context { display: flex; flex-direction: column; gap: var(--space-sm); }
+
+  .tabbar {
+    border-bottom: 1px solid var(--hairline);
+    padding: var(--space-md) var(--space-md) 0;
+    background: var(--chip);
+    border-radius: 12px 12px 0 0;
+  }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    border-bottom: none;
+    border-radius: 10px 10px 0 0;
+    padding: 8px 14px;
+    font-size: var(--text-xs);
+    color: var(--ink);
+  }
+  .tab .tile { border: none; }
+
+  .taskbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--bezel);
+    border: 1px solid var(--hairline);
+    border-radius: 12px;
+    padding: 10px 18px;
+  }
+  .taskbar .app {
+    width: 24px; height: 24px;
+    border-radius: 25%;
+    background: repeating-linear-gradient(45deg, rgba(233,235,238,0.10), rgba(233,235,238,0.10) 3px, rgba(233,235,238,0.04) 3px, rgba(233,235,238,0.04) 6px);
+  }
+  .taskbar .tile { border: none; }
+
+  footer {
+    margin-top: var(--space-2xl);
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--hairline);
+    font-family: var(--mono);
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
+    max-width: 76ch;
+    line-height: 1.7;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Today · standard cut (unchanged reference) -->
+    <symbol id="t-base" viewBox="0 0 96 96">
+      <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="8"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
+        <path d="M 9 34 H 30" fill="none"></path>
+        <path d="M 9 62 H 30" fill="none"></path>
+        <path d="M 77 48 H 87" fill="none"></path>
+      </g>
+    </symbol>
+
+    <!-- Today · small cut (16 px, unchanged reference) -->
+    <symbol id="t-s" viewBox="0 0 96 96">
+      <g fill="var(--run-ink, #17181A)" stroke="var(--run-ink, #17181A)" stroke-width="10.5"
+         stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 31 20 L 31 76 L 77 48 Z"></path>
+        <path d="M 11 32 H 30" fill="none"></path>
+        <path d="M 11 64 H 30" fill="none"></path>
+        <path d="M 77 48 H 88" fill="none"></path>
+      </g>
+    </symbol>
+
+    <!-- Small cut + dot tips (proposed 24/32 px frame), equal pins -->
+    <symbol id="t-s-dots" viewBox="0 0 96 96">
+      <g fill="none" stroke="var(--run-ink, #17181A)" stroke-width="10.5">
+        <path d="M 8 32 H 29"></path>
+        <path d="M 8 64 H 29"></path>
+        <path d="M 70 48 H 88"></path>
+      </g>
+      <g fill="var(--run-ink, #17181A)">
+        <circle cx="8" cy="32" r="8"></circle>
+        <circle cx="8" cy="64" r="8"></circle>
+        <circle cx="88" cy="48" r="8"></circle>
+      </g>
+      <path d="M 25 20 L 25 76 L 71 48 Z" fill="var(--run-ink, #17181A)"
+            stroke="var(--run-ink, #17181A)" stroke-width="10.5" stroke-linejoin="round"></path>
+    </symbol>
+
+    <!-- JS-generated cuts -->
+    <symbol id="t-dots"  viewBox="0 0 96 96"></symbol>
+    <symbol id="t-ports" viewBox="0 0 96 96"></symbol>
+    <symbol id="t-heavy" viewBox="0 0 96 96"></symbol>
+    <symbol id="t-prop"  viewBox="0 0 96 96"></symbol>
+  </defs>
+</svg>
+
+<div class="sheet">
+  <header>
+    <div>
+      <p class="kicker">Mark refinement · Terminals</p>
+      <h1>Run — giving the leads somewhere to land</h1>
+      <p class="brief">Open-circle terminals on the leads, the way a schematic draws its ports. They make the symbol read more honestly at display sizes — and below 48&nbsp;px they hand off to simpler cuts, because that is where the jank actually lives.</p>
+    </div>
+    <div class="controls">
+      <button class="toggle" id="canvasToggle" type="button" aria-pressed="false">Light canvas</button>
+    </div>
+  </header>
+
+  <section>
+    <div class="hero-row">
+      <div class="hero-cell">
+        <div class="tile tile-hero bg-yellow">
+          <svg role="img" aria-label="Current Run mark: op-amp triangle with bare round-capped leads"><use href="#t-base"></use></svg>
+        </div>
+        <span class="label">today</span>
+      </div>
+      <div class="hero-cell">
+        <div class="tile tile-hero bg-yellow">
+          <svg role="img" aria-label="Proposed Run mark: op-amp triangle with open-circle port terminals on each lead"><use href="#t-prop"></use></svg>
+        </div>
+        <span class="label">proposed · live tweak below</span>
+      </div>
+      <div class="diagnosis">
+        <h2>Where the jank comes from</h2>
+        <dl>
+          <dt>thin leads</dt>
+          <dd>8-unit strokes render at 1.4–1.9&nbsp;px in the 32–48&nbsp;px range — anti-aliasing smears them into fog.</dd>
+          <dt>bare caps</dt>
+          <dd>Round caps just trail off; the eye has nothing to land on, so the leads read as noise instead of pins.</dd>
+          <dt>output stub</dt>
+          <dd>The 10-unit output lead all but vanishes below 48&nbsp;px — the triangle loses its exit.</dd>
+          <dt>the fix</dt>
+          <dd>Terminate every lead deliberately: open ports at display sizes, filled junction dots at 24–32&nbsp;px, and the proven clean cut at 16&nbsp;px.</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Terminal treatments</h2>
+    <div class="options">
+      <div class="option">
+        <div class="tile bg-yellow"><svg aria-hidden="true"><use href="#t-base"></use></svg></div>
+        <span class="name">baseline</span>
+        <p class="note">today — bare round caps, leads trail off</p>
+      </div>
+      <div class="option">
+        <div class="tile bg-yellow"><svg aria-hidden="true"><use href="#t-dots"></use></svg></div>
+        <span class="name">junction dots</span>
+        <p class="note">filled tips; reads as solder joints; survives every size</p>
+      </div>
+      <div class="option" data-recommended>
+        <div class="tile bg-yellow"><svg aria-hidden="true"><use href="#t-ports"></use></svg></div>
+        <span class="rec">recommended</span>
+        <span class="name">port rings</span>
+        <p class="note">open ports, the EDA idiom; ring lighter than the lead so the triangle stays in charge</p>
+      </div>
+      <div class="option">
+        <div class="tile bg-yellow"><svg aria-hidden="true"><use href="#t-heavy"></use></svg></div>
+        <span class="name">heavy rings</span>
+        <p class="note">lead-weight rings; the tips start competing with the triangle</p>
+      </div>
+    </div>
+    <p class="caption">In schematic convention an open circle is a port and a filled dot is a junction — both honest idioms. Port rings say “connect here,” which is the better story for a simulator’s run button.</p>
+  </section>
+
+  <section>
+    <h2>Tune the recommended cut</h2>
+    <div class="tweak-row">
+      <div class="tweaks">
+        <div class="tweak">
+          <label for="tipR">terminal size</label>
+          <input type="range" id="tipR" min="5.5" max="10" step="0.5" value="8">
+          <output for="tipR" id="tipROut">8u</output>
+        </div>
+        <div class="tweak">
+          <label for="ringW">ring weight</label>
+          <input type="range" id="ringW" min="3" max="7" step="0.5" value="4">
+          <output for="ringW" id="ringWOut">4u</output>
+        </div>
+        <div class="tweak">
+          <label for="pinLen">pin length</label>
+          <input type="range" id="pinLen" min="3.5" max="8" step="0.5" value="5.5">
+          <output for="pinLen" id="pinLenOut">5.5u</output>
+        </div>
+        <div class="tweak-buttons">
+          <button class="toggle" id="filledToggle" type="button" aria-pressed="false">Filled tips</button>
+          <button class="toggle" id="resetTweaks" type="button">Reset</button>
+        </div>
+      </div>
+      <pre class="readout" id="readout" aria-live="polite"></pre>
+    </div>
+  </section>
+
+  <section>
+    <h2>Scale — before and after</h2>
+    <div class="ladders">
+      <div class="ladder-block">
+        <span class="label">today — standard cut scaled down, small cut at 16</span>
+        <div class="ladder" aria-label="Current mark at 64, 48, 32, 24, and 16 pixels">
+          <div class="rung"><div class="tile s64 bg-yellow"><svg aria-hidden="true"><use href="#t-base"></use></svg></div><span class="label">64</span></div>
+          <div class="rung"><div class="tile s48 bg-yellow"><svg aria-hidden="true"><use href="#t-base"></use></svg></div><span class="label">48</span></div>
+          <div class="rung"><div class="tile s32 bg-yellow"><svg aria-hidden="true"><use href="#t-base"></use></svg></div><span class="label">32</span></div>
+          <div class="rung"><div class="tile s24 bg-yellow"><svg aria-hidden="true"><use href="#t-base"></use></svg></div><span class="label">24</span></div>
+          <div class="rung"><div class="tile s16 bg-yellow"><svg aria-hidden="true"><use href="#t-s"></use></svg></div><span class="label">16</span></div>
+        </div>
+      </div>
+      <div class="ladder-block">
+        <span class="label">proposed — ports ≥ 48 · dot tips 24–32 · clean cut at 16</span>
+        <div class="ladder" aria-label="Proposed tiered marks at 64, 48, 32, 24, and 16 pixels">
+          <div class="rung"><div class="tile s64 bg-yellow"><svg aria-hidden="true"><use href="#t-prop"></use></svg></div><span class="label">64</span></div>
+          <div class="rung"><div class="tile s48 bg-yellow"><svg aria-hidden="true"><use href="#t-prop"></use></svg></div><span class="label">48</span></div>
+          <div class="rung"><div class="tile s32 bg-yellow"><svg aria-hidden="true"><use href="#t-s-dots"></use></svg></div><span class="label">32</span></div>
+          <div class="rung"><div class="tile s24 bg-yellow"><svg aria-hidden="true"><use href="#t-s-dots"></use></svg></div><span class="label">24</span></div>
+          <div class="rung"><div class="tile s16 bg-yellow"><svg aria-hidden="true"><use href="#t-s"></use></svg></div><span class="label">16</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Ring holes need roughly 2&nbsp;px of daylight to read as hollow — that exists at 48&nbsp;px and above. At 24–32&nbsp;px the dot-tip small cut keeps the terminal idea alive without the mush; 16&nbsp;px keeps the proven heavy cut untouched.</p>
+  </section>
+
+  <section>
+    <h2>In context</h2>
+    <div class="context-row">
+      <div class="context">
+        <span class="label">favicon · browser tab (16 px, unchanged)</span>
+        <div class="tabbar">
+          <div class="tab">
+            <div class="tile s16 bg-yellow"><svg aria-hidden="true"><use href="#t-s"></use></svg></div>
+            untitled-1 — simulator
+          </div>
+        </div>
+      </div>
+      <div class="context">
+        <span class="label">windows taskbar (24 px → dot-tip cut)</span>
+        <div class="taskbar">
+          <div class="app" aria-hidden="true"></div>
+          <div class="app" aria-hidden="true"></div>
+          <div class="tile s24 bg-yellow"><svg aria-hidden="true"><use href="#t-s-dots"></use></svg></div>
+          <div class="app" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Variants</h2>
+    <div class="ladder">
+      <div class="rung"><div class="tile s64 bg-yellow" style="width:96px;height:96px"><svg aria-hidden="true"><use href="#t-prop"></use></svg></div><span class="label">primary</span></div>
+      <div class="rung"><div class="tile s64 bg-bezel" style="width:96px;height:96px"><svg aria-hidden="true"><use href="#t-prop"></use></svg></div><span class="label">inverse</span></div>
+      <div class="rung"><div class="tile s64 bg-mono" style="width:96px;height:96px"><svg aria-hidden="true"><use href="#t-prop"></use></svg></div><span class="label">mono</span></div>
+    </div>
+    <p class="caption">Ports stay hollow on every background — the hole shows tile, bezel, or canvas through it, same as a real schematic pin.</p>
+  </section>
+
+  <footer>
+    Layout is solved so all three pins read equal: the triangle sits left of brand-grid position to make room for the output pin and ring, and gives up width (97.8% at the defaults — imperceptible) only when the budget runs out. Pins overlap into the ring stroke band, so no tangent gap can open between pin and ring. On approval, the recut touches: run-mark.svg + run-icon.svg + run-icon-dark.svg (port rings, geometry from the readout above) · ICO frames 256/128/64/48 re-render from the ringed cut · the 32 px ICO frame and PNG move to the dot-tip cut · run-icon-16.svg and the 16 px frame stay as shipped · og-card.html, the website heroes, and the inline favicons in crates/rspice-ui/web/index.html and crates/rspice-wasm/web/index.html pick up their matching cuts.
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var INK = "var(--run-ink, #17181A)";
+
+    /* ---- parametric terminal mark on the 96-unit grid ----
+       Layout is solved from the pin length so all three pins read equal:
+       [margin][ring 2R][pin L][triangle][pin L][ring 2R][margin] = 96.
+       The triangle keeps full brand size while the budget allows, then
+       scales down uniformly about (48,48). Pins overlap into the ring's
+       stroke band (to its centerline) so no tangent gap can open. */
+    function solveLayout(p) {
+      var TRI_W = 46, TRI_H = 56, STROKE = 8;
+      var R = p.tipR, L = p.pinLen;
+      var w = p.filled ? 0 : Math.min(p.ringW, p.tipR);
+      var budget = 96 - 4 * R - 2 * L - STROKE;
+      var s = Math.min(1, budget / TRI_W);
+      var m = Math.max(0, (96 - (4 * R + 2 * L + TRI_W * s + STROKE)) / 2);
+      var triL = m + 2 * R + L + STROKE / 2;
+      var apexX = triL + TRI_W * s;
+      return {
+        R: R, L: L, w: w, s: s,
+        inCx: m + R,
+        outCx: apexX + STROKE / 2 + L + R,
+        triL: triL, apexX: apexX,
+        y0: 48 - (TRI_H / 2) * s, y1: 48 + (TRI_H / 2) * s,
+        rc: R - w / 2
+      };
+    }
+
+    function terminalMark(p) {
+      var g = solveLayout(p);
+      var inLeadStart = p.filled ? g.inCx : g.inCx + g.rc;
+      var outLeadEnd = p.filled ? g.outCx : g.outCx - g.rc;
+
+      var s = "";
+      s += '<g fill="none" stroke="' + INK + '" stroke-width="8">';
+      s += '<path d="M ' + fmt(inLeadStart) + ' 34 H ' + fmt(g.triL + 2) + '"></path>';
+      s += '<path d="M ' + fmt(inLeadStart) + ' 62 H ' + fmt(g.triL + 2) + '"></path>';
+      s += '<path d="M ' + fmt(g.apexX - 1) + ' 48 H ' + fmt(outLeadEnd) + '"></path>';
+      s += '</g>';
+
+      var tips = [[g.inCx, 34], [g.inCx, 62], [g.outCx, 48]];
+      if (p.filled) {
+        s += '<g fill="' + INK + '">';
+        tips.forEach(function (t) {
+          s += '<circle cx="' + fmt(t[0]) + '" cy="' + t[1] + '" r="' + fmt(g.R) + '"></circle>';
+        });
+        s += '</g>';
+      } else {
+        s += '<g fill="none" stroke="' + INK + '" stroke-width="' + fmt(g.w) + '">';
+        tips.forEach(function (t) {
+          s += '<circle cx="' + fmt(t[0]) + '" cy="' + t[1] + '" r="' + fmt(g.rc) + '"></circle>';
+        });
+        s += '</g>';
+      }
+
+      s += '<path d="M ' + fmt(g.triL) + ' ' + fmt(g.y0) + ' L ' + fmt(g.triL) + ' ' + fmt(g.y1) +
+           ' L ' + fmt(g.apexX) + ' 48 Z" fill="' + INK + '" stroke="' + INK +
+           '" stroke-width="8" stroke-linejoin="round"></path>';
+      return s;
+    }
+
+    var PRESETS = {
+      dots:  { tipR: 6.5, ringW: 0, filled: true,  pinLen: 5.5 },
+      ports: { tipR: 8,   ringW: 4, filled: false, pinLen: 5.5 },
+      heavy: { tipR: 9.5, ringW: 6, filled: false, pinLen: 5.5 }
+    };
+    document.getElementById("t-dots").innerHTML  = terminalMark(PRESETS.dots);
+    document.getElementById("t-ports").innerHTML = terminalMark(PRESETS.ports);
+    document.getElementById("t-heavy").innerHTML = terminalMark(PRESETS.heavy);
+
+    /* ---- live-tweaked proposed cut ---- */
+    var DEFAULTS = { tipR: 8, ringW: 4, filled: false, pinLen: 5.5 };
+    var state = Object.assign({}, DEFAULTS);
+    try {
+      var saved = JSON.parse(localStorage.getItem("runTermTweaks") || "null");
+      if (saved && typeof saved.tipR === "number") { state = Object.assign({}, DEFAULTS, saved); }
+    } catch (e) { /* stale storage — fall back to defaults */ }
+
+    var tipR = document.getElementById("tipR");
+    var ringW = document.getElementById("ringW");
+    var pinLen = document.getElementById("pinLen");
+    var tipROut = document.getElementById("tipROut");
+    var ringWOut = document.getElementById("ringWOut");
+    var pinLenOut = document.getElementById("pinLenOut");
+    var filledToggle = document.getElementById("filledToggle");
+    var readout = document.getElementById("readout");
+    var propSymbol = document.getElementById("t-prop");
+
+    function fmt(n) { return (Math.round(n * 100) / 100).toString(); }
+
+    function pxAt(units, tilePx) { return units * (0.7 * tilePx) / 96; }
+
+    function renderReadout(p) {
+      var g = solveLayout(p);
+      var lines = [];
+      lines.push("// proposed cut · 96-unit grid · pins equal at " + fmt(g.L) + "u");
+      if (p.filled) {
+        lines.push("dot   r " + fmt(g.R) + "  at (" + fmt(g.inCx) + ",34) (" + fmt(g.inCx) + ",62) (" + fmt(g.outCx) + ",48)");
+      } else {
+        var hole = 2 * (g.R - g.w);
+        lines.push("ring  r " + fmt(g.rc) + " · stroke " + fmt(g.w) +
+                   "  at (" + fmt(g.inCx) + ",34) (" + fmt(g.inCx) + ",62) (" + fmt(g.outCx) + ",48)");
+        var h64 = pxAt(hole, 64), h48 = pxAt(hole, 48);
+        var cls64 = h64 >= 1.9 ? "ok" : "bad";
+        var cls48 = h48 >= 1.9 ? "ok" : "bad";
+        lines.push("hole  " + fmt(hole) + "u  → <span class=\"" + cls64 + "\">" + h64.toFixed(1) + " px @64</span> · <span class=\"" + cls48 + "\">" + h48.toFixed(1) + " px @48</span>" + (h48 < 1.9 ? "  ⚠ dissolves at 48 px" : ""));
+      }
+      var pct = Math.round(g.s * 1000) / 10;
+      var triLine = "tri   M " + fmt(g.triL) + " " + fmt(g.y0) + " L " + fmt(g.triL) + " " + fmt(g.y1) +
+                    " L " + fmt(g.apexX) + " 48 Z";
+      if (g.s >= 0.999) {
+        triLine += "  (full size)";
+      } else {
+        triLine += "  (<span class=\"" + (g.s >= 0.95 ? "ok" : "bad") + "\">" + pct + "% of brand size" +
+                   (g.s < 0.95 ? " ⚠" : "") + "</span>)";
+      }
+      lines.push(triLine);
+      readout.innerHTML = lines.join("\n");
+    }
+
+    function apply() {
+      propSymbol.innerHTML = terminalMark(state);
+      tipR.value = state.tipR;
+      ringW.value = state.ringW;
+      pinLen.value = state.pinLen;
+      tipROut.textContent = fmt(state.tipR) + "u";
+      ringWOut.textContent = fmt(state.ringW) + "u";
+      pinLenOut.textContent = fmt(state.pinLen) + "u";
+      ringW.disabled = state.filled;
+      filledToggle.setAttribute("aria-pressed", state.filled ? "true" : "false");
+      filledToggle.textContent = state.filled ? "Hollow ports" : "Filled tips";
+      renderReadout(state);
+      localStorage.setItem("runTermTweaks", JSON.stringify(state));
+    }
+
+    tipR.addEventListener("input", function () { state.tipR = parseFloat(tipR.value); apply(); });
+    ringW.addEventListener("input", function () { state.ringW = parseFloat(ringW.value); apply(); });
+    pinLen.addEventListener("input", function () { state.pinLen = parseFloat(pinLen.value); apply(); });
+    filledToggle.addEventListener("click", function () { state.filled = !state.filled; apply(); });
+    document.getElementById("resetTweaks").addEventListener("click", function () {
+      state = Object.assign({}, DEFAULTS); apply();
+    });
+    apply();
+
+    /* ---- canvas toggle (shared key with the other mark sheets) ---- */
+    var canvasToggle = document.getElementById("canvasToggle");
+    function applyCanvas(mode) {
+      if (mode === "light") {
+        root.setAttribute("data-canvas", "light");
+        canvasToggle.textContent = "Dark canvas";
+        canvasToggle.setAttribute("aria-pressed", "true");
+      } else {
+        root.removeAttribute("data-canvas");
+        canvasToggle.textContent = "Light canvas";
+        canvasToggle.setAttribute("aria-pressed", "false");
+      }
+    }
+    if (localStorage.getItem("markSheetCanvas") === "light") { applyCanvas("light"); }
+    canvasToggle.addEventListener("click", function () {
+      var next = root.getAttribute("data-canvas") === "light" ? "dark" : "light";
+      applyCanvas(next);
+      localStorage.setItem("markSheetCanvas", next);
+    });
+  })();
+</script>
+
+</body>
+</html>
