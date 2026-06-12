@@ -126,7 +126,7 @@ fn draw_empty_hint(painter: &Painter, available: Rect) {
     painter.text(
         center + egui::vec2(0.0, 2.0),
         egui::Align2::CENTER_CENTER,
-        "Pick a part from the left panel, or press R · C · L · V · G to place one",
+        "Pick a part from the left panel, or press Shift+R · C · L · V · G to place one",
         theme::sans(12.0, FontWeight::Regular),
         palette.text_faint,
     );
