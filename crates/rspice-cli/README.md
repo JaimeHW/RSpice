@@ -37,12 +37,36 @@ A handful of analyses can instead be requested from the command line. When one o
 
 | Mode | Flags |
 | :--- | :--- |
-| Monte Carlo | `--monte-carlo N` (optional `--seed`) |
+| Monte Carlo | `--monte-carlo N` (optional `--seed`, `--mc-distribution`, `--mc-spread`, `--mc-param`) |
 | Periodic steady-state (PSS) | `--pss-freq F` (optional `--pss-harmonics`, `--pss-tstab`) |
 | Harmonic balance | `--hb-freq F` (optional `--hb-harmonics`) |
-| Pole-zero | `--pz-input NODE --pz-output NODE` |
+| Pole-zero | `--pz-input NODE --pz-output NODE` (node names or indices) |
 | DC sensitivity | `--sens-output NODE --sens-param NAME` (optional `--sens-value`) |
 | Process corners | `--corners tt,ss,ff` (optional `--corner-lib`) |
+
+Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
+
+### Measurements and the exit status
+
+`.MEAS TRAN` statements evaluate against the transient result (node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works); `.MEAS DC` statements evaluate against the DC sweep with the swept value as the abscissa. Results print under `--meas` and are always collected for report files.
+
+**A failed measurement fails the run with exit code 3** — including measurements whose analysis never ran (and AC/NOISE measurements, which `rspice run` cannot evaluate yet; they are recorded as explicit failures rather than skipped). Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
+
+### Output files for every mode
+
+With `-o`, every run mode writes machine-readable results. When a deck runs several analyses, each writes its own tagged file (`out.csv` → `out.op.csv`, `out.tran.csv`, ...). Mode-specific shapes:
+
+| Mode | Tag | Contents |
+| :--- | :--- | :--- |
+| `.STEP` | `step` | One row per step value, node voltages as columns |
+| Monte Carlo | `mc` | Per-run samples; JSON adds mean/std/min/max, seed, failure count |
+| PSS | `pss` | One period of the steady-state waveforms (time domain) |
+| HB | `hb` | Complex spectrum per node over the harmonic frequencies |
+| `.TF` | `tf` | Gain, input impedance, output impedance |
+| Pole-zero | `pz` | `pole(i)`/`zero(i)` complex columns |
+| `.SENS` | `sens` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
+
+TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
 ## Commands
 
@@ -52,7 +76,7 @@ A handful of analyses can instead be requested from the command line. When one o
 rspice run <NETLIST> [OPTIONS]
 ```
 
-Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
+Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist from stdin (includes then resolve against the working directory).
 
 **Output options:**
 
@@ -60,10 +84,20 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 | :--- | :--- |
 | `-o, --output <FILE>` | Output file for results. With several analysis cards in one deck, each analysis writes its own tagged file: `out.csv` → `out.op.csv`, `out.tran.csv`, ... |
 | `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
+| `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
+| `--summary <FILE>` | Write a JSON run summary — tool version, per-run status, every measurement, overall verdict — to FILE, or stdout with `-` |
 | `--progress` | Show a live elapsed-time indicator during transient analysis |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
+
+**Run-discipline options:**
+
+| Flag | Description |
+| :--- | :--- |
+| `--timeout <SECONDS>` | Abort the run after this budget; exits 124. Transient and DC sweeps stop at the next safe point. Ctrl-C stops the same way and exits 130 |
+| `--allow-failed-meas` | Exit 0 even when `.MEAS` measurements fail (default: exit 3) |
+| `--allow-nonfinite` | Export results containing NaN/Inf instead of failing (default: simulation error) |
 
 **Simulation options:**
 
@@ -74,8 +108,14 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 | `--abstol <TOL>` | Absolute convergence tolerance |
 | `--reltol <TOL>` | Relative convergence tolerance |
 | `--residual-reltol <TOL>` | Relative residual tolerance for equation convergence checks |
+| `--voltage-abstol <TOL>` | Voltage absolute tolerance (VNTOL) |
+| `--current-abstol <TOL>` | Current absolute tolerance |
+| `--charge-abstol <TOL>` | Charge absolute tolerance (CHGTOL) |
 | `--min-step <TIME>` | Minimum transient timestep |
 | `--max-step <TIME>` | Maximum transient timestep |
+| `--integration-method <M>` | Transient integrator: `trap`, `gear`, `trapgear` (default), `euler` |
+| `--trtol <TOL>` | Transient truncation-error tolerance (TRTOL) |
+| `--gmin <G>` | Initial GMIN conductance for convergence aids |
 | `--convergence <MODE>` | DC convergence preset: `fast`, `default`, `robust` |
 | `-I, --include <DIR>` | Add a search directory for `.include`/`.lib` references (repeatable) |
 | `-D, --define <NAME=VALUE>` | Override or define a netlist parameter; values accept SPICE suffixes, e.g. `-D RLOAD=4.7k` (repeatable) |
@@ -84,16 +124,19 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists.
 
 | Flag | Description |
 | :--- | :--- |
-| `--monte-carlo <N>` | Run N Monte Carlo iterations |
-| `--seed <SEED>` | Random seed for Monte Carlo (requires `--monte-carlo`) |
+| `--monte-carlo <N>` | Run N Monte Carlo iterations (operating-point variation) |
+| `--seed <SEED>` | Random seed for Monte Carlo; the default seed 1 makes runs reproducible (requires `--monte-carlo`) |
+| `--mc-distribution <D>` | Variation distribution: `gaussian` (default), `uniform`, `worst-case` |
+| `--mc-spread <S>` | Relative spread: sigma for gaussian, tolerance otherwise (default: 0.01) |
+| `--mc-param <NAME>` | Restrict variation to specific parameters (repeatable) |
 | `--pss-freq <FREQ>` | PSS fundamental frequency in Hz |
 | `--pss-harmonics <N>` | Number of PSS harmonics (default: 9) |
 | `--pss-tstab <TIME>` | PSS stabilization time before the shooting method (default: auto) |
 | `--hb-freq <FREQ>` | Harmonic balance fundamental frequency in Hz |
 | `--hb-harmonics <N>` | Number of HB harmonics (default: 9) |
-| `--pz-input <NODE>` | Pole-zero input node index |
-| `--pz-output <NODE>` | Pole-zero output node index (requires `--pz-input`) |
-| `--sens-output <NODE>` | Sensitivity analysis output node index |
+| `--pz-input <NODE>` | Pole-zero input node (name or index) |
+| `--pz-output <NODE>` | Pole-zero output node (requires `--pz-input`) |
+| `--sens-output <NODE>` | Sensitivity analysis output node (name or index) |
 | `--sens-param <PARAM>` | Parameter name for sensitivity analysis (requires `--sens-output`) |
 | `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
 | `--corners <LIST>` | Process corners, comma-separated, e.g. `tt,ss,ff` |
@@ -165,7 +208,7 @@ rspice info <NETLIST> [OPTIONS]
 
 ### `rspice check` — Validate Netlist
 
-Check netlist syntax and connectivity.
+Check netlist syntax and topology. Accepts `-` for stdin. Two singular-topology checks always run: a loop of ideal voltage sources/inductors is an error (the DC system cannot be solved), and a node connected only to current sources warns about its undefined voltage.
 
 ```bash
 rspice check <NETLIST> [OPTIONS]
@@ -180,7 +223,9 @@ rspice check <NETLIST> [OPTIONS]
 
 ### `rspice compare` — Golden File Comparison
 
-Compare simulation results against a reference file for regression testing. Both files may be in any supported result format — rawfile (binary or ASCII), CSV, TSV, JSON, or HDF5, auto-detected by extension — so a binary rawfile result can be checked directly against a CSV golden. Complex AC data compares value-for-value as `Re(..)`/`Im(..)` series. Exits with code `0` if the comparison passes and `1` if differences are found.
+Compare simulation results against a reference file for regression testing. Both files may be in any supported result format — rawfile (binary or ASCII), CSV, TSV, JSON, or HDF5, auto-detected by extension — so a binary rawfile result can be checked directly against a CSV golden. Complex AC data compares value-for-value as `Re(..)`/`Im(..)` series.
+
+The golden file defines the contract: golden variables missing from the result fail, point-count mismatches fail (a result truncated by a crashed run cannot pass on the overlap it wrote), and NaN never matches anything. A passing comparison exits `0`; mismatches exit `3` (verification failure).
 
 ```bash
 rspice compare <RESULT> <GOLDEN> [OPTIONS]
@@ -193,6 +238,9 @@ rspice compare <RESULT> <GOLDEN> [OPTIONS]
 | `--variables <VAR>` | Compare specific variables only (repeatable; default: all) |
 | `--fail-fast` | Stop on first difference |
 | `--json` | Output differences as JSON |
+| `--allow-truncated` | Tolerate point-count mismatches and compare the overlap |
+| `--ignore-missing` | Tolerate golden variables missing from the result |
+| `--bless` | Accept the result as the new reference: copies it over the golden file when they differ, or creates the golden file if it does not exist |
 
 ### `rspice convert` — Format Conversion
 
@@ -226,7 +274,7 @@ rspice compile-va <FILE> [OPTIONS]
 
 | Flag | Description |
 | :--- | :--- |
-| `-o, --output <FILE>` | Output compiled model (optional, for caching) |
+| `-o, --output <FILE>` | Write a JSON interface summary: model name, terminals, internal node count, parameters with defaults and bounds |
 | `-I, --include <DIR>` | Add an include directory (repeatable) |
 | `--strict` | Enable strict LRM compliance mode |
 | `--detailed` | Show detailed compilation information |
@@ -301,18 +349,21 @@ Environment variable overrides:
 
 ## Exit Codes
 
-Exit codes follow BSD `sysexits` conventions:
+The exit status is the verification contract — a deck whose measurements fail, or whose results are non-finite, does not exit 0:
 
 | Code | Meaning |
 | :--- | :--- |
-| 0 | Success |
-| 1 | General error (simulation failure, Verilog-A compile failure, conversion failure, comparison differences) |
+| 0 | Success: simulation ran and every check passed |
+| 1 | Simulation error (convergence failure, non-finite results, Verilog-A compile failure, conversion failure) |
 | 2 | Usage error (invalid arguments) |
-| 65 | Input format error (netlist parse failure) |
+| 3 | Verification failure: a `.MEAS` failed or did not evaluate, or `compare` found mismatches |
+| 65 | Input format error (netlist parse failure, singular topology from `check`) |
 | 66 | Input file not found |
 | 70 | Internal error |
 | 74 | I/O error (failed to read input or write output) |
 | 78 | Configuration error |
+| 124 | Run exceeded `--timeout` |
+| 130 | Interrupted (Ctrl-C) |
 
 ## CI Integration
 
@@ -344,18 +395,21 @@ jobs:
 A typical verification pipeline:
 
 ```bash
-# 1. Validate the netlist
+# 1. Validate the netlist (syntax + singular-topology checks)
 rspice check circuit.sp --connectivity --strict
 
-# 2. Run the simulation
-rspice run circuit.sp -q -o results.csv -f csv
+# 2. Run with a time budget; failed .MEAS checks exit 3, NaN results exit 1
+rspice run circuit.sp -q -o results.csv -f csv --timeout 600 \
+        --summary summary.json
 
-# 3. Compare against the golden reference
+# 3. Compare against the golden reference (mismatches exit 3)
 rspice compare results.csv golden.csv --abstol 1e-9
 
-# 4. Extract measurements
-rspice run circuit.sp --meas-format json --meas-file metrics.json
+# 4. After a reviewed, intentional change: accept the new waveforms
+rspice compare results.csv golden.csv --bless
 ```
+
+Because failed measurements, non-finite results, comparison mismatches, and timeouts all map to distinct nonzero exit codes, `rspice run deck.sp && deploy` is safe without parsing any output. The `--summary` JSON carries the same verdict plus every measurement value for archiving.
 
 ## License
 

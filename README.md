@@ -54,11 +54,11 @@ Run it:
 ```console
 $ target/release/rspice run rc_lowpass.sp --meas
 ✓ Transient complete: 1053 time points computed
-  Measurement Results (2):
+  Measurement Results (TRAN, 2):
     VPEAK = 4.999773e+00
     RISETIME = 2.197215e-04
 
-Simulation complete in 0.003s.
+Simulation complete in 0.001s.
 ```
 
 Results can be written to a file instead — SPICE raw, CSV, TSV, JSON, or HDF5:
@@ -106,7 +106,7 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 ### Command line
 
-The CLI is built for scripted runs and CI: it executes the analyses a netlist requests, validates and inspects netlists, converts between output formats, and compares results against golden references; runs can emit JUnit or TAP reports for CI.
+The CLI is built for scripted runs and CI: it executes the analyses a netlist requests, validates and inspects netlists, converts between output formats, and compares results against golden references. The exit status is the verification contract — failed `.MEAS` checks exit 3, non-finite results exit 1, comparison mismatches exit 3, `--timeout` overruns exit 124 — and runs can emit JUnit or TAP reports, a JSON run summary (`--summary`), and machine-readable measurement files.
 
 | Command | Description |
 | :--- | :--- |
@@ -119,11 +119,14 @@ The CLI is built for scripted runs and CI: it executes the analyses a netlist re
 | `rspice completions` | Generate shell completion scripts |
 
 ```bash
-# Quiet batch run with a JUnit report
-rspice run circuit.sp -q --report-format junit --report-file results.xml
+# Quiet batch run with a JUnit report and a time budget
+rspice run circuit.sp -q --report-format junit --report-file results.xml --timeout 600
 
-# Compare results to a golden file
+# Compare results to a golden file (mismatches exit 3)
 rspice compare results.csv golden.csv --abstol 1e-9 --reltol 1e-6
+
+# Accept a reviewed waveform change as the new reference
+rspice compare results.csv golden.csv --bless
 ```
 
 Full command and option reference: [crates/rspice-cli/README.md](crates/rspice-cli/README.md).
