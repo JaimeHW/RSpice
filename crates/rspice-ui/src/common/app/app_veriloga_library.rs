@@ -1,12 +1,24 @@
+//! Global Verilog-A library persistence. Native builds keep the library
+//! as JSON under the user config directory; the browser build has no
+//! filesystem (and the atomic-write temp naming reaches
+//! `std::process::id`, which aborts on wasm32), so there the library
+//! simply lives in memory for the session and both entry points are
+//! quiet no-ops.
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-
-use crate::state::{Library, LibraryManager};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::state::Library;
+use crate::state::LibraryManager;
 
 pub(super) const VERILOGA_LIBRARY_NAME: &str = "veriloga";
+#[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
+#[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_FORMAT_VERSION: u32 = 1;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]
 struct PersistedVerilogALibrary {
     version: u32,
@@ -15,6 +27,7 @@ struct PersistedVerilogALibrary {
 
 /// Borrowed twin of [`PersistedVerilogALibrary`] so saving never clones
 /// the library.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Serialize)]
 struct PersistedVerilogALibraryRef<'a> {
     version: u32,
@@ -22,10 +35,17 @@ struct PersistedVerilogALibraryRef<'a> {
 }
 
 pub(super) fn restore_global_veriloga_library(library_manager: &mut LibraryManager) {
-    let Some(library) = load_global_veriloga_library() else {
-        return;
-    };
-    install_loaded_veriloga_library(library_manager, library);
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = library_manager;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(library) = load_global_veriloga_library() else {
+            return;
+        };
+        install_loaded_veriloga_library(library_manager, library);
+    }
 }
 
 pub(super) fn save_global_veriloga_library(library_manager: &LibraryManager) -> Result<(), String> {
@@ -33,9 +53,17 @@ pub(super) fn save_global_veriloga_library(library_manager: &LibraryManager) -> 
         return Ok(());
     };
 
+    // The ~30 s autosave also lands here: the wasm no-op must stay quiet.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = library;
+        Ok(())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
     save_global_veriloga_library_to_path(&global_veriloga_library_path(), library)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn global_veriloga_library_path() -> PathBuf {
     let config_root = dirs::config_dir()
         .or_else(dirs::home_dir)
@@ -43,16 +71,19 @@ fn global_veriloga_library_path() -> PathBuf {
     global_veriloga_library_path_for_root(&config_root)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn global_veriloga_library_path_for_root(config_root: &Path) -> PathBuf {
     config_root
         .join("rspice")
         .join(VERILOGA_LIBRARY_CONFIG_FILE)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_global_veriloga_library() -> Option<Library> {
     load_global_veriloga_library_from_path(&global_veriloga_library_path())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_global_veriloga_library_from_path(path: &Path) -> Option<Library> {
     let text = std::fs::read_to_string(path).ok()?;
     let parsed: PersistedVerilogALibrary = serde_json::from_str(&text).ok()?;
@@ -62,6 +93,7 @@ fn load_global_veriloga_library_from_path(path: &Path) -> Option<Library> {
     Some(parsed.library)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn save_global_veriloga_library_to_path(path: &Path, library: &Library) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
@@ -101,12 +133,14 @@ fn save_global_veriloga_library_to_path(path: &Path, library: &Library) -> Resul
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn install_loaded_veriloga_library(library_manager: &mut LibraryManager, mut library: Library) {
     library.name = VERILOGA_LIBRARY_NAME.to_string();
     library.read_only = false;
     library_manager.add_library(library);
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let temp_path = temporary_path_for(path);
     std::fs::write(&temp_path, bytes).map_err(|e| {
@@ -152,6 +186,7 @@ fn write_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn temporary_path_for(path: &Path) -> PathBuf {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path

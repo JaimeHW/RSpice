@@ -12,6 +12,9 @@ pub struct VerilogALoadDialogState {
     pub file_path: Option<PathBuf>,
     /// Path input text (for editing).
     pub file_path_text: String,
+    /// Pasted module source — the browser build has no filesystem, so it
+    /// compiles this buffer instead of a picked file.
+    pub source_text: String,
     /// Compiler options.
     pub options: VerilogADialogOptions,
     /// Compilation state.
@@ -44,6 +47,7 @@ impl Default for VerilogALoadDialogState {
             open: false,
             file_path: None,
             file_path_text: String::new(),
+            source_text: String::new(),
             options: VerilogADialogOptions::default(),
             compilation_state: CompilationState::Idle,
             errors: Vec::new(),
@@ -65,6 +69,7 @@ impl Clone for VerilogALoadDialogState {
             open: self.open,
             file_path: self.file_path.clone(),
             file_path_text: self.file_path_text.clone(),
+            source_text: self.source_text.clone(),
             options: self.options.clone(),
             compilation_state: self.compilation_state,
             errors: self.errors.clone(),
@@ -86,6 +91,7 @@ impl std::fmt::Debug for VerilogALoadDialogState {
             .field("open", &self.open)
             .field("file_path", &self.file_path)
             .field("file_path_text", &self.file_path_text)
+            .field("source_text", &self.source_text.len())
             .field("compilation_state", &self.compilation_state)
             .field("errors", &self.errors.len())
             .field(
@@ -144,6 +150,11 @@ impl VerilogALoadDialogState {
     pub fn set_file_path(&mut self, path: PathBuf) {
         self.file_path_text = path.to_string_lossy().to_string();
         self.file_path = Some(path);
+        self.reset_compile_outcome();
+    }
+
+    /// Drop the last compile's outcome (the source changed under it).
+    pub fn reset_compile_outcome(&mut self) {
         self.errors.clear();
         self.compiled_module = None;
         self.compiled_artifact = None;

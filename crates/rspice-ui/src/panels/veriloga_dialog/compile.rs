@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
 use super::state::VerilogALoadDialogState;
@@ -5,35 +6,61 @@ use super::types::{
     CompilationState, CompileErrorDisplay, CompileTaskResult, CompiledModuleInfo, ParameterInfo,
 };
 
+/// What a compile run reads its module from. Native builds compile the
+/// picked file (preprocessing resolves `include against the disk); the
+/// browser build compiles the pasted buffer.
+enum CompileInput {
+    #[cfg(not(target_arch = "wasm32"))]
+    File(PathBuf),
+    #[cfg(target_arch = "wasm32")]
+    Source(String),
+}
+
 /// Start async compilation using rspice-veriloga.
 pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
-    let path = match &state.file_path {
-        Some(p) => p.clone(),
-        None => {
-            state.errors = vec![CompileErrorDisplay::error("No file selected")];
+    #[cfg(not(target_arch = "wasm32"))]
+    let input = {
+        let path = match &state.file_path {
+            Some(p) => p.clone(),
+            None => {
+                state.errors = vec![CompileErrorDisplay::error("No file selected")];
+                state.compilation_state = CompilationState::Failed;
+                return;
+            }
+        };
+
+        if !path.exists() {
+            state.errors = vec![CompileErrorDisplay::error("File not found")];
             state.compilation_state = CompilationState::Failed;
             return;
         }
+
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if ext != "va" && ext != "vams" {
+            state.errors = vec![CompileErrorDisplay::error(
+                "Invalid file extension. Expected .va or .vams",
+            )];
+            state.compilation_state = CompilationState::Failed;
+            return;
+        }
+        CompileInput::File(path)
     };
 
-    if !path.exists() {
-        state.errors = vec![CompileErrorDisplay::error("File not found")];
-        state.compilation_state = CompilationState::Failed;
-        return;
-    }
-
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if ext != "va" && ext != "vams" {
-        state.errors = vec![CompileErrorDisplay::error(
-            "Invalid file extension. Expected .va or .vams",
-        )];
-        state.compilation_state = CompilationState::Failed;
-        return;
-    }
+    #[cfg(target_arch = "wasm32")]
+    let input = {
+        if state.source_text.trim().is_empty() {
+            state.errors = vec![CompileErrorDisplay::error(
+                "No source — paste the Verilog-A module text",
+            )];
+            state.compilation_state = CompilationState::Failed;
+            return;
+        }
+        CompileInput::Source(state.source_text.clone())
+    };
 
     let options = rspice_veriloga::CompilerOptions {
         enable_ams: state.options.enable_ams,
@@ -49,18 +76,43 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
     };
 
     let (tx, rx) = mpsc::channel();
-    let source_path = path.clone();
 
     crate::common::spawn_or_inline(move || {
-        log::info!("Starting Verilog-A compilation: {}", source_path.display());
-
         let compiler = rspice_veriloga::VerilogACompiler::new(options);
-        let result = compiler.compile_file_with_metadata(&source_path);
+        let (result, source_path) = match input {
+            #[cfg(not(target_arch = "wasm32"))]
+            CompileInput::File(path) => {
+                log::info!("Starting Verilog-A compilation: {}", path.display());
+                (compiler.compile_file_with_metadata(&path), path)
+            }
+            #[cfg(target_arch = "wasm32")]
+            CompileInput::Source(text) => {
+                log::info!(
+                    "Starting Verilog-A compilation from pasted source ({} bytes)",
+                    text.len()
+                );
+                // Compiling from memory has no on-disk dependencies; the
+                // synthetic va:// path is minted from the module name once
+                // it is known.
+                let result = compiler.compile(&text).map(|model| {
+                    rspice_veriloga::CompiledFile {
+                        model,
+                        dependencies: Vec::new(),
+                    }
+                });
+                (result, PathBuf::new())
+            }
+        };
 
         let task_result = match result {
             Ok(compiled) => {
                 let model = compiled.model;
                 log::info!("Verilog-A compilation succeeded: module '{}'", model.name);
+                let source_path = if source_path.as_os_str().is_empty() {
+                    PathBuf::from(format!("va://{}.va", model.name))
+                } else {
+                    source_path
+                };
                 CompileTaskResult::Success {
                     module_info: CompiledModuleInfo {
                         name: model.name.to_string(),
