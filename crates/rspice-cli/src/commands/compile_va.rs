@@ -112,13 +112,39 @@ pub fn execute(
     // Summary
     println!("Compilation successful");
 
+    // Machine-readable interface summary
+    if let Some(ref output_path) = args.output {
+        let json = serde_json::json!({
+            "source": args.input.display().to_string(),
+            "model": model.name,
+            "terminals": model.terminal_names,
+            "internal_nodes": model.internal_nodes,
+            "parameters": model.parameters.iter().map(|p| {
+                serde_json::json!({
+                    "name": p.name,
+                    "default": p.default,
+                    "min": p.min,
+                    "max": p.max,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        let text = serde_json::to_string_pretty(&json)
+            .map_err(|e| CliError::output_json_error(output_path, e))?;
+        std::fs::write(output_path, text + "\n")
+            .map_err(|e| CliError::output_error(output_path, e))?;
+        println!("Interface summary written to: {}", output_path.display());
+    }
+
     // Usage example
     if args.show_usage {
         println!();
         println!("Usage in SPICE netlist:");
         println!(
             "  .VERILOGA {}",
-            args.input.file_name().unwrap().to_string_lossy()
+            args.input
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| args.input.display().to_string())
         );
 
         // Generate example device instantiation
