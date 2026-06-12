@@ -11,6 +11,7 @@
 //! - [`engine`] - Simulation engine and analysis runners
 //! - [`config`] - Simulation and convergence configuration
 //! - [`results`] - Simulation results with NumPy array support
+//! - [`abort`] - Ctrl-C cancellation plumbing
 //! - [`errors`] - Python exception types
 //!
 //! ## Example
@@ -24,13 +25,59 @@
 //! print(f"V(1) = {result.voltage(1)} V")
 //! ```
 
+mod abort;
 mod config;
 mod engine;
 mod errors;
 mod netlist;
 mod results;
 
+use numpy::{PyArray1, ToPyArray};
 use pyo3::prelude::*;
+
+/// Generate AC sweep frequencies without running an analysis
+///
+/// Mirrors the `.AC DEC|OCT|LIN` frequency grids exactly, so Python-side
+/// sweeps match netlist-directive sweeps point for point.
+///
+/// Args:
+///     variation: "dec", "oct", or "lin"
+///     points: Points per decade/octave, or total points for "lin"
+///     start_freq: Sweep start frequency in Hz
+///     stop_freq: Sweep stop frequency in Hz
+///
+/// Returns:
+///     numpy.ndarray: Frequency points in Hz
+///
+/// Example:
+///     >>> freqs = rspice.ac_frequencies("dec", 20, 1.0, 1e6)
+#[pyfunction]
+fn ac_frequencies<'py>(
+    py: Python<'py>,
+    variation: &str,
+    points: usize,
+    start_freq: f64,
+    stop_freq: f64,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let variation = match variation.to_ascii_lowercase().as_str() {
+        "dec" | "decade" => rspice_core::netlist::FreqVariation::Dec,
+        "oct" | "octave" => rspice_core::netlist::FreqVariation::Oct,
+        "lin" | "linear" => rspice_core::netlist::FreqVariation::Lin,
+        other => {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "variation must be 'dec', 'oct', or 'lin', got '{other}'"
+            )));
+        }
+    };
+    let frequencies =
+        rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start_freq, stop_freq);
+    if frequencies.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "invalid frequency sweep: {points} points from {start_freq} to {stop_freq} Hz"
+        )));
+    }
+    Ok(frequencies.to_pyarray(py))
+}
 
 /// RSpice Python module - circuit simulation engine
 ///
@@ -64,6 +111,12 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<results::PyVariableStatistics>()?;
     m.add_class::<results::PyPoleZeroResult>()?;
     m.add_class::<results::PyComplexValue>()?;
+    m.add_class::<results::PyFourierResult>()?;
+    m.add_class::<results::PyHarmonic>()?;
+    m.add_class::<results::PyTransferFunctionResult>()?;
+
+    // Module-level functions
+    m.add_function(wrap_pyfunction!(ac_frequencies, m)?)?;
 
     // Exception types
     m.add("RSpiceError", m.py().get_type::<errors::RSpiceError>())?;
@@ -101,6 +154,10 @@ fn rspice(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "VariableStatistics",
             "PoleZeroResult",
             "ComplexValue",
+            "FourierResult",
+            "Harmonic",
+            "TransferFunctionResult",
+            "ac_frequencies",
             "RSpiceError",
             "ParseError",
             "SimulationError",
