@@ -132,21 +132,32 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
             // ---- Library column
             column(ui, column_width, columns_height, "Library", true, |ui| {
-                let libraries: Vec<(String, usize)> = state
+                let libraries: Vec<(String, usize, bool)> = state
                     .library_manager
                     .libraries_sorted()
                     .iter()
-                    .map(|lib| (lib.name.clone(), lib.cells.len()))
+                    .map(|lib| (lib.name.clone(), lib.cells.len(), lib.read_only))
                     .collect();
-                for (name, cell_count) in libraries {
+                for (name, cell_count, read_only) in libraries {
                     let selected = state.library_manager.selected_library.as_deref()
                         == Some(name.as_str());
+                    // Read-only libraries wear the same "ro ·" mark as the
+                    // rail's palette groups.
+                    let meta = if read_only {
+                        format!("ro · {cell_count}")
+                    } else {
+                        cell_count.to_string()
+                    };
                     let row = TreeRow::new(&name)
-                        .meta(&cell_count.to_string())
+                        .meta(&meta)
                         .selected(selected)
                         .show(ui);
                     if row.response.clicked() {
                         state.library_manager.select_library(&name);
+                    }
+                    if read_only {
+                        row.response
+                            .on_hover_text("Read-only library — placeable, never editable");
                     }
                 }
             });
@@ -158,22 +169,41 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .selected_library
                     .clone()
                 else {
+                    column_empty(ui, "Select a library");
                     return;
                 };
-                let cells: Vec<String> = state
+                let (cells, unfiltered): (Vec<String>, usize) = state
                     .library_manager
                     .get_library(&library)
                     .map(|lib| {
-                        lib.cells_sorted()
+                        let all = lib.cells_sorted();
+                        let unfiltered = all.len();
+                        let names = all
                             .iter()
                             .filter(|cell| {
                                 filter.is_empty()
                                     || cell.name.to_lowercase().contains(&filter)
                             })
                             .map(|cell| cell.name.clone())
-                            .collect()
+                            .collect();
+                        (names, unfiltered)
                     })
                     .unwrap_or_default();
+                if cells.is_empty() {
+                    // Name the filter so a stale one can't gaslight the browser.
+                    if unfiltered == 0 {
+                        column_empty(ui, "No cells yet — New cell creates the first");
+                    } else {
+                        column_empty(
+                            ui,
+                            &format!(
+                                "No cells match '{}'",
+                                state.library_manager.filter_text.trim()
+                            ),
+                        );
+                    }
+                    return;
+                }
                 for name in cells {
                     let selected =
                         state.library_manager.selected_cell.as_deref() == Some(name.as_str());
@@ -186,10 +216,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
             // ---- View column
             column(ui, column_width, columns_height, "View", false, |ui| {
+                if state.library_manager.selected_library.is_none() {
+                    column_empty(ui, "Select a library");
+                    return;
+                }
                 let (Some(library), Some(cell)) = (
                     state.library_manager.selected_library.clone(),
                     state.library_manager.selected_cell.clone(),
                 ) else {
+                    column_empty(ui, "Select a cell");
                     return;
                 };
                 let views: Vec<(String, ViewType)> = state
@@ -291,6 +326,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 /// One bordered browser column with an uppercase header.
+/// Quiet one-liner for a column with nothing to list — names the action
+/// that fills it.
+fn column_empty(ui: &mut Ui, text: &str) {
+    let c = Tokens::get(ui.ctx()).color;
+    ui.add_space(8.0);
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(c.text_faint),
+    );
+}
+
 fn column(
     ui: &mut Ui,
     width: f32,
