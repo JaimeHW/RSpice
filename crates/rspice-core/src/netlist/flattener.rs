@@ -128,6 +128,10 @@ pub struct Flattener<'a> {
     external_subckts: HashSet<String>,
     /// Global nodes that must not be renamed while flattening hierarchy.
     global_nodes: HashSet<String>,
+    /// Definitions currently being expanded, outermost first. A definition
+    /// re-entered while still on this stack is a recursive instantiation,
+    /// reported with the full cycle instead of running into `max_depth`.
+    expansion_stack: Vec<String>,
     /// Netlist-wide statistical-function stream (shared draw counter), so
     /// per-instance expression draws are distinct yet reproducible.
     random: RandomState,
@@ -157,6 +161,7 @@ impl<'a> Flattener<'a> {
             instance_metadata: Vec::new(),
             external_subckts: HashSet::new(),
             global_nodes: HashSet::new(),
+            expansion_stack: Vec::new(),
             random: RandomState::default(),
         }
     }
@@ -176,6 +181,7 @@ impl<'a> Flattener<'a> {
         let mut flat_elements = Vec::new();
         self.external_subckts = Self::collect_external_subckts(netlist);
         self.global_nodes = netlist.global_nodes.clone();
+        self.expansion_stack.clear();
         // Continue the netlist's statistical draw sequence (seeded at parse
         // time) so flatten-time draws are distinct per instance.
         self.random = netlist.params.random().clone();
@@ -310,6 +316,47 @@ impl<'a> Flattener<'a> {
             format!("{}.{}", prefix, instance.name)
         };
 
+        // A connection-count mismatch silently mis-wires the circuit if the
+        // ports are truncated or nodes are dropped, so it is a hard error —
+        // the same contract Spectre and HSPICE enforce.
+        if instance.nodes.len() != subckt.ports.len() {
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Subcircuit instance '{}' connects {} node(s) but '{}' declares {} port(s): {}",
+                    new_prefix,
+                    instance.nodes.len(),
+                    subckt_name,
+                    subckt.ports.len(),
+                    subckt.ports.join(" ")
+                ),
+            });
+        }
+
+        // A definition that is still being expanded cannot be instantiated
+        // again below itself; report the cycle by name instead of expanding
+        // until max_depth trips ~100 levels later.
+        if self.expansion_stack.iter().any(|name| name == subckt_name) {
+            let start = self
+                .expansion_stack
+                .iter()
+                .position(|name| name == subckt_name)
+                .unwrap_or(0);
+            let mut chain: Vec<&str> = self.expansion_stack[start..]
+                .iter()
+                .map(String::as_str)
+                .collect();
+            chain.push(subckt_name);
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!(
+                    "Recursive subcircuit instantiation at '{}': {}",
+                    new_prefix,
+                    chain.join(" -> ")
+                ),
+            });
+        }
+
         // Build node map: subcircuit port -> instance connection
         let mut node_map = HashMap::new();
 
@@ -354,6 +401,7 @@ impl<'a> Flattener<'a> {
         }
 
         // Expand each element in the subcircuit
+        self.expansion_stack.push(subckt_name.to_owned());
         for sub_element in &subckt.elements {
             // Apply parameter substitution to element values
             let mut substituted = self.substitute_params(sub_element, &param_map)?;
@@ -369,6 +417,7 @@ impl<'a> Flattener<'a> {
                 output,
             )?;
         }
+        self.expansion_stack.pop();
 
         Ok(())
     }
