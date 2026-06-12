@@ -256,7 +256,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn dev_limvds(vnew: Value, vold: Value) -> Value {
+    pub(crate) fn dev_limvds(vnew: Value, vold: Value) -> Value {
         if vold >= 3.5 {
             if vnew > vold {
                 vnew.min(3.0 * vold + 2.0)
@@ -303,7 +303,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(in crate::device::mosfet::mosfet) fn dev_fetlim(
+    pub(crate) fn dev_fetlim(
         vnew: Value,
         vold: Value,
         vto: Value,

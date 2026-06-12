@@ -1,0 +1,46 @@
+* 0.18um-style BSIM3v3.3 model cards for the rspice bsim3v3 oracle decks.
+* Parameter values written for this test suite (not a foundry deck); they
+* exercise the short-channel, DIBL, mobility, Rds(V) and CTM charge paths.
+* Keep in sync with tests.rs::nmos018()/pmos018().
+
+.model n018 nmos level=49
++ tnom=27 tox=4.1e-9 xj=1.0e-7 nch=2.35e17
++ vth0=0.37 k1=0.59 k2=0.0026 k3=1e-3 k3b=2.3 w0=1e-7 nlx=1.8e-7
++ dvt0w=0 dvt1w=0 dvt2w=0 dvt0=1.4 dvt1=0.41 dvt2=0.027
++ u0=270 ua=-1.4e-9 ub=2.4e-18 uc=6.2e-11 vsat=9.5e4
++ a0=1.9 ags=0.41 b0=-1e-8 b1=0 keta=0.04 a1=0 a2=1
++ rdsw=110 prwg=0.5 prwb=-0.2 wr=1 wint=5e-9 lint=1.5e-8
++ dwg=-4e-9 dwb=6e-9 voff=-0.092 nfactor=2.2 cit=0
++ cdsc=2.4e-4 cdscd=0 cdscb=0
++ eta0=2.5e-3 etab=5e-5 dsub=1.5e-2
++ pclm=0.72 pdiblc1=0.21 pdiblc2=2.5e-3 pdiblcb=-0.1 drout=0.78
++ pscbe1=8.5e8 pscbe2=5e-7 pvag=0.01 delta=0.01 rsh=0 mobmod=1
++ prt=0 ute=-1.5 kt1=-0.11 kt1l=0 kt2=0.022
++ ua1=4.31e-9 ub1=-7.61e-18 uc1=-5.6e-11 at=3.3e4
++ wl=0 wln=1 ww=0 wwn=1 wwl=0 ll=0 lln=1 lw=0 lwn=1 lwl=0
++ capmod=3 xpart=0.5 cgdo=7.9e-10 cgso=7.9e-10 cgbo=1e-12
++ cj=9.5e-4 pb=0.8 mj=0.38 cjsw=2.4e-10 pbsw=0.8 mjsw=0.13
++ cjswg=3.3e-10 pbswg=0.8 mjswg=0.13
++ cf=0 clc=1e-7 cle=0.6 voffcv=-0.02 noff=1.8 acde=0.6 moin=15
++ js=1.5e-6 jsw=2.5e-12 nj=1 xti=3
+
+.model p018 pmos level=49
++ tnom=27 tox=4.1e-9 xj=1.0e-7 nch=4.1e17
++ vth0=-0.39 k1=0.55 k2=0.032 k3=0 k3b=7.5 w0=1e-6 nlx=1.1e-7
++ dvt0w=0 dvt1w=0 dvt2w=0 dvt0=0.58 dvt1=0.24 dvt2=0.07
++ u0=110 ua=1.3e-9 ub=1.0e-21 uc=-1.0e-10 vsat=1.9e5
++ a0=1.6 ags=0.27 b0=2.5e-7 b1=8e-7 keta=0.025 a1=0.4 a2=0.4
++ rdsw=250 prwg=0.5 prwb=0.05 wr=1 wint=0 lint=2.5e-8
++ dwg=-2.5e-8 dwb=1e-8 voff=-0.1 nfactor=1.9 cit=0
++ cdsc=2.4e-4 cdscd=0 cdscb=0
++ eta0=0.02 etab=-0.012 dsub=0.06
++ pclm=1.2 pdiblc1=8e-4 pdiblc2=0.022 pdiblcb=-1e-3 drout=0.08
++ pscbe1=2.7e9 pscbe2=9.5e-10 pvag=15 delta=0.01 rsh=0 mobmod=1
++ prt=0 ute=-1.1 kt1=-0.11 kt1l=0 kt2=0.022
++ ua1=4.31e-9 ub1=-7.61e-18 uc1=-5.6e-11 at=3.3e4
++ wl=0 wln=1 ww=0 wwn=1 wwl=0 ll=0 lln=1 lw=0 lwn=1 lwl=0
++ capmod=3 xpart=0.5 cgdo=6.4e-10 cgso=6.4e-10 cgbo=1e-12
++ cj=1.15e-3 pb=0.85 mj=0.41 cjsw=1.9e-10 pbsw=0.85 mjsw=0.34
++ cjswg=2.8e-10 pbswg=0.85 mjswg=0.34
++ cf=0 clc=1e-7 cle=0.6 voffcv=-0.05 noff=2.5 acde=0.85 moin=15
++ js=1.1e-6 jsw=2.2e-12 nj=1 xti=3

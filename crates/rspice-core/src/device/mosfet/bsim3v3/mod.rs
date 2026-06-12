@@ -1,0 +1,252 @@
+//! BSIM3v3.3.0 bulk MOSFET model (SPICE levels 8/49).
+//!
+//! Ported from ngspice-46 `src/spicelib/devices/bsim3/`. This is a
+//! self-contained model module — parameters ([`params`]), size/temperature
+//! preconditioning ([`temp`]), and the load equations ([`eval`]) — with **no
+//! engine integration yet**: nothing here stamps a matrix or registers with
+//! the builder. The same module layout as the in-tree BSIM3-family SOI ports
+//! (`device::mosfet::b3soi::{pd,fd,dd}`) is used so the eventual LEVEL=8/49
+//! wiring can follow the LEVEL=55-57 pattern.
+//!
+//! # What is ported
+//!
+//! - Full model card with L/W/P binning and the b3set.c defaults
+//!   ([`Bsim3v3Model`]); TNOM enters in Celsius exactly as b3mpar.c converts.
+//! - `BSIM3temp`: the per-model temperature block, the (W, L)-keyed
+//!   `bsim3SizeDependParam` knots, and the per-instance tail
+//!   (`delvto`/`mulu0`, series conductances, `ijth` anchors) — see [`temp`],
+//!   including the always-on fatal checks of b3check.c.
+//! - `BSIM3load` DC path: junction diodes (with `ijth` linearization and
+//!   explicit `gmin`), Vth chain, `Vgsteff` smoothing, MOBMOD 1/2/3, `Vdsat`,
+//!   `Vdseff`, `Vasat`/`VACLM`/`VADIBL`/`Va`/`VASCBE`, `Ids` with analytic
+//!   `gm`/`gds`/`gmbs`, and the substrate current — see [`eval`].
+//! - CAPMOD=3 (charge-thickness) intrinsic charges with the full capacitance
+//!   matrix, junction depletion charges, and the smoothed overlap charges.
+//!
+//! # What is intentionally not ported (typed errors, not silent fallbacks)
+//!
+//! - `capMod` 0/1/2 charge models (DC is capMod-independent; charge requests
+//!   error). `xpart < 0` (intrinsic-charge suppression) is honored.
+//! - NQS (`nqsMod`/`acnqsMod` = 1) and the ACM geometry model (`acm > 0`):
+//!   rejected at construction.
+//! - Noise and the SOA checks (b3noi.c, b3soachk.c): out of scope for the
+//!   load; the model card stores their parameters.
+//!
+//! # Integration seams (for the future LEVEL=8/49 wiring)
+//!
+//! The [`Bsim3v3`] device owns `Arc<Bsim3v3Model>` + `Arc<Bsim3v3SizeDep>` +
+//! [`Bsim3v3InstTemp`] and exposes [`Bsim3v3::eval_polarity`] (raw node
+//! voltages in, `mtype`-folded internally) plus the ngspice limiting sequence
+//! [`Bsim3v3::limit_voltages`]. The op struct carries every `here->BSIM3*`
+//! quantity the b3ld.c stamp consumes; the multiplier `m`, the mode swap of
+//! the matrix load (b3ld.c:2920-3120), and the gmin policy are the engine's
+//! responsibility.
+
+pub mod common;
+pub mod eval;
+pub mod params;
+pub mod temp;
+
+pub use eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
+pub use params::{Binned, Bsim3v3Model};
+pub use temp::{
+    Bsim3v3Geometry, Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep, SizeDepCache,
+};
+
+use crate::Value;
+use crate::device::mosfet::Mosfet;
+use std::sync::Arc;
+
+/// One BSIM3v3.3 instance: shared model card + size knot + instance tail.
+#[derive(Debug, Clone)]
+pub struct Bsim3v3 {
+    pub name: String,
+    /// +1 NMOS / -1 PMOS (model `mtype`).
+    pub mtype: Value,
+    pub model: Arc<Bsim3v3Model>,
+    pub model_temp: Arc<Bsim3v3ModelTemp>,
+    pub size: Arc<Bsim3v3SizeDep>,
+    pub inst: Bsim3v3InstTemp,
+    pub geom: Bsim3v3Geometry,
+}
+
+impl Bsim3v3 {
+    /// Build an instance from a model card and instance geometry at the given
+    /// device temperature (Kelvin). Mirrors `BSIM3setup` + `BSIM3temp` for a
+    /// single instance; unsupported model options are rejected here rather
+    /// than silently ignored.
+    pub fn new(
+        name: String,
+        model: Arc<Bsim3v3Model>,
+        geom: Bsim3v3Geometry,
+        temp_k: Value,
+    ) -> Result<Self, String> {
+        if model.acm_mod != 0 {
+            return Err(format!(
+                "BSIM3 '{name}': ACM={} is not implemented (only ACM=0)",
+                model.acm_mod
+            ));
+        }
+        if model.nqs_mod != 0 || model.acnqs_mod != 0 {
+            return Err(format!(
+                "BSIM3 '{name}': NQSMOD/ACNQSMOD=1 is not implemented"
+            ));
+        }
+        if !(1..=3).contains(&model.mob_mod) {
+            return Err(format!(
+                "BSIM3 '{name}': MOBMOD={} is invalid (1, 2 or 3)",
+                model.mob_mod
+            ));
+        }
+        if !(0..=3).contains(&model.cap_mod) {
+            return Err(format!(
+                "BSIM3 '{name}': CAPMOD={} is invalid (0-3)",
+                model.cap_mod
+            ));
+        }
+        let model_temp = Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
+        let size = Arc::new(Bsim3v3SizeDep::new(&model, &model_temp, geom.l, geom.w)?);
+        let inst = Bsim3v3InstTemp::new(&model, &model_temp, &size, &geom);
+        Ok(Self {
+            name,
+            mtype: model.mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        })
+    }
+
+    /// Evaluate at device-polarity branch voltages (already limited).
+    pub fn eval(
+        &self,
+        bias: Bsim3v3Bias,
+        gmin: Value,
+        compute_charges: bool,
+    ) -> Result<Bsim3v3Op, String> {
+        eval::eval(
+            &self.model,
+            &self.model_temp,
+            &self.size,
+            &self.inst,
+            bias,
+            gmin,
+            compute_charges,
+        )
+    }
+
+    /// Evaluate the DC operating point at raw node-space voltages: `mtype` is
+    /// folded into the branch voltages here, exactly as b3ld.c forms
+    /// `vbs`/`vgs`/`vds` from the node vector (b3ld.c:248-256).
+    pub fn eval_polarity(
+        &self,
+        vds_node: Value,
+        vgs_node: Value,
+        vbs_node: Value,
+        gmin: Value,
+        compute_charges: bool,
+    ) -> Result<Bsim3v3Op, String> {
+        self.eval(
+            Bsim3v3Bias {
+                vds: self.mtype * vds_node,
+                vgs: self.mtype * vgs_node,
+                vbs: self.mtype * vbs_node,
+            },
+            gmin,
+            compute_charges,
+        )
+    }
+
+    /// Per-iteration Newton limiting, the exact b3ld.c sequence (lines
+    /// 343-368): `DEVfetlim` on vgs (or vgd in inverse mode) around the
+    /// previous `von`, `DEVlimvds` on vds, then `DEVpnjlim` on the
+    /// forward-biased body junction with `CONSTvt0` and the model `vcrit`.
+    ///
+    /// `new`/`old` are device-polarity branch voltages (the `old` triple is
+    /// the previous iterate's accepted state, ngspice `CKTstate0`);
+    /// `von_prev` is the previous iterate's threshold (`here->BSIM3von`,
+    /// 0 before the first evaluation). Returns the limited bias and the
+    /// `Check` flag from `DEVpnjlim` (ngspice bumps `CKTnoncon` when set).
+    pub fn limit_voltages(
+        &self,
+        new: Bsim3v3Bias,
+        old: Bsim3v3Bias,
+        von_prev: Value,
+    ) -> (Bsim3v3Bias, bool) {
+        let mut vgs = new.vgs;
+        let mut vds = new.vds;
+        let mut vbs = new.vbs;
+        let mut vgd = vgs - vds;
+        let vgdo = old.vgs - old.vds;
+
+        if old.vds >= 0.0 {
+            vgs = Mosfet::dev_fetlim(vgs, old.vgs, von_prev);
+            vds = vgs - vgd;
+            vds = Mosfet::dev_limvds(vds, old.vds);
+            vgd = vgs - vds;
+            let _ = vgd;
+        } else {
+            vgd = Mosfet::dev_fetlim(vgd, vgdo, von_prev);
+            vds = vgs - vgd;
+            vds = -Mosfet::dev_limvds(-vds, -old.vds);
+            vgs = vgd + vds;
+        }
+
+        let mut check = false;
+        if vds >= 0.0 {
+            vbs = pnjlim(vbs, old.vbs, common::CONST_VT0, self.model_temp.vcrit, &mut check);
+        } else {
+            let vbd_old = old.vbs - old.vds;
+            let vbd = pnjlim(
+                vbs - vds,
+                vbd_old,
+                common::CONST_VT0,
+                self.model_temp.vcrit,
+                &mut check,
+            );
+            vbs = vbd + vds;
+        }
+
+        (Bsim3v3Bias { vds, vgs, vbs }, check)
+    }
+}
+
+/// `DEVpnjlim` (ngspice devsup.c:49-84) including the `*icheck` out-flag that
+/// b3ld.c feeds into the convergence counter. The flag-less variant lives on
+/// [`Mosfet`] (`dev_pnjlim`); the BSIM3 load needs the flag, so the few lines
+/// are mirrored here with the check semantics intact.
+fn pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value, icheck: &mut bool) -> Value {
+    if vnew > vcrit && (vnew - vold).abs() > vt + vt {
+        *icheck = true;
+        if vold > 0.0 {
+            let arg = (vnew - vold) / vt;
+            if arg > 0.0 {
+                vold + vt * (2.0 + (arg - 2.0).ln())
+            } else {
+                vold - vt * (2.0 + (2.0 - arg).ln())
+            }
+        } else {
+            vt * (vnew / vt).ln()
+        }
+    } else if vnew < 0.0 {
+        let arg = if vold > 0.0 {
+            -vold - 1.0
+        } else {
+            2.0 * vold - 1.0
+        };
+        if vnew < arg {
+            *icheck = true;
+            arg
+        } else {
+            *icheck = false;
+            vnew
+        }
+    } else {
+        *icheck = false;
+        vnew
+    }
+}
+
+#[cfg(test)]
+mod tests;
