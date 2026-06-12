@@ -86,13 +86,19 @@ impl ModelType {
     }
 }
 
-/// SPICE model level/type
+/// SPICE model level/type.
+///
+/// This classifies what a model card *claims to be* for browsing and
+/// filtering — it is not a statement of native engine support. Cards run
+/// natively only for the levels the core implements (SPICE L1/L2/L6,
+/// legacy BSIM, BSIM3-SOI); BSIM4 runs through the bundled Verilog-A
+/// model; BSIM-CMG/PSP/EKV cards can be catalogued but do not simulate
+/// natively today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ModelLevel {
     /// BSIM3 v3.3
     Bsim3v3,
     /// BSIM4
-    #[default]
     Bsim4,
     /// BSIM CMG (FinFET)
     BsimCmg,
@@ -107,6 +113,7 @@ pub enum ModelLevel {
     /// SPICE Level 3
     SpiceLevel3,
     /// Unknown/custom
+    #[default]
     Unknown,
 }
 

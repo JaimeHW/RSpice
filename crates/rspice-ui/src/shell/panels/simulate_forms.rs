@@ -49,7 +49,7 @@ pub(in crate::shell) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usiz
             check_row(ui, "Source stepping", &mut setup.op.source_stepping);
             check_row(ui, "Save all signals", &mut setup.op.save_all);
             check_row(ui, "Save OP details", &mut setup.op.save_op_info);
-            "Solves the DC operating point and annotates the schematic."
+            "Solves the DC operating point; device bias lands in the OP inspector."
         }
         1 => {
             input_row(ui, "Stop time", &mut setup.tran.stop);

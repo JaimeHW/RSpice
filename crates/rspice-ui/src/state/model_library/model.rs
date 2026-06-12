@@ -38,7 +38,7 @@ impl Default for DeviceModel {
         Self {
             name: String::new(),
             model_type: ModelType::Nmos,
-            level: ModelLevel::Bsim4,
+            level: ModelLevel::Unknown,
             description: String::new(),
             l_min: None,
             l_max: None,
