@@ -227,6 +227,26 @@ impl SimulationProgress {
         self.status = SimulationStatus::Parsing;
     }
 
+    /// Fold the engine's completed fraction into the live status line, so
+    /// long transients show real progress instead of a frozen t=0.
+    pub fn observe_engine_fraction(&mut self, fraction: f64) {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let updated = match &self.status {
+            SimulationStatus::Transient { stop_time, .. } => Some(SimulationStatus::Transient {
+                time: fraction * *stop_time,
+                stop_time: *stop_time,
+            }),
+            SimulationStatus::DcSweep { source, .. } => Some(SimulationStatus::DcSweep {
+                source: source.clone(),
+                progress: fraction as f32,
+            }),
+            _ => None,
+        };
+        if let Some(status) = updated {
+            self.update_status(status);
+        }
+    }
+
     /// Update elapsed time
     pub fn update_elapsed(&mut self) {
         if let Some(start) = self.start_time {

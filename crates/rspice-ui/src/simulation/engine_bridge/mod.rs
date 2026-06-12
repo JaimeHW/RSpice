@@ -106,7 +106,7 @@ impl EngineBridge {
         &self,
         config: &AnalysisConfig,
         netlist_str: &str,
-        abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         self.run_request(
             SimulationInput {
@@ -125,7 +125,7 @@ impl EngineBridge {
         config: &AnalysisConfig,
         netlist_str: &str,
         source_path: Option<&Path>,
-        abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
         self.run_request(
             SimulationInput {

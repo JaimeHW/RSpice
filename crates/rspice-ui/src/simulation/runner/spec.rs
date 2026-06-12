@@ -1,8 +1,4 @@
 use std::path::Path;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 
 use super::super::engine_bridge::EngineBridge;
 use super::super::multi_run::AnalysisSpec;
@@ -21,9 +17,9 @@ pub(super) fn run_spec_request(
     options: SpecExecutionOptions,
     netlist: &str,
     source_path: Option<&Path>,
-    abort_flag: &Arc<AtomicBool>,
+    abort_flag: &dyn rspice_core::abort_signal::AbortSignal,
 ) -> Result<SimulationResult, SimulationError> {
-    if abort_flag.load(Ordering::SeqCst) {
+    if abort_flag.is_aborted() {
         return Err(SimulationError::Aborted);
     }
 

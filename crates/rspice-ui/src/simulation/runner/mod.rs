@@ -287,6 +287,25 @@ fn lock_progress<'a>(
     }
 }
 
+/// Bridges the engine's abort/progress hook onto the runner's shared state:
+/// polls the UI abort flag and folds the reported completed fraction back
+/// into the status line at the engine's abort-poll cadence.
+struct RunnerSignal {
+    abort_flag: Arc<AtomicBool>,
+    progress: Arc<Mutex<SimulationProgress>>,
+}
+
+impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
+    fn is_aborted(&self) -> bool {
+        self.abort_flag.load(Ordering::SeqCst)
+    }
+
+    fn observe_progress(&self, fraction: f64) {
+        let mut p = lock_progress(&self.progress, "observe_progress");
+        p.observe_engine_fraction(fraction);
+    }
+}
+
 /// Simulation execution in background thread
 ///
 /// Runs the actual rspice-core simulation engine.
@@ -511,6 +530,11 @@ fn run_simulation_thread(
         return Err(SimulationError::Aborted);
     }
 
+    let signal = RunnerSignal {
+        abort_flag: abort_flag.clone(),
+        progress: progress.clone(),
+    };
+
     let result = match request {
         SimulationRequest::Config(config) => {
             // Run simulation via engine bridge with abort support
@@ -519,7 +543,7 @@ fn run_simulation_thread(
                 &config,
                 &input.netlist,
                 input.source_path.as_deref(),
-                &abort_flag,
+                &signal,
             ) {
                 Ok(r) => {
                     log::info!("Engine bridge returned successfully");
@@ -539,7 +563,7 @@ fn run_simulation_thread(
                 *options,
                 &input.netlist,
                 input.source_path.as_deref(),
-                &abort_flag,
+                &signal,
             )?
         }
     };
