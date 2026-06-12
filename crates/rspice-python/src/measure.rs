@@ -35,6 +35,21 @@ pub(crate) fn evaluate_dc_measurements(
         .collect()
 }
 
+/// Evaluate the netlist's AC .MEAS statements against a sweep.
+///
+/// Complex results are addressed through the derived real series
+/// (`V(x)` magnitude, `VDB`, `VP` in degrees, `VR`/`VI`); the frequency
+/// axis is reachable as `TIME`, `FREQUENCY`, or `FREQ`.
+pub(crate) fn evaluate_ac_measurements(
+    netlist: &Netlist,
+    sweep: &[rspice_core::analysis::AcResult],
+) -> Vec<PyMeasurement> {
+    measure_signals::evaluate_ac_measurements(netlist, sweep)
+        .iter()
+        .map(|r| PyMeasurement::from_core(r, "AC"))
+        .collect()
+}
+
 /// Produce explicit not-evaluated entries for measurements whose analysis
 /// did not run, so CI fails loudly instead of silently skipping checks.
 pub(crate) fn unevaluated_measurements(

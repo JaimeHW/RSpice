@@ -176,6 +176,58 @@ fn time_current_and_dc_measurements_evaluate() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// AC measurements evaluate against the derived real series: magnitude,
+/// decibels, and phase in degrees, with the frequency axis addressable.
+#[test]
+fn ac_measurements_evaluate() {
+    let dir = test_dir("ac");
+    let deck = dir.join("rc_ac.sp");
+    // -3dB corner of the RC low-pass: 1/(2*pi*1k*100n) = 1591.55 Hz,
+    // where the phase is exactly -45 degrees.
+    std::fs::write(
+        &deck,
+        "* RC low-pass AC\n\
+         V1 in 0 AC 1\n\
+         R1 in out 1k\n\
+         C1 out 0 100n\n\
+         .AC DEC 50 10 1Meg\n\
+         .MEAS AC f3db FIND FREQUENCY WHEN VDB(out)=-3.0103\n\
+         .MEAS AC corner_phase FIND VP(out) WHEN VDB(out)=-3.0103\n\
+         .END\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["run", deck.to_str().unwrap(), "--meas"]);
+    assert!(
+        output.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let value_of = |name: &str| -> f64 {
+        let line = stdout
+            .lines()
+            .find(|line| line.trim_start().starts_with(name))
+            .unwrap_or_else(|| panic!("no {name} line in output:\n{stdout}"));
+        assert!(!line.contains("FAILED"), "{name} must evaluate: {line}");
+        line.split('=').nth(1).expect("value").trim().parse().expect("numeric")
+    };
+
+    let f3db = value_of("F3DB =");
+    assert!(
+        (f3db - 1591.55).abs() < 25.0,
+        "-3dB corner should be ~1591.55 Hz, got {f3db}"
+    );
+    let phase = value_of("CORNER_PHASE =");
+    assert!(
+        (phase + 45.0).abs() < 1.0,
+        "phase at the corner should be ~-45 degrees, got {phase}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn meas_file_writers_keep_full_precision() {
     let dir = test_dir("files");

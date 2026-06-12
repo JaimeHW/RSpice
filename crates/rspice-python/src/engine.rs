@@ -521,11 +521,17 @@ impl PyEngine {
                 "requires a .dc analysis in the netlist",
             )),
         }
-        measurements.extend(measure::unevaluated_measurements(
-            net,
-            "AC",
-            "AC measurements are not supported yet",
-        ));
+        match &ac {
+            Some(ac_obj) => {
+                let ac_ref = ac_obj.borrow(py);
+                measurements.extend(measure::evaluate_ac_measurements(net, &ac_ref.results));
+            }
+            None => measurements.extend(measure::unevaluated_measurements(
+                net,
+                "AC",
+                "requires a .ac analysis in the netlist",
+            )),
+        }
 
         Ok(PyRunReport {
             op,

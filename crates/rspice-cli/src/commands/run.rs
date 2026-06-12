@@ -154,7 +154,7 @@ impl<'a> RunContext<'a> {
 
         for analysis in analyses {
             let reason = match analysis.as_str() {
-                "TRAN" | "DC" => format!("{analysis} analysis did not run"),
+                "TRAN" | "DC" | "AC" => format!("{analysis} analysis did not run"),
                 other => format!("{other} measurements are not supported by `rspice run` yet"),
             };
             let results = rspice_core::analysis::advanced::unevaluated_measurements(

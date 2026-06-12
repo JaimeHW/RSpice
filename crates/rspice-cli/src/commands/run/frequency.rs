@@ -173,6 +173,14 @@ pub(super) fn run_ac(
                 }
             }
 
+            ctx.record_measurements(
+                "AC",
+                rspice_core::analysis::advanced::evaluate_ac_measurements(
+                    ctx.netlist,
+                    &results,
+                ),
+            );
+
             if !ctx.quiet {
                 println!("AC Analysis: {} frequency points", results.len());
                 if ctx.verbose && !results.is_empty() {

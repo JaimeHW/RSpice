@@ -505,7 +505,7 @@ impl PyTransientResult {
 #[pyclass(name = "AcResult")]
 pub struct PyAcResult {
     frequencies: Vec<f64>,
-    results: Vec<AcResult>,
+    pub(crate) results: Vec<AcResult>,
     node_names: Vec<String>,
     branch_names: Vec<String>,
 }
