@@ -10,7 +10,7 @@ use crate::shell::panels::simulate::{ANALYSES, analysis_meta};
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, chip};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, PaneSide, chip, two_pane};
 
 /// Card stack max width (centered in the view).
 const CARD_WIDTH: f32 = 880.0;
@@ -143,10 +143,11 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
     let c = t.color;
 
     card(ui, |ui| {
-        if let Some(action) = card_header(ui, "Analyses", "run in listed order", Some("+ Add analysis")) {
-            if action.clicked() {
-                state.sim_setup.picker_open = true;
-            }
+        if let Some(action) =
+            card_header(ui, "Analyses", "run in listed order", Some("+ Add analysis"))
+            && action.clicked()
+        {
+            state.sim_setup.picker_open = true;
         }
 
         for (tab_idx, name, description) in ANALYSES {
@@ -426,7 +427,7 @@ fn analysis_picker(ctx: &egui::Context, state: &mut AppState) {
         DialogChoice::Secondary => {
             if setup.enabled.insert(selected) {
                 let (id, _) = analysis_meta(selected);
-                shell.toasts.info(ctx, &format!("{id} added to the run set"));
+                shell.toasts.info(ctx, format!("{id} added to the run set"));
             }
             shell.selected_analysis = Some(selected);
         }
@@ -436,13 +437,11 @@ fn analysis_picker(ctx: &egui::Context, state: &mut AppState) {
 
 /// Dialog body: filterable rail + parameter form + writes strip.
 fn picker_body(ui: &mut Ui, setup: &mut crate::common::app::SimSetupState, add_and_close: &mut bool) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
+    let c = Tokens::get(ui.ctx()).color;
 
-    ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
-    ui.horizontal_top(|ui| {
+    two_pane(ui, PICKER_RAIL_WIDTH, PICKER_HEIGHT, |ui, side| match side {
         // ── Left rail: filter over the categorized analysis list.
-        picker_pane(ui, PICKER_RAIL_WIDTH, |ui| {
+        PaneSide::Rail => {
             picker_filter_strip(ui, &mut setup.picker_query);
 
             let query = setup.picker_query.trim().to_lowercase();
@@ -480,12 +479,11 @@ fn picker_body(ui: &mut Ui, setup: &mut crate::common::app::SimSetupState, add_a
                     }
                     ui.add_space(6.0);
                 });
-        });
+        }
 
         // ── Detail: selected analysis header, parameter form, writes strip.
-        let selected = setup.picker_selected.unwrap_or(TAB_TRANSIENT);
-        let detail_width = ui.available_width();
-        picker_pane(ui, detail_width, |ui| {
+        PaneSide::Detail => {
+            let selected = setup.picker_selected.unwrap_or(TAB_TRANSIENT);
             picker_detail_header(ui, setup, selected);
 
             egui::ScrollArea::vertical()
@@ -511,24 +509,8 @@ fn picker_body(ui: &mut Ui, setup: &mut crate::common::app::SimSetupState, add_a
                 });
 
             picker_writes_strip(ui, setup, selected);
-        });
+        }
     });
-}
-
-/// A bordered pane of the picker's two-pane layout.
-fn picker_pane(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::none()
-        .fill(c.bg_panel)
-        .stroke(egui::Stroke::new(1.0, c.border))
-        .rounding(t.radius)
-        .show(ui, |ui| {
-            ui.set_width(width);
-            ui.set_height(PICKER_HEIGHT);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            add_contents(ui);
-        });
 }
 
 /// 34 px rail header hosting the frameless filter input.
