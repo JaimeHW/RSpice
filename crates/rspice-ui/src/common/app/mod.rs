@@ -183,6 +183,15 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Whether a run can start: a circuit exists, nothing is running, and
+    /// the run set has at least one analysis ticked. Every Run affordance
+    /// (toolbar, run bar, menu, F5) gates on this.
+    pub fn can_run_simulation(&self) -> bool {
+        !self.schematic.components.is_empty()
+            && !self.simulation.is_running
+            && !self.sim_setup.enabled.is_empty()
+    }
+
     fn log_severity_for_console(level: ConsoleLevel) -> crate::panels::LogSeverity {
         match level {
             ConsoleLevel::Info => crate::panels::LogSeverity::Info,

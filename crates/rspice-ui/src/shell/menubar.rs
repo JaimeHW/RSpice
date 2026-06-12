@@ -555,7 +555,7 @@ fn check_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
 }
 
 fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
-    let can_run = !state.schematic.components.is_empty() && !state.simulation.is_running;
+    let can_run = state.can_run_simulation();
     if can_run {
         if item(ui, "Run", Some("F5")) {
             state.simulation.trigger_simulation = true;

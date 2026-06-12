@@ -809,8 +809,7 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
 
-                let can_run =
-                    !state.schematic.components.is_empty() && !state.simulation.is_running;
+                let can_run = state.can_run_simulation();
                 if Button::new("Run")
                     .icon(Icon::Run)
                     .accent()
@@ -851,14 +850,17 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
                 // Status readout.
                 let status = if state.simulation.is_running {
                     state.simulation.status.clone()
+                } else if state.sim_setup.enabled.is_empty() {
+                    "idle — nothing in the run set".to_owned()
                 } else if let Some(run) = state.simulation.active_run() {
                     format!(
-                        "idle — last run #{} {}",
+                        "idle — {} in run set · last run #{} {}",
+                        state.sim_setup.enabled.len(),
                         run.id,
                         if run.success { "ok" } else { "failed" }
                     )
                 } else {
-                    "idle".to_owned()
+                    format!("idle — {} in run set", state.sim_setup.enabled.len())
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(

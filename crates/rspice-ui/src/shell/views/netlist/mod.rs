@@ -273,8 +273,13 @@ fn strip_dot_command<'a>(line: &'a str, command: &str) -> Option<&'a str> {
     None
 }
 
-/// Request a simulation run; queues it when the engine is busy.
+/// Request a simulation run; queues it when the engine is busy. An empty
+/// run set drops the request — the tuner's live loop must not spam the
+/// controller's empty-set warning on every slider move.
 pub(super) fn request_run(state: &mut AppState) {
+    if state.sim_setup.enabled.is_empty() {
+        return;
+    }
     if state.simulation.is_running {
         state.shell.netlist.rerun_queued = true;
     } else {
@@ -284,7 +289,10 @@ pub(super) fn request_run(state: &mut AppState) {
 
 /// Fire a queued re-run once the engine is idle (live-tuning loop).
 fn flush_queued_run(state: &mut AppState) {
-    if state.shell.netlist.rerun_queued && !state.simulation.is_running {
+    if state.shell.netlist.rerun_queued
+        && !state.simulation.is_running
+        && !state.sim_setup.enabled.is_empty()
+    {
         state.shell.netlist.rerun_queued = false;
         state.simulation.trigger_simulation = true;
     }

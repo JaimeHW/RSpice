@@ -202,6 +202,17 @@ pub struct SimSetupState {
 }
 
 impl SimSetupState {
+    /// Fresh setup with the conventional default run set — a transient —
+    /// so a new project's Run button works out of the box (the engine no
+    /// longer falls back to the selected row on an empty set).
+    pub fn new() -> Self {
+        let mut setup = Self::default();
+        setup
+            .enabled
+            .insert(crate::common::simulation_analysis_tabs::TAB_TRANSIENT);
+        setup
+    }
+
     /// One-line mono summary of an analysis configuration, for list rows.
     pub fn summary(&self, index: usize) -> String {
         let sweep_kind = ["dec", "oct", "lin"];

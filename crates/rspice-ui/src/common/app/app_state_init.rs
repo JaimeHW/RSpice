@@ -32,7 +32,7 @@ pub(super) fn default_app_state() -> AppState {
         schematic,
         simulation: crate::state::SimulationState::default(),
         dialogs: DialogState::default(),
-        sim_setup: super::SimSetupState::default(),
+        sim_setup: super::SimSetupState::new(),
         log_buffer: crate::panels::LogBuffer::default(),
         script_console: crate::panels::ScriptConsoleState::default(),
         library_manager,
