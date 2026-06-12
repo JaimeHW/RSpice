@@ -352,7 +352,11 @@ pub(super) fn parse_save_command(
 
 /// Parse a single textual probe (`v(out)`, `v(a,b)`, `i(v1)`, `@m1[id]`, or a
 /// bare vector name) into a [`super::SaveSignal`].
-fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
+///
+/// Public (via the netlist module) so frontends can build a
+/// [`super::SaveSet`] from user-supplied probe specs — e.g. the CLI
+/// `--save` flag — with netlist semantics.
+pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
     use super::SaveSignal;
 
     let trimmed = raw.trim();

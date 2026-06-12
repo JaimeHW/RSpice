@@ -21,6 +21,8 @@ use std::collections::{HashMap, HashSet};
 
 mod command_parsers;
 mod commands;
+
+pub use commands::parse_save_probe;
 mod conditionals;
 mod elements;
 mod laplace_synthesis;
