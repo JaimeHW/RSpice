@@ -604,17 +604,21 @@ impl Engine {
         }
     }
 
-    fn build_small_signal_ac_matrix_with_vbic_delay_mode(
+    /// Refill a complex AC workspace in place for one frequency. The
+    /// workspace keeps its sparsity pattern and shared symbolic
+    /// factorization across calls, so a sweep pays the structure cost once
+    /// instead of once per point.
+    fn fill_small_signal_ac_matrix_with_vbic_delay_mode(
         circuit: &CircuitData,
-        matrix: &StaticMatrix,
+        ac_matrix: &mut ComplexMatrix,
         op_voltages: &[Value],
         omega: Value,
         include_vbic_dynamic_stamp: bool,
         include_vbic_delay_branches: bool,
-    ) -> ComplexMatrix {
+    ) {
         let has_nonlinear = circuit.has_nonlinear_devices();
         let size = circuit.matrix_size();
-        let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
+        ac_matrix.clear_values();
 
         // Stamp resistors (real conductance)
         for (r_idx, stamp) in circuit.resistors.stamps.iter().enumerate() {
@@ -640,21 +644,21 @@ impl Engine {
         // leave the branch equations singular (dead far port).
         for tline in &circuit.tlines {
             if let Some((br1, br2)) = tline.ltra_branch_matrix_indices() {
-                if Self::stamp_ltra_branch_ac(&mut ac_matrix, tline, br1, br2, omega) {
+                if Self::stamp_ltra_branch_ac(ac_matrix, tline, br1, br2, omega) {
                     continue;
                 }
             }
             if let Some((br1, br2)) = tline.txl_branch_matrix_indices() {
-                Self::stamp_txl_branch_ac(&mut ac_matrix, tline, br1, br2);
+                Self::stamp_txl_branch_ac(ac_matrix, tline, br1, br2);
                 continue;
             }
-            Self::stamp_transmission_line_ac(&mut ac_matrix, tline, omega);
+            Self::stamp_transmission_line_ac(ac_matrix, tline, omega);
         }
 
         // Nonlinear device Jacobian (real part) evaluated at DC operating point.
         if has_nonlinear {
             Self::stamp_nonlinear_small_signal_real(
-                &mut ac_matrix,
+                ac_matrix,
                 circuit,
                 op_voltages,
                 omega / (2.0 * PI),
@@ -662,7 +666,7 @@ impl Engine {
             if include_vbic_dynamic_stamp {
                 for bjt in &circuit.bjts.devices {
                     Self::stamp_vbic_bjt_dynamic_ac(
-                        &mut ac_matrix,
+                        ac_matrix,
                         bjt,
                         op_voltages,
                         omega,
@@ -698,7 +702,7 @@ impl Engine {
 
         // Nonlinear semiconductor junction capacitances at the operating point.
         if has_nonlinear {
-            Self::stamp_nonlinear_capacitances(&mut ac_matrix, circuit, op_voltages, omega);
+            Self::stamp_nonlinear_capacitances(ac_matrix, circuit, op_voltages, omega);
         }
 
         // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
@@ -935,8 +939,6 @@ impl Engine {
         for i in 0..size {
             ac_matrix.add_real(i, i, 1e-15);
         }
-
-        ac_matrix
     }
 
     pub(super) fn build_small_signal_ac_matrix(
@@ -951,14 +953,16 @@ impl Engine {
         // transport therefore shapes AC and noise transfers above ~1/TD,
         // and the official binary fails the pre-xf 2005 AC tables by over
         // 1 dB at 10 GHz on the CEamp deck.
-        Self::build_small_signal_ac_matrix_with_vbic_delay_mode(
+        let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
+        Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
             circuit,
-            matrix,
+            &mut ac_matrix,
             op_voltages,
             omega,
             true,
             true,
-        )
+        );
+        ac_matrix
     }
 
     pub(super) fn build_small_signal_pz_matrix(
@@ -970,14 +974,16 @@ impl Engine {
         // PZ descriptor construction handles VBIC hidden dynamic states
         // explicitly in `engine/advanced/mod.rs`, so keep the base AC
         // linearization free of frequency-dependent VBIC companion reduction.
-        Self::build_small_signal_ac_matrix_with_vbic_delay_mode(
+        let mut ac_matrix = ComplexMatrix::from_real_structure(matrix);
+        Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
             circuit,
-            matrix,
+            &mut ac_matrix,
             op_voltages,
             omega,
             false,
             true,
-        )
+        );
+        ac_matrix
     }
 
     fn build_ac_excitation_rhs(circuit: &CircuitData) -> Vec<Complex64> {
@@ -1078,11 +1084,19 @@ impl Engine {
         // Closure to solve at a single frequency. Takes the circuit as a
         // parameter so the parallel path below can hand each worker its own
         // clone (device-evaluation caches are Cell-based and not Sync).
-        let solve_at_freq =
-            |circuit: &CircuitData, freq: Value| -> Result<AcResult, SimulationError> {
+        let solve_at_freq = |circuit: &CircuitData,
+                             ac_matrix: &mut ComplexMatrix,
+                             freq: Value|
+         -> Result<AcResult, SimulationError> {
                 let omega = 2.0 * PI * freq;
-                let mut ac_matrix =
-                    Self::build_small_signal_ac_matrix(circuit, &matrix, &dc_solution, omega);
+                Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                    circuit,
+                    ac_matrix,
+                    &dc_solution,
+                    omega,
+                    true,
+                    true,
+                );
                 let rhs = Self::build_ac_excitation_rhs(circuit);
                 let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
 
@@ -1119,18 +1133,20 @@ impl Engine {
             let chunk_results: Result<Vec<Vec<AcResult>>, SimulationError> = work
                 .into_par_iter()
                 .map(|(worker_circuit, chunk)| {
+                    let mut workspace = ComplexMatrix::from_real_structure(&matrix);
                     chunk
                         .iter()
-                        .map(|&freq| solve_at_freq(&worker_circuit, freq))
+                        .map(|&freq| solve_at_freq(&worker_circuit, &mut workspace, freq))
                         .collect()
                 })
                 .collect();
             return chunk_results.map(|chunks| chunks.into_iter().flatten().collect());
         }
 
+        let mut workspace = ComplexMatrix::from_real_structure(&matrix);
         frequencies
             .iter()
-            .map(|&freq| solve_at_freq(&circuit, freq))
+            .map(|&freq| solve_at_freq(&circuit, &mut workspace, freq))
             .collect()
     }
 }
