@@ -115,6 +115,11 @@ pub struct RunArgs {
     #[arg(long)]
     pub allow_nonfinite: bool,
 
+    /// Abort the run after this many seconds (exit code 124). Transient
+    /// and DC sweep analyses stop at the next safe point.
+    #[arg(long, value_name = "SECONDS")]
+    pub timeout: Option<f64>,
+
     /// Show progress bar with ETA for transient simulation
     #[arg(long)]
     pub progress: bool,

@@ -292,10 +292,14 @@ pub(super) fn run_dc_sweep(
         );
     }
 
-    match ctx
-        .engine
-        .run_dc_sweep(ctx.netlist, source, start, stop, step)
-    {
+    match ctx.engine.run_dc_sweep_with_abort(
+        ctx.netlist,
+        source,
+        start,
+        stop,
+        step,
+        &crate::abort::ProcessAbort,
+    ) {
         Ok(results) => {
             for (_, point) in &results {
                 super::shared::ensure_finite_series(
@@ -437,9 +441,13 @@ pub(super) fn run_transient(
             rel_tol: compression_tol,
             min_interval: tstep / 10.0,
         };
-        let result =
-            ctx.engine
-                .run_tran_compressed(ctx.netlist, tstop, internal_max_step, compression);
+        let result = ctx.engine.run_tran_compressed_with_abort(
+            ctx.netlist,
+            tstop,
+            internal_max_step,
+            compression,
+            &crate::abort::ProcessAbort,
+        );
         pb.finish_and_clear();
         match result {
             Ok(compressed) => {
@@ -455,7 +463,12 @@ pub(super) fn run_transient(
             Err(e) => Err(e),
         }
     } else {
-        let result = ctx.engine.run_tran(ctx.netlist, tstop, internal_max_step);
+        let result = ctx.engine.run_tran_with_abort(
+            ctx.netlist,
+            tstop,
+            internal_max_step,
+            &crate::abort::ProcessAbort,
+        );
         pb.finish_and_clear();
         result
     };

@@ -20,6 +20,7 @@ use std::process::ExitCode;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+mod abort;
 mod cli;
 mod commands;
 mod hdf5;

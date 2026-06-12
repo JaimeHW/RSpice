@@ -182,6 +182,41 @@ fn missing_input_exits_sixty_six() {
     assert_eq!(output.status.code(), Some(66));
 }
 
+/// --timeout stops a long transient at the next safe point and exits with
+/// the GNU timeout convention (124).
+#[test]
+fn timeout_exits_one_twenty_four() {
+    let dir = test_dir("timeout");
+    let deck = dir.join("slow.sp");
+    // 100 simulated seconds of a 1kHz sine at 1ns steps: far longer than
+    // the 1-second budget on any machine.
+    std::fs::write(
+        &deck,
+        "* long transient\n\
+         V1 in 0 SIN(0 1 1k)\n\
+         R1 in out 1k\n\
+         C1 out 0 100n\n\
+         .tran 1n 100\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let start = std::time::Instant::now();
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap(), "--timeout", "1"]);
+    assert_eq!(
+        output.status.code(),
+        Some(124),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(30),
+        "timeout must stop the run promptly"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Failed measurements still land in report files alongside the bad exit
 /// status, so CI dashboards and shell checks agree.
 #[test]

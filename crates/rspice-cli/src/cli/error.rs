@@ -19,6 +19,10 @@ pub enum ExitCode {
     /// Verification failure: the simulation ran, but a .MEAS check failed
     /// or results did not match the golden reference
     VerificationFailed = 3,
+    /// The run exceeded --timeout (GNU timeout convention)
+    TimedOut = 124,
+    /// Interrupted by Ctrl-C (128 + SIGINT)
+    Interrupted = 130,
     /// Input file not found
     InputNotFound = 66,
     /// Input file format error
@@ -70,6 +74,12 @@ pub enum CliError {
     #[error("Verification failed: {message}")]
     VerificationFailed { message: String },
 
+    #[error("Simulation timed out after {seconds}s")]
+    TimedOut { seconds: f64 },
+
+    #[error("Simulation interrupted")]
+    Interrupted,
+
     #[error("Failed to write output: {path}")]
     OutputError {
         path: PathBuf,
@@ -112,6 +122,8 @@ impl CliError {
             CliError::ParseError { .. } => ExitCode::InputError,
             CliError::SimulationError { .. } => ExitCode::GeneralError,
             CliError::VerificationFailed { .. } => ExitCode::VerificationFailed,
+            CliError::TimedOut { .. } => ExitCode::TimedOut,
+            CliError::Interrupted => ExitCode::Interrupted,
             CliError::OutputError { .. } => ExitCode::IoError,
             CliError::OutputSerializationError { .. } => ExitCode::InternalError,
             CliError::InvalidArgument { .. } => ExitCode::MisuseOfCommand,

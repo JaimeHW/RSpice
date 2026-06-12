@@ -304,6 +304,17 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         });
     }
 
+    crate::abort::install_interrupt_handler();
+    if let Some(seconds) = args.timeout {
+        if !seconds.is_finite() || seconds <= 0.0 {
+            return Err(CliError::InvalidArgument {
+                message: format!("--timeout must be a positive number of seconds, got {seconds}"),
+                suggestion: Some("e.g. --timeout 300 for a five-minute budget".to_string()),
+            });
+        }
+        crate::abort::arm_timeout(seconds);
+    }
+
     log::info!("Loading netlist: {}", args.input.display());
     let source = Netlist::read_source(&args.input).map_err(|e| CliError::ParseError {
         message: e.to_string(),
@@ -347,6 +358,18 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     let duration = start_time.elapsed().as_secs_f64();
     write_report_files(&reports, &args, verbose)?;
+
+    // An abort outranks the per-analysis errors it caused: report files are
+    // already on disk, but the exit status says interrupted/timed out.
+    match crate::abort::reason() {
+        Some(crate::abort::AbortReason::Interrupt) => return Err(CliError::Interrupted),
+        Some(crate::abort::AbortReason::Timeout) => {
+            return Err(CliError::TimedOut {
+                seconds: args.timeout.unwrap_or(0.0),
+            });
+        }
+        None => {}
+    }
 
     if !quiet {
         println!("\nSimulation complete in {:.3}s.", duration);
