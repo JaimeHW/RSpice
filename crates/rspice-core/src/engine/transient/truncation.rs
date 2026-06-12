@@ -593,9 +593,19 @@ impl Engine {
         current_abstol: Value,
         charge_abstol: Value,
         trtol: Value,
+        caps_cache_out: Option<&mut Vec<(Value, Value, Value)>>,
     ) -> Option<Value> {
         if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
             return None;
+        }
+
+        // The Meyer capacitance halves computed here are exactly what the
+        // acceptance-path history rotation re-derives on the same candidate
+        // solution; the caller can capture them to skip that second walk.
+        let mut caps_cache = caps_cache_out;
+        if let Some(cache) = caps_cache.as_deref_mut() {
+            cache.clear();
+            cache.reserve(circuit.mosfets.devices.len());
         }
 
         let effective_method = Self::effective_companion_method(method, trap_order);
@@ -607,6 +617,9 @@ impl Engine {
             let (vgs, vgd, vgb) = mos.gate_charge_branch_voltages_at(candidate_solution);
             let (cgs_half, cgd_half, cgb_half) =
                 mos.transient_capacitance_halves_at(vgs_eval, vds_eval, vbs_eval);
+            if let Some(cache) = caps_cache.as_deref_mut() {
+                cache.push((cgs_half, cgd_half, cgb_half));
+            }
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
 
             for (
@@ -1029,6 +1042,7 @@ impl Engine {
                 current_abstol,
                 charge_abstol,
                 trtol,
+                None,
             )
             .filter(|limit| limit.is_finite() && *limit > 0.0)
         } else {

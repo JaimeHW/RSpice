@@ -909,6 +909,11 @@ impl Engine {
         let mut total_middle_nanos: u128 = 0;
         let mut total_merit_trials: usize = 0;
         let mut total_failed_attempts: usize = 0;
+        // Meyer capacitance halves captured by the device-truncation walk on
+        // the candidate solution; valid only for the accept path of the same
+        // loop pass (reset every attempt).
+        let mut mosfet_caps_scratch: Vec<(Value, Value, Value)> = Vec::new();
+        let mut mosfet_caps_valid = false;
         let mut failed_voltage_conv: usize = 0;
         let mut failed_device_conv: usize = 0;
         let mut failed_residual_only: usize = 0;
@@ -989,6 +994,7 @@ impl Engine {
 
         while t < tstop && total_iterations < max_total_iterations {
             let attempt_top_start = crate::time_compat::Instant::now();
+            mosfet_caps_valid = false;
             // Progress logging every 2 seconds
             if last_progress_log.elapsed().as_secs() >= 2 {
                 log::info!(
@@ -2006,6 +2012,7 @@ impl Engine {
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
+                                None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -2064,6 +2071,7 @@ impl Engine {
                         &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2251,7 +2259,7 @@ impl Engine {
                 && !suppress_gate_charge
                 && !circuit.mosfets.is_empty()
             {
-                Self::mosfet_ngspice_truncation_limit(
+                let limit = Self::mosfet_ngspice_truncation_limit(
                     &circuit,
                     &new_solution,
                     current_method,
@@ -2262,8 +2270,11 @@ impl Engine {
                     self.current_abstol(),
                     self.charge_abstol(),
                     self.transient_trtol(),
+                    Some(&mut mosfet_caps_scratch),
                 )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
+                .filter(|limit| limit.is_finite() && *limit > 0.0);
+                mosfet_caps_valid = mosfet_caps_scratch.len() == circuit.mosfets.devices.len();
+                limit
             } else {
                 None
             };
@@ -2675,6 +2686,7 @@ impl Engine {
                                 self.current_abstol(),
                                 self.charge_abstol(),
                                 self.transient_trtol(),
+                                None,
                             )
                             .filter(|limit| limit.is_finite() && *limit > 0.0)
                         } else {
@@ -2733,6 +2745,7 @@ impl Engine {
                         &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        None,
                         None,
                         suppress_gate_charge,
                         &tline_dc_refs,
@@ -2914,6 +2927,7 @@ impl Engine {
                 &mut mosfet_history,
                 &mut b3soi_history,
                 Some(&vbic_snapshot_cache),
+                mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
                 &tline_dc_refs,
                 &coupled_tline_refs,

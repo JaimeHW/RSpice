@@ -1738,6 +1738,7 @@ impl Engine {
         mosfet_history: &mut MosfetTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
+        mosfet_caps: Option<&[(Value, Value, Value)]>,
         suppress_gate_charge_history: bool,
         tline_dc_refs: &[(Value, Value)],
         coupled_tline_refs: &[CoupledTlineReferenceState],
@@ -2185,7 +2186,12 @@ impl Engine {
             let (vgs, vds, vbs) = mos.eval_branch_voltages_at(accepted_solution);
             let vgd = vgs - vds;
             let vgb = vgs - vbs;
-            let (cgs_half, cgd_half, cgb_half) = mos.transient_capacitance_halves_at(vgs, vds, vbs);
+            // The truncation walk already evaluated the Meyer halves on this
+            // accepted solution; reuse them when the caller captured them.
+            let (cgs_half, cgd_half, cgb_half) = match mosfet_caps {
+                Some(cache) => cache[idx],
+                None => mos.transient_capacitance_halves_at(vgs, vds, vbs),
+            };
             let (cgs_ov, cgd_ov, cgb_ov) = mos.overlap_capacitances();
             let cgs = cgs_half + mosfet_history.capgs_prev_half[idx] + cgs_ov;
             let cgd = cgd_half + mosfet_history.capgd_prev_half[idx] + cgd_ov;
