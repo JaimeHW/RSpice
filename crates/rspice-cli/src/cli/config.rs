@@ -71,9 +71,6 @@ pub struct OutputConfig {
     /// Show progress by default
     pub show_progress: bool,
 
-    /// Include node names in output
-    pub include_node_names: bool,
-
     /// Default output directory (None = same as input)
     pub output_directory: Option<PathBuf>,
 }
@@ -115,7 +112,6 @@ impl Default for OutputConfig {
         Self {
             format: "raw".to_string(),
             show_progress: false,
-            include_node_names: false,
             output_directory: None,
         }
     }
@@ -153,7 +149,6 @@ struct SimulationLayer {
 struct OutputLayer {
     format: Option<String>,
     show_progress: Option<bool>,
-    include_node_names: Option<bool>,
     output_directory: Option<PathBuf>,
 }
 
@@ -275,9 +270,6 @@ impl Config {
         }
         if let Some(v) = out.show_progress {
             self.output.show_progress = v;
-        }
-        if let Some(v) = out.include_node_names {
-            self.output.include_node_names = v;
         }
         if let Some(v) = out.output_directory {
             self.output.output_directory = Some(v);

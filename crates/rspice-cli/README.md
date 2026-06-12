@@ -42,7 +42,8 @@ A handful of analyses can instead be requested from the command line. When one o
 | Harmonic balance | `--hb-freq F` (optional `--hb-harmonics`) |
 | Pole-zero | `--pz-input NODE --pz-output NODE` (node names or indices) |
 | DC sensitivity | `--sens-output NODE --sens-param NAME` (optional `--sens-value`) |
-| Process corners | `--corners tt,ss,ff` (optional `--corner-lib`) |
+| Process corners | `--corners tt,ss,ff` (optional `--corner-lib`, `-j` parallel workers) |
+| Two-port S-parameters | `--sparam "P1+,P1-,P2+,P2-"` (optional `--sparam-z0`; needs a `.AC` card) |
 
 Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G`, `--max-step 1u`, `-D RLOAD=4.7k`.
 
@@ -72,6 +73,7 @@ With `-o`, every run mode writes machine-readable results. When a deck runs seve
 | `.TF` | `tf` | Gain, input impedance, output impedance |
 | Pole-zero | `pz` | `pole(i)`/`zero(i)` complex columns |
 | `.SENS` | `sens` | `dV/d(param)` columns (DC: single point; AC: series over frequency) |
+| S-parameters | `sparam` | `S11`/`S21`/`S12`/`S22` complex columns over frequency (Touchstone instead when `-o` ends in `.s2p`) |
 
 TF, pole-zero, and sensitivity tables have no natural HDF5 section and reject `-f hdf5` with a clear error; use `csv`, `json`, or `raw`.
 
