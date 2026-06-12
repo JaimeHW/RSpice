@@ -286,13 +286,13 @@ impl TestRunner {
             },
         };
 
-        // Expected-diagnostic decks invert the convergence outcome: the
-        // adjudicated result is a clean convergence failure (the reference
-        // simulator fails these decks too), and converging instead demands
-        // re-adjudication of the contract.
+        // Expected-diagnostic decks invert the outcome: the adjudicated
+        // result is a clean refusal diagnostic (the reference simulator
+        // fails these decks too), and converging every analysis instead
+        // demands re-adjudication of the contract.
         if matches!(contract, Some(ValidationContract::ExpectedUnsolvable)) {
             match &final_result.error {
-                Some(message) if message.contains("Convergence failed") => {
+                Some(message) if is_clean_refusal_diagnostic(message) => {
                     log::info!(
                         "'{}' failed as adjudicated (expected_unsolvable): {message}",
                         final_result.name
@@ -370,5 +370,62 @@ impl TestRunner {
                 analysis_type: Some("SMOKE".to_string()),
             },
         }
+    }
+}
+
+/// Whether a deck-level failure message is a clean refusal diagnostic for
+/// the `expected_unsolvable` contract.
+///
+/// A certified-unsolvable deck refuses through whichever discipline gives up
+/// first, and the phrasing legitimately moves as solver disciplines evolve.
+/// vbic/diffamp demonstrated both classes within one day: with the
+/// 2026-06-12 solver line it converges its (certified right-half-plane,
+/// hence unstable) operating point — out-solving ngspice-46, which hits a
+/// singular matrix there — and then refuses the transient, first as
+/// "transient timestep pinned at the minimum near t=1.27e-9s … integration
+/// restart did not escape", later as "Convergence failed after 319
+/// iterations". Both are the same adjudicated pathology; gating on one
+/// phrasing made the contract flip on solver-discipline changes that were
+/// each individually sound.
+///
+/// The accepted classes stay an explicit, closed list: Newton refusal and
+/// timestep-collapse refusal. Timeouts, panics, parse and build errors stay
+/// genuine defects even on an unsolvable deck.
+fn is_clean_refusal_diagnostic(message: &str) -> bool {
+    message.contains("Convergence failed")
+        || message.contains("timestep pinned at the minimum")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_clean_refusal_diagnostic;
+
+    #[test]
+    fn refusal_classes_cover_both_observed_diffamp_diagnostics() {
+        // The two phrasings diffamp actually produced on 2026-06-12,
+        // before and after the merge of the globalized-Newton line.
+        assert!(is_clean_refusal_diagnostic(
+            "Simulation error: Convergence failed after 319 iterations"
+        ));
+        assert!(is_clean_refusal_diagnostic(
+            "Simulation error: Circuit error: transient timestep pinned at the \
+             minimum near t=1.270828e-9s (dt=7.451e-19s, delmin=1.000e-19s): \
+             integration restart did not escape; the circuit is numerically \
+             ill-conditioned at this operating point"
+        ));
+    }
+
+    #[test]
+    fn dirty_failures_are_not_clean_refusals() {
+        assert!(!is_clean_refusal_diagnostic(
+            "Test exceeded hard process timeout (30000ms)"
+        ));
+        assert!(!is_clean_refusal_diagnostic(
+            "Simulation error: Simulation aborted by user"
+        ));
+        assert!(!is_clean_refusal_diagnostic("Parse error: unknown card .foo"));
+        assert!(!is_clean_refusal_diagnostic(
+            "Circuit build error: node q1_e has no DC path to ground"
+        ));
     }
 }

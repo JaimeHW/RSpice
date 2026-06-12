@@ -236,10 +236,18 @@ enum ValidationContract {
     /// Upstream deck whose validation lives in a `.control` script RSpice
     /// does not interpret.
     ScriptedControl,
-    /// The deck's operating point is genuinely unsolvable (e.g., a
-    /// certified right-half-plane instability that the reference
-    /// simulator also fails); the expected outcome is a clean convergence
-    /// diagnostic, and converging would itself demand re-adjudication.
+    /// The deck is adjudicated genuinely un-simulatable (e.g., a certified
+    /// right-half-plane instability that the reference simulator also
+    /// fails): some analysis must terminate with a clean refusal
+    /// diagnostic — Newton convergence failure or timestep-collapse
+    /// refusal — and completing every analysis instead demands
+    /// re-adjudication. The refusing phase may legitimately move as
+    /// solver disciplines evolve: diffamp's operating point, unsolvable
+    /// for ngspice-46 (singular matrix), converges on the 2026-06-12
+    /// solver line to an audited genuine equilibrium (strict
+    /// componentwise residual, no cancellation-floor involvement,
+    /// physically sane voltages) whose certified RHP pole ladder then
+    /// makes the transient the refusing analysis.
     ExpectedUnsolvable,
     /// Transient comparison replays the reference's recorded time grid as
     /// the accepted-step sequence: physics parity judged on equal grids,
