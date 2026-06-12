@@ -15,11 +15,13 @@ use crate::state::SimulationState;
 use crate::ui::plot::fmt_si;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
+use crate::ui::widgets::{
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
+    pane_section_label, two_pane,
+};
 
-/// Height of the signal/function panes.
-const PANE_HEIGHT: f32 = 264.0;
-/// Width of the signals rail.
-const RAIL_WIDTH: f32 = 232.0;
+/// Height of the signal/function panes (the spec's `min-height: 286px`).
+const PANE_HEIGHT: f32 = 286.0;
 
 #[derive(Default, Clone)]
 pub struct CalculatorPanel {
@@ -170,15 +172,9 @@ impl CalculatorPanel {
 
         // Two panes: signals rail + function reference.
         let mut insert: Option<(String, usize)> = None;
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            pane(ui, RAIL_WIDTH, |ui| {
-                self.signals_pane(ui, simulation, &mut insert);
-            });
-            let remaining = ui.available_width();
-            pane(ui, remaining, |ui| {
-                self.functions_pane(ui, &mut insert);
-            });
+        two_pane(ui, PANE_RAIL_W, PANE_HEIGHT, |ui, side| match side {
+            PaneSide::Rail => self.signals_pane(ui, simulation, &mut insert),
+            PaneSide::Detail => self.functions_pane(ui, &mut insert),
         });
 
         if let Some((text, caret_back)) = insert {
@@ -245,17 +241,18 @@ impl CalculatorPanel {
         let c = t.color;
 
         pane_header(ui, |ui| {
+            let width = (ui.available_width() - 10.0).max(40.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.signal_filter)
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .hint_text("Filter signals…")
-                    .desired_width(f32::INFINITY),
+                    .desired_width(width),
             );
         });
 
         egui::ScrollArea::vertical()
             .id_salt("volta.calc.signals")
-            .max_height(PANE_HEIGHT - 64.0)
+            .max_height(PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -280,7 +277,7 @@ impl CalculatorPanel {
                             continue;
                         }
                         any = true;
-                        section_label(ui, &format!("run #{} · {}", run.id, analysis.label));
+                        pane_section_label(ui, &format!("run #{} · {}", run.id, analysis.label));
                         for row in rows {
                             if signal_row(ui, &row).clicked() {
                                 *insert = Some((row.name.clone(), 0));
@@ -332,7 +329,7 @@ impl CalculatorPanel {
 
         egui::ScrollArea::vertical()
             .id_salt("volta.calc.functions")
-            .max_height(PANE_HEIGHT - 40.0)
+            .max_height(PANE_HEIGHT - PANE_HEADER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -414,7 +411,7 @@ impl CalculatorPanel {
 }
 
 // ---------------------------------------------------------------------------
-// row + chrome primitives (the spec's .panes / .it vocabulary)
+// rows (the spec's .it vocabulary; pane chrome lives in ui/widgets/pane.rs)
 // ---------------------------------------------------------------------------
 
 fn caption(ui: &mut Ui, text: &str) {
@@ -432,90 +429,6 @@ fn caption(ui: &mut Ui, text: &str) {
     );
     ui.label(job);
     ui.add_space(3.0);
-}
-
-/// A bordered pane of the fixed two-pane layout.
-fn pane(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::none()
-        .fill(c.bg_panel)
-        .stroke(egui::Stroke::new(1.0, c.border))
-        .rounding(t.radius)
-        .show(ui, |ui| {
-            ui.set_width(width);
-            ui.set_height(PANE_HEIGHT);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            add_contents(ui);
-        });
-}
-
-fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let response = ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 34.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(8.0);
-            add_contents(ui);
-            ui.add_space(8.0);
-        },
-    );
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-}
-
-fn pane_footer(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 26.0),
-            egui::Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.add_space(8.0);
-                ui.label(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
-                );
-            },
-        );
-        ui.painter().hline(
-            ui.min_rect().x_range(),
-            ui.min_rect().top() + 0.5,
-            egui::Stroke::new(1.0, c.border),
-        );
-    });
-}
-
-fn section_label(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 22.0),
-        egui::Sense::hover(),
-    );
-    let mut job = egui::text::LayoutJob::default();
-    job.append(
-        &text.to_uppercase(),
-        0.0,
-        egui::TextFormat {
-            font_id: theme::mono(9.5, FontWeight::Medium),
-            color: t.color.text_faint,
-            extra_letter_spacing: 0.1 * 9.5,
-            ..Default::default()
-        },
-    );
-    let galley = ui.fonts(|f| f.layout_job(job));
-    ui.painter().galley(
-        egui::pos2(rect.left() + 10.0, rect.bottom() - galley.size().y - 2.0),
-        galley,
-        t.color.text_faint,
-    );
 }
 
 fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
