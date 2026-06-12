@@ -67,6 +67,26 @@ impl Bjt {
         ve: Value,
         vs: Value,
     ) -> IntrinsicTerminalState {
+        if !self.has_intrinsic_state_unknowns() {
+            // Every series element is externalized or absent and there are
+            // no parasitic-transport or self-heating unknowns: the internal
+            // nodes ARE the terminals. The post-solve collapse below would
+            // overwrite every branch with exactly these identities anyway,
+            // so the 8-dim internal Newton (whose vcrit-style legacy seed
+            // makes it iterate on every uncached call) has nothing to say —
+            // this is bjtload's direct evaluation case, and on promoted GP
+            // decks it is the difference between ~1 µs and ~25 µs per call.
+            return IntrinsicTerminalState {
+                vcx: vc,
+                vci: vc,
+                vbx: vb,
+                vbi: vb,
+                vei: ve,
+                vbp: vc,
+                vsi: vs,
+                vrth: 0.0,
+            };
+        }
         let has_rcx = Self::series_active(self.rcx);
         let has_rci = Self::series_active(self.rci);
         let has_rbx = Self::series_active(self.rbx);
