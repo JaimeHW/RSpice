@@ -216,3 +216,114 @@ fn loaded_break_matches_the_return_ratio_where_single_injection_fails() {
          (got {tian_at_10}, true {t_true}, error {tian_error:.5})"
     );
 }
+
+/// The `.STB` netlist card drives the same analysis from deck text: the
+/// card parses into `AnalysisCommand::Stb`, and mapping it to a config the
+/// way the CLI does reproduces the closed-form loop gain.
+#[test]
+fn stb_card_parses_and_drives_the_same_loop_gain() {
+    use rspice_core::analysis::advanced::stb::StbSweepType;
+    use rspice_core::netlist::{AnalysisCommand, FreqVariation};
+
+    let deck = "\
+* single-pole loop carrying its own .stb card
+e1 eo 0 ctrl 0 -1000
+vprobe eo x 0
+r1 x ctrl 1k
+c1 ctrl 0 159.154943091895n
+.stb dec 20 10 10meg probe=vprobe
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let card = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Stb {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                probe,
+            } => Some((*variation, *points, *start_freq, *stop_freq, probe.clone())),
+            _ => None,
+        })
+        .expect(".stb card parses into an analysis");
+
+    let (variation, points, start_freq, stop_freq, probe) = card;
+    assert_eq!(variation, FreqVariation::Dec);
+    assert_eq!(points, 20);
+    assert!((start_freq - 10.0).abs() < 1e-12);
+    assert!((stop_freq - 10.0e6).abs() < 1e-3);
+    assert!(
+        probe.eq_ignore_ascii_case("vprobe"),
+        "probe name survives parsing: {probe}"
+    );
+
+    // Map card -> config exactly the way the CLI dispatch does.
+    let sweep_type = match variation {
+        FreqVariation::Lin => StbSweepType::Linear,
+        FreqVariation::Dec => StbSweepType::Decade,
+        FreqVariation::Oct => StbSweepType::Octave,
+    };
+    let config = StbConfig::new()
+        .with_sweep(start_freq, stop_freq, points)
+        .with_sweep_type(sweep_type)
+        .with_probe(&probe);
+    let engine = Engine::new(SimulationConfig::default());
+    let analysis = engine.run_stb(&netlist, config).expect("STB completes");
+
+    for (&f, &t) in analysis.frequencies.iter().zip(&analysis.loop_gains) {
+        let expected = single_pole_t(f);
+        assert!(
+            (t - expected).norm() < 5e-3 * expected.norm(),
+            "card-driven loop gain at {f:.3e} Hz: got {t}, want {expected}"
+        );
+    }
+}
+
+/// The probe also parses as a bare trailing name (no PROBE= key).
+#[test]
+fn stb_card_accepts_a_bare_probe_name() {
+    use rspice_core::netlist::AnalysisCommand;
+
+    let deck = "\
+* bare probe name
+e1 eo 0 ctrl 0 -1000
+vprobe eo x 0
+r1 x ctrl 1k
+c1 ctrl 0 159.154943091895n
+.stb oct 5 100 1meg vprobe
+.end
+";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let probe = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Stb { probe, .. } => Some(probe.clone()),
+            _ => None,
+        })
+        .expect(".stb card parses");
+    assert!(probe.eq_ignore_ascii_case("vprobe"));
+}
+
+/// A probeless `.stb` card is a parse error that names the requirement,
+/// not a deferred runtime failure.
+#[test]
+fn stb_card_without_probe_is_a_parse_error() {
+    let deck = "\
+* missing probe
+v1 in 0 ac 1
+r1 in out 1k
+c1 out 0 1u
+.stb dec 10 1k 1meg
+.end
+";
+    let err = Netlist::parse(deck).expect_err("probeless .stb must not parse");
+    let message = err.to_string();
+    assert!(
+        message.to_ascii_lowercase().contains("probe"),
+        "error names the missing probe: {message}"
+    );
+}

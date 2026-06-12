@@ -242,6 +242,153 @@ pub(super) fn run_ac(
     }
 }
 
+/// Run `.STB`: Tian double-injection loop gain at a designated 0 V probe
+/// source, with gain/phase margins extracted from the sweep.
+pub(super) fn run_stb(
+    ctx: &RunContext<'_>,
+    variation: rspice_core::netlist::FreqVariation,
+    points: usize,
+    start_freq: f64,
+    stop_freq: f64,
+    probe: &str,
+) -> Result<(), CliError> {
+    use rspice_core::analysis::advanced::{StbConfig, StbSweepType};
+    use rspice_core::netlist::FreqVariation;
+
+    if !ctx.quiet {
+        println!(
+            "Running STB (loop stability) analysis: {} to {} Hz, probe {}...",
+            start_freq, stop_freq, probe
+        );
+    }
+
+    let sweep_type = match variation {
+        FreqVariation::Lin => StbSweepType::Linear,
+        FreqVariation::Dec => StbSweepType::Decade,
+        FreqVariation::Oct => StbSweepType::Octave,
+    };
+    let config = StbConfig::new()
+        .with_sweep(start_freq, stop_freq, points)
+        .with_sweep_type(sweep_type)
+        .with_probe(probe);
+
+    let stb = ctx
+        .engine
+        .run_stb(ctx.netlist, config)
+        .map_err(|e| CliError::simulation_error_in(e.to_string(), "STB"))?;
+
+    if !ctx.args.allow_nonfinite {
+        for (freq, gain) in stb.frequencies.iter().zip(stb.loop_gains.iter()) {
+            if !gain.re.is_finite() || !gain.im.is_finite() {
+                return Err(CliError::SimulationError {
+                    message: format!(
+                        "loop gain is non-finite at {freq:e} Hz; the solution is not \
+                         physical. Use --allow-nonfinite to export anyway."
+                    ),
+                    analysis: Some("STB".to_string()),
+                });
+            }
+        }
+    }
+
+    let margins = &stb.result.margins;
+    if !ctx.quiet {
+        println!(
+            "STB Analysis: {} frequency points, probe {}",
+            stb.frequencies.len(),
+            stb.probe_name
+        );
+        if margins.num_crossovers == 0 {
+            println!(
+                "  Loop gain never crosses unity ({:.1} dB at DC); no phase margin to report",
+                margins.dc_gain_db
+            );
+        } else {
+            println!(
+                "  Phase margin: {:.2} deg at {:.4e} Hz (unity-gain crossover)",
+                margins.phase_margin_deg, margins.phase_margin_freq
+            );
+            println!(
+                "  Gain margin: {:.2} dB at {:.4e} Hz",
+                margins.gain_margin_db, margins.gain_margin_freq
+            );
+            if margins.conditionally_stable {
+                println!(
+                    "  Conditionally stable: {} unity-gain crossovers",
+                    margins.num_crossovers
+                );
+            }
+        }
+        for warning in &stb.result.warnings {
+            println!("  Warning: {warning}");
+        }
+    }
+
+    if let Some(ref output_path) = ctx.output_path_for("stb") {
+        if matches!(ctx.format, OutputFormat::Hdf5) {
+            let mut data = Hdf5SimulationData::new();
+            data.title = "STB Loop Gain".to_string();
+
+            let mut ac = Hdf5AcSection::new(stb.frequencies.clone());
+            ac.add_signal(
+                "loopgain".to_string(),
+                stb.loop_gains.iter().map(|g| g.re).collect(),
+                stb.loop_gains.iter().map(|g| g.im).collect(),
+            );
+            data.ac = Some(ac);
+
+            write_hdf5(output_path, &data)
+                .map_err(|err| map_hdf5_output_error(output_path, err))?;
+        } else {
+            use super::export::{ColumnData, ExportColumn, ExportTable};
+
+            ExportTable {
+                analysis: "stb".to_string(),
+                plot_name: "STB Loop Gain".to_string(),
+                scale_name: "frequency".to_string(),
+                scale_type: "frequency".to_string(),
+                scale: stb.frequencies.clone(),
+                columns: vec![
+                    ExportColumn {
+                        name: "loopgain".to_string(),
+                        var_type: "gain".to_string(),
+                        data: ColumnData::Complex {
+                            real: stb.loop_gains.iter().map(|g| g.re).collect(),
+                            imag: stb.loop_gains.iter().map(|g| g.im).collect(),
+                        },
+                    },
+                    ExportColumn {
+                        name: "loopgain_mag_db".to_string(),
+                        var_type: "gain".to_string(),
+                        data: ColumnData::Real(
+                            stb.loop_gains
+                                .iter()
+                                .map(|g| 20.0 * g.norm().max(1e-300).log10())
+                                .collect(),
+                        ),
+                    },
+                    ExportColumn {
+                        name: "loopgain_phase_deg".to_string(),
+                        var_type: "phase".to_string(),
+                        data: ColumnData::Real(
+                            stb.loop_gains
+                                .iter()
+                                .map(|g| g.im.atan2(g.re).to_degrees())
+                                .collect(),
+                        ),
+                    },
+                ],
+            }
+            .write(output_path, ctx.format)?;
+        }
+        if !ctx.quiet {
+            println!("  Loop gain exported to: {}", output_path.display());
+        }
+    }
+
+    Ok(())
+}
+
 pub(super) fn run_noise(
     ctx: &RunContext<'_>,
     output_node: &str,

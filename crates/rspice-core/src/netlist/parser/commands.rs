@@ -82,6 +82,43 @@ pub(super) fn parse_command(
                 stop_freq,
             });
         }
+        ".STB" => {
+            let var_str = expect_ident(stream, line_num)?;
+            let variation = match var_str.as_str() {
+                "LIN" => FreqVariation::Lin,
+                "OCT" => FreqVariation::Oct,
+                "DEC" => FreqVariation::Dec,
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Unknown frequency variation: {}", var_str),
+                    });
+                }
+            };
+            let points = expect_value(stream, line_num, params)? as usize;
+            let start_freq = expect_value(stream, line_num, params)?;
+            let stop_freq = expect_value(stream, line_num, params)?;
+
+            // The probe designates the 0 V source standing in the loop:
+            // PROBE=vname (the Spectre flavor) or a bare trailing name.
+            let mut probe = expect_ident(stream, line_num).map_err(|_| ParseError::Syntax {
+                line: line_num,
+                message: ".STB requires a probe: name a 0 V voltage source placed in \
+                          the loop, e.g. .STB DEC 10 1 100MEG PROBE=VPRB"
+                    .to_string(),
+            })?;
+            if probe.eq_ignore_ascii_case("probe") && stream.consume(&TokenKind::Equals) {
+                probe = expect_ident(stream, line_num)?;
+            }
+
+            analyses.push(AnalysisCommand::Stb {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                probe,
+            });
+        }
         ".DISTO" => {
             let disto = parse_disto_command(stream, line_num, params)?;
             analyses.push(disto);

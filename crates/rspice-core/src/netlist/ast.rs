@@ -982,6 +982,20 @@ pub enum AnalysisCommand {
         stop_freq: Value,
     },
 
+    /// Loop-stability analysis: .STB DEC|LIN|OCT np fstart fstop PROBE=vname
+    ///
+    /// Tian double-injection loop gain at a designated 0 V voltage source
+    /// placed in series with the feedback path (the Spectre probe
+    /// convention). The probe name also parses as a bare trailing token.
+    Stb {
+        variation: FreqVariation,
+        points: usize,
+        start_freq: Value,
+        stop_freq: Value,
+        /// Name of the 0 V voltage source serving as the loop probe.
+        probe: String,
+    },
+
     /// Distortion analysis: .DISTO DEC|LIN|OCT np fstart fstop [f2overf1]
     Disto {
         variation: FreqVariation,

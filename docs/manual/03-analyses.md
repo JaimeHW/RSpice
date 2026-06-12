@@ -18,6 +18,7 @@ A deck with no analysis card runs a DC operating point.
 | `.sens v(out[,ref]) [AC sweep]` | DC or AC sensitivity. |
 | `.tf v(out) SRC` / `.tf i(VSRC) SRC` | DC transfer function (gain, Rin, Rout). |
 | `.four f0 v(out) …` | Fourier analysis of the last transient. |
+| `.stb dec\|oct\|lin N fstart fstop probe=VNAME` | Loop stability: Tian double-injection loop gain at a 0 V probe source placed in series with the feedback path (both terminals off ground). Prints phase/gain margins; exports `loopgain` (complex), `loopgain_mag_db`, `loopgain_phase_deg` under the `stb` tag. |
 
 Initial conditions: `.ic v(node)=value …` seeds the transient start;
 `.nodeset` hints the DC solve. `.options uic` semantics are not yet

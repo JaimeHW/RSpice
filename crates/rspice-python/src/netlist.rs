@@ -71,6 +71,16 @@ fn describe_analysis(analysis: &AnalysisCommand) -> String {
             ".ac {} {points} {start_freq} {stop_freq}",
             format!("{variation:?}").to_lowercase()
         ),
+        AnalysisCommand::Stb {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            probe,
+        } => format!(
+            ".stb {} {points} {start_freq} {stop_freq} probe={probe}",
+            format!("{variation:?}").to_lowercase()
+        ),
         AnalysisCommand::Tran {
             step,
             stop,

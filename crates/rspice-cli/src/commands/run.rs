@@ -230,6 +230,13 @@ impl<'a> RunContext<'a> {
                 start_freq,
                 stop_freq,
             } => frequency::run_ac(self, *variation, *points, *start_freq, *stop_freq)?,
+            AnalysisCommand::Stb {
+                variation,
+                points,
+                start_freq,
+                stop_freq,
+                probe,
+            } => frequency::run_stb(self, *variation, *points, *start_freq, *stop_freq, probe)?,
             AnalysisCommand::Disto {
                 variation,
                 points,

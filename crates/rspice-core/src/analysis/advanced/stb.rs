@@ -72,11 +72,13 @@ pub struct StbConfig {
 /// Sweep type for STB analysis
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StbSweepType {
-    /// Linear frequency sweep
+    /// Linear frequency sweep (`num_points` total)
     Linear,
-    /// Decade (logarithmic) sweep
+    /// Decade (logarithmic) sweep (`num_points` per decade)
     #[default]
     Decade,
+    /// Octave (logarithmic) sweep (`num_points` per octave)
+    Octave,
 }
 
 impl Default for StbConfig {
@@ -140,6 +142,7 @@ impl StbConfig {
         match self.sweep_type {
             StbSweepType::Linear => self.linear_points(),
             StbSweepType::Decade => self.decade_points(),
+            StbSweepType::Octave => self.octave_points(),
         }
     }
 
@@ -168,6 +171,25 @@ impl StbConfig {
                 let log_f = log_start
                     + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
                 10.0_f64.powf(log_f)
+            })
+            .collect()
+    }
+
+    fn octave_points(&self) -> Vec<Value> {
+        if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
+            return vec![self.freq_start.max(1e-15)];
+        }
+        let log_start = self.freq_start.log2();
+        let log_stop = self.freq_stop.log2();
+        let num_octaves = log_stop - log_start;
+        let total_points = (num_octaves * self.num_points as f64).ceil() as usize;
+        let total_points = total_points.max(1);
+
+        (0..total_points)
+            .map(|i| {
+                let log_f = log_start
+                    + (log_stop - log_start) * i as f64 / (total_points - 1).max(1) as f64;
+                2.0_f64.powf(log_f)
             })
             .collect()
     }
