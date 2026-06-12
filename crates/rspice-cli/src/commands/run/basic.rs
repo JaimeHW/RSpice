@@ -623,29 +623,25 @@ pub(super) fn run_fourier(
 
         for (output, result) in &analyzed {
             println!("│ Output: {:54} │", output);
+            println!("│ DC component = {:<47.6e} │", result.dc_component);
             println!("├────────────────────────────────────────────────────────────────┤");
-            println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)       │");
+            println!("│  Harmonic    Frequency (Hz)    Magnitude    Phase (deg)        │");
             println!("├────────────────────────────────────────────────────────────────┤");
 
-            for (i, harmonic) in result.harmonics.iter().enumerate() {
-                let freq = fundamental * (i + 1) as f64;
+            for harmonic in result.harmonics.iter().filter(|h| h.harmonic_number > 0) {
                 println!(
-                    "│  {:3}        {:12.4e}      {:10.6}   {:10.2}         │",
-                    i + 1,
-                    freq,
+                    "│  {:3}        {:12.4e}      {:10.6}   {:10.2}          │",
+                    harmonic.harmonic_number,
+                    harmonic.frequency,
                     harmonic.magnitude,
-                    harmonic.phase.to_degrees()
+                    harmonic.phase
                 );
             }
 
             println!("├────────────────────────────────────────────────────────────────┤");
             println!(
-                "│  DC Component:   {:10.6}                                    │",
-                result.dc_component
-            );
-            println!(
-                "│  THD:            {:10.4} %                                   │",
-                result.thd * 100.0
+                "│  THD:            {:10.4} %                                  │",
+                result.thd
             );
             println!("└────────────────────────────────────────────────────────────────┘");
         }
@@ -690,18 +686,18 @@ fn write_fourier_output(
             )
             .map_err(io_err)?;
             for (output, result) in analyzed {
-                for (i, harmonic) in result.harmonics.iter().enumerate() {
+                for harmonic in &result.harmonics {
                     writeln!(
                         file,
                         "{1}{0}{2}{0}{3:.9e}{0}{4:.9e}{0}{5:.6}{0}{6:.9e}{0}{7:.6}",
                         sep,
                         output,
-                        i + 1,
-                        fundamental * (i + 1) as f64,
+                        harmonic.harmonic_number,
+                        harmonic.frequency,
                         harmonic.magnitude,
-                        harmonic.phase.to_degrees(),
+                        harmonic.phase,
                         result.dc_component,
-                        result.thd * 100.0,
+                        result.thd,
                     )
                     .map_err(io_err)?;
                 }
@@ -716,18 +712,18 @@ fn write_fourier_output(
                     serde_json::json!({
                         "output": output,
                         "dc_component": result.dc_component,
-                        "thd": result.thd,
-                        "thd_percent": result.thd * 100.0,
+                        // Core's thd field is already a percentage.
+                        "thd": result.thd / 100.0,
+                        "thd_percent": result.thd,
                         "harmonics": result
                             .harmonics
                             .iter()
-                            .enumerate()
-                            .map(|(i, harmonic)| {
+                            .map(|harmonic| {
                                 serde_json::json!({
-                                    "n": i + 1,
-                                    "frequency_hz": fundamental * (i + 1) as f64,
+                                    "n": harmonic.harmonic_number,
+                                    "frequency_hz": harmonic.frequency,
                                     "magnitude": harmonic.magnitude,
-                                    "phase_deg": harmonic.phase.to_degrees(),
+                                    "phase_deg": harmonic.phase,
                                 })
                             })
                             .collect::<Vec<_>>(),
