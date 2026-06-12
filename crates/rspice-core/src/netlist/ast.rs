@@ -127,6 +127,10 @@ pub enum ElementKind {
         model: Option<String>,
         /// Optional instance parameters (e.g., `L`, `W`, `M`, `R`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// Capacitor.
@@ -137,11 +141,17 @@ pub enum ElementKind {
         /// Explicit capacitance value in Farads when provided directly.
         /// `NAN` when the value must be resolved from a model card.
         value: Value,
+        /// Optional deferred expression for parameterized capacitance values.
+        value_expr: Option<String>,
         initial_voltage: Option<Value>,
         /// Optional model name for model-based capacitor instances.
         model: Option<String>,
         /// Optional instance parameters (e.g. `W`, `L`, `M`, `SCALE`, `TC1`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// Inductor.
@@ -153,11 +163,17 @@ pub enum ElementKind {
         /// Explicit inductance value in Henries when provided directly.
         /// `NAN` when the value must be resolved from a model card.
         value: Value,
+        /// Optional deferred expression for parameterized inductance values.
+        value_expr: Option<String>,
         initial_current: Option<Value>,
         /// Optional model name for model-based inductor instances.
         model: Option<String>,
         /// Optional instance parameters (e.g. `M`, `SCALE`, `TC1`, `TC2`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// Jiles-Atherton hysteresis inductor: magnetic core with nonlinear B-H curve
@@ -188,6 +204,10 @@ pub enum ElementKind {
         model: String,
         /// Instance parameters (e.g. `AREA`, `M`, `TEMP`, `DTEMP`, `OFF`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// BJT (NPN or PNP)
@@ -196,6 +216,10 @@ pub enum ElementKind {
         bjt_type: BjtType,
         /// Instance parameters (e.g. `AREA`, `M`, `TEMP`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// MOSFET
@@ -204,6 +228,10 @@ pub enum ElementKind {
         mos_type: MosType,
         /// Instance parameters (e.g. `W`, `L`, `M`, `NF`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// JFET (NJF or PJF)
@@ -212,6 +240,10 @@ pub enum ElementKind {
         jfet_type: JfetType,
         /// Instance parameters (e.g. `AREA`, `M`, `W`, `L`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     /// MESFET (GaAs FET: NMF or PMF)
@@ -220,6 +252,10 @@ pub enum ElementKind {
         mesfet_type: MesfetType,
         /// Instance parameters (e.g. `AREA`, `M`, `W`, `L`).
         instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured as expressions inside subcircuit
+        /// bodies; resolved against the instance scope during flattening
+        /// and merged over `instance_params`.
+        deferred_params: Vec<(String, String)>,
     },
 
     //-------------------------------------------------------------------------

@@ -524,9 +524,11 @@ pub(super) fn synthesize_laplace(
             name: format!("{}.__CX{}", name, i),
             kind: ElementKind::Capacitor {
                 value: cap_value,
+                value_expr: None,
                 initial_voltage: None,
                 model: None,
                 instance_params: Vec::new(),
+                deferred_params: Vec::new(),
             },
             nodes: vec![state_node(i), "0".to_string()],
         });

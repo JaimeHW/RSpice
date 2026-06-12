@@ -400,6 +400,53 @@ pub(super) fn expect_value_default(
     try_value(stream, params).unwrap_or(default)
 }
 
+/// An instance-parameter value: resolved at parse time, or captured as
+/// expression text for per-instance evaluation during flattening.
+pub(super) enum DeferrableValue {
+    Resolved(Value),
+    Deferred(String),
+}
+
+/// Take one instance-parameter value. With `defer` set (subcircuit bodies),
+/// brace expressions and parameter references are captured as expression
+/// text instead of being evaluated against the definition-time scope, whose
+/// defaults would otherwise shadow per-instance overrides. Plain numerics
+/// resolve immediately in both modes.
+pub(super) fn take_deferrable_value(
+    stream: &mut TokenStream,
+    params: &ParamContext,
+    defer: bool,
+) -> Option<DeferrableValue> {
+    skip_commas(stream);
+    if defer {
+        match &stream.peek().kind {
+            TokenKind::Expression(_) => {
+                return take_value_expression_string(stream, params)
+                    .map(DeferrableValue::Deferred);
+            }
+            TokenKind::Minus | TokenKind::Plus
+                if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) =>
+            {
+                return take_value_expression_string(stream, params)
+                    .map(DeferrableValue::Deferred);
+            }
+            TokenKind::Ident(name) => {
+                // Engineering-suffixed numerics ("1u", "2.5k") resolve below;
+                // anything non-numeric here is a parameter reference that may
+                // be overridden (or only provided) at the instance, so it has
+                // to survive to flattening as text.
+                if crate::netlist::lexer::parse_spice_value(name).is_err() {
+                    let expr = name.clone();
+                    stream.advance();
+                    return Some(DeferrableValue::Deferred(expr));
+                }
+            }
+            _ => {}
+        }
+    }
+    try_value(stream, params).map(DeferrableValue::Resolved)
+}
+
 pub(super) fn skip_optional_param_name(stream: &mut TokenStream, param_name: &str) {
     if let TokenKind::Ident(s) = &stream.peek().kind
         && s == param_name

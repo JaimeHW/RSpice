@@ -168,9 +168,11 @@ impl SpefFile {
                     name: format!("CSPEF{parasitic_seq}"),
                     kind: ElementKind::Capacitor {
                         value: cap.farads,
+                        value_expr: None,
                         initial_voltage: None,
                         model: None,
                         instance_params: Vec::new(),
+                        deferred_params: Vec::new(),
                     },
                     nodes: vec![n1, n2],
                 });
@@ -189,6 +191,7 @@ impl SpefFile {
                         value_expr: None,
                         model: None,
                         instance_params: Vec::new(),
+                        deferred_params: Vec::new(),
                     },
                     nodes: vec![node_name(&res.a), node_name(&res.b)],
                 });

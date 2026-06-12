@@ -368,6 +368,7 @@ mod tests {
             value_expr,
             model,
             instance_params,
+            ..
         } = &element.kind
         else {
             panic!("test element is not a resistor");

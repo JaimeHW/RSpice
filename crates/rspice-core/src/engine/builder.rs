@@ -209,6 +209,7 @@ impl Engine {
                     value_expr,
                     model,
                     instance_params,
+                    ..
                 } => {
                     if let Some(expression) = value_expr.as_deref()
                         && model.is_none()
@@ -290,6 +291,7 @@ impl Engine {
                     initial_voltage,
                     model,
                     instance_params,
+                    ..
                 } => {
                     let capacitance = resolve_capacitor_instance_value(
                         netlist,
@@ -316,6 +318,7 @@ impl Engine {
                     initial_current,
                     model,
                     instance_params,
+                    ..
                 } => {
                     // Magnetic-core model cards (Jiles-Atherton) route to the
                     // hysteretic inductor; plain L/IND cards and modelless
@@ -446,6 +449,7 @@ impl Engine {
                 ElementKind::Diode {
                     model,
                     instance_params,
+                    ..
                 } => {
                     let anode = circuit.get_or_create_node(&element.nodes[0]);
                     let cathode = circuit.get_or_create_node(&element.nodes[1]);
@@ -559,6 +563,7 @@ impl Engine {
                     model,
                     bjt_type,
                     instance_params,
+                    ..
                 } => {
                     let collector = circuit.get_or_create_node(&element.nodes[0]);
                     let base = circuit.get_or_create_node(&element.nodes[1]);
@@ -706,6 +711,7 @@ impl Engine {
                     model,
                     mos_type: _mos_type,
                     instance_params,
+                    ..
                 } => {
                     // Resolve NMOS/PMOS from model card when available.
                     let model_def = find_binned_model_def(netlist, model, instance_params);
@@ -1007,6 +1013,7 @@ impl Engine {
                     model,
                     jfet_type: _jfet_type,
                     instance_params,
+                    ..
                 } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);
@@ -1121,6 +1128,7 @@ impl Engine {
                     model,
                     mesfet_type: _mesfet_type,
                     instance_params,
+                    ..
                 } => {
                     let drain = circuit.get_or_create_node(&element.nodes[0]);
                     let gate = circuit.get_or_create_node(&element.nodes[1]);

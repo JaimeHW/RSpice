@@ -609,44 +609,134 @@ impl<'a> Flattener<'a> {
                 value_expr,
                 model,
                 instance_params,
-            } => {
-                let resolved_value = if let Some(expr) = value_expr {
-                    resolve_parametric_value(
-                        &ParametricValue::Expression(expr.clone()),
-                        param_map,
-                        &self.random,
-                    )?
-                } else {
-                    *value
-                };
-                ElementKind::Resistor {
-                    value: resolved_value,
-                    value_expr: None,
-                    model: model.clone(),
-                    instance_params: instance_params.clone(),
-                }
-            }
+                deferred_params,
+            } => ElementKind::Resistor {
+                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value_expr: None,
+                model: model.clone(),
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
             ElementKind::Capacitor {
                 value,
+                value_expr,
                 initial_voltage,
                 model,
                 instance_params,
+                deferred_params,
             } => ElementKind::Capacitor {
-                value: *value,
+                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value_expr: None,
                 initial_voltage: *initial_voltage,
                 model: model.clone(),
-                instance_params: instance_params.clone(),
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
             },
             ElementKind::Inductor {
                 value,
+                value_expr,
                 initial_current,
                 model,
                 instance_params,
+                deferred_params,
             } => ElementKind::Inductor {
-                value: *value,
+                value: self.resolve_optional_value_expr(*value, value_expr, param_map)?,
+                value_expr: None,
                 initial_current: *initial_current,
                 model: model.clone(),
-                instance_params: instance_params.clone(),
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
+
+            // Semiconductor devices: instance parameters captured as
+            // expressions inside the subcircuit body resolve against this
+            // instance's parameter scope, so overrides like `x1 ... wn=4u`
+            // reach device geometry instead of being shadowed by the
+            // definition-time defaults.
+            ElementKind::Diode {
+                model,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Diode {
+                model: model.clone(),
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
+            ElementKind::Bjt {
+                model,
+                bjt_type,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Bjt {
+                model: model.clone(),
+                bjt_type: *bjt_type,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
+            ElementKind::Mosfet {
+                model,
+                mos_type,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Mosfet {
+                model: model.clone(),
+                mos_type: *mos_type,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
+            ElementKind::Jfet {
+                model,
+                jfet_type,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Jfet {
+                model: model.clone(),
+                jfet_type: *jfet_type,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
+            },
+            ElementKind::Mesfet {
+                model,
+                mesfet_type,
+                instance_params,
+                deferred_params,
+            } => ElementKind::Mesfet {
+                model: model.clone(),
+                mesfet_type: *mesfet_type,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    param_map,
+                )?,
+                deferred_params: Vec::new(),
             },
 
             // Nested subcircuit - propagate parameters
@@ -711,6 +801,50 @@ impl<'a> Flattener<'a> {
             kind: new_kind,
             nodes: element.nodes.clone(),
         })
+    }
+
+    /// Resolve a deferred value expression, or keep the parse-time value.
+    fn resolve_optional_value_expr(
+        &self,
+        value: Value,
+        value_expr: &Option<String>,
+        param_map: &HashMap<String, Value>,
+    ) -> Result<Value, ParseError> {
+        match value_expr {
+            Some(expr) => resolve_parametric_value(
+                &ParametricValue::Expression(expr.clone()),
+                param_map,
+                &self.random,
+            ),
+            None => Ok(value),
+        }
+    }
+
+    /// Merge deferred (expression-valued) instance parameters over the
+    /// parse-time-resolved set, evaluating each against this instance's
+    /// parameter scope. A deferred entry overrides a same-named resolved one.
+    fn merge_deferred_params(
+        &self,
+        instance_params: &[(String, Value)],
+        deferred_params: &[(String, String)],
+        param_map: &HashMap<String, Value>,
+    ) -> Result<Vec<(String, Value)>, ParseError> {
+        if deferred_params.is_empty() {
+            return Ok(instance_params.to_vec());
+        }
+        let mut merged = instance_params.to_vec();
+        for (name, expr) in deferred_params {
+            let value = resolve_parametric_value(
+                &ParametricValue::Expression(expr.clone()),
+                param_map,
+                &self.random,
+            )?;
+            match merged.iter_mut().find(|(existing, _)| existing == name) {
+                Some(slot) => slot.1 = value,
+                None => merged.push((name.clone(), value)),
+            }
+        }
+        Ok(merged)
     }
 
     fn resolve_external_subcircuit_params(

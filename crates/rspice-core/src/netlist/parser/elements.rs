@@ -20,6 +20,7 @@ pub(super) fn parse_resistor(
     let mut value_expr: Option<String> = None;
     let mut model: Option<String> = None;
     let mut instance_params: Vec<(String, Value)> = Vec::new();
+    let mut deferred_params: Vec<(String, String)> = Vec::new();
 
     skip_commas(stream);
 
@@ -56,9 +57,13 @@ pub(super) fn parse_resistor(
             }
             TokenKind::Ident(s) => {
                 let ident = s.clone();
-                if !defer_simple_param_refs && params.get(&ident).is_some() {
+                if params.get(&ident).is_some() {
                     stream.advance();
-                    value = params.get(&ident);
+                    if defer_simple_param_refs {
+                        value_expr = Some(ident);
+                    } else {
+                        value = params.get(&ident);
+                    }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
                     stream.advance();
                     value = Some(v);
@@ -112,20 +117,44 @@ pub(super) fn parse_resistor(
                         continue;
                     }
 
-                    let param_value =
-                        try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                            line: line_num,
-                            message: format!(
-                                "Expected value for resistor parameter '{}'",
-                                raw_name
-                            ),
-                        })?;
-
-                    if name_upper == "R" || name_upper == "VALUE" {
-                        value = Some(param_value);
-                        value_expr = None;
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(param_value)) => {
+                            if name_upper == "R" || name_upper == "VALUE" {
+                                value = Some(param_value);
+                                value_expr = None;
+                            }
+                            instance_params.push((name_upper, param_value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            if name_upper == "R" || name_upper == "VALUE" {
+                                value_expr = Some(expr);
+                                value = None;
+                            } else if matches!(name_upper.as_str(), "RSER" | "RPAR" | "CPAR") {
+                                // Parasitic expansion happens at parse time, so a
+                                // per-instance value cannot be honored; rejecting
+                                // beats silently dropping the parasitic.
+                                return Err(ParseError::Syntax {
+                                    line: line_num,
+                                    message: format!(
+                                        "parameterized {raw_name} on a passive inside a \
+                                         subcircuit is not supported; declare the parasitic \
+                                         as an explicit element instead"
+                                    ),
+                                });
+                            } else {
+                                deferred_params.push((name_upper, expr));
+                            }
+                        }
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for resistor parameter '{}'",
+                                    raw_name
+                                ),
+                            });
+                        }
                     }
-                    instance_params.push((name_upper, param_value));
                 } else if model.is_none() && value.is_none() {
                     // Bare identifier after value-less prefix: treat as model name.
                     model = Some(raw_name);
@@ -180,6 +209,7 @@ pub(super) fn parse_resistor(
             value_expr,
             model,
             instance_params,
+            deferred_params,
         },
         nodes,
     });
@@ -196,9 +226,11 @@ pub(super) fn parse_resistor(
 /// an instance parameter for build-time resolution (M/SCALE/TC1/TC2/W/L...).
 struct PassiveTail {
     value: Option<Value>,
+    value_expr: Option<String>,
     model: Option<String>,
     ic: Option<Value>,
     instance_params: Vec<(String, Value)>,
+    deferred_params: Vec<(String, String)>,
 }
 
 /// Remove one instance parameter by name, returning its value.
@@ -234,6 +266,7 @@ fn expand_passive_parasitics(
                 value_expr: None,
                 model: None,
                 instance_params: Vec::new(),
+                deferred_params: Vec::new(),
             },
             nodes: vec![outer_pos, internal],
         });
@@ -249,6 +282,7 @@ fn expand_passive_parasitics(
                 value_expr: None,
                 model: None,
                 instance_params: Vec::new(),
+                deferred_params: Vec::new(),
             },
             nodes: vec![nodes[0].clone(), nodes[1].clone()],
         });
@@ -261,9 +295,11 @@ fn expand_passive_parasitics(
             name: format!("C{tag}#PAR"),
             kind: ElementKind::Capacitor {
                 value: cpar,
+                value_expr: None,
                 initial_voltage: None,
                 model: None,
                 instance_params: Vec::new(),
+                deferred_params: Vec::new(),
             },
             nodes: vec![nodes[0].clone(), nodes[1].clone()],
         });
@@ -276,12 +312,15 @@ fn parse_passive_tail(
     params: &ParamContext,
     element_label: &str,
     value_keys: &[&str],
+    defer_simple_param_refs: bool,
 ) -> Result<PassiveTail, ParseError> {
     let mut tail = PassiveTail {
         value: None,
+        value_expr: None,
         model: None,
         ic: None,
         instance_params: Vec::new(),
+        deferred_params: Vec::new(),
     };
 
     skip_commas(stream);
@@ -289,14 +328,27 @@ fn parse_passive_tail(
     // Optional leading positional value or model name.
     if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
-            TokenKind::Number(_) | TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+            TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
+            }
+            TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+                if defer_simple_param_refs
+                    && matches!(stream.peek().kind, TokenKind::Expression(_))
+                {
+                    tail.value_expr = take_value_expression_string(stream, params);
+                } else {
+                    tail.value = Some(expect_value(stream, line_num, params)?);
+                }
             }
             TokenKind::Ident(s) => {
                 let ident = s.clone();
-                if let Some(resolved) = params.get(&ident) {
+                if params.get(&ident).is_some() {
                     stream.advance();
-                    tail.value = Some(resolved);
+                    if defer_simple_param_refs {
+                        tail.value_expr = Some(ident);
+                    } else {
+                        tail.value = params.get(&ident);
+                    }
                 } else if let Ok(v) = crate::netlist::lexer::parse_spice_value(&ident) {
                     stream.advance();
                     tail.value = Some(v);
@@ -328,24 +380,57 @@ fn parse_passive_tail(
                         continue;
                     }
 
-                    let param_value =
-                        try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                            line: line_num,
-                            message: format!(
-                                "Expected value for {} parameter '{}'",
-                                element_label, raw_name
-                            ),
-                        })?;
-
                     if name_upper == "IC" {
-                        tail.ic = Some(param_value);
+                        // Initial conditions stay parse-time values: the IC
+                        // field is plain numeric in the AST.
+                        tail.ic =
+                            Some(try_value(stream, params).ok_or_else(|| ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for {} parameter '{}'",
+                                    element_label, raw_name
+                                ),
+                            })?);
                         continue;
                     }
-                    if value_keys.iter().any(|key| name_upper == *key) {
-                        tail.value = Some(param_value);
-                        continue;
+
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(param_value)) => {
+                            if value_keys.iter().any(|key| name_upper == *key) {
+                                tail.value = Some(param_value);
+                                tail.value_expr = None;
+                                continue;
+                            }
+                            tail.instance_params.push((name_upper, param_value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            if value_keys.iter().any(|key| name_upper == *key) {
+                                tail.value_expr = Some(expr);
+                                tail.value = None;
+                                continue;
+                            }
+                            if matches!(name_upper.as_str(), "RSER" | "RPAR" | "CPAR") {
+                                return Err(ParseError::Syntax {
+                                    line: line_num,
+                                    message: format!(
+                                        "parameterized {raw_name} on a passive inside a \
+                                         subcircuit is not supported; declare the parasitic \
+                                         as an explicit element instead"
+                                    ),
+                                });
+                            }
+                            tail.deferred_params.push((name_upper, expr));
+                        }
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for {} parameter '{}'",
+                                    element_label, raw_name
+                                ),
+                            });
+                        }
                     }
-                    tail.instance_params.push((name_upper, param_value));
                 } else if tail.model.is_none() && tail.value.is_none() {
                     tail.model = Some(raw_name);
                 }
@@ -367,15 +452,23 @@ pub(super) fn parse_capacitor(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
     skip_optional_param_name(stream, "C");
-    let tail = parse_passive_tail(stream, line_num, params, "capacitor", &["C", "VALUE", "CAP"])?;
+    let tail = parse_passive_tail(
+        stream,
+        line_num,
+        params,
+        "capacitor",
+        &["C", "VALUE", "CAP"],
+        defer_simple_param_refs,
+    )?;
 
-    if tail.value.is_none() && tail.model.is_none() {
+    if tail.value.is_none() && tail.value_expr.is_none() && tail.model.is_none() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Capacitor requires either a value or a model".to_string(),
@@ -389,9 +482,11 @@ pub(super) fn parse_capacitor(
         name,
         kind: ElementKind::Capacitor {
             value: tail.value.unwrap_or(Value::NAN),
+            value_expr: tail.value_expr,
             initial_voltage: tail.ic,
             model: tail.model,
             instance_params,
+            deferred_params: tail.deferred_params,
         },
         nodes,
     });
@@ -404,15 +499,23 @@ pub(super) fn parse_inductor(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
     skip_optional_param_name(stream, "L");
-    let tail = parse_passive_tail(stream, line_num, params, "inductor", &["L", "VALUE", "IND"])?;
+    let tail = parse_passive_tail(
+        stream,
+        line_num,
+        params,
+        "inductor",
+        &["L", "VALUE", "IND"],
+        defer_simple_param_refs,
+    )?;
 
-    if tail.value.is_none() && tail.model.is_none() {
+    if tail.value.is_none() && tail.value_expr.is_none() && tail.model.is_none() {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "Inductor requires either a value or a model".to_string(),
@@ -429,9 +532,11 @@ pub(super) fn parse_inductor(
         name,
         kind: ElementKind::Inductor {
             value: tail.value.unwrap_or(Value::NAN),
+            value_expr: tail.value_expr,
             initial_current: tail.ic,
             model: tail.model,
             instance_params,
+            deferred_params: tail.deferred_params,
         },
         nodes,
     });
@@ -486,6 +591,7 @@ pub(super) fn parse_diode(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let anode = expect_node(stream, line_num)?;
@@ -496,6 +602,7 @@ pub(super) fn parse_diode(
     // assignments (AREA/M/PJ/TEMP/DTEMP/IC...), mirroring ngspice's D-line
     // grammar.
     let mut instance_params = Vec::new();
+    let mut deferred_params = Vec::new();
     let mut area_positional_seen = false;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
@@ -515,11 +622,23 @@ pub(super) fn parse_diode(
                 }
 
                 if stream.consume(&TokenKind::Equals) {
-                    let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                        line: line_num,
-                        message: format!("Expected value for diode parameter '{}'", raw_name),
-                    })?;
-                    instance_params.push((name_upper, value));
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(value)) => {
+                            instance_params.push((name_upper, value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            deferred_params.push((name_upper, expr));
+                        }
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for diode parameter '{}'",
+                                    raw_name
+                                ),
+                            });
+                        }
+                    }
                 }
             }
             TokenKind::Number(v) => {
@@ -540,6 +659,7 @@ pub(super) fn parse_diode(
         kind: ElementKind::Diode {
             model,
             instance_params,
+            deferred_params,
         },
         nodes: vec![anode, cathode],
     });
@@ -552,6 +672,7 @@ pub(super) fn parse_bjt(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let collector = expect_node(stream, line_num)?;
@@ -622,6 +743,7 @@ pub(super) fn parse_bjt(
     }
 
     let mut instance_params = Vec::new();
+    let mut deferred_params = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -640,11 +762,23 @@ pub(super) fn parse_bjt(
                 }
 
                 if stream.consume(&TokenKind::Equals) {
-                    let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                        line: line_num,
-                        message: format!("Expected value for BJT parameter '{}'", raw_name),
-                    })?;
-                    instance_params.push((name_upper, value));
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(value)) => {
+                            instance_params.push((name_upper, value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            deferred_params.push((name_upper, expr));
+                        }
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for BJT parameter '{}'",
+                                    raw_name
+                                ),
+                            });
+                        }
+                    }
                 }
             }
             TokenKind::Number(v) => {
@@ -664,6 +798,7 @@ pub(super) fn parse_bjt(
             model,
             bjt_type: super::BjtType::Npn, // Will be set from model
             instance_params,
+            deferred_params,
         },
         nodes,
     });
@@ -676,6 +811,7 @@ pub(super) fn parse_mosfet(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
@@ -713,6 +849,7 @@ pub(super) fn parse_mosfet(
     nodes.extend(tail_tokens);
 
     let mut instance_params = Vec::new();
+    let mut deferred_params = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -726,11 +863,23 @@ pub(super) fn parse_mosfet(
                 stream.advance();
 
                 if stream.consume(&TokenKind::Equals) {
-                    let value = try_value(stream, params).ok_or_else(|| ParseError::Syntax {
-                        line: line_num,
-                        message: format!("Expected value for MOSFET parameter '{}'", raw_name),
-                    })?;
-                    instance_params.push((name_upper, value));
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(value)) => {
+                            instance_params.push((name_upper, value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            deferred_params.push((name_upper, expr));
+                        }
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for MOSFET parameter '{}'",
+                                    raw_name
+                                ),
+                            });
+                        }
+                    }
                 }
             }
             _ => {
@@ -746,6 +895,7 @@ pub(super) fn parse_mosfet(
             model,
             mos_type: super::MosType::Nmos, // Will be set from model
             instance_params,
+            deferred_params,
         },
         nodes,
     });
@@ -758,13 +908,15 @@ pub(super) fn parse_jfet(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    let instance_params = parse_fet_instance_params(stream, line_num, params);
+    let (instance_params, deferred_params) =
+        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs);
 
     elements.push(Element {
         name,
@@ -772,6 +924,7 @@ pub(super) fn parse_jfet(
             model,
             jfet_type: super::JfetType::Njf, // Will be set from model
             instance_params,
+            deferred_params,
         },
         nodes: vec![drain, gate, source],
     });
@@ -785,13 +938,15 @@ pub(super) fn parse_mesfet(
     line_num: usize,
     elements: &mut Vec<Element>,
     params: &ParamContext,
+    defer_simple_param_refs: bool,
 ) -> Result<(), ParseError> {
     let name = expect_ident(stream, line_num)?;
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
-    let instance_params = parse_fet_instance_params(stream, line_num, params);
+    let (instance_params, deferred_params) =
+        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs);
 
     elements.push(Element {
         name,
@@ -799,6 +954,7 @@ pub(super) fn parse_mesfet(
             model,
             mesfet_type: super::MesfetType::Nmf, // Will be set from model
             instance_params,
+            deferred_params,
         },
         nodes: vec![drain, gate, source],
     });
@@ -810,8 +966,10 @@ pub(super) fn parse_fet_instance_params(
     stream: &mut TokenStream,
     _line_num: usize,
     params: &ParamContext,
-) -> Vec<(String, Value)> {
+    defer_simple_param_refs: bool,
+) -> (Vec<(String, Value)>, Vec<(String, String)>) {
     let mut instance_params = Vec::new();
+    let mut deferred_params = Vec::new();
     let mut area_positional_seen = false;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -827,8 +985,14 @@ pub(super) fn parse_fet_instance_params(
                 stream.advance();
 
                 if stream.consume(&TokenKind::Equals) {
-                    if let Some(value) = try_value(stream, params) {
-                        instance_params.push((name_upper, value));
+                    match take_deferrable_value(stream, params, defer_simple_param_refs) {
+                        Some(DeferrableValue::Resolved(value)) => {
+                            instance_params.push((name_upper, value));
+                        }
+                        Some(DeferrableValue::Deferred(expr)) => {
+                            deferred_params.push((name_upper, expr));
+                        }
+                        None => {}
                     }
                     continue;
                 }
@@ -853,7 +1017,7 @@ pub(super) fn parse_fet_instance_params(
         }
     }
 
-    instance_params
+    (instance_params, deferred_params)
 }
 
 /// Parse lossless transmission line (O element)
