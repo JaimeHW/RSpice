@@ -158,6 +158,12 @@ pub struct ProjectWorkspace {
     pub active_view: CellViewRef,
     pub open_views: Vec<OpenCellView>,
     pub hierarchy_stack: Vec<CellViewRef>,
+    /// Instance names descended through, aligned with
+    /// `hierarchy_stack[1..]`: entry N-1 is the instance whose master is
+    /// `hierarchy_stack[N]`. Older saves default to empty; rendering
+    /// falls back to cell names per entry.
+    #[serde(default)]
+    pub hierarchy_instances: Vec<String>,
     pub schematic_buffers: HashMap<String, SchematicState>,
     /// Measurement specifications for the results specs matrix. Project
     /// design intent, so it persists with the workspace.
@@ -181,6 +187,7 @@ impl Default for ProjectWorkspace {
             active_view: active_view.clone(),
             open_views: vec![OpenCellView::new(active_view.clone(), ViewType::Schematic)],
             hierarchy_stack: vec![active_view],
+            hierarchy_instances: Vec::new(),
             schematic_buffers,
             specs: Vec::new(),
             netlist_source: None,
@@ -303,14 +310,66 @@ impl ProjectWorkspace {
     pub fn open_as_root(&mut self, reference: CellViewRef, view_type: ViewType) {
         self.open_view(reference.clone(), view_type);
         self.hierarchy_stack.clear();
+        self.hierarchy_instances.clear();
         self.hierarchy_stack.push(reference);
     }
 
     pub fn enter_hierarchy(&mut self, reference: CellViewRef, view_type: ViewType) {
+        // No instance context (menu/browser entry): the cell name is the
+        // best available occurrence label.
+        let label = reference.cell.clone();
+        self.descend_into(label, reference, view_type);
+    }
+
+    /// Descend into `instance`, opening its master `reference`. The
+    /// occurrence path (TOP, X1, XB, ...) records the instance name.
+    pub fn descend_into(&mut self, instance: String, reference: CellViewRef, view_type: ViewType) {
         self.open_view(reference.clone(), view_type);
         if self.hierarchy_stack.last() != Some(&reference) {
             self.hierarchy_stack.push(reference);
+            self.hierarchy_instances.push(instance);
+            self.align_occurrences();
         }
+    }
+
+    /// Keep `hierarchy_instances` exactly one shorter than the stack —
+    /// older saves and external truncation re-label from cell names.
+    fn align_occurrences(&mut self) {
+        let want = self.hierarchy_stack.len().saturating_sub(1);
+        self.hierarchy_instances.truncate(want);
+        while self.hierarchy_instances.len() < want {
+            let index = self.hierarchy_instances.len() + 1;
+            self.hierarchy_instances
+                .push(self.hierarchy_stack[index].cell.clone());
+        }
+    }
+
+    /// Display labels for the occurrence path: the root cell, then the
+    /// instance descended through at each level.
+    pub fn occurrence_labels(&self) -> Vec<String> {
+        self.hierarchy_stack
+            .iter()
+            .enumerate()
+            .map(|(index, reference)| {
+                if index == 0 {
+                    reference.cell.clone()
+                } else {
+                    self.hierarchy_instances
+                        .get(index - 1)
+                        .cloned()
+                        .unwrap_or_else(|| reference.cell.clone())
+                }
+            })
+            .collect()
+    }
+
+    /// Pop one hierarchy level (the U gesture). Returns the new focus.
+    pub fn ascend_one(&mut self) -> Option<CellViewRef> {
+        let len = self.hierarchy_stack.len();
+        if len < 2 {
+            return None;
+        }
+        self.focus_breadcrumb(len - 2)
     }
 
     pub fn focus_breadcrumb(&mut self, index: usize) -> Option<CellViewRef> {
@@ -319,6 +378,7 @@ impl ProjectWorkspace {
         }
 
         self.hierarchy_stack.truncate(index + 1);
+        self.align_occurrences();
         let reference = self.hierarchy_stack[index].clone();
         self.open_view(reference.clone(), ViewType::Schematic);
         Some(reference)
@@ -397,5 +457,52 @@ pub fn ensure_cell_view(
         {
             cell.add_view(View::new(view_name, view_type));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reference(cell: &str) -> CellViewRef {
+        CellViewRef::new("work", cell, "schematic")
+    }
+
+    #[test]
+    fn descend_records_the_instance_names() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.open_as_root(reference("tb_ota"), ViewType::Schematic);
+        workspace.descend_into("X1".into(), reference("ota_5t"), ViewType::Schematic);
+        workspace.descend_into("XB".into(), reference("bias_2t"), ViewType::Schematic);
+
+        assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1", "XB"]);
+        assert_eq!(workspace.active_view.cell, "bias_2t");
+    }
+
+    #[test]
+    fn breadcrumb_focus_truncates_the_occurrence_path() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.open_as_root(reference("tb_ota"), ViewType::Schematic);
+        workspace.descend_into("X1".into(), reference("ota_5t"), ViewType::Schematic);
+        workspace.descend_into("XB".into(), reference("bias_2t"), ViewType::Schematic);
+
+        workspace.focus_breadcrumb(1);
+        assert_eq!(workspace.occurrence_labels(), ["tb_ota", "X1"]);
+        assert_eq!(workspace.active_view.cell, "ota_5t");
+
+        workspace.ascend_one();
+        assert_eq!(workspace.occurrence_labels(), ["tb_ota"]);
+        assert_eq!(workspace.active_view.cell, "tb_ota");
+        // At the root, ascending is a no-op.
+        assert!(workspace.ascend_one().is_none());
+    }
+
+    #[test]
+    fn legacy_stacks_fall_back_to_cell_names() {
+        let mut workspace = ProjectWorkspace::default();
+        workspace.open_as_root(reference("tb_ota"), ViewType::Schematic);
+        // Simulate an older save: stack grew without instance labels.
+        workspace.hierarchy_stack.push(reference("ota_5t"));
+        assert_eq!(workspace.occurrence_labels(), ["tb_ota", "ota_5t"]);
     }
 }

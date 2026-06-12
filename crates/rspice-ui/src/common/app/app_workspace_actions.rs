@@ -176,9 +176,26 @@ impl AppState {
     }
 
     pub(crate) fn enter_workspace_view(&mut self, reference: CellViewRef) {
+        self.descend_into_instance(None, reference);
+    }
+
+    /// Descend into a hierarchical instance: open its master and record
+    /// the instance name on the occurrence path. `None` (no instance
+    /// context) labels the level with the cell name.
+    pub(crate) fn descend_into_instance(
+        &mut self,
+        instance: Option<String>,
+        reference: CellViewRef,
+    ) {
         self.sync_active_schematic_to_workspace();
         let view_type = view_type_for_reference(self, &reference);
-        self.workspace.enter_hierarchy(reference.clone(), view_type);
+        match instance {
+            Some(name) => {
+                self.workspace
+                    .descend_into(name, reference.clone(), view_type)
+            }
+            None => self.workspace.enter_hierarchy(reference.clone(), view_type),
+        }
         self.library_manager
             .select_view(&reference.library, &reference.cell, &reference.view);
         if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
@@ -188,6 +205,14 @@ impl AppState {
             "Entered {}",
             reference.display_path()
         )));
+    }
+
+    /// Ascend one hierarchy level (the U gesture / pathbar action).
+    pub(crate) fn ascend_workspace_level(&mut self) {
+        let len = self.workspace.hierarchy_stack.len();
+        if len >= 2 {
+            self.focus_workspace_breadcrumb(len - 2);
+        }
     }
 
     pub(crate) fn focus_workspace_breadcrumb(&mut self, index: usize) {
@@ -230,11 +255,13 @@ impl AppState {
             return;
         };
 
-        self.enter_workspace_view(CellViewRef::new(
+        let instance_name = component.name.clone();
+        let reference = CellViewRef::new(
             binding.library.clone(),
             binding.cell.clone(),
             binding.view.clone(),
-        ));
+        );
+        self.descend_into_instance(Some(instance_name), reference);
     }
 }
 

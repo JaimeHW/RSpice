@@ -39,6 +39,9 @@ fn breadcrumb(ui: &mut Ui, state: &mut AppState) {
     ui.spacing_mut().item_spacing.x = 0.0;
     let library = state.workspace.active_view.library.clone();
     crumb_text(ui, &[(library.as_str(), false)]);
+    // Occurrence path: root cell, then the instance descended through at
+    // each level — TOP › X1 › XB, the orientation Virtuoso users expect.
+    let labels = state.workspace.occurrence_labels();
     let cells: Vec<String> = state
         .workspace
         .hierarchy_stack
@@ -46,14 +49,20 @@ fn breadcrumb(ui: &mut Ui, state: &mut AppState) {
         .map(|reference| reference.cell.clone())
         .collect();
     let mut focus: Option<usize> = None;
-    for (index, cell) in cells.iter().enumerate() {
+    for (index, label) in labels.iter().enumerate() {
         crumb_text(ui, &[(" › ", false)]);
         let last = index + 1 == stack_len;
         if last {
-            crumb_text(ui, &[(cell.as_str(), true)]);
+            crumb_text(ui, &[(label.as_str(), true)]);
+            // When the crumb is an instance name, say which cell it opens.
+            if cells.get(index).is_some_and(|cell| cell != label) {
+                crumb_text(ui, &[(" ‹", false)]);
+                crumb_text(ui, &[(cells[index].as_str(), false)]);
+                crumb_text(ui, &[("›", false)]);
+            }
         } else if ui
             .link(
-                egui::RichText::new(cell)
+                egui::RichText::new(label)
                     .font(crate::ui::theme::mono(
                         crate::ui::tokens::FS_0,
                         crate::ui::theme::FontWeight::Regular,
