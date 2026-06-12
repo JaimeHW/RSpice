@@ -446,12 +446,10 @@ impl Mosfet {
     /// Calculate (gm, gds, gmb) including both forward and reverse-oriented
     /// channel contributions for source/drain symmetry.
     ///
-    /// If `f` is the forward-oriented current and:
-    /// `Id = f(Vgs, Vds, Vbs) - f(Vgs - Vds, -Vds, Vbs - Vds)`,
-    /// then for the reverse term chain rule yields:
-    /// - gm_rev  = -gm_fwd_rev
-    /// - gds_rev = gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev
-    /// - gmb_rev = -gmb_fwd_rev
+    /// Levels 1/2/6 and the legacy BSIM ports use their closed-form
+    /// linearizations. The simplified short-channel fallthrough (LEVEL >= 3)
+    /// differentiates the exact composed current the residual stamps, so its
+    /// Jacobian is consistent with `calculate_id` by construction.
     pub(in crate::device::mosfet::mosfet) fn small_signal(
         &self,
         vgs: Value,
@@ -478,83 +476,83 @@ impl Mosfet {
             return (gm, gds, gmb);
         }
 
-        let gm_forward = self.gm_forward(vgs, vds, vbs);
-        let gds_forward = self.gds_forward(vgs, vds, vbs);
-        let gmb_forward = self.gmb_forward(vgs, vds, vbs);
+        // Simplified short-channel fallthrough (LEVEL >= 3): differentiate
+        // the exact composed current the residual stamps so the Jacobian is
+        // consistent with `calculate_id` by construction. The closed-form
+        // expressions previously used here were Level-1 formulas that ignored
+        // mobility degradation, velocity saturation, CLM, and subthreshold
+        // conduction, so Newton iterated against wrong slopes and AC
+        // linearization was wrong. `calculate_id` is C1-smooth with blending
+        // widths >= 0.01 V, so a 1 uV central difference sits well inside the
+        // smooth regions.
+        const FD_STEP: Value = 1.0e-6;
+        let id_at = |vgs: Value, vds: Value, vbs: Value| self.calculate_id(vgs, vds, vbs).0;
+        let half = 0.5 / FD_STEP;
+        let gm = (id_at(vgs + FD_STEP, vds, vbs) - id_at(vgs - FD_STEP, vds, vbs)) * half;
+        let gds = (id_at(vgs, vds + FD_STEP, vbs) - id_at(vgs, vds - FD_STEP, vbs)) * half;
+        let gmb = (id_at(vgs, vds, vbs + FD_STEP) - id_at(vgs, vds, vbs - FD_STEP)) * half;
 
-        let (vgs_rev, vds_rev, vbs_rev) = Self::reverse_voltages(vgs, vds, vbs);
-        let gm_fwd_rev = self.gm_forward(vgs_rev, vds_rev, vbs_rev);
-        let gds_fwd_rev = self.gds_forward(vgs_rev, vds_rev, vbs_rev);
-        let gmb_fwd_rev = self.gmb_forward(vgs_rev, vds_rev, vbs_rev);
+        let sanitize = |g: Value| if g.is_finite() { g } else { 0.0 };
+        // Keep a tiny output-conductance floor for Newton conditioning, as
+        // the previous path did.
+        (sanitize(gm), sanitize(gds).max(1e-12), sanitize(gmb))
+    }
+}
 
-        let gm = gm_forward - gm_fwd_rev;
-        let gds = gds_forward + gm_fwd_rev + gds_fwd_rev + gmb_fwd_rev;
-        let gmb = gmb_forward - gmb_fwd_rev;
-        (gm, gds, gmb)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn simplified_nmos() -> Mosfet {
+        let mut params = std::collections::HashMap::new();
+        params.insert("VTO".to_string(), 0.6);
+        params.insert("KP".to_string(), 120e-6);
+        params.insert("GAMMA".to_string(), 0.4);
+        params.insert("PHI".to_string(), 0.7);
+        params.insert("LAMBDA".to_string(), 0.02);
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
+            .with_level(3)
+            .with_params(&params)
     }
 
-    pub(in crate::device::mosfet::mosfet) fn gm_forward(
-        &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
-    ) -> Value {
-        let p = self.polarity();
-        let vgs_eff = p * vgs;
-        let _vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
-        let vth = self.vth(vbs);
-        let vgt_raw = vgs_eff - vth;
-        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
-        let dvgt_dvgs = smooth_step(vgt_raw, SMOOTH_VOLTAGE);
-
-        // Analytical formula for Level 1/3 (optimized path)
-        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
-        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
-        let sat_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
-        let dvdsat_dvgs = sat_blend * dvgt_dvgs;
-        let gm_core = self.beta() * (vdsat * dvgt_dvgs + (vgt - vdsat) * dvdsat_dvgs);
-        (gm_core * (1.0 + self.lambda * vds_eff)).max(1e-12)
-    }
-
-    pub(in crate::device::mosfet::mosfet) fn gds_forward(
-        &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
-    ) -> Value {
-        let p = self.polarity();
-        let vgs_eff = p * vgs;
-        let vds_eff = smooth_positive(p * vds, VDS_SMOOTHING);
-        let vth = self.vth(vbs);
-        let vgt_raw = vgs_eff - vth;
-        let vgt = smooth_positive(vgt_raw, SMOOTH_VOLTAGE);
-
-        // Analytical formula for Level 1/3 (optimized path)
-        let vdsat = smooth_min(vgt, vds_eff, SMOOTH_VOLTAGE);
-        let lin_blend = smooth_step(vgt - vds_eff, SMOOTH_VOLTAGE);
-        let dvdsat_dvds = 1.0 - lin_blend;
-        let gds_core = self.beta() * (vgt - vdsat) * dvdsat_dvds;
-        let id_core = self.beta() * (vgt * vdsat - 0.5 * vdsat * vdsat);
-        let gds_clm = id_core * self.lambda;
-        (gds_core * (1.0 + self.lambda * vds_eff) + gds_clm).max(1e-12)
-    }
-
-    pub(in crate::device::mosfet::mosfet) fn gmb_forward(
-        &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
-    ) -> Value {
-        let p = self.polarity();
-        let vbs_eff = p * vbs;
-
-        // gmb = -gm * (gamma / (2 * sqrt(phi - Vbs)))
-        // The gm function is already smooth, so gmb inherits smoothness
-        let gm = self.gm_forward(vgs, vds, vbs);
-
-        // Smooth the phi - Vbs term to avoid singularity
-        let phi_vbs = smooth_max(self.phi - vbs_eff, SMOOTH_VOLTAGE, SMOOTH_VOLTAGE);
-
-        gm * self.gamma / (2.0 * phi_vbs.sqrt())
+    /// The simplified short-channel path must report derivatives consistent
+    /// with the current it stamps: gm = dId/dVgs, gds = dId/dVds, and
+    /// gmb = dId/dVbs of `calculate_id`. The closed-form Level-1 expressions
+    /// this replaced violated that for any card where mobility degradation,
+    /// velocity saturation, CLM, or subthreshold conduction mattered.
+    #[test]
+    fn simplified_path_small_signal_matches_current_derivatives() {
+        let m = simplified_nmos();
+        // Saturation, triode, subthreshold, body-biased, and reverse-mode.
+        let bias_points = [
+            (1.5, 1.2, 0.0),
+            (1.5, 0.2, 0.0),
+            (0.3, 1.0, 0.0),
+            (1.2, 0.8, -0.5),
+            (0.9, -0.7, -0.2),
+        ];
+        let h = 1e-4;
+        for (vgs, vds, vbs) in bias_points {
+            let (gm, gds, gmb) = m.small_signal(vgs, vds, vbs);
+            let gm_ref =
+                (m.calculate_id(vgs + h, vds, vbs).0 - m.calculate_id(vgs - h, vds, vbs).0)
+                    / (2.0 * h);
+            let gds_ref =
+                (m.calculate_id(vgs, vds + h, vbs).0 - m.calculate_id(vgs, vds - h, vbs).0)
+                    / (2.0 * h);
+            let gmb_ref =
+                (m.calculate_id(vgs, vds, vbs + h).0 - m.calculate_id(vgs, vds, vbs - h).0)
+                    / (2.0 * h);
+            for (got, want, name) in
+                [(gm, gm_ref, "gm"), (gds, gds_ref, "gds"), (gmb, gmb_ref, "gmb")]
+            {
+                let tol = 1e-3 * want.abs().max(1e-9);
+                assert!(
+                    (got - want).abs() <= tol,
+                    "{name} inconsistent at (vgs={vgs}, vds={vds}, vbs={vbs}): \
+                     got {got:.6e}, derivative of calculate_id is {want:.6e}"
+                );
+            }
+        }
     }
 }
