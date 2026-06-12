@@ -4,6 +4,16 @@
 * Usage: .INCLUDE mosfet.lib
 *        M1 drain gate source source IRF540
 *
+* Fidelity note: these are first-order SPICE LEVEL=1 cards intended for
+* topology, switching, and teaching circuits. They capture threshold,
+* transconductance, channel-length modulation, body effect, and junction/
+* overlap capacitances. They do NOT capture series drain/source resistance,
+* mobility degradation, velocity saturation, or self-heating, so on-state
+* resistance and SOA behavior of the power parts are approximate. Every
+* parameter listed here is honored by the simulator; parameters the engine
+* does not implement are deliberately omitted rather than carried as
+* decoration.
+*
 * Models included:
 *   IRF540   - N-channel power MOSFET (100V, 28A)
 *   IRF9540  - P-channel power MOSFET (100V, 19A)
@@ -23,7 +33,7 @@
 *=============================================================================
 
 * 2N7000 - N-channel enhancement mode (TO-92)
-* Vds = 60V, Id = 200mA, Rds(on) = 1.8Ω @ Vgs=10V
+* Vds = 60V, Id = 200mA, Rds(on) = 1.8 ohm @ Vgs=10V
 .MODEL 2N7000 NMOS(
 + LEVEL=1        ; SPICE Level 1 model
 + VTO=2.0        ; Threshold voltage
@@ -37,13 +47,11 @@
 + CGSO=40E-12    ; Gate-source overlap capacitance
 + CGDO=40E-12    ; Gate-drain overlap capacitance
 + CGBO=30E-12    ; Gate-bulk overlap capacitance
-+ RD=0.2         ; Drain resistance
-+ RS=0.2         ; Source resistance
 + IS=1E-14       ; Body diode saturation current
 + )
 
 * BS170 - N-channel enhancement mode (TO-92)
-* Vds = 60V, Id = 500mA, Rds(on) = 1.2Ω
+* Vds = 60V, Id = 500mA, Rds(on) = 1.2 ohm
 .MODEL BS170 NMOS(
 + LEVEL=1
 + VTO=1.8        ; Lower threshold
@@ -51,7 +59,7 @@
 + GAMMA=0 PHI=0.65 LAMBDA=0.02
 + CBD=50E-12 CBS=50E-12 PB=0.8
 + CGSO=50E-12 CGDO=50E-12 CGBO=30E-12
-+ RD=0.1 RS=0.1 IS=1E-14
++ IS=1E-14
 + )
 
 *=============================================================================
@@ -63,96 +71,81 @@
 .MODEL BS250 PMOS(
 + LEVEL=1
 + VTO=-3.0       ; Negative threshold (PMOS)
-+ KP=100E-3      
++ KP=100E-3
 + GAMMA=0 PHI=0.65 LAMBDA=0.02
 + CBD=40E-12 CBS=40E-12 PB=0.8
 + CGSO=40E-12 CGDO=40E-12 CGBO=30E-12
-+ RD=0.3 RS=0.3 IS=1E-14
++ IS=1E-14
 + )
 
 *=============================================================================
-* Power N-Channel MOSFETs (HEXFET / VDMOS)
+* Power N-Channel MOSFETs
 *=============================================================================
 
 * IRF540 - N-channel power MOSFET
-* Vds = 100V, Id = 28A, Rds(on) = 44mΩ @ Vgs=10V
+* Vds = 100V, Id = 28A
 .MODEL IRF540 NMOS(
-+ LEVEL=3        ; BSIM-like for better accuracy
++ LEVEL=1
 + VTO=3.5        ; Threshold voltage
 + KP=20.0        ; High transconductance (power device)
 + GAMMA=0 PHI=0.65
 + LAMBDA=0.005   ; Low channel length modulation (long channel)
-+ THETA=0.04     ; Mobility degradation
-+ ETA=0.02       ; DIBL
-+ KAPPA=0.1      ; Saturation field
 + CBD=800E-12    ; High capacitances (large die)
 + CBS=800E-12
 + PB=0.8
 + CGSO=400E-12
 + CGDO=100E-12   ; Lower Cgd (Miller)
 + CGBO=50E-12
-+ RD=0.022       ; Very low on-resistance
-+ RS=0.022
-+ RG=1.0         ; Gate resistance
-+ IS=1E-12       ; Body diode
-+ N=1.2          ; Diode emission coefficient
++ IS=1E-12       ; Body diode saturation current
 + )
 
 * IRF9540 - P-channel power MOSFET (complement to IRF540)
-* Vds = -100V, Id = -19A, Rds(on) = 117mΩ
+* Vds = -100V, Id = -19A
 .MODEL IRF9540 PMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=-3.5       ; Negative threshold
 + KP=10.0        ; Lower than NMOS
 + GAMMA=0 PHI=0.65
 + LAMBDA=0.005
-+ THETA=0.04 ETA=0.02 KAPPA=0.1
 + CBD=600E-12 CBS=600E-12 PB=0.8
 + CGSO=350E-12 CGDO=80E-12 CGBO=50E-12
-+ RD=0.058 RS=0.058 RG=1.0
-+ IS=1E-12 N=1.2
++ IS=1E-12
 + )
 
 * IRFZ44N - N-channel power MOSFET (logic level)
-* Vds = 55V, Id = 49A, Rds(on) = 17.5mΩ @ Vgs=10V
+* Vds = 55V, Id = 49A
 .MODEL IRFZ44N NMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=3.0        ; Lower threshold for logic drive
 + KP=40.0        ; Very high transconductance
 + GAMMA=0 PHI=0.65 LAMBDA=0.003
-+ THETA=0.03 ETA=0.02 KAPPA=0.1
 + CBD=1200E-12 CBS=1200E-12 PB=0.8
 + CGSO=600E-12 CGDO=150E-12 CGBO=80E-12
-+ RD=0.009 RS=0.009 RG=0.5
-+ IS=1E-11 N=1.2
++ IS=1E-11
 + )
 
 * IRF840 - N-channel high voltage power MOSFET
-* Vds = 500V, Id = 8A, Rds(on) = 850mΩ
+* Vds = 500V, Id = 8A
 .MODEL IRF840 NMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=3.5
 + KP=5.0         ; Lower due to high voltage design
 + GAMMA=0 PHI=0.65 LAMBDA=0.001  ; Very low CLM for 500V
-+ THETA=0.02 ETA=0.01 KAPPA=0.05
 + CBD=300E-12 CBS=300E-12 PB=0.8
 + CGSO=200E-12 CGDO=50E-12 CGBO=30E-12
-+ RD=0.425 RS=0.425 RG=2.0
-+ IS=5E-13 N=1.2
++ IS=5E-13
 + )
 
 * IRFP150N - N-channel power MOSFET (TO-247)
-* Vds = 100V, Id = 42A, Rds(on) = 36mΩ
+* Vds = 100V, Id = 42A
 .MODEL IRFP150N NMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=3.5
 + KP=25.0
 + GAMMA=0 PHI=0.65 LAMBDA=0.004
-+ THETA=0.03 ETA=0.02 KAPPA=0.1
 + CBD=1000E-12 CBS=1000E-12 PB=0.8
 + CGSO=500E-12 CGDO=120E-12 CGBO=60E-12
-+ RD=0.018 RS=0.018 RG=0.8
-+ IS=1E-11 N=1.2
++ IS=1E-11
 + )
 
 *=============================================================================
@@ -160,45 +153,39 @@
 *=============================================================================
 
 * AO3400 - N-channel SOT-23
-* Vds = 30V, Id = 5.8A, Rds(on) = 26mΩ @ Vgs=4.5V
+* Vds = 30V, Id = 5.8A
 .MODEL AO3400 NMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=1.2        ; Logic level threshold
 + KP=15.0
 + GAMMA=0 PHI=0.65 LAMBDA=0.01
-+ THETA=0.05 ETA=0.02 KAPPA=0.15
 + CBD=200E-12 CBS=200E-12 PB=0.8
 + CGSO=150E-12 CGDO=40E-12 CGBO=20E-12
-+ RD=0.013 RS=0.013 RG=0.5
-+ IS=1E-12 N=1.2
++ IS=1E-12
 + )
 
 * AO3401 - P-channel SOT-23
-* Vds = -30V, Id = -4A, Rds(on) = 42mΩ @ Vgs=-4.5V
+* Vds = -30V, Id = -4A
 .MODEL AO3401 PMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=-1.2       ; Logic level threshold
 + KP=8.0
 + GAMMA=0 PHI=0.65 LAMBDA=0.01
-+ THETA=0.05 ETA=0.02 KAPPA=0.15
 + CBD=150E-12 CBS=150E-12 PB=0.8
 + CGSO=100E-12 CGDO=30E-12 CGBO=20E-12
-+ RD=0.021 RS=0.021 RG=0.5
-+ IS=1E-12 N=1.2
++ IS=1E-12
 + )
 
 * SI2301 - P-channel SOT-23 (very popular for load switching)
-* Vds = -20V, Id = -2.5A, Rds(on) = 100mΩ @ Vgs=-4.5V
+* Vds = -20V, Id = -2.5A
 .MODEL SI2301 PMOS(
-+ LEVEL=3
++ LEVEL=1
 + VTO=-1.0       ; Very low threshold
 + KP=5.0
 + GAMMA=0 PHI=0.65 LAMBDA=0.015
-+ THETA=0.05 ETA=0.02 KAPPA=0.15
 + CBD=100E-12 CBS=100E-12 PB=0.8
 + CGSO=80E-12 CGDO=25E-12 CGBO=15E-12
-+ RD=0.05 RS=0.05 RG=0.5
-+ IS=1E-12 N=1.2
++ IS=1E-12
 + )
 
 *=============================================================================
@@ -213,7 +200,7 @@
 + GAMMA=0.5 PHI=0.65 LAMBDA=0.05
 + CBD=5E-15 CBS=5E-15 PB=0.8
 + CGSO=2E-15 CGDO=2E-15 CGBO=1E-15
-+ RD=50 RS=50 IS=1E-14
++ IS=1E-14
 + )
 
 * Generic PMOS for logic simulation (3.3V compatible)
@@ -224,7 +211,7 @@
 + GAMMA=0.5 PHI=0.65 LAMBDA=0.05
 + CBD=5E-15 CBS=5E-15 PB=0.8
 + CGSO=2E-15 CGDO=2E-15 CGBO=1E-15
-+ RD=100 RS=100 IS=1E-14
++ IS=1E-14
 + )
 
 .END
