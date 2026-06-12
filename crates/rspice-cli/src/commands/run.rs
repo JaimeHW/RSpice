@@ -53,6 +53,9 @@ struct RunContext<'a> {
     /// Analysis tags (upper-case) whose .MEAS statements were evaluated,
     /// so leftover measurements can fail loudly instead of being skipped.
     evaluated_meas: std::cell::RefCell<std::collections::HashSet<String>>,
+    /// Result files this run resolved for export, for the `--summary`
+    /// manifest.
+    outputs: std::cell::RefCell<Vec<std::path::PathBuf>>,
 }
 
 impl<'a> RunContext<'a> {
@@ -91,6 +94,7 @@ impl<'a> RunContext<'a> {
             quiet,
             measurements: std::cell::RefCell::new(Vec::new()),
             evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
+            outputs: std::cell::RefCell::new(Vec::new()),
         })
     }
 
@@ -171,22 +175,26 @@ impl<'a> RunContext<'a> {
     /// When the deck runs several analyses, each gets its own file so later
     /// analyses cannot silently overwrite earlier results:
     /// `out.csv` becomes `out.op.csv`, `out.tran.csv`, ...
+    ///
+    /// Every resolved path is remembered for the `--summary` manifest.
     fn output_path_for(&self, tag: &str) -> Option<std::path::PathBuf> {
         let path = self.output.clone()?;
-        if !self.multi_analysis {
-            return Some(path);
-        }
-
-        let mut file_name = path
-            .file_stem()
-            .map(|stem| stem.to_os_string())
-            .unwrap_or_default();
-        file_name.push(format!(".{tag}"));
-        if let Some(ext) = path.extension() {
-            file_name.push(".");
-            file_name.push(ext);
-        }
-        Some(path.with_file_name(file_name))
+        let resolved = if !self.multi_analysis {
+            path
+        } else {
+            let mut file_name = path
+                .file_stem()
+                .map(|stem| stem.to_os_string())
+                .unwrap_or_default();
+            file_name.push(format!(".{tag}"));
+            if let Some(ext) = path.extension() {
+                file_name.push(".");
+                file_name.push(ext);
+            }
+            path.with_file_name(file_name)
+        };
+        self.outputs.borrow_mut().push(resolved.clone());
+        Some(resolved)
     }
 
     fn run_analysis(&self, analysis: &AnalysisCommand) -> Result<(), CliError> {
@@ -337,6 +345,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
 
     let start_time = Instant::now();
     let mut reports = Vec::with_capacity(plan.len());
+    let mut outputs: Vec<PathBuf> = Vec::new();
     let mut first_error: Option<String> = None;
 
     for deck in &plan {
@@ -347,7 +356,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             );
         }
         let netlist = load_netlist_from_source(&deck.source, &args, config)?;
-        let report = run_deck(
+        let (report, deck_outputs) = run_deck(
             &netlist,
             &args,
             config,
@@ -359,6 +368,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             first_error = report.error.clone();
         }
         reports.push(report);
+        outputs.extend(deck_outputs);
     }
 
     let duration = start_time.elapsed().as_secs_f64();
@@ -376,10 +386,12 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
         && (failed_measurements.is_empty() || args.allow_failed_meas);
 
     if let Some(ref summary_path) = args.summary {
+        outputs.dedup();
         write_run_summary(
             summary_path,
             &args,
             &reports,
+            &outputs,
             duration,
             passed,
             abort_reason,
@@ -428,6 +440,7 @@ fn write_run_summary(
     path: &std::path::Path,
     args: &RunArgs,
     reports: &[SimulationReport],
+    outputs: &[PathBuf],
     duration: f64,
     passed: bool,
     abort_reason: Option<crate::abort::AbortReason>,
@@ -440,6 +453,7 @@ fn write_run_summary(
         "netlist": args.input.display().to_string(),
         "duration_secs": duration,
         "passed": passed,
+        "outputs": outputs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "aborted": abort_reason.map(|reason| match reason {
             crate::abort::AbortReason::Interrupt => "interrupt",
             crate::abort::AbortReason::Timeout => "timeout",
@@ -487,7 +501,7 @@ fn run_deck(
     verbose: bool,
     quiet: bool,
     run_label: Option<&str>,
-) -> Result<SimulationReport, CliError> {
+) -> Result<(SimulationReport, Vec<PathBuf>), CliError> {
     if verbose {
         println!("Title: {}", netlist.title);
         println!("Elements: {}", netlist.elements.len());
@@ -511,14 +525,19 @@ fn run_deck(
     };
 
     if run_requested_mode(&ctx, config)? {
-        return Ok(SimulationReport {
-            name,
-            netlist: args.input.display().to_string(),
-            passed: true,
-            duration_secs: 0.0,
-            error: None,
-            measurements: Vec::new(),
-        });
+        let measurements = ctx.measurements.borrow().clone();
+        let passed = measurements.iter().all(|meas| meas.passed);
+        return Ok((
+            SimulationReport {
+                name,
+                netlist: args.input.display().to_string(),
+                passed,
+                duration_secs: 0.0,
+                error: None,
+                measurements,
+            },
+            ctx.outputs.into_inner(),
+        ));
     }
 
     let mut ran_analysis = false;
@@ -560,14 +579,17 @@ fn run_deck(
     let passed = simulation_error.is_none();
     let measurements = ctx.measurements.borrow().clone();
 
-    Ok(SimulationReport {
-        name,
-        netlist: args.input.display().to_string(),
-        passed,
-        duration_secs: duration,
-        error: simulation_error,
-        measurements,
-    })
+    Ok((
+        SimulationReport {
+            name,
+            netlist: args.input.display().to_string(),
+            passed,
+            duration_secs: duration,
+            error: simulation_error,
+            measurements,
+        },
+        ctx.outputs.into_inner(),
+    ))
 }
 
 /// Failure text for the run report: simulation errors carry their bare

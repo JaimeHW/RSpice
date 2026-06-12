@@ -785,6 +785,7 @@ fn run_corner_with_lib(
         quiet: ctx.quiet,
         measurements: std::cell::RefCell::new(Vec::new()),
         evaluated_meas: std::cell::RefCell::new(std::collections::HashSet::new()),
+        outputs: std::cell::RefCell::new(Vec::new()),
     };
 
     let mut passed = true;
@@ -815,6 +816,9 @@ fn run_corner_with_lib(
             m.name = format!("{}:{}", corner, m.name);
             m
         }));
+    ctx.outputs
+        .borrow_mut()
+        .extend(corner_ctx.outputs.into_inner());
 
     Ok(passed)
 }
