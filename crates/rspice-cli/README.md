@@ -48,9 +48,9 @@ Numeric flag values accept SPICE magnitude suffixes everywhere: `--pss-freq 2.4G
 
 ### Measurements and the exit status
 
-`.MEAS TRAN` statements evaluate against the transient result (node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works); `.MEAS DC` statements evaluate against the DC sweep with the swept value as the abscissa. Results print under `--meas` and are always collected for report files.
+`.MEAS TRAN` statements evaluate against the transient result (node voltages, branch currents as `I(name)`, and the time axis as `TIME`, so `FIND TIME WHEN V(out)=...` works); `.MEAS DC` statements evaluate against the DC sweep with the swept value as the abscissa; `.MEAS AC` statements evaluate against the AC sweep through the derived real series — `V(x)`/`VM(x)` magnitude, `VDB(x)`, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` — with the frequency axis addressable as `FREQUENCY`, `FREQ`, or `TIME`. Results print under `--meas` and are always collected for report files.
 
-**A failed measurement fails the run with exit code 3** — including measurements whose analysis never ran (and AC/NOISE measurements, which `rspice run` cannot evaluate yet; they are recorded as explicit failures rather than skipped). Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
+**A failed measurement fails the run with exit code 3** — including measurements whose analysis never ran (and NOISE measurements, which `rspice run` cannot evaluate yet; they are recorded as explicit failures rather than skipped). Pass `--allow-failed-meas` to restore exit 0. Results containing NaN/Inf are a simulation error (exit 1) unless `--allow-nonfinite` is given.
 
 ### Output files for every mode
 
@@ -86,7 +86,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `-f, --format <FORMAT>` | Output format: `raw`, `ascii`, `csv`, `json`, `tsv`, `hdf5` (default: config `output.format`, else `raw`) |
 | `--save <SIGNAL>` | Limit exported signals, replacing the netlist `.SAVE`/`.PROBE` selection: `V(out)`, `V(a,b)`, `I(v1)`, `@m1[id]`, `all` (repeatable) |
 | `--meas` | Print `.MEAS` measurement results |
-| `--summary <FILE>` | Write a JSON run summary — tool version, per-run status, every measurement, overall verdict — to FILE, or stdout with `-` |
+| `--summary <FILE>` | Write a JSON run summary — tool version, per-run status, every measurement, the result files written, overall verdict — to FILE, or stdout with `-` |
 | `--progress` | Show a live elapsed-time indicator during transient analysis |
 | `--compress` | Enable waveform compression for long simulations |
 | `--compress-tol <TOL>` | Compression tolerance (default: config `compression_tolerance`, else 1e-4; requires `--compress`) |
@@ -141,6 +141,7 @@ Accepts `.sp`, `.cir`, `.net`, and `.spice` netlists, or `-` to read the netlist
 | `--sens-value <VALUE>` | Nominal parameter value (default: 1.0; requires `--sens-param`) |
 | `--corners <LIST>` | Process corners, comma-separated, e.g. `tt,ss,ff` |
 | `--corner-lib <FILE>` | Library with one `.lib <corner> ... .endl` section per corner; each corner re-elaborates the deck with its section applied (requires `--corners`) |
+| `-j, --jobs <N>` | Parallel workers for corner sweeps (default: 1). Corner outputs are tagged per corner so workers never collide; results are byte-identical to a serial sweep |
 
 Corner runs write per-corner tagged outputs (`res.csv` → `res.tt.csv`, `res.ss.csv`) and exit nonzero if any corner fails. Without `--corner-lib`, every corner runs nominal models and the sweep only checks convergence.
 
@@ -241,6 +242,7 @@ rspice compare <RESULT> <GOLDEN> [OPTIONS]
 | `--allow-truncated` | Tolerate point-count mismatches and compare the overlap |
 | `--ignore-missing` | Tolerate golden variables missing from the result |
 | `--bless` | Accept the result as the new reference: copies it over the golden file when they differ, or creates the golden file if it does not exist |
+| `--interpolate` | Linearly resample the result onto the golden file's scale, so runs with different time grids compare point-for-point (never extrapolates) |
 
 ### `rspice convert` — Format Conversion
 
