@@ -73,6 +73,7 @@ pub struct StaticMatrix {
     probe_rhs: Option<Vec<Value>>,
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
+    residual_gross_scratch: Vec<Value>,
 }
 
 /// Whether the KLU-class backend handles real solves for this process.
@@ -106,6 +107,7 @@ impl StaticMatrix {
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
+            residual_gross_scratch: Vec::new(),
         }
     }
 
@@ -219,6 +221,7 @@ impl StaticMatrix {
             probe_values: None,
             probe_rhs: None,
             residual_scratch: Vec::new(),
+            residual_gross_scratch: Vec::new(),
         })
     }
 
@@ -327,7 +330,12 @@ impl StaticMatrix {
         let row_idx = self.csc.row_idx();
         self.residual_scratch.resize(self.nrows, 0.0);
         self.residual_scratch.fill(0.0);
-        let ax = &mut self.residual_scratch;
+        self.residual_gross_scratch.resize(self.nrows, 0.0);
+        self.residual_gross_scratch.fill(0.0);
+        let (ax, ax_gross) = (
+            &mut self.residual_scratch,
+            &mut self.residual_gross_scratch,
+        );
         for col in 0..self.ncols {
             let x = solution[col];
             if !x.is_finite() {
@@ -335,7 +343,9 @@ impl StaticMatrix {
             }
             for idx in col_ptr[col]..col_ptr[col + 1] {
                 let row = row_idx[idx];
-                ax[row] += self.values[idx] * x;
+                let term = self.values[idx] * x;
+                ax[row] += term;
+                ax_gross[row] += term.abs();
             }
         }
 
@@ -347,7 +357,13 @@ impl StaticMatrix {
                 return Ok(Value::INFINITY);
             }
             let residual = (row_ax - row_rhs).abs();
-            let scale = safe_abstol + safe_reltol * row_ax.abs().max(row_rhs.abs());
+            // Componentwise backward error (Oettli–Prager): the row scale is
+            // the GROSS term magnitude Σ|a_ij·x_j|, not the net Σa_ij·x_j.
+            // At a converged KCL row the net cancels to ~0, and a net-based
+            // scale collapses to bare abstol — rejecting solutions whose
+            // residual is nothing but the floating-point cancellation noise
+            // of the row's own mA-scale currents.
+            let scale = safe_abstol + safe_reltol * ax_gross[row].max(row_rhs.abs());
             let normalized = residual / scale.max(safe_abstol);
             residual_inf = residual_inf.max(normalized);
         }
