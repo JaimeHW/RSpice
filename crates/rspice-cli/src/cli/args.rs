@@ -418,6 +418,16 @@ pub struct CompareArgs {
     /// Output differences as JSON
     #[arg(long)]
     pub json: bool,
+
+    /// Tolerate point-count mismatches and compare only the overlap
+    /// (default: a truncated result fails)
+    #[arg(long)]
+    pub allow_truncated: bool,
+
+    /// Tolerate golden variables missing from the result
+    /// (default: missing variables fail)
+    #[arg(long)]
+    pub ignore_missing: bool,
 }
 
 /// CI/CD report formats

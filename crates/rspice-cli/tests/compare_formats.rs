@@ -84,7 +84,7 @@ fn hdf5_result_compares_against_raw_golden() {
 }
 
 #[test]
-fn differences_fail_with_exit_code_1() {
+fn differences_fail_with_verification_exit_code() {
     let dir = test_dir("diff");
     std::fs::write(dir.join("a.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
     std::fs::write(dir.join("b.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.5\n").unwrap();
@@ -98,6 +98,127 @@ fn differences_fail_with_exit_code_1() {
         .output()
         .expect("run rspice");
     assert!(!output.status.success());
-    assert_eq!(output.status.code(), Some(1), "comparison failures exit 1");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "comparison mismatches exit with the verification-failure code"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A result file missing trailing points must FAIL against a longer golden
+/// file — a simulation that died mid-run cannot pass regression by matching
+/// on the overlap it did write.
+#[test]
+fn truncated_result_fails_against_longer_golden() {
+    let dir = test_dir("trunc");
+    std::fs::write(
+        dir.join("golden.csv"),
+        "time,V(OUT)\n0,1.0\n1e-6,2.0\n2e-6,3.0\n3e-6,4.0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("result.csv"),
+        "time,V(OUT)\n0,1.0\n1e-6,2.0\n2e-6,3.0\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "truncated result must fail; stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("points"),
+        "output should explain the point-count mismatch: {stdout}"
+    );
+
+    // Explicit opt-out compares the overlap only.
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--allow-truncated",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Golden variables absent from the result are missing coverage, not a
+/// silent skip.
+#[test]
+fn missing_golden_variable_fails() {
+    let dir = test_dir("missing_var");
+    std::fs::write(
+        dir.join("golden.csv"),
+        "time,V(OUT),V(MID)\n0,1.0,0.5\n1e-6,2.0,1.0\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("result.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(3));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("V(MID)"),
+        "output should name the missing variable: {stdout}"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--ignore-missing",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(output.status.code(), Some(0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// NaN never matches, including NaN-vs-NaN.
+#[test]
+fn nan_values_fail_comparison() {
+    let dir = test_dir("nan");
+    std::fs::write(dir.join("golden.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+    std::fs::write(dir.join("result.csv"), "time,V(OUT)\n0,1.0\n1e-6,NaN\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "NaN in the result must fail comparison"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

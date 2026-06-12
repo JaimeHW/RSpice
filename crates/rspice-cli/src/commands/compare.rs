@@ -26,6 +26,10 @@ pub struct CompareArgs {
     pub variables: Vec<String>,
     /// Fail on first difference (vs. report all)
     pub fail_fast: bool,
+    /// Tolerate point-count mismatches (compare the overlap only)
+    pub allow_truncated: bool,
+    /// Tolerate golden variables that are missing from the result
+    pub ignore_missing: bool,
 }
 
 impl Default for CompareArgs {
@@ -38,6 +42,8 @@ impl Default for CompareArgs {
             format: OutputFormat::Raw,
             variables: vec![],
             fail_fast: false,
+            allow_truncated: false,
+            ignore_missing: false,
         }
     }
 }
@@ -59,6 +65,10 @@ pub struct CompareResult {
     pub max_diff_variable: String,
     /// Differences found
     pub differences: Vec<Difference>,
+    /// Structural failures: missing variables, point-count mismatches.
+    /// These fail the comparison even when every overlapping value matches,
+    /// so a truncated result cannot pass against a longer golden file.
+    pub problems: Vec<String>,
 }
 
 /// A single difference between result and golden
@@ -123,12 +133,20 @@ pub fn execute(args: CompareArgs, _verbose: bool, quiet: bool) -> Result<(), Cli
     if cmp_result.passed {
         Ok(())
     } else {
-        Err(CliError::ConversionError {
-            message: format!(
-                "Comparison failed: {} differences found (max diff: {:.2e})",
+        let mut parts = Vec::new();
+        if !cmp_result.differences.is_empty() {
+            parts.push(format!(
+                "{} value difference(s), max {:.2e} ({})",
                 cmp_result.differences.len(),
-                cmp_result.max_abs_diff
-            ),
+                cmp_result.max_abs_diff,
+                cmp_result.max_diff_variable
+            ));
+        }
+        if !cmp_result.problems.is_empty() {
+            parts.push(cmp_result.problems.join("; "));
+        }
+        Err(CliError::VerificationFailed {
+            message: format!("comparison failed: {}", parts.join("; ")),
         })
     }
 }
@@ -149,7 +167,12 @@ fn load_waveform_data(path: &std::path::Path) -> Result<WaveformData, CliError> 
     Ok(WaveformData { variables, values })
 }
 
-/// Compare two waveform datasets
+/// Compare two waveform datasets.
+///
+/// The golden file defines the contract: every golden variable must exist
+/// in the result (unless `--ignore-missing`), and matched series must have
+/// the same length (unless `--allow-truncated`). Extra variables in the
+/// result are tolerated — new probes do not invalidate old references.
 fn compare_waveforms(
     result: &WaveformData,
     golden: &WaveformData,
@@ -163,7 +186,34 @@ fn compare_waveforms(
         max_rel_diff: 0.0,
         max_diff_variable: String::new(),
         differences: Vec::new(),
+        problems: Vec::new(),
     };
+
+    // Structural checks: requested/golden variables must exist on both sides.
+    if args.variables.is_empty() {
+        if !args.ignore_missing {
+            for var in &golden.variables {
+                if !result.variables.contains(var) {
+                    cmp_result
+                        .problems
+                        .push(format!("variable '{var}' is missing from the result"));
+                }
+            }
+        }
+    } else {
+        for var in &args.variables {
+            if !result.variables.contains(var) {
+                cmp_result
+                    .problems
+                    .push(format!("variable '{var}' is missing from the result"));
+            }
+            if !golden.variables.contains(var) {
+                cmp_result
+                    .problems
+                    .push(format!("variable '{var}' is missing from the golden file"));
+            }
+        }
+    }
 
     // Find matching variables
     for (var_idx, var_name) in result.variables.iter().enumerate() {
@@ -182,6 +232,15 @@ fn compare_waveforms(
 
         let result_vals = &result.values[var_idx];
         let golden_vals = &golden.values[golden_idx];
+
+        if result_vals.len() != golden_vals.len() && !args.allow_truncated {
+            cmp_result.problems.push(format!(
+                "'{var_name}': result has {} points, golden has {} \
+                 (--allow-truncated compares the overlap)",
+                result_vals.len(),
+                golden_vals.len()
+            ));
+        }
 
         let num_points = result_vals.len().min(golden_vals.len());
         cmp_result.num_points = cmp_result.num_points.max(num_points);
@@ -226,6 +285,10 @@ fn compare_waveforms(
         }
     }
 
+    if !cmp_result.problems.is_empty() {
+        cmp_result.passed = false;
+    }
+
     Ok(cmp_result)
 }
 
@@ -239,6 +302,7 @@ fn output_json(result: &CompareResult) {
         "max_rel_diff": result.max_rel_diff,
         "max_diff_variable": result.max_diff_variable,
         "num_differences": result.differences.len(),
+        "problems": result.problems,
         "differences": result.differences.iter().take(10).map(|d| {
             serde_json::json!({
                 "variable": d.variable,
@@ -250,7 +314,10 @@ fn output_json(result: &CompareResult) {
             })
         }).collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&json).unwrap());
+    match serde_json::to_string_pretty(&json) {
+        Ok(text) => println!("{text}"),
+        Err(e) => eprintln!("Error: failed to serialize comparison report: {e}"),
+    }
 }
 
 /// Output comparison result as text
@@ -269,6 +336,9 @@ fn output_text(result: &CompareResult, quiet: bool) {
         }
     } else {
         println!("✗ Comparison FAILED");
+        for problem in &result.problems {
+            println!("  {}", problem);
+        }
         println!("  {} differences found", result.differences.len());
 
         // Show first few differences
