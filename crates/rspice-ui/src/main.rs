@@ -7,6 +7,38 @@
 // Desktop Entry Point - Commercial-grade GPU-native UI
 // =============================================================================
 
+/// Decode the embedded brand PNG into an egui window icon (taskbar / alt-tab).
+/// Embedded at compile time so the running app needs no icon file on disk;
+/// returns `None` on any decode surprise so a bad asset never blocks startup.
+#[cfg(not(target_arch = "wasm32"))]
+fn load_window_icon() -> Option<egui::IconData> {
+    const ICON_PNG: &[u8] = include_bytes!("../../../design/brand/export/icon-256.png");
+
+    let mut decoder = png::Decoder::new(std::io::Cursor::new(ICON_PNG));
+    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
+    let mut reader = decoder.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => {
+            buf.truncate(info.buffer_size());
+            buf
+        }
+        png::ColorType::Rgb => buf[..info.buffer_size()]
+            .chunks_exact(3)
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect(),
+        _ => return None,
+    };
+
+    Some(egui::IconData {
+        rgba,
+        width: info.width,
+        height: info.height,
+    })
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
     // Initialize logging with wgpu_core set to warn to reduce noise
@@ -17,12 +49,17 @@ fn main() {
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("RSpice - Circuit Simulator")
+        .with_inner_size([1400.0, 900.0])
+        .with_min_inner_size([800.0, 600.0]);
+    if let Some(icon) = load_window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
+
     // Configure eframe options
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("RSpice - Circuit Simulator")
-            .with_inner_size([1400.0, 900.0])
-            .with_min_inner_size([800.0, 600.0]),
+        viewport,
         vsync: true,
         // egui anti-aliases analytically (feathered tessellation); hardware
         // MSAA would quadruple fill bandwidth for no visible gain.
