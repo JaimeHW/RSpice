@@ -7,6 +7,7 @@ pub mod enhanced_newton;
 pub mod klu;
 mod newton;
 mod sparse;
+pub(crate) use sparse::klu_backend_enabled;
 
 #[cfg(feature = "parallel")]
 pub mod parallel;

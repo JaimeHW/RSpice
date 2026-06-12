@@ -213,9 +213,14 @@ impl Engine {
             return size <= 160 && has_transformer_or_coupled_inductor;
         }
 
-        // Small nonlinear systems benefit from dense LU due to reduced sparse
-        // symbolic/indirection overhead at this scale.
-        !has_xspice_devices && size <= 64
+        // Small nonlinear systems used to route to dense LU because the
+        // general sparse machinery dominates at this scale. The KLU-class
+        // values-only refactorization has no such overhead — measured on
+        // ring51 (~60 unknowns), the dense path costs ~100 us per Newton
+        // solve against single-digit microseconds for the refactor — so
+        // dense remains only for the transformer-coupling stability case
+        // above and for explicit `RSPICE_SOLVER=faer` runs.
+        !has_xspice_devices && size <= 64 && !crate::solver::klu_backend_enabled()
     }
 }
 
