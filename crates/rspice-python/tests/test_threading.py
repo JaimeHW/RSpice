@@ -32,13 +32,21 @@ class TestGilRelease:
         thread = threading.Thread(target=ticker)
         thread.start()
         try:
-            engine.run_tran(netlist, stop_time=5e-3, max_step=5e-8)
+            start = time.monotonic()
+            engine.run_tran(netlist, stop_time=2e-2, max_step=5e-8)
+            end = time.monotonic()
         finally:
             stop.set()
             thread.join()
         # If the GIL were held for the whole simulation the ticker would
-        # barely run. Require steady progress.
-        assert len(ticks) >= 10
+        # block on it and could not record a single tick inside the
+        # simulation window (sleep granularity on loaded CI runners makes
+        # any fixed tick-count assertion flaky, so count window ticks only).
+        during = [t for t in ticks if start < t < end]
+        assert len(during) >= 3, (
+            f"only {len(during)} ticks during the {end - start:.3f}s "
+            f"simulation window — GIL appears to be held"
+        )
 
     def test_parallel_engines(self):
         netlists = [rspice.Netlist.parse(LONG_RC) for _ in range(4)]
