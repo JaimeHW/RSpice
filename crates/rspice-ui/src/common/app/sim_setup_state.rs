@@ -190,12 +190,15 @@ pub struct SimSetupState {
     pub options_errors: Vec<String>,
     /// Options dialog open.
     pub options_open: bool,
-    /// Add-analysis picker open.
-    pub picker_open: bool,
-    /// Picker search query.
-    pub picker_query: String,
-    /// Analysis highlighted in the picker rail (sticky across opens).
-    pub picker_selected: Option<usize>,
+    /// Analyses listed in the run-set card beyond the always-listed core —
+    /// exotics stay listed (dimmed) when unticked, until removed.
+    pub listed: HashSet<usize>,
+    /// Add-analysis palette open (anchored to the card action).
+    pub palette_open: bool,
+    /// Palette filter query.
+    pub palette_query: String,
+    /// Keyboard-active row in the palette's filtered list.
+    pub palette_active: usize,
 }
 
 impl SimSetupState {
@@ -364,10 +367,11 @@ impl SimSetupState {
                     return field("start time", e);
                 }
                 let max = self.tran.max_step.trim();
-                if !max.is_empty() && !max.eq_ignore_ascii_case("auto") {
-                    if let Err(e) = parse(max) {
-                        return field("max step", e);
-                    }
+                if !max.is_empty()
+                    && !max.eq_ignore_ascii_case("auto")
+                    && let Err(e) = parse(max)
+                {
+                    return field("max step", e);
                 }
                 None
             }
@@ -437,10 +441,11 @@ impl SimSetupState {
                     return Some(error);
                 }
                 let ratio = self.disto_f2_over_f1.trim();
-                if !ratio.is_empty() && !ratio.eq_ignore_ascii_case("auto") {
-                    if let Err(e) = parse(ratio) {
-                        return field("f2/f1 ratio", e);
-                    }
+                if !ratio.is_empty()
+                    && !ratio.eq_ignore_ascii_case("auto")
+                    && let Err(e) = parse(ratio)
+                {
+                    return field("f2/f1 ratio", e);
                 }
                 None
             }

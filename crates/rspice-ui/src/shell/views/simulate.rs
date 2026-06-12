@@ -1,6 +1,8 @@
 //! Simulate view — a centered card stack: analyses in run order, saved
 //! outputs, corner selection, and the run bar with live progress. The
-//! add-analysis picker rides on the modal primitive.
+//! run-set card is the single source of truth: tick to enable, click to
+//! configure in the right inspector; adding rides the anchored analysis
+//! palette (`design/volta-simulate-v2.html`), never a modal.
 
 use egui::Ui;
 
@@ -8,17 +10,36 @@ use crate::common::AppState;
 use crate::common::simulation_analysis_tabs::{SIMULATION_ANALYSIS_CATEGORIES, TAB_TRANSIENT};
 use crate::shell::panels::simulate::{ANALYSES, analysis_meta};
 use crate::ui::icons::Icon;
-use crate::ui::theme::{self, FontWeight};
+use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, PaneSide, chip, two_pane};
+use crate::ui::widgets::{Button, chip};
 
 /// Card stack max width (centered in the view).
 const CARD_WIDTH: f32 = 880.0;
 
+/// The core analyses every project lists permanently; exotics join the
+/// card through the palette and leave through the row's remove control.
+fn is_core(index: usize) -> bool {
+    matches!(index, 0..=4 | 7)
+}
+
 /// Render the simulate view.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     state.sim_setup.ensure_initialized();
-    analysis_picker(ui.ctx(), state);
+
+    // `a` opens the palette from anywhere in the view (matches the spec's
+    // keyboard-first add path); inert while anything has keyboard focus.
+    let mut palette_opened = false;
+    if !state.sim_setup.palette_open
+        && ui.ctx().memory(|m| m.focused().is_none())
+        && ui
+            .ctx()
+            .input(|i| i.key_pressed(egui::Key::A) && i.modifiers.is_none())
+    {
+        open_palette(&mut state.sim_setup);
+        palette_opened = true;
+    }
+
     egui::ScrollArea::vertical()
         .id_salt("volta.simulate.scroll")
         .auto_shrink([false, false])
@@ -34,7 +55,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     ui.set_width(card_width);
                     ui.spacing_mut().item_spacing.y = 14.0;
 
-                    analyses_card(ui, state);
+                    analyses_card(ui, state, palette_opened);
                     outputs_card(ui, state);
                     corners_card(ui, state);
                     run_bar(ui, state);
@@ -45,8 +66,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Keep the panel inspector in sync with a sensible default selection.
     if state.shell.selected_analysis.is_none() {
-        state.shell.selected_analysis = Some(1);
+        state.shell.selected_analysis = Some(TAB_TRANSIENT);
     }
+}
+
+/// Reset the palette to a fresh open state.
+fn open_palette(setup: &mut crate::common::app::SimSetupState) {
+    setup.palette_open = true;
+    setup.palette_query.clear();
+    setup.palette_active = 0;
 }
 
 /// Card frame helper.
@@ -138,25 +166,35 @@ fn card_header(
     Some(response.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
 
-fn analyses_card(ui: &mut Ui, state: &mut AppState) {
+fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let mut remove: Option<usize> = None;
+    let mut palette_anchor: Option<egui::Rect> = None;
 
     card(ui, |ui| {
         if let Some(action) =
             card_header(ui, "Analyses", "run in listed order", Some("+ Add analysis"))
-            && action.clicked()
         {
-            state.sim_setup.picker_open = true;
+            if action.clicked() {
+                if state.sim_setup.palette_open {
+                    state.sim_setup.palette_open = false;
+                } else {
+                    open_palette(&mut state.sim_setup);
+                    palette_opened = true;
+                }
+            }
+            palette_anchor = Some(action.rect);
         }
 
         for (tab_idx, name, description) in ANALYSES {
             let enabled = state.sim_setup.enabled.contains(tab_idx);
+            let listed = state.sim_setup.listed.contains(tab_idx);
             let selected = state.shell.selected_analysis == Some(*tab_idx);
-            // Only show disabled exotic analyses when enabled — the core five
-            // stay visible like the design.
-            let core = matches!(*tab_idx, 0..=4 | 7);
-            if !core && !enabled {
+            // The core analyses stay visible; exotics appear once added via
+            // the palette and stay listed (dimmed) while unticked.
+            let core = is_core(*tab_idx);
+            if !core && !enabled && !listed {
                 continue;
             }
 
@@ -164,6 +202,7 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
                 egui::vec2(ui.available_width(), 33.0),
                 egui::Sense::click(),
             );
+            let hovered = ui.rect_contains_pointer(rect);
             let painter = ui.painter();
             if selected {
                 painter.rect_filled(rect, 0.0, c.accent_dim);
@@ -213,20 +252,21 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
                 }
             }
 
-            // Name + description + live summary + state.
+            // Name + description (dimmed while unticked) + live summary.
+            let alpha = if enabled { 1.0 } else { 0.55 };
             painter.text(
                 egui::pos2(rect.left() + 44.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 name,
                 theme::mono(tokens::FS_1, FontWeight::Medium),
-                c.text,
+                c.text.gamma_multiply(alpha),
             );
             painter.text(
                 egui::pos2(rect.left() + 110.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 description,
                 theme::sans(tokens::FS_1, FontWeight::Regular),
-                c.text_dim,
+                c.text_dim.gamma_multiply(alpha),
             );
             let invalid = enabled && state.sim_setup.validation_error(*tab_idx).is_some();
             if rect.width() > 560.0 {
@@ -238,28 +278,73 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState) {
                     if invalid { c.err } else { c.text_faint },
                 );
             }
-            let (state_label, state_color) = if invalid {
-                ("invalid", c.err)
-            } else if selected {
-                ("selected", c.text_faint)
-            } else if enabled {
-                ("enabled", c.text_faint)
+
+            // Far right: the state label — swapped for the remove control on
+            // hovered non-core rows ("invalid" never hides).
+            if hovered && !core && !invalid {
+                let x_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.right() - 22.0, rect.center().y),
+                    egui::vec2(18.0, 18.0),
+                );
+                let x_response = ui.interact(
+                    x_rect,
+                    ui.id().with(("an-remove", tab_idx)),
+                    egui::Sense::click(),
+                );
+                if x_response.hovered() {
+                    ui.painter().rect_filled(x_rect, t.radius, c.bg_hover);
+                }
+                let x_color = if x_response.hovered() { c.err } else { c.text_faint };
+                ui.painter().text(
+                    x_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "×",
+                    theme::mono(tokens::FS_2, FontWeight::Regular),
+                    x_color,
+                );
+                if x_response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Remove from the list")
+                    .clicked()
+                {
+                    remove = Some(*tab_idx);
+                }
             } else {
-                ("off", c.text_faint)
-            };
-            painter.text(
-                egui::pos2(rect.right() - 14.0, rect.center().y),
-                egui::Align2::RIGHT_CENTER,
-                state_label,
-                theme::mono(tokens::FS_0, FontWeight::Regular),
-                state_color,
-            );
+                let (state_label, state_color) = if invalid {
+                    ("invalid", c.err)
+                } else if selected {
+                    ("selected", c.text_faint)
+                } else if enabled {
+                    ("enabled", c.text_faint)
+                } else {
+                    ("off", c.text_faint)
+                };
+                painter.text(
+                    egui::pos2(rect.right() - 14.0, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    state_label,
+                    theme::mono(tokens::FS_0, FontWeight::Regular),
+                    state_color,
+                );
+            }
 
             if response.clicked() {
                 state.shell.selected_analysis = Some(*tab_idx);
             }
         }
     });
+
+    if let Some(index) = remove {
+        state.sim_setup.listed.remove(&index);
+        state.sim_setup.enabled.remove(&index);
+        if state.shell.selected_analysis == Some(index) {
+            state.shell.selected_analysis = Some(TAB_TRANSIENT);
+        }
+    }
+
+    if let Some(anchor) = palette_anchor {
+        analysis_palette(ui, state, anchor, palette_opened);
+    }
 }
 
 fn outputs_card(ui: &mut Ui, state: &mut AppState) {
@@ -372,176 +457,232 @@ fn corners_card(ui: &mut Ui, state: &mut AppState) {
 }
 
 // ---------------------------------------------------------------------------
-// Add-analysis picker (design/volta-dialogs-v2.html §4)
+// Analysis palette (design/volta-simulate-v2.html)
 // ---------------------------------------------------------------------------
+//
+// Anchored under the card's "+ Add analysis" action; add-only — it puts a
+// type in the run set and selects it so the right inspector is already on
+// the new analysis when it closes. Enter adds and closes, Shift+Enter adds
+// and keeps the palette open, Esc closes, `a` opens it from the view.
 
-/// Picker pane height — rail and detail share it.
-const PICKER_HEIGHT: f32 = 392.0;
-/// Analysis rail width inside the Lg dialog.
-const PICKER_RAIL_WIDTH: f32 = 224.0;
+/// Palette surface width.
+const PALETTE_WIDTH: f32 = 322.0;
+/// Maximum height of the scrolling type list.
+const PALETTE_LIST_MAX_H: f32 = 320.0;
+/// Palette row height.
+const PALETTE_ROW_H: f32 = 27.0;
 
-/// The add-analysis picker: a categorized analysis rail on the left, the
-/// selected analysis' parameter form on the right over a live mono preview
-/// of the card it writes. Add commits and closes; "Add & configure
-/// another" commits and stays open.
-fn analysis_picker(ctx: &egui::Context, state: &mut AppState) {
-    if !state.sim_setup.picker_open {
+/// Stable id for the palette filter field.
+fn palette_input_id() -> egui::Id {
+    egui::Id::new("volta.simulate.palette.input")
+}
+
+/// The categorized analysis list matching the filter, flattened in rail
+/// order: `(analysis index, category)`.
+fn palette_items(query: &str) -> Vec<(usize, &'static str)> {
+    let query = query.trim().to_lowercase();
+    let mut items = Vec::new();
+    for (category, entries) in SIMULATION_ANALYSIS_CATEGORIES {
+        for (index, label) in *entries {
+            let (id, description) = analysis_meta(*index);
+            if query.is_empty()
+                || label.to_lowercase().contains(&query)
+                || id.contains(query.as_str())
+                || description.to_lowercase().contains(&query)
+                || category.to_lowercase().contains(&query)
+            {
+                items.push((*index, *category));
+            }
+        }
+    }
+    items
+}
+
+/// Put `index` in the run set and focus it; the palette closes unless the
+/// add is chained (Shift), in which case the filter field re-arms.
+fn palette_commit(ctx: &egui::Context, state: &mut AppState, index: usize, chain: bool) {
+    state.sim_setup.listed.insert(index);
+    state.sim_setup.enabled.insert(index);
+    state.shell.selected_analysis = Some(index);
+    if chain {
+        state.sim_setup.palette_query.clear();
+        state.sim_setup.palette_active = 0;
+        // Enter surrenders the TextEdit's focus; take it back for the
+        // next filter keystrokes.
+        ctx.memory_mut(|m| m.request_focus(palette_input_id()));
+    } else {
+        state.sim_setup.palette_open = false;
+    }
+}
+
+fn analysis_palette(ui: &Ui, state: &mut AppState, anchor: egui::Rect, just_opened: bool) {
+    if !state.sim_setup.palette_open {
+        return;
+    }
+    let ctx = ui.ctx().clone();
+    let t = Tokens::get(&ctx);
+    let c = t.color;
+
+    // Keys first, against the pre-frame filtered list, so Enter lands on
+    // the row the user sees highlighted.
+    let items = palette_items(&state.sim_setup.palette_query);
+    let (up, down, enter, shift, escape) = ctx.input(|i| {
+        (
+            i.key_pressed(egui::Key::ArrowUp),
+            i.key_pressed(egui::Key::ArrowDown),
+            i.key_pressed(egui::Key::Enter),
+            i.modifiers.shift,
+            i.key_pressed(egui::Key::Escape),
+        )
+    });
+    if escape {
+        state.sim_setup.palette_open = false;
+        return;
+    }
+    let mut keyed = false;
+    if down && !items.is_empty() {
+        state.sim_setup.palette_active =
+            (state.sim_setup.palette_active + 1).min(items.len() - 1);
+        keyed = true;
+    } else if up {
+        state.sim_setup.palette_active = state.sim_setup.palette_active.saturating_sub(1);
+        keyed = true;
+    }
+    if state.sim_setup.palette_active >= items.len() {
+        state.sim_setup.palette_active = items.len().saturating_sub(1);
+    }
+    if enter && let Some((index, _)) = items.get(state.sim_setup.palette_active).copied() {
+        palette_commit(&ctx, state, index, shift);
+        if !state.sim_setup.palette_open {
+            return;
+        }
+    }
+
+    let response = egui::Area::new(egui::Id::new("volta.simulate.palette"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(egui::pos2(anchor.right(), anchor.bottom() + 4.0))
+        .pivot(egui::Align2::RIGHT_TOP)
+        .show(&ctx, |ui| {
+            egui::Frame::none()
+                .fill(c.bg_elevated)
+                .stroke(egui::Stroke::new(1.0, c.border_strong))
+                .rounding(t.radius_lg)
+                .shadow(t.shadow())
+                .show(ui, |ui| {
+                    ui.set_width(PALETTE_WIDTH);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    palette_search_strip(ui, state, just_opened);
+                    palette_list(ui, state, &items, keyed);
+                    palette_hint_strip(ui);
+                });
+        })
+        .response;
+
+    // Click-away closes — but not on the click that opened it.
+    if !just_opened && response.clicked_elsewhere() && !anchor.contains(pointer_press(&ctx)) {
+        state.sim_setup.palette_open = false;
+    }
+}
+
+/// Where the latest pointer press started (so the anchor button's own
+/// click never counts as click-away).
+fn pointer_press(ctx: &egui::Context) -> egui::Pos2 {
+    ctx.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos()))
+        .unwrap_or(egui::pos2(f32::MIN, f32::MIN))
+}
+
+/// The filter field strip at the palette top.
+fn palette_search_strip(ui: &mut Ui, state: &mut AppState, just_opened: bool) {
+    let c = Tokens::get(ui.ctx()).color;
+    egui::Frame::none()
+        .inner_margin(egui::Margin::same(8.0))
+        .show(ui, |ui| {
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut state.sim_setup.palette_query)
+                    .id(palette_input_id())
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .hint_text(format!("Filter {} analyses…", ANALYSES.len()))
+                    .desired_width(f32::INFINITY),
+            );
+            if edit.changed() {
+                state.sim_setup.palette_active = 0;
+            }
+            if just_opened {
+                edit.request_focus();
+            }
+        });
+    let y = ui.cursor().top();
+    ui.painter()
+        .hline(ui.min_rect().x_range(), y - 0.5, egui::Stroke::new(1.0, c.border));
+}
+
+/// The categorized, scrolling type list.
+fn palette_list(ui: &mut Ui, state: &mut AppState, items: &[(usize, &'static str)], keyed: bool) {
+    let c = Tokens::get(ui.ctx()).color;
+
+    if items.is_empty() {
+        egui::Frame::none()
+            .inner_margin(egui::Margin::symmetric(10.0, 12.0))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "No analysis matches “{}”",
+                        state.sim_setup.palette_query.trim()
+                    ))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(c.text_faint),
+                );
+            });
         return;
     }
 
-    let shell = &mut state.shell;
-    let setup = &mut state.sim_setup;
-
-    let already_enabled = setup
-        .enabled
-        .contains(&setup.picker_selected.unwrap_or(TAB_TRANSIENT));
-    let hint = format!("{} in run set · runs in list order", setup.enabled.len());
-    let primary_label = if already_enabled { "Done" } else { "Add analysis" };
-
-    let mut add_and_close = false;
-    let choice = Dialog::new("Simulate", "Add analysis", primary_label)
-        .size(DialogSize::Lg)
-        .secondary("Add & configure another")
-        .ghost("Cancel")
-        .hint(&hint)
-        .show(ctx, |ui| picker_body(ui, setup, &mut add_and_close));
-
-    let selected = setup.picker_selected.unwrap_or(TAB_TRANSIENT);
-    let mut close = || {
-        setup.picker_open = false;
-        setup.picker_query.clear();
-    };
-    match choice {
-        DialogChoice::None => {
-            if add_and_close {
-                setup.enabled.insert(selected);
-                shell.selected_analysis = Some(selected);
-                close();
+    let mut clicked: Option<(usize, bool)> = None;
+    egui::ScrollArea::vertical()
+        .id_salt("volta.simulate.palette.list")
+        .max_height(PALETTE_LIST_MAX_H)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut last_category = "";
+            for (position, (index, category)) in items.iter().enumerate() {
+                if *category != last_category {
+                    last_category = category;
+                    palette_section_label(ui, category);
+                }
+                let active = position == state.sim_setup.palette_active;
+                let response = palette_row(ui, state, *index, active);
+                if active && keyed {
+                    response.scroll_to_me(Some(egui::Align::Center));
+                }
+                // A resting cursor must not fight the arrow keys: only an
+                // actually-moving pointer steals the active row.
+                if response.hovered()
+                    && !active
+                    && ui.input(|i| i.pointer.is_moving())
+                {
+                    state.sim_setup.palette_active = position;
+                }
+                if response.clicked() {
+                    let shift = ui.input(|i| i.modifiers.shift);
+                    clicked = Some((*index, shift));
+                }
             }
-        }
-        DialogChoice::Primary => {
-            setup.enabled.insert(selected);
-            shell.selected_analysis = Some(selected);
-            close();
-        }
-        DialogChoice::Secondary => {
-            if setup.enabled.insert(selected) {
-                let (id, _) = analysis_meta(selected);
-                shell.toasts.info(ctx, format!("{id} added to the run set"));
-            }
-            shell.selected_analysis = Some(selected);
-        }
-        DialogChoice::Ghost | DialogChoice::Cancelled => close(),
+            ui.add_space(4.0);
+        });
+    if let Some((index, shift)) = clicked {
+        let ctx = ui.ctx().clone();
+        palette_commit(&ctx, state, index, shift);
     }
 }
 
-/// Dialog body: filterable rail + parameter form + writes strip.
-fn picker_body(ui: &mut Ui, setup: &mut crate::common::app::SimSetupState, add_and_close: &mut bool) {
-    let c = Tokens::get(ui.ctx()).color;
-
-    two_pane(ui, PICKER_RAIL_WIDTH, PICKER_HEIGHT, |ui, side| match side {
-        // ── Left rail: filter over the categorized analysis list.
-        PaneSide::Rail => {
-            picker_filter_strip(ui, &mut setup.picker_query);
-
-            let query = setup.picker_query.trim().to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt("volta.simulate.picker.rail")
-                .max_height(PICKER_HEIGHT - 34.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for (category, items) in SIMULATION_ANALYSIS_CATEGORIES {
-                        let visible: Vec<(usize, &str)> = items
-                            .iter()
-                            .filter(|(index, label)| {
-                                let (id, description) = analysis_meta(*index);
-                                query.is_empty()
-                                    || label.to_lowercase().contains(&query)
-                                    || id.contains(query.as_str())
-                                    || description.to_lowercase().contains(&query)
-                            })
-                            .copied()
-                            .collect();
-                        if visible.is_empty() {
-                            continue;
-                        }
-                        picker_section_label(ui, category);
-                        for (index, label) in visible {
-                            let response = picker_rail_row(ui, setup, index, label);
-                            if response.clicked() {
-                                setup.picker_selected = Some(index);
-                            }
-                            if response.double_clicked() {
-                                setup.picker_selected = Some(index);
-                                *add_and_close = true;
-                            }
-                        }
-                    }
-                    ui.add_space(6.0);
-                });
-        }
-
-        // ── Detail: selected analysis header, parameter form, writes strip.
-        PaneSide::Detail => {
-            let selected = setup.picker_selected.unwrap_or(TAB_TRANSIENT);
-            picker_detail_header(ui, setup, selected);
-
-            egui::ScrollArea::vertical()
-                .id_salt("volta.simulate.picker.form")
-                .max_height(PICKER_HEIGHT - 34.0 - 46.0)
-                .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    egui::Frame::none()
-                        .inner_margin(egui::Margin::symmetric(12.0, 10.0))
-                        .show(ui, |ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            let note =
-                                crate::shell::panels::simulate_forms::form(ui, setup, selected);
-                            if !note.is_empty() {
-                                ui.add_space(6.0);
-                                ui.label(
-                                    egui::RichText::new(note)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.text_faint),
-                                );
-                            }
-                        });
-                });
-
-            picker_writes_strip(ui, setup, selected);
-        }
-    });
-}
-
-/// 34 px rail header hosting the frameless filter input.
-fn picker_filter_strip(ui: &mut Ui, query: &mut String) {
-    let c = Tokens::get(ui.ctx()).color;
-    let response = ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 34.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(10.0);
-            ui.add_sized(
-                egui::vec2(ui.available_width() - 10.0, 22.0),
-                egui::TextEdit::singleline(query)
-                    .frame(false)
-                    .hint_text("Filter analyses…")
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular)),
-            );
-        },
-    );
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-}
-
-/// Small-caps category label inside the rail.
-fn picker_section_label(ui: &mut Ui, text: &str) {
+/// Small-caps category label inside the palette list.
+fn palette_section_label(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 24.0), egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
     let mut job = egui::text::LayoutJob::default();
     job.append(
         &text.to_uppercase(),
@@ -561,201 +702,98 @@ fn picker_section_label(ui: &mut Ui, text: &str) {
     );
 }
 
-/// One analysis row: run-set dot, mono id, human label. Click selects,
-/// double-click adds and closes.
-fn picker_rail_row(
-    ui: &mut Ui,
-    setup: &crate::common::app::SimSetupState,
-    index: usize,
-    label: &str,
-) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
+/// One palette row: run-set dot, mono id, description, status meta.
+fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egui::Response {
+    let c = Tokens::get(ui.ctx()).color;
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), PALETTE_ROW_H),
+        egui::Sense::click(),
+    );
     if !ui.is_rect_visible(rect) {
         return response;
     }
 
-    let enabled = setup.enabled.contains(&index);
-    let selected = setup.picker_selected.unwrap_or(TAB_TRANSIENT) == index;
-    let hover = ui
-        .ctx()
-        .animate_bool_with_time(response.id, response.hovered() && !selected, 0.12);
+    let enabled = state.sim_setup.enabled.contains(&index);
+    let listed = enabled || state.sim_setup.listed.contains(&index) || is_core(index);
     let painter = ui.painter();
-    if selected {
-        painter.rect_filled(rect, 0.0, c.accent_dim);
-    } else if hover > 0.0 {
-        painter.rect_filled(
-            rect,
-            0.0,
-            theme::mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
-        );
+    if active {
+        painter.rect_filled(rect, 0.0, c.bg_hover);
     }
 
-    // Run-set dot: filled when enabled, hollow otherwise.
-    let dot_center = egui::pos2(rect.left() + 16.0, rect.center().y);
+    let dot_center = egui::pos2(rect.left() + 13.0, rect.center().y);
     if enabled {
         painter.circle_filled(dot_center, 3.0, c.ok);
     } else {
         painter.circle_stroke(dot_center, 3.0, egui::Stroke::new(1.0, c.border_strong));
     }
 
-    let (id, _) = analysis_meta(index);
+    let (id, description) = analysis_meta(index);
     painter.text(
-        egui::pos2(rect.left() + 28.0, rect.center().y),
+        egui::pos2(rect.left() + 24.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         id,
         theme::mono(tokens::FS_1, FontWeight::Medium),
-        if selected {
-            c.text
-        } else {
-            theme::mix(c.text_dim, c.text, hover)
-        },
+        if active { c.text } else { mix(c.text_dim, c.text, 0.5) },
     );
-    painter.text(
-        egui::pos2(rect.right() - 10.0, rect.center().y),
-        egui::Align2::RIGHT_CENTER,
-        label,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        c.text_faint,
+    let meta = if enabled {
+        "in run set"
+    } else if listed {
+        "listed"
+    } else {
+        ""
+    };
+    let mut desc_right = rect.right() - 10.0;
+    if !meta.is_empty() {
+        let galley = ui.fonts(|f| {
+            f.layout_no_wrap(
+                meta.to_owned(),
+                theme::mono(10.0, FontWeight::Regular),
+                c.text_faint,
+            )
+        });
+        painter.galley(
+            egui::pos2(
+                rect.right() - 10.0 - galley.size().x,
+                rect.center().y - galley.size().y * 0.5,
+            ),
+            galley.clone(),
+            c.text_faint,
+        );
+        desc_right -= galley.size().x + 8.0;
+    }
+    let desc_left = rect.left() + 80.0;
+    let desc_galley = ui.fonts(|f| {
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            description.to_owned(),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            egui::Color32::PLACEHOLDER,
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width((desc_right - desc_left).max(20.0));
+        f.layout_job(job)
+    });
+    painter.galley(
+        egui::pos2(desc_left, rect.center().y - desc_galley.size().y * 0.5),
+        desc_galley,
+        c.text_dim,
     );
+
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// 34 px detail header: mono id, description, and the run-set badge
-/// (click to remove).
-fn picker_detail_header(
-    ui: &mut Ui,
-    setup: &mut crate::common::app::SimSetupState,
-    selected: usize,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let (id, description) = analysis_meta(selected);
-    let enabled = setup.enabled.contains(&selected);
-
-    let response = ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 34.0),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(12.0);
-            ui.label(
-                egui::RichText::new(id)
-                    .font(theme::mono(tokens::FS_2, FontWeight::Medium))
-                    .color(c.text),
-            );
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(description)
-                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-                    .color(c.text_dim),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(10.0);
-                if enabled {
-                    let galley = ui.fonts(|f| {
-                        f.layout_no_wrap(
-                            "in run set".to_owned(),
-                            theme::mono(tokens::FS_0, FontWeight::Regular),
-                            c.ok,
-                        )
-                    });
-                    let pad = egui::vec2(7.0, 3.0);
-                    let (badge_rect, badge_response) = ui.allocate_exact_size(
-                        galley.size() + 2.0 * pad,
-                        egui::Sense::click(),
-                    );
-                    let painter = ui.painter();
-                    painter.rect(
-                        badge_rect,
-                        badge_rect.height() * 0.5,
-                        c.ok.gamma_multiply(if badge_response.hovered() { 0.26 } else { 0.14 }),
-                        egui::Stroke::new(1.0, c.ok.gamma_multiply(0.55)),
-                    );
-                    painter.galley(badge_rect.min + pad, galley, c.ok);
-                    if badge_response
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text("Remove from the run set")
-                        .clicked()
-                    {
-                        setup.enabled.remove(&selected);
-                    }
-                }
-            });
-        },
+/// Keyboard hint strip at the palette foot.
+fn palette_hint_strip(ui: &mut Ui) {
+    let c = Tokens::get(ui.ctx()).color;
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.hline(rect.x_range(), rect.top() + 0.5, egui::Stroke::new(1.0, c.border));
+    painter.text(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "↑↓ · Enter adds · Shift+Enter keeps adding · Esc",
+        theme::mono(tokens::FS_0, FontWeight::Regular),
+        c.text_faint,
     );
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-}
-
-/// Bottom strip: the exact card this analysis writes into the deck — or
-/// the first validation error, in the error treatment.
-fn picker_writes_strip(
-    ui: &mut Ui,
-    setup: &crate::common::app::SimSetupState,
-    selected: usize,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), 46.0),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                ui.add_space(7.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    let mut caption = egui::text::LayoutJob::default();
-                    caption.append(
-                        "WRITES",
-                        0.0,
-                        egui::TextFormat {
-                            font_id: theme::mono(9.5, FontWeight::Medium),
-                            color: c.text_faint,
-                            extra_letter_spacing: 0.1 * 9.5,
-                            ..Default::default()
-                        },
-                    );
-                    ui.label(caption);
-                });
-                ui.add_space(2.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    match setup.spice_preview(selected) {
-                        Ok(card) => {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(card)
-                                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
-                                        .color(c.text_dim),
-                                )
-                                .truncate(),
-                            );
-                        }
-                        Err(error) => {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(error)
-                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                        .color(c.err),
-                                )
-                                .truncate(),
-                            );
-                        }
-                    }
-                });
-            },
-        );
-        ui.painter().hline(
-            ui.min_rect().x_range(),
-            ui.min_rect().top() + 0.5,
-            egui::Stroke::new(1.0, c.border),
-        );
-    });
 }
 
 fn run_bar(ui: &mut Ui, state: &mut AppState) {
