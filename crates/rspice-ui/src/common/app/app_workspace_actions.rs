@@ -175,10 +175,6 @@ impl AppState {
         )));
     }
 
-    pub(crate) fn enter_workspace_view(&mut self, reference: CellViewRef) {
-        self.descend_into_instance(None, reference);
-    }
-
     /// Descend into a hierarchical instance: open its master and record
     /// the instance name on the occurrence path. `None` (no instance
     /// context) labels the level with the cell name.

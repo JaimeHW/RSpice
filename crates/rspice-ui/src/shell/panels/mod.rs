@@ -50,15 +50,22 @@ pub fn show(
                     rect.y_range(),
                     egui::Stroke::new(1.0, c.border),
                 );
-                ScrollArea::vertical()
-                    .id_salt("volta.left.scroll")
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| match state.shell.view {
-                        WorkspaceView::Schematic => schematic::left(ui, state, symbol_library),
-                        WorkspaceView::Simulate => simulate::left(ui, state),
-                        WorkspaceView::Results => results::left(ui, state),
-                        _ => {}
-                    });
+                match state.shell.view {
+                    // The schematic rail manages its own vertical layout:
+                    // fixed chrome, a filling tree scroll region, and the
+                    // place strip pinned to the bottom edge.
+                    WorkspaceView::Schematic => schematic::left(ui, state, symbol_library),
+                    _ => {
+                        ScrollArea::vertical()
+                            .id_salt("volta.left.scroll")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| match state.shell.view {
+                                WorkspaceView::Simulate => simulate::left(ui, state),
+                                WorkspaceView::Results => results::left(ui, state),
+                                _ => {}
+                            });
+                    }
+                }
             });
     }
 

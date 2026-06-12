@@ -153,6 +153,84 @@ fn finish_generation(
 }
 
 //=============================================================================
+// Design net summary (navigation UIs)
+//=============================================================================
+
+/// One electrical net of the open schematic, summarized for navigation:
+/// the rail's Nets segment, cross-probe highlighting, search.
+#[derive(Debug, Clone)]
+pub struct DesignNet {
+    /// SPICE name ("0", a label/port name, or autonamed `netN`).
+    pub name: String,
+    /// Component terminals on this net.
+    pub pin_count: usize,
+    /// `true` when the net is an interface port of the cell.
+    pub is_port: bool,
+    /// Wires belonging to this net (for canvas highlighting).
+    pub wire_ids: Vec<u64>,
+}
+
+/// Live net summary: connectivity + ports + labels + ground, no instance
+/// generation. Cheap enough to recompute on topology change; callers cache
+/// by `topology_version`.
+pub fn design_nets(schematic: &SchematicState) -> Vec<DesignNet> {
+    let mut generator = NetlistGenerator::new(schematic);
+    generator.extract_nets();
+    generator.apply_interface_ports();
+    generator.apply_net_labels();
+    generator.identify_ground();
+
+    let ports: HashSet<String> = schematic
+        .interface_ports()
+        .iter()
+        .map(|port| port.name.to_ascii_lowercase())
+        .collect();
+
+    let mut pin_counts: HashMap<usize, usize> = HashMap::new();
+    for component in &schematic.components {
+        for (_, position) in component.terminal_positions() {
+            if let Some(net) = generator.net_at(position) {
+                *pin_counts.entry(net.id).or_default() += 1;
+            }
+        }
+    }
+    let mut wires: HashMap<usize, Vec<u64>> = HashMap::new();
+    for wire in &schematic.wires {
+        if let Some(first) = wire.points.first()
+            && let Some(net) = generator.net_at(*first)
+        {
+            wires.entry(net.id).or_default().push(wire.id);
+        }
+    }
+
+    let mut nets: Vec<DesignNet> = generator
+        .nets()
+        .iter()
+        .map(|net| {
+            let name = net.spice_name();
+            DesignNet {
+                is_port: ports.contains(&name.to_ascii_lowercase()),
+                pin_count: pin_counts.get(&net.id).copied().unwrap_or(0),
+                wire_ids: wires.remove(&net.id).unwrap_or_default(),
+                name,
+            }
+        })
+        .collect();
+
+    // Reading order: interface ports, then named nets, then autonamed.
+    let autonamed =
+        |name: &str| name.strip_prefix("net").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()));
+    nets.sort_by(|a, b| {
+        (!a.is_port, autonamed(&a.name), a.name.to_ascii_lowercase()).cmp(&(
+            !b.is_port,
+            autonamed(&b.name),
+            b.name.to_ascii_lowercase(),
+        ))
+    });
+    nets
+}
+
+//=============================================================================
 // Node Net
 //=============================================================================
 

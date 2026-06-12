@@ -24,7 +24,7 @@
 
 mod console;
 mod menubar;
-mod panels;
+pub(crate) mod panels;
 pub mod results;
 mod state;
 mod statusbar;
@@ -33,7 +33,7 @@ mod views;
 mod wtabs;
 
 pub use results::{ResultViewer, ResultsState};
-pub use state::{ConsoleUiState, ShellState, ShellStateSer, WorkspaceView};
+pub use state::{ConsoleUiState, NavMode, RailTab, ShellState, ShellStateSer, WorkspaceView};
 
 use egui::Context;
 

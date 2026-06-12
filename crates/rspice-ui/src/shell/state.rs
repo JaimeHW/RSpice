@@ -159,16 +159,37 @@ pub struct ShellState {
     pub show_grid: bool,
     /// Hide both contextual side panels (focus mode).
     pub panels_hidden: bool,
-    /// One-shot request to focus the component search box (Create ▸ Instance,
-    /// `i` shortcut).
+    /// One-shot request to focus the place command (Create ▸ Instance,
+    /// `Shift+I` shortcut).
     pub focus_cell_search: bool,
-    /// Component browser search query.
+    /// One-shot request to focus the navigator's find-in-design field.
+    pub focus_nav_search: bool,
+    /// Active rail context: the design (navigator) or the shelf (library).
+    pub rail_tab: RailTab,
+    /// Navigator kind segment: instances, nets or ports.
+    pub nav_mode: NavMode,
+    /// Find-in-design query (filters instances, nets and ports together).
+    pub nav_search: String,
+    /// Instance rows expanded to peek into their masters (component ids).
+    pub nav_peek: std::collections::HashSet<u64>,
+    /// Library browser search query.
     pub cell_search: String,
     /// Component browser library filter ("All libs", "primitives", or a
     /// library name).
     pub cell_lib_filter: String,
-    /// Selected row in the component browser list.
-    pub cell_selected: Option<usize>,
+    /// Selected browser entry, as a stable ref ("prim:<label>" or
+    /// "cell:<lib>/<cell>").
+    pub cell_selected: Option<String>,
+    /// Collapsed library groups (palette sections and library names).
+    pub lib_groups_closed: std::collections::HashSet<String>,
+    /// Pinned favorites, as browser refs, in pin order.
+    pub lib_pins: Vec<String>,
+    /// Recently placed entries, most recent first, capped at six.
+    pub lib_recents: Vec<String>,
+    /// Place-strip command text (typeahead query).
+    pub place_cmd: String,
+    /// Active row in the place-strip typeahead popover.
+    pub place_pop_index: usize,
     /// One-shot request to export the visible waveforms as CSV (needs the
     /// app's IO backend, so it is handled at the shell level).
     pub export_csv_requested: bool,
@@ -184,6 +205,25 @@ pub struct ShellState {
     pub inspector_edit: Option<InspectorEdit>,
 }
 
+/// Which context the left rail shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RailTab {
+    /// The open design: nameplate, occurrence path, instances/nets/ports.
+    #[default]
+    Navigator,
+    /// The shelf: palette categories, project and vendor libraries.
+    Library,
+}
+
+/// Navigator kind segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NavMode {
+    #[default]
+    Instances,
+    Nets,
+    Ports,
+}
+
 impl ShellState {
     /// New shell state with defaults (Instrument dark, compact, schematic
     /// view, "tt" corner, grid on).
@@ -192,8 +232,36 @@ impl ShellState {
             corner: "tt".to_owned(),
             show_grid: true,
             cell_lib_filter: "All libs".to_owned(),
+            // Long tail groups start collapsed; the working set stays open.
+            lib_groups_closed: ["Sources", "Controlled sources", "Behavioral (XSPICE)"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            // The bench staples seed both favorites and the recents chips.
+            lib_pins: ["prim:Resistor", "prim:Capacitor", "prim:Ground", "prim:V DC"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            lib_recents: [
+                "prim:Resistor",
+                "prim:Capacitor",
+                "prim:Ground",
+                "prim:V DC",
+                "prim:NMOS",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             ..Self::default()
         }
+    }
+
+    /// Record a placement for the place strip's recents row: most recent
+    /// first, deduplicated, capped at six.
+    pub fn note_placement(&mut self, entry_ref: String) {
+        self.lib_recents.retain(|existing| *existing != entry_ref);
+        self.lib_recents.insert(0, entry_ref);
+        self.lib_recents.truncate(6);
     }
 
     /// Cycle to the next workspace view (Window ▸ Next workspace tab).

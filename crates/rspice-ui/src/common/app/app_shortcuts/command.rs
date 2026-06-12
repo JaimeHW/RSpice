@@ -40,6 +40,9 @@ pub(crate) enum ShortcutCommand {
     Zoom100,
     ToolLabel,
     FocusCellSearch,
+    DescendIntoSelected,
+    AscendHierarchy,
+    FocusDesignSearch,
     OpenPreferences,
     OpenCommandPalette,
 }
@@ -132,6 +135,9 @@ impl ShortcutCommand {
             ShortcutCommand::Zoom100 => "Zoom 100 %",
             ShortcutCommand::ToolLabel => "Net Label Tool",
             ShortcutCommand::FocusCellSearch => "Find Instance",
+            ShortcutCommand::DescendIntoSelected => "Descend Into Instance",
+            ShortcutCommand::AscendHierarchy => "Ascend One Level",
+            ShortcutCommand::FocusDesignSearch => "Find In Design",
             ShortcutCommand::OpenPreferences => "Preferences",
             ShortcutCommand::OpenCommandPalette => "Command Palette",
         }
@@ -179,6 +185,9 @@ impl ShortcutCommand {
             ShortcutCommand::Zoom100 => "Ctrl+0",
             ShortcutCommand::ToolLabel => "N",
             ShortcutCommand::FocusCellSearch => "Shift+I",
+            ShortcutCommand::DescendIntoSelected => "Shift+E",
+            ShortcutCommand::AscendHierarchy => "U",
+            ShortcutCommand::FocusDesignSearch => "/",
             ShortcutCommand::OpenPreferences => "Ctrl+,",
             ShortcutCommand::OpenCommandPalette => "Ctrl+K",
         }

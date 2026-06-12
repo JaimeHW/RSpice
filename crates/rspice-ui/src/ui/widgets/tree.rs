@@ -26,6 +26,7 @@ pub struct TreeRow<'a> {
     indent: u8,
     selected: bool,
     mono_label: bool,
+    dim: bool,
     height: Option<f32>,
 }
 
@@ -41,6 +42,7 @@ impl<'a> TreeRow<'a> {
             indent: 0,
             selected: false,
             mono_label: false,
+            dim: false,
             height: None,
         }
     }
@@ -84,6 +86,13 @@ impl<'a> TreeRow<'a> {
     /// Render the primary label in the mono face (cell names, signals).
     pub fn mono(mut self) -> Self {
         self.mono_label = true;
+        self
+    }
+
+    /// Render as a ghost row (faint label, no hover brightening) — peeked
+    /// master contents that are visible but not editable from here.
+    pub fn dim(mut self) -> Self {
+        self.dim = true;
         self
     }
 
@@ -134,7 +143,9 @@ impl<'a> TreeRow<'a> {
             );
         }
 
-        let text_color = if self.selected {
+        let text_color = if self.dim {
+            c.text_faint
+        } else if self.selected {
             c.text
         } else {
             mix(c.text_dim, c.text, hover)

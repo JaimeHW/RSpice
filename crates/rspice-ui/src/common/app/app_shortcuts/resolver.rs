@@ -100,7 +100,23 @@ const GLOBAL_EDIT_RULES: [ShortcutRule; 8] = [
     ShortcutRule::new(ShortcutCommand::EditSelectAll, Key::A, Some(true), None),
 ];
 
-const FOCUS_FREE_RULES: [ShortcutRule; 20] = [
+const FOCUS_FREE_RULES: [ShortcutRule; 23] = [
+    ShortcutRule::new(
+        ShortcutCommand::FocusDesignSearch,
+        Key::Slash,
+        Some(false),
+        None,
+    ),
+    // Hierarchy: descend into the selected instance / ascend one level
+    // (the Virtuoso-style E/U pair; double-click and the breadcrumb are
+    // the mouse paths).
+    ShortcutRule::new(
+        ShortcutCommand::DescendIntoSelected,
+        Key::E,
+        Some(false),
+        Some(true),
+    ),
+    ShortcutRule::new(ShortcutCommand::AscendHierarchy, Key::U, Some(false), None),
     ShortcutRule::new(ShortcutCommand::ToolSelect, Key::S, Some(false), None),
     ShortcutRule::new(ShortcutCommand::ToolWire, Key::W, Some(false), None),
     ShortcutRule::new(ShortcutCommand::ToolLabel, Key::N, Some(false), None),
@@ -159,11 +175,12 @@ const FOCUS_FREE_RULES: [ShortcutRule; 20] = [
         Some(false),
         None,
     ),
+    // Plain E only — Shift+E is hierarchy descend (Virtuoso pairing).
     ShortcutRule::new(
         ShortcutCommand::OpenPropertiesEditor,
         Key::E,
         Some(false),
-        None,
+        Some(false),
     ),
     ShortcutRule::new(ShortcutCommand::EscapeCancel, Key::Escape, None, None),
 ];

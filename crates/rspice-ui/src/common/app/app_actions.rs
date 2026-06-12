@@ -146,6 +146,17 @@ impl RSpiceApp {
                 self.state.shell.view = crate::shell::WorkspaceView::Schematic;
                 self.state.shell.focus_cell_search = true;
             }
+            ShortcutCommand::DescendIntoSelected => {
+                self.state.open_selected_instance_master();
+            }
+            ShortcutCommand::AscendHierarchy => {
+                self.state.ascend_workspace_level();
+            }
+            ShortcutCommand::FocusDesignSearch => {
+                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                self.state.shell.rail_tab = crate::shell::RailTab::Navigator;
+                self.state.shell.focus_nav_search = true;
+            }
             ShortcutCommand::OpenPreferences => {
                 self.state.dialogs.preferences_open = true;
             }

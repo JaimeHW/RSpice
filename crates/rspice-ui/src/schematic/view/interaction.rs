@@ -185,9 +185,11 @@ fn handle_select_dragging(
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
     if component_type == ComponentType::CellInstance {
         if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
+            let recent = format!("cell:{}/{}", library_cell.library, library_cell.cell);
             state
                 .schematic
                 .add_library_cell_component(grid_pos, library_cell);
+            state.shell.note_placement(recent);
             log::info!("Placed library cell instance at {:?}", grid_pos);
         } else {
             state.push_user_message(ConsoleMessage::warning(
@@ -197,6 +199,9 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
         }
     } else {
         state.schematic.add_component(component_type, grid_pos);
+        if let Some(recent) = crate::shell::panels::schematic::palette_ref(component_type) {
+            state.shell.note_placement(recent);
+        }
         log::info!("Placed {:?} at {:?}", component_type, grid_pos);
     }
 }
