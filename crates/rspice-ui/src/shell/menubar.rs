@@ -552,6 +552,30 @@ fn check_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     if item(ui, "Run design checks", Some("Ctrl+E")) {
         crate::common::menu_bar::run_design_rule_check(state);
     }
+    separator(ui);
+    if state.dialogs.drc_results.is_some() {
+        if item(ui, "View violations", None) {
+            // Badges live on the canvas, the rows in the console — show both,
+            // with the console tab opened on the worst severity present.
+            state.shell.view = WorkspaceView::Schematic;
+            state.shell.console.collapsed = false;
+            state.shell.console.filter = match state.dialogs.drc_results.as_ref() {
+                Some(result) if !result.errors().is_empty() => {
+                    crate::shell::state::ConsoleFilter::Errors
+                }
+                Some(result) if !result.warnings().is_empty() => {
+                    crate::shell::state::ConsoleFilter::Warnings
+                }
+                _ => crate::shell::state::ConsoleFilter::All,
+            };
+        }
+        if item(ui, "Clear violations", None) {
+            state.dialogs.drc_results = None;
+        }
+    } else {
+        item_disabled(ui, "View violations", None);
+        item_disabled(ui, "Clear violations", None);
+    }
 }
 
 fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
