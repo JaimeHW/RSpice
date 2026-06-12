@@ -357,13 +357,23 @@ impl StaticMatrix {
                 return Ok(Value::INFINITY);
             }
             let residual = (row_ax - row_rhs).abs();
-            // Componentwise backward error (Oettli–Prager): the row scale is
-            // the GROSS term magnitude Σ|a_ij·x_j|, not the net Σa_ij·x_j.
-            // At a converged KCL row the net cancels to ~0, and a net-based
-            // scale collapses to bare abstol — rejecting solutions whose
-            // residual is nothing but the floating-point cancellation noise
-            // of the row's own mA-scale currents.
-            let scale = safe_abstol + safe_reltol * ax_gross[row].max(row_rhs.abs());
+            // The row scale is the NET magnitude max(|Σa_ij·x_j|, |b_i|)
+            // plus an explicit floating-point cancellation floor on the
+            // GROSS term magnitude Σ|a_ij·x_j|. At a converged KCL row the
+            // net cancels to ~0 and the residual that remains is the
+            // summation noise of the row's own mA-scale currents — bounded
+            // by O(n·ε)·gross — so the floor accepts it without bare-abstol
+            // rejections (the 4096-MOSFET array artifact). Scaling by the
+            // gross magnitude itself (full Oettli–Prager) is too loose as a
+            // NONLINEAR acceptance criterion: on high-gain summing rows with
+            // large balanced flows it hides genuine disequilibrium that is a
+            // tiny fraction of the gross (a feedback amplifier accepts a
+            // wrong-basin operating point), so the relative part stays on
+            // the net.
+            const CANCELLATION_NOISE_TERMS: Value = 256.0;
+            let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * ax_gross[row];
+            let scale =
+                safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
             let normalized = residual / scale.max(safe_abstol);
             residual_inf = residual_inf.max(normalized);
         }
