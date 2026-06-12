@@ -38,6 +38,9 @@ mod header;
 mod instances;
 mod magnetics;
 mod models;
+mod subcircuits;
+
+pub use subcircuits::HierarchySource;
 
 //=============================================================================
 // NetlistResult (Compatibility API)
@@ -84,7 +87,29 @@ pub fn generate_netlist_with_analysis(
     schematic: &SchematicState,
     analysis_lines: &[String],
 ) -> NetlistResult {
-    let mut generator = NetlistGenerator::new(schematic);
+    finish_generation(NetlistGenerator::new(schematic), schematic, analysis_lines)
+}
+
+/// Generate a netlist with project-cell hierarchy: placed cells whose
+/// masters live in the workspace netlist as `.SUBCKT` definitions, so the
+/// emitted deck is self-contained.
+pub fn generate_netlist_hierarchical(
+    schematic: &SchematicState,
+    analysis_lines: &[String],
+    hierarchy: &HierarchySource<'_>,
+) -> NetlistResult {
+    finish_generation(
+        NetlistGenerator::with_hierarchy(schematic, hierarchy),
+        schematic,
+        analysis_lines,
+    )
+}
+
+fn finish_generation(
+    mut generator: NetlistGenerator<'_>,
+    schematic: &SchematicState,
+    analysis_lines: &[String],
+) -> NetlistResult {
     let netlist = generator.generate_with_analysis(analysis_lines);
 
     // Build the nets map from the generator's data
@@ -225,6 +250,10 @@ pub struct NetlistGenerator<'a> {
     warnings: Vec<String>,
     /// Netlist generation errors that should block simulation.
     errors: Vec<String>,
+    /// Project cell masters for hierarchical generation (`.SUBCKT`
+    /// emission and instance terminal resolution). `None` keeps the
+    /// flat, single-schematic behavior.
+    hierarchy: Option<&'a HierarchySource<'a>>,
 }
 
 impl<'a> NetlistGenerator<'a> {
@@ -240,7 +269,24 @@ impl<'a> NetlistGenerator<'a> {
             subcircuits: Vec::new(),
             warnings: Vec::new(),
             errors: Vec::new(),
+            hierarchy: None,
         }
+    }
+
+    /// Create a generator that resolves placed project cells through the
+    /// given hierarchy source.
+    pub fn with_hierarchy(
+        schematic: &'a SchematicState,
+        hierarchy: &'a HierarchySource<'a>,
+    ) -> Self {
+        let mut generator = Self::new(schematic);
+        generator.hierarchy = Some(hierarchy);
+        generator
+    }
+
+    /// Consume the generated lines (subcircuit-body assembly).
+    pub(self) fn take_lines(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.lines)
     }
 
     /// Generate complete SPICE netlist
@@ -278,6 +324,10 @@ impl<'a> NetlistGenerator<'a> {
         // Phase 1: Extract node connectivity
         self.extract_nets();
 
+        // Phase 1a: Interface ports name their nets first — the port list
+        // is the cell's contract, so it wins label conflicts.
+        self.apply_interface_ports();
+
         // Phase 1b: Fold user net labels into the nets (names + same-name
         // connections). Runs before ground identification so the ground
         // symbol always wins the node-0 assignment.
@@ -291,6 +341,10 @@ impl<'a> NetlistGenerator<'a> {
 
         // Phase 4: Generate include directives for library-bound instances
         self.generate_library_view_includes();
+
+        // Phase 4b: Project-cell .SUBCKT definitions (hierarchical mode) —
+        // before instances so every definition precedes its first use.
+        self.generate_subcircuit_definitions();
 
         // Phase 5: Generate component instances
         self.generate_instances();

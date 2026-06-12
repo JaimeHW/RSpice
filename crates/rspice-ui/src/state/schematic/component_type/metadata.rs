@@ -39,6 +39,7 @@ impl ComponentType {
             ComponentType::VSwitch => "S",
             ComponentType::TransmissionLine => "T",
             ComponentType::Ground => "",
+            ComponentType::Port => "",
             ComponentType::CellInstance => "X",
             ComponentType::XspiceGain
             | ComponentType::XspiceSummer
@@ -104,6 +105,7 @@ impl ComponentType {
             ComponentType::VSwitch => "V-Switch (S)",
             ComponentType::TransmissionLine => "Transmission Line",
             ComponentType::Ground => "Ground",
+            ComponentType::Port => "Port",
             ComponentType::CellInstance => "Cell Instance",
             ComponentType::XspiceGain => "Gain",
             ComponentType::XspiceSummer => "Summer",

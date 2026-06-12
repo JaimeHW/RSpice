@@ -37,6 +37,25 @@ pub(super) fn write_cell_instance_symbol(
     write_block_symbol(svg, cx, cy, "X", config);
 }
 
+/// Interface port: a flag whose tip is the attachment point at (-10, 0).
+pub(super) fn write_port_symbol(svg: &mut String, cx: f64, cy: f64, _config: &SvgExportConfig) {
+    writeln!(
+        svg,
+        r#"<polygon class="component" fill="none" points="{},{} {},{} {},{} {},{} {},{}"/>"#,
+        cx - 10.0,
+        cy,
+        cx - 4.0,
+        cy - 6.0,
+        cx + 10.0,
+        cy - 6.0,
+        cx + 10.0,
+        cy + 6.0,
+        cx - 4.0,
+        cy + 6.0
+    )
+    .unwrap();
+}
+
 pub(super) fn write_xspice_symbol(
     svg: &mut String,
     cx: f64,

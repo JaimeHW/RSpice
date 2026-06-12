@@ -23,7 +23,7 @@ mod source_symbols;
 pub use self::config::SvgExportConfig;
 
 use self::bjt_diode_symbols::{write_diode_symbol, write_npn_symbol, write_pnp_symbol};
-use self::block_symbols::{write_cell_instance_symbol, write_xspice_symbol};
+use self::block_symbols::{write_cell_instance_symbol, write_port_symbol, write_xspice_symbol};
 use self::controlled_symbols::{
     write_cccs_symbol, write_ccvs_symbol, write_opamp_symbol, write_vccs_symbol,
     write_vcvs_symbol, write_vswitch_symbol,
@@ -109,6 +109,7 @@ fn write_component(svg: &mut String, component: &Component, config: &SvgExportCo
         | ComponentType::VoltageSourceExp
         | ComponentType::VoltageSourceSffm => write_vsource_symbol(svg, cx, cy, config),
         ComponentType::Ground => write_ground_symbol(svg, cx, cy, config),
+        ComponentType::Port => write_port_symbol(svg, cx, cy, config),
         ComponentType::Nmos | ComponentType::NVdmos => write_nmos_symbol(svg, cx, cy, config),
         ComponentType::Pmos | ComponentType::PVdmos => write_pmos_symbol(svg, cx, cy, config),
         ComponentType::NpnBjt => write_npn_symbol(svg, cx, cy, config),

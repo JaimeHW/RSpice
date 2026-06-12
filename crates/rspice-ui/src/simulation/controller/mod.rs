@@ -205,9 +205,13 @@ impl SimulationController {
             ));
             Self::compose_manual_netlist(&source, &analysis_lines)
         } else {
-            let result = crate::simulation::netlist_gen::generate_netlist_with_analysis(
+            let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_buffers(
+                &state.workspace.schematic_buffers,
+            );
+            let result = crate::simulation::netlist_gen::generate_netlist_hierarchical(
                 &state.schematic,
                 &analysis_lines,
+                &hierarchy,
             );
 
             if !result.errors.is_empty() {

@@ -97,6 +97,7 @@ pub fn get_value_display_name(kind: ComponentType) -> &'static str {
         ComponentType::Vccs => "Transconductance",
         ComponentType::Ccvs => "Transresistance",
         ComponentType::Ground => "Name",
+        ComponentType::Port => "Port name",
         // Catch-all for any other component types
         _ => "Value",
     }

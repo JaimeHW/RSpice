@@ -89,6 +89,9 @@ pub enum ComponentType {
     TransmissionLine,
     /// Ground node (no SPICE prefix - implicit node 0)
     Ground,
+    /// Interface port — names its net and declares it as a pin of the
+    /// containing cell (no SPICE prefix; ports shape the .SUBCKT header)
+    Port,
     /// Generic hierarchical/library cell instance (SPICE prefix: X)
     CellInstance,
     /// Gain block

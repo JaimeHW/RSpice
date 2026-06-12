@@ -255,7 +255,16 @@ const BEHAVIORAL: &[ComponentPaletteEntry] = &[
     },
 ];
 
+const HIERARCHY: &[ComponentPaletteEntry] = &[ComponentPaletteEntry {
+    kind: ComponentType::Port,
+    label: "Port",
+}];
+
 const PALETTE: &[ComponentPaletteSection] = &[
+    ComponentPaletteSection {
+        title: "Hierarchy",
+        entries: HIERARCHY,
+    },
     ComponentPaletteSection {
         title: "Passives",
         entries: PASSIVES,

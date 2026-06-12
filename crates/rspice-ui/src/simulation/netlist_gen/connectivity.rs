@@ -143,6 +143,51 @@ impl<'a> NetlistGenerator<'a> {
     }
 
     //-------------------------------------------------------------------------
+    // Phase 1a: Interface Ports
+    //-------------------------------------------------------------------------
+
+    /// Fold interface ports into the extracted nets.
+    ///
+    /// A port names its net exactly like a label, and same-name ports
+    /// connect their nets. This runs before `apply_net_labels` so the
+    /// interface name wins label conflicts — the port list is the cell's
+    /// contract. An unnamed port is an error: the interface cannot contain
+    /// an anonymous pin.
+    pub(super) fn apply_interface_ports(&mut self) {
+        let mut name_to_net: HashMap<String, usize> = HashMap::new();
+        for component in &self.schematic.components {
+            if component.kind != ComponentType::Port {
+                continue;
+            }
+            let Some(spec) = component.port_spec() else {
+                self.errors.push(format!(
+                    "Unnamed interface port at ({}, {}) — name it or remove it",
+                    component.pos.x, component.pos.y
+                ));
+                continue;
+            };
+            let Some((_, terminal)) = component.terminal_positions().into_iter().next() else {
+                continue;
+            };
+            let Some(&net_id) = self.point_to_net.get(&terminal) else {
+                continue;
+            };
+
+            let key = spec.name.to_ascii_lowercase();
+            match name_to_net.get(&key) {
+                // Same port name elsewhere: one interface pin, one net.
+                Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
+                _ => {
+                    name_to_net.insert(key, net_id);
+                    if let Some(net) = self.nets.iter_mut().find(|n| n.id == net_id) {
+                        net.label = Some(spec.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    //-------------------------------------------------------------------------
     // Phase 1b: Net Labels
     //-------------------------------------------------------------------------
 
@@ -156,7 +201,18 @@ impl<'a> NetlistGenerator<'a> {
         let mut labels: Vec<_> = self.schematic.net_labels.iter().collect();
         labels.sort_by_key(|label| label.id);
 
-        let mut name_to_net: HashMap<String, usize> = HashMap::new();
+        // Seed with names already assigned (interface ports run first), so
+        // a label matching a port name connects to the port's net instead
+        // of minting a same-named twin.
+        let mut name_to_net: HashMap<String, usize> = self
+            .nets
+            .iter()
+            .filter_map(|net| {
+                net.label
+                    .as_ref()
+                    .map(|label| (label.to_ascii_lowercase(), net.id))
+            })
+            .collect();
         for label in labels {
             let name = label.name.trim();
             if name.is_empty() {

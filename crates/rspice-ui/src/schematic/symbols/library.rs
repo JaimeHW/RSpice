@@ -171,6 +171,7 @@ impl SymbolLibrary {
                 "Behavioral Source",
             ),
             (ComponentType::Ground, "ground_signal.svg", "Ground"),
+            (ComponentType::Port, "port.svg", "Port"),
             (ComponentType::Diode, "diode.svg", "Diode"),
             (
                 ComponentType::Nmos,

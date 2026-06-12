@@ -203,6 +203,8 @@ impl<'a> NetlistGenerator<'a> {
 
             // Ground - handled separately
             ComponentType::Ground => None,
+            // Interface ports shape the .SUBCKT header, never instance lines
+            ComponentType::Port => None,
             // Transformers are synthesized into winding inductors plus a coupling line.
             ComponentType::Transformer => None,
             // Coupling statements are synthesized in a dedicated validation pass.
@@ -220,29 +222,72 @@ impl<'a> NetlistGenerator<'a> {
                     return None;
                 };
 
-                if binding.terminal_order.is_empty() {
+                // Project cells (no source file) resolve their interface
+                // through the workspace hierarchy: the master's port order
+                // IS the node order, and its .SUBCKT is emitted alongside.
+                let master_ports: Option<Vec<String>> = if binding.source_path.is_none() {
+                    self.hierarchy
+                        .and_then(|h| h.master(&binding.library, &binding.cell))
+                        .map(|master| {
+                            master
+                                .interface_ports()
+                                .into_iter()
+                                .map(|port| port.name)
+                                .collect()
+                        })
+                } else {
+                    None
+                };
+
+                // A project cell must resolve to a master — otherwise the
+                // X line would reference a definition nobody emits.
+                if binding.source_path.is_none() && master_ports.is_none() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' master not found in project: {}/{} \u{2039}schematic\u{203A} — open the cell once, or bind a source file",
+                        component.name, binding.library, binding.cell
+                    ));
+                    return None;
+                }
+
+                let terminal_order: &[String] = if !binding.terminal_order.is_empty() {
+                    &binding.terminal_order
+                } else if let Some(ports) = master_ports.as_deref() {
+                    ports
+                } else {
                     self.errors.push(format!(
                         "Cell instance '{}' ({}/{}/{}) is missing terminal order metadata (netlist.ports/netlist.terminals)",
                         component.name, binding.library, binding.cell, binding.view
                     ));
                     return None;
-                }
-                if node_names.len() != binding.terminal_order.len() {
+                };
+
+                // Stale binding: the master's interface changed after this
+                // instance was placed. Pin positions no longer correspond,
+                // so this is a hard stop, not a guess.
+                if let Some(ports) = master_ports.as_deref()
+                    && !binding.terminal_order.is_empty()
+                    && ports.len() != binding.terminal_order.len()
+                {
                     self.errors.push(format!(
-                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: schematic has {} nodes but binding defines {} terminals",
+                        "Cell instance '{}' is stale: master {}/{} now defines {} port(s) but the instance was placed with {} — re-place the instance",
+                        component.name,
+                        binding.library,
+                        binding.cell,
+                        ports.len(),
+                        binding.terminal_order.len()
+                    ));
+                    return None;
+                }
+
+                if node_names.len() != terminal_order.len() {
+                    self.errors.push(format!(
+                        "Cell instance '{}' ({}/{}/{}) terminal mismatch: schematic has {} nodes but the interface defines {} terminals",
                         component.name,
                         binding.library,
                         binding.cell,
                         binding.view,
                         node_names.len(),
-                        binding.terminal_order.len()
-                    ));
-                    return None;
-                }
-                if binding.source_path.is_none() {
-                    self.errors.push(format!(
-                        "Cell instance '{}' ({}/{}/{}) is missing source path metadata",
-                        component.name, binding.library, binding.cell, binding.view
+                        terminal_order.len()
                     ));
                     return None;
                 }

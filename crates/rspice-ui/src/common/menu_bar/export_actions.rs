@@ -139,8 +139,14 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
 }
 
 fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) -> Option<String> {
-    let generation =
-        crate::simulation::netlist_gen::generate_netlist_with_analysis(&state.schematic, &[]);
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_buffers(
+        &state.workspace.schematic_buffers,
+    );
+    let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical(
+        &state.schematic,
+        &[],
+        &hierarchy,
+    );
 
     if !generation.errors.is_empty() {
         for err in generation.errors {

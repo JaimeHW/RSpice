@@ -115,6 +115,9 @@ pub(super) fn draw_component(
             ComponentType::Ground => {
                 draw_ground_symbol(painter, pos, scale, stroke);
             }
+            ComponentType::Port => {
+                draw_port_symbol(painter, pos, scale, rotation_index, stroke);
+            }
             ComponentType::Diode => {
                 draw_diode_symbol(painter, pos, scale, rotation_index, stroke);
             }
@@ -157,6 +160,32 @@ pub(super) fn draw_component(
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
     draw_component_labels(painter, pos, scale, component);
+}
+
+/// Interface port: a flag whose tip is the attachment point at (-10, 0).
+/// It must read as "this net leaves the cell", not as a floating label —
+/// the filled tip distinguishes it from a net label at a glance.
+fn draw_port_symbol(painter: &Painter, pos: Pos2, scale: f32, rotation_index: i32, stroke: Stroke) {
+    let rotate = |dx: f32, dy: f32| -> Pos2 {
+        let (x, y) = match rotation_index.rem_euclid(4) {
+            0 => (dx, dy),
+            1 => (-dy, dx),
+            2 => (-dx, -dy),
+            _ => (dy, -dx),
+        };
+        Pos2::new(pos.x + x * scale, pos.y + y * scale)
+    };
+    let outline = [
+        rotate(-10.0, 0.0),
+        rotate(-4.0, -6.0),
+        rotate(10.0, -6.0),
+        rotate(10.0, 6.0),
+        rotate(-4.0, 6.0),
+    ];
+    for i in 0..outline.len() {
+        painter.line_segment([outline[i], outline[(i + 1) % outline.len()]], stroke);
+    }
+    painter.circle_filled(rotate(-10.0, 0.0), 1.6 * scale, stroke.color);
 }
 
 /// Hierarchical cell instance: a block body with pin stubs matching the

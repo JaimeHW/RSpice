@@ -6,6 +6,7 @@ impl ComponentType {
     pub fn terminal_count(&self) -> usize {
         match self {
             ComponentType::Ground => 1,
+            ComponentType::Port => 1,
             ComponentType::CellInstance => 2,
             ComponentType::Transformer => 4,
             ComponentType::NpnBjt | ComponentType::PnpBjt => 3,
@@ -141,6 +142,9 @@ impl ComponentType {
             }
             // (20, 20): hh 10
             ComponentType::Ground => &[("GND", Point { x: 0, y: -10 })],
+            // (20, 20): hw 10 — single attachment point on the left, the
+            // flag body extends to the right of it
+            ComponentType::Port => &[("P", Point { x: -10, y: 0 })],
             // (40, 20): hw 20
             ComponentType::XspiceGain
             | ComponentType::XspiceLimiter
@@ -219,6 +223,7 @@ impl ComponentType {
             | ComponentType::CurrentSourceNoise
             | ComponentType::BehavioralSource => (28, 40),
             ComponentType::Ground => (20, 20),
+            ComponentType::Port => (20, 20),
             ComponentType::CellInstance => (60, 40),
             ComponentType::Diode => (40, 20),
             ComponentType::NpnBjt | ComponentType::PnpBjt => (40, 80),
@@ -304,6 +309,7 @@ mod tests {
         ComponentType::CoupledInductor,
         ComponentType::CellInstance,
         ComponentType::Ground,
+        ComponentType::Port,
         ComponentType::XspiceGain,
         ComponentType::XspiceLimiter,
         ComponentType::XspiceIntegrator,

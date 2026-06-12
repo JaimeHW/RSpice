@@ -16,10 +16,30 @@ impl SchematicState {
         // Set default values
         component.value = kind.default_value().to_string();
 
+        // A port's value IS its interface name — every placement gets a
+        // fresh one so two new ports never silently short their nets.
+        if kind == ComponentType::Port {
+            component.value = self.next_port_name();
+        }
+
         self.components.push(component);
         self.is_dirty = true;
         self.bump_topology_version();
         id
+    }
+
+    /// First unused `p<N>` port name in this schematic.
+    fn next_port_name(&self) -> String {
+        let taken: std::collections::HashSet<String> = self
+            .components
+            .iter()
+            .filter(|c| c.kind == ComponentType::Port)
+            .map(|c| c.value.trim().to_ascii_lowercase())
+            .collect();
+        (1..)
+            .map(|n| format!("p{n}"))
+            .find(|candidate| !taken.contains(candidate))
+            .expect("unbounded name space")
     }
 
     /// Add a generic library/cell/view instance at the given position.
