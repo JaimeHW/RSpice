@@ -60,6 +60,9 @@ pub struct CommandPaletteState {
     pub selected: usize,
     /// Request keyboard focus on the next frame (set when opened).
     pub want_focus: bool,
+    /// Commands run from the palette, newest first — leads the empty-query
+    /// list under a RECENT header. Survives close/reopen, capped at five.
+    pub(crate) recent: Vec<super::app_shortcuts::ShortcutCommand>,
 }
 
 impl CommandPaletteState {

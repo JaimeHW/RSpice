@@ -49,7 +49,7 @@ pub(crate) enum ShortcutCommand {
 
 impl ShortcutCommand {
     /// Every command, in the order the command palette lists them.
-    pub(crate) const ALL: [ShortcutCommand; 42] = [
+    pub(crate) const ALL: [ShortcutCommand; 45] = [
         ShortcutCommand::RunSimulation,
         ShortcutCommand::StopSimulation,
         ShortcutCommand::RunChecks,
@@ -88,6 +88,9 @@ impl ShortcutCommand {
         ShortcutCommand::ToggleBrowserPanel,
         ShortcutCommand::ToggleLogPanel,
         ShortcutCommand::FocusCellSearch,
+        ShortcutCommand::FocusDesignSearch,
+        ShortcutCommand::DescendIntoSelected,
+        ShortcutCommand::AscendHierarchy,
         ShortcutCommand::OpenPreferences,
         ShortcutCommand::ShowShortcutsHelp,
         ShortcutCommand::EscapeCancel,

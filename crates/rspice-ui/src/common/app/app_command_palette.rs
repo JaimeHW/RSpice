@@ -1,12 +1,19 @@
 //! Command palette (Ctrl+K) — keyboard-first access to every command.
 //!
 //! A floating top-center surface, lighter than a modal: mono filter input
-//! over a ranked command list with the shortcut hints right-aligned.
-//! Arrows move, Enter runs, Esc closes, click runs. Filtering prefers
-//! prefix matches, then word starts, then subsequences.
+//! over a ranked command list with the shortcut hints right-aligned
+//! (`design/app/volta-app-dialogs.html` §01). Arrows move, Enter runs,
+//! Esc closes, click runs. Filtering prefers prefix matches, then word
+//! starts, then substrings, then subsequences; ties keep the canonical
+//! order so related commands stay grouped. Matched letters render in
+//! accent so subsequence hits explain themselves. An empty query leads
+//! with the last five commands run from here, under a RECENT header.
+//! Context verbs (descend/ascend) stay listed when they cannot run,
+//! dimmed, with the reason in place of the shortcut.
 
 use egui::{Context, Key};
 
+use crate::state::ComponentType;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 
@@ -16,55 +23,124 @@ use super::app_shortcuts::ShortcutCommand;
 /// Most rows shown at once; the rest are reachable by typing.
 const MAX_ROWS: usize = 12;
 
-/// How well a command matches the query (lower sorts first).
-fn match_rank(name: &str, query: &str) -> Option<u8> {
+/// How many executed commands the RECENT section keeps.
+const MAX_RECENT: usize = 5;
+
+/// How well a command matches the query (lower sorts first), plus which
+/// display-name chars matched (char indices, ascending).
+fn match_spans(name: &str, query: &str) -> Option<(u8, Vec<usize>)> {
     if query.is_empty() {
-        return Some(3);
+        return Some((3, Vec::new()));
     }
-    let name_lower = name.to_lowercase();
-    let query_lower = query.to_lowercase();
-    if name_lower.starts_with(&query_lower) {
-        return Some(0);
+    let name_lower: Vec<char> = name.to_lowercase().chars().collect();
+    let query_lower: Vec<char> = query.to_lowercase().chars().collect();
+
+    if let Some(at) = find_chars(&name_lower, &query_lower) {
+        let rank = if at == 0 {
+            0
+        } else if name_lower[at - 1] == ' ' {
+            1
+        } else {
+            2
+        };
+        return Some((rank, (at..at + query_lower.len()).collect()));
     }
-    if name_lower
-        .split_whitespace()
-        .any(|word| word.starts_with(&query_lower))
-    {
-        return Some(1);
-    }
-    if name_lower.contains(&query_lower) {
-        return Some(2);
-    }
+
     // Subsequence: every query char appears in order.
-    let mut chars = name_lower.chars();
-    if query_lower
-        .chars()
-        .all(|q| chars.by_ref().any(|n| n == q))
-    {
-        return Some(4);
+    let mut marks = Vec::with_capacity(query_lower.len());
+    let mut next = 0;
+    for (index, ch) in name_lower.iter().enumerate() {
+        if next < query_lower.len() && *ch == query_lower[next] {
+            marks.push(index);
+            next += 1;
+        }
     }
-    None
+    (next == query_lower.len()).then_some((4, marks))
 }
 
-/// The filtered, ranked command list for a query.
-fn filtered_commands(query: &str) -> Vec<ShortcutCommand> {
-    let mut ranked: Vec<(u8, ShortcutCommand)> = ShortcutCommand::ALL
-        .iter()
-        .copied()
-        // Cancel and the palette itself are pointless from inside the palette.
-        .filter(|c| {
-            !matches!(
-                c,
-                ShortcutCommand::EscapeCancel | ShortcutCommand::OpenCommandPalette
-            )
-        })
-        .filter_map(|c| match_rank(c.display_name(), query).map(|rank| (rank, c)))
-        .collect();
-    ranked.sort_by_key(|(rank, c)| (*rank, c.display_name()));
-    ranked.into_iter().map(|(_, c)| c).collect()
+fn find_chars(haystack: &[char], needle: &[char]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&at| haystack[at..at + needle.len()] == *needle)
+}
+
+/// One renderable palette row.
+struct PaletteRow {
+    command: ShortcutCommand,
+    /// Matched display-name char indices (accent-rendered).
+    marks: Vec<usize>,
+    /// None = runnable; Some(reason) renders dimmed with the reason in
+    /// place of the shortcut, and refuses to run.
+    blocked: Option<&'static str>,
+}
+
+/// Commands the palette offers — everything except Cancel and the palette
+/// itself, which are pointless from inside the palette.
+fn palette_commands() -> impl Iterator<Item = ShortcutCommand> {
+    ShortcutCommand::ALL.iter().copied().filter(|c| {
+        !matches!(
+            c,
+            ShortcutCommand::EscapeCancel | ShortcutCommand::OpenCommandPalette
+        )
+    })
 }
 
 impl RSpiceApp {
+    /// Why a context verb cannot run right now (None = it can).
+    fn palette_blocker(&self, command: ShortcutCommand) -> Option<&'static str> {
+        match command {
+            ShortcutCommand::DescendIntoSelected => {
+                let schematic = &self.state.schematic;
+                let descendable = schematic
+                    .selection
+                    .single_component()
+                    .and_then(|id| schematic.components.iter().find(|c| c.id == id))
+                    .is_some_and(|c| {
+                        c.kind == ComponentType::CellInstance && c.library_cell.is_some()
+                    });
+                (!descendable).then_some("select one cell instance")
+            }
+            ShortcutCommand::AscendHierarchy => {
+                (self.state.workspace.hierarchy_stack.len() < 2).then_some("already at top")
+            }
+            _ => None,
+        }
+    }
+
+    /// The filtered, ranked rows plus how many of them are RECENT entries.
+    fn palette_rows(&self, query: &str) -> (Vec<PaletteRow>, usize) {
+        let row = |command: ShortcutCommand, marks: Vec<usize>| PaletteRow {
+            command,
+            marks,
+            blocked: self.palette_blocker(command),
+        };
+
+        if query.is_empty() {
+            let recents = &self.state.dialogs.command_palette.recent;
+            let mut rows: Vec<PaletteRow> = recents
+                .iter()
+                .take(MAX_RECENT)
+                .map(|c| row(*c, Vec::new()))
+                .collect();
+            let recent_count = rows.len();
+            rows.extend(
+                palette_commands()
+                    .filter(|c| !recents.contains(c))
+                    .map(|c| row(c, Vec::new())),
+            );
+            return (rows, recent_count);
+        }
+
+        let mut ranked: Vec<(u8, PaletteRow)> = palette_commands()
+            .filter_map(|c| match_spans(c.display_name(), query).map(|(r, m)| (r, row(c, m))))
+            .collect();
+        // Stable by rank only — ties keep the canonical ALL order, so the
+        // Place family stays a family instead of alphabet soup.
+        ranked.sort_by_key(|(rank, _)| *rank);
+        (ranked.into_iter().map(|(_, r)| r).collect(), 0)
+    }
+
     pub(super) fn render_command_palette(&mut self, ctx: &Context) {
         if !self.state.dialogs.command_palette.open {
             return;
@@ -72,8 +148,9 @@ impl RSpiceApp {
         let t = Tokens::get(ctx);
         let c = t.color;
 
-        let commands = filtered_commands(&self.state.dialogs.command_palette.query);
-        let visible = commands.len().min(MAX_ROWS);
+        let query = self.state.dialogs.command_palette.query.clone();
+        let (rows, recent_count) = self.palette_rows(&query);
+        let visible = rows.len().min(MAX_ROWS);
         let palette = &mut self.state.dialogs.command_palette;
         palette.selected = palette.selected.min(visible.saturating_sub(1));
 
@@ -103,6 +180,7 @@ impl RSpiceApp {
         let mut run: Option<ShortcutCommand> = None;
         let screen = ctx.screen_rect();
         let width = 520.0_f32.min(screen.width() - 48.0);
+        let query_empty = query.is_empty();
 
         egui::Area::new(egui::Id::new("volta.command_palette"))
             .order(egui::Order::Foreground)
@@ -149,19 +227,27 @@ impl RSpiceApp {
                         ui.add_space(6.0);
                         let selected = palette.selected;
 
-                        if commands.is_empty() {
+                        if rows.is_empty() {
                             ui.label(
                                 egui::RichText::new("No matching command")
                                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                                     .color(c.text_faint),
                             );
                         }
-                        for (index, command) in commands.iter().take(MAX_ROWS).enumerate() {
-                            if command_row(ui, command, index == selected) {
-                                run = Some(*command);
+                        for (index, row) in rows.iter().take(MAX_ROWS).enumerate() {
+                            if query_empty && recent_count > 0 {
+                                if index == 0 {
+                                    section_header(ui, "RECENT");
+                                }
+                                if index == recent_count {
+                                    ui.add_space(4.0);
+                                }
+                            }
+                            if command_row(ui, row, index == selected) {
+                                run = Some(row.command);
                             }
                         }
-                        let hidden = commands.len().saturating_sub(MAX_ROWS);
+                        let hidden = rows.len().saturating_sub(MAX_ROWS);
                         if hidden > 0 {
                             ui.add_space(4.0);
                             ui.label(
@@ -174,20 +260,45 @@ impl RSpiceApp {
             });
 
         if enter && run.is_none() {
-            run = commands
+            run = rows
                 .get(self.state.dialogs.command_palette.selected)
-                .copied();
+                .filter(|row| row.blocked.is_none())
+                .map(|row| row.command);
         }
         if let Some(command) = run {
+            let recent = &mut self.state.dialogs.command_palette.recent;
+            recent.retain(|c| *c != command);
+            recent.insert(0, command);
+            recent.truncate(MAX_RECENT);
             self.state.dialogs.command_palette.open = false;
             self.execute_shortcut_command(command);
         }
     }
 }
 
-/// One palette row: name left, shortcut hint right; accent edge when
-/// selected. Returns true when clicked.
-fn command_row(ui: &mut egui::Ui, command: &ShortcutCommand, selected: bool) -> bool {
+/// Small mono section header inside the list (RECENT).
+fn section_header(ui: &mut egui::Ui, label: &str) {
+    let c = Tokens::get(ui.ctx()).color;
+    let mut job = egui::text::LayoutJob::default();
+    job.append(
+        label,
+        0.0,
+        egui::TextFormat {
+            font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+            color: c.text_faint,
+            extra_letter_spacing: 0.1 * tokens::FS_0,
+            ..Default::default()
+        },
+    );
+    ui.add_space(2.0);
+    ui.label(job);
+    ui.add_space(2.0);
+}
+
+/// One palette row: name left (matched chars in accent), shortcut hint —
+/// or the blocked reason — right; accent edge when selected. Returns true
+/// when a runnable row is clicked.
+fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
@@ -199,9 +310,10 @@ fn command_row(ui: &mut egui::Ui, command: &ShortcutCommand, selected: bool) -> 
         return false;
     }
 
+    let blocked = row.blocked.is_some();
     let hover = ui
         .ctx()
-        .animate_bool_with_time(response.id, response.hovered(), 0.12);
+        .animate_bool_with_time(response.id, response.hovered() && !blocked, 0.12);
     let painter = ui.painter();
     if selected || hover > 0.0 {
         let fill = if selected {
@@ -219,24 +331,61 @@ fn command_row(ui: &mut egui::Ui, command: &ShortcutCommand, selected: bool) -> 
         );
     }
 
-    painter.text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        command.display_name(),
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        if selected { c.text } else { c.text_dim },
+    let base_color = if blocked {
+        c.text_faint
+    } else if selected {
+        c.text
+    } else {
+        c.text_dim
+    };
+    let name = row.command.display_name();
+    let mut job = egui::text::LayoutJob::default();
+    let mut next_mark = 0;
+    for (index, ch) in name.chars().enumerate() {
+        let marked = next_mark < row.marks.len() && row.marks[next_mark] == index;
+        if marked {
+            next_mark += 1;
+        }
+        let format = if marked {
+            egui::TextFormat {
+                font_id: theme::sans(tokens::FS_1, FontWeight::Medium),
+                color: c.accent,
+                ..Default::default()
+            }
+        } else {
+            egui::TextFormat {
+                font_id: theme::sans(tokens::FS_1, FontWeight::Regular),
+                color: base_color,
+                ..Default::default()
+            }
+        };
+        let mut buffer = [0u8; 4];
+        job.append(ch.encode_utf8(&mut buffer), 0.0, format);
+    }
+    let galley = ui.fonts(|f| f.layout_job(job));
+    painter.galley(
+        egui::pos2(
+            rect.left() + 12.0,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        base_color,
     );
-    let shortcut = command.shortcut_string();
-    if !shortcut.is_empty() {
+
+    let right_text = row.blocked.unwrap_or_else(|| row.command.shortcut_string());
+    if !right_text.is_empty() {
         painter.text(
             egui::pos2(rect.right() - 10.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
-            shortcut,
+            right_text,
             theme::mono(tokens::FS_0, FontWeight::Regular),
             c.text_faint,
         );
     }
 
+    if blocked {
+        return false;
+    }
     response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
