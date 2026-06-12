@@ -287,3 +287,39 @@ pub(super) fn map_hdf5_output_error(path: &Path, err: crate::hdf5::Hdf5Error) ->
         source: std::io::Error::other(err.to_string()),
     }
 }
+
+/// Reject results containing NaN/Inf: the solver produced a non-physical
+/// solution (singular system, voltage-source loop, blow-up) and exporting
+/// it — or judging measurements against it — would hand automation garbage
+/// with a passing exit status.
+///
+/// `signals` yields `(display name, series)` pairs; scalars pass a
+/// one-element slice. Skipped entirely under `--allow-nonfinite`.
+pub(super) fn ensure_finite_series<'a>(
+    allow: bool,
+    analysis: &str,
+    signals: impl IntoIterator<Item = (&'a str, &'a [f64])>,
+) -> Result<(), CliError> {
+    if allow {
+        return Ok(());
+    }
+    for (name, values) in signals {
+        if let Some(index) = values.iter().position(|v| !v.is_finite()) {
+            let location = if values.len() > 1 {
+                format!(" at point {index}")
+            } else {
+                String::new()
+            };
+            return Err(CliError::SimulationError {
+                message: format!(
+                    "{name} is non-finite ({}){location}; the solution is not \
+                     physical — check the circuit topology (e.g. conflicting \
+                     voltage sources). Use --allow-nonfinite to export anyway.",
+                    values[index]
+                ),
+                analysis: Some(analysis.to_string()),
+            });
+        }
+    }
+    Ok(())
+}

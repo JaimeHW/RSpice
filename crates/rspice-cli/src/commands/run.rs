@@ -437,7 +437,7 @@ fn run_deck(
 
         ran_analysis = true;
         if let Err(e) = ctx.run_analysis(analysis) {
-            simulation_error = Some(e.to_string());
+            simulation_error = Some(simulation_error_message(&e));
             break;
         }
     }
@@ -447,7 +447,7 @@ fn run_deck(
             println!("No analysis commands - running default DC OP...");
         }
         if let Err(e) = basic::run_dc_op(&ctx) {
-            simulation_error = Some(e.to_string());
+            simulation_error = Some(simulation_error_message(&e));
         }
     }
 
@@ -468,6 +468,16 @@ fn run_deck(
         error: simulation_error,
         measurements,
     })
+}
+
+/// Failure text for the run report: simulation errors carry their bare
+/// message (re-wrapping at exit would otherwise print
+/// "Simulation failed: Simulation failed: ...").
+fn simulation_error_message(e: &CliError) -> String {
+    match e {
+        CliError::SimulationError { message, .. } => message.clone(),
+        other => other.to_string(),
+    }
 }
 
 /// Write the CI/CD report artifacts covering every run.

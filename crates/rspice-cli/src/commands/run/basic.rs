@@ -15,6 +15,30 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
 
     match ctx.engine.run_dc_op_with_report(ctx.netlist) {
         Ok((result, op_report)) => {
+            super::shared::ensure_finite_series(
+                ctx.args.allow_nonfinite,
+                "DC OP",
+                (1..result.node_voltages.len())
+                    .map(|node| {
+                        let name = result
+                            .node_names
+                            .get(node)
+                            .map(|n| n.as_str())
+                            .unwrap_or("node");
+                        (name, std::slice::from_ref(&result.node_voltages[node]))
+                    })
+                    .chain(result.branch_currents.iter().enumerate().map(
+                        |(index, current)| {
+                            let name = result
+                                .branch_names
+                                .get(index)
+                                .map(|n| n.as_str())
+                                .unwrap_or("branch");
+                            (name, std::slice::from_ref(current))
+                        },
+                    )),
+            )?;
+
             if !ctx.quiet {
                 let voltage_signals = dc_operating_point_voltage_signals(&result);
                 let current_signals = dc_operating_point_current_signals(&result);
@@ -273,6 +297,21 @@ pub(super) fn run_dc_sweep(
         .run_dc_sweep(ctx.netlist, source, start, stop, step)
     {
         Ok(results) => {
+            for (_, point) in &results {
+                super::shared::ensure_finite_series(
+                    ctx.args.allow_nonfinite,
+                    "DC Sweep",
+                    (1..point.node_voltages.len()).map(|node| {
+                        let name = point
+                            .node_names
+                            .get(node)
+                            .map(|n| n.as_str())
+                            .unwrap_or("node");
+                        (name, std::slice::from_ref(&point.node_voltages[node]))
+                    }),
+                )?;
+            }
+
             if !ctx.quiet {
                 println!("DC Sweep: {} points computed", results.len());
             }
@@ -423,6 +462,33 @@ pub(super) fn run_transient(
 
     match result {
         Ok(result) => {
+            super::shared::ensure_finite_series(
+                ctx.args.allow_nonfinite,
+                "Transient",
+                result
+                    .voltages
+                    .iter()
+                    .enumerate()
+                    .map(|(index, waveform)| {
+                        let name = result
+                            .node_names
+                            .get(index)
+                            .map(|n| n.as_str())
+                            .unwrap_or("node");
+                        (name, waveform.as_slice())
+                    })
+                    .chain(result.branch_currents.iter().enumerate().map(
+                        |(index, waveform)| {
+                            let name = result
+                                .branch_names
+                                .get(index)
+                                .map(|n| n.as_str())
+                                .unwrap_or("branch");
+                            (name, waveform.as_slice())
+                        },
+                    )),
+            )?;
+
             if !ctx.quiet && !ctx.compress {
                 println!(
                     "✓ Transient complete: {} time points computed",

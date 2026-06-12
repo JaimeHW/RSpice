@@ -103,6 +103,28 @@ pub(super) fn run_ac(
 
     match ctx.engine.run_ac(ctx.netlist, &frequencies) {
         Ok(results) => {
+            if !ctx.args.allow_nonfinite {
+                for result in &results {
+                    for (node, voltage) in result.voltages.iter().enumerate() {
+                        if !voltage.re.is_finite() || !voltage.im.is_finite() {
+                            let name = result
+                                .node_names
+                                .get(node)
+                                .map(|n| n.as_str())
+                                .unwrap_or("node");
+                            return Err(CliError::SimulationError {
+                                message: format!(
+                                    "{name} is non-finite at {:e} Hz; the solution is \
+                                     not physical. Use --allow-nonfinite to export anyway.",
+                                    result.frequency
+                                ),
+                                analysis: Some("AC".to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+
             if !ctx.quiet {
                 println!("AC Analysis: {} frequency points", results.len());
                 if ctx.verbose && !results.is_empty() {
@@ -230,6 +252,23 @@ pub(super) fn run_noise(
         ctx.engine.config().temperature,
     ) {
         Ok(results) => {
+            if !ctx.args.allow_nonfinite {
+                for result in &results {
+                    if !result.output_noise_rms().is_finite()
+                        || !result.input_referred_rms().is_finite()
+                    {
+                        return Err(CliError::SimulationError {
+                            message: format!(
+                                "noise spectrum is non-finite at {:e} Hz; the solution \
+                                 is not physical. Use --allow-nonfinite to export anyway.",
+                                result.frequency
+                            ),
+                            analysis: Some("Noise".to_string()),
+                        });
+                    }
+                }
+            }
+
             if !ctx.quiet {
                 println!("Noise Analysis: {} frequency points", results.len());
                 if let Some(reference) = reference_node {

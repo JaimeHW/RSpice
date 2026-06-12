@@ -110,6 +110,11 @@ pub struct RunArgs {
     #[arg(long)]
     pub allow_failed_meas: bool,
 
+    /// Export results even when they contain NaN/Inf (default: non-finite
+    /// results are a simulation error)
+    #[arg(long)]
+    pub allow_nonfinite: bool,
+
     /// Show progress bar with ETA for transient simulation
     #[arg(long)]
     pub progress: bool,

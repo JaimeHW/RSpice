@@ -123,6 +123,47 @@ fn unevaluated_measurement_exits_three() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Conflicting parallel voltage sources produce a singular system; the
+/// NaN/Inf solution must be an error, not a quiet success.
+#[test]
+fn nonfinite_result_is_a_simulation_error() {
+    let dir = test_dir("nonfinite");
+    let deck = dir.join("vloop.sp");
+    std::fs::write(
+        &deck,
+        "* conflicting parallel voltage sources\n\
+         V1 a 0 5\n\
+         V2 a 0 3\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&["--quiet", "run", deck.to_str().unwrap()]);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "non-finite OP must exit 1; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("non-finite"),
+        "stderr should explain the non-finite solution: {stderr}"
+    );
+
+    // The escape hatch restores the old behavior for debugging.
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--allow-nonfinite",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn parse_error_exits_sixty_five() {
     let dir = test_dir("parse");
