@@ -214,7 +214,8 @@ impl<'a> RunContext<'a> {
                 start,
                 stop,
                 step,
-            } => basic::run_dc_sweep(self, source, *start, *stop, *step)?,
+                sweep2,
+            } => basic::run_dc_sweep(self, source, *start, *stop, *step, sweep2.as_ref())?,
             AnalysisCommand::Tran {
                 step,
                 stop,

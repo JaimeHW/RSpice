@@ -162,6 +162,85 @@ impl Engine {
         self.run_dc_sweep_with_abort(netlist, source_name, start, stop, step, &NoAbort)
     }
 
+    /// Two-source DC sweep: the first (inner) source sweeps fully at every
+    /// value of the second (outer) source, ngspice-style; results are the
+    /// inner sweeps concatenated in outer order, each point tagged with the
+    /// inner sweep value. With no second sweep this is a plain DC sweep.
+    ///
+    /// The outer source must be a top-level voltage source (or `TEMP`).
+    pub fn run_dc_sweep2_with_abort(
+        &self,
+        netlist: &Netlist,
+        source_name: &str,
+        start: Value,
+        stop: Value,
+        step: Value,
+        sweep2: Option<&crate::netlist::DcSecondSweep>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<(Value, SimulationResult)>, SimulationError> {
+        let Some(sweep2) = sweep2 else {
+            return self.run_dc_sweep_with_abort(netlist, source_name, start, stop, step, abort);
+        };
+
+        use crate::analysis::DcSweep;
+        let outer = DcSweep::new(sweep2.source.clone(), sweep2.start, sweep2.stop, sweep2.step);
+        let outer_points = outer.points();
+        if outer_points.is_empty() {
+            return Err(SimulationError::Circuit(
+                "Invalid second-source sweep parameters".to_string(),
+            ));
+        }
+
+        let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
+            || sweep2.source.eq_ignore_ascii_case("TEMPER");
+
+        let mut results = Vec::new();
+        for &outer_value in &outer_points {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let mut swept = netlist.clone();
+            if outer_is_temp {
+                swept.options.temp = Some(outer_value);
+                swept.params.set("TEMP", outer_value);
+                swept.params.set("TEMPER", outer_value);
+            } else {
+                Self::override_source_dc(&mut swept, &sweep2.source, outer_value)?;
+            }
+            let inner =
+                self.run_dc_sweep_with_abort(&swept, source_name, start, stop, step, abort)?;
+            results.extend(inner);
+        }
+        Ok(results)
+    }
+
+    /// Set the DC operating value of a named top-level voltage source.
+    fn override_source_dc(
+        netlist: &mut Netlist,
+        source_name: &str,
+        value: Value,
+    ) -> Result<(), SimulationError> {
+        use crate::netlist::ElementKind;
+        for element in &mut netlist.elements {
+            if element.name.eq_ignore_ascii_case(source_name) {
+                return match &mut element.kind {
+                    ElementKind::VoltageSource(spec) => {
+                        *spec = spec.clone().with_dc_value(value);
+                        Ok(())
+                    }
+                    _ => Err(SimulationError::Circuit(format!(
+                        "Second DC sweep source '{}' must be a voltage source",
+                        source_name
+                    ))),
+                };
+            }
+        }
+        Err(SimulationError::Circuit(format!(
+            "Second DC sweep source not found: {}",
+            source_name
+        )))
+    }
+
     pub fn run_dc_sweep_with_abort(
         &self,
         netlist: &Netlist,

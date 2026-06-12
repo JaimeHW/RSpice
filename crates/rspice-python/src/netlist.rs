@@ -54,7 +54,14 @@ fn describe_analysis(analysis: &AnalysisCommand) -> String {
             start,
             stop,
             step,
-        } => format!(".dc {source} {start} {stop} {step}"),
+            sweep2,
+        } => match sweep2 {
+            Some(outer) => format!(
+                ".dc {source} {start} {stop} {step} {} {} {} {}",
+                outer.source, outer.start, outer.stop, outer.step
+            ),
+            None => format!(".dc {source} {start} {stop} {step}"),
+        },
         AnalysisCommand::Ac {
             variation,
             points,

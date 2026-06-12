@@ -36,11 +36,29 @@ pub fn parse_command(
             let stop = expect_value(stream, line_num, params)?;
             let step = expect_value(stream, line_num, params)?;
 
+            // Optional second (outer) source: .DC V1 a b s V2 a2 b2 s2
+            skip_commas(stream);
+            let sweep2 = if matches!(stream.peek().kind, TokenKind::Ident(_)) {
+                let source2 = expect_ident(stream, line_num)?;
+                let start2 = expect_value(stream, line_num, params)?;
+                let stop2 = expect_value(stream, line_num, params)?;
+                let step2 = expect_value(stream, line_num, params)?;
+                Some(super::DcSecondSweep {
+                    source: source2,
+                    start: start2,
+                    stop: stop2,
+                    step: step2,
+                })
+            } else {
+                None
+            };
+
             analyses.push(AnalysisCommand::Dc {
                 source,
                 start,
                 stop,
                 step,
+                sweep2,
             });
         }
         ".AC" => {

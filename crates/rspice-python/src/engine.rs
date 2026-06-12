@@ -318,13 +318,30 @@ impl PyEngine {
                     start,
                     stop,
                     step,
+                    sweep2,
                 } => {
-                    let result = self.run_dc_sweep(py, netlist, source, *start, *stop, *step)?;
+                    let engine = self.engine_for_netlist(&netlist.inner);
+                    let results = run_interruptible(py, |abort| {
+                        engine.run_dc_sweep2_with_abort(
+                            &netlist.inner,
+                            source,
+                            *start,
+                            *stop,
+                            *step,
+                            sweep2.as_ref(),
+                            abort,
+                        )
+                    })?;
+                    let result = PyDcSweepResult::new(results);
                     dc = Some(Py::new(py, result)?);
-                    records.push(PyAnalysisRecord::executed(
-                        "dc",
-                        format!(".dc {source} {start} {stop} {step}"),
-                    ));
+                    let description = match sweep2 {
+                        Some(outer) => format!(
+                            ".dc {source} {start} {stop} {step} {} {} {} {}",
+                            outer.source, outer.start, outer.stop, outer.step
+                        ),
+                        None => format!(".dc {source} {start} {stop} {step}"),
+                    };
+                    records.push(PyAnalysisRecord::executed("dc", description));
                 }
                 AnalysisCommand::Tran {
                     step,

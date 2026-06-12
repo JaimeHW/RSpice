@@ -697,6 +697,15 @@ pub enum MesfetType {
     Pmf, // P-channel MESFET
 }
 
+/// Second (outer) source of a two-source `.DC` sweep.
+#[derive(Debug, Clone)]
+pub struct DcSecondSweep {
+    pub source: String,
+    pub start: Value,
+    pub stop: Value,
+    pub step: Value,
+}
+
 //=============================================================================
 // Source Specifications
 //=============================================================================
@@ -901,6 +910,47 @@ impl SourceSpec {
             },
         }
     }
+
+    /// Replace the DC operating value, preserving AC and transient parts.
+    /// A purely AC or transient spec gains an explicit DC component.
+    pub fn with_dc_value(self, value: Value) -> SourceSpec {
+        match self {
+            SourceSpec::Dc(_) => SourceSpec::Dc(value),
+            SourceSpec::Ac { magnitude, phase } => SourceSpec::DcAc {
+                dc_value: value,
+                ac_magnitude: magnitude,
+                ac_phase: phase,
+            },
+            SourceSpec::DcAc {
+                ac_magnitude,
+                ac_phase,
+                ..
+            } => SourceSpec::DcAc {
+                dc_value: value,
+                ac_magnitude,
+                ac_phase,
+            },
+            SourceSpec::DcTransient { transient, .. } => SourceSpec::DcTransient {
+                dc_value: value,
+                transient,
+            },
+            SourceSpec::DcAcTransient {
+                ac_magnitude,
+                ac_phase,
+                transient,
+                ..
+            } => SourceSpec::DcAcTransient {
+                dc_value: value,
+                ac_magnitude,
+                ac_phase,
+                transient,
+            },
+            transient => SourceSpec::DcTransient {
+                dc_value: value,
+                transient: Box::new(transient),
+            },
+        }
+    }
 }
 
 //=============================================================================
@@ -913,12 +963,15 @@ pub enum AnalysisCommand {
     /// DC operating point: .OP
     Op,
 
-    /// DC sweep: .DC source start stop step
+    /// DC sweep: .DC source start stop step [source2 start2 stop2 step2]
     Dc {
         source: String,
         start: Value,
         stop: Value,
         step: Value,
+        /// Optional second (outer) sweep source: the first source sweeps
+        /// fully at every value of this one, ngspice-style.
+        sweep2: Option<DcSecondSweep>,
     },
 
     /// AC analysis: .AC DEC|LIN|OCT np fstart fstop

@@ -284,20 +284,28 @@ pub(super) fn run_dc_sweep(
     start: f64,
     stop: f64,
     step: f64,
+    sweep2: Option<&rspice_core::netlist::DcSecondSweep>,
 ) -> Result<(), CliError> {
     if !ctx.quiet {
-        println!(
-            "Running DC sweep on {} from {} to {} by {}...",
-            source, start, stop, step
-        );
+        match sweep2 {
+            Some(outer) => println!(
+                "Running DC sweep on {} from {} to {} by {} for each {} from {} to {} by {}...",
+                source, start, stop, step, outer.source, outer.start, outer.stop, outer.step
+            ),
+            None => println!(
+                "Running DC sweep on {} from {} to {} by {}...",
+                source, start, stop, step
+            ),
+        }
     }
 
-    match ctx.engine.run_dc_sweep_with_abort(
+    match ctx.engine.run_dc_sweep2_with_abort(
         ctx.netlist,
         source,
         start,
         stop,
         step,
+        sweep2,
         &crate::abort::ProcessAbort,
     ) {
         Ok(results) => {
