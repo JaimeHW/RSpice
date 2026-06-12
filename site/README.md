@@ -12,8 +12,9 @@ here, run the deploy workflow, and that exact byte content goes live.
   (rspice-wasm bundle) likewise.
 - `assets/` — fonts, og-card, shared css/js.
 
-`design/*.html` are design explorations with a sandbox lifecycle — they
-are NOT the site. When a design lands, port it here deliberately.
+The mockups under `design/` (see `design/README.md` for the index) are
+design explorations with a sandbox lifecycle — they are NOT the site.
+When a design lands, port it here deliberately.
 
 Deploying: `gh workflow run deploy-site` (or push a `site-v*` tag).
 The workflow builds both wasm bundles from the tagged/dispatched ref,
