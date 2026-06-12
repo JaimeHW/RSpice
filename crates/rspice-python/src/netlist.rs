@@ -1,14 +1,25 @@
 //! Netlist Python bindings
 //!
-//! Provides Python access to netlist parsing and manipulation:
-//! - Parse netlists from strings or files
-//! - Handle include directives with path resolution
-//! - Access parsed netlist information
+//! Provides Python access to netlist parsing and introspection.
+//!
+//! Title handling: classic SPICE treats the first line of a deck as a title,
+//! which silently swallows the first element of inline strings (or turns a
+//! statement-looking title into a device). The Python API avoids both traps
+//! with an explicit rule:
+//!
+//! - [`PyNetlist::parse`] treats the content as *statements only*. Unless the
+//!   first non-blank line is a `*` comment (which becomes the title), a
+//!   synthetic title is prepended — a typo'd first element raises ParseError
+//!   instead of becoming the title.
+//! - [`PyNetlist::parse_spice`] applies raw SPICE deck semantics: the first
+//!   line is always the title.
+//! - [`PyNetlist::parse_file`] keeps raw SPICE semantics, matching every
+//!   other SPICE tool's treatment of `.sp`/`.cir` files.
 
 use pyo3::prelude::*;
 use rspice_core::Netlist;
+use rspice_core::netlist::AnalysisCommand;
 use std::borrow::Cow;
-use std::path::Path;
 
 /// A parsed SPICE netlist ready for simulation
 ///
@@ -23,83 +34,96 @@ pub struct PyNetlist {
     pub(crate) inner: Netlist,
 }
 
-impl PyNetlist {
-    fn parse_content(content: &str) -> Result<Netlist, rspice_core::error::ParseError> {
-        let normalized = normalize_titleless_netlist(content);
-        Netlist::parse(&normalized)
-    }
-
-    fn parse_content_with_includes(
-        content: &str,
-        base_path: &Path,
-    ) -> Result<Netlist, rspice_core::error::ParseError> {
-        let normalized = normalize_titleless_netlist(content);
-        Netlist::parse_with_path(&normalized, base_path)
+/// Prepend a synthetic title unless the content already starts with a
+/// `*` comment line (which SPICE treats as the title here).
+fn ensure_statement_content(content: &str) -> Cow<'_, str> {
+    let first_meaningful = content.lines().map(str::trim).find(|line| !line.is_empty());
+    match first_meaningful {
+        Some(line) if line.starts_with('*') => Cow::Borrowed(content),
+        Some(_) => Cow::Owned(format!("* Untitled circuit\n{content}")),
+        None => Cow::Borrowed(content),
     }
 }
 
-fn normalize_titleless_netlist(content: &str) -> Cow<'_, str> {
-    if content
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .is_some_and(|line| line.starts_with('*'))
-    {
-        return Cow::Borrowed(content);
-    }
-
-    let meaningful_lines: Vec<&str> = content
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('*'))
-        .take(2)
-        .collect();
-
-    if meaningful_lines.len() == 2
-        && meaningful_lines
-            .iter()
-            .copied()
-            .all(parses_as_spice_statement)
-    {
-        Cow::Owned(format!("* Untitled circuit\n{content}"))
-    } else {
-        Cow::Borrowed(content)
-    }
-}
-
-fn parses_as_spice_statement(line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed.starts_with('*') || trimmed.starts_with('+') {
-        return false;
-    }
-
-    let candidate = format!("* Statement probe\n{trimmed}\n.end");
-    match Netlist::parse(&candidate) {
-        Ok(parsed) => {
-            if trimmed.starts_with('.') {
-                return true;
+/// Render an analysis command as a short human-readable summary.
+fn describe_analysis(analysis: &AnalysisCommand) -> String {
+    match analysis {
+        AnalysisCommand::Op => ".op".to_string(),
+        AnalysisCommand::Dc {
+            source,
+            start,
+            stop,
+            step,
+        } => format!(".dc {source} {start} {stop} {step}"),
+        AnalysisCommand::Ac {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        } => format!(
+            ".ac {} {points} {start_freq} {stop_freq}",
+            format!("{variation:?}").to_lowercase()
+        ),
+        AnalysisCommand::Tran {
+            step,
+            stop,
+            start,
+            max_step,
+        } => {
+            let mut out = format!(".tran {step} {stop}");
+            if let Some(start) = start {
+                out.push_str(&format!(" {start}"));
             }
-
-            !parsed.elements.is_empty()
-                || !parsed.analyses.is_empty()
-                || !parsed.models.is_empty()
-                || !parsed.subcircuits.is_empty()
-                || !parsed.global_nodes.is_empty()
-                || !parsed.measurements.is_empty()
-                || !parsed.veriloga_includes.is_empty()
-                || !parsed.initial_conditions.is_empty()
-                || !parsed.node_sets.is_empty()
+            if let Some(max_step) = max_step {
+                out.push_str(&format!(" {max_step}"));
+            }
+            out
         }
-        Err(_) => false,
+        AnalysisCommand::Noise {
+            output_node,
+            input_source,
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            ..
+        } => format!(
+            ".noise v({output_node}) {input_source} {} {points} {start_freq} {stop_freq}",
+            format!("{variation:?}").to_lowercase()
+        ),
+        AnalysisCommand::Tf {
+            output_node,
+            input_source,
+            output_is_current,
+            ..
+        } => {
+            let probe = if *output_is_current { "i" } else { "v" };
+            format!(".tf {probe}({output_node}) {input_source}")
+        }
+        AnalysisCommand::Four {
+            fundamental,
+            outputs,
+            num_harmonics,
+        } => format!(
+            ".four {fundamental} {} ({num_harmonics} harmonics)",
+            outputs.join(" ")
+        ),
+        other => format!("{other:?}"),
     }
 }
 
 #[pymethods]
 impl PyNetlist {
-    /// Parse a netlist from a string
+    /// Parse a netlist from a string of circuit statements
+    ///
+    /// Every line is treated as a statement. If the first non-blank line is
+    /// a `*` comment it becomes the title; otherwise a synthetic title is
+    /// added. A malformed first element therefore raises ParseError instead
+    /// of being silently consumed as a title (use `parse_spice` for raw
+    /// SPICE deck semantics).
     ///
     /// Args:
-    ///     content: SPICE netlist content as a string
+    ///     content: SPICE circuit statements
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
@@ -117,14 +141,38 @@ impl PyNetlist {
     ///     ... ''')
     #[staticmethod]
     pub fn parse(content: &str) -> PyResult<Self> {
-        let inner = Self::parse_content(content).map_err(crate::errors::parse_error_to_pyerr)?;
+        let normalized = ensure_statement_content(content);
+        let inner = Netlist::parse(&normalized).map_err(crate::errors::parse_error_to_pyerr)?;
+        Ok(Self { inner })
+    }
+
+    /// Parse a raw SPICE deck where the first line is always the title
+    ///
+    /// Mirrors classic SPICE semantics exactly: line one is the title even
+    /// if it looks like an element statement.
+    ///
+    /// Args:
+    ///     content: Raw SPICE deck text
+    ///
+    /// Returns:
+    ///     Netlist: Parsed netlist object
+    ///
+    /// Raises:
+    ///     ParseError: If the netlist contains syntax errors
+    ///
+    /// Example:
+    ///     >>> netlist = Netlist.parse_spice("My Amplifier\nV1 1 0 10\n.end")
+    #[staticmethod]
+    pub fn parse_spice(content: &str) -> PyResult<Self> {
+        let inner = Netlist::parse(content).map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
 
     /// Parse a netlist from a file with include resolution
     ///
-    /// This method reads a netlist file and automatically expands any
-    /// .include and .lib directives relative to the file's location.
+    /// Reads a SPICE deck (first line is the title, per universal `.sp`
+    /// convention) and expands `.include`/`.lib` directives relative to the
+    /// file's location.
     ///
     /// Args:
     ///     path: Path to the netlist file (str or os.PathLike)
@@ -144,26 +192,32 @@ impl PyNetlist {
         Ok(Self { inner })
     }
 
-    /// Parse a netlist from a string with include resolution
+    /// Parse statements from a string, resolving includes against a base path
     ///
-    /// Like parse(), but resolves .include and .lib directives relative
-    /// to the specified base path.
+    /// Same statement semantics as `parse`, but `.include`/`.lib` directives
+    /// resolve relative to `base_path`.
     ///
     /// Args:
-    ///     content: SPICE netlist content as a string
-    ///     base_path: Base path for resolving include directives (str or os.PathLike)
+    ///     content: SPICE circuit statements
+    ///     base_path: Base path for resolving include directives
     ///
     /// Returns:
     ///     Netlist: Parsed netlist object
     ///
     /// Raises:
     ///     ParseError: If the netlist contains syntax errors
-    ///
-    /// Example:
-    ///     >>> netlist = Netlist.parse_with_includes(content, "circuits/")
     #[staticmethod]
     pub fn parse_with_includes(content: &str, base_path: std::path::PathBuf) -> PyResult<Self> {
-        let inner = Self::parse_content_with_includes(content, &base_path)
+        let normalized = ensure_statement_content(content);
+        // Core resolves includes relative to the *parent* of the given path
+        // (it expects a file path). Accept a directory by anchoring a
+        // synthetic file inside it.
+        let anchor = if base_path.is_dir() {
+            base_path.join("__inline_netlist__.sp")
+        } else {
+            base_path
+        };
+        let inner = Netlist::parse_with_path(&normalized, &anchor)
             .map_err(crate::errors::parse_error_to_pyerr)?;
         Ok(Self { inner })
     }
@@ -192,10 +246,58 @@ impl PyNetlist {
         self.inner.analyses.len()
     }
 
+    /// Get the number of .MEAS statements in the netlist
+    #[getter]
+    fn num_measurements(&self) -> usize {
+        self.inner.measurements.len()
+    }
+
     /// Get the netlist title (first line comment)
     #[getter]
     fn title(&self) -> String {
         self.inner.title.clone()
+    }
+
+    /// Names of all device elements, in netlist order
+    #[getter]
+    fn element_names(&self) -> Vec<String> {
+        self.inner.elements.iter().map(|e| e.name.clone()).collect()
+    }
+
+    /// Names of all .MODEL definitions
+    #[getter]
+    fn model_names(&self) -> Vec<String> {
+        self.inner.models.iter().map(|m| m.name.clone()).collect()
+    }
+
+    /// Names of all .SUBCKT definitions
+    #[getter]
+    fn subcircuit_names(&self) -> Vec<String> {
+        self.inner
+            .subcircuits
+            .iter()
+            .map(|s| s.name.clone())
+            .collect()
+    }
+
+    /// Names of all .MEAS statements
+    #[getter]
+    fn measurement_names(&self) -> Vec<String> {
+        self.inner
+            .measurements
+            .iter()
+            .map(|m| m.name.clone())
+            .collect()
+    }
+
+    /// Human-readable summaries of the netlist's analysis directives
+    ///
+    /// Example:
+    ///     >>> netlist.analyses
+    ///     ['.tran 1e-06 0.001', '.ac dec 10 1 1000000']
+    #[getter]
+    fn analyses(&self) -> Vec<String> {
+        self.inner.analyses.iter().map(describe_analysis).collect()
     }
 
     /// Check if a node is marked as global
@@ -205,11 +307,12 @@ impl PyNetlist {
 
     fn __repr__(&self) -> String {
         format!(
-            "Netlist(elements={}, models={}, subcircuits={}, analyses={})",
+            "Netlist(elements={}, models={}, subcircuits={}, analyses={}, measurements={})",
             self.inner.elements.len(),
             self.inner.models.len(),
             self.inner.subcircuits.len(),
-            self.inner.analyses.len()
+            self.inner.analyses.len(),
+            self.inner.measurements.len()
         )
     }
 
