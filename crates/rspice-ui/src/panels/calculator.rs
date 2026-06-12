@@ -241,12 +241,11 @@ impl CalculatorPanel {
         let c = t.color;
 
         pane_header(ui, |ui| {
-            let width = (ui.available_width() - 10.0).max(40.0);
             ui.add(
                 egui::TextEdit::singleline(&mut self.signal_filter)
                     .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                     .hint_text("Filter signals…")
-                    .desired_width(width),
+                    .desired_width(ui.available_width()),
             );
         });
 

@@ -91,23 +91,22 @@ pub fn two_pane(
 }
 
 /// The `.hd` strip at the top of a pane: 36 pt, contents centered
-/// vertically with 10 pt side padding, hairline rule underneath.
+/// vertically inside 10 pt side padding (right-aligned sub-layouts land
+/// on the padded edge, not the pane border), hairline rule underneath.
 pub fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
-    let response = ui.allocate_ui_with_layout(
-        vec2(ui.available_width(), PANE_HEADER_H),
-        Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.set_min_size(vec2(ui.available_width(), PANE_HEADER_H));
-            ui.spacing_mut().item_spacing.x = 8.0;
-            ui.add_space(10.0);
-            add_contents(ui);
-            ui.add_space(10.0);
-        },
+    let (rect, _) =
+        ui.allocate_exact_size(vec2(ui.available_width(), PANE_HEADER_H), Sense::hover());
+    let mut header_ui = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.shrink2(vec2(10.0, 0.0)))
+            .layout(Layout::left_to_right(Align::Center)),
     );
+    header_ui.spacing_mut().item_spacing.x = 8.0;
+    add_contents(&mut header_ui);
     ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom() - 0.5,
+        rect.x_range(),
+        rect.bottom() - 0.5,
         Stroke::new(1.0, t.color.border),
     );
 }
@@ -118,23 +117,16 @@ pub fn pane_footer(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-        ui.allocate_ui_with_layout(
-            vec2(ui.available_width(), PANE_FOOTER_H),
-            Layout::left_to_right(egui::Align::Center),
-            |ui| {
-                ui.set_min_size(vec2(ui.available_width(), PANE_FOOTER_H));
-                ui.add_space(10.0);
-                ui.label(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(c.text_faint),
-                );
-            },
-        );
-        ui.painter().hline(
-            ui.min_rect().x_range(),
-            ui.min_rect().top() + 0.5,
-            Stroke::new(1.0, c.border),
+        let (rect, _) =
+            ui.allocate_exact_size(vec2(ui.available_width(), PANE_FOOTER_H), Sense::hover());
+        let painter = ui.painter();
+        painter.hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, c.border));
+        painter.text(
+            pos2(rect.left() + 10.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            text,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            c.text_faint,
         );
     });
 }
