@@ -2226,8 +2226,11 @@ impl Engine {
                         std::sync::atomic::AtomicUsize::new(0);
                     let log_count = DEVICE_TRUNC_REJECT_LOG_COUNT
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // Routine LTE step-rejection diagnostics, not a user-facing
+                    // condition: keep them at debug so healthy runs have a
+                    // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
-                        log::warn!(
+                        log::debug!(
                             "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
