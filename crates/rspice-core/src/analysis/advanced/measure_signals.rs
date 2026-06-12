@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 use super::measure::{MeasureEngine, MeasureResult, MeasureStatement};
 use crate::Value;
+use crate::analysis::AcResult;
 use crate::engine::TransientResult;
 use crate::netlist::Netlist;
 use crate::solver::SimulationResult;
@@ -162,6 +163,99 @@ impl DcSweepSeries {
     }
 }
 
+/// Owned per-signal series derived from an AC sweep, from which a
+/// measurement signal table can be borrowed.
+///
+/// AC quantities are complex; measurements address the standard derived
+/// real series. For a node `x`: `V(x)`/`VM(x)` magnitude, `VDB(x)`
+/// 20·log10 magnitude, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` real and
+/// imaginary parts; branch currents use the `I` prefix the same way. The
+/// frequency axis is reachable as `TIME` (the measurement abscissa),
+/// `FREQUENCY`, and `FREQ`.
+pub struct AcSweepSeries {
+    axis: Vec<Value>,
+    /// (full signal key, series)
+    storage: Vec<(String, Vec<Value>)>,
+}
+
+impl AcSweepSeries {
+    /// Collect the derived real series across the sweep. Returns `None`
+    /// for an empty sweep.
+    pub fn from_sweep(sweep: &[AcResult]) -> Option<Self> {
+        let first = sweep.first()?;
+        let axis: Vec<Value> = sweep.iter().map(|point| point.frequency).collect();
+
+        let mut storage: Vec<(String, Vec<Value>)> = Vec::new();
+        let mut push_complex_series =
+            |prefix: char, raw: &str, values: Vec<crate::Complex64>| {
+                let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
+                let db: Vec<Value> = magnitude
+                    .iter()
+                    .map(|m| {
+                        if *m > 1e-30 {
+                            20.0 * m.log10()
+                        } else {
+                            -600.0
+                        }
+                    })
+                    .collect();
+                let phase_deg: Vec<Value> =
+                    values.iter().map(|c| c.arg().to_degrees()).collect();
+                let real: Vec<Value> = values.iter().map(|c| c.re).collect();
+                let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
+
+                storage.push((format!("{prefix}({raw})"), magnitude.clone()));
+                storage.push((format!("{prefix}M({raw})"), magnitude));
+                storage.push((format!("{prefix}DB({raw})"), db));
+                storage.push((format!("{prefix}P({raw})"), phase_deg));
+                storage.push((format!("{prefix}R({raw})"), real));
+                storage.push((format!("{prefix}I({raw})"), imag));
+            };
+
+        for (index, name) in first.node_names.iter().enumerate() {
+            let raw = if name.is_empty() {
+                (index + 1).to_string()
+            } else {
+                name.clone()
+            };
+            let values: Vec<crate::Complex64> = sweep
+                .iter()
+                .map(|point| point.voltages.get(index).copied().unwrap_or_default())
+                .collect();
+            push_complex_series('V', &raw, values);
+        }
+        for (index, name) in first.branch_names.iter().enumerate() {
+            if name.is_empty() {
+                continue;
+            }
+            let values: Vec<crate::Complex64> = sweep
+                .iter()
+                .map(|point| point.currents.get(index).copied().unwrap_or_default())
+                .collect();
+            push_complex_series('I', name, values);
+        }
+
+        Some(Self { axis, storage })
+    }
+
+    /// The sweep frequencies, used as the measurement abscissa.
+    pub fn axis(&self) -> &[Value] {
+        &self.axis
+    }
+
+    /// Borrowed signal table over the collected series.
+    pub fn signal_map(&self) -> HashMap<String, &[Value]> {
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        insert_case_variants(&mut signals, "Time", self.axis.as_slice());
+        insert_case_variants(&mut signals, "Frequency", self.axis.as_slice());
+        insert_case_variants(&mut signals, "Freq", self.axis.as_slice());
+        for (key, series) in &self.storage {
+            insert_case_variants(&mut signals, key, series.as_slice());
+        }
+        signals
+    }
+}
+
 /// The netlist's measurement statements for one analysis kind
 /// (`"TRAN"`, `"DC"`, `"AC"`, ...).
 pub fn measurements_for_analysis<'a>(
@@ -224,6 +318,28 @@ pub fn evaluate_dc_measurements(
     evaluate_statements(&statements, series.axis(), &signals)
 }
 
+/// Evaluate the netlist's AC .MEAS statements against a sweep.
+///
+/// Returns an empty vector when the netlist has no AC measurements; an
+/// empty sweep fails every statement explicitly rather than skipping it.
+/// Signal naming follows [`AcSweepSeries`]: magnitudes under `V(x)`/`VM(x)`,
+/// `VDB`/`VP` (degrees)/`VR`/`VI` variants, and the frequency axis as
+/// `TIME`/`FREQUENCY`/`FREQ`.
+pub fn evaluate_ac_measurements(netlist: &Netlist, sweep: &[AcResult]) -> Vec<MeasureResult> {
+    let statements = measurements_for_analysis(netlist, "AC");
+    if statements.is_empty() {
+        return Vec::new();
+    }
+    let Some(series) = AcSweepSeries::from_sweep(sweep) else {
+        return statements
+            .iter()
+            .map(|m| MeasureResult::failed(&m.name, "AC sweep produced no points"))
+            .collect();
+    };
+    let signals = series.signal_map();
+    evaluate_statements(&statements, series.axis(), &signals)
+}
+
 /// Explicit not-evaluated entries for measurements whose analysis did not
 /// run (or is not supported by the caller), so automation fails loudly
 /// instead of silently skipping checks.
@@ -262,6 +378,31 @@ mod tests {
         assert!(signals.contains_key("v(OUT)"));
         assert!(signals.contains_key("I(v1)"));
         assert_eq!(signals["TIME"], result.time.as_slice());
+    }
+
+    #[test]
+    fn ac_series_exposes_derived_real_quantities() {
+        let point = |freq: f64, voltage: crate::Complex64| AcResult {
+            frequency: freq,
+            node_names: vec!["out".to_string()],
+            branch_names: vec![],
+            voltages: vec![voltage],
+            currents: vec![],
+        };
+        let sweep = vec![
+            point(1.0, crate::Complex64::new(1.0, 0.0)),
+            point(10.0, crate::Complex64::new(0.0, -1.0)),
+        ];
+
+        let series = AcSweepSeries::from_sweep(&sweep).expect("non-empty sweep");
+        assert_eq!(series.axis(), &[1.0, 10.0]);
+        let signals = series.signal_map();
+        assert_eq!(signals["V(out)"], &[1.0, 1.0][..], "magnitude");
+        assert_eq!(signals["VDB(out)"], &[0.0, 0.0][..], "decibels");
+        assert_eq!(signals["VR(out)"], &[1.0, 0.0][..], "real part");
+        assert_eq!(signals["VI(out)"], &[0.0, -1.0][..], "imaginary part");
+        assert_eq!(signals["VP(out)"][1], -90.0, "phase in degrees");
+        assert!(signals.contains_key("FREQUENCY"));
     }
 
     #[test]
