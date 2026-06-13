@@ -112,10 +112,12 @@ pub(super) fn draw_grid(painter: &Painter, bounds: Rect, state: &AppState) {
             });
         }
 
-        let cached = cache.as_ref().expect("grid mesh built above");
-        let mut mesh = cached.mesh.clone();
-        mesh.translate(origin.to_vec2());
-        painter.add(Shape::mesh(mesh));
+        // Rebuilt above when stale; skip a frame rather than panic if not.
+        if let Some(cached) = cache.as_ref() {
+            let mut mesh = cached.mesh.clone();
+            mesh.translate(origin.to_vec2());
+            painter.add(Shape::mesh(mesh));
+        }
     });
 }
 

@@ -363,6 +363,62 @@ impl Bsim3v3s {
     }
 }
 
+/// BSIM4 v4.8 (MOS level 14/54) storage for the Newton solve.
+///
+/// Mirrors [`Bsim3v3s`] but holds [`crate::device::Bsim4v8Device`]
+/// instances: the same generic [`MatrixStamper`] path, with the coupled
+/// four-terminal charge companion integrated by the engine's dedicated
+/// BSIM4 transient pass.
+#[derive(Debug, Clone, Default)]
+pub struct Bsim4v8s {
+    pub devices: Vec<crate::device::Bsim4v8Device>,
+}
+
+impl Bsim4v8s {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, device: crate::device::Bsim4v8Device) {
+        self.devices.push(device);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all BSIM4 devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all BSIM4 devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all BSIM4 devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
 /// MOSFET storage for nonlinear Newton-Raphson iteration
 #[derive(Debug, Clone, Default)]
 pub struct Mosfets {

@@ -624,7 +624,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><td>header</td><td>29&nbsp;px, always visible — collapse keeps the header so counts stay readable. Trash clears the active filter's scope; chevron collapses.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>log row</td><td>timestamp (faint) · level (colored: error red, warn amber, check green, info dim, debug/trace fainter) · message. Mono 11.5, 20&nbsp;px line, virtualized, sticky to bottom.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>script rows</td><td>“&gt; ⟨command⟩” in text ink; output indented 24&nbsp;px, green on success, red on failure. Empty state: “Type a command — 'help' lists the automation verbs”.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>source link</td><td>Rows that carry a source location (netlist line, schematic anchor) are clickable and jump there — the netlist editor already paints gutter diagnostics; this closes the loop.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>source link</td><td>Check findings write one row each (capped at 50, with an honest “+N more — F4 cycles through them” tail). Rows with a canvas anchor render with hover fill and a pointing cursor; clicking jumps to the schematic, centers the anchor, and selects the offender. Netlist-line anchors await a multi-document text editor.</td><td><span class="tag today">ships</span> netlist lines <span class="tag spec">spec</span></td></tr>
     <tr><td>resize</td><td>Drag the header edge, 89–480&nbsp;px.</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use once_cell::sync::Lazy;
@@ -19,7 +19,10 @@ static FFT_PLAN_CACHE: Lazy<Mutex<HashMap<usize, Arc<dyn Fft<f64>>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 pub(super) fn cached_window(window: WindowFunction, length: usize) -> WindowCacheEntry {
-    let mut cache = WINDOW_CACHE.lock().expect("window cache lock poisoned");
+    // Poison recovery: the map holds only completed entries (a panic in
+    // generate_window happens before insert), so the data stays valid and
+    // a panicked analysis thread must not take the render path down too.
+    let mut cache = WINDOW_CACHE.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(entry) = cache.get(&(window, length)) {
         return entry.clone();
     }
@@ -39,7 +42,9 @@ pub(super) fn cached_window(window: WindowFunction, length: usize) -> WindowCach
 }
 
 pub(super) fn cached_fft_plan(length: usize) -> Arc<dyn Fft<f64>> {
-    let mut cache = FFT_PLAN_CACHE.lock().expect("fft plan cache lock poisoned");
+    let mut cache = FFT_PLAN_CACHE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
     if let Some(plan) = cache.get(&length) {
         return Arc::clone(plan);
     }

@@ -77,6 +77,13 @@ class IntegrationMethod:
     TRAP_GEAR: IntegrationMethod
 
 class BypassConfig:
+    def __new__(
+        cls,
+        *,
+        enabled: bool | None = None,
+        reltol: float | None = None,
+        abstol: float | None = None,
+    ) -> BypassConfig: ...
     def __init__(
         self,
         *,
@@ -91,6 +98,23 @@ class BypassConfig:
     abstol: float
 
 class ConvergenceConfig:
+    def __new__(
+        cls,
+        *,
+        gmin_stepping: bool | None = None,
+        source_stepping: bool | None = None,
+        pseudo_transient: bool | None = None,
+        arc_length: bool | None = None,
+        damping_strategy: DampingStrategy | None = None,
+        gmin_initial: float | None = None,
+        gmin_target: float | None = None,
+        voltage_reltol: float | None = None,
+        residual_reltol: float | None = None,
+        voltage_abstol: float | None = None,
+        current_abstol: float | None = None,
+        charge_abstol: float | None = None,
+        verbose: bool | None = None,
+    ) -> ConvergenceConfig: ...
     def __init__(
         self,
         *,
@@ -127,6 +151,20 @@ class ConvergenceConfig:
     verbose: bool
 
 class SimulationConfig:
+    def __new__(
+        cls,
+        *,
+        tolerance: float | None = None,
+        max_iterations: int | None = None,
+        transient_max_iterations: int | None = None,
+        min_timestep: float | None = None,
+        max_timestep: float | None = None,
+        temperature: float | None = None,
+        integration_method: IntegrationMethod | None = None,
+        transient_trtol: float | None = None,
+        convergence: ConvergenceConfig | None = None,
+        bypass: BypassConfig | None = None,
+    ) -> SimulationConfig: ...
     def __init__(
         self,
         *,
@@ -236,7 +274,7 @@ class DcSweepResult:
     def sweep_values(self) -> npt.NDArray[np.float64]: ...
     def __len__(self) -> int: ...
     def __iter__(self) -> Iterator[tuple[float, SimulationResult]]: ...
-    def __getitem__(self, index: int) -> tuple[float, SimulationResult]: ...
+    def __getitem__(self, index: int, /) -> tuple[float, SimulationResult]: ...
     def points(self) -> list[tuple[float, SimulationResult]]: ...
     def result_at(self, index: int) -> SimulationResult: ...
     def sweep_value_at(self, index: int) -> float: ...
@@ -429,6 +467,7 @@ class RunReport:
     def assert_passed(self) -> None: ...
 
 class Engine:
+    def __new__(cls, config: SimulationConfig | None = None) -> Engine: ...
     def __init__(self, config: SimulationConfig | None = None) -> None: ...
     def run(self, netlist: Netlist) -> RunReport: ...
     def measure(

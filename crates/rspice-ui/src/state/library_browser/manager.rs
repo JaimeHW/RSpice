@@ -25,6 +25,26 @@ pub struct LibraryManager {
     /// (including pessimistically on `get_library_mut`).
     #[serde(skip)]
     revision: u64,
+    /// Column the keyboard owns in the browser (↑↓ move, ←→ hop) —
+    /// runtime UI state, follows mouse clicks too.
+    #[serde(skip)]
+    pub nav_column: NavColumn,
+    /// Scroll the keyboard column's selected row into view this frame
+    /// (set by a keyboard move, cleared after rendering).
+    #[serde(skip)]
+    pub nav_scroll: bool,
+}
+
+/// Which browser column keyboard navigation acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NavColumn {
+    /// The library list.
+    #[default]
+    Library,
+    /// The cell list.
+    Cell,
+    /// The view list.
+    View,
 }
 
 impl LibraryManager {

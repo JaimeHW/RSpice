@@ -186,6 +186,8 @@ pub struct ResultsState {
     pub cache: DecimationCache,
     /// Derived dB/phase series cache.
     pub derived: DerivedSeries,
+    /// Fingerprint-keyed strip-model cache for the waves viewer.
+    models: waves::ModelsCache,
     /// Strips hidden via the strip-close action.
     pub hidden_strips: HashSet<usize>,
     /// Strip currently maximized via the strip action, if any.

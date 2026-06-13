@@ -1,0 +1,414 @@
+<!doctype html>
+<!--
+  VOLTA — Symbol editor: the cell's public face
+  ································································
+  A NEW workspace surface — nothing ships yet; every section is spec.
+  Opening a symbol view (library double-click, or descend-adjacent
+  navigation) lands here: one surface that edits writable symbols and
+  inspects read-only ones behind the same amber gate the schematic uses.
+
+  Will port into:
+    · crates/rspice-ui (a new shell/views/symbol.rs + symbol edit state)
+  Companions:
+    · design/app/volta-symbols.html          (terminal-grid artwork law — this editor enforces it)
+    · design/app/volta-schematic-editor.html (docbar grammar, read-only banner, canvas tokens)
+    · design/app/volta-library-manager.html  (routing: how symbol views open)
+  Status tags: everything here is "spec" — the surface does not exist yet.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOLTA — Symbol editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+/* ───────────────────────── tokens (volta-schematic-rail.html lineage) ── */
+:root {
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px;
+  --fs-0: 11px; --fs-1: 12px; --fs-2: 13px; --fs-3: 14px; --fs-4: 16px;
+  --ctl-h: 24px; --row-h: 26px; --t-fast: 0.16s; --t-med: 0.22s;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 2px; --radius-lg: 3px;
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-app: #11171B; --bg-panel: #1A2024; --bg-inset: #0B1115;
+  --bg-elevated: #21292E; --bg-hover: #262E33; --bg-active: #2E3A41;
+  --border: #2B3136; --border-strong: #444C50;
+  --text: #D7DBDE; --text-dim: #93999E; --text-faint: #646A6E;
+  --accent: #F2B824; --accent-ink: #17181A; --accent-dim: rgba(242,184,36,0.13);
+  --ok: #65D68A; --warn: #EA9344; --err: #E06C5A;
+  --ok-dim: rgba(101,214,138,0.12); --err-dim: rgba(224,108,90,0.13);
+  --warn-dim: rgba(234,147,68,0.13);
+  --canvas-bg: #070C10; --canvas-grid: #1C2327;
+  --wire: #7FBF95; --symbol: #C9D2D8; --net-label: #DCB155;
+  --shadow: 0 6px 24px rgba(0,0,0,0.45);
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-app: #E8ECEE; --bg-panel: #F5F7F8; --bg-inset: #E1E5E7;
+  --bg-elevated: #FBFDFE; --bg-hover: #E6EAED; --bg-active: #D4DCE2;
+  --border: #D1D5D8; --border-strong: #A6ACAF;
+  --text: #1F2528; --text-dim: #53595D; --text-faint: #7F8487;
+  --accent: #8F6400; --accent-ink: #FCFAF6; --accent-dim: rgba(143,100,0,0.10);
+  --ok: #007C3A; --warn: #C26E12; --err: #C03A28;
+  --ok-dim: rgba(0,124,58,0.10); --err-dim: rgba(192,58,40,0.10);
+  --warn-dim: rgba(194,110,18,0.12);
+  --canvas-bg: #FBFDFE; --canvas-grid: #DFE5E8;
+  --wire: #724E00; --symbol: #2C3135; --net-label: #6F5600;
+  --shadow: 0 6px 24px rgba(3,4,5,0.18);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { font-family: var(--font-ui); font-size: var(--fs-2); line-height: 1.55; background: var(--bg-app); color: var(--text); transition: background var(--t-med) ease, color var(--t-med) ease; }
+
+/* ───────────────────────── spec-document scaffold ── */
+header.mast { max-width: 1240px; margin: 0 auto; padding: 48px var(--sp-5) 8px; }
+.brand { font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.18em; color: var(--accent); }
+h1 { font-size: 26px; font-weight: 600; letter-spacing: -0.01em; margin: var(--sp-2) 0 var(--sp-3); }
+.lede { color: var(--text-dim); max-width: 76ch; text-wrap: pretty; }
+.mast-row { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-3); flex-wrap: wrap; }
+.src { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); }
+section { padding: 44px var(--sp-5) 0; max-width: 1240px; margin: 0 auto; }
+section:last-of-type { padding-bottom: 88px; }
+.kicker { font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); margin-bottom: var(--sp-2); }
+h2 { font-size: var(--fs-4); font-weight: 600; margin-bottom: var(--sp-3); }
+p.note { color: var(--text-dim); font-size: var(--fs-1); max-width: 76ch; margin-top: var(--sp-2); text-wrap: pretty; }
+table.spec { width: 100%; border-collapse: collapse; margin-top: var(--sp-3); font-size: var(--fs-1); }
+table.spec th { text-align: left; font-family: var(--font-mono); font-size: var(--fs-0); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding: 6px 12px 6px 0; border-bottom: 1px solid var(--border-strong); }
+table.spec td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-dim); }
+table.spec td:first-child { font-family: var(--font-mono); color: var(--text); white-space: nowrap; }
+.tag { display: inline-block; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; border-radius: 999px; padding: 1px 8px; vertical-align: 1px; }
+.tag.spec { color: var(--warn); background: var(--warn-dim); }
+kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text); background: var(--bg-inset); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 3px; padding: 0 6px; white-space: nowrap; }
+.demo { margin-top: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-inset); padding: var(--sp-5); position: relative; }
+.demo-label { position: absolute; top: -9px; left: 12px; background: var(--bg-app); padding: 0 8px; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); letter-spacing: 0.1em; }
+.demo .hint { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); margin-top: var(--sp-2); }
+.theme-toggle { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-dim); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; cursor: pointer; transition: color var(--t-fast) ease, border-color var(--t-fast) ease; }
+.theme-toggle:hover { color: var(--text); border-color: var(--border-strong); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ───────────────────────── editor frame ── */
+.frame { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-panel); overflow: hidden; margin-top: var(--sp-4); }
+.docbar { display: flex; align-items: center; gap: var(--sp-3); height: 34px; padding: 0 var(--sp-3); border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+.crumb { display: flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-1); }
+.crumb .lib { color: var(--text-faint); }
+.crumb .here { color: var(--text); font-weight: 600; }
+.crumb .view { color: var(--text-faint); }
+.docbar .grow { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-0); border-radius: 999px; padding: 2px 10px; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.pill.ok { color: var(--ok); border-color: transparent; background: var(--ok-dim); } .pill.ok::before { background: var(--ok); }
+.pill.err { color: var(--err); border-color: transparent; background: var(--err-dim); } .pill.err::before { background: var(--err); }
+
+.shell { display: flex; align-items: stretch; min-height: 480px; }
+.canvas-wrap { flex: 1; min-width: 0; position: relative; background: var(--canvas-bg); }
+svg.schem { display: block; width: 100%; height: 100%; user-select: none; }
+.body { stroke: currentColor; stroke-width: 1.3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.f { fill: currentColor; stroke: none; }
+.schem .sym { color: var(--symbol); }
+.schem .pin-pad { fill: none; stroke: var(--wire); stroke-width: 1.1; }
+.schem .pin-pad.sel { stroke: var(--accent); stroke-width: 1.6; }
+.schem .pin-ghost { color: var(--accent); opacity: 0.55; }
+.schem text.pin-name { font-family: var(--font-mono); font-size: 11px; fill: var(--symbol); }
+.schem text.anchor { font-family: var(--font-mono); font-size: 10.5px; fill: var(--net-label); }
+.schem .origin { stroke: var(--accent); stroke-width: 1; opacity: 0.7; }
+.schem .bbox { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 4 4; fill: none; opacity: 0.6; }
+
+/* pins rail */
+.pins-rail { width: 280px; flex: none; border-left: 1px solid var(--border); background: var(--bg-panel); display: flex; flex-direction: column; }
+.rail-h { height: 30px; flex: none; display: flex; align-items: center; padding: 0 var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-0); font-weight: 600; letter-spacing: 0.09em; color: var(--text-faint); border-bottom: 1px solid var(--border); }
+.pin-row { display: grid; grid-template-columns: 1fr 56px 70px; gap: 8px; align-items: center; min-height: var(--row-h); padding: 0 var(--sp-3); font-size: var(--fs-1); color: var(--text-dim); }
+.pin-row:hover { background: var(--bg-hover); }
+.pin-row .nm { font-family: var(--font-mono); color: var(--text); }
+.pin-row .dir { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text-faint); }
+.pin-row .st { font-family: var(--font-mono); font-size: 10px; border-radius: 999px; padding: 0 7px; justify-self: start; }
+.pin-row .st.ok { color: var(--ok); background: var(--ok-dim); }
+.pin-row .st.err { color: var(--err); background: var(--err-dim); }
+.rail-note { padding: var(--sp-3); font-size: var(--fs-0); font-family: var(--font-mono); color: var(--text-faint); border-top: 1px solid var(--border); margin-top: auto; }
+
+/* as-placed preview tile */
+.preview-tile { position: absolute; right: 12px; bottom: 12px; width: 168px; background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow); overflow: hidden; }
+.preview-tile .pt-h { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--text-faint); padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.duo { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); }
+@media (max-width: 900px) { .duo { grid-template-columns: 1fr; } .pins-rail { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body data-theme="dark">
+
+<header class="mast">
+  <div class="brand">VOLTA · SYMBOL EDITOR</div>
+  <h1>Symbol editor — the cell's public face, finally editable</h1>
+  <p class="lede">
+    A symbol is a contract: what a cell looks like on every sheet that places it, and which pins it
+    promises. Today symbol views say “no editor yet.” This spec is that editor — one surface that
+    edits writable symbols, inspects PDK symbols behind the same amber gate the schematic uses, and
+    enforces the terminal-grid law the shipped artwork was drawn under. Nothing here is built;
+    every section is the contract to build against.
+  </p>
+  <div class="mast-row">
+    <span class="src">new surface — will port into shell/views/symbol.rs</span>
+    <span class="tag spec">spec</span>
+    <button class="theme-toggle" id="themeToggle" type="button">theme: dark</button>
+  </div>
+</header>
+
+<!-- ════════════════════════ HERO ════════════════════════════════════════ -->
+<section id="hero">
+  <div class="kicker">00</div>
+  <h2>The editor, mid-session</h2>
+  <p class="lede">
+    OTA5T's symbol open for edit: five pins placed, one to go. The pins rail tracks the contract
+    against the schematic's ports — IBIAS is still unplaced, so the pill says so. Click an empty
+    edge slot (the faint squares) to place it and watch the pill settle.
+  </p>
+
+  <div class="frame">
+    <div class="docbar">
+      <nav class="crumb"><span class="lib">rspice-examples</span><span class="lib">·</span><span class="here">OTA5T</span><span class="view">· symbol</span></nav>
+      <div class="grow"></div>
+      <span class="pill err" id="pinPill">PINS 1 unplaced</span>
+    </div>
+    <div class="shell">
+      <div class="canvas-wrap">
+        <svg class="schem" viewBox="0 0 720 480" id="heroSvg" role="img"
+             aria-label="Symbol editor canvas: OTA5T amplifier body with five placed pins and one empty slot">
+          <defs>
+            <pattern id="tgrid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <circle cx="20" cy="20" r="1" fill="var(--canvas-grid)"></circle>
+            </pattern>
+          </defs>
+          <rect x="0" y="0" width="720" height="480" fill="url(#tgrid)"></rect>
+
+          <!-- origin cross at the symbol's reference point -->
+          <g class="origin"><path d="M 260,240 h 16 M 268,232 v 16" fill="none" stroke="var(--accent)"></path></g>
+
+          <!-- bounding box (selection halo on sheets) -->
+          <rect class="bbox" x="300" y="140" width="160" height="200"></rect>
+
+          <!-- body: amp triangle, stroke-only per the artwork law -->
+          <g class="sym">
+            <path class="body" d="M 300,150 L 450,240 L 300,330 Z"></path>
+            <path class="body" d="M 316,196 h 18 M 325,187 v 18"></path>
+            <path class="body" d="M 316,284 h 18"></path>
+          </g>
+
+          <!-- pins: stub + pad on the terminal grid + name -->
+          <g id="pins">
+            <g class="pin" data-name="INP"><path class="body" d="M 260,200 H 300" style="color:var(--wire)"></path><rect class="pin-pad" x="256" y="196" width="8" height="8"></rect><text class="pin-name" x="268" y="193">INP</text></g>
+            <g class="pin" data-name="INN"><path class="body" d="M 260,280 H 300" style="color:var(--wire)"></path><rect class="pin-pad" x="256" y="276" width="8" height="8"></rect><text class="pin-name" x="268" y="297">INN</text></g>
+            <g class="pin" data-name="OUT"><path class="body" d="M 450,240 H 500" style="color:var(--wire)"></path><rect class="pin-pad" x="496" y="236" width="8" height="8"></rect><text class="pin-name" x="458" y="233">OUT</text></g>
+            <g class="pin" data-name="VDD"><path class="body" d="M 360,186 V 140" style="color:var(--wire)"></path><rect class="pin-pad" x="356" y="136" width="8" height="8"></rect><text class="pin-name" x="370" y="152">VDD</text></g>
+            <g class="pin" data-name="VSS"><path class="body" d="M 360,294 V 340" style="color:var(--wire)"></path><rect class="pin-pad" x="356" y="336" width="8" height="8"></rect><text class="pin-name" x="370" y="334">VSS</text></g>
+          </g>
+
+          <!-- empty slot for the unplaced IBIAS pin -->
+          <g id="ibiasSlot" tabindex="0" role="button" aria-label="Place pin IBIAS at the lower-left slot" style="cursor:pointer">
+            <rect class="pin-pad" x="256" y="316" width="8" height="8" style="stroke:var(--text-faint); stroke-dasharray:3 2"></rect>
+            <text class="pin-name" x="230" y="312" style="fill:var(--text-faint)">IBIAS?</text>
+          </g>
+
+          <!-- label anchors -->
+          <text class="anchor" x="304" y="128">@name</text>
+          <text class="anchor" x="304" y="360">@value</text>
+        </svg>
+
+        <div class="preview-tile">
+          <div class="pt-h">AS PLACED · 100 %</div>
+          <svg viewBox="240 120 280 240" style="display:block; width:100%; background:var(--canvas-bg)">
+            <g class="sym" style="color:var(--symbol)">
+              <path class="body" d="M 300,150 L 450,240 L 300,330 Z"></path>
+              <path class="body" d="M 316,196 h 18 M 325,187 v 18 M 316,284 h 18"></path>
+              <path class="body" d="M 260,200 H 300 M 260,280 H 300 M 450,240 H 500 M 360,186 V 140 M 360,294 V 340" style="color:var(--wire)"></path>
+            </g>
+            <text class="pin-name" x="304" y="138" style="fill:var(--text-dim)">X1</text>
+            <text class="pin-name" x="304" y="352" style="fill:var(--text-faint)">OTA5T</text>
+          </svg>
+        </div>
+      </div>
+
+      <aside class="pins-rail">
+        <div class="rail-h">PINS · SCHEMATIC CONTRACT</div>
+        <div class="pin-row"><span class="nm">INP</span><span class="dir">in</span><span class="st ok">placed</span></div>
+        <div class="pin-row"><span class="nm">INN</span><span class="dir">in</span><span class="st ok">placed</span></div>
+        <div class="pin-row"><span class="nm">OUT</span><span class="dir">out</span><span class="st ok">placed</span></div>
+        <div class="pin-row"><span class="nm">VDD</span><span class="dir">inout</span><span class="st ok">placed</span></div>
+        <div class="pin-row"><span class="nm">VSS</span><span class="dir">inout</span><span class="st ok">placed</span></div>
+        <div class="pin-row" id="ibiasRow"><span class="nm">IBIAS</span><span class="dir">in</span><span class="st err" id="ibiasState">unplaced</span></div>
+        <div class="rail-note">rows come from the schematic's ports — the symbol cannot invent or drop pins, only place them</div>
+      </aside>
+    </div>
+  </div>
+  <p class="note">
+    Everything on this surface is <span class="tag spec">spec</span>. The artwork follows the shipped
+    terminal-grid law (volta-symbols.html): terminals on the 40-unit grid, stroke-only bodies at 1.3,
+    fills reserved for arrows, dots, and tips.
+  </p>
+</section>
+
+<!-- ════════════════════════ 01 — postures ═══════════════════════════════ -->
+<section id="s1">
+  <div class="kicker">01</div>
+  <h2>One surface, two postures</h2>
+  <table class="spec">
+    <tr><th>Posture</th><th>Rule</th></tr>
+    <tr><td>edit</td><td>Writable-library symbols open editable: pins place and move, body tools draw, labels anchor. Edits mark the view dirty exactly like the schematic; undo shares the same transaction grammar.</td></tr>
+    <tr><td>inspect</td><td>Read-only-library (PDK) symbols open behind the same amber banner the schematic uses — “Read-only — '⟨lib⟩' masters cannot be edited” — with the same “Copy to editable library…” way out. Every edit path refuses with the same console line. One gate, everywhere.</td></tr>
+    <tr><td>routing</td><td>Library browser: symbol views double-click open here (their meta stops saying “no editor yet”). The docbar reads lib · CELL · symbol; the workspace tab stays Schematic-family — symbols are design views, not a sixth tab.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 02 — canvas law ═════════════════════════════ -->
+<section id="s2">
+  <div class="kicker">02</div>
+  <h2>Canvas law — the terminal grid is load-bearing</h2>
+  <p class="lede">
+    The schematic's wires can only land where the symbol promises terminals. So this canvas renders
+    the 40-unit terminal lattice heavier than the schematic's working grid, and the one inviolable
+    rule is mechanical, not advisory:
+  </p>
+  <table class="spec">
+    <tr><th>Element</th><th>Rule</th></tr>
+    <tr><td>terminal grid</td><td>40-unit lattice, dots one weight up from the schematic grid. Pins snap to it, period — there is no off-grid pin, not even with snap “off”.</td></tr>
+    <tr><td>body geometry</td><td>Free — vertices snap to the quarter-grid (10 units) for drawability, and the shipped artwork's sub-grid curves remain representable. The body is drawing; the pins are contract.</td></tr>
+    <tr><td>origin</td><td>Accent cross at the reference point — the coordinate the schematic places and rotates around. Draggable; defaults to the bbox center snapped to grid.</td></tr>
+    <tr><td>bbox</td><td>Faint dashed rectangle, auto-fitted to geometry plus pin stubs; defines the selection halo and label-avoidance zone on sheets.</td></tr>
+    <tr><td>ink</td><td>The artwork law, enforced by construction: bodies stroke at 1.3 in the symbol ink; the only fills the tools can produce are arrows, dots, and port tips. There is no fill bucket.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 03 — pins ═══════════════════════════════════ -->
+<section id="s3">
+  <div class="kicker">03</div>
+  <h2>Pins — the contract, checked like ERC</h2>
+  <p class="lede">
+    The pins rail lists the schematic view's ports — the symbol cannot invent a pin the cell doesn't
+    have, or silently drop one it does. Placement is the only degree of freedom, and the docbar pill
+    reports the contract the way the schematic's ERC pill reports topology.
+  </p>
+  <table class="spec">
+    <tr><th>Element</th><th>Rule</th></tr>
+    <tr><td>anatomy</td><td>Terminal pad (open square on the grid point, wire ink) · stub into the body · mono name riding the stub. The pad is what wires hit; it renders only in the editor, never on sheets.</td></tr>
+    <tr><td>placement</td><td><kbd>P</kbd> arms the next unplaced pin (rail order); click a grid point on or outside the bbox to land it. Click an existing pin to move it. The rail row and the canvas pad select together.</td></tr>
+    <tr><td>direction</td><td>in · out · inout · passive, inherited from the port; shown in the rail, drawn as the stub's arrowhead for in/out when “direction marks” is on.</td></tr>
+    <tr><td>pill states</td><td>“PINS match schematic” ok · “PINS N unplaced” err · “PINS N orphaned” err (symbol has a pin the schematic dropped — offer delete) · “PINS no schematic” idle (symbol-only cells: the rail becomes editable and the symbol IS the contract).</td></tr>
+    <tr><td>checks</td><td>Pin findings join the design checks: UnplacedPin (error), OrphanedPin (error), PinOffGrid (impossible by construction, checked anyway for imported artwork — error). Console rows jump here like every other finding.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 04 — body tools ═════════════════════════════ -->
+<section id="s4">
+  <div class="kicker">04</div>
+  <h2>Body tools — five, and no fill bucket</h2>
+  <table class="spec">
+    <tr><th>Tool</th><th>Key</th><th>Rule</th></tr>
+    <tr><td>polyline</td><td><kbd>W</kbd></td><td>Click to pin vertices, right-click/<kbd>Esc</kbd> finishes — the schematic's wire gesture, drawing symbol ink instead of copper.</td></tr>
+    <tr><td>circle · arc</td><td><kbd>C</kbd> · <kbd>A</kbd></td><td>Center-then-radius; arc adds start/sweep handles. Sources, gates, and bubbles are circles — these two cover the shipped set.</td></tr>
+    <tr><td>arrow</td><td><kbd>D</kbd></td><td>The filled triangle glyph (MOSFET/BJT convention), placed on a segment and flippable with <kbd>H</kbd>/<kbd>Y</kbd>.</td></tr>
+    <tr><td>dot</td><td><kbd>O</kbd></td><td>The 1.7-radius filled dot (bulk ties, junction marks).</td></tr>
+    <tr><td>select</td><td><kbd>S</kbd>/<kbd>Esc</kbd></td><td>Click, marquee, move; <kbd>R</kbd> rotates the selection in quarter turns around the origin; <kbd>Del</kbd> deletes. Undo wraps every gesture.</td></tr>
+  </table>
+  <p class="note">
+    Deliberately absent: rectangles-as-primitives (a polyline closes), text-as-geometry (labels are
+    anchors, §05), and any fill tool — the artwork law has no filled regions, and the editor cannot
+    produce what the law forbids.
+  </p>
+</section>
+
+<!-- ════════════════════════ 05 — labels ═════════════════════════════════ -->
+<section id="s5">
+  <div class="kicker">05</div>
+  <h2>Labels — anchors, not text</h2>
+  <table class="spec">
+    <tr><th>Anchor</th><th>Rule</th></tr>
+    <tr><td>@name</td><td>Where the instance name (X1, M2…) lands when placed. Brass ink in the editor; the sheet substitutes the real name. Default: above the bbox, left-aligned.</td></tr>
+    <tr><td>@value</td><td>Where the value/model string lands. Default: below the bbox. Both anchors drag freely; the sheet's smart label placement starts from them and still avoids collisions.</td></tr>
+    <tr><td>preview tile</td><td>The as-placed tile (hero, bottom-right) renders the symbol at sheet zoom with real label substitution — the volta-symbols judging discipline, permanently installed in the editor.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 06 — generate ═══════════════════════════════ -->
+<section id="s6">
+  <div class="kicker">06</div>
+  <h2>Generate from schematic — the empty state that works for you</h2>
+  <p class="lede">
+    A new symbol view doesn't open blank. It opens with the offer every Virtuoso user misses the
+    moment it's gone:
+  </p>
+  <div class="demo">
+    <span class="demo-label">EMPTY STATE</span>
+    <div style="text-align:center; padding: 28px 0; color: var(--text-dim);">
+      <div style="font-size:15px; font-weight:500;">No symbol drawn yet</div>
+      <div style="font-size:12px; color:var(--text-faint); margin-top:6px;">Generate from schematic builds a box body with all 6 ports placed — then reshape it</div>
+      <div style="font-size:12px; color:var(--text-faint); margin-top:2px;">or press W · C · A to start drawing</div>
+    </div>
+  </div>
+  <table class="spec">
+    <tr><th>Rule</th><th>Detail</th></tr>
+    <tr><td>generate</td><td>Builds a rectangle body sized to the pin count, ports placed by direction convention — ins left, outs right, inouts top/bottom — names riding the stubs, anchors defaulted. One undo entry; reshape from there.</td></tr>
+    <tr><td>re-generate</td><td>After ports change, the pill's fix-it action offers “Place new pins” (additive) — never a silent full regenerate over hand-drawn art.</td></tr>
+  </table>
+</section>
+
+<!-- ════════════════════════ 07 — keymap ═════════════════════════════════ -->
+<section id="s7">
+  <div class="kicker">07</div>
+  <h2>Keymap</h2>
+  <table class="spec">
+    <tr><th>Group</th><th>Bindings</th></tr>
+    <tr><td>tools</td><td><kbd>S</kbd> select · <kbd>P</kbd> place next pin · <kbd>W</kbd> polyline · <kbd>C</kbd> circle · <kbd>A</kbd> arc · <kbd>D</kbd> arrow · <kbd>O</kbd> dot · <kbd>Esc</kbd> cancel</td></tr>
+    <tr><td>transform</td><td><kbd>R</kbd> rotate selection · <kbd>H</kbd>/<kbd>Y</kbd> mirror (and flip an arrow)</td></tr>
+    <tr><td>shared</td><td>Zoom, pan, undo/redo, clipboard, <kbd>F</kbd> fit, <kbd>Ctrl+E</kbd> checks — identical to the schematic; no symbol-only chords to relearn.</td></tr>
+  </table>
+  <p class="note">
+    Single letters reuse the schematic's letters where the muscle memory transfers (<kbd>W</kbd> draws
+    a run, <kbd>C</kbd> is round, <kbd>D</kbd> is the triangle) — the two surfaces are one editor in
+    two postures, and the hands should agree.
+  </p>
+</section>
+
+<script>
+(function () {
+  var btn = document.getElementById("themeToggle");
+  btn.addEventListener("click", function () {
+    var next = document.body.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    document.body.setAttribute("data-theme", next);
+    btn.textContent = "theme: " + next;
+  });
+})();
+
+/* hero: place the missing IBIAS pin */
+(function () {
+  var slot = document.getElementById("ibiasSlot");
+  var pill = document.getElementById("pinPill");
+  var state = document.getElementById("ibiasState");
+  function place() {
+    var g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    g.setAttribute("class", "pin");
+    g.innerHTML = '<path class="body" d="M 260,320 H 300" style="color:var(--wire)"></path>' +
+      '<rect class="pin-pad sel" x="256" y="316" width="8" height="8"></rect>' +
+      '<text class="pin-name" x="268" y="313">IBIAS</text>';
+    document.getElementById("pins").appendChild(g);
+    slot.remove();
+    pill.textContent = "PINS match schematic";
+    pill.classList.remove("err");
+    pill.classList.add("ok");
+    state.textContent = "placed";
+    state.classList.remove("err");
+    state.classList.add("ok");
+  }
+  slot.addEventListener("click", place);
+  slot.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); place(); }
+  });
+})();
+</script>
+</body>
+</html>

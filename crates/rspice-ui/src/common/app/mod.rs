@@ -57,6 +57,7 @@ mod app_shortcuts;
 
 mod app_actions;
 
+mod app_autosave;
 mod app_file_actions;
 
 mod app_viewer_capabilities;
@@ -266,6 +267,9 @@ pub struct RSpiceApp {
     pub(crate) state: AppState,
     /// First frame flag (for initialization)
     first_frame: bool,
+    /// When the autosave timer was armed (first dirty frame) or last fired.
+    #[cfg(not(target_arch = "wasm32"))]
+    autosave_last: Option<std::time::Instant>,
     /// Theme last applied to the egui context (re-applied when the user
     /// changes the shell theme).
     applied_theme: Option<crate::ui::Theme>,
@@ -342,6 +346,8 @@ impl RSpiceApp {
         Self {
             state,
             first_frame: true,
+            #[cfg(not(target_arch = "wasm32"))]
+            autosave_last: None,
             applied_theme: None,
             last_window_title: String::new(),
             symbol_library,
@@ -412,6 +418,9 @@ impl RSpiceApp {
         self.process_model_browser_dialog(ctx);
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
+        self.process_copy_cell_dialog(ctx);
+        self.process_rename_cell_dialog(ctx);
+        self.process_autosave_restore_dialog(ctx);
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
     }
@@ -421,6 +430,8 @@ impl eframe::App for RSpiceApp {
     /// Called on each frame
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.prepare_frame(ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.autosave_tick(ctx);
         self.render_frame_chrome(ctx);
         self.render_frame_dialogs(ctx);
     }

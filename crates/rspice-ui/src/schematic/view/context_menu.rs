@@ -67,6 +67,17 @@ pub(super) fn handle_context_menu(
     });
 }
 
+/// A menu row that disables on read-only views instead of vanishing —
+/// the verb stays discoverable, the refusal stays honest.
+fn edit_item(ui: &mut Ui, read_only: bool, label: &str, kbd: Option<&str>) -> bool {
+    if read_only {
+        item_disabled(ui, label, kbd);
+        false
+    } else {
+        item(ui, label, kbd)
+    }
+}
+
 /// Faint mono header naming what the menu is for.
 fn menu_header(ui: &mut Ui, label: &str) {
     let c = Tokens::get(ui.ctx()).color;
@@ -102,25 +113,26 @@ fn instance_menu(ui: &mut Ui, state: &mut AppState, id: u64) {
         return;
     };
 
+    let ro = state.schematic.read_only;
     menu_header(ui, &format!("{name} · {}", kind.display_name()));
-    if item(ui, "Properties…", Some("E")) {
+    if edit_item(ui, ro, "Properties…", Some("E")) {
         crate::common::app::open_property_editor(state, id);
         ui.close_menu();
     }
-    if item(ui, "Rotate", Some("R")) {
+    if edit_item(ui, ro, "Rotate", Some("R")) {
         state.schematic.rotate_selection();
         ui.close_menu();
     }
-    if item(ui, "Mirror horizontal", Some("H")) {
+    if edit_item(ui, ro, "Mirror horizontal", Some("H")) {
         state.schematic.mirror_selection_h();
         ui.close_menu();
     }
-    if item(ui, "Mirror vertical", Some("Y")) {
+    if edit_item(ui, ro, "Mirror vertical", Some("Y")) {
         state.schematic.mirror_selection_v();
         ui.close_menu();
     }
     separator(ui);
-    if item(ui, "Cut", Some("Ctrl+X")) {
+    if edit_item(ui, ro, "Cut", Some("Ctrl+X")) {
         state.schematic.copy_selection();
         state.schematic.delete_selection();
         ui.close_menu();
@@ -129,7 +141,7 @@ fn instance_menu(ui: &mut Ui, state: &mut AppState, id: u64) {
         state.schematic.copy_selection();
         ui.close_menu();
     }
-    if item(ui, "Delete", Some("Del")) {
+    if edit_item(ui, ro, "Delete", Some("Del")) {
         state.schematic.delete_selection();
         ui.close_menu();
     }
@@ -154,9 +166,10 @@ fn wire_menu(ui: &mut Ui, state: &mut AppState, id: u64, click_pos: Point) {
         .cloned()
         .map(|net| format!("wire · {net}"))
         .unwrap_or_else(|| "wire".to_owned());
+    let ro = state.schematic.read_only;
     menu_header(ui, &net);
 
-    if item(ui, "Add net label", Some("N")) {
+    if edit_item(ui, ro, "Add net label", Some("N")) {
         let name = format!("net{}", state.schematic.net_labels.len() + 1);
         state.schematic.with_undo("place net label", |schematic| {
             schematic.add_net_label(click_pos, name);
@@ -176,14 +189,15 @@ fn wire_menu(ui: &mut Ui, state: &mut AppState, id: u64, click_pos: Point) {
         ui.close_menu();
     }
     separator(ui);
-    if item(ui, "Delete segment", Some("Del")) {
+    if edit_item(ui, ro, "Delete segment", Some("Del")) {
         state.schematic.delete_selection();
         ui.close_menu();
     }
 }
 
 fn canvas_menu(ui: &mut Ui, state: &mut AppState, click_pos: Point) {
-    if item(ui, "Paste", Some("Ctrl+V")) {
+    let ro = state.schematic.read_only;
+    if edit_item(ui, ro, "Paste", Some("Ctrl+V")) {
         // Paste lands where the menu was summoned — the user already
         // pointed at the destination.
         state.schematic.paste_at(click_pos);

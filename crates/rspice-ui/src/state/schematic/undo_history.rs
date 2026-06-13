@@ -414,3 +414,345 @@ fn unwrap_snapshot(snapshot: Arc<SchematicSnapshot>) -> SchematicSnapshot {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::super::component_type::ComponentType;
+    use super::super::point::Point;
+    use super::super::state::SchematicState;
+    use super::*;
+
+    /// Snapshot containing `n` distinct resistors (and nothing else).
+    fn snapshot_with(n: usize) -> SchematicSnapshot {
+        SchematicSnapshot {
+            components: (0..n)
+                .map(|i| Component::new(i as u64, ComponentType::Resistor, Point::new(i as i32, 0)))
+                .collect(),
+            wires: Vec::new(),
+            junctions: Vec::new(),
+            net_labels: Vec::new(),
+            connections: Vec::new(),
+        }
+    }
+
+    fn capture(state: &SchematicState) -> SchematicSnapshot {
+        SchematicSnapshot::capture(state)
+    }
+
+    // -------------------------------------------------------------------------
+    // UndoHistory (transaction core)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn begin_edit_end_creates_exactly_one_entry() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "Add R1");
+        let created = history.end_operation(snapshot_with(1));
+
+        assert!(created);
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(history.redo_count(), 0);
+        assert!(history.can_undo());
+        assert_eq!(history.undo_description(), Some("Add R1"));
+        assert!(!history.has_pending_operation());
+    }
+
+    #[test]
+    fn begin_end_without_change_creates_no_entry() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(2), "No-op move");
+        let created = history.end_operation(snapshot_with(2));
+
+        assert!(!created);
+        assert_eq!(history.undo_count(), 0);
+        assert!(!history.can_undo());
+    }
+
+    #[test]
+    fn end_without_begin_is_a_noop() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        assert!(!history.end_operation(snapshot_with(1)));
+        assert_eq!(history.undo_count(), 0);
+    }
+
+    #[test]
+    fn cancel_discards_pending_operation() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "Cancelled drag");
+        assert!(history.has_pending_operation());
+        history.cancel_operation();
+
+        assert!(!history.has_pending_operation());
+        // A later end_operation has no pending transaction to commit.
+        assert!(!history.end_operation(snapshot_with(1)));
+        assert_eq!(history.undo_count(), 0);
+    }
+
+    #[test]
+    fn undo_returns_before_snapshot_and_arms_redo() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "Add R1");
+        history.end_operation(snapshot_with(1));
+
+        let (restored, desc) = history.undo(snapshot_with(1)).expect("undo entry");
+        assert!(restored.is_equal(&snapshot_with(0)));
+        assert_eq!(desc, "Add R1");
+        assert_eq!(history.undo_count(), 0);
+        assert_eq!(history.redo_count(), 1);
+        assert_eq!(history.redo_description(), Some("Add R1"));
+    }
+
+    #[test]
+    fn redo_returns_after_snapshot_and_rearms_undo() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "Add R1");
+        history.end_operation(snapshot_with(1));
+        let (restored, _) = history.undo(snapshot_with(1)).unwrap();
+
+        let (redone, desc) = history.redo(restored).expect("redo entry");
+        assert!(redone.is_equal(&snapshot_with(1)));
+        assert_eq!(desc, "Add R1");
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(history.redo_count(), 0);
+    }
+
+    #[test]
+    fn new_operation_after_undo_clears_redo_stack() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "Add R1");
+        history.end_operation(snapshot_with(1));
+        history.undo(snapshot_with(1)).unwrap();
+        assert!(history.can_redo());
+
+        history.begin_operation(snapshot_with(0), "Add C1");
+        history.end_operation(snapshot_with(2));
+
+        assert!(!history.can_redo());
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(history.undo_description(), Some("Add C1"));
+    }
+
+    #[test]
+    fn undo_on_empty_history_is_a_noop() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        assert!(history.undo(snapshot_with(0)).is_none());
+        assert!(history.redo(snapshot_with(0)).is_none());
+        // A failed undo must not pollute the redo stack.
+        assert_eq!(history.redo_count(), 0);
+        assert_eq!(history.undo_count(), 0);
+    }
+
+    #[test]
+    fn double_begin_replaces_pending_snapshot() {
+        // Current behavior: a second begin_operation overwrites the pending
+        // transaction (with a logged warning). The committed entry uses the
+        // second "before" snapshot and only one entry is created.
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        history.begin_operation(snapshot_with(0), "First");
+        history.begin_operation(snapshot_with(1), "Second");
+        let created = history.end_operation(snapshot_with(2));
+
+        assert!(created);
+        assert_eq!(history.undo_count(), 1);
+        assert_eq!(history.undo_description(), Some("Second"));
+        let (restored, _) = history.undo(snapshot_with(2)).unwrap();
+        assert!(restored.is_equal(&snapshot_with(1)));
+    }
+
+    #[test]
+    fn history_is_capped_at_max_undo_steps() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+
+        // Push 105 distinct operations; the 5 oldest must be evicted.
+        for i in 0..105 {
+            history.begin_operation(snapshot_with(i), format!("Op {i}"));
+            assert!(history.end_operation(snapshot_with(i + 1)));
+        }
+        assert_eq!(history.undo_count(), MAX_UNDO_STEPS);
+        assert_eq!(history.undo_description(), Some("Op 104"));
+
+        // Unwind the full depth; the oldest surviving entry is op 5.
+        let mut last = None;
+        for _ in 0..MAX_UNDO_STEPS {
+            last = history.undo(snapshot_with(0));
+            assert!(last.is_some());
+        }
+        let (oldest, desc) = last.unwrap();
+        assert_eq!(desc, "Op 5");
+        assert!(oldest.is_equal(&snapshot_with(5)));
+        assert!(!history.can_undo());
+        assert_eq!(history.redo_count(), MAX_UNDO_STEPS);
+    }
+
+    #[test]
+    fn clear_resets_everything_including_initialized() {
+        let mut history = UndoHistory::default();
+        history.initialize();
+        history.begin_operation(snapshot_with(0), "Add R1");
+        history.end_operation(snapshot_with(1));
+        history.undo(snapshot_with(1)).unwrap();
+        history.begin_operation(snapshot_with(0), "Pending");
+
+        history.clear();
+
+        assert_eq!(history.undo_count(), 0);
+        assert_eq!(history.redo_count(), 0);
+        assert!(!history.has_pending_operation());
+        assert!(!history.is_initialized());
+    }
+
+    #[test]
+    fn snapshot_equality_detects_component_value_edit() {
+        let mut a = snapshot_with(1);
+        let b = snapshot_with(1);
+        assert!(a.is_equal(&b));
+
+        a.components[0].value = "10k".to_string();
+        assert!(!a.is_equal(&b));
+    }
+
+    // -------------------------------------------------------------------------
+    // SchematicState wrappers (with_undo / undo / redo / dirty flag)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn with_undo_records_entry_and_undo_restores_state_exactly() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+        let baseline = capture(&state);
+
+        let changed = state.with_undo("Add resistor", |s| {
+            s.add_component(ComponentType::Resistor, Point::new(10, 20));
+        });
+        assert!(changed);
+        assert_eq!(state.components.len(), 1);
+        assert!(state.can_undo());
+
+        assert!(state.undo());
+        assert!(state.components.is_empty());
+        assert!(capture(&state).is_equal(&baseline));
+        assert!(!state.can_undo());
+        assert!(state.can_redo());
+    }
+
+    #[test]
+    fn state_redo_reapplies_the_operation() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        state.with_undo("Add resistor", |s| {
+            s.add_component(ComponentType::Resistor, Point::new(10, 20));
+        });
+        let after = capture(&state);
+
+        assert!(state.undo());
+        assert!(state.redo());
+        assert_eq!(state.components.len(), 1);
+        assert!(capture(&state).is_equal(&after));
+        assert!(state.can_undo());
+        assert!(!state.can_redo());
+    }
+
+    #[test]
+    fn with_undo_returns_false_when_nothing_changed() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        let changed = state.with_undo("Nothing", |_| {});
+        assert!(!changed);
+        assert!(!state.can_undo());
+    }
+
+    #[test]
+    fn with_undo_is_skipped_on_read_only_state() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+        state.read_only = true;
+
+        let changed = state.with_undo("Add resistor", |s| {
+            s.add_component(ComponentType::Resistor, Point::new(0, 0));
+        });
+
+        // The closure must not run at all on a read-only view.
+        assert!(!changed);
+        assert!(state.components.is_empty());
+        assert!(!state.can_undo());
+    }
+
+    #[test]
+    fn state_undo_on_empty_history_returns_false() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        assert!(!state.undo());
+        assert!(!state.redo());
+    }
+
+    #[test]
+    fn undo_marks_state_dirty_and_clears_selection() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        let id = {
+            let mut id = 0;
+            state.with_undo("Add resistor", |s| {
+                id = s.add_component(ComponentType::Resistor, Point::new(10, 20));
+            });
+            id
+        };
+        state.is_dirty = false;
+        state.selection.select_component(id);
+        assert!(!state.selection.is_empty());
+
+        assert!(state.undo());
+        assert!(state.is_dirty);
+        assert!(state.selection.is_empty());
+    }
+
+    #[test]
+    fn begin_operation_auto_initializes_history() {
+        let mut state = SchematicState::default();
+        assert!(!state.undo_history.is_initialized());
+
+        state.begin_operation("Add resistor");
+        state.add_component(ComponentType::Resistor, Point::new(0, 0));
+        assert!(state.end_operation());
+
+        assert!(state.undo_history.is_initialized());
+        assert_eq!(state.undo_history.undo_count(), 1);
+    }
+
+    #[test]
+    fn cancelled_state_operation_leaves_no_entry() {
+        let mut state = SchematicState::default();
+        state.init_undo_history();
+
+        state.begin_operation("Aborted drag");
+        state.add_component(ComponentType::Resistor, Point::new(0, 0));
+        state.cancel_operation();
+
+        assert!(!state.has_pending_operation());
+        assert!(!state.can_undo());
+        // The (uncommitted) edit itself remains; only the undo entry is dropped.
+        assert_eq!(state.components.len(), 1);
+    }
+}

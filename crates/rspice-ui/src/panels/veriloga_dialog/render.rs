@@ -348,8 +348,10 @@ fn render_compiling_pane(ui: &mut Ui, state: &VerilogALoadDialogState, now: f64)
         ui.add_space(8.0);
         progress_sweep(ui, now);
     });
-    // The clock and the sweep animate; keep frames coming while we wait.
-    ui.ctx().request_repaint();
+    // The clock and the sweep animate; keep frames coming while we wait —
+    // at animation rate, not vsync, since this runs for the whole compile.
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(33));
 }
 
 /// Indeterminate progress: a thin track with an accent segment sweeping

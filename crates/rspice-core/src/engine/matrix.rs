@@ -246,6 +246,23 @@ impl Engine {
             }
         }
 
+        // BSIM4 v4.8 (MOS level 14/54) stamps: same full 4x4 reservation —
+        // the substrate-current and GIDL/GISL rows plus the CAPMOD=2 charge
+        // companion couple every terminal pair.
+        for dev in &circuit.bsim4v8.devices {
+            let d = dev.node_drain;
+            let g = dev.node_gate;
+            let s = dev.node_source;
+            let b = dev.node_bulk;
+            for &row in &[d, g, s, b] {
+                for &col in &[d, g, s, b] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // JFET stamps (3-terminal: include full 3x3 topology to support AC capacitances).
         for jfet in &circuit.jfets {
             let d = jfet.drain;

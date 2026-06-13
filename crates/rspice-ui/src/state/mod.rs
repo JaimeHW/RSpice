@@ -11,7 +11,7 @@ mod schematic;
 mod simulation;
 pub mod workspace;
 
-pub use library_browser::{Cell, Library, LibraryManager, View, ViewType};
+pub use library_browser::{Cell, Library, LibraryManager, NavColumn, View, ViewType};
 pub use model_library::ModelLibraryManager;
 pub use pdk_config::{ConfigError, DiscoveredFile, LibraryPathEntry, PdkConfig};
 pub use property_types::{

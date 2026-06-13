@@ -247,6 +247,10 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
         <label class="check-row"><input type="checkbox" id="prefCb"> Colorblind-safe trace colors</label>
         <div class="section-h">FILES</div>
         <div class="pref-row">
+          <label for="prefAutosave">Autosave</label>
+          <select id="prefAutosave"><option>Off</option><option>1 min</option><option selected>5 min</option><option>15 min</option></select>
+        </div>
+        <div class="pref-row">
           <label>Recent files</label>
           <div style="display:flex; align-items:center; gap:10px">
             <span style="font-family:var(--font-mono); font-size:var(--fs-1)" id="recentCount">3 entries</span>
@@ -269,7 +273,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><td>Direction · Mode · Density</td><td>Instrument/Meridian/Graphite · Dark/Light · Compact/Relaxed</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>Colorblind-safe traces</td><td>off by default; swaps the six trace hues for an Okabe–Ito-derived set</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>Recent files</td><td>count + Clear (button hidden at zero)</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>Autosave</td><td>“Autosave schematic” interval: Off · 1 · 5 · 15 min — the one setting users ask every EDA tool for by week two</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>Autosave</td><td>Off · 1 · 5 · 15 min, default 5. Checkpoints write the normal save serialization to a <span style="font-family:var(--font-mono)">.autosave</span> sibling and never touch the file; a clean save deletes the checkpoint. Opening a file shadowed by a newer checkpoint asks first — Restore loads it as unsaved changes over the file's identity, Discard deletes it, <kbd>Esc</kbd> opens the file and keeps the checkpoint. Unsaved sheets have nothing to anchor to: save once and autosave takes over.</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 

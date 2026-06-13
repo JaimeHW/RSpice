@@ -658,3 +658,417 @@ impl SnapEngine {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::super::ComponentType;
+    use super::*;
+
+    fn engine_with(f: impl FnOnce(&mut SnapEngine)) -> SnapEngine {
+        let mut e = SnapEngine::default();
+        f(&mut e);
+        e
+    }
+
+    /// A resistor at `pos` exposes "+" at (-20, 0) and "-" at (+20, 0).
+    fn resistor(id: u64, pos: Point) -> Component {
+        Component::new(id, ComponentType::Resistor, pos)
+    }
+
+    // -------------------------------------------------------------------------
+    // Grid snapping
+    // -------------------------------------------------------------------------
+
+    /// Points already on the grid are returned unchanged.
+    #[test]
+    fn grid_snap_on_grid_passthrough() {
+        let engine = engine_with(|e| e.grid_size = 10);
+        assert_eq!(engine.snap_to_grid_point(Point::new(20, 30)), Point::new(20, 30));
+        assert_eq!(engine.snap_to_grid_point(Point::origin()), Point::origin());
+    }
+
+    /// Off-grid points round to the nearest grid line; the exact midpoint rounds up.
+    #[test]
+    fn grid_snap_rounds_to_nearest() {
+        let engine = engine_with(|e| e.grid_size = 10);
+        assert_eq!(engine.snap_to_grid_point(Point::new(4, 6)), Point::new(0, 10));
+        assert_eq!(engine.snap_to_grid_point(Point::new(5, 15)), Point::new(10, 20));
+        assert_eq!(engine.snap_to_grid_point(Point::new(14, 16)), Point::new(10, 20));
+    }
+
+    /// Unit grid is the identity, including negative coordinates.
+    #[test]
+    fn grid_snap_unit_grid_is_identity() {
+        let engine = SnapEngine::default(); // grid_size = 1
+        assert_eq!(engine.snap_to_grid_point(Point::new(-7, -3)), Point::new(-7, -3));
+        assert_eq!(engine.snap_to_grid_point(Point::new(13, -41)), Point::new(13, -41));
+    }
+
+    /// A non-positive grid_size is clamped to 1 rather than dividing by zero.
+    #[test]
+    fn grid_snap_clamps_grid_size_to_one() {
+        let engine = engine_with(|e| e.grid_size = 0);
+        assert_eq!(engine.snap_to_grid_point(Point::new(7, -9)), Point::new(7, -9));
+    }
+
+    /// With no nearby targets and a coarse grid, find_snap_target falls back to
+    /// a Grid target (no indicator) at the nearest intersection.
+    #[test]
+    fn grid_fallback_with_coarse_grid() {
+        let engine = engine_with(|e| e.grid_size = 10);
+        let result = engine.find_snap_target(Point::new(13, 17), &[], &[], &[]);
+        assert_eq!(result.snapped_position, Point::new(10, 20));
+        assert!(!result.show_indicator);
+        assert!(!result.has_target());
+        assert_eq!(result.target_type(), Some(&SnapTargetType::Grid));
+    }
+
+    /// An on-grid cursor with no targets yields a grid-only result (no target).
+    #[test]
+    fn grid_fallback_on_grid_cursor_is_grid_only() {
+        let engine = engine_with(|e| e.grid_size = 10);
+        let result = engine.find_snap_target(Point::new(10, 20), &[], &[], &[]);
+        assert_eq!(result.snapped_position, Point::new(10, 20));
+        assert!(result.target.is_none());
+        assert!(!result.show_indicator);
+    }
+
+    // -------------------------------------------------------------------------
+    // Priority and candidate selection
+    // -------------------------------------------------------------------------
+
+    /// Priority order: Terminal < Junction < WireEndpoint < WireSegment < Grid.
+    #[test]
+    fn target_type_priority_order() {
+        let terminal = SnapTargetType::Terminal {
+            component_id: 1,
+            terminal_name: "+".to_string(),
+        };
+        let endpoint = SnapTargetType::WireEndpoint {
+            wire_id: 1,
+            is_start: true,
+        };
+        let segment = SnapTargetType::WireSegment {
+            wire_id: 1,
+            segment_index: 0,
+        };
+        assert!(terminal.priority() < SnapTargetType::Junction.priority());
+        assert!(SnapTargetType::Junction.priority() < endpoint.priority());
+        assert!(endpoint.priority() < segment.priority());
+        assert!(segment.priority() < SnapTargetType::Grid.priority());
+    }
+
+    /// Higher priority wins regardless of distance; distance breaks ties.
+    #[test]
+    fn is_better_than_prefers_priority_then_distance() {
+        let far_terminal = SnapTarget::terminal(Point::origin(), 1, "+", 1.9);
+        let near_junction = SnapTarget::junction(Point::origin(), 0.1);
+        assert!(far_terminal.is_better_than(&near_junction));
+        assert!(!near_junction.is_better_than(&far_terminal));
+
+        let near = SnapTarget::junction(Point::origin(), 0.3);
+        let far = SnapTarget::junction(Point::origin(), 0.5);
+        assert!(near.is_better_than(&far));
+    }
+
+    /// A terminal one unit away beats a junction at zero distance.
+    #[test]
+    fn terminal_beats_closer_junction() {
+        let engine = SnapEngine::default();
+        let comps = [resistor(1, Point::origin())]; // "-" terminal at (20, 0)
+        let junctions = [Junction::new(7, Point::new(21, 0))];
+        let result = engine.find_snap_target(Point::new(21, 0), &comps, &[], &junctions);
+        assert!(result.is_terminal_snap());
+        assert_eq!(result.snapped_position, Point::new(20, 0));
+        assert_eq!(result.terminal_component_id(), Some(1));
+        assert_eq!(result.terminal_name(), Some("-"));
+        assert!(result.has_target());
+    }
+
+    /// A junction one unit away beats a wire endpoint at zero distance.
+    #[test]
+    fn junction_beats_closer_wire_endpoint() {
+        let engine = SnapEngine::default();
+        let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
+        let junctions = [Junction::new(7, Point::new(1, 0))];
+        let result = engine.find_snap_target(Point::origin(), &[], &wires, &junctions);
+        assert_eq!(result.target_type(), Some(&SnapTargetType::Junction));
+        assert_eq!(result.snapped_position, Point::new(1, 0));
+    }
+
+    /// A wire endpoint beats a closer mid-segment point.
+    #[test]
+    fn wire_endpoint_beats_closer_segment_point() {
+        let engine = SnapEngine::default();
+        let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
+        // Endpoint (0,0) is sqrt(2) away; segment point (1,0) is 1 away.
+        let result = engine.find_snap_target(Point::new(1, 1), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireEndpoint {
+                wire_id: 3,
+                is_start: true
+            })
+        );
+        assert_eq!(result.snapped_position, Point::origin());
+    }
+
+    /// Within the same priority class, the nearer target wins.
+    #[test]
+    fn nearer_target_wins_within_same_priority() {
+        let engine = SnapEngine::default();
+        let junctions = [
+            Junction::new(1, Point::new(2, 0)),
+            Junction::new(2, Point::new(0, 1)),
+        ];
+        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        assert_eq!(result.snapped_position, Point::new(0, 1));
+    }
+
+    // -------------------------------------------------------------------------
+    // Snap radius boundaries
+    // -------------------------------------------------------------------------
+
+    /// A target exactly at the snap radius is still captured (inclusive bound).
+    #[test]
+    fn target_exactly_at_radius_snaps() {
+        let engine = SnapEngine::default(); // snap_radius = 2
+        let junctions = [Junction::new(1, Point::new(2, 0))];
+        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        assert_eq!(result.target_type(), Some(&SnapTargetType::Junction));
+        assert_eq!(result.snapped_position, Point::new(2, 0));
+    }
+
+    /// A target just outside the radius (sqrt(5) > 2) is ignored.
+    #[test]
+    fn target_just_outside_radius_does_not_snap() {
+        let engine = SnapEngine::default();
+        let junctions = [Junction::new(1, Point::new(2, 1))];
+        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        assert!(result.target.is_none());
+        assert_eq!(result.snapped_position, Point::origin());
+    }
+
+    /// with_radius clamps non-positive radii to 1.
+    #[test]
+    fn with_radius_clamps_to_minimum_one() {
+        assert_eq!(SnapEngine::new().with_radius(0).snap_radius, 1);
+        assert_eq!(SnapEngine::new().with_radius(-5).snap_radius, 1);
+        assert_eq!(SnapEngine::new().with_radius(3).snap_radius, 3);
+    }
+
+    /// A larger radius captures targets the default radius rejects.
+    #[test]
+    fn larger_radius_extends_capture() {
+        let junctions = [Junction::new(1, Point::new(3, 0))];
+        let default_engine = SnapEngine::default();
+        assert!(
+            default_engine
+                .find_snap_target(Point::origin(), &[], &[], &junctions)
+                .target
+                .is_none()
+        );
+        let wide = SnapEngine::new().with_radius(3);
+        let result = wide.find_snap_target(Point::origin(), &[], &[], &junctions);
+        assert_eq!(result.snapped_position, Point::new(3, 0));
+    }
+
+    // -------------------------------------------------------------------------
+    // Engine configuration flags
+    // -------------------------------------------------------------------------
+
+    /// A disabled engine returns the cursor position untouched, even off-grid.
+    #[test]
+    fn disabled_engine_returns_original_position() {
+        let engine = engine_with(|e| {
+            e.enabled = false;
+            e.grid_size = 10;
+        });
+        let junctions = [Junction::new(1, Point::new(13, 17))];
+        let result = engine.find_snap_target(Point::new(13, 17), &[], &[], &junctions);
+        assert_eq!(result.snapped_position, Point::new(13, 17));
+        assert!(result.target.is_none());
+        assert!(!result.show_indicator);
+        assert_eq!(result.original_position, Point::new(13, 17));
+    }
+
+    /// Per-class flags gate their target type out of consideration.
+    #[test]
+    fn class_flags_gate_targets() {
+        let engine = engine_with(|e| e.snap_to_junctions = false);
+        let junctions = [Junction::new(1, Point::new(1, 0))];
+        let result = engine.find_snap_target(Point::origin(), &[], &[], &junctions);
+        assert!(result.target.is_none());
+    }
+
+    /// terminals_only() snaps to terminals but ignores wire endpoints.
+    #[test]
+    fn terminals_only_ignores_wires() {
+        let engine = SnapEngine::terminals_only();
+        let comps = [resistor(1, Point::origin())];
+        let wires = [Wire::segment(3, Point::new(21, 0), Point::new(30, 0))];
+        // Terminal at (20,0) dist 1, wire start at (21,0) dist 0.
+        let result = engine.find_snap_target(Point::new(21, 0), &comps, &wires, &[]);
+        assert!(result.is_terminal_snap());
+        assert_eq!(result.snapped_position, Point::new(20, 0));
+
+        let result = engine.find_snap_target(Point::new(29, 0), &[], &wires, &[]);
+        assert!(result.target.is_none());
+    }
+
+    // -------------------------------------------------------------------------
+    // Wire endpoint and segment targets
+    // -------------------------------------------------------------------------
+
+    /// Endpoint snaps report which end of the wire was hit.
+    #[test]
+    fn wire_endpoint_reports_start_vs_end() {
+        let engine = SnapEngine::default();
+        let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
+
+        let result = engine.find_snap_target(Point::new(0, 1), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireEndpoint {
+                wire_id: 3,
+                is_start: true
+            })
+        );
+
+        let result = engine.find_snap_target(Point::new(10, 1), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireEndpoint {
+                wire_id: 3,
+                is_start: false
+            })
+        );
+    }
+
+    /// Degenerate wires: a single-point wire snaps as a start endpoint,
+    /// an empty wire contributes nothing.
+    #[test]
+    fn degenerate_wires_handled() {
+        let engine = SnapEngine::default();
+        let wires = [
+            Wire::new(1, vec![Point::new(5, 5)]),
+            Wire::new(2, vec![]),
+        ];
+        let result = engine.find_snap_target(Point::new(5, 6), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireEndpoint {
+                wire_id: 1,
+                is_start: true
+            })
+        );
+
+        let result = engine.find_snap_target(Point::new(50, 50), &[], &wires, &[]);
+        assert!(result.target.is_none());
+    }
+
+    /// Mid-segment snapping projects onto the segment; points that land on an
+    /// endpoint are excluded (endpoints own those positions).
+    #[test]
+    fn segment_snap_projects_and_excludes_endpoints() {
+        let engine = engine_with(|e| {
+            e.snap_to_terminals = false;
+            e.snap_to_junctions = false;
+            e.snap_to_wire_endpoints = false;
+        });
+        let wires = [Wire::segment(3, Point::origin(), Point::new(10, 0))];
+
+        let result = engine.find_snap_target(Point::new(5, 1), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireSegment {
+                wire_id: 3,
+                segment_index: 0
+            })
+        );
+        assert_eq!(result.snapped_position, Point::new(5, 0));
+
+        // Projection lands on the start vertex: no segment candidate.
+        let result = engine.find_snap_target(Point::new(0, 1), &[], &wires, &[]);
+        assert!(result.target.is_none());
+    }
+
+    /// Multi-segment wires report the index of the segment that was hit.
+    #[test]
+    fn segment_snap_reports_segment_index() {
+        let engine = SnapEngine::default();
+        let wires = [Wire::new(
+            3,
+            vec![Point::origin(), Point::new(10, 0), Point::new(10, 10)],
+        )];
+        let result = engine.find_snap_target(Point::new(11, 5), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireSegment {
+                wire_id: 3,
+                segment_index: 1
+            })
+        );
+        assert_eq!(result.snapped_position, Point::new(10, 5));
+    }
+
+    /// Diagonal (45-degree) segments snap to the perpendicular projection.
+    #[test]
+    fn diagonal_segment_snap() {
+        let engine = SnapEngine::default();
+        let wires = [Wire::segment(3, Point::origin(), Point::new(10, 10))];
+        let result = engine.find_snap_target(Point::new(6, 4), &[], &wires, &[]);
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::WireSegment {
+                wire_id: 3,
+                segment_index: 0
+            })
+        );
+        assert_eq!(result.snapped_position, Point::new(5, 5));
+    }
+
+    // -------------------------------------------------------------------------
+    // Terminal convenience queries
+    // -------------------------------------------------------------------------
+
+    /// find_nearest_terminal picks the closest terminal within radius,
+    /// and returns None when everything is out of range.
+    #[test]
+    fn find_nearest_terminal_respects_radius() {
+        let engine = SnapEngine::default();
+        let comps = [resistor(1, Point::origin()), resistor(2, Point::new(43, 0))];
+        // Cursor at (21,0): R1 "-" at (20,0) dist 1; R2 "+" at (23,0) dist 2.
+        let nearest = engine.find_nearest_terminal(Point::new(21, 0), &comps).unwrap();
+        assert_eq!(nearest.position, Point::new(20, 0));
+        assert!(matches!(
+            nearest.target_type,
+            SnapTargetType::Terminal { component_id: 1, .. }
+        ));
+
+        assert!(engine.find_nearest_terminal(Point::new(100, 100), &comps).is_none());
+    }
+
+    /// is_at_terminal matches exact positions only.
+    #[test]
+    fn is_at_terminal_exact_match_only() {
+        let engine = SnapEngine::default();
+        let comps = [resistor(1, Point::origin())];
+        assert_eq!(
+            engine.is_at_terminal(Point::new(-20, 0), &comps),
+            Some((1, "+".to_string()))
+        );
+        assert_eq!(engine.is_at_terminal(Point::new(-19, 0), &comps), None);
+    }
+
+    /// get_all_terminals enumerates every terminal of every component.
+    #[test]
+    fn get_all_terminals_enumerates_components() {
+        let engine = SnapEngine::default();
+        let comps = [resistor(1, Point::origin()), resistor(2, Point::new(0, 40))];
+        let terms = engine.get_all_terminals(&comps);
+        assert_eq!(terms.len(), 4);
+        assert!(terms.contains(&(1, "+".to_string(), Point::new(-20, 0))));
+        assert!(terms.contains(&(2, "-".to_string(), Point::new(20, 40))));
+    }
+}

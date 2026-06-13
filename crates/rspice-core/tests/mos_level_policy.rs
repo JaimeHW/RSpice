@@ -1,13 +1,13 @@
 //! Build-time policy for MOS model levels without a native implementation.
 //!
-//! BSIM-class cards without a native port (LEVEL=14/53/54, ...) must be
-//! rejected with a remediation message instead of silently running the
-//! simplified short-channel approximation, which honors only a handful of
-//! parameters and produces plausible-looking but wrong currents. The
+//! BSIM-class cards without a native port (LEVEL=53, ...) must be rejected
+//! with a remediation message instead of silently running the simplified
+//! short-channel approximation, which honors only a handful of parameters
+//! and produces plausible-looking but wrong currents. The
 //! `.options allow_simplified_mos` opt-in downgrades the rejection to a
 //! warning; LEVEL=3 stays runnable (with a warning) for compatibility with
 //! the vendored ngspice MOS3 decks; LEVEL=8/49 route to the native
-//! BSIM3v3.3 port.
+//! BSIM3v3.3 port and LEVEL=14/54 to the native BSIM4 v4.8 port.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -35,11 +35,14 @@ fn run(deck: &str) -> Result<(), String> {
 }
 
 #[test]
-fn bsim4_level_without_native_model_is_rejected() {
-    let deck = op_deck(".model nmod NMOS (LEVEL=54 VTH0=0.5)", "");
-    let message = run(&deck).expect_err("LEVEL=54 must not silently run the approximation");
+fn bsim_level_without_native_model_is_rejected() {
+    // LEVEL=53 (BSIM3v3.2-class) has no native port; the rejection must
+    // name the family, list the natively supported BSIM levels, and offer
+    // the opt-in.
+    let deck = op_deck(".model nmod NMOS (LEVEL=53 VTH0=0.5)", "");
+    let message = run(&deck).expect_err("LEVEL=53 must not silently run the approximation");
     assert!(
-        message.contains("BSIM4"),
+        message.contains("BSIM3v3"),
         "error names the model family: {message}"
     );
     assert!(
@@ -47,8 +50,8 @@ fn bsim4_level_without_native_model_is_rejected() {
         "error names the opt-in: {message}"
     );
     assert!(
-        message.contains("veriloga"),
-        "error points at the Verilog-A BSIM4 path: {message}"
+        message.contains("14/54 (BSIM4"),
+        "error lists the native BSIM4 levels: {message}"
     );
 }
 
@@ -66,9 +69,22 @@ fn bsim3_levels_run_natively() {
 }
 
 #[test]
+fn bsim4_levels_run_natively() {
+    // LEVEL=54 and LEVEL=14 route to the native BSIM4 v4.8 port — no
+    // allow_simplified_mos opt-in, no rejection.
+    for level in [54, 14] {
+        let deck = op_deck(
+            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOXE=1.4n NDEP=3e18)"),
+            "",
+        );
+        run(&deck).unwrap_or_else(|err| panic!("LEVEL={level} must run natively: {err}"));
+    }
+}
+
+#[test]
 fn simplified_mos_opt_in_accepts_the_deck() {
     let deck = op_deck(
-        ".model nmod NMOS (LEVEL=54 VTH0=0.5)",
+        ".model nmod NMOS (LEVEL=53 VTH0=0.5)",
         ".options allow_simplified_mos=1",
     );
     run(&deck).expect("explicit opt-in runs the simplified approximation");
@@ -77,7 +93,7 @@ fn simplified_mos_opt_in_accepts_the_deck() {
 #[test]
 fn simplified_mos_opt_in_zero_still_rejects() {
     let deck = op_deck(
-        ".model nmod NMOS (LEVEL=54 VTH0=0.5)",
+        ".model nmod NMOS (LEVEL=53 VTH0=0.5)",
         ".options allow_simplified_mos=0",
     );
     run(&deck).expect_err("allow_simplified_mos=0 keeps the rejection");

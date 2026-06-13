@@ -18,6 +18,11 @@ impl RSpiceApp {
     pub(super) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         use crate::state::{ComponentType, Tool};
 
+        if self.state.schematic.read_only && command_edits_schematic(command) {
+            self.state.deny_read_only_edit();
+            return;
+        }
+
         match command {
             ShortcutCommand::FileNew => self.action_file_new(),
             ShortcutCommand::FileOpen => self.action_file_open(),
@@ -242,4 +247,33 @@ impl RSpiceApp {
         // Toggle the console between expanded and collapsed.
         self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
     }
+}
+
+/// Commands that mutate the open schematic — refused on read-only views.
+/// Copy and Select All are reads; tools that only inspect (select, probe)
+/// and navigation stay live.
+fn command_edits_schematic(command: ShortcutCommand) -> bool {
+    matches!(
+        command,
+        ShortcutCommand::EditUndo
+            | ShortcutCommand::EditRedo
+            | ShortcutCommand::EditPaste
+            | ShortcutCommand::EditCut
+            | ShortcutCommand::EditDelete
+            | ShortcutCommand::ToolWire
+            | ShortcutCommand::ToolLabel
+            | ShortcutCommand::PlaceResistor
+            | ShortcutCommand::PlaceGround
+            | ShortcutCommand::PlaceVoltageSource
+            | ShortcutCommand::PlaceCurrentSource
+            | ShortcutCommand::PlaceCapacitor
+            | ShortcutCommand::PlaceInductor
+            | ShortcutCommand::PlaceDiode
+            | ShortcutCommand::PlaceNmos
+            | ShortcutCommand::PlaceNpnBjt
+            | ShortcutCommand::RotateSelectionOrPreview
+            | ShortcutCommand::MirrorSelectionHorizontal
+            | ShortcutCommand::MirrorSelectionVertical
+            | ShortcutCommand::OpenPropertiesEditor
+    )
 }

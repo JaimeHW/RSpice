@@ -38,7 +38,8 @@ rename a file, update the citations.
 | `volta-schematic-editor.html` | Desktop schematic editor: document bar (breadcrumb + ERC pill), canvas vocabulary, selection, placement, wiring, checks overlay, hierarchy, context menus (spec), empty state, full keymap | — |
 | `volta-library-manager.html` | Library workspace view: three-column browser, docbar, metadata strip, New cell + New view forms (completes volta-dialogs §07), delete confirmations, empty states | — |
 | `volta-app-chrome.html` | Shell chrome as first-class surfaces: all nine menus item-for-item, toolbar, workspace tabs (×3 directions), status bar with responsive priorities, console, empty-state grammar | — |
-| `volta-app-dialogs.html` | App-level surfaces: command palette (live ranking), Preferences, Keyboard shortcuts (complete deck), About | — |
+| `volta-app-dialogs.html` | App-level surfaces: command palette (live ranking), Preferences (incl. checkpoint autosave), Keyboard shortcuts (complete deck), About | — |
+| `volta-symbol-editor.html` | Symbol editor (new surface, entirely `spec`, awaiting review): one edit/inspect surface behind the read-only gate, terminal-grid law, pin contract checked like ERC, five body tools, label anchors, generate-from-schematic | — |
 
 ## website/ · internal/ · brand/ · archive/
 
@@ -66,13 +67,17 @@ closed the same day by the four files added to the table above:
 `volta-app-chrome.html`, `volta-app-dialogs.html`.
 
 Inside those files, `ships` tags mark what the code does and `spec`
-tags mark proposals. The same-day implementation pass shipped most of
-the original backlog: canvas context menus, finding cycling
-(F4/Shift+F4), the clickable ERC pill and docbar selection echo,
-palette recents/match marks/context verbs, the complete searchable
-shortcut deck, About's license line and Copy diagnostics, the Check
-menu's View/Clear violations, library read-only marks and named empty
-states, and the empty-sheet copy fix. Still open as `spec`: console
-source links, schematic autosave, library keyboard navigation and cell
-copy/rename, open-any-view routing, the read-only descend banner, and
-real Technology/Path metadata.
+tags mark proposals. The 2026-06-12 implementation passes shipped the
+bulk of the backlog: canvas context menus, finding cycling
+(F4/Shift+F4), console click-to-source rows, the clickable ERC pill
+and docbar selection echo, palette recents/match marks/context verbs,
+the complete searchable shortcut deck, About's license line and Copy
+diagnostics, the Check menu's View/Clear violations, library read-only
+marks, named empty states, keyboard navigation, testbench opening,
+real Technology/Path metadata, the read-only edit gate with its banner
+and "Copy to editable library…" door, Copy/Rename cell with full
+reference remapping, and checkpoint autosave with the restore dialog.
+Still open as `spec`: the symbol editor (fully spec'd in
+`volta-symbol-editor.html`, awaiting review before implementation),
+veriloga/spice text-view routing (needs a multi-document text editor),
+path click-to-reveal, and netlist-line console anchors.

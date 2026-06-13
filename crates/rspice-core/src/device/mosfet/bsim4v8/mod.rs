@@ -1,12 +1,11 @@
 //! BSIM4 v4.8 bulk MOSFET model (SPICE levels 14/54).
 //!
-//! Ported from ngspice-46 `src/spicelib/devices/bsim4/`. This is a
-//! self-contained model module — parameters ([`params`]), size/temperature
-//! preconditioning ([`temp`]), and the load equations ([`eval`]) — with **no
-//! engine integration yet**: nothing here stamps a matrix or registers with
-//! the builder. The module layout mirrors the in-tree BSIM3v3.3 port
-//! (`device::mosfet::bsim3v3`) so the eventual LEVEL=14/54 wiring can follow
-//! the LEVEL=8/49 pattern.
+//! Ported from ngspice-46 `src/spicelib/devices/bsim4/`. The model math —
+//! parameters ([`params`]), size/temperature preconditioning ([`temp`]),
+//! and the load equations ([`eval`]) — is self-contained; the engine wiring
+//! lives in [`device`] ([`Bsim4v8Device`]), which the builder registers for
+//! LEVEL=14/54 cards. The module layout mirrors the in-tree BSIM3v3.3 port
+//! (`device::mosfet::bsim3v3`) and its LEVEL=8/49 integration.
 //!
 //! # What is ported
 //!
@@ -57,21 +56,23 @@
 //! parses an instance `dtemp` but never uses it; this port does the same
 //! (the device evaluates at the temperature the temp pass ran at).
 //!
-//! # Integration seams (for the future LEVEL=14/54 wiring)
+//! # Integration seams
 //!
-//! The [`Bsim4v8`] device owns `Arc<Bsim4v8Model>` + `Arc<Bsim4v8SizeDep>`
+//! The [`Bsim4v8`] core owns `Arc<Bsim4v8Model>` + `Arc<Bsim4v8SizeDep>`
 //! + [`Bsim4v8InstTemp`] and exposes [`Bsim4v8::eval_polarity`] (raw node
 //! voltages in, `mtype`-folded internally) plus the ngspice limiting
 //! sequence [`Bsim4v8::limit_voltages`]. The op struct carries every
 //! `here->BSIM4*` quantity the b4ld.c stamp consumes; the multiplier `m`,
-//! the mode swap of the matrix load, and the gmin policy are the engine's
-//! responsibility.
+//! the mode swap of the matrix load, and the gmin policy live in the
+//! engine-facing wrapper ([`Bsim4v8Device`]).
 
 pub mod common;
+pub mod device;
 pub mod eval;
 pub mod params;
 pub mod temp;
 
+pub use device::{Bsim4v8ChargeMatrix, Bsim4v8Device};
 pub use eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8Op};
 pub use params::{Binned, Bsim4v8Model};
 pub use temp::{
@@ -106,6 +107,60 @@ impl Bsim4v8 {
         geom: Bsim4v8Geometry,
         temp_k: Value,
     ) -> Result<Self, String> {
+        Self::validate_model(&name, &model, &geom)?;
+        let model_temp = Arc::new(Bsim4v8ModelTemp::new(&model, temp_k));
+        let size = Arc::new(Bsim4v8SizeDep::new(
+            &model,
+            &model_temp,
+            geom.l,
+            geom.w,
+            geom.nf,
+        )?);
+        let inst = Bsim4v8InstTemp::new(&model, &model_temp, &size, &geom);
+        Ok(Self {
+            name,
+            mtype: model.mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        })
+    }
+
+    /// Build an instance against a shared model-temperature block, memoizing
+    /// the (W, L, NF) size knot in `cache` — the engine builder path,
+    /// mirroring ngspice's `pSizeDependParamKnot` reuse across same-geometry
+    /// instances.
+    pub fn new_shared(
+        name: String,
+        model: Arc<Bsim4v8Model>,
+        model_temp: Arc<Bsim4v8ModelTemp>,
+        cache: &mut SizeDepCache,
+        geom: Bsim4v8Geometry,
+    ) -> Result<Self, String> {
+        Self::validate_model(&name, &model, &geom)?;
+        let size = cache.get(&model, &model_temp, geom.l, geom.w, geom.nf)?;
+        let inst = Bsim4v8InstTemp::new(&model, &model_temp, &size, &geom);
+        Ok(Self {
+            name,
+            mtype: model.mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        })
+    }
+
+    /// The unsupported-option rejections of `BSIM4setup`/`b4check.c`:
+    /// unimplemented model options are typed errors, never silent fallbacks
+    /// (see the module docs for the list).
+    fn validate_model(
+        name: &str,
+        model: &Bsim4v8Model,
+        geom: &Bsim4v8Geometry,
+    ) -> Result<(), String> {
         if model.rds_mod != 0 {
             return Err(format!(
                 "BSIM4 '{name}': RDSMOD={} is not implemented (only RDSMOD=0)",
@@ -181,24 +236,7 @@ impl Bsim4v8 {
                 model.geo_mod
             ));
         }
-        let model_temp = Arc::new(Bsim4v8ModelTemp::new(&model, temp_k));
-        let size = Arc::new(Bsim4v8SizeDep::new(
-            &model,
-            &model_temp,
-            geom.l,
-            geom.w,
-            geom.nf,
-        )?);
-        let inst = Bsim4v8InstTemp::new(&model, &model_temp, &size, &geom);
-        Ok(Self {
-            name,
-            mtype: model.mtype,
-            model,
-            model_temp,
-            size,
-            inst,
-            geom,
-        })
+        Ok(())
     }
 
     /// Evaluate at device-polarity branch voltages (already limited).

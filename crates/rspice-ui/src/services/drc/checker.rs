@@ -430,3 +430,414 @@ impl Default for DrcChecker {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::drc::input::PinInfo;
+
+    fn pin(name: &str, net: &str) -> PinInfo {
+        PinInfo {
+            name: name.to_string(),
+            net_name: net.to_string(),
+            is_output: false,
+            x: None,
+            y: None,
+        }
+    }
+
+    fn pin_at(name: &str, net: &str, x: f64, y: f64) -> PinInfo {
+        PinInfo {
+            name: name.to_string(),
+            net_name: net.to_string(),
+            is_output: false,
+            x: Some(x),
+            y: Some(y),
+        }
+    }
+
+    fn resistor(id: usize, name: &str, pins: Vec<PinInfo>) -> ComponentInfo {
+        ComponentInfo {
+            id,
+            name: name.to_string(),
+            component_type: "resistor".to_string(),
+            pins,
+            is_voltage_source: false,
+            is_current_source: false,
+        }
+    }
+
+    fn vsource(id: usize, name: &str, plus_net: &str, minus_net: &str) -> ComponentInfo {
+        ComponentInfo {
+            id,
+            name: name.to_string(),
+            component_type: "voltage_source".to_string(),
+            pins: vec![pin("+", plus_net), pin("-", minus_net)],
+            is_voltage_source: true,
+            is_current_source: false,
+        }
+    }
+
+    fn wire(id: usize, x0: f64, y0: f64, x1: f64, y1: f64) -> WireInfo {
+        WireInfo {
+            id,
+            start_x: x0,
+            start_y: y0,
+            end_x: x1,
+            end_y: y1,
+        }
+    }
+
+    fn label(name: &str, x: f64, y: f64) -> NetLabelInfo {
+        NetLabelInfo {
+            name: name.to_string(),
+            x,
+            y,
+        }
+    }
+
+    fn of_type<'a>(result: &'a DrcResult, vt: DrcViolationType) -> Vec<&'a DrcViolation> {
+        result
+            .violations()
+            .iter()
+            .filter(|v| v.violation_type == vt)
+            .collect()
+    }
+
+    // V1 across vin/0 with R1 in parallel: every net has two connections and
+    // ground is present, so a default check is clean.
+    fn minimal_circuit() -> Vec<ComponentInfo> {
+        vec![
+            vsource(0, "V1", "vin", "0"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+        ]
+    }
+
+    #[test]
+    fn empty_schematic_reports_only_missing_ground() {
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&[], &[], &[]);
+        assert!(result.completed);
+        assert_eq!(result.total_count(), 1);
+        assert_eq!(
+            result.violations()[0].violation_type,
+            DrcViolationType::MissingGround
+        );
+    }
+
+    #[test]
+    fn empty_schematic_clean_when_ground_check_disabled() {
+        let config = DrcConfig {
+            check_missing_ground: false,
+            ..DrcConfig::default()
+        };
+        let mut checker = DrcChecker::with_config(config);
+        let result = checker.check_connectivity(&[], &[], &[]);
+        assert!(result.completed);
+        assert_eq!(result.total_count(), 0);
+        assert!(result.passed());
+    }
+
+    #[test]
+    fn minimal_connected_circuit_has_no_violations() {
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&minimal_circuit(), &[], &[]);
+        assert_eq!(result.total_count(), 0, "{:?}", result.violations());
+        assert!(result.passed());
+    }
+
+    #[test]
+    fn duplicate_component_names_are_flagged() {
+        let mut components = minimal_circuit();
+        components.push(resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]));
+
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let dups = of_type(&result, DrcViolationType::DuplicateName);
+        assert_eq!(dups.len(), 1);
+        assert_eq!(dups[0].severity, DrcSeverity::Critical);
+        match &dups[0].location {
+            DrcLocation::Component { name, .. } => assert_eq!(name, "R1"),
+            other => panic!("expected component location, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn triplicate_name_reported_once_not_per_pair() {
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(3, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let dups = of_type(&result, DrcViolationType::DuplicateName);
+        assert_eq!(dups.len(), 1);
+        assert!(dups[0].message.contains("3 instances"));
+    }
+
+    #[test]
+    fn duplicate_name_check_can_be_disabled() {
+        let mut components = minimal_circuit();
+        components.push(resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]));
+
+        let config = DrcConfig {
+            check_duplicate_names: false,
+            ..DrcConfig::default()
+        };
+        let mut checker = DrcChecker::with_config(config);
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(of_type(&result, DrcViolationType::DuplicateName).is_empty());
+    }
+
+    #[test]
+    fn missing_ground_flagged_with_global_location() {
+        let components = vec![
+            vsource(0, "V1", "vin", "vee"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "vee")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let missing = of_type(&result, DrcViolationType::MissingGround);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].location, DrcLocation::Global);
+        assert_eq!(missing[0].severity, DrcSeverity::Critical);
+    }
+
+    #[test]
+    fn gnd_name_satisfies_ground_check_case_insensitive() {
+        let components = vec![
+            vsource(0, "V1", "vin", "GND"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "GND")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(of_type(&result, DrcViolationType::MissingGround).is_empty());
+    }
+
+    #[test]
+    fn single_connection_net_is_floating() {
+        let mut components = minimal_circuit();
+        components.push(resistor(2, "R2", vec![pin("1", "vin"), pin("2", "out")]));
+
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        assert_eq!(floating.len(), 1);
+        assert_eq!(floating[0].severity, DrcSeverity::Error);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "out".to_string()
+            }
+        );
+        // Related items identify the component so the UI can highlight it.
+        assert_eq!(floating[0].related_items, vec!["R2".to_string()]);
+    }
+
+    #[test]
+    fn ground_net_is_never_floating() {
+        let components = vec![resistor(0, "R1", vec![pin("1", "0"), pin("2", "a")])];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        assert_eq!(floating.len(), 1);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "a".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn auto_named_nets_are_not_reported_floating() {
+        // A pin with coordinates but no net name lands in a geometry cluster
+        // whose canonical name is auto-generated; the floating check skips it.
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(
+                2,
+                "R2",
+                vec![pin("1", "vin"), pin_at("2", "", 300.0, 300.0)],
+            ),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(of_type(&result, DrcViolationType::FloatingNode).is_empty());
+    }
+
+    #[test]
+    fn min_connections_config_is_honored() {
+        let config = DrcConfig {
+            min_connections: 3,
+            ..DrcConfig::default()
+        };
+        let mut checker = DrcChecker::with_config(config);
+        let result = checker.check_connectivity(&minimal_circuit(), &[], &[]);
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        // "vin" has two connections, below the threshold; "0" is exempt as ground.
+        assert_eq!(floating.len(), 1);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "vin".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn two_voltage_sources_on_one_net_are_shorted_outputs() {
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            vsource(1, "V2", "vin", "0"),
+            resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let shorted = of_type(&result, DrcViolationType::ShortedOutputs);
+        assert_eq!(shorted.len(), 1);
+        assert_eq!(
+            shorted[0].location,
+            DrcLocation::Node {
+                net_name: "vin".to_string()
+            }
+        );
+        let mut related = shorted[0].related_items.clone();
+        related.sort();
+        assert_eq!(related, vec!["V1".to_string(), "V2".to_string()]);
+    }
+
+    #[test]
+    fn sources_on_distinct_nets_are_not_shorted() {
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            vsource(1, "V2", "vcc", "0"),
+            resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(3, "R2", vec![pin("1", "vcc"), pin("2", "0")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(of_type(&result, DrcViolationType::ShortedOutputs).is_empty());
+        assert!(result.passed());
+    }
+
+    #[test]
+    fn pins_on_same_wire_form_one_net() {
+        // Both pins lie on a single horizontal wire; a label on the wire
+        // names the net so the floating check would see it if it misfired.
+        let components = vec![
+            resistor(0, "R1", vec![pin_at("1", "", 0.0, 0.0), pin("2", "0")]),
+            resistor(1, "R2", vec![pin_at("1", "", 50.0, 0.0), pin("2", "0")]),
+        ];
+        let wires = vec![wire(0, 0.0, 0.0, 100.0, 0.0)];
+        let labels = vec![label("mid", 80.0, 0.0)];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &wires, &labels);
+        assert!(
+            of_type(&result, DrcViolationType::FloatingNode).is_empty(),
+            "{:?}",
+            result.violations()
+        );
+    }
+
+    #[test]
+    fn crossing_wires_merge_into_one_net() {
+        // Vertical and horizontal wires crossing at the origin carry one pin
+        // each; the intersection unifies them into a two-connection net.
+        let components = vec![
+            resistor(0, "R1", vec![pin_at("1", "", 0.0, 100.0), pin("2", "0")]),
+            resistor(1, "R2", vec![pin_at("1", "", 100.0, 0.0), pin("2", "0")]),
+        ];
+        let wires = vec![
+            wire(0, 0.0, -100.0, 0.0, 100.0),
+            wire(1, -100.0, 0.0, 100.0, 0.0),
+        ];
+        let labels = vec![label("x", 0.0, -100.0)];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &wires, &labels);
+        assert!(
+            of_type(&result, DrcViolationType::FloatingNode).is_empty(),
+            "{:?}",
+            result.violations()
+        );
+    }
+
+    #[test]
+    fn labeled_pin_with_no_wire_is_floating_under_label_name() {
+        // The label shares the pin coordinate, so the cluster takes the
+        // label's name and the single connection is reported against it.
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(
+                2,
+                "R2",
+                vec![pin("1", "vin"), pin_at("2", "", 0.0, 200.0)],
+            ),
+        ];
+        let labels = vec![label("dangling", 0.0, 200.0)];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &labels);
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        assert_eq!(floating.len(), 1);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "dangling".to_string()
+            }
+        );
+        assert_eq!(floating[0].related_items, vec!["R2".to_string()]);
+    }
+
+    #[test]
+    fn fixed_violation_disappears_on_recheck() {
+        let mut components = minimal_circuit();
+        components.push(resistor(2, "R1", vec![pin("1", "vin"), pin("2", "0")]));
+
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert_eq!(of_type(&result, DrcViolationType::DuplicateName).len(), 1);
+
+        components[2].name = "R2".to_string();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(of_type(&result, DrcViolationType::DuplicateName).is_empty());
+        assert_eq!(result.total_count(), 0);
+    }
+
+    #[test]
+    fn violation_ids_are_unique_within_a_result() {
+        let components = vec![
+            vsource(0, "V1", "vin", "x"),
+            vsource(1, "V1", "vin", "y"),
+            resistor(2, "R1", vec![pin("1", "vin"), pin("2", "z")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        assert!(result.total_count() >= 3);
+        let mut ids: Vec<usize> = result.violations().iter().map(|v| v.id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), result.total_count());
+    }
+
+    #[test]
+    fn summary_counts_match_violations() {
+        let components = vec![
+            // No ground (critical), floating "out" (error), duplicate name (critical).
+            resistor(0, "R1", vec![pin("1", "a"), pin("2", "out")]),
+            resistor(1, "R1", vec![pin("1", "a"), pin("2", "b")]),
+            resistor(2, "R2", vec![pin("1", "a"), pin("2", "b")]),
+        ];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &[]);
+        let summary = result.summary();
+        assert_eq!(summary.total, result.total_count());
+        assert_eq!(summary.critical, 2);
+        assert_eq!(summary.errors, 1);
+        assert!(!summary.passed);
+        assert!(result.has_errors());
+    }
+}

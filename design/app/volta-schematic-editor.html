@@ -525,9 +525,13 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
   </table>
   <p class="note">
     Ships today. Deliberate scope note: descend is <kbd>Shift+E</kbd>, not Virtuoso's bare <kbd>E</kbd> —
-    <kbd>E</kbd> is properties here and overloading it was rejected. A read-only banner for descents into
-    read-only-library masters is <span class="tag spec">spec</span>: amber strip under the docbar,
-    “Read-only — ‹PDK› masters cannot be edited”, with a “Copy to editable library…” action.
+    <kbd>E</kbd> is properties here and overloading it was rejected. Read-only masters
+    <span class="tag today">ships</span>: opening a view from a read-only library raises an amber strip
+    under the docbar (“Read-only — '‹lib›' masters cannot be edited”) and every edit path refuses with
+    the same console line — placement, wiring, clipboard writes, transforms, undo, properties; drags
+    collapse to marquee; inspection, copy, probing and descent stay live. The banner's
+    “Copy to editable library…” action remains <span class="tag spec">spec</span> pending the
+    Copy-cell form.
   </p>
 </section>
 
