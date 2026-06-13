@@ -22,6 +22,12 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
     schematic.recalculate_runtime_state();
+    // Views from read-only libraries open for inspection, never for edit —
+    // the docbar banner explains and every edit path checks this flag.
+    schematic.read_only = state
+        .library_manager
+        .get_library(&reference.library)
+        .is_some_and(|library| library.read_only);
     schematic
 }
 
@@ -201,6 +207,19 @@ impl AppState {
             "Entered {}",
             reference.display_path()
         )));
+    }
+
+    /// Refuse an edit on a read-only view, with the console line that names
+    /// the library. Returns true when the edit must be blocked.
+    pub(crate) fn deny_read_only_edit(&mut self) -> bool {
+        if !self.schematic.read_only {
+            return false;
+        }
+        let library = self.workspace.active_view.library.clone();
+        self.push_user_message(ConsoleMessage::warning(format!(
+            "Read-only — '{library}' masters cannot be edited"
+        )));
+        true
     }
 
     /// Ascend one hierarchy level (the U gesture / pathbar action).

@@ -3,8 +3,12 @@
 use super::AppState;
 
 /// Open the tabbed property editor for `component_id`, populated from the
-/// component's registry sheet and current values.
+/// component's registry sheet and current values. Refused on read-only
+/// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
+    if state.deny_read_only_edit() {
+        return;
+    }
     let Some(component) = state
         .schematic
         .components

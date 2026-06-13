@@ -68,6 +68,11 @@ impl SchematicState {
     where
         F: FnOnce(&mut Self),
     {
+        // Backstop for read-only views: the UI layers refuse with a console
+        // line; anything that slips through is silently skipped here.
+        if self.read_only {
+            return false;
+        }
         self.begin_operation(description);
         operation(self);
         self.end_operation()

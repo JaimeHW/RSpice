@@ -24,6 +24,10 @@ pub(super) fn handle_tool_interactions(
         && let Some(pos) = response.interact_pointer_pos()
     {
         match current_tool {
+            // Read-only views take no edits; the console names the library.
+            Tool::Place(_) | Tool::Wire | Tool::Label if state.schematic.read_only => {
+                state.deny_read_only_edit();
+            }
             Tool::Place(component_type) => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
                 place_component(state, component_type, grid_pos);
@@ -110,6 +114,9 @@ fn handle_select_dragging(
             // Shift+drag is always an additive marquee — even when it starts
             // on a component, the intent is to extend the selection, not to
             // move the part (Virtuoso convention).
+            state.schematic.selection_rect.start_at(grid_pos);
+        } else if state.schematic.read_only {
+            // No moves on read-only views — every drag is a marquee.
             state.schematic.selection_rect.start_at(grid_pos);
         } else if state.schematic.is_draggable_wire_point(wire_grid_pos) {
             state.schematic.begin_operation("drag wire vertex");

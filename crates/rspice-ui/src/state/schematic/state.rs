@@ -130,6 +130,11 @@ pub struct SchematicState {
     #[serde(skip)]
     pub center_request: Option<Point>,
 
+    /// The open view belongs to a read-only library — inspection only.
+    /// Set by the workspace loader; every edit path refuses while it holds.
+    #[serde(skip)]
+    pub read_only: bool,
+
     /// Flag indicating the undo history should be reset (e.g., after loading a file).
     /// Set to true when a file is loaded, cleared after history is reset.
     #[serde(skip)]
@@ -191,6 +196,7 @@ impl Default for SchematicState {
             is_dirty: false,
             needs_fit: false,
             center_request: None,
+            read_only: false,
             needs_history_reset: false,
             topology_version: 0,
             snap_engine: SnapEngine::default(),

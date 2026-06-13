@@ -17,7 +17,40 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         });
     });
 
+    if state.schematic.read_only {
+        read_only_banner(ui, state);
+    }
+
     crate::schematic::view::render_schematic_view(ui, state, symbol_library);
+}
+
+/// Amber strip under the docbar while a read-only master is open — the
+/// canvas is for inspection, and this is where that is said.
+fn read_only_banner(ui: &mut Ui, state: &AppState) {
+    let t = crate::ui::tokens::Tokens::get(ui.ctx());
+    let c = t.color;
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), 24.0),
+        egui::Sense::hover(),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, c.warn.gamma_multiply(0.13));
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
+    let library = &state.workspace.active_view.library;
+    painter.text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        format!("Read-only — '{library}' masters cannot be edited"),
+        crate::ui::theme::sans(
+            crate::ui::tokens::FS_1,
+            crate::ui::theme::FontWeight::Regular,
+        ),
+        c.warn,
+    );
 }
 
 /// Faint selection echo beside the check pill — the eye is on the canvas
