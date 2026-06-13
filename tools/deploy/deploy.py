@@ -7,7 +7,7 @@ r"""Take committed site/ changes live on rspice.app — git only, no gh.
 The deploy-site workflow triggers on a `site-v*` tag push, so shipping needs
 nothing but `git`: this pushes your branch and a new `site-vN` tag. GitHub
 Actions then builds (tools/deploy/build_site.py), gates, and force-pushes
-gh-pages, which Cloudflare Pages serves as production. The build stays in CI
+cf-pages, which Cloudflare Pages serves as production. The build stays in CI
 for a clean-room, reproducible result — nothing is built or published locally.
 
 It prints the Actions URL to watch the run; if you have the GitHub CLI you can
@@ -92,7 +92,7 @@ def main():
         print("  watch the run:  " + url)
         if shutil.which("gh"):
             print("  or stream it:   gh run watch  (gh detected, optional)")
-    print("Cloudflare serves gh-pages within ~a minute after every gate passes.")
+    print("Cloudflare serves cf-pages within ~a minute after every gate passes.")
     print("  verify live:    https://rspice.app/build.json   (source_sha should be %s)" % short)
 
 

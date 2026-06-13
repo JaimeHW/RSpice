@@ -1,7 +1,7 @@
 # site/ — the deployed rspice.app pages
 
 This tree IS the public site (Cloudflare Pages, production branch
-`gh-pages`). It deploys **verbatim** — no transform layer. Edit a page
+`cf-pages`). It deploys **verbatim** — no transform layer. Edit a page
 here, run the deploy workflow, and that exact byte content goes live.
 
 - `index.html` / `interior.html` / `parity.html` / `docs.html` /
@@ -25,7 +25,7 @@ By hand: push a `site-v*` tag (or `gh workflow run deploy-site` if you use the C
 The workflow builds both wasm bundles from the pushed ref with
 `tools/deploy/build_site.py`, assembles `_site/`, refuses to publish unless the
 bundles pass the magic/export gates and the playground completes a live headless
-solve, then force-publishes `_site` to `gh-pages`, which Cloudflare picks up.
+solve, then force-publishes `_site` to `cf-pages`, which Cloudflare picks up.
 Local dry-run: `python3 tools/deploy/build_site.py` (add `--skip-headless`
 without a local Chrome). Rollback: re-run the workflow on an older ref.
 

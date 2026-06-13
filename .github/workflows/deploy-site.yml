@@ -1,12 +1,12 @@
 # Deliberate site deploys. main is a shared live-dev branch, so the site
-# never deploys per-push: run this manually (gh workflow run deploy-site)
+# never deploys per-push: run tools/deploy/deploy.py (git only, no gh)
 # or push a site-v* tag. The build is tools/deploy/build_site.py — both
 # wasm bundles compiled from the dispatched ref, bundle-integrity gates,
 # and a live headless solve of the playground; nothing publishes unless
-# every gate passes. Publishing force-replaces the gh-pages tree, which
+# every gate passes. tools/deploy/publish.py force-pushes _site to the cf-pages tree, which
 # is the Cloudflare Pages production branch — Cloudflare picks the push
 # up and serves it within about a minute. Rollback: re-run on an older
-# ref. The branch stays single-commit (force_orphan) so multi-MB wasm
+# ref. The branch stays single-commit so the multi-MB wasm
 # bundles never accrete history.
 name: Deploy site
 
@@ -54,11 +54,7 @@ jobs:
       - name: Build and verify (_site)
         run: python3 tools/deploy/build_site.py
 
-      - name: Publish to gh-pages (Cloudflare Pages production branch)
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./_site
-          publish_branch: gh-pages
-          force_orphan: true
-          commit_message: "deploy ${{ github.sha }}"
+      - name: Publish to cf-pages (Cloudflare Pages production branch)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 tools/deploy/publish.py --branch cf-pages --dir _site
