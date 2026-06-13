@@ -503,6 +503,11 @@ impl Engine {
         circuit
             .bsim3v3
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        // BSIM4: identical discipline (b4acld.c repeats the DC
+        // conductance groups, GIDL/GISL included, on the real axis).
+        circuit
+            .bsim4v8
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for jfet in &circuit.jfets {
             jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper);
         }
@@ -762,10 +767,11 @@ impl Engine {
             }
         }
 
-        // BSIM3 coupled capacitance matrix: the mode-assembled gc** block of
-        // b3ld.c evaluated at the operating point, times jw — exactly the
-        // xc*** entries of b3acld.c:356-369 (nqsMod = 0).
-        if !circuit.bsim3v3.is_empty() {
+        // BSIM3/BSIM4 coupled capacitance matrices: the mode-assembled gc**
+        // blocks of b3ld.c/b4ld.c evaluated at the operating point, times
+        // jw — exactly the xc*** entries of b3acld.c:356-369 / b4acld.c
+        // (nqsMod = 0).
+        if !circuit.bsim3v3.is_empty() || !circuit.bsim4v8.is_empty() {
             struct AcImagStamper<'a> {
                 matrix: &'a mut ComplexMatrix,
             }
@@ -785,6 +791,11 @@ impl Engine {
             for dev in &circuit.bsim3v3.devices {
                 let (charge, mode) = dev.charge_at(op_voltages);
                 let gc = crate::device::Bsim3v3Device::charge_matrix(&charge, mode);
+                dev.stamp_charge_matrix(&gc, omega, &mut stamper);
+            }
+            for dev in &circuit.bsim4v8.devices {
+                let (charge, mode) = dev.charge_at(op_voltages);
+                let gc = crate::device::Bsim4v8Device::charge_matrix(&charge, mode);
                 dev.stamp_charge_matrix(&gc, omega, &mut stamper);
             }
         }

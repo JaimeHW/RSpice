@@ -51,6 +51,18 @@ impl Engine {
             );
         }
 
+        // Same status for the native BSIM4 port: the fnoiMod/tnoiMod
+        // selectors are parsed and stored, but no b4noi.c sources are
+        // generated yet.
+        if !circuit.bsim4v8.is_empty() {
+            log::warn!(
+                "noise analysis: {} BSIM4 (LEVEL=14/54) device(s) contribute no noise \
+                 sources yet (series-resistance thermal noise is included; channel \
+                 thermal and flicker noise are not)",
+                circuit.bsim4v8.len()
+            );
+        }
+
         // Verilog-A white_noise()/flicker_noise() sources, with PSDs
         // evaluated at the operating point. Potential-contribution noise
         // arrives as a series EMF on the branch-equation row, which is an

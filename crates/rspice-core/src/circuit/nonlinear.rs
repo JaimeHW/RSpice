@@ -9,6 +9,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     b3soi_fd: B3SoiFds,
     b3soi_pd: B3SoiPds,
     bsim3v3: Bsim3v3s,
+    bsim4v8: Bsim4v8s,
     jfets: Vec<crate::device::Jfet>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
@@ -28,6 +29,7 @@ impl CircuitData {
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
+            || !self.bsim4v8.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -65,6 +67,15 @@ impl CircuitData {
         !self.bsim3v3.is_empty()
     }
 
+    /// Check if circuit has any native BSIM4 v4.8 (level 14/54) device.
+    ///
+    /// Same dedicated transient pipeline shape as the BSIM3 one, over the
+    /// BSIM4 composite charge states.
+    #[inline]
+    pub fn has_bsim4v8_devices(&self) -> bool {
+        !self.bsim4v8.is_empty()
+    }
+
     /// Check whether circuit contains strongly-coupled physical nonlinearities
     /// that benefit from conservative Newton damping (e.g., voltage limiting).
     #[inline]
@@ -76,6 +87,7 @@ impl CircuitData {
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
+            || !self.bsim4v8.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -108,6 +120,7 @@ impl CircuitData {
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
+            || !self.bsim4v8.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self.has_xspice_devices()
@@ -158,6 +171,10 @@ impl CircuitData {
         for dev in &mut self.bsim3v3.devices {
             dev.set_eval_gmin(gmin);
         }
+        // BSIM4 follows the same discipline (b4ld.c diode/TAT terms).
+        for dev in &mut self.bsim4v8.devices {
+            dev.set_eval_gmin(gmin);
+        }
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate
@@ -192,6 +209,7 @@ impl CircuitData {
             b3soi_fd: self.b3soi_fd.clone(),
             b3soi_pd: self.b3soi_pd.clone(),
             bsim3v3: self.bsim3v3.clone(),
+            bsim4v8: self.bsim4v8.clone(),
             jfets: self.jfets.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
@@ -211,6 +229,7 @@ impl CircuitData {
         self.b3soi_fd = snapshot.b3soi_fd;
         self.b3soi_pd = snapshot.b3soi_pd;
         self.bsim3v3 = snapshot.bsim3v3;
+        self.bsim4v8 = snapshot.bsim4v8;
         self.jfets = snapshot.jfets;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
@@ -232,6 +251,7 @@ impl CircuitData {
         self.b3soi_fd.update_all(voltages);
         self.b3soi_pd.update_all(voltages);
         self.bsim3v3.update_all(voltages);
+        self.bsim4v8.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
         order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
         let mut hfet_inverse_latched = false;
@@ -303,6 +323,9 @@ impl CircuitData {
         // hook (the b3ld.c cdreq/ceqbd/ceqbs rows), not the legacy `rhs`
         // slice, so the same path serves DC and transient assembly.
         self.bsim3v3.stamp_all(&mut stamper, &mut [], voltages);
+        // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
+        // rows through the stamper's RHS hook).
+        self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
         for vswitch in &self.vswitches {
             vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
         }
@@ -347,6 +370,7 @@ impl CircuitData {
             && self.b3soi_fd.all_converged(criteria)
             && self.b3soi_pd.all_converged(criteria)
             && self.bsim3v3.all_converged(criteria)
+            && self.bsim4v8.all_converged(criteria)
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))

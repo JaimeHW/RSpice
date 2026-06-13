@@ -21,6 +21,7 @@ pub use b3soi::{B3SoiDd, B3SoiDdModel, B3SoiFd, B3SoiFdModel, B3SoiPd, B3SoiPdMo
 pub use bsim3::{Bsim3, Bsim3Params, Bsim3Region, Bsim3Type};
 pub use bsim3v3::{Bsim3v3, Bsim3v3Device, Bsim3v3Model};
 pub use bsim4::{Bsim4, Bsim4Params, Bsim4Type};
+pub use bsim4v8::{Bsim4v8, Bsim4v8Device, Bsim4v8Model};
 pub use ekv::EkvMosfet;
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;

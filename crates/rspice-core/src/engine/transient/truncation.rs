@@ -928,6 +928,95 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    /// LTE truncation limit for the BSIM4 v4.8 (level 14/54) charge states.
+    ///
+    /// Mirrors [`Self::bsim3_ngspice_truncation_limit`] over the three
+    /// composite BSIM4 node charges (`qg`/`qb`/`qd`, junction depletion
+    /// charges folded in) — exactly the states `b4trunc.c` feeds `CKTterr`
+    /// for `trnqsMod = rgateMod = rbodyMod = 0`. Returns the tightest
+    /// per-charge step bound, or `None` when no charge is active.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn bsim4_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Bsim4TransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
+            return None;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
+            let (c, _mode) = dev.charge_at(candidate_solution);
+            for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
+                (
+                    c.qg_state(),
+                    history.qg_prev[idx],
+                    history.qg_prev_prev[idx],
+                    history.qg_prev_prev_prev[idx],
+                    history.cqg_prev[idx],
+                ),
+                (
+                    c.qb_state(),
+                    history.qb_prev[idx],
+                    history.qb_prev_prev[idx],
+                    history.qb_prev_prev_prev[idx],
+                    history.cqb_prev[idx],
+                ),
+                (
+                    c.qd_state(),
+                    history.qd_prev[idx],
+                    history.qd_prev_prev[idx],
+                    history.qd_prev_prev_prev[idx],
+                    history.cqd_prev[idx],
+                ),
+            ] {
+                // Integrated charge current at the candidate point.
+                let cq_curr = Self::jfet_companion_ccap(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
     /// Signal-activity step limit: rescale the candidate step so that no
     /// nonlinear-device terminal voltage moves more than `bound` volts in one
     /// step.

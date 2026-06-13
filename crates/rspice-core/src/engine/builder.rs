@@ -123,8 +123,8 @@ fn is_magnetic_core_model_type(model_type: &str) -> bool {
 
 /// MOS model levels with a native bulk-MOSFET implementation: Berkeley
 /// MOS1/MOS2/MOS6 (1/2/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
-/// 8/49 (BSIM3v3.3) and 55-57 (BSIM3-SOI) are routed to dedicated devices
-/// before this check applies.
+/// 8/49 (BSIM3v3.3), 14/54 (BSIM4 v4.8) and 55-57 (BSIM3-SOI) are routed
+/// to dedicated devices before this check applies.
 fn native_bulk_mos_level(level: i32) -> bool {
     matches!(level, 1 | 2 | 4 | 5 | 6)
 }
@@ -250,6 +250,9 @@ impl Engine {
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
         let mut bsim3v3_models: HashMap<String, Bsim3v3SharedModel> = HashMap::new();
+
+        // Likewise for BSIM4 v4.8, keyed on (W, L, NF) size knots.
+        let mut bsim4v8_models: HashMap<String, Bsim4v8SharedModel> = HashMap::new();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
@@ -873,11 +876,10 @@ impl Engine {
                         }
                     }
 
-                    // BSIM3v3.3: LEVEL=8/49 cards route to the native port
-                    // (LEVEL=54 stays on the BSIM4 rejection below). One
-                    // shared model card + temperature block per .model; size
-                    // knots are memoized across instances exactly as ngspice
-                    // reuses pSizeDependParamKnot.
+                    // BSIM3v3.3: LEVEL=8/49 cards route to the native port.
+                    // One shared model card + temperature block per .model;
+                    // size knots are memoized across instances exactly as
+                    // ngspice reuses pSizeDependParamKnot.
                     if matches!(level, 8 | 49)
                         && let Some(params_map) = params_map.as_ref()
                     {
@@ -896,6 +898,32 @@ impl Engine {
                             self.config.temperature,
                             tnom_default_k,
                             &mut bsim3v3_models,
+                        )?;
+                        continue;
+                    }
+
+                    // BSIM4 v4.8: LEVEL=14/54 cards route to the native port
+                    // with the same sharing scheme (the size knots carry NF).
+                    // Unported mode knobs (rdsMod, rgateMod, ...) surface the
+                    // module's typed construction error.
+                    if matches!(level, 14 | 54)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let model_key =
+                            model_def.map_or_else(|| model.clone(), |def| def.name.clone());
+                        let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
+                            netlist.options.tnom.unwrap_or(27.0),
+                        );
+                        Self::build_bsim4v8(
+                            &mut circuit,
+                            element,
+                            resolved_mos_type,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            self.config.temperature,
+                            tnom_default_k,
+                            &mut bsim4v8_models,
                         )?;
                         continue;
                     }
@@ -934,10 +962,10 @@ impl Engine {
                             return Err(SimulationError::Circuit(format!(
                                 "MOSFET '{}': model '{}' requests {} which has no native \
                                  implementation. Supported levels: 1, 2, 6 (Berkeley \
-                                 MOS1/MOS2/MOS6), 4/5 (legacy BSIM1/BSIM2), 55-57 \
-                                 (BSIM3-SOI FD/DD/PD). For BSIM4 accuracy use the bundled \
-                                 Verilog-A model (models/veriloga/bsim4.va); to knowingly \
-                                 run a simplified ~15-parameter approximation instead, set \
+                                 MOS1/MOS2/MOS6), 4/5 (legacy BSIM1/BSIM2), 8/49 \
+                                 (BSIM3v3.3), 14/54 (BSIM4 v4.8), 55-57 (BSIM3-SOI \
+                                 FD/DD/PD). To knowingly run a simplified ~15-parameter \
+                                 approximation instead, set \
                                  `.options allow_simplified_mos=1`.",
                                 element.name, model, descriptor
                             )));
@@ -2137,6 +2165,9 @@ impl Engine {
         for dev in &mut circuit.bsim3v3.devices {
             dev.set_eval_gmin(junction_gmin);
         }
+        for dev in &mut circuit.bsim4v8.devices {
+            dev.set_eval_gmin(junction_gmin);
+        }
 
         Ok(circuit)
     }
@@ -2541,6 +2572,163 @@ impl Engine {
         ));
         Ok(())
     }
+
+    /// Build and register a native BSIM4 v4.8 (MOS level 14/54) instance.
+    ///
+    /// Topology is the standard 4-terminal bulk MOSFET `m d g s b` (the
+    /// canonical mode set collapses every optional internal node of
+    /// b4set.c). Series drain/source resistance follows b4temp.c
+    /// (`rgeoMod = 0`): a conductance of `1 / (RSH * NRD)` (resp. NRS)
+    /// exists only when RSH is positive and the square count was *given*
+    /// positive — unlike BSIM3, the NRD/NRS default of 1 does not create
+    /// one. It is lowered to an ordinary linear resistor at an internal
+    /// prime node, and the device's drain/source point at the primes
+    /// (ngspice stamps `m * drainConductance` between dNode and
+    /// dNodePrime). Unported mode knobs (rdsMod/rgateMod/rbodyMod/NQS/
+    /// gate-current/capMod/mtrlMod/WPE/stress) surface the module's typed
+    /// construction error.
+    #[allow(clippy::too_many_arguments)]
+    fn build_bsim4v8(
+        circuit: &mut CircuitData,
+        element: &crate::netlist::Element,
+        mos_type: crate::netlist::MosType,
+        model_key: &str,
+        params_map: &HashMap<String, f64>,
+        instance_params: &[(String, f64)],
+        temperature_kelvin: f64,
+        tnom_default_k: f64,
+        shared: &mut HashMap<String, Bsim4v8SharedModel>,
+    ) -> Result<(), SimulationError> {
+        use crate::device::Bsim4v8Device;
+        use crate::device::mosfet::bsim4v8::{
+            Bsim4v8, Bsim4v8Geometry, Bsim4v8Model, Bsim4v8ModelTemp, SizeDepCache,
+        };
+
+        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
+        // ngspice-46's BSIM4 parses an instance DTEMP but never uses it
+        // (see the module docs); every instance evaluates at the circuit
+        // temperature, like ngspice's CKTtemp.
+        let temp_k = temperature_kelvin;
+
+        let entry = match shared.entry(model_key.to_string()) {
+            std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                let model = std::sync::Arc::new(Bsim4v8Model::from_params(
+                    params_map,
+                    is_pmos,
+                    tnom_default_k,
+                ));
+                // The charge model implements CAPMOD=2 (the BSIM4 default;
+                // other values are rejected by the device constructor).
+                // CVCHARGEMOD=1 would only fail at charge-request time, so
+                // reject the card up front rather than failing
+                // mid-analysis. XPART<0 (intrinsic charge suppression)
+                // remains honored.
+                if model.cvcharge_mod != 0 && model.xpart >= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "MOSFET '{}': BSIM4 model '{}' requests CVCHARGEMOD={} which is \
+                         not implemented (only CVCHARGEMOD=0)",
+                        element.name, model_key, model.cvcharge_mod
+                    )));
+                }
+                let model_temp = std::sync::Arc::new(Bsim4v8ModelTemp::new(&model, temp_k));
+                vacant.insert(Bsim4v8SharedModel {
+                    model,
+                    model_temp,
+                    size_cache: SizeDepCache::new(),
+                })
+            }
+        };
+
+        let multiplier = instance_param(instance_params, &["M"])
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .unwrap_or(1.0);
+        let defaults = Bsim4v8Geometry::default();
+        let given = |names: &[&str]| instance_param(instance_params, names);
+        let geom = Bsim4v8Geometry {
+            l: given(&["L"]).unwrap_or(defaults.l),
+            w: given(&["W"]).unwrap_or(defaults.w),
+            nf: given(&["NF"])
+                .filter(|nf| nf.is_finite() && *nf >= 1.0)
+                .unwrap_or(defaults.nf),
+            m: multiplier,
+            min_sd: given(&["MIN"]).map_or(defaults.min_sd, |v| v as i32),
+            drain_area: given(&["AD"]).unwrap_or(0.0),
+            drain_area_given: given(&["AD"]).is_some(),
+            source_area: given(&["AS"]).unwrap_or(0.0),
+            source_area_given: given(&["AS"]).is_some(),
+            drain_perimeter: given(&["PD"]).unwrap_or(0.0),
+            drain_perimeter_given: given(&["PD"]).is_some(),
+            source_perimeter: given(&["PS"]).unwrap_or(0.0),
+            source_perimeter_given: given(&["PS"]).is_some(),
+            drain_squares: given(&["NRD"]).unwrap_or(defaults.drain_squares),
+            drain_squares_given: given(&["NRD"]).is_some(),
+            source_squares: given(&["NRS"]).unwrap_or(defaults.source_squares),
+            source_squares_given: given(&["NRS"]).is_some(),
+            delvto: given(&["DELVTO", "DELVT0"]).unwrap_or(0.0),
+            mulu0: given(&["MULU0"]).unwrap_or(1.0),
+            dtemp: given(&["DTEMP"]).unwrap_or(0.0),
+            sa: given(&["SA"]).unwrap_or(0.0),
+            sb: given(&["SB"]).unwrap_or(0.0),
+            sd: given(&["SD"]).unwrap_or(0.0),
+            off: given(&["OFF"]).is_some_and(|v| v != 0.0),
+            ic_vds: given(&["ICVDS", "IC"]).unwrap_or(0.0),
+            ic_vgs: given(&["ICVGS"]).unwrap_or(0.0),
+            ic_vbs: given(&["ICVBS"]).unwrap_or(0.0),
+        };
+
+        let core = Bsim4v8::new_shared(
+            element.name.clone(),
+            std::sync::Arc::clone(&entry.model),
+            std::sync::Arc::clone(&entry.model_temp),
+            &mut entry.size_cache,
+            geom,
+        )
+        .map_err(SimulationError::Circuit)?;
+
+        let drain_external = circuit.get_or_create_node(&element.nodes[0]);
+        let gate = circuit.get_or_create_node(&element.nodes[1]);
+        let source_external = circuit.get_or_create_node(&element.nodes[2]);
+        let bulk = circuit.get_or_create_node(&element.nodes[3]);
+
+        // Internal prime nodes only when the series conductance exists
+        // (drain_conductance = 1/(RSH*NRD) > 0 with NRD given, b4temp.c).
+        let drain = if core.inst.drain_conductance > 0.0 {
+            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
+            circuit.resistors.add(
+                format!("{}.__rd", element.name),
+                drain_external,
+                dint,
+                1.0 / (core.inst.drain_conductance * multiplier),
+            );
+            dint
+        } else {
+            drain_external
+        };
+        let source = if core.inst.source_conductance > 0.0 {
+            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
+            circuit.resistors.add(
+                format!("{}.__rs", element.name),
+                source_external,
+                sint,
+                1.0 / (core.inst.source_conductance * multiplier),
+            );
+            sint
+        } else {
+            source_external
+        };
+
+        circuit.bsim4v8.add(Bsim4v8Device::new(
+            element.name.clone(),
+            drain,
+            gate,
+            source,
+            bulk,
+            multiplier,
+            core,
+        ));
+        Ok(())
+    }
 }
 
 /// Per-`.model` shared BSIM3v3.3 state: the parsed card, its temperature
@@ -2549,4 +2737,12 @@ struct Bsim3v3SharedModel {
     model: std::sync::Arc<crate::device::Bsim3v3Model>,
     model_temp: std::sync::Arc<crate::device::mosfet::bsim3v3::Bsim3v3ModelTemp>,
     size_cache: crate::device::mosfet::bsim3v3::SizeDepCache,
+}
+
+/// Per-`.model` shared BSIM4 v4.8 state: the parsed card, its temperature
+/// block, and the (W, L, NF)-keyed size-dependent parameter knots.
+struct Bsim4v8SharedModel {
+    model: std::sync::Arc<crate::device::Bsim4v8Model>,
+    model_temp: std::sync::Arc<crate::device::mosfet::bsim4v8::Bsim4v8ModelTemp>,
+    size_cache: crate::device::mosfet::bsim4v8::SizeDepCache,
 }
