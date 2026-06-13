@@ -297,8 +297,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       </div>
       <div class="strip-cell">
         <p class="kicker">Decks passed · sample</p>
-        <p class="stat-val" id="stat-passed">105 / 113</p>
-        <p class="stat-sub">grid-locked, point-for-point</p>
+        <p class="stat-val" id="stat-passed">111 / 113</p>
+        <p class="stat-sub">grid-locked or contract-gated</p>
       </div>
       <div class="strip-cell">
         <p class="kicker">Points compared · sample</p>
@@ -308,7 +308,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="strip-cell">
         <p class="kicker">Max waveform deviation · sample</p>
         <p class="stat-val" id="stat-dev">&lt; 1e-9 V</p>
-        <p class="stat-sub">worst point across passing decks</p>
+        <p class="stat-sub">worst point across grid-locked decks</p>
       </div>
     </div>
   </div>
@@ -320,7 +320,10 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         <p class="kicker">Per-cluster results · <span id="suite-rel">v1.0.0</span></p>
         <h2 id="h-suite">The suite, cluster by cluster.</h2>
         <p>Decks are grouped by the ngspice example corpus they came from. A cluster is listed
-        as under review until its grid-lock policy is settled — close is not a pass.</p>
+        as under review until its grid-lock policy is settled — close is not a pass. Decks that
+        free-run pointwise comparison cannot judge gate on per-deck validation contracts:
+        locked-grid replay, engineering-measure sidecars, or certified refusal where the
+        oracle itself cannot solve the deck.</p>
       </div>
 
       <p class="table-hint">click a passing cluster to plot its overlay · click an under-review cluster to see why</p>
@@ -336,12 +339,20 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
             </tr>
           </thead>
           <tbody id="suite-body">
-            <tr class="row" data-cluster="transient-sources" tabindex="0">
-              <td class="cluster"><span class="twist" aria-hidden="true"></span>transient-sources</td>
+            <tr class="row" data-cluster="transient-sources" data-review="1" tabindex="0" aria-expanded="false">
+              <td class="cluster"><span class="twist" aria-hidden="true">▶</span>transient-sources</td>
               <td class="num">18</td>
-              <td><span class="pill pass"><span class="dot"></span>pass</span></td>
+              <td><span class="pill warn"><span class="dot"></span><span class="js-n">2 under review</span></span></td>
               <td class="num js-dmax">3.1e-12 V</td>
               <td class="num js-rt">1.8 s</td>
+            </tr>
+            <tr class="exp" id="exp-transient-sources" hidden>
+              <td colspan="5">
+                <ul class="exp-list">
+                  <li><span class="deck">fourbitadder.cir · general</span><span class="why">transient regression, bisected to a single commit — fix in flight</span></li>
+                  <li><span class="deck">fourbitadder.cir · transient</span><span class="why">same regression — exceeds the suite's hard timeout</span></li>
+                </ul>
+              </td>
             </tr>
             <tr class="row" data-cluster="dc-sweep" tabindex="0">
               <td class="cluster"><span class="twist" aria-hidden="true"></span>dc-sweep</td>
@@ -357,38 +368,19 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
               <td class="num js-dmax">2.2e-12 V</td>
               <td class="num js-rt">1.2 s</td>
             </tr>
-            <tr class="row" data-cluster="vbic" data-review="1" tabindex="0" aria-expanded="false">
-              <td class="cluster"><span class="twist" aria-hidden="true">▶</span>vbic</td>
+            <tr class="row" data-cluster="vbic" tabindex="0">
+              <td class="cluster"><span class="twist" aria-hidden="true"></span>vbic</td>
               <td class="num">16</td>
-              <td><span class="pill warn"><span class="dot"></span><span class="js-n">5 under review</span></span></td>
-              <td class="num js-dmax">2.7e-3 V</td>
+              <td><span class="pill pass"><span class="dot"></span>pass</span></td>
+              <td class="num js-dmax">3.4e-12 V</td>
               <td class="num js-rt">6.1 s</td>
             </tr>
-            <tr class="exp" id="exp-vbic" hidden>
-              <td colspan="5">
-                <ul class="exp-list">
-                  <li><span class="deck">vbic_diffamp.cir</span><span class="why">VBIC charge nodes pending MNA promotion — fix verified, lands next release</span></li>
-                  <li><span class="deck">vbic_excess_phase_ft.cir</span><span class="why">excess-phase grid-lock policy pending</span></li>
-                  <li><span class="deck">vbic_selfheat_pulse.cir</span><span class="why">self-heating branch ordering under audit</span></li>
-                  <li class="more"><span class="deck js-more">+ 2 more in the full run log</span></li>
-                </ul>
-              </td>
-            </tr>
-            <tr class="row" data-cluster="transmission-lines" data-review="1" tabindex="0" aria-expanded="false">
-              <td class="cluster"><span class="twist" aria-hidden="true">▶</span>transmission-lines</td>
+            <tr class="row" data-cluster="transmission-lines" tabindex="0">
+              <td class="cluster"><span class="twist" aria-hidden="true"></span>transmission-lines</td>
               <td class="num">12</td>
-              <td><span class="pill warn"><span class="dot"></span><span class="js-n">3 under review</span></span></td>
-              <td class="num js-dmax">4.4e-3 V</td>
+              <td><span class="pill pass"><span class="dot"></span>pass</span></td>
+              <td class="num js-dmax">≤ 1e-6 V</td>
               <td class="num js-rt">3.7 s</td>
-            </tr>
-            <tr class="exp" id="exp-transmission-lines" hidden>
-              <td colspan="5">
-                <ul class="exp-list">
-                  <li><span class="deck">ltra_step_coax.cir</span><span class="why">LTRA breakpoint insertion differs from the oracle</span></li>
-                  <li><span class="deck">txl_lossy_pulse.cir</span><span class="why">grid-lock policy pending for delay lines</span></li>
-                  <li><span class="deck">urc_ladder_ac.cir</span><span class="why">URC lumping-count heuristic under audit</span></li>
-                </ul>
-              </td>
             </tr>
             <tr class="row" data-cluster="monte-carlo" tabindex="0">
               <td class="cluster"><span class="twist" aria-hidden="true"></span>monte-carlo</td>
@@ -433,7 +425,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         </div>
         <svg id="parity-plot" viewBox="0 0 760 340" role="img"
              aria-label="Overlay of the selected cluster's RSpice trace on its oracle trace, with a flat grid-locked residual underneath"></svg>
-        <figcaption id="fig-cap">sffm_am_mix.cir · rspice (yellow) over ngspice-46 oracle (dashed) — grid-locked · max |Δ| 3.1e-12 V · sample data</figcaption>
+        <figcaption id="fig-cap">bjt_curve_trace.cir · rspice (yellow) over ngspice-46 oracle (dashed) — grid-locked · max |Δ| 6.4e-13 V · sample data</figcaption>
       </figure>
     </div>
   </section>
@@ -568,13 +560,13 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
   /* rows: [max|Δ|, runtime] — review rows carry a third field: under-review count */
   var REL = {
     "v1.0.0": {
-      passed: "105 / 113", points: "2.4 M", dev: "< 1e-9 V",
+      passed: "111 / 113", points: "2.4 M", dev: "< 1e-9 V",
       rows: {
-        "transient-sources":  ["3.1e-12 V", "1.8 s"],
+        "transient-sources":  ["3.1e-12 V", "1.8 s", 2],
         "dc-sweep":           ["6.4e-13 V", "0.9 s"],
         "ac-noise":           ["2.2e-12 V", "1.2 s"],
-        "vbic":               ["2.7e-3 V",  "6.1 s", 5],
-        "transmission-lines": ["4.4e-3 V",  "3.7 s", 3],
+        "vbic":               ["3.4e-12 V", "6.1 s"],
+        "transmission-lines": ["≤ 1e-6 V",  "3.7 s"],
         "monte-carlo":        ["4.7e-12 V", "12.6 s"],
         "digital-xspice":     ["1.5e-12 V", "2.1 s"],
         "rf-pss":             ["8.9e-10 V", "9.4 s"],
@@ -584,11 +576,11 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     "v0.9.0": {
       passed: "97 / 113", points: "2.1 M", dev: "< 5e-9 V",
       rows: {
-        "transient-sources":  ["3.1e-12 V", "2.6 s"],
+        "transient-sources":  ["3.1e-12 V", "2.6 s", 6],
         "dc-sweep":           ["8.8e-13 V", "1.1 s"],
         "ac-noise":           ["2.9e-12 V", "1.5 s"],
-        "vbic":               ["5.3e-3 V",  "7.4 s", 11],
-        "transmission-lines": ["8.2e-3 V",  "4.5 s", 5],
+        "vbic":               ["8.1e-9 V",  "7.4 s"],
+        "transmission-lines": ["≤ 2e-6 V",  "4.5 s"],
         "monte-carlo":        ["4.7e-12 V", "15.8 s"],
         "digital-xspice":     ["2.0e-12 V", "2.7 s"],
         "rf-pss":             ["4.6e-9 V",  "11.2 s"],
@@ -596,10 +588,10 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       }
     }
   };
-  var REVIEW_LISTED = { "vbic": 3, "transmission-lines": 3 };
+  var REVIEW_LISTED = { "transient-sources": 2 };
 
   var releaseSel = document.getElementById("release");
-  var state = { release: "v1.0.0", sel: "transient-sources" };
+  var state = { release: "v1.0.0", sel: "dc-sweep" };
 
   /* ============ Overlay figure — same plotting approach as the main site ============ */
   var plot = document.getElementById("parity-plot");
@@ -725,7 +717,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
 
   /* ============ Boot ============ */
   applyRelease(releaseSel.value);
-  selectCluster("transient-sources", false);
+  selectCluster("dc-sweep", false);
 })();
 </script>
 </body>
