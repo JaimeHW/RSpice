@@ -156,7 +156,7 @@ result = engine.run_dc_op(netlist)
 print(result.voltage(1))
 ```
 
-Transient and AC results come back as NumPy arrays. Full API reference: [crates/rspice-python/README.md](crates/rspice-python/README.md).
+Transient and AC results come back as NumPy arrays. Full API reference: [crates/rspice-python/README.md](crates/rspice-python/README.md). A CI-ready pytest pattern — circuit and `.MEAS` criteria asserted from a test — lives in [examples/python/](examples/python/) and runs in this repo's own CI.
 
 ### WebAssembly
 
@@ -188,7 +188,7 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) the vendored ngspice test suite and validation manifest, and [docs/](docs/) the testing methodology.
+Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) the vendored ngspice test suite and validation manifest, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual and testing methodology.
 
 ## License
 
