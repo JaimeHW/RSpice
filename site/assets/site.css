@@ -146,12 +146,12 @@ h2 { font-size: 32px; line-height: 1.18; }
 }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; flex: none; }
 .logo-tile {
-  width: 28px; height: 28px; border-radius: 22%;
+  width: 36px; height: 36px; border-radius: 22%;
   background: var(--signal-yellow);
   display: flex; align-items: center; justify-content: center;
   flex: none;
 }
-.logo-tile svg { width: 70%; height: 70%; --run-ink: var(--schematic-ink); }
+.logo-tile svg { width: 78%; height: 78%; --run-ink: var(--schematic-ink); }
 .brand .wm { height: 20px; width: 65px; color: var(--text); }
 .nav-links { display: flex; gap: 4px; margin-left: var(--space-sm); overflow-x: auto; }
 .nav-links a {
