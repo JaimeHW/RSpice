@@ -85,7 +85,7 @@ rfd = "0.15"
 # Cross-platform config directories
 dirs = "5.0"
 
-# License-key signature verification (docs/license-key-spec.md) — pure
+# License-key signature verification (internal license-key spec) — pure
 # Rust, works on wasm32; key generation lives in the license_tool example
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "rand_core"] }
 

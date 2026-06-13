@@ -1,6 +1,6 @@
 //! License key parsing, verification, and local storage.
 //!
-//! Implements `docs/license-key-spec.md` end to end:
+//! Implements the internal license-key spec end to end:
 //!
 //! - Wire format `RSPICE-K1.<base32(payload)>.<base32(signature)>` in
 //!   Crockford base32 (uppercase, no padding; grouping dashes and

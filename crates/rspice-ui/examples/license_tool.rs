@@ -1,4 +1,4 @@
-//! Development license tooling (spec: docs/license-key-spec.md).
+//! Development license tooling (spec: internal license-key spec).
 //!
 //! Production issuance belongs to the platform backend's cold-key flow;
 //! this exists to mint the development signer (key id 0x01) and signed
