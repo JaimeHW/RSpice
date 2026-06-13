@@ -19,8 +19,9 @@ source is `design/internal/rspice-parity-dashboard.html`; the two are kept
 in sync by hand, with the oracle labels deliberately differing.
 
 Deploying: `python3 tools/deploy/deploy.py` (Windows: `py tools\deploy\deploy.py`)
-— pushes your branch, dispatches the deploy-site workflow, and watches the run.
-By hand it's still `gh workflow run deploy-site` (or push a `site-v*` tag).
+— git only, no `gh` required: it pushes your branch and a new `site-vN` tag, and
+the tag push is what triggers the workflow. It prints the Actions URL to watch.
+By hand: push a `site-v*` tag (or `gh workflow run deploy-site` if you use the CLI).
 The workflow builds both wasm bundles from the pushed ref with
 `tools/deploy/build_site.py`, assembles `_site/`, refuses to publish unless the
 bundles pass the magic/export gates and the playground completes a live headless

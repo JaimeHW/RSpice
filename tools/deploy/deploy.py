@@ -1,69 +1,72 @@
 #!/usr/bin/env python3
-r"""Take committed site/ changes live on rspice.app — one command.
+r"""Take committed site/ changes live on rspice.app — git only, no gh.
 
-    python3 tools/deploy/deploy.py [--ref BRANCH] [--allow-dirty]
+    python3 tools/deploy/deploy.py [--ref BRANCH] [--tag NAME] [--allow-dirty]
     # Windows:  py tools\deploy\deploy.py
 
-This does NOT build or publish locally. The build stays in CI for a
-clean-room, reproducible result: GitHub Actions runs
-tools/deploy/build_site.py from the pushed commit, gates it, and
-force-pushes _site/ to the gh-pages branch, which Cloudflare Pages serves
-as production. This wrapper just drives that pipeline:
+The deploy-site workflow triggers on a `site-v*` tag push, so shipping needs
+nothing but `git`: this pushes your branch and a new `site-vN` tag. GitHub
+Actions then builds (tools/deploy/build_site.py), gates, and force-pushes
+gh-pages, which Cloudflare Pages serves as production. The build stays in CI
+for a clean-room, reproducible result — nothing is built or published locally.
 
-  1. refuse a dirty tree   — uncommitted edits would NOT be deployed
-                             (CI builds the pushed commit, not your worktree)
-  2. git push              — land your commits on origin
-  3. gh workflow run       — dispatch deploy-site on the pushed ref
-  4. gh run watch          — stream the run; Cloudflare picks up gh-pages
-                             ~1 min after every gate passes
-
-Needs the GitHub CLI (`gh`) authenticated with workflow scope.
+It prints the Actions URL to watch the run; if you have the GitHub CLI you can
+stream it with `gh run watch`, but `gh` is never required.
 """
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
-import time
-
-WORKFLOW = "deploy-site.yml"
 
 
 def out(cmd):
     return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def need(tool):
-    if not shutil.which(tool):
-        sys.exit("required tool not found on PATH: " + tool)
+def next_site_tag():
+    """Next `site-vN`, one past the highest existing numbered tag (local+fetched)."""
+    highest = 0
+    for tag in out(["git", "tag", "--list", "site-v*"]).splitlines():
+        m = re.fullmatch(r"site-v(\d+)", tag.strip())
+        if m:
+            highest = max(highest, int(m.group(1)))
+    return "site-v%d" % (highest + 1)
 
 
-def latest_run_id():
-    return out(["gh", "run", "list", "--workflow", WORKFLOW, "--limit", "1",
-                "--json", "databaseId", "-q", ".[0].databaseId"])
+def actions_url():
+    """https://github.com/<owner>/<repo>/actions/... from the origin remote."""
+    try:
+        remote = out(["git", "remote", "get-url", "origin"])
+    except subprocess.CalledProcessError:
+        return None
+    m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", remote)
+    return ("https://github.com/%s/actions/workflows/deploy-site.yml" % m.group(1)
+            if m else None)
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Push + trigger + watch the site deploy.")
+    ap = argparse.ArgumentParser(description="Push + tag to deploy the site (git only).")
     ap.add_argument("--ref", help="branch to push and deploy (default: current branch)")
+    ap.add_argument("--tag", help="tag name to create (default: next site-vN)")
     ap.add_argument("--allow-dirty", action="store_true",
                     help="proceed despite uncommitted tracked changes "
                          "(they will NOT be included — CI builds the pushed commit)")
     args = ap.parse_args()
 
-    need("git")
-    need("gh")
+    if not shutil.which("git"):
+        sys.exit("required tool not found on PATH: git")
 
     branch = args.ref or out(["git", "rev-parse", "--abbrev-ref", "HEAD"])
 
-    # 1 · clean-tree guard — untracked files are fine (they never deploy);
-    #     uncommitted edits to *tracked* files are the foot-gun.
+    # clean-tree guard — untracked files are fine (they never deploy);
+    # uncommitted edits to *tracked* files are the foot-gun.
     status = out(["git", "status", "--porcelain"])
     tracked_dirty = [ln for ln in status.splitlines() if not ln.startswith("??")]
     if tracked_dirty and not args.allow_dirty:
         print("Uncommitted changes to tracked files - these will NOT be deployed\n"
-              "(CI builds the pushed commit, not your working tree):\n",
-              file=sys.stderr)
+              "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
         print("\n".join(tracked_dirty), file=sys.stderr)
         sys.exit("\ncommit them first, or re-run with --allow-dirty")
 
@@ -71,35 +74,26 @@ def main():
         print("WARNING: deploying ref '%s' (not main). The site's source of truth "
               "is main; this will publish %s's site/ to production." % (branch, branch))
 
-    # 2 · push
+    tag = args.tag or next_site_tag()
+    short = out(["git", "rev-parse", "--short", "HEAD"])
+
     print("-> pushing %s to origin..." % branch)
     subprocess.run(["git", "push", "origin", branch], check=True)
 
-    # 3 · dispatch (note the run id beforehand so we watch the NEW one)
-    before = latest_run_id()
-    print("-> dispatching %s on %s..." % (WORKFLOW, branch))
-    subprocess.run(["gh", "workflow", "run", WORKFLOW, "--ref", branch], check=True)
+    print("-> tagging %s at %s and pushing it (this is what triggers the deploy)..."
+          % (tag, short))
+    subprocess.run(["git", "tag", "-a", tag, "-m", "deploy site (%s %s)" % (branch, short)],
+                   check=True)
+    subprocess.run(["git", "push", "origin", tag], check=True)
 
-    run_id = None
-    for _ in range(20):
-        time.sleep(2)
-        current = latest_run_id()
-        if current and current != before:
-            run_id = current
-            break
-    if not run_id:
-        sys.exit("dispatched, but the new run did not appear — check:\n"
-                 "  gh run list --workflow %s" % WORKFLOW)
-
-    # 4 · watch (the run keeps going even if you Ctrl-C this)
-    print("-> watching run %s ..." % run_id)
-    watched = subprocess.run(["gh", "run", "watch", run_id, "--exit-status"])
-    if watched.returncode != 0:
-        sys.exit("deploy run %s failed — inspect:\n"
-                 "  gh run view %s --log-failed" % (run_id, run_id))
-
-    print("\nDeployed. Cloudflare serves gh-pages within ~a minute.")
-    print("  verify:  https://rspice.app/build.json   (source_sha should match the pushed HEAD)")
+    url = actions_url()
+    print("\nDeploy triggered by tag %s (commit %s)." % (tag, short))
+    if url:
+        print("  watch the run:  " + url)
+        if shutil.which("gh"):
+            print("  or stream it:   gh run watch  (gh detected, optional)")
+    print("Cloudflare serves gh-pages within ~a minute after every gate passes.")
+    print("  verify live:    https://rspice.app/build.json   (source_sha should be %s)" % short)
 
 
 if __name__ == "__main__":
