@@ -23,9 +23,9 @@ target/release/rspice-bench run
 - `--repeats N` — timed repetitions per deck/simulator (default 5; one
   untimed warmup always runs first).
 - `--out PATH` — scoreboard destination (default
-  `diagnostics/benchmarks/scoreboard.json`). The rig never date-stamps the
+  `benchmarks/scoreboards/scoreboard.json`). The rig never date-stamps the
   file itself; archive a run by passing an explicit dated path, e.g.
-  `--out diagnostics/benchmarks/2026-06-11-baseline.json`.
+  `--out benchmarks/scoreboards/2026-06-11-baseline.json`.
 
 The process exits non-zero if any simulator run failed, so the rig can gate
 deck health in CI even when timings are not being compared.
@@ -53,14 +53,15 @@ Comparability rules:
 | `divider_ac.cir` | Startup floor: trivial DC + AC sweep — process overhead, parse, output. |
 | `diode_rectifier.cir` | Nonlinear transient: Newton iterations with diode limiting. |
 | `ring51.cir` | 51-stage MOSFET ring oscillator: device-evaluation-dominated transient. |
+| `mos_array_4096.cir` | Device-evaluation tier: 4,096-stage level-1 NMOS array transient — Newton time spent in model code, not factorization. |
 | `rc_ladder_100.cir` | Small linear transient (100 nodes, ~10k steps). |
 | `rc_ladder_1000.cir` | Medium linear transient (1k nodes, ~10k steps): stamp + solve balance. |
 | `rc_ladder_10000.cir` | Scale tier (10k nodes, ~1k steps): factorization/solve dominated. |
 
-The RC ladders are generated — `rspice-bench gen` reproduces them
-byte-for-byte (fixed formatting, no timestamps). Edit
-`crates/rspice-bench/src/generate.rs` and regenerate; never hand-edit the
-ladder decks. The other decks are hand-written and use only the dialect
+The RC ladders and the MOS array are generated — `rspice-bench gen`
+reproduces them byte-for-byte (fixed formatting, no timestamps). Edit
+`crates/rspice-bench/src/generate.rs` and regenerate; never hand-edit a
+generated deck. The other decks are hand-written and use only the dialect
 subset both simulators share.
 
 Planned additions (roadmap M0.5): ring oscillators in additional
@@ -69,7 +70,7 @@ technologies, a sky130 op-amp tran/AC/noise trio, a buck converter, a
 
 ## Scoreboards
 
-`diagnostics/benchmarks/` holds the published scoreboards:
+`scoreboards/` (this directory) holds the published scoreboards:
 
 - `scoreboard.json` — the latest run on the reference machine.
 - `YYYY-MM-DD-<tag>.json` — archived baselines (pre/post optimization).

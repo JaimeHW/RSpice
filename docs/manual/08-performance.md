@@ -6,7 +6,7 @@
 over the deck set in `benchmarks/circuits/` and writes a JSON
 scoreboard. Methodology, conventions, and the published baselines live
 in [benchmarks/README.md](../../benchmarks/README.md) and
-`diagnostics/benchmarks/`. House rule: **no optimization claim without a
+`benchmarks/scoreboards/`. House rule: **no optimization claim without a
 before/after scoreboard from the rig.**
 
 ```sh

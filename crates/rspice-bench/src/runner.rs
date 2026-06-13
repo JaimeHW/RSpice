@@ -47,7 +47,7 @@ pub struct RunArgs {
     /// rotates this file itself; pass an explicit dated path to archive a run.
     #[arg(
         long,
-        default_value = "diagnostics/benchmarks/scoreboard.json",
+        default_value = "benchmarks/scoreboards/scoreboard.json",
         value_name = "PATH"
     )]
     pub out: PathBuf,
