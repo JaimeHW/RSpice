@@ -88,6 +88,18 @@ impl RSpiceApp {
                 ui.add_space(tokens::SP_3);
                 section_label(ui, "Files");
 
+                // Checkpoint autosave: writes a .autosave sibling, never
+                // the file itself; a clean save deletes the checkpoint.
+                let autosave_options = ["Off", "1 min", "5 min", "15 min"];
+                let autosave_values: [u8; 4] = [0, 1, 5, 15];
+                let mut autosave_index = autosave_values
+                    .iter()
+                    .position(|m| *m == state.shell.autosave_minutes)
+                    .unwrap_or(2);
+                if choice_row(ui, "Autosave", &autosave_options, &mut autosave_index) {
+                    state.shell.autosave_minutes = autosave_values[autosave_index];
+                }
+
                 let count = state.recent_files.len();
                 let label = match count {
                     0 => "none".to_owned(),

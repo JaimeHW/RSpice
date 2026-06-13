@@ -137,6 +137,9 @@ pub struct DialogState {
     pub rename_cell_name: String,
     /// Rename Cell validation error message
     pub rename_cell_error: Option<String>,
+    /// An open found a newer autosave checkpoint — (file, checkpoint),
+    /// resolved by the restore dialog before anything loads.
+    pub pending_autosave_restore: Option<(std::path::PathBuf, std::path::PathBuf)>,
 
     /// Starting position of selection drag (grid coords)
     pub drag_start: Option<(i32, i32)>,

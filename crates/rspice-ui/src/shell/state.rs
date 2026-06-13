@@ -178,6 +178,9 @@ pub struct ShellState {
     pub theme: Theme,
     /// Console chrome state.
     pub console: ConsoleUiState,
+    /// Autosave checkpoint interval in minutes; 0 = off. Checkpoints write
+    /// next to the project file and never touch it.
+    pub autosave_minutes: u8,
     /// Toast queue.
     pub toasts: Toasts,
     /// Schematic-space cursor position, reported by the canvas each frame the
@@ -271,6 +274,8 @@ impl ShellState {
     pub fn new() -> Self {
         Self {
             corner: "tt".to_owned(),
+            // Crash recovery is not opt-in; Off stays available.
+            autosave_minutes: 5,
             cell_lib_filter: "All libs".to_owned(),
             // Long tail groups start collapsed; the working set stays open.
             lib_groups_closed: ["Sources", "Controlled sources", "Behavioral (XSPICE)"]
@@ -341,6 +346,8 @@ pub struct ShellStateSer {
     grid_style: Option<GridStyle>,
     #[serde(default)]
     panels_hidden: bool,
+    #[serde(default = "default_autosave_minutes")]
+    autosave_minutes: u8,
     #[serde(default)]
     result_viewer: super::results::ResultViewer,
     /// User expression traces per waves strip: (analysis index, expression).
@@ -350,6 +357,10 @@ pub struct ShellStateSer {
 
 fn default_corner() -> String {
     "tt".to_owned()
+}
+
+fn default_autosave_minutes() -> u8 {
+    5
 }
 
 fn default_true() -> bool {
@@ -383,6 +394,7 @@ impl From<&ShellState> for ShellStateSer {
             show_grid: shell.grid.visible(),
             grid_style: Some(shell.grid),
             panels_hidden: shell.panels_hidden,
+            autosave_minutes: shell.autosave_minutes,
             result_viewer: shell.results.viewer,
             expr_traces,
         }
@@ -403,6 +415,7 @@ impl From<ShellStateSer> for ShellState {
             corner: ser.corner,
             grid,
             panels_hidden: ser.panels_hidden,
+            autosave_minutes: ser.autosave_minutes,
             ..Self::new()
         };
         shell.results.viewer = ser.result_viewer;
