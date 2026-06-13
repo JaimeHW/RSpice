@@ -6,7 +6,7 @@ use egui::Ui;
 use crate::common::AppState;
 use crate::common::app::LibraryDeleteTarget;
 use crate::shell::WorkspaceView;
-use crate::state::{CellViewRef, ViewType};
+use crate::state::{CellViewRef, NavColumn, ViewType};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, TreeRow, docbar, mono_input};
@@ -62,9 +62,181 @@ fn delete_confirm_dialog(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
+/// The cell names the Cell column lists for the current selection+filter —
+/// rendering and keyboard navigation must agree on this.
+fn visible_cells(state: &AppState) -> Vec<String> {
+    let Some(library) = state.library_manager.selected_library.as_deref() else {
+        return Vec::new();
+    };
+    let filter = state.library_manager.filter_text.to_lowercase();
+    state
+        .library_manager
+        .get_library(library)
+        .map(|lib| {
+            lib.cells_sorted()
+                .iter()
+                .filter(|cell| filter.is_empty() || cell.name.to_lowercase().contains(&filter))
+                .map(|cell| cell.name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The view names the View column lists.
+fn visible_views(state: &AppState) -> Vec<String> {
+    let (Some(library), Some(cell)) = (
+        state.library_manager.selected_library.as_deref(),
+        state.library_manager.selected_cell.as_deref(),
+    ) else {
+        return Vec::new();
+    };
+    state
+        .library_manager
+        .get_library(library)
+        .and_then(|lib| lib.get_cell(cell))
+        .map(|cell| {
+            cell.views_sorted()
+                .iter()
+                .map(|view| view.name.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Open a view in the workspace if it carries schematic content.
+fn open_view_if_editable(state: &mut AppState, library: &str, cell: &str, view: &str) {
+    let openable = state
+        .library_manager
+        .get_library(library)
+        .and_then(|lib| lib.get_cell(cell))
+        .and_then(|c| c.views_sorted().iter().find(|v| v.name == view).copied())
+        .is_some_and(|v| matches!(v.view_type, ViewType::Schematic | ViewType::Testbench));
+    if openable {
+        state.open_workspace_view(CellViewRef {
+            library: library.to_owned(),
+            cell: cell.to_owned(),
+            view: view.to_owned(),
+        });
+        state.shell.view = WorkspaceView::Schematic;
+    }
+}
+
+/// Keyboard navigation: ↑↓ move within the focused column, ←→ hop columns,
+/// Enter opens. Inert while any text field (the filter) has focus.
+fn handle_keyboard_nav(ui: &Ui, state: &mut AppState) {
+    if ui.ctx().wants_keyboard_input() {
+        return;
+    }
+    let (down, up, left, right, enter) = ui.input(|i| {
+        (
+            i.key_pressed(egui::Key::ArrowDown),
+            i.key_pressed(egui::Key::ArrowUp),
+            i.key_pressed(egui::Key::ArrowLeft),
+            i.key_pressed(egui::Key::ArrowRight),
+            i.key_pressed(egui::Key::Enter),
+        )
+    });
+    if !(down || up || left || right || enter) {
+        return;
+    }
+
+    let nav = state.library_manager.nav_column;
+    if left {
+        state.library_manager.nav_column = match nav {
+            NavColumn::View => NavColumn::Cell,
+            _ => NavColumn::Library,
+        };
+    }
+    if right {
+        state.library_manager.nav_column = match nav {
+            NavColumn::Library if state.library_manager.selected_library.is_some() => {
+                NavColumn::Cell
+            }
+            NavColumn::Cell if state.library_manager.selected_cell.is_some() => NavColumn::View,
+            other => other,
+        };
+    }
+
+    if down || up {
+        let step: isize = if down { 1 } else { -1 };
+        match state.library_manager.nav_column {
+            NavColumn::Library => {
+                let names: Vec<String> = state
+                    .library_manager
+                    .libraries_sorted()
+                    .iter()
+                    .map(|lib| lib.name.clone())
+                    .collect();
+                if let Some(next) =
+                    step_in(&names, state.library_manager.selected_library.as_deref(), step)
+                {
+                    state.library_manager.select_library(&next);
+                }
+            }
+            NavColumn::Cell => {
+                let names = visible_cells(state);
+                let library = state.library_manager.selected_library.clone();
+                if let (Some(library), Some(next)) = (
+                    library,
+                    step_in(&names, state.library_manager.selected_cell.as_deref(), step),
+                ) {
+                    state.library_manager.select_cell(&library, &next);
+                }
+            }
+            NavColumn::View => {
+                let names = visible_views(state);
+                let context = (
+                    state.library_manager.selected_library.clone(),
+                    state.library_manager.selected_cell.clone(),
+                );
+                if let ((Some(library), Some(cell)), Some(next)) = (
+                    context,
+                    step_in(&names, state.library_manager.selected_view.as_deref(), step),
+                ) {
+                    state.library_manager.select_view(&library, &cell, &next);
+                }
+            }
+        }
+        state.library_manager.nav_scroll = true;
+    }
+
+    if enter {
+        let selection = (
+            state.library_manager.selected_library.clone(),
+            state.library_manager.selected_cell.clone(),
+            state.library_manager.selected_view.clone(),
+        );
+        match (state.library_manager.nav_column, selection) {
+            (NavColumn::View, (Some(library), Some(cell), Some(view))) => {
+                open_view_if_editable(state, &library, &cell, &view);
+            }
+            // Enter on a cell opens its schematic view when it has one.
+            (NavColumn::Cell, (Some(library), Some(cell), _)) => {
+                open_view_if_editable(state, &library, &cell, "schematic");
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Next selection for a ±1 keyboard step: clamped, and a step with no
+/// current selection lands on the first (or last) entry.
+fn step_in(names: &[String], current: Option<&str>, step: isize) -> Option<String> {
+    if names.is_empty() {
+        return None;
+    }
+    let index = match current.and_then(|c| names.iter().position(|n| n == c)) {
+        Some(index) => (index as isize + step).clamp(0, names.len() as isize - 1) as usize,
+        None if step > 0 => 0,
+        None => names.len() - 1,
+    };
+    names.get(index).cloned()
+}
+
 /// Render the library manager.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     delete_confirm_dialog(ui.ctx(), state);
+    handle_keyboard_nav(ui, state);
     docbar(ui, |ui| {
         let filter_width = 240.0;
         ui.scope(|ui| {
@@ -131,7 +303,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ui.spacing_mut().item_spacing.x = 0.0;
 
             // ---- Library column
-            column(ui, column_width, columns_height, "Library", true, |ui| {
+            let lib_focus = state.library_manager.nav_column == NavColumn::Library;
+            column(ui, column_width, columns_height, "Library", true, lib_focus, |ui| {
                 let libraries: Vec<(String, usize, bool)> = state
                     .library_manager
                     .libraries_sorted()
@@ -152,8 +325,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         .meta(&meta)
                         .selected(selected)
                         .show(ui);
+                    if selected && state.library_manager.nav_scroll {
+                        row.response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if row.response.clicked() {
                         state.library_manager.select_library(&name);
+                        state.library_manager.nav_column = NavColumn::Library;
                     }
                     if read_only {
                         row.response
@@ -163,7 +340,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             });
 
             // ---- Cell column
-            column(ui, column_width, columns_height, "Cell", true, |ui| {
+            let cell_focus = state.library_manager.nav_column == NavColumn::Cell;
+            column(ui, column_width, columns_height, "Cell", true, cell_focus, |ui| {
                 let Some(library) = state
                     .library_manager
                     .selected_library
@@ -208,14 +386,19 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     let selected =
                         state.library_manager.selected_cell.as_deref() == Some(name.as_str());
                     let row = TreeRow::new(&name).mono().selected(selected).show(ui);
+                    if selected && state.library_manager.nav_scroll {
+                        row.response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if row.response.clicked() {
                         state.library_manager.select_cell(&library, &name);
+                        state.library_manager.nav_column = NavColumn::Cell;
                     }
                 }
             });
 
             // ---- View column
-            column(ui, column_width, columns_height, "View", false, |ui| {
+            let view_focus = state.library_manager.nav_column == NavColumn::View;
+            column(ui, column_width, columns_height, "View", false, view_focus, |ui| {
                 if state.library_manager.selected_library.is_none() {
                     column_empty(ui, "Select a library");
                     return;
@@ -255,10 +438,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         .mono()
                         .selected(selected)
                         .show(ui);
+                    if selected && state.library_manager.nav_scroll {
+                        row.response.scroll_to_me(Some(egui::Align::Center));
+                    }
                     if row.response.clicked() {
                         state
                             .library_manager
                             .select_view(&library, &cell, &name);
+                        state.library_manager.nav_column = NavColumn::View;
                     }
                     if row.response.double_clicked() && openable {
                         state.open_workspace_view(CellViewRef {
@@ -272,6 +459,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             });
         },
     );
+
+    // Keyboard scroll requests are one-shot — consumed by this frame's rows.
+    state.library_manager.nav_scroll = false;
 
     // ---- Meta strip
     let (meta_rect, _) = ui.allocate_exact_size(
@@ -375,13 +565,15 @@ fn column_empty(ui: &mut Ui, text: &str) {
     );
 }
 
-/// One bordered browser column with an uppercase header.
+/// One bordered browser column with an uppercase header. The header takes
+/// the accent ink while the keyboard owns the column.
 fn column(
     ui: &mut Ui,
     width: f32,
     height: f32,
     title: &str,
     right_border: bool,
+    focused: bool,
     add_contents: impl FnOnce(&mut Ui),
 ) {
     let t = Tokens::get(ui.ctx());
@@ -413,13 +605,14 @@ fn column(
                 head_rect.bottom() - 0.5,
                 egui::Stroke::new(1.0, c.border),
             );
+            let header_color = if focused { c.accent } else { c.text_faint };
             let mut job = egui::text::LayoutJob::default();
             job.append(
                 &title.to_uppercase(),
                 0.0,
                 egui::TextFormat {
                     font_id: theme::sans(tokens::FS_0, FontWeight::SemiBold),
-                    color: c.text_faint,
+                    color: header_color,
                     extra_letter_spacing: 0.09 * tokens::FS_0,
                     ..Default::default()
                 },
@@ -431,7 +624,7 @@ fn column(
                     head_rect.center().y - galley.size().y * 0.5,
                 ),
                 galley,
-                c.text_faint,
+                header_color,
             );
 
             egui::ScrollArea::vertical()

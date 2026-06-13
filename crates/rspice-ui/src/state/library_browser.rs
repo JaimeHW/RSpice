@@ -32,5 +32,5 @@ mod view;
 
 pub use cell::Cell;
 pub use library::Library;
-pub use manager::LibraryManager;
+pub use manager::{LibraryManager, NavColumn};
 pub use view::{View, ViewType};
