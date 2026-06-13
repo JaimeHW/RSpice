@@ -690,3 +690,880 @@ fn pmos_polarity_mirrors_nmos_conventions() {
     assert_eq!(op.mode, 1);
     assert!(op.cd > 0.0, "internal-frame current positive, got {}", op.cd);
 }
+
+// ===================== pinned ngspice references =====================
+//
+// Values produced by a local ngspice-46 build running the decks in
+// testdata/ (`wrdata`, 9 significant digits). The live oracle test below
+// regenerates and re-checks every sweep; these pinned rows keep the oracle
+// agreement in the default test suite. Comparison at 1e-6 relative — the
+// port matched the full 12k-point oracle at <= 4.94e-9 relative (print
+// quantization), so any drift past 1e-6 is a real regression.
+
+fn assert_rel(ours: Value, reference: Value, what: &str) {
+    let tol = 1e-6 * reference.abs().max(ours.abs()) + 1e-22;
+    assert!(
+        (ours - reference).abs() <= tol,
+        "{what}: ours={ours:.9e} ngspice={reference:.9e}"
+    );
+}
+
+#[test]
+fn ngspice_pinned_nmos_idvg_linear() {
+    // m1 = 1u/45n, vds=0.05, vbs=0, T=27C (nmos_idvg_vd50m_vb0).
+    let dev = nmos_device(1e-6, 45e-9, 1.0, T300);
+    let table: [(Value, Value, Value, Value, Value); 5] = [
+        (0.0, 3.12868811e-10, 8.80428212e-09, 2.54449222e-09, 1.82391109e-09),
+        (0.3, 1.17939846e-06, 2.99566556e-05, 9.56158860e-06, 4.95180212e-06),
+        (0.6, 1.17111258e-04, 4.79554116e-04, 1.92100141e-03, 7.75030642e-05),
+        (0.9, 1.98523688e-04, 1.60162691e-04, 3.66700074e-03, 3.30176312e-05),
+        (1.1, 2.24835254e-04, 1.09457144e-04, 4.24171044e-03, 2.38798480e-05),
+    ];
+    for &(vgs, id, gm, gds, gmbs) in &table {
+        let op = op_at(&dev, 0.05, vgs, 0.0);
+        assert_rel(op.cd, id, &format!("id(vgs={vgs})"));
+        assert_rel(op.gm, gm, &format!("gm(vgs={vgs})"));
+        assert_rel(op.gds, gds, &format!("gds(vgs={vgs})"));
+        assert_rel(op.gmbs, gmbs, &format!("gmbs(vgs={vgs})"));
+    }
+    let op = op_at(&dev, 0.05, 0.9, 0.0);
+    assert_rel(op.von, 3.96082238e-01, "vth");
+    assert_rel(op.vdsat, 2.80112388e-01, "vdsat(0.9)");
+    assert_rel(op.cbd, -5.00003187e-14, "ibd");
+    assert_rel(op_at(&dev, 0.05, 1.1, 0.0).vdsat, 3.67445684e-01, "vdsat(1.1)");
+
+    // Body bias vbs=-0.9 at vgs=0.9 (nmos_idvg_vd50m_vbm09); the reverse
+    // junctions carry the TAT + gmin leakage.
+    let op = op_at(&dev, 0.05, 0.9, -0.9);
+    assert_rel(op.cd, 1.72951222e-04, "id(vbs=-0.9)");
+    assert_rel(op.gm, 2.15379091e-04, "gm(vbs=-0.9)");
+    assert_rel(op.gds, 3.39957450e-03, "gds(vbs=-0.9)");
+    assert_rel(op.gmbs, 2.47469449e-05, "gmbs(vbs=-0.9)");
+    assert_rel(op.von, 5.01802278e-01, "vth(vbs=-0.9)");
+    assert_rel(op.cbs, -9.00001154e-13, "ibs(vbs=-0.9)");
+    assert_rel(op.cbd, -9.50001234e-13, "ibd(vbs=-0.9)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_idvg_saturation() {
+    // m1 = 1u/45n, vds=1.1, vbs=0 (nmos_idvg_vd1100m_vb0). This card's
+    // 22.6nm Leff puts gmbs negative in saturation (DIBL/DITS dominated) —
+    // ngspice agrees point by point.
+    let dev = nmos_device(1e-6, 45e-9, 1.0, T300);
+
+    let op = op_at(&dev, 1.1, 0.0, 0.0);
+    assert_rel(op.cd, 6.22105666e-09, "id(0)");
+    assert_rel(op.gm, 1.74352960e-07, "gm(0)");
+    assert_rel(op.gds, 1.66753226e-08, "gds(0)");
+    assert_rel(op.gmbs, -1.36299333e-07, "gmbs(0)");
+    assert_rel(op.von, 3.16523792e-01, "vth(0)");
+    assert_rel(op.vdsat, 3.77590033e-02, "vdsat(0)");
+    assert_rel(op.csub, 8.65521888e-14, "isub(0)");
+    assert_rel(op.igidl, 1.02705712e-27, "igidl(0)");
+    assert_rel(op.vgsteff, 4.64929501e-06, "vgsteff(0)");
+    assert_rel(op.vdseff, 3.73373751e-02, "vdseff(0)");
+
+    let op = op_at(&dev, 1.1, 0.6, 0.0);
+    assert_rel(op.cd, 4.68109509e-04, "id(0.6)");
+    assert_rel(op.gm, 1.97228540e-03, "gm(0.6)");
+    assert_rel(op.gds, 2.39110397e-04, "gds(0.6)");
+    assert_rel(op.gmbs, -1.73098462e-03, "gmbs(0.6)");
+    assert_rel(op.vdsat, 1.72844541e-01, "vdsat(0.6)");
+    assert_rel(op.csub, 1.13760643e-09, "isub(0.6)");
+    assert_rel(op.vgsteff, 2.73384386e-01, "vgsteff(0.6)");
+    assert_rel(op.vdseff, 1.70641200e-01, "vdseff(0.6)");
+
+    let op = op_at(&dev, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 1.40891935e-03, "id(1.1)");
+    assert_rel(op.gm, 1.87452469e-03, "gm(1.1)");
+    assert_rel(op.gds, 3.04461834e-04, "gds(1.1)");
+    assert_rel(op.gmbs, -1.78776023e-03, "gmbs(1.1)");
+    assert_rel(op.vdsat, 3.92689365e-01, "vdsat(1.1)");
+    assert_rel(op.csub, 5.35400314e-11, "isub(1.1)");
+    assert_rel(op.vgsteff, 7.83228617e-01, "vgsteff(1.1)");
+    assert_rel(op.vdseff, 3.86196871e-01, "vdseff(1.1)");
+
+    // vbs=-0.9 (nmos_idvg_vd1100m_vbm09): the DVT2/K2 chain drives the
+    // operating-point von negative at this Leff; pinned as ngspice prints it.
+    let op = op_at(&dev, 1.1, 1.1, -0.9);
+    assert_rel(op.cd, 3.15052501e-03, "id(vbs=-0.9)");
+    assert_rel(op.gm, 2.15484576e-03, "gm(vbs=-0.9)");
+    assert_rel(op.gds, 2.35589192e-03, "gds(vbs=-0.9)");
+    assert_rel(op.gmbs, -2.04349261e-03, "gmbs(vbs=-0.9)");
+    assert_rel(op.von, -4.18954541e-01, "vth(vbs=-0.9)");
+    assert_rel(op.vdsat, 5.81275439e-01, "vdsat(vbs=-0.9)");
+    assert_rel(op.csub, 2.80024230e-13, "isub(vbs=-0.9)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_idvd() {
+    let dev = nmos_device(1e-6, 45e-9, 1.0, T300);
+
+    // vgs=0.5, vbs=0 (nmos_idvd_vg500m_vb0).
+    let table: [(Value, Value, Value); 3] = [
+        (0.1, 8.58989331e-05, 3.35711528e-04),
+        (0.6, 1.73265569e-04, 1.73385984e-04),
+        (1.1, 2.68791324e-04, 2.15459318e-04),
+    ];
+    for &(vds, id, gds) in &table {
+        let op = op_at(&dev, vds, 0.5, 0.0);
+        assert_rel(op.cd, id, &format!("vg0.5 id(vds={vds})"));
+        assert_rel(op.gds, gds, &format!("vg0.5 gds(vds={vds})"));
+    }
+    let op = op_at(&dev, 0.6, 0.5, 0.0);
+    assert_rel(op.gm, 1.70419811e-03, "vg0.5 gm(0.6)");
+    assert_rel(op.gmbs, -6.45399696e-04, "vg0.5 gmbs(0.6)");
+    let op = op_at(&dev, 1.1, 0.5, 0.0);
+    assert_rel(op.vdsat, 1.21948090e-01, "vg0.5 vdsat(1.1)");
+    assert_rel(op.csub, 1.33030640e-09, "vg0.5 isub(1.1)");
+
+    // vgs=0.8, vbs=0 (nmos_idvd_vg800m_vb0).
+    let table: [(Value, Value, Value); 3] = [
+        (0.05, 1.80270519e-04, 3.26856982e-03),
+        (0.55, 7.09764381e-04, 2.71993307e-04),
+        (1.1, 8.49159220e-04, 2.62699651e-04),
+    ];
+    for &(vds, id, gds) in &table {
+        let op = op_at(&dev, vds, 0.8, 0.0);
+        assert_rel(op.cd, id, &format!("vg0.8 id(vds={vds})"));
+        assert_rel(op.gds, gds, &format!("vg0.8 gds(vds={vds})"));
+    }
+    let op = op_at(&dev, 0.55, 0.8, 0.0);
+    assert_rel(op.gm, 1.75716925e-03, "vg0.8 gm(0.55)");
+    assert_rel(op.gmbs, -6.18437815e-04, "vg0.8 gmbs(0.55)");
+    assert_rel(op.vdsat, 2.49306771e-01, "vg0.8 vdsat(0.55)");
+    assert_rel(op_at(&dev, 1.1, 0.8, 0.0).csub, 4.67711508e-10, "vg0.8 isub(1.1)");
+
+    // vgs=1.1, vbs=-0.45 (nmos_idvd_vg1100m_vbm045).
+    let op = op_at(&dev, 0.6, 1.1, -0.45);
+    assert_rel(op.cd, 1.60056174e-03, "vg1.1 id(0.6)");
+    assert_rel(op.gds, 1.37048267e-03, "vg1.1 gds(0.6)");
+    let op = op_at(&dev, 1.1, 1.1, -0.45);
+    assert_rel(op.cd, 2.25187339e-03, "vg1.1 id(1.1)");
+    assert_rel(op.gds, 1.30051995e-03, "vg1.1 gds(1.1)");
+    assert_rel(op.gmbs, -1.94437507e-03, "vg1.1 gmbs(1.1)");
+    assert_rel(op.vdsat, 4.93209795e-01, "vg1.1 vdsat(1.1)");
+    assert_rel(op.csub, 5.15686982e-12, "vg1.1 isub(1.1)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_geometry_variants() {
+    // Rows at (vds=0.05, vgs=0.9) and (vds=1.1, vgs=1.1) for the other
+    // three deck geometries: m2 = 2u/0.2u, m3 = 1u/45n nf=4 (PAeffGeo
+    // diffusions), m4 = 4u/1u.
+    let m2 = nmos_device(2e-6, 0.2e-6, 1.0, T300);
+    let op = op_at(&m2, 0.05, 0.9, 0.0);
+    assert_rel(op.cd, 9.63138520e-05, "m2 lin id");
+    assert_rel(op.gm, 1.51388172e-04, "m2 lin gm");
+    assert_rel(op.gds, 1.78180914e-03, "m2 lin gds");
+    assert_rel(op.gmbs, 7.14478375e-05, "m2 lin gmbs");
+    let op = op_at(&m2, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 7.29480675e-04, "m2 sat id");
+    assert_rel(op.gm, 1.55044160e-03, "m2 sat gm");
+    assert_rel(op.gds, 5.24445642e-05, "m2 sat gds");
+    assert_rel(op.gmbs, 5.62222957e-04, "m2 sat gmbs");
+
+    let m3 = nmos_device(1e-6, 45e-9, 4.0, T300);
+    let op = op_at(&m3, 0.05, 0.9, 0.0);
+    assert_rel(op.cd, 1.96889988e-04, "m3 lin id");
+    assert_rel(op.gm, 1.59825444e-04, "m3 lin gm");
+    assert_rel(op.gds, 3.63852589e-03, "m3 lin gds");
+    assert_rel(op.gmbs, 3.38428801e-05, "m3 lin gmbs");
+    let op = op_at(&m3, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 1.40523471e-03, "m3 sat id");
+    assert_rel(op.gm, 1.88614311e-03, "m3 sat gm");
+    assert_rel(op.gds, 3.04728150e-04, "m3 sat gds");
+    assert_rel(op.gmbs, -1.78288359e-03, "m3 sat gmbs");
+    assert_rel(op_at(&m3, 0.05, 0.9, -0.9).cd, 1.70665584e-04, "m3 id(vbs=-0.9)");
+
+    let m4 = nmos_device(4e-6, 1e-6, 1.0, T300);
+    let op = op_at(&m4, 0.05, 0.9, 0.0);
+    assert_rel(op.cd, 4.10171169e-05, "m4 lin id");
+    assert_rel(op.gm, 6.94262578e-05, "m4 lin gm");
+    assert_rel(op.gds, 7.62922032e-04, "m4 lin gds");
+    assert_rel(op.gmbs, 3.41325298e-05, "m4 lin gmbs");
+    let op = op_at(&m4, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 3.26762653e-04, "m4 sat id");
+    assert_rel(op.gm, 7.50560632e-04, "m4 sat gm");
+    assert_rel(op.gds, 1.39084542e-05, "m4 sat gds");
+    assert_rel(op.gmbs, 3.03053461e-04, "m4 sat gmbs");
+}
+
+#[test]
+fn ngspice_pinned_nmos_temperature() {
+    // m1 = 1u/45n at .temp 125 and .temp -40 (nmos_oracle_temp.sp /
+    // nmos_oracle_tm40.sp); exercises tempMod=0 plus the diode/TAT
+    // temperature chain (ibd carries the temp-scaled saturation current).
+    let hot = nmos_device(1e-6, 45e-9, 1.0, 125.0 + 273.15);
+    assert_rel(op_at(&hot, 0.05, 0.0, 0.0).cd, 1.54225677e-08, "T125 leakage id");
+    let op = op_at(&hot, 0.05, 0.9, 0.0);
+    assert_rel(op.cd, 1.75100485e-04, "T125 id");
+    assert_rel(op.gm, 1.41093291e-04, "T125 gm");
+    assert_rel(op.gds, 3.27180360e-03, "T125 gds");
+    assert_rel(op.gmbs, 2.75781664e-05, "T125 gmbs");
+    assert_rel(op.von, 3.33085360e-01, "T125 vth");
+    assert_rel(op.cbd, -8.24653081e-14, "T125 ibd");
+    let op = op_at(&hot, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 1.37611607e-03, "T125 sat id");
+    assert_rel(op.gm, 1.73509940e-03, "T125 sat gm");
+    assert_rel(op.gds, 2.93735071e-04, "T125 sat gds");
+    assert_rel(op.gmbs, -1.70440132e-03, "T125 sat gmbs");
+    assert_rel(op.von, 2.52585567e-01, "T125 sat vth");
+    assert_rel(op.vdsat, 4.46840617e-01, "T125 sat vdsat");
+    assert_rel(op.csub, 1.26924564e-11, "T125 sat isub");
+    let m3_hot = nmos_device(1e-6, 45e-9, 4.0, 125.0 + 273.15);
+    assert_rel(op_at(&m3_hot, 1.1, 1.1, 0.0).cd, 1.37410526e-03, "T125 m3 sat id");
+
+    let cold = nmos_device(1e-6, 45e-9, 1.0, -40.0 + 273.15);
+    assert_rel(op_at(&cold, 0.05, 0.0, 0.0).cd, 3.15304865e-12, "Tm40 leakage id");
+    let op = op_at(&cold, 0.05, 0.9, 0.0);
+    assert_rel(op.cd, 2.17481206e-04, "Tm40 id");
+    assert_rel(op.gm, 1.79190141e-04, "Tm40 gm");
+    assert_rel(op.gds, 3.97173031e-03, "Tm40 gds");
+    assert_rel(op.gmbs, 3.68166094e-05, "Tm40 gmbs");
+    assert_rel(op.von, 4.39194452e-01, "Tm40 vth");
+    assert_rel(op.cbd, -5.00000195e-14, "Tm40 ibd");
+    let op = op_at(&cold, 1.1, 1.1, 0.0);
+    assert_rel(op.cd, 1.42413165e-03, "Tm40 sat id");
+    assert_rel(op.gm, 1.98495077e-03, "Tm40 sat gm");
+    assert_rel(op.gds, 3.10565969e-04, "Tm40 sat gds");
+    assert_rel(op.gmbs, -1.82829677e-03, "Tm40 sat gmbs");
+    assert_rel(op.von, 3.60277676e-01, "Tm40 sat vth");
+    assert_rel(op.vdsat, 3.54832273e-01, "Tm40 sat vdsat");
+    assert_rel(op.csub, 1.30141955e-10, "Tm40 sat isub");
+    let m3_cold = nmos_device(1e-6, 45e-9, 4.0, -40.0 + 273.15);
+    assert_rel(op_at(&m3_cold, 1.1, 1.1, 0.0).cd, 1.41930478e-03, "Tm40 m3 sat id");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod2() {
+    // m1 = 1u/45n intrinsic charges + capacitance matrix as `@m1[qg]`/
+    // `@m1[c**]` report them (here->BSIM4qgate/c***, b4ask.c), CAPMOD=2.
+    let dev = nmos_device(1e-6, 45e-9, 1.0, T300);
+    let charge_at = |vds: Value, vgs: Value| {
+        dev.eval(Bsim4v8Bias { vds, vgs, vbs: 0.0 }, GMIN, true)
+            .expect("charge eval")
+            .charge
+            .expect("charges")
+    };
+
+    // Linear, strong inversion (nmos_idvg_vd50m_vb0 at vgs=0.9).
+    let c = charge_at(0.05, 0.9);
+    assert_rel(c.qgate, 5.56112662e-16, "lin qg");
+    assert_rel(c.qbulk, -3.17363989e-16, "lin qb");
+    assert_rel(c.qdrn, -1.11984308e-16, "lin qd");
+    assert_rel(c.cggb, 6.59136638e-16, "lin cgg");
+    assert_rel(c.cgdb, -1.87972596e-16, "lin cgd");
+    assert_rel(c.cgsb, -4.27469041e-16, "lin cgs");
+    assert_rel(c.cdgb, -3.12752276e-16, "lin cdg");
+    assert_rel(c.cddb, 4.63915823e-16, "lin cdd");
+    assert_rel(c.cdsb, -1.03865067e-16, "lin cds");
+    assert_rel(c.cbgb, -2.40833408e-17, "lin cbg");
+    assert_rel(c.cbdb, -4.71918220e-16, "lin cbd");
+    assert_rel(c.cbsb, 3.55843819e-16, "lin cbs");
+    assert_rel(c.capbd, 3.92729344e-16, "lin capbd");
+    assert_rel(c.capbs, 4.01240000e-16, "lin capbs");
+
+    // Saturation (nmos_idvg_vd1100m_vb0 at vgs=1.1) with the derived
+    // completion rows of the 4x4 matrix.
+    let c = charge_at(1.1, 1.1);
+    assert_rel(c.qgate, 6.99204478e-16, "sat qg");
+    assert_rel(c.qbulk, -3.85615596e-16, "sat qb");
+    assert_rel(c.qdrn, -1.25493936e-16, "sat qd");
+    assert_rel(c.qsrc, -1.88094945e-16, "sat qs");
+    assert_rel(c.cggb, 6.15702104e-16, "sat cgg");
+    assert_rel(c.cgdb, 3.67808440e-17, "sat cgd");
+    assert_rel(c.cgsb, -1.45454506e-16, "sat cgs");
+    assert_rel(c.cdgb, -1.83546997e-16, "sat cdg");
+    assert_rel(c.cddb, -1.36515831e-17, "sat cdd");
+    assert_rel(c.cdsb, 5.38777248e-17, "sat cds");
+    assert_rel(c.cbgb, -1.57142098e-16, "sat cbg");
+    assert_rel(c.cbdb, -2.36179433e-18, "sat cbd");
+    assert_rel(c.cbsb, 1.05350960e-17, "sat cbs");
+    assert_rel(c.csgb, -2.75013009e-16, "sat csg");
+    assert_rel(c.csdb, -2.07674666e-17, "sat csd");
+    assert_rel(c.cssb, 8.10416850e-17, "sat css");
+    assert_rel(c.cgbb, -5.07028442e-16, "sat cgb");
+    assert_rel(c.cdbb, 1.43320855e-16, "sat cdb");
+    assert_rel(c.csbb, 2.14738790e-16, "sat csb");
+    assert_rel(c.cbbb, 1.48968797e-16, "sat cbb");
+
+    // Subthreshold/depletion (vgs=0, vds=1.1): the gate/bulk pair carries
+    // the charge, the drain partition is ~zero.
+    let c = charge_at(1.1, 0.0);
+    assert_rel(c.qgate, 2.24991507e-16, "dep qg");
+    assert_rel(c.qbulk, -2.24987895e-16, "dep qb");
+    assert_rel(c.qdrn, -1.44531650e-21, "dep qd");
+    assert_rel(c.cggb, 1.55231298e-16, "dep cgg");
+    assert_rel(c.cbgb, -1.55146657e-16, "dep cbg");
+
+    // Id-Vd at vgs=0.8 across linear-to-saturation
+    // (nmos_idvd_vg800m_vb0): capbd tracks the drain junction bias.
+    let c = charge_at(0.05, 0.8);
+    assert_rel(c.qgate, 4.90989796e-16, "vd50m qg");
+    assert_rel(c.qbulk, -3.14408340e-16, "vd50m qb");
+    assert_rel(c.qdrn, -8.15103680e-17, "vd50m qd");
+    assert_rel(c.cggb, 6.42175595e-16, "vd50m cgg");
+    assert_rel(c.cddb, 3.84859556e-16, "vd50m cdd");
+    assert_rel(c.cbdb, -3.90351250e-16, "vd50m cbd");
+    assert_rel(c.capbd, 3.92729344e-16, "vd50m capbd");
+    let c = charge_at(0.55, 0.8);
+    assert_rel(c.qgate, 4.97787297e-16, "vd550m qg");
+    assert_rel(c.qdrn, -6.40628943e-17, "vd550m qd");
+    assert_rel(c.cggb, 5.92253961e-16, "vd550m cgg");
+    assert_rel(c.cddb, -1.24783324e-17, "vd550m cdd");
+    assert_rel(c.capbd, 3.33456107e-16, "vd550m capbd");
+}
+
+#[test]
+fn ngspice_pinned_pmos() {
+    // p90 m1 = 1u/90n; node-space biases (PMOS), internal polarity folded
+    // by eval_polarity (pmos_oracle.sp sweeps). vth/vdsat/charges are the
+    // internal-frame `here->BSIM4*` values, positive as ngspice prints them.
+    let dev = pmos_device(1e-6, 90e-9, T300);
+    let table: [(Value, Value, Value, Value, Value); 3] = [
+        (-0.4, 2.73567022e-06, 3.47860239e-05, 3.50738362e-05, 7.33896156e-06),
+        (-0.8, 2.01011962e-05, 3.56661498e-05, 3.73779975e-04, 1.10310990e-05),
+        (-1.1, 2.89375622e-05, 2.41763513e-05, 5.53359794e-04, 1.02506581e-05),
+    ];
+    for &(vgs_node, id, gm, gds, gmbs) in &table {
+        let op = dev
+            .eval_polarity(-0.05, vgs_node, 0.0, GMIN, false)
+            .expect("eval");
+        assert_rel(op.cd, id, &format!("pmos id(vgs={vgs_node})"));
+        assert_rel(op.gm, gm, &format!("pmos gm(vgs={vgs_node})"));
+        assert_rel(op.gds, gds, &format!("pmos gds(vgs={vgs_node})"));
+        assert_rel(op.gmbs, gmbs, &format!("pmos gmbs(vgs={vgs_node})"));
+    }
+    let op = dev
+        .eval_polarity(-0.05, -0.8, 0.0, GMIN, true)
+        .expect("eval");
+    assert_rel(op.von, 3.57331527e-01, "pmos vth");
+    assert_rel(op.vdsat, 3.72908219e-01, "pmos vdsat(-0.8)");
+    assert_rel(op.cbd, -5.00003159e-14, "pmos ibd");
+    let c = op.charge.expect("charges");
+    assert_rel(c.qgate, 1.29938876e-15, "pmos qg");
+    assert_rel(c.qbulk, -6.85141267e-16, "pmos qb");
+    assert_rel(c.qdrn, -2.91905191e-16, "pmos qd");
+    assert_rel(c.cggb, 1.60930964e-15, "pmos cgg");
+    assert_rel(c.cgdb, -6.18695879e-16, "pmos cgd");
+    assert_rel(c.cgsb, -9.54372079e-16, "pmos cgs");
+    assert_rel(c.cdgb, -7.79581392e-16, "pmos cdg");
+    assert_rel(c.cddb, 1.06011611e-15, "pmos cdd");
+    assert_rel(c.cdsb, -1.26436629e-16, "pmos cds");
+    assert_rel(c.cbgb, -3.62087121e-17, "pmos cbg");
+    assert_rel(c.cbdb, -9.27844984e-16, "pmos cbd");
+    assert_rel(c.cbsb, 6.13474377e-16, "pmos cbs");
+    assert_rel(c.capbd, 4.93775177e-16, "pmos capbd");
+    assert_rel(c.capbs, 5.04680000e-16, "pmos capbs");
+
+    // Second geometry m2 = 2u/0.25u at vgs=-0.8.
+    let m2 = {
+        let model = Arc::new(Bsim4v8Model::from_params(&pmos90(), true, T300));
+        Bsim4v8::new("m2".to_string(), model, geom(2e-6, 0.25e-6, 1.0), T300).expect("pmos m2")
+    };
+    let op = m2
+        .eval_polarity(-0.05, -0.8, 0.0, GMIN, false)
+        .expect("eval");
+    assert_rel(op.cd, 1.54873022e-05, "pmos m2 id");
+    assert_rel(op.gm, 2.91541495e-05, "pmos m2 gm");
+    assert_rel(op.gds, 2.88223652e-04, "pmos m2 gds");
+    assert_rel(op.gmbs, 9.60404821e-06, "pmos m2 gmbs");
+
+    // Forward body bias vbs=+0.9 (node frame) at vgs=-1.1.
+    let op = dev
+        .eval_polarity(-0.05, -1.1, 0.9, GMIN, false)
+        .expect("eval");
+    assert_rel(op.cd, 2.18769310e-05, "pmos id(vbs=+0.9)");
+    assert_rel(op.gm, 2.57849895e-05, "pmos gm(vbs=+0.9)");
+    assert_rel(op.gds, 4.16132466e-04, "pmos gds(vbs=+0.9)");
+    assert_rel(op.gmbs, 6.17421134e-06, "pmos gmbs(vbs=+0.9)");
+    assert_rel(op.von, 5.05587021e-01, "pmos vth(vbs=+0.9)");
+    assert_rel(op.vdsat, 5.19456781e-01, "pmos vdsat(vbs=+0.9)");
+
+    // Saturation Id-Vg point (vds=-1.1).
+    let op = dev
+        .eval_polarity(-1.1, -1.1, 0.0, GMIN, false)
+        .expect("eval");
+    assert_rel(op.cd, 2.07956178e-04, "pmos sat id");
+    assert_rel(op.gm, 3.69279162e-04, "pmos sat gm");
+    assert_rel(op.gds, 4.75388615e-05, "pmos sat gds");
+    assert_rel(op.gmbs, 8.97400018e-05, "pmos sat gmbs");
+    assert_rel(op.von, 3.49387775e-01, "pmos sat vth");
+    assert_rel(op.vdsat, 5.85213980e-01, "pmos sat vdsat");
+    assert_rel(op.vgsteff, 7.50458863e-01, "pmos sat vgsteff");
+    assert_rel(op.vdseff, 5.74289900e-01, "pmos sat vdseff");
+    let op = m2
+        .eval_polarity(-1.1, -1.1, 0.0, GMIN, false)
+        .expect("eval");
+    assert_rel(op.cd, 1.61082620e-04, "pmos m2 sat id");
+    assert_rel(op.gds, 1.48834421e-05, "pmos m2 sat gds");
+
+    // Id-Vd row at vds=-0.6 (pmos_idvd_vgm1100m_vb0) with charges.
+    let op = dev
+        .eval_polarity(-0.6, -1.1, 0.0, GMIN, true)
+        .expect("eval");
+    assert_rel(op.cd, 1.91001736e-04, "pmos idvd id");
+    assert_rel(op.gm, 3.29293129e-04, "pmos idvd gm");
+    assert_rel(op.gds, 7.02272806e-05, "pmos idvd gds");
+    assert_rel(op.gmbs, 8.32418473e-05, "pmos idvd gmbs");
+    assert_rel(op.vdsat, 5.82941887e-01, "pmos idvd vdsat");
+    let c = op.charge.expect("charges");
+    assert_rel(c.qgate, 1.67602355e-15, "pmos idvd qg");
+    assert_rel(c.qbulk, -8.71646161e-16, "pmos idvd qb");
+    assert_rel(c.qdrn, -3.22684859e-16, "pmos idvd qd");
+    assert_rel(c.cggb, 1.45543507e-15, "pmos idvd cgg");
+    assert_rel(c.cgdb, 3.64232786e-18, "pmos idvd cgd");
+    assert_rel(c.cgsb, -1.40924578e-15, "pmos idvd cgs");
+    assert_rel(c.cddb, 6.43493136e-18, "pmos idvd cdd");
+    let op = m2
+        .eval_polarity(-0.6, -1.1, 0.0, GMIN, false)
+        .expect("eval");
+    assert_rel(op.cd, 1.51688249e-04, "pmos m2 idvd id");
+    assert_rel(op.gds, 5.19704692e-05, "pmos m2 idvd gds");
+}
+
+// ===================== live ngspice oracle =====================
+//
+// Set NGSPICE_EXE to a local ngspice-46 build and run
+// `cargo test -p rspice-core --lib bsim4v8 -- --ignored --nocapture`.
+// Each deck in testdata/ is executed with `ngspice -b`; every wrdata table is
+// then replayed through this port at the same bias and compared column by
+// column at 1e-6 relative (the math is a transcription, so anything looser
+// is a porting bug; the reference itself is printed with 9 significant
+// digits).
+
+mod oracle {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    pub const REL_TOL: Value = 1e-6;
+
+    pub struct Sweep {
+        pub file: &'static str,
+        /// true: vg swept; false: vd swept.
+        pub sweep_is_vg: bool,
+        pub vd: Value,
+        pub vg: Value,
+        pub vb: Value,
+    }
+
+    pub struct DeviceSpec {
+        pub name: &'static str,
+        pub w: Value,
+        pub l: Value,
+        pub nf: Value,
+        /// Explicit AD/AS/PD/PS, or None for the BSIM4PAeffGeo diffusions.
+        pub diff: Option<(Value, Value, Value, Value)>,
+    }
+
+    pub struct DeckSpec {
+        pub deck: &'static str,
+        pub temp_c: Value,
+        pub is_pmos: bool,
+        pub devices: &'static [DeviceSpec],
+        pub sweeps: &'static [Sweep],
+    }
+
+    pub fn deck_specs() -> Vec<DeckSpec> {
+        vec![
+            DeckSpec {
+                deck: "nmos_oracle.sp",
+                temp_c: 27.0,
+                is_pmos: false,
+                devices: &[
+                    DeviceSpec { name: "m1", w: 1e-6, l: 45e-9, nf: 1.0,
+                                 diff: Some((0.1e-12, 0.1e-12, 2.2e-6, 2.2e-6)) },
+                    DeviceSpec { name: "m2", w: 2e-6, l: 0.2e-6, nf: 1.0,
+                                 diff: Some((0.2e-12, 0.2e-12, 4.2e-6, 4.2e-6)) },
+                    DeviceSpec { name: "m3", w: 1e-6, l: 45e-9, nf: 4.0, diff: None },
+                    DeviceSpec { name: "m4", w: 4e-6, l: 1e-6, nf: 1.0,
+                                 diff: Some((0.4e-12, 0.4e-12, 8.2e-6, 8.2e-6)) },
+                ],
+                sweeps: &[
+                    Sweep { file: "nmos_idvg_vd50m_vb0", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "nmos_idvg_vd50m_vbm09", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: -0.9 },
+                    Sweep { file: "nmos_idvg_vd1100m_vb0", sweep_is_vg: true, vd: 1.1, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "nmos_idvg_vd1100m_vbm09", sweep_is_vg: true, vd: 1.1, vg: 0.0, vb: -0.9 },
+                    Sweep { file: "nmos_idvd_vg500m_vb0", sweep_is_vg: false, vd: 0.0, vg: 0.5, vb: 0.0 },
+                    Sweep { file: "nmos_idvd_vg800m_vb0", sweep_is_vg: false, vd: 0.0, vg: 0.8, vb: 0.0 },
+                    Sweep { file: "nmos_idvd_vg1100m_vbm045", sweep_is_vg: false, vd: 0.0, vg: 1.1, vb: -0.45 },
+                ],
+            },
+            DeckSpec {
+                deck: "nmos_oracle_temp.sp",
+                temp_c: 125.0,
+                is_pmos: false,
+                devices: &[
+                    DeviceSpec { name: "m1", w: 1e-6, l: 45e-9, nf: 1.0,
+                                 diff: Some((0.1e-12, 0.1e-12, 2.2e-6, 2.2e-6)) },
+                    DeviceSpec { name: "m3", w: 1e-6, l: 45e-9, nf: 4.0, diff: None },
+                ],
+                sweeps: &[
+                    Sweep { file: "nmos_idvg_vd50m_t125", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "nmos_idvg_vd1100m_t125", sweep_is_vg: true, vd: 1.1, vg: 0.0, vb: 0.0 },
+                ],
+            },
+            DeckSpec {
+                deck: "nmos_oracle_tm40.sp",
+                temp_c: -40.0,
+                is_pmos: false,
+                devices: &[
+                    DeviceSpec { name: "m1", w: 1e-6, l: 45e-9, nf: 1.0,
+                                 diff: Some((0.1e-12, 0.1e-12, 2.2e-6, 2.2e-6)) },
+                    DeviceSpec { name: "m3", w: 1e-6, l: 45e-9, nf: 4.0, diff: None },
+                ],
+                sweeps: &[
+                    Sweep { file: "nmos_idvg_vd50m_tm40", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "nmos_idvg_vd1100m_tm40", sweep_is_vg: true, vd: 1.1, vg: 0.0, vb: 0.0 },
+                ],
+            },
+            DeckSpec {
+                deck: "pmos_oracle.sp",
+                temp_c: 27.0,
+                is_pmos: true,
+                devices: &[
+                    DeviceSpec { name: "m1", w: 1e-6, l: 90e-9, nf: 1.0,
+                                 diff: Some((0.1e-12, 0.1e-12, 2.2e-6, 2.2e-6)) },
+                    DeviceSpec { name: "m2", w: 2e-6, l: 0.25e-6, nf: 1.0,
+                                 diff: Some((0.2e-12, 0.2e-12, 4.2e-6, 4.2e-6)) },
+                ],
+                sweeps: &[
+                    Sweep { file: "pmos_idvg_vdm50m_vb0", sweep_is_vg: true, vd: -0.05, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "pmos_idvg_vdm50m_vb09", sweep_is_vg: true, vd: -0.05, vg: 0.0, vb: 0.9 },
+                    Sweep { file: "pmos_idvg_vdm1100m_vb0", sweep_is_vg: true, vd: -1.1, vg: 0.0, vb: 0.0 },
+                    Sweep { file: "pmos_idvd_vgm1100m_vb0", sweep_is_vg: false, vd: 0.0, vg: -1.1, vb: 0.0 },
+                ],
+            },
+        ]
+    }
+
+    pub fn build_device(spec: &DeviceSpec, is_pmos: bool, temp_k: Value) -> Bsim4v8 {
+        let card = if is_pmos { pmos90() } else { nmos45() };
+        let model = Arc::new(Bsim4v8Model::from_params(&card, is_pmos, T300));
+        let mut geom = Bsim4v8Geometry {
+            l: spec.l,
+            w: spec.w,
+            nf: spec.nf,
+            ..Bsim4v8Geometry::default()
+        };
+        if let Some((ad, asr, pd, ps)) = spec.diff {
+            geom.drain_area = ad;
+            geom.drain_area_given = true;
+            geom.source_area = asr;
+            geom.source_area_given = true;
+            geom.drain_perimeter = pd;
+            geom.drain_perimeter_given = true;
+            geom.source_perimeter = ps;
+            geom.source_perimeter_given = true;
+        }
+        Bsim4v8::new(spec.name.to_string(), model, geom, temp_k).expect("oracle device")
+    }
+
+    pub fn testdata_dir() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/device/mosfet/bsim4v8/testdata")
+    }
+
+    pub fn run_deck(exe: &Path, deck: &str) -> PathBuf {
+        let work = std::env::temp_dir().join(format!(
+            "rspice-b4v8-oracle-{}-{}",
+            std::process::id(),
+            deck.trim_end_matches(".sp")
+        ));
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work).expect("create oracle work dir");
+        for f in ["models45.lib", deck] {
+            fs::copy(testdata_dir().join(f), work.join(f)).expect("copy deck");
+        }
+        let out = Command::new(exe)
+            .arg("-b")
+            .arg(deck)
+            .current_dir(&work)
+            .output()
+            .expect("run ngspice");
+        assert!(
+            out.status.success(),
+            "ngspice failed on {deck}:\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        work
+    }
+
+    /// Parse a `wrdata` table (wr_vecnames + wr_singlescale).
+    pub fn parse_wrdata(path: &Path) -> (Vec<String>, Vec<Vec<Value>>) {
+        let text = fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let mut lines = text.lines();
+        let header: Vec<String> = lines
+            .next()
+            .expect("wrdata header")
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        let rows = lines
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                l.split_whitespace()
+                    .map(|t| t.parse::<Value>().expect("wrdata number"))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        (header, rows)
+    }
+
+    /// Map an oracle column quantity onto the port's op/charge state. The
+    /// `@m[q*]`/`@m[c**]` probes report the intrinsic `here->BSIM4*` values
+    /// (b4ask.c), not the CKTstate compositions.
+    pub fn extract(op: &Bsim4v8Op, quantity: &str) -> Value {
+        let c = || op.charge.as_ref().expect("charge state");
+        match quantity {
+            "id" => op.cd,
+            "gm" => op.gm,
+            "gds" => op.gds,
+            "gmbs" => op.gmbs,
+            "vth" => op.von,
+            "vdsat" => op.vdsat,
+            "ibs" => op.cbs,
+            "ibd" => op.cbd,
+            "isub" => op.csub,
+            "igidl" => op.igidl,
+            "igisl" => op.igisl,
+            "vgsteff" => op.vgsteff,
+            "vdseff" => op.vdseff,
+            "qg" => c().qgate,
+            "qb" => c().qbulk,
+            "qd" => c().qdrn,
+            "qs" => c().qsrc,
+            "cgg" => c().cggb,
+            "cgd" => c().cgdb,
+            "cgs" => c().cgsb,
+            "cdg" => c().cdgb,
+            "cdd" => c().cddb,
+            "cds" => c().cdsb,
+            "cbg" => c().cbgb,
+            "cbd" => c().cbdb,
+            "cbs" => c().cbsb,
+            "csg" => c().csgb,
+            "csd" => c().csdb,
+            "css" => c().cssb,
+            "cgb" => c().cgbb,
+            "cdb" => c().cdbb,
+            "csb" => c().csbb,
+            "cbb" => c().cbbb,
+            "capbd" => c().capbd,
+            "capbs" => c().capbs,
+            other => panic!("unmapped oracle quantity {other}"),
+        }
+    }
+}
+
+/// Live oracle: requires a local ngspice-46 build.
+#[test]
+#[ignore = "requires NGSPICE_EXE pointing at a local ngspice-46 binary"]
+fn live_ngspice_oracle_dc_and_charge() {
+    let Some(exe) = std::env::var_os("NGSPICE_EXE").map(std::path::PathBuf::from) else {
+        eprintln!("Skipping: set NGSPICE_EXE to run the live BSIM4 oracle.");
+        return;
+    };
+
+    let mut points = 0usize;
+    let mut worst: (Value, String) = (0.0, String::new());
+    for spec in oracle::deck_specs() {
+        let work = oracle::run_deck(&exe, spec.deck);
+        let temp_k = spec.temp_c + 273.15;
+
+        let devices: HashMap<String, Bsim4v8> = spec
+            .devices
+            .iter()
+            .map(|d| {
+                (
+                    d.name.to_string(),
+                    oracle::build_device(d, spec.is_pmos, temp_k),
+                )
+            })
+            .collect();
+
+        for sweep in spec.sweeps {
+            let (header, rows) = oracle::parse_wrdata(&work.join(sweep.file));
+            assert!(rows.len() > 10, "{}: too few rows", sweep.file);
+            for row in &rows {
+                let x = row[0];
+                let (vd, vg, vb) = if sweep.sweep_is_vg {
+                    (sweep.vd, x, sweep.vb)
+                } else {
+                    (x, sweep.vg, sweep.vb)
+                };
+                // One charge-bearing eval per device per row.
+                let mut ops: HashMap<&str, Bsim4v8Op> = HashMap::new();
+                for (col, name) in header.iter().enumerate().skip(1) {
+                    let (dev_name, quantity) = name
+                        .trim_start_matches('@')
+                        .split_once('[')
+                        .map(|(d, q)| (d, q.trim_end_matches(']')))
+                        .expect("oracle column name");
+                    let dev = &devices[dev_name];
+                    let op = ops.entry(dev_name).or_insert_with(|| {
+                        dev.eval_polarity(vd, vg, vb, 1e-12, true).expect("eval")
+                    });
+                    let ours = oracle::extract(op, quantity);
+                    let reference = row[col];
+                    let tol = oracle::REL_TOL * reference.abs().max(ours.abs()) + 1e-22;
+                    let err = (ours - reference).abs();
+                    if reference.abs() > 0.0 {
+                        let rel = err / reference.abs().max(1e-30);
+                        if rel > worst.0 && err > 1e-22 {
+                            worst = (
+                                rel,
+                                format!(
+                                    "{}:{} {} at (vd={vd},vg={vg},vb={vb}): ours={ours:.9e} ref={reference:.9e}",
+                                    sweep.file, dev_name, quantity
+                                ),
+                            );
+                        }
+                    }
+                    assert!(
+                        err <= tol,
+                        "{} {}[{}] at (vd={vd}, vg={vg}, vb={vb}): ours={ours:.9e} ngspice={reference:.9e} err={err:.3e}",
+                        sweep.file,
+                        dev_name,
+                        quantity,
+                    );
+                    points += 1;
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(&work);
+    }
+    println!(
+        "live BSIM4 oracle: {points} comparisons passed; worst rel err {:.3e} ({})",
+        worst.0, worst.1
+    );
+}
+
+// ===================== Verilog-A cross-check =====================
+//
+// The in-tree Verilog-A BSIM4.8 (models/veriloga/bsim4.va, the
+// Xyce-adapted variant) is a sibling implementation, not the transcription
+// oracle: it documents default deviations from the C model (igc-family
+// defaults, junction trap model, TNOM=25), so agreement is percent-level
+// by design — see tests/veriloga_bsim4_oracle.rs. This cross-check reports
+// native-vs-VA deltas at the same fixture biases without forcing
+// agreement; the hard bound only guards against gross divergence.
+
+#[cfg(feature = "veriloga")]
+mod veriloga_cross_check {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn bsim4_va_path() -> Option<PathBuf> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../models/veriloga/bsim4.va");
+        path.exists().then_some(path)
+    }
+
+    /// Terminal drain current -i(vd) of the VA model at a bias point, the
+    /// exact recipe of tests/veriloga_bsim4_oracle.rs.
+    fn va_drain_current(model: &Path, vgs: Value, vds: Value, temp_c: Option<Value>) -> Value {
+        let temp_line = match temp_c {
+            Some(t) => format!(".options temp={t}\n"),
+            None => String::new(),
+        };
+        let deck = format!(
+            "* bsim4 va bias point\n\
+             {temp_line}\
+             vg g 0 {vgs}\n\
+             vd d 0 {vds}\n\
+             XM1 d g 0 0 bsim4va l=1e-7 w=1e-6\n\
+             .va \"{}\" bsim4va\n\
+             .end\n",
+            model.display().to_string().replace('\\', "/")
+        );
+        let netlist = crate::Netlist::parse(&deck).expect("parse");
+        let result = crate::Engine::default()
+            .run_tran(&netlist, 2e-9, 1e-9)
+            .expect("bias point must converge");
+        let idx = result
+            .branch_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("vd"))
+            .expect("vd branch");
+        -result.branch_currents[idx].last().copied().expect("samples")
+    }
+
+    /// Terminal drain current of the native port with the all-defaults
+    /// card (the VA deck gives no model parameters): channel current plus
+    /// the reverse drain-junction current, i.e. what -i(vd) measures.
+    fn native_drain_current(tnom_k: Value, temp_k: Value, vgs: Value, vds: Value) -> Value {
+        let model = Arc::new(Bsim4v8Model::from_params(&HashMap::new(), false, tnom_k));
+        let dev = Bsim4v8::new(
+            "m1".to_string(),
+            model,
+            Bsim4v8Geometry { l: 0.1e-6, w: 1e-6, ..Bsim4v8Geometry::default() },
+            temp_k,
+        )
+        .expect("native default device");
+        let op = dev
+            .eval(Bsim4v8Bias { vds, vgs, vbs: 0.0 }, GMIN, false)
+            .expect("eval");
+        op.cd - op.cbd
+    }
+
+    /// Native (C-transcription) vs Verilog-A at the fixture bias points.
+    /// Run with `cargo test -p rspice-core --lib bsim4v8 --features veriloga
+    /// -- --ignored --nocapture` to see the delta table.
+    #[test]
+    #[ignore = "requires models/veriloga/bsim4.va and the veriloga engine"]
+    fn native_vs_veriloga_bias_points() {
+        let Some(model) = bsim4_va_path() else {
+            eprintln!("bsim4.va not present; skipping VA cross-check");
+            return;
+        };
+
+        // (label, vgs, vds, temp_c). The temperature rows mirror the VA
+        // fixture's tnom=25 protocol; the rest run at the 27C default.
+        let points: [(&str, Value, Value, Option<Value>); 10] = [
+            ("idvg deep subthreshold", 0.0, 1.2, None),
+            ("idvg subthreshold", 0.3, 1.2, None),
+            ("idvg moderate inversion", 0.6, 1.2, None),
+            ("idvg onset", 0.9, 1.2, None),
+            ("idvg strong inversion", 1.2, 1.2, None),
+            ("idvd linear", 1.2, 0.1, None),
+            ("idvd saturation onset", 1.2, 0.6, None),
+            ("temp -40C", 1.0, 1.2, Some(-40.0)),
+            ("temp 27C", 1.0, 1.2, Some(27.0)),
+            ("temp 125C", 1.0, 1.2, Some(125.0)),
+        ];
+
+        println!(
+            "{:<26} {:>13} {:>13} {:>9}",
+            "bias", "native", "veriloga", "delta"
+        );
+        let mut worst: Value = 0.0;
+        for (label, vgs, vds, temp_c) in points {
+            let (tnom_k, temp_k) = match temp_c {
+                // VA temperature fixtures: tnom=25, swept device temp.
+                Some(t) => (25.0 + 273.15, t + 273.15),
+                None => (T300, T300),
+            };
+            let native = native_drain_current(tnom_k, temp_k, vgs, vds);
+            let va = va_drain_current(&model, vgs, vds, temp_c);
+            let delta = (va - native) / native.abs().max(1e-30);
+            worst = worst.max(delta.abs());
+            println!(
+                "{label:<26} {native:>13.6e} {va:>13.6e} {:>+8.2}%",
+                delta * 100.0
+            );
+            // Documented variant gap is 0.6-1% strong inversion, ~5% deep
+            // subthreshold; anything past 15% would mean one of the two
+            // models is broken, not a default deviation.
+            assert!(
+                delta.abs() < 0.15,
+                "{label}: native {native:.6e} vs VA {va:.6e} ({:+.2}%)",
+                delta * 100.0
+            );
+        }
+        println!("worst |delta| = {:.2}%", worst * 100.0);
+    }
+}
