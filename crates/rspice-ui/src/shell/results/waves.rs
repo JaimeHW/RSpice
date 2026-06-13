@@ -21,7 +21,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
 
 use super::strip::{LegendChip, StripHeader};
-use super::{DerivedSeries, ExprEditor, ExprSeries, ExprTrace, waveform_color, well_hint};
+use super::{
+    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, ResultsState, waveform_color, well_hint,
+};
 
 /// How a trace's Y values are interpreted.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,6 +68,65 @@ pub(super) struct StripModel {
     /// hue — one chip per signal, all runs).
     signal_trace_count: usize,
     traces: Vec<StripTrace>,
+}
+
+/// Frame cache for the strip models. Building them clones every trace name
+/// and walks all overlay runs, and both the center view and the right panel
+/// ask for them each frame — the fingerprint covers everything the models
+/// read, so the rebuild only happens when an input actually changes.
+#[derive(Default, Clone)]
+pub(super) struct ModelsCache(Option<(u64, Arc<Vec<StripModel>>)>);
+
+impl std::fmt::Debug for ModelsCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ModelsCache(..)")
+    }
+}
+
+/// Everything `build_models` reads: run data version, the display-run set,
+/// per-trace visibility and stored color, phase mode, and the theme palette.
+fn models_fingerprint(simulation: &SimulationState, phase_continuous: bool, t: &Tokens) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    simulation.data_version.hash(&mut h);
+    phase_continuous.hash(&mut h);
+    for color in &t.color.traces {
+        color.to_array().hash(&mut h);
+    }
+    for run in simulation.display_runs() {
+        run.id.hash(&mut h);
+        for analysis in &run.analyses {
+            analysis.waveforms.len().hash(&mut h);
+            for waveform in &analysis.waveforms {
+                waveform.visible.hash(&mut h);
+                waveform.color.hash(&mut h);
+            }
+        }
+    }
+    h.finish()
+}
+
+/// Fingerprint-cached [`build_models`]; the returned handle is cheap to
+/// clone and stays valid across later state borrows.
+pub(super) fn cached_models(
+    simulation: &SimulationState,
+    results: &mut ResultsState,
+    t: &Tokens,
+) -> Arc<Vec<StripModel>> {
+    let fp = models_fingerprint(simulation, results.phase_continuous, t);
+    if let Some((cached_fp, models)) = &results.models.0 {
+        if *cached_fp == fp {
+            return Arc::clone(models);
+        }
+    }
+    let models = Arc::new(build_models(
+        simulation,
+        &mut results.derived,
+        t,
+        results.phase_continuous,
+    ));
+    results.models.0 = Some((fp, Arc::clone(&models)));
+    models
 }
 
 /// Fold a run identity into a cache key for overlay traces. Active-run
@@ -322,13 +383,7 @@ fn x_range(model: &StripModel) -> Option<(f64, f64)> {
 /// Render the strip stack.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    let phase_continuous = state.shell.results.phase_continuous;
-    let models = build_models(
-        &state.simulation,
-        &mut state.shell.results.derived,
-        &t,
-        phase_continuous,
-    );
+    let models = cached_models(&state.simulation, &mut state.shell.results, &t);
     if models.is_empty() {
         let hint = if state.simulation.active_run().is_none() {
             "No results yet — press F5 or the Run button to simulate"
@@ -1008,13 +1063,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     }
 
-    let phase_continuous = state.shell.results.phase_continuous;
-    let models = build_models(
-        &state.simulation,
-        &mut state.shell.results.derived,
-        &t,
-        phase_continuous,
-    );
+    let models = cached_models(&state.simulation, &mut state.shell.results, &t);
     let cursor_model = state
         .shell
         .results
