@@ -122,6 +122,14 @@ impl RSpiceApp {
             ShortcutCommand::RunChecks => {
                 crate::common::menu_bar::run_design_rule_check(&mut self.state);
             }
+            ShortcutCommand::NextViolation => {
+                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
+            }
+            ShortcutCommand::PrevViolation => {
+                self.state.shell.view = crate::shell::WorkspaceView::Schematic;
+                crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
+            }
             ShortcutCommand::NextWorkspaceTab => {
                 self.state.shell.cycle_view();
             }

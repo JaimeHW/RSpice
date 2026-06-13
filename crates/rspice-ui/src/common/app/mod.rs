@@ -41,7 +41,7 @@ mod app_console;
 pub use app_console::{ConsoleLevel, ConsoleMessage};
 
 mod app_interaction_state;
-pub use app_interaction_state::{DragType, InteractionState};
+pub use app_interaction_state::{ContextTarget, DragType, InteractionState};
 
 mod app_veriloga_library;
 use app_veriloga_library::{

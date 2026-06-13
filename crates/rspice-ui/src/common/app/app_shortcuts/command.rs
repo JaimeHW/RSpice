@@ -33,6 +33,8 @@ pub(crate) enum ShortcutCommand {
     RunSimulation,
     StopSimulation,
     RunChecks,
+    NextViolation,
+    PrevViolation,
     NextWorkspaceTab,
     ZoomIn,
     ZoomOut,
@@ -49,10 +51,12 @@ pub(crate) enum ShortcutCommand {
 
 impl ShortcutCommand {
     /// Every command, in the order the command palette lists them.
-    pub(crate) const ALL: [ShortcutCommand; 45] = [
+    pub(crate) const ALL: [ShortcutCommand; 47] = [
         ShortcutCommand::RunSimulation,
         ShortcutCommand::StopSimulation,
         ShortcutCommand::RunChecks,
+        ShortcutCommand::NextViolation,
+        ShortcutCommand::PrevViolation,
         ShortcutCommand::FileNew,
         ShortcutCommand::FileOpen,
         ShortcutCommand::FileSave,
@@ -131,6 +135,8 @@ impl ShortcutCommand {
             ShortcutCommand::RunSimulation => "Run Simulation",
             ShortcutCommand::StopSimulation => "Stop Simulation",
             ShortcutCommand::RunChecks => "Run Design Checks",
+            ShortcutCommand::NextViolation => "Next Violation",
+            ShortcutCommand::PrevViolation => "Previous Violation",
             ShortcutCommand::NextWorkspaceTab => "Next Workspace Tab",
             ShortcutCommand::ZoomIn => "Zoom In",
             ShortcutCommand::ZoomOut => "Zoom Out",
@@ -181,6 +187,8 @@ impl ShortcutCommand {
             ShortcutCommand::RunSimulation => "F5",
             ShortcutCommand::StopSimulation => "Shift+F5",
             ShortcutCommand::RunChecks => "Ctrl+E",
+            ShortcutCommand::NextViolation => "F4",
+            ShortcutCommand::PrevViolation => "Shift+F4",
             ShortcutCommand::NextWorkspaceTab => "Ctrl+Tab",
             ShortcutCommand::ZoomIn => "Ctrl++",
             ShortcutCommand::ZoomOut => "Ctrl+-",

@@ -86,6 +86,8 @@ impl ShortcutCategory {
                 ShortcutCommand::RunSimulation,
                 ShortcutCommand::StopSimulation,
                 ShortcutCommand::RunChecks,
+                ShortcutCommand::NextViolation,
+                ShortcutCommand::PrevViolation,
             ],
             ShortcutCategory::Navigation => &[
                 ShortcutCommand::ZoomIn,

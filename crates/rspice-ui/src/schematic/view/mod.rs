@@ -9,6 +9,7 @@ use crate::common::app::AppState;
 
 use super::symbols::SymbolLibrary;
 
+mod context_menu;
 mod coordinates;
 mod drawing;
 mod grid;
@@ -18,7 +19,7 @@ mod preview;
 mod scene;
 mod symbol_primitives;
 mod viewport;
-mod violations;
+pub(crate) mod violations;
 
 use self::coordinates::viewport_from_state;
 use self::interaction::handle_tool_interactions;
@@ -40,6 +41,11 @@ pub fn render_schematic_view(
             .schematic
             .zoom_to_fit(available.width() as f64, available.height() as f64);
     }
+    if let Some(target) = state.schematic.center_request.take() {
+        state
+            .schematic
+            .center_view_on(target, available.width() as f64, available.height() as f64);
+    }
 
     let response = ui.allocate_rect(available, Sense::click_and_drag());
     let painter = ui.painter_at(available);
@@ -50,7 +56,13 @@ pub fn render_schematic_view(
     // frame during pans and drags.
     handle_viewport_navigation(ui, &response, available, state);
     let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
+    // Right-click owns two meanings: finishing a live wire run (inside the
+    // tool handler) and the context menu (here). Capture whether a run was
+    // live before the tool handler so the click that finishes a wire can
+    // never also open the menu.
+    let wire_was_active = state.schematic.wire_drawing.active;
     handle_tool_interactions(ui, &response, state, &viewport);
+    context_menu::handle_context_menu(&response, state, &viewport, wire_was_active);
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.

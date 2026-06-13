@@ -124,6 +124,12 @@ pub struct SchematicState {
     #[serde(skip)]
     pub needs_fit: bool,
 
+    /// One-shot request to pan the view so this schematic-space point sits at
+    /// the canvas center (violation cycling). Consumed on the next render,
+    /// like `needs_fit`; the zoom level is left alone.
+    #[serde(skip)]
+    pub center_request: Option<Point>,
+
     /// Flag indicating the undo history should be reset (e.g., after loading a file).
     /// Set to true when a file is loaded, cleared after history is reset.
     #[serde(skip)]
@@ -184,6 +190,7 @@ impl Default for SchematicState {
             net_mapping: HashMap::new(),
             is_dirty: false,
             needs_fit: false,
+            center_request: None,
             needs_history_reset: false,
             topology_version: 0,
             snap_engine: SnapEngine::default(),

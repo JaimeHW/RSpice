@@ -73,6 +73,16 @@ impl SchematicState {
         );
     }
 
+    /// Pan so `target` (schematic pixel coordinates) sits at the viewport
+    /// center, keeping the current zoom. Same screen mapping as
+    /// `zoom_to_fit`: screen = bounds.min + pan + schematic * zoom.
+    pub fn center_view_on(&mut self, target: Point, viewport_width: f64, viewport_height: f64) {
+        self.pan = (
+            viewport_width / 2.0 - f64::from(target.x) * self.zoom,
+            viewport_height / 2.0 - f64::from(target.y) * self.zoom,
+        );
+    }
+
     /// Calculate the bounding box of all schematic content.
     /// Returns (min_x, min_y, max_x, max_y) in schematic pixel coordinates, or None if empty.
     /// Note: These are pixel coordinates snapped to grid, not grid cell indices.

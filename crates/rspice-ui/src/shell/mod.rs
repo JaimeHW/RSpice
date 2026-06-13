@@ -23,7 +23,7 @@
 //! and simulation state stay in `crate::state` / `crate::simulation`.
 
 mod console;
-mod menubar;
+pub(crate) mod menubar;
 pub(crate) mod panels;
 pub mod results;
 mod state;

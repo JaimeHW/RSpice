@@ -44,7 +44,7 @@ impl ShortcutRule {
     }
 }
 
-const GLOBAL_RULES: [ShortcutRule; 18] = [
+const GLOBAL_RULES: [ShortcutRule; 20] = [
     ShortcutRule::new(
         ShortcutCommand::OpenPreferences,
         Key::Comma,
@@ -78,6 +78,8 @@ const GLOBAL_RULES: [ShortcutRule; 18] = [
     ShortcutRule::new(ShortcutCommand::RunSimulation, Key::F5, None, Some(false)),
     ShortcutRule::new(ShortcutCommand::StopSimulation, Key::F5, None, Some(true)),
     ShortcutRule::new(ShortcutCommand::RunChecks, Key::E, Some(true), None),
+    ShortcutRule::new(ShortcutCommand::NextViolation, Key::F4, None, Some(false)),
+    ShortcutRule::new(ShortcutCommand::PrevViolation, Key::F4, None, Some(true)),
     ShortcutRule::new(ShortcutCommand::NextWorkspaceTab, Key::Tab, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Plus, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Equals, Some(true), None),

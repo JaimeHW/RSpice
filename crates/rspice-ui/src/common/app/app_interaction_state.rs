@@ -34,6 +34,23 @@ pub struct InteractionState {
 
     /// Whether hovering over a wire vertex (for visual feedback)
     pub hover_wire_vertex: Option<(i32, i32)>,
+
+    /// What the open context menu is for, and the grid position of the
+    /// right-click that opened it. Captured on the click frame; the menu
+    /// re-renders from it for as long as egui keeps the popup open.
+    #[serde(skip)]
+    pub context_target: Option<(ContextTarget, (i32, i32))>,
+}
+
+/// What sits under a canvas right-click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextTarget {
+    /// A component instance (by id).
+    Component(u64),
+    /// A wire segment (by id).
+    Wire(u64),
+    /// Empty canvas.
+    Canvas,
 }
 
 impl InteractionState {
@@ -55,6 +72,7 @@ impl InteractionState {
         self.last_click_pos = None;
         self.vertex_drag_pos = None;
         self.hover_wire_vertex = None;
+        self.context_target = None;
     }
 }
 

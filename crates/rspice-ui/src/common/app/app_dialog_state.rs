@@ -126,6 +126,9 @@ pub struct DialogState {
     /// `topology_version` when the last check ran — canvas markers hide and
     /// the ERC pill reads "stale" once the design changes underneath them.
     pub drc_checked_version: u64,
+    /// Position in the severity-ordered finding cycle (F4 / Shift+F4);
+    /// None until the first jump after a check.
+    pub drc_cycle: Option<usize>,
 
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,

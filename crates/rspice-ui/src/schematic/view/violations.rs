@@ -8,13 +8,89 @@
 
 use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 
-use crate::common::app::AppState;
+use crate::common::app::{AppState, ConsoleMessage};
 use crate::services::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use crate::state::Point;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::active_palette;
 
 use super::viewport::Viewport;
+
+/// Jump the view to the next (`step` = 1) or previous (−1) finding,
+/// ordered worst severity first. Selects the offending object where one
+/// exists and centers the canvas on the anchor; node/global findings have
+/// no spot and stay in the console and pill.
+pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
+    let Some(result) = &state.dialogs.drc_results else {
+        state.push_user_message(ConsoleMessage::info(
+            "No check results — run design checks first (Ctrl+E)",
+        ));
+        return;
+    };
+    if state.dialogs.drc_checked_version != state.schematic.topology_version() {
+        state.push_user_message(ConsoleMessage::warning(
+            "Check results are stale — re-run design checks (Ctrl+E)",
+        ));
+        return;
+    }
+
+    // Owned snapshot of the anchored findings so the borrows drop before
+    // the selection/viewport mutations below.
+    let mut anchored: Vec<(DrcSeverity, Point, Option<Anchor>, String)> = result
+        .violations()
+        .iter()
+        .filter_map(|violation| {
+            anchor(state, violation).map(|world| {
+                let select = match &violation.location {
+                    DrcLocation::Component { id, .. } => Some(Anchor::Component(*id as u64)),
+                    DrcLocation::Wire { id } => Some(Anchor::Wire(*id as u64)),
+                    _ => None,
+                };
+                (violation.severity, world, select, violation.message.clone())
+            })
+        })
+        .collect();
+    if anchored.is_empty() {
+        state.push_user_message(ConsoleMessage::info(
+            "No findings with a canvas anchor — see the console summary",
+        ));
+        return;
+    }
+    // Worst first; stable within a severity.
+    anchored.sort_by(|a, b| b.0.cmp(&a.0));
+
+    let len = anchored.len() as isize;
+    let index = match state.dialogs.drc_cycle {
+        // First jump lands on the worst finding, not the second one.
+        None if step >= 0 => 0,
+        None => (len - 1) as usize,
+        Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
+    };
+    state.dialogs.drc_cycle = Some(index);
+
+    let (severity, world, select, message) = anchored.swap_remove(index);
+    state.schematic.selection.clear();
+    state.schematic.net_highlight.clear();
+    match select {
+        Some(Anchor::Component(id)) => state.schematic.selection.select_component(id),
+        Some(Anchor::Wire(id)) => state.schematic.selection.select_wire(id),
+        None => {}
+    }
+    state.schematic.center_request = Some(world);
+    state.push_user_message(ConsoleMessage::info(format!(
+        "Finding {}/{} — {} · {}",
+        index + 1,
+        len,
+        severity.display_name(),
+        message,
+    )));
+}
+
+/// What a cycled finding selects on arrival.
+enum Anchor {
+    Component(u64),
+    Wire(u64),
+}
 
 /// Marker half-extent in screen px (badges do not scale with zoom — they
 /// are annotations, not geometry).
