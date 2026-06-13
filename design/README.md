@@ -32,7 +32,7 @@ rename a file, update the citations.
 | `volta-results-v2.html` | Run-keyed results: run shelf, overlay grammar (signal=hue, run=weight), specs matrix, MC dashboard, noise contributors, OP inspector | — |
 | `volta-netlist-editor.html` | Netlist editor, parameter tuner, run bar, scope breadcrumb, completion popover | — |
 | `volta-schematic-rail.html` | Schematic left rail: navigator, library palette, place strip, nameplate | — |
-| `volta-license-dialog.html` | License activation dialog. UX spec: `docs/license-key-spec.md` §5 | — |
+| `volta-license-dialog.html` | License activation dialog. UX spec: license-key spec §5 (internal doc) | — |
 | `volta-symbols.html` | Component symbol set: round-1 judging sheet + shipped symbol gallery | — |
 | `volta-touch.html` | Tablet/phone concept, round 2 (landscape thumb-rail; portrait rejected). Not implemented | — |
 | `volta-schematic-editor.html` | Desktop schematic editor: document bar (breadcrumb + ERC pill), canvas vocabulary, selection, placement, wiring, checks overlay, hierarchy, context menus (spec), empty state, full keymap | — |
@@ -65,8 +65,14 @@ closed the same day by the four files added to the table above:
 `volta-schematic-editor.html`, `volta-library-manager.html`,
 `volta-app-chrome.html`, `volta-app-dialogs.html`.
 
-Inside those files, `ships` tags mark what the code already does and
-`spec` tags mark proposed behavior — the `spec` items (context menus,
-console source links, ERC cycling, palette recents/match marks, shortcut
-search, autosave, About diagnostics, empty-state copy fix) are the
-implementation backlog, not design gaps.
+Inside those files, `ships` tags mark what the code does and `spec`
+tags mark proposals. The same-day implementation pass shipped most of
+the original backlog: canvas context menus, finding cycling
+(F4/Shift+F4), the clickable ERC pill and docbar selection echo,
+palette recents/match marks/context verbs, the complete searchable
+shortcut deck, About's license line and Copy diagnostics, the Check
+menu's View/Clear violations, library read-only marks and named empty
+states, and the empty-sheet copy fix. Still open as `spec`: console
+source links, schematic autosave, library keyboard navigation and cell
+copy/rename, open-any-view routing, the read-only descend banner, and
+real Technology/Path metadata.

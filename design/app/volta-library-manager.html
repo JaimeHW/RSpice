@@ -228,9 +228,10 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     </div>
   </div>
   <p class="note">
-    Ships as drawn <span class="tag today">ships</span>, except: the read-only badge on library rows
-    (today read-only matters only inside New cell's library list) and the Technology value (today a
-    literal “—”) <span class="tag spec">spec</span>.
+    Ships as drawn <span class="tag today">ships</span> — read-only libraries wear the rail's
+    “ro · N” meta mark with the same hover line (“Read-only library — placeable, never editable”),
+    the in-app adaptation of the badge drawn here. The Technology value (today a literal “—”)
+    remains <span class="tag spec">spec</span>.
   </p>
 </section>
 
@@ -336,8 +337,8 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><th>State</th><th>Copy</th><th>Status</th></tr>
     <tr><td>no library selected</td><td>CELL column: “Select a library”</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>no cell selected</td><td>VIEW column: “Select a cell”</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>filter matches nothing</td><td>CELL column: “No cells match '⟨filter⟩'” — names the filter so a stale one can't gaslight the browser</td><td><span class="tag spec">spec</span></td></tr>
-    <tr><td>library empty</td><td>CELL column: “No cells yet — New cell creates the first” </td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>filter matches nothing</td><td>CELL column: “No cells match '⟨filter⟩'” — names the filter so a stale one can't gaslight the browser</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>library empty</td><td>CELL column: “No cells yet — New cell creates the first” </td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 

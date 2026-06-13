@@ -307,9 +307,9 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
     </div>
   </div>
   <p class="note">
-    Everything above ships <span class="tag today">ships</span> except the in-canvas selection echo at the
-    docbar's right edge, which today lives only in the status bar — duplicated here because the eye is on
-    the canvas when the selection changes <span class="tag spec">spec</span>.
+    Everything above ships <span class="tag today">ships</span> — including the selection echo at the
+    docbar's right edge, duplicated from the status bar because the eye is on the canvas when the
+    selection changes.
   </p>
 </section>
 
@@ -325,8 +325,8 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
     <tr><th>Element</th><th>Rule</th><th>Status</th></tr>
     <tr><td>lib · CELL · view</td><td>Top of hierarchy: library faint, cell bold, view faint. None clickable — there is nowhere to go.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>lib › TOP › X1 ‹ MASTER ›</td><td>Descended: every intermediate hop is a link that pops back to that level. The focused instance is bold; its master cell follows in ‹ › when the names differ.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>ERC pill</td><td>Idle “ERC not run” · idle “ERC stale · re-run” when topology changed since the last check · ok “ERC clean” · ok “ERC clean · N warn” · err “ERC N errors”. Click runs checks (<kbd>Ctrl+E</kbd>).</td><td><span class="tag today">ships</span> click-to-run <span class="tag spec">spec</span></td></tr>
-    <tr><td>Selection echo</td><td>“Sel: M2 (W=24u L=1u)” mirrored from the status bar at the docbar's right edge, faint mono.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>ERC pill</td><td>Idle “ERC not run” · idle “ERC stale · re-run” when topology changed since the last check · ok “ERC clean” · ok “ERC clean · N warn” · err “ERC N errors”. Click runs checks (<kbd>Ctrl+E</kbd>).</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>Selection echo</td><td>“Sel: M2 (W=24u L=1u)” mirrored from the status bar at the docbar's right edge, faint mono. Silent when nothing is selected.</td><td><span class="tag today">ships</span></td></tr>
   </table>
   <div class="demo">
     <span class="demo-label">PILL STATES</span>
@@ -503,7 +503,7 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
     <tr><th>Behavior</th><th>Rule</th><th>Status</th></tr>
     <tr><td>staleness</td><td>Badges hide the moment topology changes; the pill flips to “ERC stale · re-run”. No stale marker ever points at fresh copper.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>console link</td><td>Each finding is also a console row; clicking the row zooms the canvas to the anchor.</td><td><span class="tag spec">spec</span></td></tr>
-    <tr><td>cycle</td><td><kbd>F4</kbd> jumps to the next finding, <kbd>Shift+F4</kbd> previous, ordered by severity.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>cycle</td><td><kbd>F4</kbd> jumps to the next finding, <kbd>Shift+F4</kbd> previous, ordered worst severity first — each jump selects the offending object, centers the canvas on it, and narrates “Finding 2/5 — …” to the console.</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 
@@ -534,10 +534,11 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
 <!-- ════════════════════════ 08 — context menus ══════════════════════════ -->
 <section id="s8">
   <div class="kicker">08</div>
-  <h2>Context menus — the third hand <span class="tag spec">spec</span></h2>
+  <h2>Context menus — the third hand <span class="tag today">ships</span></h2>
   <p class="lede">
-    Today right-click only finishes a wire. That stays — when the wire tool is live, right-click means
-    “done.” In every other state, right-click should open the menu for what's under the cursor.
+    When the wire tool is live, right-click means “done” — the shipped wire gesture keeps priority,
+    and no menu opens, not even on the click that finishes a run. In every other state, right-click
+    opens the menu for what's under the cursor and moves the selection to it.
     Every item is a shortcut the menu teaches: nothing appears here that lacks a keyboard or menubar route.
   </p>
   <div class="demo" style="min-height: 280px">
@@ -616,7 +617,7 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
     </div>
   </div>
   <p class="note">
-    Reconciliation <span class="tag spec">spec</span>: the shipped copy read “press R · C · L · V · G”,
+    Reconciliation <span class="tag today">ships</span>: the shipped copy read “press R · C · L · V · G”,
     but bare <kbd>R</kbd> rotates — the resistor is <kbd>Shift+R</kbd>. The other four keys were right
     (<kbd>C</kbd> capacitor, <kbd>L</kbd> inductor, <kbd>V</kbd> source, <kbd>G</kbd> ground).
     The copy shown here matches the bindings; fix the string, not the keymap.
@@ -637,7 +638,7 @@ svg.schem { display: block; width: 100%; height: auto; user-select: none; }
     <tr><td>view</td><td><kbd>F</kbd> fit · <kbd>Ctrl+0</kbd> 100 % · <kbd>Ctrl++</kbd>/<kbd>Ctrl+-</kbd> zoom · wheel = cursor-centered zoom · middle-drag / <kbd>Shift</kbd>+drag = pan</td></tr>
     <tr><td>hierarchy</td><td><kbd>Shift+E</kbd> descend · <kbd>U</kbd> ascend · double-click instance descends</td></tr>
     <tr><td>find</td><td><kbd>/</kbd> design search · <kbd>Shift+I</kbd> cell search</td></tr>
-    <tr><td>checks · run</td><td><kbd>Ctrl+E</kbd> checks · <kbd>F5</kbd> run · <kbd>Shift+F5</kbd> stop</td></tr>
+    <tr><td>checks · run</td><td><kbd>Ctrl+E</kbd> checks · <kbd>F4</kbd>/<kbd>Shift+F4</kbd> cycle findings · <kbd>F5</kbd> run · <kbd>Shift+F5</kbd> stop</td></tr>
   </table>
 </section>
 

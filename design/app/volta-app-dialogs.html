@@ -175,8 +175,9 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   <h2>Command palette — every verb, three keystrokes away</h2>
   <p class="lede">
     <kbd>Ctrl+K</kbd> floats a 520&nbsp;px panel 96&nbsp;px from the top, query focused. It searches
-    all 42 commands with the shipped ranking — prefix beats word-start beats substring beats
-    subsequence — and shows at most 12 rows; the remainder becomes “N more — keep typing.”
+    the whole command set (47 verbs, minus Cancel and the palette itself) with the shipped ranking —
+    prefix beats word-start beats substring beats subsequence — and shows at most 12 rows; the
+    remainder becomes “N more — keep typing.”
     This demo runs the real algorithm: try <b>pl</b>, then <b>pre</b>, then <b>zf</b> (a subsequence).
   </p>
 
@@ -197,9 +198,9 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><td>keys</td><td><kbd>↓</kbd>/<kbd>↑</kbd> cycle with wrap · <kbd>Enter</kbd> executes · <kbd>Esc</kbd> closes.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>row</td><td>28&nbsp;px: command name left, shortcut right in faint mono. Selection = 2&nbsp;px accent left edge over hover fill.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>overflow</td><td>“⟨n⟩ more — keep typing” after row 12. Never a scrollbar — the palette teaches narrowing, not scrolling.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>match marks</td><td>Matched letters render semibold accent (as in this demo) so subsequence hits explain themselves.</td><td><span class="tag spec">spec</span></td></tr>
-    <tr><td>recents</td><td>Empty query leads with the last 5 executed commands under a RECENT header, then the canonical list.</td><td><span class="tag spec">spec</span></td></tr>
-    <tr><td>context verbs</td><td>Descend Into Instance, Ascend One Level and Find In Design are excluded today; include them, disabled-with-reason when contextless — the palette should be the complete vocabulary.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>match marks</td><td>Matched letters render medium accent (as in this demo) so subsequence hits explain themselves.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>recents</td><td>Empty query leads with the last 5 commands run from the palette under a RECENT header, then the canonical list.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>context verbs</td><td>Descend Into Instance, Ascend One Level and Find In Design are listed; when contextless they stay visible but dim, with the reason (“select one cell instance”, “already at top”) in place of the shortcut — the palette is the complete vocabulary.</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 
@@ -278,10 +279,9 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   <h2>Keyboard shortcuts — the deck, searchable</h2>
   <p class="lede">
     <kbd>F1</kbd>. One scrolling card, category headers, description left, keycaps right.
-    The shipped dialog draws seven categories and stops; eleven commands (run/stop, checks, zoom,
-    tab switching, searches, hierarchy) have no category and silently vanish. The redesign adds
-    Simulation and Navigation so the card is the <em>whole</em> truth — and a filter, because
-    nobody reads 45 rows.
+    The dialog once drew seven categories and silently dropped the commands that had none —
+    run/stop, checks, zoom, tab switching, searches, hierarchy. Simulation and Navigation now
+    complete the deck, and a filter narrows it, because nobody reads 47 unfiltered rows.
   </p>
   <div class="demo">
     <span class="demo-label">LIVE — FILTER THE DECK</span>
@@ -301,7 +301,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
         <button class="btn" type="button">Close</button>
       </div>
     </div>
-    <div class="hint">search field and the Simulation/Navigation categories are the spec'd additions <span class="tag spec">spec</span> — the rest ships</div>
+    <div class="hint">the full deck ships, filter included — General also carries Preferences and Command Palette</div>
   </div>
 </section>
 
@@ -310,14 +310,14 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   <div class="kicker">04</div>
   <h2>About — what build, what engine, what license</h2>
   <p class="lede">
-    Small dialog, four facts, one verb. The spec'd additions: the license line (the menubar tier,
-    spelled out) and Copy diagnostics — version, OS, GPU, license tier to the clipboard, because
-    that is the first thing support asks for and the last thing users can find.
+    Small dialog, five facts, two verbs. The license line spells out the menubar tier, and
+    Copy diagnostics puts version, build hash, engine, license, and OS/arch on the clipboard —
+    the first thing support asks for and the last thing users can find.
   </p>
   <div class="duo">
     <div class="demo" style="margin-top:var(--sp-4)">
-      <span class="demo-label">SHIPS TODAY</span>
-      <div class="dlg sm" role="dialog" aria-label="About RSpice">
+      <span class="demo-label">PREVIOUS</span>
+      <div class="dlg sm" role="dialog" aria-label="About RSpice, previous">
         <div class="dlg-head">
           <span class="m-kicker">RSpice</span>
           <h4>About</h4>
@@ -337,8 +337,8 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
       </div>
     </div>
     <div class="demo" style="margin-top:var(--sp-4)">
-      <span class="demo-label">SPEC — WITH LICENSE + DIAGNOSTICS</span>
-      <div class="dlg sm" role="dialog" aria-label="About RSpice, proposed">
+      <span class="demo-label">SHIPS TODAY — LICENSE + DIAGNOSTICS</span>
+      <div class="dlg sm" role="dialog" aria-label="About RSpice, current">
         <div class="dlg-head">
           <span class="m-kicker">RSpice</span>
           <h4>About</h4>
@@ -382,6 +382,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
 (function () {
   var COMMANDS = [
     ["Run Simulation", "F5"], ["Stop Simulation", "Shift+F5"], ["Run Design Checks", "Ctrl+E"],
+    ["Next Violation", "F4"], ["Previous Violation", "Shift+F4"],
     ["New", "Ctrl+N"], ["Open", "Ctrl+O"], ["Save", "Ctrl+S"],
     ["Undo", "Ctrl+Z"], ["Redo", "Ctrl+Shift+Z"], ["Copy", "Ctrl+C"], ["Paste", "Ctrl+V"],
     ["Cut", "Ctrl+X"], ["Delete", "Del"], ["Select All", "Ctrl+A"],
@@ -393,7 +394,9 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     ["Edit Properties", "E"],
     ["Zoom In", "Ctrl++"], ["Zoom Out", "Ctrl+-"], ["Zoom to Fit", "F"], ["Zoom 100 %", "Ctrl+0"],
     ["Next Workspace Tab", "Ctrl+Tab"], ["Toggle Browser", "Ctrl+Shift+L"], ["Toggle Log", "Ctrl+`"],
-    ["Find Instance", "Shift+I"], ["Preferences", "Ctrl+,"], ["Shortcuts Help", "F1"],
+    ["Find Instance", "Shift+I"], ["Find In Design", "/"],
+    ["Descend Into Instance", "Shift+E"], ["Ascend One Level", "U"],
+    ["Preferences", "Ctrl+,"], ["Shortcuts Help", "F1"],
     ["Cancel", "Esc"], ["Command Palette", "Ctrl+K"]
   ];
   var MAX_ROWS = 12;
@@ -491,8 +494,8 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     ["Tools", [["Select Tool", "S"], ["Wire Tool", "W"], ["Net Label Tool", "N"], ["Probe Tool", "P"]]],
     ["Component Placement", [["Place Resistor", "Shift+R"], ["Place Ground", "G"], ["Place Voltage Source", "V"], ["Place Current Source", "I"], ["Place Capacitor", "C"], ["Place Inductor", "L"], ["Place Diode", "D"], ["Place NMOS", "M"], ["Place NPN BJT", "Q"]]],
     ["Transform", [["Rotate", "R"], ["Mirror Horizontal", "H"], ["Mirror Vertical", "Y"]]],
-    ["Simulation *", [["Run Simulation", "F5"], ["Stop Simulation", "Shift+F5"], ["Run Design Checks", "Ctrl+E"]]],
-    ["Navigation *", [["Zoom In", "Ctrl++"], ["Zoom Out", "Ctrl+-"], ["Zoom to Fit", "F"], ["Zoom 100 %", "Ctrl+0"], ["Next Workspace Tab", "Ctrl+Tab"], ["Descend Into Instance", "Shift+E"], ["Ascend One Level", "U"], ["Find In Design", "/"], ["Find Instance", "Shift+I"]]],
+    ["Simulation", [["Run Simulation", "F5"], ["Stop Simulation", "Shift+F5"], ["Run Design Checks", "Ctrl+E"], ["Next Violation", "F4"], ["Previous Violation", "Shift+F4"]]],
+    ["Navigation", [["Zoom In", "Ctrl++"], ["Zoom Out", "Ctrl+-"], ["Zoom to Fit", "F"], ["Zoom 100 %", "Ctrl+0"], ["Next Workspace Tab", "Ctrl+Tab"], ["Descend Into Instance", "Shift+E"], ["Ascend One Level", "U"], ["Find In Design", "/"], ["Find Instance", "Shift+I"]]],
     ["General", [["Edit Properties", "E"], ["Cancel", "Esc"], ["Shortcuts Help", "F1"], ["Preferences", "Ctrl+,"], ["Command Palette", "Ctrl+K"]]]
   ];
   var listEl = document.getElementById("scList");

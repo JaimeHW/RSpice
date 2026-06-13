@@ -373,6 +373,9 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
 
       <div class="dd" id="mCheck" role="menu" aria-label="Check menu">
         <button class="mi" role="menuitem">Run design checks<span class="sc">Ctrl+E</span></button>
+        <hr>
+        <button class="mi" role="menuitem">View violations</button>
+        <button class="mi" role="menuitem">Clear violations</button>
       </div>
 
       <div class="dd" id="mSimulate" role="menu" aria-label="Simulate menu">
@@ -521,7 +524,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><td>dynamic items</td><td>Undo names its action (“Undo move M2”). Open recent lists the last 8 files. The Help license line reads “Enter license key…” unlicensed, “License — ⟨tier⟩ until ⟨date⟩” licensed.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>disabled, never hidden</td><td>Items disable when their precondition fails (Redo with empty stack, Stop while idle, Clear results with none). Menus never reflow.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>radio groups</td><td>Grid and Theme submenus use a leading ● on the active choice — three independent groups under Theme: Direction, Mode, Density.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>Check menu</td><td>One item today. It earns the bar because violations land here next: “View violations”, “Clear violations” <span class="tag spec">spec</span> join it rather than nesting checks under Tools.</td><td><span class="tag today">ships</span></td></tr>
+    <tr><td>Check menu</td><td>Run design checks, then View violations (jumps to the schematic and opens the console on the worst severity present) and Clear violations — both disabled until a check has produced results. Checks earn the bar instead of nesting under Tools.</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 
@@ -637,11 +640,11 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   </p>
   <table class="spec">
     <tr><th>Surface</th><th>Copy</th><th>Status</th></tr>
-    <tr><td>schematic canvas</td><td>“Empty schematic” / placement keys / “File ▸ Open example…” — volta-schematic-editor.html §09</td><td><span class="tag today">ships</span> copy fix <span class="tag spec">spec</span></td></tr>
+    <tr><td>schematic canvas</td><td>“Empty schematic” / placement keys / “File ▸ Open example…” — volta-schematic-editor.html §09</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>results signals</td><td>“No results yet” / “Run (F5) simulates the enabled analyses” </td><td><span class="tag today">ships</span></td></tr>
     <tr><td>automation tab</td><td>“Type a command — 'help' lists the automation verbs”</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>library columns</td><td>“Select a library” · “Select a cell” — volta-library-manager.html §06</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>run history</td><td>“No runs this session — Run (F5) starts the first”</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>run history</td><td>“No runs yet — press Run (F5)”</td><td><span class="tag today">ships</span></td></tr>
   </table>
 </section>
 
