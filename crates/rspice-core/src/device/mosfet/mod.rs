@@ -8,6 +8,7 @@ pub mod b3soi;
 mod bsim3;
 pub mod bsim3v3;
 mod bsim4;
+pub mod bsim4v8;
 mod ekv;
 mod jfet;
 mod legacy_bsim;

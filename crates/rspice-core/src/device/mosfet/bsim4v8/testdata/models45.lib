@@ -1,0 +1,65 @@
+* BSIM4 v4.8 model cards for the rspice bsim4v8 oracle decks.
+* Parameter values written for this test suite (not a foundry deck); they
+* exercise the short-channel Vth chain, DITS, mobMod 0/1, Rds(V), GIDL,
+* substrate current, the diode/TAT card and the CTM charge path.
+* Keep in sync with tests.rs::nmos45()/pmos90().
+
+.model n45 nmos level=54 version=4.8
++ tnom=27 toxe=1.4e-9 toxp=1.0e-9 toxm=1.4e-9 toxref=1.4e-9 epsrox=3.9
++ xj=1.4e-8 ndep=3.0e18 nsd=2.0e20 ngate=1.0e23
++ vth0=0.46 k1=0.49 k2=0.01 k3=0 k3b=0 w0=2.5e-6 lpe0=2.0e-9 lpeb=1.0e-9
++ dvt0=1.1 dvt1=0.55 dvt2=-0.03 dvt0w=0 dvt1w=5.3e6 dvt2w=-0.032
++ dvtp0=1.0e-8 dvtp1=0.12 dsub=0.095 eta0=0.0042 etab=-0.05
++ minv=0.05 voff=-0.11 voffl=1.0e-9 nfactor=1.7
++ cdsc=4.0e-4 cdscb=1.0e-5 cdscd=1.0e-5 cit=1.0e-5
++ mobmod=0 u0=0.045 ua=5.0e-10 ub=1.3e-18 uc=8.0e-11 ud=1.0e15 eu=1.67
++ vsat=1.2e5 a0=1.1 ags=0.5 a1=0 a2=1 b0=0 b1=0 keta=0.035 ketac=0.04
++ dwg=-3.0e-9 dwb=4.0e-9
++ pclm=0.06 pdiblc1=0.012 pdiblc2=4.0e-3 pdiblcb=-0.05 drout=0.45
++ pvag=0.2 delta=0.012 pscbe1=8.0e8 pscbe2=1.0e-7
++ fprout=0.2 pdits=0.15 pditsd=0.22 pditsl=2.0e6
++ rdsw=150 rdswmin=10 prwg=0.3 prwb=-0.1 wr=1 wint=2.0e-9 lint=1.2e-9
++ xl=-2.0e-8
++ alpha0=6.0e-9 alpha1=0.8 beta0=12
++ agidl=4.0e-10 bgidl=2.1e9 cgidl=0.4 egidl=0.9
++ agisl=3.0e-10 bgisl=2.2e9 cgisl=0.5 egisl=1.0
++ ute=-1.4 ua1=2.5e-9 ub1=-2.0e-18 uc1=-1.0e-10 ud1=0 at=2.6e4 prt=10
++ kt1=-0.26 kt1l=1.0e-9 kt2=0.022 tvoff=8.0e-4 tnfactor=0.1 teta0=1.0e-4
++ xpart=0 cgso=1.0e-10 cgdo=1.0e-10 cgbo=1.0e-12
++ cgsl=1.5e-10 cgdl=1.5e-10 ckappas=0.55 ckappad=0.55
++ acde=0.9 moin=12 noff=1.2 voffcv=0.05 clc=6.0e-8 cle=0.58 cf=1.1e-10
++ rsh=5
++ jss=1.2e-7 jsws=2.0e-13 jswgs=1.0e-13 njs=1.05 xtis=3
++ ijthsfwd=0.02 ijthsrev=0.02
++ cjs=8.0e-4 mjs=0.42 pbs=0.85 cjsws=6.0e-11 mjsws=0.3 pbsws=0.75
++ cjswgs=2.5e-10 mjswgs=0.35 pbswgs=0.8
++ tpb=1.2e-3 tcj=8.0e-4 tpbsw=1.0e-3 tcjsw=6.0e-4 tpbswg=9.0e-4 tcjswg=5.0e-4
++ jtss=1.0e-7 jtsd=1.0e-7 jtssws=1.0e-13 jtsswgs=1.0e-13
++ njts=18 njtssw=22 njtsswg=20 vtss=8 vtsd=8 vtssws=8 vtsswgs=8
++ xtss=0.022 xtsd=0.022 xtssws=0.022 xtsswgs=0.022
++ tnjts=0.5 tnjtssw=0.6 tnjtsswg=0.55
++ dmcg=4.0e-8 dmci=5.0e-8
+
+.model p90 pmos level=54 version=4.8
++ tnom=27 toxe=2.1e-9 toxp=1.6e-9 toxm=2.1e-9 toxref=2.1e-9
++ xj=2.0e-8 ndep=1.8e18 nsd=1.5e20 ngate=8.0e22
++ vth0=-0.35 k1=0.45 k2=-0.02 k3=1 k3b=0.5 w0=1.0e-6 lpe0=5.0e-9
++ dvt0=1.8 dvt1=0.52 dvt2=-0.028 dvtp0=6.0e-9 dvtp1=0.1
++ dsub=0.45 eta0=0.15 etab=-0.12 minv=0 voff=-0.13 nfactor=2.1
++ cdsc=2.4e-4
++ mobmod=1 u0=0.009 ua=9.0e-10 ub=1.0e-18 uc=-5.0e-11
++ vsat=9.0e4 a0=1.3 ags=0.3 a1=0 a2=1 keta=-0.02
++ pclm=0.12 pdiblc1=0.02 pdiblc2=6.0e-3 drout=0.5 pvag=1
++ delta=0.01 pscbe1=4.24e8 pscbe2=1.0e-5 pdits=0.1 pditsd=0.2
++ rdsw=320 prwg=0.4 prwb=0.1 wint=3.0e-9 lint=1.5e-9
++ agidl=2.0e-10 bgidl=2.5e9 cgidl=0.6 egidl=0.8
++ ute=-1.2 ua1=4.0e-9 ub1=-1.5e-18 uc1=-1.0e-10 at=3.0e4
++ kt1=-0.22 kt2=0.025
++ xpart=0 cgso=1.6e-10 cgdo=1.6e-10 cgbo=1.0e-12
++ cgsl=1.0e-10 cgdl=1.0e-10 ckappas=0.6
++ acde=1.0 moin=15 noff=1.5 voffcv=-0.02 clc=1.0e-7 cle=0.6 cf=1.2e-10
++ rsh=6
++ jss=2.0e-7 jsws=3.0e-13 njs=1.1 xtis=3 ijthsfwd=0.03
++ cjs=1.1e-3 mjs=0.45 pbs=0.9 cjsws=8.0e-11 mjsws=0.32 pbsws=0.8
++ cjswgs=3.0e-10 mjswgs=0.38 pbswgs=0.85
++ tpb=1.0e-3 tcj=7.0e-4
