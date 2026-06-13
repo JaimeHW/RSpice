@@ -18,8 +18,8 @@ use thiserror::Error;
 
 mod storage;
 pub use storage::{
-    B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Capacitors, CurrentSources, Diodes, Inductors, Mosfets,
-    Resistors, VoltageSources,
+    B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Capacitors, CurrentSources, Diodes, Inductors,
+    Mosfets, Resistors, VoltageSources,
 };
 mod construction;
 mod external_models;
@@ -306,6 +306,7 @@ pub struct CircuitData {
     pub(crate) b3soi: B3SoiDds,
     pub(crate) b3soi_fd: B3SoiFds,
     pub(crate) b3soi_pd: B3SoiPds,
+    pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) jfets: Vec<crate::device::Jfet>,
 
     // Controlled sources

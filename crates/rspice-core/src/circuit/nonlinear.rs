@@ -8,6 +8,7 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     b3soi: B3SoiDds,
     b3soi_fd: B3SoiFds,
     b3soi_pd: B3SoiPds,
+    bsim3v3: Bsim3v3s,
     jfets: Vec<crate::device::Jfet>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
@@ -26,6 +27,7 @@ impl CircuitData {
             || !self.b3soi.is_empty()
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
+            || !self.bsim3v3.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -53,6 +55,16 @@ impl CircuitData {
         !self.b3soi.is_empty() || !self.b3soi_fd.is_empty() || !self.b3soi_pd.is_empty()
     }
 
+    /// Check if circuit has any native BSIM3v3.3 (level 8/49) device.
+    ///
+    /// Their coupled charge companion runs through a dedicated transient
+    /// pipeline (companion stamping, history commit, charge LTE) parallel to
+    /// the B3SOI one.
+    #[inline]
+    pub fn has_bsim3v3_devices(&self) -> bool {
+        !self.bsim3v3.is_empty()
+    }
+
     /// Check whether circuit contains strongly-coupled physical nonlinearities
     /// that benefit from conservative Newton damping (e.g., voltage limiting).
     #[inline]
@@ -63,6 +75,7 @@ impl CircuitData {
             || !self.b3soi.is_empty()
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
+            || !self.bsim3v3.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -94,6 +107,7 @@ impl CircuitData {
             || !self.b3soi.is_empty()
             || !self.b3soi_fd.is_empty()
             || !self.b3soi_pd.is_empty()
+            || !self.bsim3v3.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self.has_xspice_devices()
@@ -139,6 +153,11 @@ impl CircuitData {
         for diode in &mut self.diodes.devices {
             diode.set_junction_gmin(gmin);
         }
+        // BSIM3 consumes CKTgmin inside its diode equations (b3ld.c forms
+        // `gbs = ... + gmin` directly); there is no separate shunt path.
+        for dev in &mut self.bsim3v3.devices {
+            dev.set_eval_gmin(gmin);
+        }
     }
 
     /// Return true when any JFET-family compact model exposes a stiff gate
@@ -172,6 +191,7 @@ impl CircuitData {
             b3soi: self.b3soi.clone(),
             b3soi_fd: self.b3soi_fd.clone(),
             b3soi_pd: self.b3soi_pd.clone(),
+            bsim3v3: self.bsim3v3.clone(),
             jfets: self.jfets.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
@@ -190,6 +210,7 @@ impl CircuitData {
         self.b3soi = snapshot.b3soi;
         self.b3soi_fd = snapshot.b3soi_fd;
         self.b3soi_pd = snapshot.b3soi_pd;
+        self.bsim3v3 = snapshot.bsim3v3;
         self.jfets = snapshot.jfets;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
@@ -210,6 +231,7 @@ impl CircuitData {
         self.b3soi.update_all(voltages);
         self.b3soi_fd.update_all(voltages);
         self.b3soi_pd.update_all(voltages);
+        self.bsim3v3.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
         order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
         let mut hfet_inverse_latched = false;
@@ -277,6 +299,10 @@ impl CircuitData {
         self.b3soi.stamp_all(&mut stamper, &mut [], voltages);
         self.b3soi_fd.stamp_all(&mut stamper, &mut [], voltages);
         self.b3soi_pd.stamp_all(&mut stamper, &mut [], voltages);
+        // BSIM3 stamps its equivalent currents through the stamper's RHS
+        // hook (the b3ld.c cdreq/ceqbd/ceqbs rows), not the legacy `rhs`
+        // slice, so the same path serves DC and transient assembly.
+        self.bsim3v3.stamp_all(&mut stamper, &mut [], voltages);
         for vswitch in &self.vswitches {
             vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
         }
@@ -320,6 +346,7 @@ impl CircuitData {
             && self.b3soi.all_converged(criteria)
             && self.b3soi_fd.all_converged(criteria)
             && self.b3soi_pd.all_converged(criteria)
+            && self.bsim3v3.all_converged(criteria)
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))

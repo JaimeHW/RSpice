@@ -26,6 +26,7 @@ impl CircuitData {
             b3soi: B3SoiDds::new(),
             b3soi_fd: B3SoiFds::new(),
             b3soi_pd: B3SoiPds::new(),
+            bsim3v3: Bsim3v3s::new(),
             jfets: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
@@ -214,6 +215,12 @@ impl CircuitData {
             mosfet.node_gate = Self::remap_node_id(mosfet.node_gate, old_node_id);
             mosfet.node_source = Self::remap_node_id(mosfet.node_source, old_node_id);
             mosfet.node_bulk = Self::remap_node_id(mosfet.node_bulk, old_node_id);
+        }
+        for dev in &mut self.bsim3v3.devices {
+            dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
+            dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
+            dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
+            dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
         }
         for jfet in &mut self.jfets {
             jfet.drain = Self::remap_node_id(jfet.drain, old_node_id);

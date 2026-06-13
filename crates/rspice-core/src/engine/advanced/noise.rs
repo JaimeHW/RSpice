@@ -38,6 +38,19 @@ impl Engine {
     ) -> Vec<NoiseSource> {
         let mut noise_sources = Vec::new();
 
+        // The native BSIM3 port carries the b3noi.c parameters but its
+        // noise sources (SPICE2/BSIM3 channel thermal + flicker) are not
+        // yet generated; warn rather than silently under-reporting the
+        // spectrum of a MOS-dominated deck.
+        if !circuit.bsim3v3.is_empty() {
+            log::warn!(
+                "noise analysis: {} BSIM3 (LEVEL=8/49) device(s) contribute no noise \
+                 sources yet (series-resistance thermal noise is included; channel \
+                 thermal and flicker noise are not)",
+                circuit.bsim3v3.len()
+            );
+        }
+
         // Verilog-A white_noise()/flicker_noise() sources, with PSDs
         // evaluated at the operating point. Potential-contribution noise
         // arrives as a series EMF on the branch-equation row, which is an

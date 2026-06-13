@@ -43,10 +43,12 @@
 //! responsibility.
 
 pub mod common;
+pub mod device;
 pub mod eval;
 pub mod params;
 pub mod temp;
 
+pub use device::{Bsim3v3ChargeMatrix, Bsim3v3Device};
 pub use eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
 pub use params::{Binned, Bsim3v3Model};
 pub use temp::{
@@ -81,6 +83,48 @@ impl Bsim3v3 {
         geom: Bsim3v3Geometry,
         temp_k: Value,
     ) -> Result<Self, String> {
+        Self::validate_model(&name, &model)?;
+        let model_temp = Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
+        let size = Arc::new(Bsim3v3SizeDep::new(&model, &model_temp, geom.l, geom.w)?);
+        let inst = Bsim3v3InstTemp::new(&model, &model_temp, &size, &geom);
+        Ok(Self {
+            name,
+            mtype: model.mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        })
+    }
+
+    /// Build an instance against a shared model-temperature block, memoizing
+    /// the (W, L) size knot in `cache` — the engine builder path, mirroring
+    /// ngspice's `pSizeDependParamKnot` reuse across same-geometry instances.
+    pub fn new_shared(
+        name: String,
+        model: Arc<Bsim3v3Model>,
+        model_temp: Arc<Bsim3v3ModelTemp>,
+        cache: &mut SizeDepCache,
+        geom: Bsim3v3Geometry,
+    ) -> Result<Self, String> {
+        Self::validate_model(&name, &model)?;
+        let size = cache.get(&model, &model_temp, geom.l, geom.w)?;
+        let inst = Bsim3v3InstTemp::new(&model, &model_temp, &size, &geom);
+        Ok(Self {
+            name,
+            mtype: model.mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        })
+    }
+
+    /// The unsupported-option rejections of `BSIM3setup`/`b3check.c`:
+    /// unimplemented model options are typed errors, never silent fallbacks.
+    fn validate_model(name: &str, model: &Bsim3v3Model) -> Result<(), String> {
         if model.acm_mod != 0 {
             return Err(format!(
                 "BSIM3 '{name}': ACM={} is not implemented (only ACM=0)",
@@ -104,18 +148,7 @@ impl Bsim3v3 {
                 model.cap_mod
             ));
         }
-        let model_temp = Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
-        let size = Arc::new(Bsim3v3SizeDep::new(&model, &model_temp, geom.l, geom.w)?);
-        let inst = Bsim3v3InstTemp::new(&model, &model_temp, &size, &geom);
-        Ok(Self {
-            name,
-            mtype: model.mtype,
-            model,
-            model_temp,
-            size,
-            inst,
-            geom,
-        })
+        Ok(())
     }
 
     /// Evaluate at device-polarity branch voltages (already limited).

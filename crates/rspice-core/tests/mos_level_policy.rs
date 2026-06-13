@@ -1,12 +1,13 @@
 //! Build-time policy for MOS model levels without a native implementation.
 //!
-//! BSIM-class cards (LEVEL=8/14/49/53/54, ...) must be rejected with a
-//! remediation message instead of silently running the simplified
-//! short-channel approximation, which honors only a handful of parameters
-//! and produces plausible-looking but wrong currents. The
+//! BSIM-class cards without a native port (LEVEL=14/53/54, ...) must be
+//! rejected with a remediation message instead of silently running the
+//! simplified short-channel approximation, which honors only a handful of
+//! parameters and produces plausible-looking but wrong currents. The
 //! `.options allow_simplified_mos` opt-in downgrades the rejection to a
 //! warning; LEVEL=3 stays runnable (with a warning) for compatibility with
-//! the vendored ngspice MOS3 decks.
+//! the vendored ngspice MOS3 decks; LEVEL=8/49 route to the native
+//! BSIM3v3.3 port.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -52,13 +53,16 @@ fn bsim4_level_without_native_model_is_rejected() {
 }
 
 #[test]
-fn bsim3_level_without_native_model_is_rejected() {
-    let deck = op_deck(".model nmod NMOS (LEVEL=49 VTH0=0.5)", "");
-    let message = run(&deck).expect_err("LEVEL=49 must not silently run the approximation");
-    assert!(
-        message.contains("BSIM3v3"),
-        "error names the model family: {message}"
-    );
+fn bsim3_levels_run_natively() {
+    // LEVEL=49 and LEVEL=8 route to the native BSIM3v3.3 port — no
+    // allow_simplified_mos opt-in, no rejection.
+    for level in [49, 8] {
+        let deck = op_deck(
+            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOX=4.1n NCH=2.35e17)"),
+            "",
+        );
+        run(&deck).unwrap_or_else(|err| panic!("LEVEL={level} must run natively: {err}"));
+    }
 }
 
 #[test]

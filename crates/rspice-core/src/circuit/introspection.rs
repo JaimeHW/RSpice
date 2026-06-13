@@ -65,6 +65,26 @@ impl CircuitData {
             });
         }
 
+        for dev in &self.bsim3v3.devices {
+            let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "BSIM3",
+                region: Some(region),
+                params: vec![
+                    ("id", id),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("vbs", vbs),
+                    ("vth", vth),
+                    ("vdsat", vdsat),
+                    ("gm", gm),
+                    ("gds", gds),
+                    ("gmb", gmbs),
+                ],
+            });
+        }
+
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
             let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };

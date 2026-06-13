@@ -497,6 +497,12 @@ impl Engine {
         circuit
             .mosfets
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        // BSIM3: the DC linearization at the operating point is the real
+        // part of the small-signal admittance (b3acld.c stamps the same
+        // gm/gds/gmbs/gbd/gbs/substrate-current groups as the DC load).
+        circuit
+            .bsim3v3
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for jfet in &circuit.jfets {
             jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper);
         }
@@ -753,6 +759,33 @@ impl Engine {
             }
             if nb > 0 {
                 ac_matrix.add_imag(nb - 1, nb - 1, jwcgb);
+            }
+        }
+
+        // BSIM3 coupled capacitance matrix: the mode-assembled gc** block of
+        // b3ld.c evaluated at the operating point, times jw — exactly the
+        // xc*** entries of b3acld.c:356-369 (nqsMod = 0).
+        if !circuit.bsim3v3.is_empty() {
+            struct AcImagStamper<'a> {
+                matrix: &'a mut ComplexMatrix,
+            }
+            impl MatrixStamper for AcImagStamper<'_> {
+                #[inline]
+                fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+                    if row > 0 && col > 0 {
+                        self.matrix.add_imag(row - 1, col - 1, value);
+                    }
+                }
+                #[inline]
+                fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
+                    // Capacitance stamp only; AC sources fill the RHS.
+                }
+            }
+            let mut stamper = AcImagStamper { matrix: ac_matrix };
+            for dev in &circuit.bsim3v3.devices {
+                let (charge, mode) = dev.charge_at(op_voltages);
+                let gc = crate::device::Bsim3v3Device::charge_matrix(&charge, mode);
+                dev.stamp_charge_matrix(&gc, omega, &mut stamper);
             }
         }
 

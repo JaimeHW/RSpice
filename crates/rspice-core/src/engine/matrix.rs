@@ -227,6 +227,25 @@ impl Engine {
             }
         }
 
+        // BSIM3v3.3 (MOS level 8/49) stamps. The DC load couples the
+        // substrate-current rows and the CAPMOD=3 charge companion couples
+        // every terminal, so reserve the full 4x4 (drain-prime, gate,
+        // source-prime, bulk) block — the series RSH resistors are separate
+        // linear elements with their own pattern.
+        for dev in &circuit.bsim3v3.devices {
+            let d = dev.node_drain;
+            let g = dev.node_gate;
+            let s = dev.node_source;
+            let b = dev.node_bulk;
+            for &row in &[d, g, s, b] {
+                for &col in &[d, g, s, b] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // JFET stamps (3-terminal: include full 3x3 topology to support AC capacitances).
         for jfet in &circuit.jfets {
             let d = jfet.drain;

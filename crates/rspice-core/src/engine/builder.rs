@@ -123,8 +123,8 @@ fn is_magnetic_core_model_type(model_type: &str) -> bool {
 
 /// MOS model levels with a native bulk-MOSFET implementation: Berkeley
 /// MOS1/MOS2/MOS6 (1/2/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
-/// 55-57 (BSIM3-SOI) are routed to dedicated SOI devices before this check
-/// applies.
+/// 8/49 (BSIM3v3.3) and 55-57 (BSIM3-SOI) are routed to dedicated devices
+/// before this check applies.
 fn native_bulk_mos_level(level: i32) -> bool {
     matches!(level, 1 | 2 | 4 | 5 | 6)
 }
@@ -246,6 +246,10 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         let mut veriloga_models: HashMap<String, std::sync::Arc<rspice_veriloga::CompiledModel>> =
             HashMap::new();
+
+        // One shared BSIM3v3.3 card + temperature block per .model name,
+        // with the (W, L) size knots memoized across instances.
+        let mut bsim3v3_models: HashMap<String, Bsim3v3SharedModel> = HashMap::new();
 
         // Load and cache Verilog-A models referenced by .VERILOGA directives.
         #[cfg(feature = "veriloga")]
@@ -867,6 +871,33 @@ impl Engine {
                                 _ => {}
                             }
                         }
+                    }
+
+                    // BSIM3v3.3: LEVEL=8/49 cards route to the native port
+                    // (LEVEL=54 stays on the BSIM4 rejection below). One
+                    // shared model card + temperature block per .model; size
+                    // knots are memoized across instances exactly as ngspice
+                    // reuses pSizeDependParamKnot.
+                    if matches!(level, 8 | 49)
+                        && let Some(params_map) = params_map.as_ref()
+                    {
+                        let model_key =
+                            model_def.map_or_else(|| model.clone(), |def| def.name.clone());
+                        let tnom_default_k = crate::analysis::temperature::celsius_to_kelvin(
+                            netlist.options.tnom.unwrap_or(27.0),
+                        );
+                        Self::build_bsim3v3(
+                            &mut circuit,
+                            element,
+                            resolved_mos_type,
+                            &model_key,
+                            params_map,
+                            instance_params,
+                            self.config.temperature,
+                            tnom_default_k,
+                            &mut bsim3v3_models,
+                        )?;
+                        continue;
                     }
 
                     // Levels without a native implementation must not fall
@@ -2103,6 +2134,9 @@ impl Engine {
         for jfet in &mut circuit.jfets {
             jfet.set_junction_gmin(junction_gmin);
         }
+        for dev in &mut circuit.bsim3v3.devices {
+            dev.set_eval_gmin(junction_gmin);
+        }
 
         Ok(circuit)
     }
@@ -2373,4 +2407,146 @@ impl Engine {
         circuit.b3soi_pd.add(device);
         Ok(())
     }
+
+    /// Build and register a native BSIM3v3.3 (MOS level 8/49) instance.
+    ///
+    /// Topology is the standard 4-terminal bulk MOSFET `m d g s b`. Series
+    /// drain/source resistance follows b3temp.c: a conductance of
+    /// `1 / (RSH * NRD)` (resp. NRS) exists only when both factors are
+    /// positive; it is lowered to an ordinary linear resistor of
+    /// `RSH * NRD / M` ohms at an internal prime node, and the device's
+    /// drain/source point at the primes (ngspice stamps `m *
+    /// drainConductance` between dNode and dNodePrime, b3ld.c:3050).
+    #[allow(clippy::too_many_arguments)]
+    fn build_bsim3v3(
+        circuit: &mut CircuitData,
+        element: &crate::netlist::Element,
+        mos_type: crate::netlist::MosType,
+        model_key: &str,
+        params_map: &HashMap<String, f64>,
+        instance_params: &[(String, f64)],
+        temperature_kelvin: f64,
+        tnom_default_k: f64,
+        shared: &mut HashMap<String, Bsim3v3SharedModel>,
+    ) -> Result<(), SimulationError> {
+        use crate::device::mosfet::bsim3v3::{
+            Bsim3v3, Bsim3v3Geometry, Bsim3v3Model, Bsim3v3ModelTemp, SizeDepCache,
+        };
+        use crate::device::Bsim3v3Device;
+
+        let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
+        // BSIM3v3.3 has no instance TEMP/DTEMP (b3set.c); every instance
+        // evaluates at the circuit temperature, like ngspice's CKTtemp.
+        let temp_k = temperature_kelvin;
+
+        let entry = match shared.entry(model_key.to_string()) {
+            std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                let model = std::sync::Arc::new(Bsim3v3Model::from_params(
+                    params_map,
+                    is_pmos,
+                    tnom_default_k,
+                ));
+                // The charge model implements CAPMOD=3 (the BSIM3v3.3
+                // default); transient/AC under CAPMOD 0-2 would need the
+                // unported charge equations, so reject the card up front
+                // rather than failing mid-analysis. XPART<0 (intrinsic
+                // charge suppression) remains honored.
+                if model.cap_mod != 3 && model.xpart >= 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "MOSFET '{}': BSIM3 model '{}' requests CAPMOD={} which is not \
+                         implemented (only CAPMOD=3, the BSIM3v3.3 default)",
+                        element.name, model_key, model.cap_mod
+                    )));
+                }
+                let model_temp = std::sync::Arc::new(Bsim3v3ModelTemp::new(&model, temp_k));
+                vacant.insert(Bsim3v3SharedModel {
+                    model,
+                    model_temp,
+                    size_cache: SizeDepCache::new(),
+                })
+            }
+        };
+
+        let multiplier = instance_param(instance_params, &["M"])
+            .filter(|m| m.is_finite() && *m > 0.0)
+            .unwrap_or(1.0);
+        let defaults = Bsim3v3Geometry::default();
+        let geom = Bsim3v3Geometry {
+            l: instance_param(instance_params, &["L"]).unwrap_or(defaults.l),
+            w: instance_param(instance_params, &["W"]).unwrap_or(defaults.w),
+            m: multiplier,
+            drain_area: instance_param(instance_params, &["AD"]).unwrap_or(0.0),
+            source_area: instance_param(instance_params, &["AS"]).unwrap_or(0.0),
+            drain_squares: instance_param(instance_params, &["NRD"])
+                .unwrap_or(defaults.drain_squares),
+            source_squares: instance_param(instance_params, &["NRS"])
+                .unwrap_or(defaults.source_squares),
+            drain_perimeter: instance_param(instance_params, &["PD"]).unwrap_or(0.0),
+            source_perimeter: instance_param(instance_params, &["PS"]).unwrap_or(0.0),
+            delvto: instance_param(instance_params, &["DELVTO", "DELVT0"]).unwrap_or(0.0),
+            mulu0: instance_param(instance_params, &["MULU0"]).unwrap_or(1.0),
+            ..defaults
+        };
+
+        let core = Bsim3v3::new_shared(
+            element.name.clone(),
+            std::sync::Arc::clone(&entry.model),
+            std::sync::Arc::clone(&entry.model_temp),
+            &mut entry.size_cache,
+            geom,
+        )
+        .map_err(SimulationError::Circuit)?;
+
+        let drain_external = circuit.get_or_create_node(&element.nodes[0]);
+        let gate = circuit.get_or_create_node(&element.nodes[1]);
+        let source_external = circuit.get_or_create_node(&element.nodes[2]);
+        let bulk = circuit.get_or_create_node(&element.nodes[3]);
+
+        // Internal prime nodes only when the series conductance exists
+        // (drain_conductance = 1/(RSH*NRD) > 0, b3temp.c:811-851).
+        let drain = if core.inst.drain_conductance > 0.0 {
+            let dint = circuit.get_or_create_node(&format!("{}.__dint", element.name));
+            circuit.resistors.add(
+                format!("{}.__rd", element.name),
+                drain_external,
+                dint,
+                1.0 / (core.inst.drain_conductance * multiplier),
+            );
+            dint
+        } else {
+            drain_external
+        };
+        let source = if core.inst.source_conductance > 0.0 {
+            let sint = circuit.get_or_create_node(&format!("{}.__sint", element.name));
+            circuit.resistors.add(
+                format!("{}.__rs", element.name),
+                source_external,
+                sint,
+                1.0 / (core.inst.source_conductance * multiplier),
+            );
+            sint
+        } else {
+            source_external
+        };
+
+        circuit.bsim3v3.add(Bsim3v3Device::new(
+            element.name.clone(),
+            drain,
+            gate,
+            source,
+            bulk,
+            multiplier,
+            core,
+        ));
+        Ok(())
+    }
+}
+
+/// Per-`.model` shared BSIM3v3.3 state: the parsed card, its temperature
+/// block, and the (W, L)-keyed size-dependent parameter knots.
+struct Bsim3v3SharedModel {
+    model: std::sync::Arc<crate::device::Bsim3v3Model>,
+    model_temp: std::sync::Arc<crate::device::mosfet::bsim3v3::Bsim3v3ModelTemp>,
+    size_cache: crate::device::mosfet::bsim3v3::SizeDepCache,
 }

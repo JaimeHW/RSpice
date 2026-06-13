@@ -22,6 +22,7 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) mosfet_history: &'a MosfetTransientHistory,
     pub(super) mosfet_companion_slots: &'a [[TwoTerminalStampSlots; 5]],
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
+    pub(super) bsim3_history: &'a Bsim3TransientHistory,
     pub(super) suppress_gate_charge: bool,
     pub(super) tline_dc_refs: &'a [(Value, Value)],
     pub(super) coupled_tline_refs: &'a [CoupledTlineReferenceState],
@@ -142,6 +143,16 @@ impl Engine {
             ctx.trap_order,
             dt,
             ctx.b3soi_history,
+        );
+        Self::stamp_bsim3_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            ctx.method,
+            ctx.trap_order,
+            dt,
+            ctx.bsim3_history,
         );
         Self::stamp_tline_companions(circuit, matrix, rhs, time, ctx.tline_dc_refs);
         Self::stamp_coupled_tline_companions(
@@ -347,6 +358,9 @@ Q1 C B E 0 QN
         let mut b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
         b3soi_history.accepted_dt_prev = dt;
         b3soi_history.accepted_dt_prev_prev = dt;
+        let mut bsim3_history = Engine::initialize_bsim3_history(&circuit, &base);
+        bsim3_history.accepted_dt_prev = dt;
+        bsim3_history.accepted_dt_prev_prev = dt;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         circuit.set_semiconductor_junction_gmin(
             engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
@@ -368,6 +382,7 @@ Q1 C B E 0 QN
             mosfet_history: &mosfet_history,
             mosfet_companion_slots: &mosfet_companion_slots,
             b3soi_history: &b3soi_history,
+            bsim3_history: &bsim3_history,
             suppress_gate_charge: false,
             tline_dc_refs: &tline_dc_refs,
             coupled_tline_refs: &coupled_tline_refs,
@@ -759,6 +774,7 @@ Q1 C B E 0 QN
             let diode_history = Engine::initialize_diode_history(&circuit, &base);
             let mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
             let b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
+            let bsim3_history = Engine::initialize_bsim3_history(&circuit, &base);
             let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
             circuit.set_semiconductor_junction_gmin(
                 engine.effective_device_junction_gmin(engine.config.convergence_config.gmin_target),
@@ -777,6 +793,7 @@ Q1 C B E 0 QN
                 mosfet_history: &mosfet_history,
                 mosfet_companion_slots: &mosfet_companion_slots,
                 b3soi_history: &b3soi_history,
+                bsim3_history: &bsim3_history,
                 suppress_gate_charge: false,
                 tline_dc_refs: &tline_dc_refs,
                 coupled_tline_refs: &coupled_tline_refs,

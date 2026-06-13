@@ -71,6 +71,7 @@ impl Engine {
         diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
+        bsim3_history: &mut Bsim3TransientHistory,
     ) {
         for (cap_idx, cap) in circuit.capacitors.stamps.iter().enumerate() {
             let v = Self::differential_voltage(solution, cap.pp.row, cap.nn.row);
@@ -110,6 +111,9 @@ impl Engine {
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
         *b3soi_history = Self::initialize_b3soi_history(circuit, solution);
+        *bsim3_history = Self::initialize_bsim3_history(circuit, solution);
+        bsim3_history.accepted_dt_prev = hinted_max_step;
+        bsim3_history.accepted_dt_prev_prev = hinted_max_step;
     }
 
     #[inline]
@@ -1249,6 +1253,186 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn initialize_bsim3_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+    ) -> Bsim3TransientHistory {
+        let n = circuit.bsim3v3.len();
+        let mut h = Bsim3TransientHistory {
+            qg_prev: Vec::with_capacity(n),
+            qg_prev_prev: Vec::with_capacity(n),
+            qg_prev_prev_prev: Vec::with_capacity(n),
+            cqg_prev: Vec::with_capacity(n),
+            qb_prev: Vec::with_capacity(n),
+            qb_prev_prev: Vec::with_capacity(n),
+            qb_prev_prev_prev: Vec::with_capacity(n),
+            cqb_prev: Vec::with_capacity(n),
+            qd_prev: Vec::with_capacity(n),
+            qd_prev_prev: Vec::with_capacity(n),
+            qd_prev_prev_prev: Vec::with_capacity(n),
+            cqd_prev: Vec::with_capacity(n),
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
+        };
+        // Flat seed at the accepted point with zeroed charge currents, the
+        // MODEINITTRAN state copy of b3ld.c:2818-2829. States stay
+        // per-device (ngspice applies `m` only at stamp time; CKTterr sees
+        // the unscaled CKTstate charges).
+        for dev in &circuit.bsim3v3.devices {
+            let (c, _mode) = dev.charge_at(solution);
+            for (q, slots) in [
+                (c.qg_state(), [&mut h.qg_prev, &mut h.qg_prev_prev, &mut h.qg_prev_prev_prev]),
+                (c.qb_state(), [&mut h.qb_prev, &mut h.qb_prev_prev, &mut h.qb_prev_prev_prev]),
+                (c.qd_state(), [&mut h.qd_prev, &mut h.qd_prev_prev, &mut h.qd_prev_prev_prev]),
+            ] {
+                for slot in slots {
+                    slot.push(q);
+                }
+            }
+            h.cqg_prev.push(0.0);
+            h.cqb_prev.push(0.0);
+            h.cqd_prev.push(0.0);
+        }
+        h
+    }
+
+    /// Integrate one BSIM3 device's three composite node charges with the
+    /// engine coefficient and its history slot, yielding the equivalent
+    /// charge currents `(cqg, cqb, cqd)` (ngspice `NIintegrate` on
+    /// `BSIM3qg`/`BSIM3qb`/`BSIM3qd`).
+    #[inline]
+    fn bsim3_companion_currents(
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Bsim3TransientHistory,
+        idx: usize,
+        qg: Value,
+        qb: Value,
+        qd: Value,
+    ) -> (Value, Value, Value) {
+        let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
+            Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                q,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            )
+        };
+        (
+            cq(
+                qg,
+                history.qg_prev[idx],
+                history.qg_prev_prev[idx],
+                history.cqg_prev[idx],
+            ),
+            cq(
+                qb,
+                history.qb_prev[idx],
+                history.qb_prev_prev[idx],
+                history.cqb_prev[idx],
+            ),
+            cq(
+                qd,
+                history.qd_prev[idx],
+                history.qd_prev_prev[idx],
+                history.cqd_prev[idx],
+            ),
+        )
+    }
+
+    /// Stamp the BSIM3 transient charge companion for every instance: the
+    /// mode-assembled `gc**·ag0` capacitance matrix plus the `ceqq*`
+    /// equivalent charge currents (b3ld.c charge load, nqsMod = 0).
+    #[inline]
+    pub(super) fn stamp_bsim3_transient_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Bsim3TransientHistory,
+    ) {
+        if !circuit.has_bsim3v3_devices() {
+            return;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        // ag0 = the bare integration gain (companion geq for unit capacitance).
+        let ag0 = Self::jfet_companion_geq(effective_method, trap_order, 1.0, dt);
+        if ag0 <= 0.0 {
+            return;
+        }
+        let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
+        for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
+            let (charge, mode) = dev.charge_at(voltages);
+            let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                charge.qg_state(),
+                charge.qb_state(),
+                charge.qd_state(),
+            );
+            // The history carries per-device charges; the device stamp
+            // applies the parallel multiplier itself (b3ld.c: m * ceqq*).
+            dev.stamp_charge_companion(
+                &charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper,
+            );
+        }
+    }
+
+    /// Commit the BSIM3 charge history after an accepted timestep.
+    #[inline]
+    pub(super) fn update_bsim3_history(
+        circuit: &crate::circuit::Circuit,
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &mut Bsim3TransientHistory,
+    ) {
+        if !circuit.has_bsim3v3_devices() {
+            return;
+        }
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
+            let (charge, _mode) = dev.charge_at(voltages);
+            let (qg, qb, qd) = (charge.qg_state(), charge.qb_state(), charge.qd_state());
+            let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                qg,
+                qb,
+                qd,
+            );
+            history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
+            history.qg_prev_prev[idx] = history.qg_prev[idx];
+            history.qg_prev[idx] = qg;
+            history.cqg_prev[idx] = cqg;
+            history.qb_prev_prev_prev[idx] = history.qb_prev_prev[idx];
+            history.qb_prev_prev[idx] = history.qb_prev[idx];
+            history.qb_prev[idx] = qb;
+            history.cqb_prev[idx] = cqb;
+            history.qd_prev_prev_prev[idx] = history.qd_prev_prev[idx];
+            history.qd_prev_prev[idx] = history.qd_prev[idx];
+            history.qd_prev[idx] = qd;
+            history.cqd_prev[idx] = cqd;
+        }
+        history.accepted_dt_prev_prev = history.accepted_dt_prev;
+        history.accepted_dt_prev = dt;
+    }
+
+    #[inline]
     pub(super) fn stamp_tline_companions(
         circuit: &crate::circuit::Circuit,
         matrix: &mut crate::solver::StaticMatrix,
@@ -1791,6 +1975,7 @@ impl Engine {
         diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
+        bsim3_history: &mut Bsim3TransientHistory,
         vbic_snapshots: Option<&[Option<BjtChargeSnapshot>]>,
         mosfet_caps: Option<&[(Value, Value, Value)]>,
         suppress_gate_charge_history: bool,
@@ -2351,6 +2536,14 @@ impl Engine {
         mosfet_history.accepted_dt_prev = dt;
 
         Self::update_b3soi_history(circuit, accepted_solution, method, trap_order, dt, b3soi_history);
+        Self::update_bsim3_history(
+            circuit,
+            accepted_solution,
+            method,
+            trap_order,
+            dt,
+            bsim3_history,
+        );
     }
 }
 

@@ -305,6 +305,31 @@ struct B3SoiTransientHistory {
     accepted_dt_prev_prev: Value,
 }
 
+/// Per-instance BSIM3v3.3 (MOS level 8/49) charge-integration history.
+///
+/// Mirrors [`B3SoiTransientHistory`] over the three composite CKTstate
+/// charges ngspice integrates for BSIM3 (`BSIM3qg`, `BSIM3qd = qdrn - qbd`,
+/// `BSIM3qb = qbulk + qbd + qbs` — the junction depletion charges are folded
+/// in, b3ld.c:2796-2801), with the last integrated charge-current `cq*` per
+/// state. `b3trunc.c` runs `CKTterr` over exactly these three states.
+#[derive(Debug, Clone, Default)]
+struct Bsim3TransientHistory {
+    qg_prev: Vec<Value>,
+    qg_prev_prev: Vec<Value>,
+    qg_prev_prev_prev: Vec<Value>,
+    cqg_prev: Vec<Value>,
+    qb_prev: Vec<Value>,
+    qb_prev_prev: Vec<Value>,
+    qb_prev_prev_prev: Vec<Value>,
+    cqb_prev: Vec<Value>,
+    qd_prev: Vec<Value>,
+    qd_prev_prev: Vec<Value>,
+    qd_prev_prev_prev: Vec<Value>,
+    cqd_prev: Vec<Value>,
+    accepted_dt_prev: Value,
+    accepted_dt_prev_prev: Value,
+}
+
 #[derive(Debug, Clone, Default)]
 struct CoupledTlineReferenceState {
     near_modal: Vec<Value>,
@@ -906,6 +931,9 @@ impl Engine {
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = hinted_max_step;
         b3soi_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut bsim3_history = Self::initialize_bsim3_history(&circuit, &solution);
+        bsim3_history.accepted_dt_prev = hinted_max_step;
+        bsim3_history.accepted_dt_prev_prev = hinted_max_step;
         let mut vbic_snapshot_cache = vec![None; circuit.bjts.devices.len()];
         let force_accept_protected_nodes = circuit.force_accept_protected_nodes();
         let ideal_output_pairs = circuit.ideal_voltage_output_pairs();
@@ -1012,6 +1040,7 @@ impl Engine {
                         &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        &mut bsim3_history,
                     );
                     lte_estimator = LteEstimator::with_tolerances(
                         self.voltage_reltol(),
@@ -1330,6 +1359,7 @@ impl Engine {
                         mosfet_history: &mosfet_history,
                         mosfet_companion_slots: &mosfet_companion_slots,
                         b3soi_history: &b3soi_history,
+                        bsim3_history: &bsim3_history,
                         suppress_gate_charge,
                         tline_dc_refs: &tline_dc_refs,
                         coupled_tline_refs: &coupled_tline_refs,
@@ -1655,6 +1685,7 @@ impl Engine {
                                 mosfet_history: &mosfet_history,
                                 mosfet_companion_slots: &mosfet_companion_slots,
                                 b3soi_history: &b3soi_history,
+                                bsim3_history: &bsim3_history,
                                 suppress_gate_charge,
                                 tline_dc_refs: &tline_dc_refs,
                                 coupled_tline_refs: &coupled_tline_refs,
@@ -1740,6 +1771,7 @@ impl Engine {
                             mosfet_history: &mosfet_history,
                             mosfet_companion_slots: &mosfet_companion_slots,
                             b3soi_history: &b3soi_history,
+                            bsim3_history: &bsim3_history,
                             suppress_gate_charge,
                             tline_dc_refs: &tline_dc_refs,
                             coupled_tline_refs: &coupled_tline_refs,
@@ -2088,21 +2120,41 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_bsim3_truncation_limit = if circuit.has_bsim3v3_devices() {
+                        Self::bsim3_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &bsim3_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
                                     Self::min_truncation_limit(
-                                        force_accept_capacitor_truncation_limit,
-                                        force_accept_bjt_truncation_limit,
+                                        Self::min_truncation_limit(
+                                            force_accept_capacitor_truncation_limit,
+                                            force_accept_bjt_truncation_limit,
+                                        ),
+                                        force_accept_jfet_truncation_limit,
                                     ),
-                                    force_accept_jfet_truncation_limit,
+                                    force_accept_diode_truncation_limit,
                                 ),
-                                force_accept_diode_truncation_limit,
+                                force_accept_mosfet_truncation_limit,
                             ),
-                            force_accept_mosfet_truncation_limit,
+                            force_accept_b3soi_truncation_limit,
                         ),
-                        force_accept_b3soi_truncation_limit,
+                        force_accept_bsim3_truncation_limit,
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -2124,6 +2176,7 @@ impl Engine {
                         &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        &mut bsim3_history,
                         None,
                         None,
                         suppress_gate_charge,
@@ -2349,21 +2402,42 @@ impl Engine {
                 } else {
                     None
                 };
+            let bsim3_truncation_limit =
+                if !first_accepted_transient_step && circuit.has_bsim3v3_devices() {
+                    Self::bsim3_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &bsim3_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let device_truncation_limit = Self::min_truncation_limit(
                 Self::min_truncation_limit(
                     Self::min_truncation_limit(
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
-                                capacitor_truncation_limit,
-                                bjt_truncation_limit,
+                                Self::min_truncation_limit(
+                                    capacitor_truncation_limit,
+                                    bjt_truncation_limit,
+                                ),
+                                jfet_truncation_limit,
                             ),
-                            jfet_truncation_limit,
+                            diode_truncation_limit,
                         ),
-                        diode_truncation_limit,
+                        mosfet_truncation_limit,
                     ),
-                    mosfet_truncation_limit,
+                    b3soi_truncation_limit,
                 ),
-                b3soi_truncation_limit,
+                bsim3_truncation_limit,
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
                 Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
@@ -2765,21 +2839,41 @@ impl Engine {
                     } else {
                         None
                     };
+                    let force_accept_bsim3_truncation_limit = if circuit.has_bsim3v3_devices() {
+                        Self::bsim3_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &bsim3_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_device_truncation_limit = Self::min_truncation_limit(
                         Self::min_truncation_limit(
                             Self::min_truncation_limit(
                                 Self::min_truncation_limit(
                                     Self::min_truncation_limit(
-                                        force_accept_capacitor_truncation_limit,
-                                        force_accept_bjt_truncation_limit,
+                                        Self::min_truncation_limit(
+                                            force_accept_capacitor_truncation_limit,
+                                            force_accept_bjt_truncation_limit,
+                                        ),
+                                        force_accept_jfet_truncation_limit,
                                     ),
-                                    force_accept_jfet_truncation_limit,
+                                    force_accept_diode_truncation_limit,
                                 ),
-                                force_accept_diode_truncation_limit,
+                                force_accept_mosfet_truncation_limit,
                             ),
-                            force_accept_mosfet_truncation_limit,
+                            force_accept_b3soi_truncation_limit,
                         ),
-                        force_accept_b3soi_truncation_limit,
+                        force_accept_bsim3_truncation_limit,
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -2801,6 +2895,7 @@ impl Engine {
                         &mut diode_history,
                         &mut mosfet_history,
                         &mut b3soi_history,
+                        &mut bsim3_history,
                         None,
                         None,
                         suppress_gate_charge,
@@ -2982,6 +3077,7 @@ impl Engine {
                 &mut diode_history,
                 &mut mosfet_history,
                 &mut b3soi_history,
+                &mut bsim3_history,
                 Some(&vbic_snapshot_cache),
                 mosfet_caps_valid.then_some(mosfet_caps_scratch.as_slice()),
                 suppress_gate_charge,
