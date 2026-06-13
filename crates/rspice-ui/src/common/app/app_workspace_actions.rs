@@ -209,6 +209,142 @@ impl AppState {
         )));
     }
 
+    /// Copy a whole cell — every view and its drawn content — into a
+    /// writable library under a new name. Returns the number of views
+    /// copied, or the user-facing error.
+    pub(crate) fn copy_cell(
+        &mut self,
+        src_library: &str,
+        cell: &str,
+        dst_library: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let source = self
+            .library_manager
+            .get_library(src_library)
+            .ok_or_else(|| format!("Library '{src_library}' not found"))?;
+        let mut copy = source
+            .get_cell(cell)
+            .ok_or_else(|| format!("Cell '{cell}' not found in library '{src_library}'"))?
+            .clone();
+        let destination = self
+            .library_manager
+            .get_library(dst_library)
+            .ok_or_else(|| format!("Library '{dst_library}' not found"))?;
+        if destination.read_only {
+            return Err(format!("Library '{dst_library}' is read-only"));
+        }
+        if destination.get_cell(new_name).is_some() {
+            return Err(format!(
+                "Cell '{new_name}' already exists in library '{dst_library}'"
+            ));
+        }
+
+        copy.name = new_name.to_owned();
+        let view_names: Vec<String> = copy.views.keys().cloned().collect();
+        let view_count = view_names.len();
+        if let Some(destination) = self.library_manager.get_library_mut(dst_library) {
+            destination.add_cell(copy);
+        }
+
+        // The drawn content lives in the workspace buffers, keyed
+        // "library/cell/view" — a copy without it would be a lie.
+        for view in view_names {
+            let old_key = CellViewRef::new(src_library, cell, view.as_str()).key();
+            let new_key = CellViewRef::new(dst_library, new_name, view.as_str()).key();
+            if let Some(buffer) = self.workspace.schematic_buffers.get(&old_key).cloned() {
+                self.workspace.schematic_buffers.insert(new_key, buffer);
+            }
+        }
+
+        self.library_manager.select_cell(dst_library, new_name);
+        Ok(view_count)
+    }
+
+    /// Rename a cell and remap everything that pointed at it: view buffers,
+    /// open workspace references, and the Library/Cell binding of every
+    /// instance in this project's designs. Returns the number of instance
+    /// bindings remapped, or the user-facing error.
+    pub(crate) fn rename_cell(
+        &mut self,
+        library: &str,
+        cell: &str,
+        new_name: &str,
+    ) -> Result<usize, String> {
+        let lib = self
+            .library_manager
+            .get_library(library)
+            .ok_or_else(|| format!("Library '{library}' not found"))?;
+        if lib.read_only {
+            return Err(format!("Library '{library}' is read-only"));
+        }
+        if lib.get_cell(cell).is_none() {
+            return Err(format!("Cell '{cell}' not found in library '{library}'"));
+        }
+        if lib.get_cell(new_name).is_some() {
+            return Err(format!(
+                "Cell '{new_name}' already exists in library '{library}'"
+            ));
+        }
+
+        if let Some(lib) = self.library_manager.get_library_mut(library) {
+            if let Some(mut moved) = lib.cells.remove(cell) {
+                moved.name = new_name.to_owned();
+                lib.cells.insert(new_name.to_owned(), moved);
+            }
+        }
+
+        // Buffers move with the cell.
+        let old_prefix = format!("{library}/{cell}/");
+        let moved_keys: Vec<String> = self
+            .workspace
+            .schematic_buffers
+            .keys()
+            .filter(|key| key.starts_with(&old_prefix))
+            .cloned()
+            .collect();
+        for key in moved_keys {
+            if let Some(buffer) = self.workspace.schematic_buffers.remove(&key) {
+                let tail = &key[old_prefix.len()..];
+                self.workspace
+                    .schematic_buffers
+                    .insert(format!("{library}/{new_name}/{tail}"), buffer);
+            }
+        }
+
+        // Open references follow.
+        let remap_ref = |reference: &mut CellViewRef| {
+            if reference.library == library && reference.cell == cell {
+                reference.cell = new_name.to_owned();
+            }
+        };
+        remap_ref(&mut self.workspace.active_view);
+        for reference in &mut self.workspace.hierarchy_stack {
+            remap_ref(reference);
+        }
+
+        // Instance bindings follow — in every buffer and the live sheet.
+        let mut remapped = 0usize;
+        let mut remap_schematic = |schematic: &mut crate::state::SchematicState| {
+            for component in &mut schematic.components {
+                if let Some(binding) = component.library_cell.as_mut()
+                    && binding.library == library
+                    && binding.cell == cell
+                {
+                    binding.cell = new_name.to_owned();
+                    remapped += 1;
+                }
+            }
+        };
+        for buffer in self.workspace.schematic_buffers.values_mut() {
+            remap_schematic(buffer);
+        }
+        remap_schematic(&mut self.schematic);
+
+        self.library_manager.select_cell(library, new_name);
+        Ok(remapped)
+    }
+
     /// Refuse an edit on a read-only view, with the console line that names
     /// the library. Returns true when the edit must be blocked.
     pub(crate) fn deny_read_only_edit(&mut self) -> bool {

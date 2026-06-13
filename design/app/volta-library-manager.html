@@ -250,7 +250,7 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><td>open</td><td>Double-click opens <em>schematic</em> views.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>open anything</td><td>Schematic-content views open in the editor: schematic and testbench both double-click open <span class="tag today">ships</span>. View types without an editor say “no editor yet” in their meta instead of staying silent <span class="tag today">ships</span>. Symbol and veriloga/spice text views opening in their own editors needs those surfaces to exist first.</td><td><span class="tag spec">spec</span></td></tr>
     <tr><td>keyboard</td><td><kbd>↑</kbd><kbd>↓</kbd> move within the focused column (row scrolled into view), <kbd>←</kbd><kbd>→</kbd> hop columns, <kbd>Enter</kbd> opens — the selected view, or a cell's schematic straight from the Cell column. The focused column's header takes the accent ink; the filter field owning the keyboard suspends it all.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>cell ops</td><td>Copy cell… and Rename cell… on a cell-row context menu — the two operations every Virtuoso refugee reaches for first. Both forms are sm instances of the volta-dialogs grammar.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>cell ops</td><td>Copy cell… and Rename cell… on a cell-row context menu — the two operations every Virtuoso refugee reaches for first. Drawn in §07.</td><td><span class="tag spec">spec</span></td></tr>
   </table>
 </section>
 
@@ -342,7 +342,85 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   </table>
 </section>
 
+<!-- ════════════════════════ 07 — cell operations ════════════════════════ -->
+<section id="s7">
+  <div class="kicker">07</div>
+  <h2>Copy cell · Rename cell — the operations with consequences</h2>
+  <p class="lede">
+    Both live on the cell row's right-click menu and follow the small-form grammar. The forms are
+    one field deep; the semantics are not — a copy that loses the drawn content is a lie, and a
+    rename that strands every instance is a trap. The spec table is the contract.
+  </p>
+  <div class="demo">
+    <span class="demo-label">LIVE — OPEN THE FORMS</span>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn" data-open="modalCopyCell" type="button">Copy cell…</button>
+      <button class="btn" data-open="modalRenameCell" type="button">Rename cell…</button>
+    </div>
+    <div class="hint">try a duplicate name — 'OTA_FC' collides in rspice-examples</div>
+  </div>
+  <table class="spec">
+    <tr><th>Operation</th><th>Contract</th></tr>
+    <tr><td>Copy cell</td><td>Copies the whole cell — every view <em>and its drawn content</em> — into a writable target library under the new name. The source is untouched; read-only sources are exactly what this is for. The browser selects the copy.</td></tr>
+    <tr><td>Rename cell</td><td>Renames the cell and remaps everything that pointed at it: view buffers, open workspace tabs and breadcrumbs, and the Library/Cell binding of every instance in this project's designs. The console reports how many references moved.</td></tr>
+    <tr><td>context menu</td><td>Cell row right-click: Open · — · Copy cell… · Rename cell… · — · Delete… . On read-only libraries Copy stays live (copying out is the point); Rename and Delete disable.</td></tr>
+    <tr><td>read-only banner</td><td>The schematic banner's “Copy to editable library…” verb opens Copy cell pre-filled with the open master and the first writable library.</td></tr>
+  </table>
+</section>
+
 <!-- ════════════════════════ modals ══════════════════════════════════════ -->
+<div class="scrim" id="modalCopyCell" role="dialog" aria-modal="true" aria-labelledby="ccTitle">
+  <div class="modal sm">
+    <div class="modal-head">
+      <span class="m-kicker">Library</span>
+      <h4 id="ccTitle">Copy cell</h4>
+      <button class="modal-close" data-close type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label>Source</label><div class="kv-ro" id="ccSource">rspice-examples / OTA5T</div></div>
+      <div class="field">
+        <label for="ccTarget">To library</label>
+        <select class="input" id="ccTarget"></select>
+      </div>
+      <div class="field">
+        <label for="ccName">New name</label>
+        <input class="input" id="ccName" type="text" autocomplete="off">
+      </div>
+      <div class="err-msg" id="ccErr" role="alert"></div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint" id="ccHint">copies all views and their content</span>
+      <div class="grow"></div>
+      <button class="btn ghost" data-close type="button">Cancel</button>
+      <button class="btn primary" id="ccCreate" type="button">Copy</button>
+    </div>
+  </div>
+</div>
+
+<div class="scrim" id="modalRenameCell" role="dialog" aria-modal="true" aria-labelledby="rcTitle">
+  <div class="modal sm">
+    <div class="modal-head">
+      <span class="m-kicker">Library</span>
+      <h4 id="rcTitle">Rename cell</h4>
+      <button class="modal-close" data-close type="button" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label>Cell</label><div class="kv-ro" id="rcSource">rspice-examples / OTA5T</div></div>
+      <div class="field">
+        <label for="rcName">New name</label>
+        <input class="input" id="rcName" type="text" autocomplete="off">
+      </div>
+      <div class="err-msg" id="rcErr" role="alert"></div>
+    </div>
+    <div class="modal-foot">
+      <span class="hint">remaps buffers, tabs, and instance bindings</span>
+      <div class="grow"></div>
+      <button class="btn ghost" data-close type="button">Cancel</button>
+      <button class="btn primary" id="rcCreate" type="button">Rename</button>
+    </div>
+  </div>
+</div>
+
 <div class="scrim" id="modalNewCell" role="dialog" aria-modal="true" aria-labelledby="ncTitle">
   <div class="modal sm">
     <div class="modal-head">
@@ -546,6 +624,24 @@ function openModal(id) {
     document.getElementById("nvLib").textContent = sel.lib || "rspice-examples";
     document.getElementById("nvCell").textContent = sel.cell || "OTA5T";
   }
+  if (id === "modalCopyCell") {
+    var cLib = sel.lib || "rspice-examples", cCell = sel.cell || "OTA5T";
+    document.getElementById("ccSource").textContent = cLib + " / " + cCell;
+    document.getElementById("ccName").value = cCell + "_copy";
+    var target = document.getElementById("ccTarget");
+    target.innerHTML = "";
+    LIBS.filter(function (l) { return !l.ro; }).forEach(function (l) {
+      var o = document.createElement("option"); o.textContent = l.name; target.appendChild(o);
+    });
+    if (!lib() || !lib().ro) target.value = cLib;
+    var views = (lib() && lib().cells[cCell]) ? lib().cells[cCell].length : 0;
+    document.getElementById("ccHint").textContent = "copies all " + views + " views and their content";
+  }
+  if (id === "modalRenameCell") {
+    var rCell = sel.cell || "OTA5T";
+    document.getElementById("rcSource").textContent = (sel.lib || "rspice-examples") + " / " + rCell;
+    document.getElementById("rcName").value = rCell;
+  }
   var first = scrim.querySelector("input, select, button:not(.modal-close)");
   if (first) first.focus();
 }
@@ -606,6 +702,55 @@ document.addEventListener("keydown", function (e) {
     sel.lib = l.name; sel.cell = n; sel.view = null;
     name.value = ""; document.getElementById("ncDesc").value = "";
     closeModal(document.getElementById("modalNewCell"));
+    renderAll();
+  });
+  name.addEventListener("input", function () { err.textContent = ""; name.removeAttribute("aria-invalid"); });
+})();
+
+/* copy cell: whole-cell copy into a writable target */
+(function () {
+  var name = document.getElementById("ccName");
+  var err = document.getElementById("ccErr");
+  document.getElementById("ccCreate").addEventListener("click", function () {
+    var n = name.value.trim();
+    var src = lib() || LIBS[1];
+    var cell = sel.cell || "OTA5T";
+    var dst = LIBS.find(function (l) { return l.name === document.getElementById("ccTarget").value; });
+    if (!n) { err.textContent = "Cell name cannot be empty"; name.setAttribute("aria-invalid", "true"); return; }
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(n)) { err.textContent = "Cell name contains invalid characters"; name.setAttribute("aria-invalid", "true"); return; }
+    if (!dst) { err.textContent = "Please select a library"; return; }
+    if (Object.keys(dst.cells).some(function (c) { return c.toLowerCase() === n.toLowerCase(); })) {
+      err.textContent = "Cell '" + n + "' already exists in library '" + dst.name + "'";
+      name.setAttribute("aria-invalid", "true"); return;
+    }
+    dst.cells[n] = (src.cells[cell] || []).slice();
+    err.textContent = ""; name.removeAttribute("aria-invalid");
+    sel.lib = dst.name; sel.cell = n; sel.view = null;
+    closeModal(document.getElementById("modalCopyCell"));
+    renderAll();
+  });
+  name.addEventListener("input", function () { err.textContent = ""; name.removeAttribute("aria-invalid"); });
+})();
+
+/* rename cell: remap-everything semantics (demo remaps the model) */
+(function () {
+  var name = document.getElementById("rcName");
+  var err = document.getElementById("rcErr");
+  document.getElementById("rcCreate").addEventListener("click", function () {
+    var n = name.value.trim();
+    var l = lib() || LIBS[1];
+    var cell = sel.cell || "OTA5T";
+    if (n === cell) { closeModal(document.getElementById("modalRenameCell")); return; }
+    if (!n) { err.textContent = "Cell name cannot be empty"; name.setAttribute("aria-invalid", "true"); return; }
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]*$/.test(n)) { err.textContent = "Cell name contains invalid characters"; name.setAttribute("aria-invalid", "true"); return; }
+    if (Object.keys(l.cells).some(function (c) { return c.toLowerCase() === n.toLowerCase(); })) {
+      err.textContent = "Cell '" + n + "' already exists in library '" + l.name + "'";
+      name.setAttribute("aria-invalid", "true"); return;
+    }
+    l.cells[n] = l.cells[cell]; delete l.cells[cell];
+    err.textContent = ""; name.removeAttribute("aria-invalid");
+    sel.cell = n;
+    closeModal(document.getElementById("modalRenameCell"));
     renderAll();
   });
   name.addEventListener("input", function () { err.textContent = ""; name.removeAttribute("aria-invalid"); });

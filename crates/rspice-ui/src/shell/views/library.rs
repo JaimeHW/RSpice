@@ -382,6 +382,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     }
                     return;
                 }
+                let library_read_only = state
+                    .library_manager
+                    .get_library(&library)
+                    .is_some_and(|lib| lib.read_only);
                 for name in cells {
                     let selected =
                         state.library_manager.selected_cell.as_deref() == Some(name.as_str());
@@ -393,6 +397,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         state.library_manager.select_cell(&library, &name);
                         state.library_manager.nav_column = NavColumn::Cell;
                     }
+                    // Right-click selects and offers the cell operations —
+                    // Copy stays live on read-only libraries (copying out
+                    // is the point); Rename and Delete disable.
+                    if row.response.secondary_clicked() {
+                        state.library_manager.select_cell(&library, &name);
+                        state.library_manager.nav_column = NavColumn::Cell;
+                    }
+                    cell_row_menu(&row.response, state, &library, &name, library_read_only);
                 }
             });
 
@@ -551,6 +563,46 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             );
         }
     }
+}
+
+/// Right-click menu for a cell row: Open, the cell operations, Delete.
+/// `design/app/volta-library-manager.html` §07.
+fn cell_row_menu(
+    response: &egui::Response,
+    state: &mut AppState,
+    library: &str,
+    cell: &str,
+    read_only: bool,
+) {
+    use crate::shell::menubar::{item, item_disabled, separator};
+    response.clone().context_menu(|ui| {
+        ui.set_min_width(200.0);
+        if item(ui, "Open", None) {
+            open_view_if_editable(state, library, cell, "schematic");
+            ui.close_menu();
+        }
+        separator(ui);
+        if item(ui, "Copy cell…", None) {
+            state.open_copy_cell_dialog(library, cell);
+            ui.close_menu();
+        }
+        if read_only {
+            item_disabled(ui, "Rename cell…", None);
+        } else if item(ui, "Rename cell…", None) {
+            state.open_rename_cell_dialog(library, cell);
+            ui.close_menu();
+        }
+        separator(ui);
+        if read_only {
+            item_disabled(ui, "Delete…", None);
+        } else if item(ui, "Delete…", None) {
+            state.dialogs.library_delete_confirm = Some(LibraryDeleteTarget::Cell {
+                library: library.to_owned(),
+                cell: cell.to_owned(),
+            });
+            ui.close_menu();
+        }
+    });
 }
 
 /// Quiet one-liner for a column with nothing to list — names the action

@@ -115,6 +115,28 @@ pub struct DialogState {
     pub new_view_error: Option<String>,
     /// Library deletion awaiting confirmation
     pub library_delete_confirm: Option<LibraryDeleteTarget>,
+    /// Copy Cell dialog
+    pub copy_cell_dialog: bool,
+    /// Copy Cell source library
+    pub copy_cell_source_library: String,
+    /// Copy Cell source cell
+    pub copy_cell_source_cell: String,
+    /// Copy Cell target library
+    pub copy_cell_target_library: String,
+    /// Copy Cell new name input
+    pub copy_cell_name: String,
+    /// Copy Cell validation error message
+    pub copy_cell_error: Option<String>,
+    /// Rename Cell dialog
+    pub rename_cell_dialog: bool,
+    /// Rename Cell target library
+    pub rename_cell_library: String,
+    /// Rename Cell current name
+    pub rename_cell_current: String,
+    /// Rename Cell new name input
+    pub rename_cell_name: String,
+    /// Rename Cell validation error message
+    pub rename_cell_error: Option<String>,
 
     /// Starting position of selection drag (grid coords)
     pub drag_start: Option<(i32, i32)>,

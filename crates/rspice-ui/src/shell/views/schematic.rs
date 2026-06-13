@@ -25,31 +25,47 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
 }
 
 /// Amber strip under the docbar while a read-only master is open — the
-/// canvas is for inspection, and this is where that is said.
-fn read_only_banner(ui: &mut Ui, state: &AppState) {
+/// canvas is for inspection, and this is where that is said. The one verb
+/// it offers is the way out: copy the cell somewhere editable.
+fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
     let t = crate::ui::tokens::Tokens::get(ui.ctx());
     let c = t.color;
-    let (rect, _) = ui.allocate_exact_size(
+    ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), 24.0),
-        egui::Sense::hover(),
-    );
-    let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, c.warn.gamma_multiply(0.13));
-    painter.hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, c.border),
-    );
-    let library = &state.workspace.active_view.library;
-    painter.text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        format!("Read-only — '{library}' masters cannot be edited"),
-        crate::ui::theme::sans(
-            crate::ui::tokens::FS_1,
-            crate::ui::theme::FontWeight::Regular,
-        ),
-        c.warn,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            let rect = ui.max_rect();
+            let painter = ui.painter();
+            painter.rect_filled(rect, 0.0, c.warn.gamma_multiply(0.13));
+            painter.hline(
+                rect.x_range(),
+                rect.bottom() - 0.5,
+                egui::Stroke::new(1.0, c.border),
+            );
+            ui.add_space(12.0);
+            let library = state.workspace.active_view.library.clone();
+            ui.label(
+                egui::RichText::new(format!(
+                    "Read-only — '{library}' masters cannot be edited"
+                ))
+                .font(crate::ui::theme::sans(
+                    crate::ui::tokens::FS_1,
+                    crate::ui::theme::FontWeight::Regular,
+                ))
+                .color(c.warn),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                if crate::ui::widgets::Button::new("Copy to editable library…")
+                    .ghost()
+                    .show(ui)
+                    .clicked()
+                {
+                    let cell = state.workspace.active_view.cell.clone();
+                    state.open_copy_cell_dialog(&library, &cell);
+                }
+            });
+        },
     );
 }
 

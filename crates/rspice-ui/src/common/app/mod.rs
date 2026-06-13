@@ -412,6 +412,8 @@ impl RSpiceApp {
         self.process_model_browser_dialog(ctx);
         self.process_new_cell_dialog(ctx);
         self.process_new_view_dialog(ctx);
+        self.process_copy_cell_dialog(ctx);
+        self.process_rename_cell_dialog(ctx);
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
     }
