@@ -1,3 +1,28 @@
+RSpice conformance corpus
+=========================
+
+This tree is the ngspice-46 test corpus, vendored as RSpice's conformance
+oracle suite (provenance: docs/legal/ngspice-provenance-audit.md). The
+.out files are recorded ngspice-46 results and serve as the golden
+references.
+
+How RSpice runs it: crates/rspice-core/tests/ngspice_regression.rs drives
+the decks suite by suite (test_ngspice_<suite>_suite). Per-deck validation
+contracts live in validation-manifest.tsv (smoke, scripted_control,
+expected_unsolvable, locked_grid, measures); measure gates are declared in
+<deck>.gates.tsv sidecars next to their decks. The full run gates nightly
+CI against the conformance watermark (.github/workflows/nightly.yml).
+
+Layer map — three separate validation surfaces:
+  tests/       conformance against recorded ngspice-46 oracles (this tree)
+  examples/    user-facing pattern for circuit CI via the Python bindings
+  benchmarks/  performance rig decks + published scoreboards
+
+The upstream ngspice README follows unchanged; its build instructions
+(configure, Makefile.am, make check) apply to ngspice, not RSpice.
+
+------------------------------------------------------------------------
+
 ngspice test and example files:
 ===============================
 
