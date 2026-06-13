@@ -1,0 +1,27 @@
+# Device models
+
+Device model libraries bundled with the repository.
+
+## `spice/`
+
+SPICE `.lib` model cards authored for RSpice — starter libraries of common
+discrete parts and op-amps for examples and tests: `diode.lib`,
+`transistor.lib`, `mosfet.lib`, `opamp.lib`.
+
+## `veriloga/`
+
+Verilog-A sources for the `rspice-veriloga` compiler crate. The compact
+models below are vendored from their upstream sources; each file retains
+its original copyright and license header. Consolidated third-party
+attribution lives in the root [`NOTICE`](../NOTICE).
+
+| Path | Model | Origin | License |
+|------|-------|--------|---------|
+| `bsim4.va` | BSIM4 MOSFET | BSIM Group, UC Berkeley | UC Berkeley (see file header) |
+| `ekv26_mod.va` | EKV v2.6 MOSFET | EPFL / Tiburon Design Automation | ECL-2.0 (see file header) |
+| `psp103/` | PSP 103 MOSFET + JUNCAP200 junction (CMC standard) | NXP / CEA / Arizona State University | ECL-2.0 |
+| `r3_cmc/` | R3_CMC three-terminal resistor (CMC standard) | Si2 Compact Model Coalition | ECL-2.0 (`LICENSE.txt` / `NOTICE.txt` in directory) |
+| `constants.vams`, `disciplines.vams` | Standard Verilog-AMS support headers | Verilog-AMS LRM | — |
+
+`psp103/releasenotesPSP103p6.txt` is the upstream release-notes file for
+the vendored PSP snapshot.
