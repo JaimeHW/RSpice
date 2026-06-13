@@ -1,6 +1,6 @@
 # Deliberate site deploys. main is a shared live-dev branch, so the site
 # never deploys per-push: run this manually (gh workflow run deploy-site)
-# or push a site-v* tag. The build is tools/deploy/build_site.sh — both
+# or push a site-v* tag. The build is tools/deploy/build_site.py — both
 # wasm bundles compiled from the dispatched ref, bundle-integrity gates,
 # and a live headless solve of the playground; nothing publishes unless
 # every gate passes. Publishing force-replaces the gh-pages tree, which
@@ -52,7 +52,7 @@ jobs:
           wasm-bindgen --version
 
       - name: Build and verify (_site)
-        run: bash tools/deploy/build_site.sh
+        run: python3 tools/deploy/build_site.py
 
       - name: Publish to gh-pages (Cloudflare Pages production branch)
         uses: peaceiris/actions-gh-pages@v4

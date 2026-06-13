@@ -18,12 +18,14 @@ When a design lands, port it here deliberately. `parity.html`'s design
 source is `design/internal/rspice-parity-dashboard.html`; the two are kept
 in sync by hand, with the oracle labels deliberately differing.
 
-Deploying: `gh workflow run deploy-site` (or push a `site-v*` tag).
-The workflow builds both wasm bundles from the tagged/dispatched ref,
-assembles `_site/`, refuses to publish unless the bundles pass the
-magic/export gates and the playground completes a live headless solve,
-then force-publishes `_site` to `gh-pages`, which Cloudflare picks up.
-Local dry-run: `bash tools/deploy/build_site.sh` (add `--skip-headless`
+Deploying: `python3 tools/deploy/deploy.py` (Windows: `py tools\deploy\deploy.py`)
+— pushes your branch, dispatches the deploy-site workflow, and watches the run.
+By hand it's still `gh workflow run deploy-site` (or push a `site-v*` tag).
+The workflow builds both wasm bundles from the pushed ref with
+`tools/deploy/build_site.py`, assembles `_site/`, refuses to publish unless the
+bundles pass the magic/export gates and the playground completes a live headless
+solve, then force-publishes `_site` to `gh-pages`, which Cloudflare picks up.
+Local dry-run: `python3 tools/deploy/build_site.py` (add `--skip-headless`
 without a local Chrome). Rollback: re-run the workflow on an older ref.
 
 If wasm threads ever land (SharedArrayBuffer), add a `_headers` file
