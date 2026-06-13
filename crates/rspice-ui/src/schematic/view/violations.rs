@@ -92,6 +92,26 @@ enum Anchor {
     Wire(u64),
 }
 
+/// Resolve a finding to a console jump target — shared by the check
+/// runner's per-finding rows and anything else that wants click-to-source.
+pub(crate) fn finding_anchor(
+    state: &AppState,
+    violation: &DrcViolation,
+) -> Option<crate::panels::LogAnchor> {
+    let world = anchor(state, violation)?;
+    let (component, wire) = match &violation.location {
+        DrcLocation::Component { id, .. } => (Some(*id as u64), None),
+        DrcLocation::Wire { id } => (None, Some(*id as u64)),
+        _ => (None, None),
+    };
+    Some(crate::panels::LogAnchor::Schematic {
+        x: world.x,
+        y: world.y,
+        component,
+        wire,
+    })
+}
+
 /// Marker half-extent in screen px (badges do not scale with zoom — they
 /// are annotations, not geometry).
 const HALF: f32 = 7.0;

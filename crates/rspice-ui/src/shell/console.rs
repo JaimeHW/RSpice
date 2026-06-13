@@ -337,6 +337,10 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
     let total_rows = state.shell.console.rows.len();
     let row_font = theme::mono(11.5, FontWeight::Regular);
 
+    // Anchored rows are clickable; the jump applies after the loop so the
+    // buffer borrow ends first.
+    let mut jump: Option<crate::panels::LogAnchor> = None;
+
     // Virtualized: only the rows in view are laid out and painted, so a
     // full 10k-entry buffer costs the same as thirty rows.
     ui.spacing_mut().item_spacing.y = 0.0;
@@ -355,9 +359,26 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                 let (level_label, level_color) = level_style(entry.severity, entry.source, &c);
 
                 let width = ui.available_width();
-                let (rect, _) =
-                    ui.allocate_exact_size(vec2(width, row_height), Sense::hover());
+                let sense = if entry.anchor.is_some() {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                };
+                let (rect, response) =
+                    ui.allocate_exact_size(vec2(width, row_height), sense);
                 let painter = ui.painter();
+                if entry.anchor.is_some() {
+                    if response.hovered() {
+                        painter.rect_filled(rect, 2.0, c.bg_hover);
+                    }
+                    if response
+                        .clone()
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                    {
+                        jump = entry.anchor;
+                    }
+                }
                 let cy = rect.center().y;
                 painter.text(
                     egui::pos2(rect.left() + 12.0, cy),
@@ -382,4 +403,20 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                 );
             }
         });
+
+    // Click-to-source: jump the canvas to the finding's anchor and select
+    // the offending object. The console stays open — the row is the map,
+    // the canvas is the territory.
+    if let Some(crate::panels::LogAnchor::Schematic { x, y, component, wire }) = jump {
+        state.shell.view = crate::shell::WorkspaceView::Schematic;
+        state.schematic.center_request = Some(crate::state::Point::new(x, y));
+        state.schematic.net_highlight.clear();
+        state.schematic.selection.clear();
+        if let Some(id) = component {
+            state.schematic.selection.select_component(id);
+        }
+        if let Some(id) = wire {
+            state.schematic.selection.select_wire(id);
+        }
+    }
 }

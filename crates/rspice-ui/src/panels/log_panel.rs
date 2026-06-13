@@ -101,6 +101,19 @@ impl LogSource {
 // Log Entry
 // =============================================================================
 
+/// A canvas location a console row can jump to (click-to-source).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum LogAnchor {
+    /// A schematic-space point, optionally with the object to select on
+    /// arrival.
+    Schematic {
+        x: i32,
+        y: i32,
+        component: Option<u64>,
+        wire: Option<u64>,
+    },
+}
+
 /// A single log entry with full metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -116,6 +129,9 @@ pub struct LogEntry {
     pub message: String,
     /// Optional context (analysis name, component, etc.)
     pub context: Option<String>,
+    /// Optional jump target — anchored rows render clickable in the console.
+    #[serde(default)]
+    pub anchor: Option<LogAnchor>,
 }
 
 impl LogEntry {
@@ -134,6 +150,7 @@ impl LogEntry {
             source,
             message: message.into(),
             context: None,
+            anchor: None,
         }
     }
 
@@ -235,6 +252,19 @@ impl LogBuffer {
         message: impl Into<String>,
         context: Option<String>,
     ) {
+        self.log_anchored(severity, source, message, context, None);
+    }
+
+    /// Log with a jump target — the console renders anchored rows
+    /// clickable and jumps to the anchor on click.
+    pub fn log_anchored(
+        &mut self,
+        severity: LogSeverity,
+        source: LogSource,
+        message: impl Into<String>,
+        context: Option<String>,
+        anchor: Option<LogAnchor>,
+    ) {
         // Filter by minimum severity
         if severity > self.min_severity {
             return;
@@ -247,6 +277,7 @@ impl LogBuffer {
             source,
             message: message.into(),
             context,
+            anchor,
         };
         self.next_id += 1;
 

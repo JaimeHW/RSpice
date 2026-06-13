@@ -11,7 +11,7 @@ pub mod properties_panel;
 pub mod script_console;
 pub mod veriloga_dialog;
 
-pub use log_panel::{LogBuffer, LogEntry, LogSeverity, LogSource};
+pub use log_panel::{LogAnchor, LogBuffer, LogEntry, LogSeverity, LogSource};
 pub use pdk_settings_dialog::{
     PdkSettingsDialogResult, PdkSettingsDialogState, render_pdk_settings_dialog,
 };
