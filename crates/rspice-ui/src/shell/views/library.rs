@@ -241,10 +241,14 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 for (name, view_type) in views {
                     let selected =
                         state.library_manager.selected_view.as_deref() == Some(name.as_str());
-                    let meta = if view_type == ViewType::Schematic {
+                    // Schematic-content views open in the editor; the rest
+                    // say so instead of staying silent.
+                    let openable =
+                        matches!(view_type, ViewType::Schematic | ViewType::Testbench);
+                    let meta = if openable {
                         "double-click to open"
                     } else {
-                        ""
+                        "no editor yet"
                     };
                     let row = TreeRow::new(&name)
                         .meta(meta)
@@ -256,7 +260,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             .library_manager
                             .select_view(&library, &cell, &name);
                     }
-                    if row.response.double_clicked() && view_type == ViewType::Schematic {
+                    if row.response.double_clicked() && openable {
                         state.open_workspace_view(CellViewRef {
                             library: library.clone(),
                             cell: cell.clone(),
@@ -289,11 +293,26 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         (Some(library), None) => library.clone(),
         _ => "—".to_owned(),
     };
+    // Technology and path come off the selected library; "—" only when the
+    // library genuinely has none.
+    let selected_lib = state
+        .library_manager
+        .selected_library
+        .as_deref()
+        .and_then(|name| state.library_manager.get_library(name));
+    let technology = selected_lib
+        .map(|lib| lib.technology.trim())
+        .filter(|tech| !tech.is_empty())
+        .unwrap_or("—")
+        .to_owned();
+    let lib_path = selected_lib
+        .and_then(|lib| lib.path.as_ref())
+        .map(|path| path.display().to_string());
     let mut x = meta_rect.left() + 14.0;
     for (key, value) in [
         ("Cell", cell_path.as_str()),
         ("Checked out", "you"),
-        ("Technology", "—"),
+        ("Technology", technology.as_str()),
     ] {
         let key_galley = ui.fonts(|f| {
             f.layout_no_wrap(
@@ -323,9 +342,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         );
         x += value_galley.size().x + 28.0;
     }
+
+    // Library path, right-aligned and faint — drawn only when it fits.
+    if let Some(path) = lib_path {
+        let path_galley = ui.fonts(|f| {
+            f.layout_no_wrap(
+                path,
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.text_faint,
+            )
+        });
+        let px = meta_rect.right() - 14.0 - path_galley.size().x;
+        if px >= x {
+            painter.galley(
+                egui::pos2(px, meta_rect.center().y - path_galley.size().y * 0.5),
+                path_galley,
+                c.text_faint,
+            );
+        }
+    }
 }
 
-/// One bordered browser column with an uppercase header.
 /// Quiet one-liner for a column with nothing to list — names the action
 /// that fills it.
 fn column_empty(ui: &mut Ui, text: &str) {
@@ -338,6 +375,7 @@ fn column_empty(ui: &mut Ui, text: &str) {
     );
 }
 
+/// One bordered browser column with an uppercase header.
 fn column(
     ui: &mut Ui,
     width: f32,
