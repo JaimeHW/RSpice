@@ -248,8 +248,8 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
   <table class="spec">
     <tr><th>Behavior</th><th>Rule</th><th>Status</th></tr>
     <tr><td>open</td><td>Double-click opens <em>schematic</em> views.</td><td><span class="tag today">ships</span></td></tr>
-    <tr><td>open anything</td><td>Every view type opens with its editor: testbench → schematic editor, veriloga/spice → netlist editor, symbol → symbol view, doc → system viewer. Unopenable types say so in their meta instead of staying silent.</td><td><span class="tag spec">spec</span></td></tr>
-    <tr><td>keyboard</td><td><kbd>↑</kbd><kbd>↓</kbd> move within a column, <kbd>←</kbd><kbd>→</kbd> hop columns, <kbd>Enter</kbd> opens.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>open anything</td><td>Schematic-content views open in the editor: schematic and testbench both double-click open <span class="tag today">ships</span>. View types without an editor say “no editor yet” in their meta instead of staying silent <span class="tag today">ships</span>. Symbol and veriloga/spice text views opening in their own editors needs those surfaces to exist first.</td><td><span class="tag spec">spec</span></td></tr>
+    <tr><td>keyboard</td><td><kbd>↑</kbd><kbd>↓</kbd> move within the focused column (row scrolled into view), <kbd>←</kbd><kbd>→</kbd> hop columns, <kbd>Enter</kbd> opens — the selected view, or a cell's schematic straight from the Cell column. The focused column's header takes the accent ink; the filter field owning the keyboard suspends it all.</td><td><span class="tag today">ships</span></td></tr>
     <tr><td>cell ops</td><td>Copy cell… and Rename cell… on a cell-row context menu — the two operations every Virtuoso refugee reaches for first. Both forms are sm instances of the volta-dialogs grammar.</td><td><span class="tag spec">spec</span></td></tr>
   </table>
 </section>
@@ -324,8 +324,8 @@ kbd { font-family: var(--font-mono); font-size: var(--fs-0); color: var(--text);
     <tr><th>Field</th><th>Today</th><th>Spec</th></tr>
     <tr><td>Cell</td><td>“library / cell” of the selection <span class="tag today">ships</span></td><td>unchanged</td></tr>
     <tr><td>Checked out</td><td>literal “you” <span class="tag today">ships</span></td><td>Stays “you” until multi-user checkout exists; the field is the placeholder for it, deliberately.</td></tr>
-    <tr><td>Technology</td><td>literal “—” <span class="tag today">ships</span></td><td>The PDK the library is attached to (from PDK settings), e.g. “gpdk045” — and “—” only for technology-free libraries. <span class="tag spec">spec</span></td></tr>
-    <tr><td>Path</td><td>absent</td><td>The library's on-disk path, faint mono, right-aligned; click reveals in the system file manager. <span class="tag spec">spec</span></td></tr>
+    <tr><td>Technology</td><td>the library's technology field, “—” only when it has none <span class="tag today">ships</span></td><td>unchanged</td></tr>
+    <tr><td>Path</td><td>the library's on-disk path, faint mono, right-aligned, drawn when it fits <span class="tag today">ships</span></td><td>click reveals in the system file manager <span class="tag spec">spec</span></td></tr>
   </table>
 </section>
 

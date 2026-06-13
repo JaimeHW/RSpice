@@ -66,13 +66,16 @@ closed the same day by the four files added to the table above:
 `volta-app-chrome.html`, `volta-app-dialogs.html`.
 
 Inside those files, `ships` tags mark what the code does and `spec`
-tags mark proposals. The same-day implementation pass shipped most of
-the original backlog: canvas context menus, finding cycling
-(F4/Shift+F4), the clickable ERC pill and docbar selection echo,
-palette recents/match marks/context verbs, the complete searchable
-shortcut deck, About's license line and Copy diagnostics, the Check
-menu's View/Clear violations, library read-only marks and named empty
-states, and the empty-sheet copy fix. Still open as `spec`: console
-source links, schematic autosave, library keyboard navigation and cell
-copy/rename, open-any-view routing, the read-only descend banner, and
-real Technology/Path metadata.
+tags mark proposals. The 2026-06-12 implementation passes shipped the
+bulk of the backlog: canvas context menus, finding cycling
+(F4/Shift+F4), console click-to-source rows, the clickable ERC pill
+and docbar selection echo, palette recents/match marks/context verbs,
+the complete searchable shortcut deck, About's license line and Copy
+diagnostics, the Check menu's View/Clear violations, library read-only
+marks, named empty states, keyboard navigation, testbench opening,
+real Technology/Path metadata, and the read-only edit gate with its
+banner. Still open as `spec`, pending design decisions: schematic
+autosave semantics, the Copy/Rename cell forms (and the banner's
+"Copy to editable library…" action they unlock), a symbol viewer and
+text-view routing, path click-to-reveal, and netlist-line console
+anchors.
