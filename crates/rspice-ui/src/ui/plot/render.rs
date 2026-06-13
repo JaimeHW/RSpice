@@ -138,9 +138,15 @@ pub fn show(
             - (((y - spec.y.min) / (spec.y.max - spec.y.min)) as f32) * plot_rect.height()
     };
     let my_r = |y: f64| -> f32 {
-        let (axis, _) = spec.y_right.as_ref().expect("right axis");
-        plot_rect.bottom()
-            - (((y - axis.min) / (axis.max - axis.min)) as f32) * plot_rect.height()
+        // A right-side trace with no right axis is an inconsistent spec;
+        // map it against the left axis rather than panicking mid-frame.
+        match spec.y_right.as_ref() {
+            Some((axis, _)) => {
+                plot_rect.bottom()
+                    - (((y - axis.min) / (axis.max - axis.min)) as f32) * plot_rect.height()
+            }
+            None => my(y),
+        }
     };
     let map_y = |y: f64, side: YSide| -> f32 {
         match side {
