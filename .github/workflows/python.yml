@@ -67,7 +67,9 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
         working-directory: crates/rspice-python
         run: |
-          pip install mypy
+          # Pinned: stubtest's checks change across mypy majors (2.1 began
+          # comparing runtime __new__ signatures). Bump deliberately.
+          pip install "mypy==2.1.0"
           python -m mypy.stubtest rspice --ignore-missing-stub --allowlist stubtest-allowlist.txt
 
   wheels:
