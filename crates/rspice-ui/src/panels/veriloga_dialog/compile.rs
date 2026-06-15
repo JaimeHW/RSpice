@@ -94,12 +94,12 @@ pub(super) fn start_compile(state: &mut VerilogALoadDialogState) {
                 // Compiling from memory has no on-disk dependencies; the
                 // synthetic va:// path is minted from the module name once
                 // it is known.
-                let result = compiler.compile(&text).map(|model| {
-                    rspice_veriloga::CompiledFile {
+                let result = compiler
+                    .compile(&text)
+                    .map(|model| rspice_veriloga::CompiledFile {
                         model,
                         dependencies: Vec::new(),
-                    }
-                });
+                    });
                 (result, PathBuf::new())
             }
         };

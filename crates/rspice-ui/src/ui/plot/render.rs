@@ -74,7 +74,10 @@ fn right_margin(spec: &PlotSpec<'_>) -> f32 {
 fn inner_rect(rect: Rect, spec: &PlotSpec<'_>) -> Rect {
     Rect::from_min_max(
         pos2(rect.left() + spec.left_margin, rect.top() + MARGIN_TOP),
-        pos2(rect.right() - right_margin(spec), rect.bottom() - MARGIN_BOTTOM),
+        pos2(
+            rect.right() - right_margin(spec),
+            rect.bottom() - MARGIN_BOTTOM,
+        ),
     )
 }
 
@@ -89,10 +92,7 @@ pub fn square_outer_rect(avail: Rect, spec: &PlotSpec<'_>) -> Rect {
     let inner = (avail.width() - h_margins)
         .min(avail.height() - v_margins)
         .max(48.0);
-    Rect::from_center_size(
-        avail.center(),
-        vec2(inner + h_margins, inner + v_margins),
-    )
+    Rect::from_center_size(avail.center(), vec2(inner + h_margins, inner + v_margins))
 }
 
 /// Render a plot filling the remaining space of `ui`.
@@ -340,7 +340,12 @@ pub fn show(
                 3.0,
             ));
         }
-        painter.circle(pos2(px, py), 3.0, c.canvas_bg, Stroke::new(1.5, marker.color));
+        painter.circle(
+            pos2(px, py),
+            3.0,
+            c.canvas_bg,
+            Stroke::new(1.5, marker.color),
+        );
 
         let galley = painter.layout_no_wrap(marker.label.clone(), tag_font.clone(), marker.color);
         let (pad, tag_h) = (6.0, 16.0);
@@ -354,7 +359,12 @@ pub fn show(
             ty = py + 9.0;
         }
         let tag_rect = Rect::from_min_size(pos2(tx, ty), vec2(tag_w, tag_h));
-        painter.rect(tag_rect, t.radius, c.bg_elevated, Stroke::new(1.0, c.border_strong));
+        painter.rect(
+            tag_rect,
+            t.radius,
+            c.bg_elevated,
+            Stroke::new(1.0, c.border_strong),
+        );
         painter.galley(
             pos2(tx + pad, ty + (tag_h - galley.size().y) * 0.5),
             galley,
@@ -589,12 +599,18 @@ fn draw_readout(
     if origin.x + box_w > rect.right() - 4.0 {
         origin.x = pointer.x - box_w - 14.0;
     }
-    origin.y = origin
-        .y
-        .clamp(plot_rect.top(), (rect.bottom() - box_h - 4.0).max(plot_rect.top()));
+    origin.y = origin.y.clamp(
+        plot_rect.top(),
+        (rect.bottom() - box_h - 4.0).max(plot_rect.top()),
+    );
 
     let bg = Rect::from_min_size(origin, vec2(box_w, box_h));
-    painter.rect(bg, t.radius, c.bg_elevated, Stroke::new(1.0, c.border_strong));
+    painter.rect(
+        bg,
+        t.radius,
+        c.bg_elevated,
+        Stroke::new(1.0, c.border_strong),
+    );
     for (i, (kg, vg)) in galleys.into_iter().enumerate() {
         let y = origin.y + pad_y + i as f32 * line_h;
         painter.galley(pos2(origin.x + pad_x, y), kg, c.text_dim);

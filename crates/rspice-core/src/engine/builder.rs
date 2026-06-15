@@ -82,9 +82,8 @@ fn add_jiles_atherton_inductor_element(
     )?;
 
     let params = resolve_jiles_atherton_model_params(model_def, value)?;
-    let mut ja =
-        crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
-            .with_params(params);
+    let mut ja = crate::device::passive::JilesAthertonInductor::new(element.name.clone(), np, nn)
+        .with_params(params);
     if let Some(ic) = initial_current {
         ja.set_initial_current(ic);
     }
@@ -140,7 +139,11 @@ fn warn_floating_nodes(flat_elements: &[crate::netlist::Element]) {
 
     let canonical = |node: &str| -> String {
         let lower = node.to_ascii_lowercase();
-        if lower == "gnd" { "0".to_string() } else { lower }
+        if lower == "gnd" {
+            "0".to_string()
+        } else {
+            lower
+        }
     };
 
     let mut parent: HashMap<String, String> = HashMap::new();
@@ -244,8 +247,10 @@ impl Engine {
         // One shared Arc per model: instances share the (megabyte-scale)
         // program and a single JIT compilation
         #[cfg(feature = "veriloga")]
-        let mut veriloga_models: HashMap<String, std::sync::Arc<rspice_veriloga::CompiledModel>> =
-            HashMap::new();
+        let mut veriloga_models: HashMap<
+            String,
+            std::sync::Arc<rspice_veriloga::CompiledModel>,
+        > = HashMap::new();
 
         // One shared BSIM3v3.3 card + temperature block per .model name,
         // with the (W, L) size knots memoized across instances.
@@ -258,9 +263,8 @@ impl Engine {
         #[cfg(feature = "veriloga")]
         {
             for include in &netlist.veriloga_includes {
-                let model = std::sync::Arc::new(resolve_cached_or_compile_veriloga(
-                    &include.file_path,
-                )?);
+                let model =
+                    std::sync::Arc::new(resolve_cached_or_compile_veriloga(&include.file_path)?);
 
                 let model_key = normalize_model_key(model.name.as_str());
                 veriloga_models
@@ -344,11 +348,9 @@ impl Engine {
                     // semantics: with TEMP given the offset is
                     // temp − CKTtemp + tnom (in Celsius terms, ngspice's
                     // own quirk); otherwise DTEMP is the offset directly.
-                    let noise_dtemp = if let Some(temp) =
-                        instance_param(instance_params, &["TEMP"])
+                    let noise_dtemp = if let Some(temp) = instance_param(instance_params, &["TEMP"])
                     {
-                        let temp_k =
-                            crate::analysis::temperature::celsius_to_kelvin(temp);
+                        let temp_k = crate::analysis::temperature::celsius_to_kelvin(temp);
                         let tnom_c = netlist.options.tnom.unwrap_or(27.0);
                         temp_k - self.config.temperature + tnom_c
                     } else {
@@ -395,9 +397,13 @@ impl Engine {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
                     if let Some(ic) = *initial_voltage {
-                        circuit
-                            .capacitors
-                            .add_with_ic(element.name.clone(), np, nn, capacitance, ic);
+                        circuit.capacitors.add_with_ic(
+                            element.name.clone(),
+                            np,
+                            nn,
+                            capacitance,
+                            ic,
+                        );
                     } else {
                         circuit
                             .capacitors
@@ -636,8 +642,7 @@ impl Engine {
                         // given, temp − CKTtemp + tnom in Celsius terms
                         // (ngspice's quirk, mirrored).
                         let noise_dtemp = if instance_param(instance_params, &["TEMP"]).is_some() {
-                            temp_k - self.config.temperature
-                                + netlist.options.tnom.unwrap_or(27.0)
+                            temp_k - self.config.temperature + netlist.options.tnom.unwrap_or(27.0)
                         } else {
                             temp_k - self.config.temperature
                         };
@@ -1085,8 +1090,7 @@ impl Engine {
                     // Celsius terms when TEMP is given (ngspice's quirk).
                     mosfet.noise_temperature_offset =
                         if instance_param(instance_params, &["TEMP"]).is_some() {
-                            temp_k - self.config.temperature
-                                + netlist.options.tnom.unwrap_or(27.0)
+                            temp_k - self.config.temperature + netlist.options.tnom.unwrap_or(27.0)
                         } else {
                             temp_k - self.config.temperature
                         };
@@ -1121,9 +1125,9 @@ impl Engine {
                             .add(rd_name, drain, dint, drain_r / multiplicity);
                         mosfet.node_drain = dint;
                         if mosfet.noise_temperature_offset != 0.0 {
-                            circuit.resistors.set_last_noise_temperature_offset(
-                                mosfet.noise_temperature_offset,
-                            );
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(mosfet.noise_temperature_offset);
                         }
                     }
                     let source_r = if !resistances_apply {
@@ -1144,9 +1148,9 @@ impl Engine {
                             .add(rs_name, source, sint, source_r / multiplicity);
                         mosfet.node_source = sint;
                         if mosfet.noise_temperature_offset != 0.0 {
-                            circuit.resistors.set_last_noise_temperature_offset(
-                                mosfet.noise_temperature_offset,
-                            );
+                            circuit
+                                .resistors
+                                .set_last_noise_temperature_offset(mosfet.noise_temperature_offset);
                         }
                     }
 
@@ -1291,9 +1295,7 @@ impl Engine {
                     let card_is_hfet_level = params_map
                         .as_ref()
                         .and_then(|params| params.get("LEVEL").copied())
-                        .is_some_and(|level| {
-                            level.is_finite() && level.round() as i32 == 5
-                        });
+                        .is_some_and(|level| level.is_finite() && level.round() as i32 == 5);
                     let use_hfet_defaults = model_def
                         .map(|device_model| {
                             device_model.model_type.eq_ignore_ascii_case("NHFET")
@@ -1568,8 +1570,7 @@ impl Engine {
                         // Allocate system unknowns for branch currents of
                         // potential (voltage) contributions.
                         if device.num_branch_unknowns() > 0 {
-                            let mut branch_nodes =
-                                Vec::with_capacity(device.num_branch_unknowns());
+                            let mut branch_nodes = Vec::with_capacity(device.num_branch_unknowns());
                             for idx in 0..device.num_branch_unknowns() {
                                 let node_name = format!("{}.__br{}", element.name, idx + 1);
                                 branch_nodes.push(circuit.get_or_create_node(&node_name));
@@ -2192,8 +2193,8 @@ impl Engine {
         instance_params: &[(String, f64)],
         temperature_kelvin: f64,
     ) -> Result<(), SimulationError> {
-        use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
         use crate::device::mosfet::b3soi::dd::temp::B3SoiDdGeometry;
+        use crate::device::{B3SoiDd, B3SoiDdModel, BodyMode};
 
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         // `config.temperature` is already in Kelvin (`TEMP_REFERENCE`).
@@ -2216,8 +2217,7 @@ impl Engine {
             (p, p, BodyMode::TiedIdeal)
         } else {
             // Floating body: allocate an internal body node.
-            let body =
-                circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
+            let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
             (body, 0, BodyMode::Floating)
         };
 
@@ -2390,8 +2390,7 @@ impl Engine {
             } else {
                 // Nonideal body tie: an internal body node sits behind the body
                 // resistor; the external contact is the `p` node.
-                let body =
-                    circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
+                let body = circuit.get_or_create_node(&format!("{}.__body.internal", element.name));
                 (body, b, BodyMode::TiedResistive)
             }
         } else {
@@ -2460,10 +2459,10 @@ impl Engine {
         tnom_default_k: f64,
         shared: &mut HashMap<String, Bsim3v3SharedModel>,
     ) -> Result<(), SimulationError> {
+        use crate::device::Bsim3v3Device;
         use crate::device::mosfet::bsim3v3::{
             Bsim3v3, Bsim3v3Geometry, Bsim3v3Model, Bsim3v3ModelTemp, SizeDepCache,
         };
-        use crate::device::Bsim3v3Device;
 
         let is_pmos = matches!(mos_type, crate::netlist::MosType::Pmos);
         // BSIM3v3.3 has no instance TEMP/DTEMP (b3set.c); every instance

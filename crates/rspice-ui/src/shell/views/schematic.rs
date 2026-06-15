@@ -45,14 +45,12 @@ fn read_only_banner(ui: &mut Ui, state: &mut AppState) {
             ui.add_space(12.0);
             let library = state.workspace.active_view.library.clone();
             ui.label(
-                egui::RichText::new(format!(
-                    "Read-only — '{library}' masters cannot be edited"
-                ))
-                .font(crate::ui::theme::sans(
-                    crate::ui::tokens::FS_1,
-                    crate::ui::theme::FontWeight::Regular,
-                ))
-                .color(c.warn),
+                egui::RichText::new(format!("Read-only — '{library}' masters cannot be edited"))
+                    .font(crate::ui::theme::sans(
+                        crate::ui::tokens::FS_1,
+                        crate::ui::theme::FontWeight::Regular,
+                    ))
+                    .color(c.warn),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_space(8.0);
@@ -148,13 +146,10 @@ fn breadcrumb(ui: &mut Ui, state: &mut AppState) {
                 crumb_text(ui, &[("›", false)]);
             }
         } else if ui
-            .link(
-                egui::RichText::new(label)
-                    .font(crate::ui::theme::mono(
-                        crate::ui::tokens::FS_0,
-                        crate::ui::theme::FontWeight::Regular,
-                    )),
-            )
+            .link(egui::RichText::new(label).font(crate::ui::theme::mono(
+                crate::ui::tokens::FS_0,
+                crate::ui::theme::FontWeight::Regular,
+            )))
             .clicked()
         {
             focus = Some(index);
@@ -169,9 +164,7 @@ fn breadcrumb(ui: &mut Ui, state: &mut AppState) {
 /// checks — the pill names the state, the click changes it.
 fn check_status_pill(ui: &mut Ui, state: &mut AppState) {
     let response = match &state.dialogs.drc_results {
-        Some(_)
-            if state.dialogs.drc_checked_version != state.schematic.topology_version() =>
-        {
+        Some(_) if state.dialogs.drc_checked_version != state.schematic.topology_version() => {
             Pill::new(PillState::Idle, "ERC stale · re-run").show(ui)
         }
         Some(result) => {

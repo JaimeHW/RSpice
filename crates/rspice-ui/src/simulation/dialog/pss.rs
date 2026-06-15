@@ -189,7 +189,6 @@ impl PssDialogState {
             *self = Self::from_config(&PssConfig::default());
         }
     }
-
 }
 
 fn format_freq(f: f64) -> String {

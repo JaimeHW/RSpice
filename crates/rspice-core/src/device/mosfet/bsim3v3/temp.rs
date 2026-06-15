@@ -114,7 +114,9 @@ impl Bsim3v3ModelTemp {
             if t0 >= -1.0 {
                 c * (1.0 + t0)
             } else if c > 0.0 {
-                log::warn!("BSIM3: temperature effect has caused a junction cap to be negative; clamped to zero");
+                log::warn!(
+                    "BSIM3: temperature effect has caused a junction cap to be negative; clamped to zero"
+                );
                 0.0
             } else {
                 c * (1.0 + t0)
@@ -332,7 +334,11 @@ impl Bsim3v3SizeDep {
 
         // --- Binned parameters (lines 240-588) ---
         let (inv_l, inv_w, inv_lw) = if m.bin_unit == 1 {
-            (1.0e-6 / p.leff, 1.0e-6 / p.weff, 1.0e-12 / (p.leff * p.weff))
+            (
+                1.0e-6 / p.leff,
+                1.0e-6 / p.weff,
+                1.0e-12 / (p.leff * p.weff),
+            )
         } else {
             (1.0 / p.leff, 1.0 / p.weff, 1.0 / (p.leff * p.weff))
         };
@@ -457,8 +463,7 @@ impl Bsim3v3SizeDep {
         p.phi = 2.0 * mt.vtm0 * (p.npeak / mt.ni).ln();
         p.sqrt_phi = p.phi.sqrt();
         p.phis3 = p.sqrt_phi * p.phi;
-        p.xdep0 =
-            (2.0 * EPSSI / (CHARGE_Q * p.npeak * 1.0e6)).sqrt() * p.sqrt_phi;
+        p.xdep0 = (2.0 * EPSSI / (CHARGE_Q * p.npeak * 1.0e6)).sqrt() * p.sqrt_phi;
         p.sqrt_xdep0 = p.xdep0.sqrt();
         p.litl = (3.0 * p.xj * m.tox).sqrt();
         p.vbi = mt.vtm0 * (1.0e20 * p.npeak / (mt.ni * mt.ni)).ln();
@@ -567,8 +572,7 @@ impl Bsim3v3SizeDep {
         let t4 = m.tox * p.phi / (p.weff + p.w0);
 
         let t0 = (1.0 + p.nlx / p.leff).sqrt();
-        let t5 = p.k1ox * (t0 - 1.0) * p.sqrt_phi
-            + (p.kt1 + p.kt1l / p.leff) * (tratio - 1.0);
+        let t5 = p.k1ox * (t0 - 1.0) * p.sqrt_phi + (p.kt1 + p.kt1l / p.leff) * (tratio - 1.0);
 
         let tmp3 = m.mtype * p.vth0 - t2 - t3 + p.k3 * t4 + t5;
         p.vfbzb = tmp3 - p.phi - p.k1 * p.sqrt_phi;
@@ -807,13 +811,12 @@ impl Bsim3v3InstTemp {
 
         // Junction saturation currents + ijth anchors (b3temp.c:856-889).
         let nvtm = mt.vtm * m.jct_emission_coeff;
-        let source_sat_current =
-            if geom.source_area <= 0.0 && geom.source_perimeter <= 0.0 {
-                1.0e-14
-            } else {
-                geom.source_area * mt.jct_temp_sat_cur_density
-                    + geom.source_perimeter * mt.jct_sidewall_temp_sat_cur_density
-            };
+        let source_sat_current = if geom.source_area <= 0.0 && geom.source_perimeter <= 0.0 {
+            1.0e-14
+        } else {
+            geom.source_area * mt.jct_temp_sat_cur_density
+                + geom.source_perimeter * mt.jct_sidewall_temp_sat_cur_density
+        };
         let vjsm = if source_sat_current > 0.0 && m.ijth > 0.0 {
             let v = nvtm * (m.ijth / source_sat_current + 1.0).ln();
             Some((v, source_sat_current * (v / nvtm).exp()))

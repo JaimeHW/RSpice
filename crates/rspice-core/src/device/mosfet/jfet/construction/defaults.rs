@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl Jfet {
     /// Create a new N-JFET
@@ -304,4 +304,3 @@ impl Jfet {
         self
     }
 }
-

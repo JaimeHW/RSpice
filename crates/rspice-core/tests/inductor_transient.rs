@@ -13,11 +13,7 @@
 
 use rspice_core::{Engine, Netlist};
 
-fn node_series<'a>(
-    names: &[String],
-    voltages: &'a [Vec<f64>],
-    want: &str,
-) -> &'a [f64] {
+fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'a [f64] {
     let idx = names
         .iter()
         .position(|n| n.eq_ignore_ascii_case(want))
@@ -257,8 +253,7 @@ RL s1 0 1k
 
     let w = 2.0 * std::f64::consts::PI * 1000.0;
     let m = 0.98 * (100e-3f64 * 100e-3f64).sqrt();
-    let expected =
-        phasor_secondary_amplitude(1.0, w, 10.0, 100e-3, 100e-3, m, Some(1000.0));
+    let expected = phasor_secondary_amplitude(1.0, w, 10.0, 100e-3, 100e-3, m, Some(1000.0));
     let measured = late_cycle_peak(&result.time, v_s1, 4e-3);
     assert!(
         measured > 0.1,

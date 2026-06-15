@@ -75,9 +75,7 @@ pub mod temp;
 pub use device::{Bsim4v8ChargeMatrix, Bsim4v8Device};
 pub use eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8Op};
 pub use params::{Binned, Bsim4v8Model};
-pub use temp::{
-    Bsim4v8Geometry, Bsim4v8InstTemp, Bsim4v8ModelTemp, Bsim4v8SizeDep, SizeDepCache,
-};
+pub use temp::{Bsim4v8Geometry, Bsim4v8InstTemp, Bsim4v8ModelTemp, Bsim4v8SizeDep, SizeDepCache};
 
 use crate::Value;
 use crate::device::mosfet::Mosfet;

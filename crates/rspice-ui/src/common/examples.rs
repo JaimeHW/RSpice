@@ -575,8 +575,8 @@ fn build_opamp_inverter(state: &mut SchematicState) {
 
     // Ideal op-amp triangle:
     // in+ (260,150), in− (260,170), out (300,160).
-    let opamp = Component::new(id, ComponentType::OpAmp, Point::new(280, 160))
-        .with_name_value("E1", "1e6");
+    let opamp =
+        Component::new(id, ComponentType::OpAmp, Point::new(280, 160)).with_name_value("E1", "1e6");
     id += 1;
     state.components.push(opamp);
 
@@ -725,13 +725,9 @@ mod tests {
                         && wire.points.windows(2).any(|seg| {
                             let (a, b) = (seg[0], seg[1]);
                             if a.x == b.x {
-                                point.x == a.x
-                                    && point.y >= a.y.min(b.y)
-                                    && point.y <= a.y.max(b.y)
+                                point.x == a.x && point.y >= a.y.min(b.y) && point.y <= a.y.max(b.y)
                             } else if a.y == b.y {
-                                point.y == a.y
-                                    && point.x >= a.x.min(b.x)
-                                    && point.x <= a.x.max(b.x)
+                                point.y == a.y && point.x >= a.x.min(b.x) && point.x <= a.x.max(b.x)
                             } else {
                                 false
                             }
@@ -739,8 +735,7 @@ mod tests {
                 })
             };
 
-            let labels: HashSet<Point> =
-                state.net_labels.iter().map(|label| label.pos).collect();
+            let labels: HashSet<Point> = state.net_labels.iter().map(|label| label.pos).collect();
 
             for wire in &state.wires {
                 for endpoint in [wire.points[0], *wire.points.last().unwrap()] {

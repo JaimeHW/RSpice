@@ -61,9 +61,8 @@ impl RSpiceApp {
                 );
             }
             Err(e) => {
-                self.state.push_user_message(ConsoleMessage::warning(format!(
-                    "Autosave failed: {e}"
-                )));
+                self.state
+                    .push_user_message(ConsoleMessage::warning(format!("Autosave failed: {e}")));
             }
         }
         self.autosave_last = Some(now);

@@ -1132,30 +1132,30 @@ impl Engine {
                              ac_matrix: &mut ComplexMatrix,
                              freq: Value|
          -> Result<AcResult, SimulationError> {
-                let omega = 2.0 * PI * freq;
-                Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
-                    circuit,
-                    ac_matrix,
-                    &dc_solution,
-                    omega,
-                    true,
-                    true,
-                );
-                let rhs = Self::build_ac_excitation_rhs(circuit);
-                let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+            let omega = 2.0 * PI * freq;
+            Self::fill_small_signal_ac_matrix_with_vbic_delay_mode(
+                circuit,
+                ac_matrix,
+                &dc_solution,
+                omega,
+                true,
+                true,
+            );
+            let rhs = Self::build_ac_excitation_rhs(circuit);
+            let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
 
-                Ok(AcResult {
-                    frequency: freq,
-                    node_names: node_names.clone(),
-                    branch_names: branch_names.clone(),
-                    voltages: solution[..num_nodes].to_vec(),
-                    currents: if size > num_nodes {
-                        solution[num_nodes..].to_vec()
-                    } else {
-                        vec![]
-                    },
-                })
-            };
+            Ok(AcResult {
+                frequency: freq,
+                node_names: node_names.clone(),
+                branch_names: branch_names.clone(),
+                voltages: solution[..num_nodes].to_vec(),
+                currents: if size > num_nodes {
+                    solution[num_nodes..].to_vec()
+                } else {
+                    vec![]
+                },
+            })
+        };
 
         // Parallel sweep: every frequency point shares the same operating
         // point and matrix structure, so points are fully independent.

@@ -27,6 +27,7 @@ use std::collections::HashSet;
 use egui::Ui;
 use serde::{Deserialize, Serialize};
 
+use crate::common::app::ActiveViewer;
 use crate::common::{AppState, RSpiceApp};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
@@ -35,7 +36,6 @@ use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar};
-use crate::common::app::ActiveViewer;
 
 /// The result viewers, in tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -282,7 +282,10 @@ impl ResultsState {
 
     /// The zoom/pan override for one plot (copy; default = automatic view).
     pub fn plot_view(&self, viewer: ResultViewer, index: usize) -> PlotView {
-        self.views.get(&(viewer, index)).copied().unwrap_or_default()
+        self.views
+            .get(&(viewer, index))
+            .copied()
+            .unwrap_or_default()
     }
 
     /// Mutable zoom/pan override for one plot.
@@ -518,18 +521,17 @@ pub(super) fn point_card(
         .collect();
 
     let (pad_x, pad_y, gap, line_h) = (9.0, 6.0, 12.0, 16.0);
-    let width = (key_width + gap + value_width)
-        .max(title_galley.size().x)
-        + pad_x * 2.0;
+    let width = (key_width + gap + value_width).max(title_galley.size().x) + pad_x * 2.0;
     let height = pad_y * 2.0 + line_h * (rows.len() as f32 + 1.0);
 
     let mut origin = anchor + egui::vec2(14.0, -height - 8.0);
     if origin.x + width > bounds.right() - 4.0 {
         origin.x = anchor.x - width - 14.0;
     }
-    origin.y = origin
-        .y
-        .clamp(bounds.top() + 4.0, (bounds.bottom() - height - 4.0).max(bounds.top() + 4.0));
+    origin.y = origin.y.clamp(
+        bounds.top() + 4.0,
+        (bounds.bottom() - height - 4.0).max(bounds.top() + 4.0),
+    );
 
     let rect = egui::Rect::from_min_size(origin, egui::vec2(width, height));
     painter.rect(
@@ -547,7 +549,10 @@ pub(super) fn point_card(
         let y = origin.y + pad_y + line_h * (i as f32 + 1.0);
         painter.galley(egui::pos2(origin.x + pad_x, y), kg, c.text_dim);
         painter.galley(
-            egui::pos2(origin.x + pad_x + key_width + gap + value_width - vg.size().x, y),
+            egui::pos2(
+                origin.x + pad_x + key_width + gap + value_width - vg.size().x,
+                y,
+            ),
             vg,
             c.text,
         );
@@ -624,7 +629,10 @@ pub fn trace_color(hex: &str, fallback: egui::Color32) -> egui::Color32 {
 
 /// Resolve a waveform's display color from its stored hex + palette fallback.
 pub fn waveform_color(waveform: &WaveformData, index: usize, t: &Tokens) -> egui::Color32 {
-    trace_color(&waveform.color, t.color.traces[index % t.color.traces.len()])
+    trace_color(
+        &waveform.color,
+        t.color.traces[index % t.color.traces.len()],
+    )
 }
 
 /// Centered faint hint on an empty document well.
@@ -773,11 +781,9 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                             state.shell.results.spec_drafts = None;
                         }
                         if ui.button("Apply").clicked() && !specs::apply_drafts(state) {
-                            state.push_sim_message(
-                                crate::common::app::ConsoleMessage::warning(
-                                    "Specs not applied — fix the invalid bound first",
-                                ),
-                            );
+                            state.push_sim_message(crate::common::app::ConsoleMessage::warning(
+                                "Specs not applied — fix the invalid bound first",
+                            ));
                         }
                     } else if ui.button("Edit specs…").clicked() {
                         specs::open_editor(state);
@@ -846,7 +852,11 @@ fn run_selector(ui: &mut Ui, state: &mut AppState) {
                     );
                     let text = egui::RichText::new(body)
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                        .color(if is_active { t.color.text } else { t.color.text_dim });
+                        .color(if is_active {
+                            t.color.text
+                        } else {
+                            t.color.text_dim
+                        });
                     if ui
                         .add(egui::Label::new(text).sense(egui::Sense::click()))
                         .on_hover_text("Activate this run")

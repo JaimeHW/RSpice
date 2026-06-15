@@ -479,15 +479,17 @@ impl SaveSet {
                     }
                 }
                 SaveSignal::VoltageDiff(a, b) => {
-                    let probe =
-                        format!("v({},{})", a.to_ascii_lowercase(), b.to_ascii_lowercase());
+                    let probe = format!("v({},{})", a.to_ascii_lowercase(), b.to_ascii_lowercase());
                     if var.replace(' ', "") == probe {
                         return true;
                     }
                 }
                 SaveSignal::Current(elem) => {
                     let elem = elem.to_ascii_lowercase();
-                    if inner_i.or(branch).is_some_and(|t| pattern_selects(&elem, t)) {
+                    if inner_i
+                        .or(branch)
+                        .is_some_and(|t| pattern_selects(&elem, t))
+                    {
                         return true;
                     }
                 }

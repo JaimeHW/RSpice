@@ -22,8 +22,8 @@
 //! pass, leaving one stale evaluation).
 
 use super::common::{
-    CHARGE_Q, CONST_ROOT2, CONST_VT0, EPS0, EPSSI, EXP_THRESHOLD, KB_OVER_Q, MAX_EXP, MIN_EXP,
-    PI, dexp_temp,
+    CHARGE_Q, CONST_ROOT2, CONST_VT0, EPS0, EPSSI, EXP_THRESHOLD, KB_OVER_Q, MAX_EXP, MIN_EXP, PI,
+    dexp_temp,
 };
 use super::params::Bsim4v8Model;
 use crate::Value;
@@ -217,7 +217,12 @@ impl Bsim4v8ModelTemp {
             d_jswgs = m.jswgd;
         }
         for v in [
-            &mut s_js, &mut s_jsws, &mut s_jswgs, &mut d_js, &mut d_jsws, &mut d_jswgs,
+            &mut s_js,
+            &mut s_jsws,
+            &mut s_jswgs,
+            &mut d_js,
+            &mut d_jsws,
+            &mut d_jswgs,
         ] {
             if *v < 0.0 {
                 *v = 0.0;
@@ -670,7 +675,11 @@ impl Bsim4v8SizeDep {
 
         // --- Binned parameters ---
         let (inv_l, inv_w, inv_lw) = if m.bin_unit == 1 {
-            (1.0e-6 / p.leff, 1.0e-6 / p.weff, 1.0e-12 / (p.leff * p.weff))
+            (
+                1.0e-6 / p.leff,
+                1.0e-6 / p.weff,
+                1.0e-12 / (p.leff * p.weff),
+            )
         } else {
             (1.0 / p.leff, 1.0 / p.weff, 1.0 / (p.leff * p.weff))
         };
@@ -680,18 +689,18 @@ impl Bsim4v8SizeDep {
             };
         }
         bin!(
-            cdsc, cdscb, cdscd, cit, nfactor, xj, vsat, at, a0, ags, a1, a2, keta, ketac,
-            nsub, ndep, nsd, phin, ngate, gamma1, gamma2, vbx, vbm, xt, vfb, k1, kt1, kt1l,
-            k2, kt2, k3, k3b, w0, lpe0, lpeb, dvtp0, dvtp1, dvtp2, dvtp3, dvtp4, dvtp5, dvt0,
-            dvt1, dvt2, dvt0w, dvt1w, dvt2w, drout, dsub, vth0, ua, ua1, ub, ub1, uc, uc1, ud,
-            ud1, up, lp, eu, u0, ute, ucs, ucste, voff, tvoff, minv, minvcv, fprout, pdits,
-            pditsd, delta, rdsw, rdw, rsw, prwg, prwb, prt, eta0, etab, pclm, pdibl1, pdibl2,
-            pdiblb, pscbe1, pscbe2, pvag, wr, dwg, dwb, b0, b1, alpha0, alpha1, beta0, agidl,
-            bgidl, cgidl, egidl, rgidl, kgidl, fgidl, agisl, bgisl, cgisl, egisl, rgisl,
-            kgisl, fgisl, aigc, bigc, cigc, aigs, bigs, cigs, aigd, bigd, cigd, aigbacc,
-            bigbacc, cigbacc, aigbinv, bigbinv, cigbinv, nigc, nigbacc, nigbinv, ntox,
-            eigbinv, pigcd, poxedge, xrcrg1, xrcrg2, lambda, vtl, xn, vfbsdoff, tvfbsdoff,
-            cgsl, cgdl, ckappas, ckappad, cf, clc, cle, vfbcv, acde, moin, noff, voffcv,
+            cdsc, cdscb, cdscd, cit, nfactor, xj, vsat, at, a0, ags, a1, a2, keta, ketac, nsub,
+            ndep, nsd, phin, ngate, gamma1, gamma2, vbx, vbm, xt, vfb, k1, kt1, kt1l, k2, kt2, k3,
+            k3b, w0, lpe0, lpeb, dvtp0, dvtp1, dvtp2, dvtp3, dvtp4, dvtp5, dvt0, dvt1, dvt2, dvt0w,
+            dvt1w, dvt2w, drout, dsub, vth0, ua, ua1, ub, ub1, uc, uc1, ud, ud1, up, lp, eu, u0,
+            ute, ucs, ucste, voff, tvoff, minv, minvcv, fprout, pdits, pditsd, delta, rdsw, rdw,
+            rsw, prwg, prwb, prt, eta0, etab, pclm, pdibl1, pdibl2, pdiblb, pscbe1, pscbe2, pvag,
+            wr, dwg, dwb, b0, b1, alpha0, alpha1, beta0, agidl, bgidl, cgidl, egidl, rgidl, kgidl,
+            fgidl, agisl, bgisl, cgisl, egisl, rgisl, kgisl, fgisl, aigc, bigc, cigc, aigs, bigs,
+            cigs, aigd, bigd, cigd, aigbacc, bigbacc, cigbacc, aigbinv, bigbinv, cigbinv, nigc,
+            nigbacc, nigbinv, ntox, eigbinv, pigcd, poxedge, xrcrg1, xrcrg2, lambda, vtl, xn,
+            vfbsdoff, tvfbsdoff, cgsl, cgdl, ckappas, ckappad, cf, clc, cle, vfbcv, acde, moin,
+            noff, voffcv,
         );
         // v4.7 temperature dependence of leakage (applied to the binned
         // values below).
@@ -803,8 +812,16 @@ impl Bsim4v8SizeDep {
             / toxe
             / p.poxedge
             / p.poxedge;
-        p.aechvb = if m.mtype > 0.0 { 4.97232e-7 } else { 3.42537e-7 };
-        p.bechvb = if m.mtype > 0.0 { 7.45669e11 } else { 1.16645e12 };
+        p.aechvb = if m.mtype > 0.0 {
+            4.97232e-7
+        } else {
+            3.42537e-7
+        };
+        p.bechvb = if m.mtype > 0.0 {
+            7.45669e11
+        } else {
+            1.16645e12
+        };
         // 4.8.1+ behavior: negative dlcig/dlcigd are clamped to zero.
         let dlcig = if m.dlcig < 0.0 {
             log::warn!("BSIM4: dlcig = {:e} is negative; set to zero", m.dlcig);

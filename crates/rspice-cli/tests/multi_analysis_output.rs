@@ -47,7 +47,11 @@ fn each_analysis_gets_its_own_output_file() {
 
     let op = dir.join("results.op.csv");
     let tran = dir.join("results.tran.csv");
-    assert!(op.exists(), "missing per-analysis OP output {}", op.display());
+    assert!(
+        op.exists(),
+        "missing per-analysis OP output {}",
+        op.display()
+    );
     assert!(
         tran.exists(),
         "missing per-analysis transient output {}",
@@ -61,7 +65,10 @@ fn each_analysis_gets_its_own_output_file() {
     let op_text = std::fs::read_to_string(&op).expect("read op csv");
     assert!(op_text.starts_with("signal,"), "op file has op schema");
     let tran_text = std::fs::read_to_string(&tran).expect("read tran csv");
-    assert!(tran_text.starts_with("time,"), "tran file has waveform schema");
+    assert!(
+        tran_text.starts_with("time,"),
+        "tran file has waveform schema"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -91,7 +98,10 @@ fn single_analysis_keeps_exact_output_path() {
         .output()
         .expect("run rspice");
     assert!(output.status.success());
-    assert!(out.exists(), "single-analysis output must keep the exact path");
+    assert!(
+        out.exists(),
+        "single-analysis output must keep the exact path"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

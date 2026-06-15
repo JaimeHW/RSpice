@@ -211,7 +211,12 @@ fn ac_measurements_evaluate() {
             .find(|line| line.trim_start().starts_with(name))
             .unwrap_or_else(|| panic!("no {name} line in output:\n{stdout}"));
         assert!(!line.contains("FAILED"), "{name} must evaluate: {line}");
-        line.split('=').nth(1).expect("value").trim().parse().expect("numeric")
+        line.split('=')
+            .nth(1)
+            .expect("value")
+            .trim()
+            .parse()
+            .expect("numeric")
     };
 
     let f3db = value_of("F3DB =");
@@ -277,7 +282,10 @@ fn noise_measurements_and_goal_checks() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("SPOT"), "failure names the measurement: {stderr}");
+    assert!(
+        stderr.contains("SPOT"),
+        "failure names the measurement: {stderr}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

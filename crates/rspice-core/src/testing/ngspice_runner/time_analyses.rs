@@ -50,8 +50,7 @@ impl TestRunner {
                 .max_by_key(|series| series.x.len())
             && series.x.len() >= 2
         {
-            engine.config.locked_time_grid =
-                Some(std::sync::Arc::new(series.x.clone()));
+            engine.config.locked_time_grid = Some(std::sync::Arc::new(series.x.clone()));
         }
         let max_step =
             tmax.unwrap_or_else(|| Self::default_transient_max_step(tstep, tstop, tstart));

@@ -418,9 +418,7 @@ impl Engine {
         // TRNOISE sources expand into seeded, deterministic PWL sample
         // trains covering [0, tstop] before circuit construction; decks
         // without noise sources pass through untouched (no clone).
-        match noise::expand_transient_noise(netlist, tstop)
-            .map_err(SimulationError::Circuit)?
-        {
+        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => {
                 engine.run_tran_with_abort_resolved(&expanded, tstop, max_step, abort)
             }
@@ -438,9 +436,7 @@ impl Engine {
         max_step: Value,
     ) -> Result<(TransientResult, TransientCheckpoint), SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        match noise::expand_transient_noise(netlist, tstop)
-            .map_err(SimulationError::Circuit)?
-        {
+        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => {
                 engine.run_tran_resolved_with_resume(&expanded, tstop, max_step, &NoAbort, None)
             }
@@ -479,9 +475,7 @@ impl Engine {
         }
 
         let engine = self.resolved_for_netlist(netlist);
-        match noise::expand_transient_noise(netlist, tstop)
-            .map_err(SimulationError::Circuit)?
-        {
+        match noise::expand_transient_noise(netlist, tstop).map_err(SimulationError::Circuit)? {
             Some(expanded) => engine.run_tran_resolved_with_resume(
                 &expanded,
                 tstop,
@@ -1053,8 +1047,8 @@ impl Engine {
         // wall — restarting again cannot help). Returns whether it ran.
         macro_rules! livelock_restart {
             () => {{
-                let same_wall = livelock_last_restart_t
-                    .is_some_and(|prev| t - prev < livelock_restart_spacing);
+                let same_wall =
+                    livelock_last_restart_t.is_some_and(|prev| t - prev < livelock_restart_spacing);
                 if same_wall {
                     false
                 } else {
@@ -1071,16 +1065,13 @@ impl Engine {
                         &mut bsim3_history,
                         &mut bsim4_history,
                     );
-                    lte_estimator = LteEstimator::with_tolerances(
-                        self.voltage_reltol(),
-                        self.voltage_abstol(),
-                    );
+                    lte_estimator =
+                        LteEstimator::with_tolerances(self.voltage_reltol(), self.voltage_abstol());
                     let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
                         Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
                         breakpoints.next_after(t),
                     );
-                    timestep
-                        .force_step(restart_dt.max(timestep.preferred_min_dt()).min(max_step));
+                    timestep.force_step(restart_dt.max(timestep.preferred_min_dt()).min(max_step));
                     trap_order = 1;
                     lte_warmup_skips = 2;
                     log::warn!(
@@ -2314,25 +2305,24 @@ impl Engine {
                     // need two clean accepted points before the truncation
                     // estimators can difference them meaningfully.
                     || lte_warmup_skips > 0;
-            let vbic_truncation_limit = if !first_accepted_transient_step
-                && has_vbic_dynamic_charges
-            {
-                Self::vbic_ngspice_truncation_limit(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &bjt_history,
-                    self.voltage_reltol(),
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
-                )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
-            } else {
-                None
-            };
+            let vbic_truncation_limit =
+                if !first_accepted_transient_step && has_vbic_dynamic_charges {
+                    Self::vbic_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &bjt_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let legacy_bjt_truncation_limit = if !linearized_startup_recovery_points
                 && !first_accepted_transient_step
                 && has_bjts

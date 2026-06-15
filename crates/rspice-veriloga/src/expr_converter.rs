@@ -203,10 +203,13 @@ impl<'a> ExprConverter<'a> {
             Expression::BranchAccess(access) => self.convert_branch_access(access),
             Expression::ArrayAccess(access) => {
                 let Some((base, lower, len)) = self.ctx.array(&access.array) else {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        format!("'{}' is not a declared array variable", access.array),
-                    ))
-                    .into());
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "'{}' is not a declared array variable",
+                            access.array
+                        )))
+                        .into(),
+                    );
                 };
                 let index = self.convert(&access.index)?;
                 Ok(IrExpr::VarIndexed {
@@ -217,12 +220,12 @@ impl<'a> ExprConverter<'a> {
                     index: Box::new(index),
                 })
             }
-            Expression::ArrayLiteral(_) => Err(CodeGenError::new(
-                CodeGenErrorKind::UnsupportedFeature(
+            Expression::ArrayLiteral(_) => {
+                Err(CodeGenError::new(CodeGenErrorKind::UnsupportedFeature(
                     "Array literals are only supported as analog filter coefficient lists".into(),
-                ),
-            )
-            .into()),
+                ))
+                .into())
+            }
             Expression::AnalogOperator(op) => self.convert_analog_operator(op),
             Expression::NoiseSource(noise) => self.convert_noise_source(noise),
         }
@@ -848,7 +851,9 @@ impl<'a> ExprConverter<'a> {
             "ddx" => {
                 let inner = self.convert(require_arg(0)?)?;
                 let probe = require_arg(1)?;
-                let Expression::BranchAccess(BranchAccess::Nodes { access, pos, neg, .. }) = probe
+                let Expression::BranchAccess(BranchAccess::Nodes {
+                    access, pos, neg, ..
+                }) = probe
                 else {
                     return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                         "ddx probe must be a branch access like V(node) or V(a,b)".into(),
@@ -1060,13 +1065,12 @@ impl<'a> ExprConverter<'a> {
                 let expr = self.convert(require_arg(0)?)?;
                 let zeros = self.const_complex_pairs(require_arg(1)?)?;
                 let denominator = self.const_real_array(require_arg(2)?)?;
-                let numerator =
-                    crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "laplace_zd zeros: {}",
-                            e
-                        )))
-                    })?;
+                let numerator = crate::laplace::roots_to_polynomial(&zeros).map_err(|e| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                        "laplace_zd zeros: {}",
+                        e
+                    )))
+                })?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
                     numerator,
@@ -1078,13 +1082,12 @@ impl<'a> ExprConverter<'a> {
                 let expr = self.convert(require_arg(0)?)?;
                 let numerator = self.const_real_array(require_arg(1)?)?;
                 let poles = self.const_complex_pairs(require_arg(2)?)?;
-                let denominator =
-                    crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
-                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
-                            "laplace_np poles: {}",
-                            e
-                        )))
-                    })?;
+                let denominator = crate::laplace::roots_to_polynomial(&poles).map_err(|e| {
+                    CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                        "laplace_np poles: {}",
+                        e
+                    )))
+                })?;
                 Ok(IrExpr::LaplaceND {
                     expr: Box::new(expr),
                     numerator,
@@ -1128,10 +1131,13 @@ impl<'a> ExprConverter<'a> {
                     ),
                 };
                 if denominator.first().copied().unwrap_or(0.0) == 0.0 {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        format!("{}: leading denominator coefficient must be nonzero", call.name),
-                    ))
-                    .into());
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "{}: leading denominator coefficient must be nonzero",
+                            call.name
+                        )))
+                        .into(),
+                    );
                 }
                 let period = match autodiff_fold(self.convert(require_arg(3)?)?) {
                     IrExpr::Const(t) if t > 0.0 && t.is_finite() => t,
@@ -1183,14 +1189,9 @@ impl<'a> ExprConverter<'a> {
             ))
             .into());
         }
-        let mut points: Vec<(f64, f64)> =
-            flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        let mut points: Vec<(f64, f64)> = flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
         points.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        if log_interp
-            && points
-                .iter()
-                .any(|&(f, p)| f <= 0.0 || p <= 0.0)
-        {
+        if log_interp && points.iter().any(|&(f, p)| f <= 0.0 || p <= 0.0) {
             return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
                 "noise_table_log requires strictly positive frequencies and powers".into(),
             ))
@@ -1272,10 +1273,13 @@ impl<'a> ExprConverter<'a> {
             }
             BranchAccess::Branch { access, name, .. } => {
                 let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        format!("Unknown branch: {}", name),
-                    ))
-                    .into());
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "Unknown branch: {}",
+                            name
+                        )))
+                        .into(),
+                    );
                 };
                 Self::access_to_ir(access, pos_idx, neg_idx)
             }
@@ -1413,10 +1417,13 @@ impl<'a> ExprConverter<'a> {
             }
             BranchAccess::Branch { name, .. } => {
                 let Some((pos_idx, neg_idx)) = self.ctx.branch_nodes(name) else {
-                    return Err(CodeGenError::new(CodeGenErrorKind::InvalidExpression(
-                        format!("Unknown branch: {}", name),
-                    ))
-                    .into());
+                    return Err(
+                        CodeGenError::new(CodeGenErrorKind::InvalidExpression(format!(
+                            "Unknown branch: {}",
+                            name
+                        )))
+                        .into(),
+                    );
                 };
                 Ok(BranchRef {
                     pos_terminal: pos_idx,

@@ -7,10 +7,10 @@ use egui::{Context, Frame, Rect, Sense, TopBottomPanel, Ui, vec2};
 
 use crate::common::AppState;
 use crate::shell::WorkspaceView;
+use crate::ui::Direction;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::Direction;
 
 /// Workspace tab strip height.
 pub const WTABS_HEIGHT: f32 = 35.0;
@@ -58,8 +58,15 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                     let dirty = view == WorkspaceView::Schematic && state.schematic.is_dirty;
                     let badge = (view == WorkspaceView::Results && new_results).then_some(1u32);
 
-                    if tab(ui, label, view_icon(view), state.shell.view == view, dirty, badge)
-                        .clicked()
+                    if tab(
+                        ui,
+                        label,
+                        view_icon(view),
+                        state.shell.view == view,
+                        dirty,
+                        badge,
+                    )
+                    .clicked()
                     {
                         state.shell.view = view;
                         if view == WorkspaceView::Results {
@@ -158,7 +165,11 @@ fn tab(
     let icon_rect = Rect::from_center_size(egui::pos2(x + 6.5, cy), vec2(13.0, 13.0));
     icon.paint(painter, icon_rect, icon_color);
     x += 13.0 + 7.0;
-    painter.galley(egui::pos2(x, cy - galley.size().y * 0.5), galley.clone(), text_color);
+    painter.galley(
+        egui::pos2(x, cy - galley.size().y * 0.5),
+        galley.clone(),
+        text_color,
+    );
     x += galley.size().x;
 
     if dirty {

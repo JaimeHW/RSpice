@@ -249,10 +249,7 @@ impl MeasureResult {
 /// Resolve a signal by name, falling back to a case-insensitive scan.
 /// SPICE netlists are case-insensitive, so `.MEAS ... V(OUT)` must find a
 /// waveform stored under `V(out)`.
-fn lookup_signal<'a>(
-    signals: &HashMap<String, &'a [Value]>,
-    name: &str,
-) -> Option<&'a [Value]> {
+fn lookup_signal<'a>(signals: &HashMap<String, &'a [Value]>, name: &str) -> Option<&'a [Value]> {
     if let Some(signal) = signals.get(name) {
         return Some(signal);
     }
@@ -764,9 +761,7 @@ impl MeasureEngine {
         }
         match crate::netlist::expr::eval_expression(expression, &ctx) {
             Ok(value) => MeasureResult::success(name, value),
-            Err(err) => {
-                MeasureResult::failed(name, &format!("PARAM expression failed: {err}"))
-            }
+            Err(err) => MeasureResult::failed(name, &format!("PARAM expression failed: {err}")),
         }
     }
 

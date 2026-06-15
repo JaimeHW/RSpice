@@ -64,8 +64,7 @@ impl RSpiceApp {
 
         // Ctrl+Enter verifies; bare Enter belongs to the textarea (the
         // field note explicitly invites line breaks).
-        let ctrl_enter =
-            ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
+        let ctrl_enter = ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Enter));
 
         let state = &mut self.state;
         let choice = Dialog::new("License", "Enter license key", primary)
@@ -173,12 +172,16 @@ impl RSpiceApp {
         let key = self.state.dialogs.license_dialog.text.trim().to_owned();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = license::store_key(&key) {
-            self.state.push_user_message(ConsoleMessage::warning(format!(
-                "License active for this session, but storing it failed: {error}"
-            )));
+            self.state
+                .push_user_message(ConsoleMessage::warning(format!(
+                    "License active for this session, but storing it failed: {error}"
+                )));
         }
         self.state.license_key = Some(key);
-        let message = format!("License activated — {} until {}", info.tier, info.updates_until);
+        let message = format!(
+            "License activated — {} until {}",
+            info.tier, info.updates_until
+        );
         self.state.license = Some(info);
         self.state.dialogs.license_dialog.open = false;
         self.state.shell.toasts.info(ctx, &message);
@@ -235,8 +238,7 @@ fn row(ui: &mut egui::Ui, key: &str, value: &str, value_color: egui::Color32) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.horizontal(|ui| {
-        let (label_rect, _) =
-            ui.allocate_exact_size(egui::vec2(110.0, 20.0), egui::Sense::hover());
+        let (label_rect, _) = ui.allocate_exact_size(egui::vec2(110.0, 20.0), egui::Sense::hover());
         ui.painter().text(
             egui::pos2(label_rect.left(), label_rect.center().y),
             egui::Align2::LEFT_CENTER,

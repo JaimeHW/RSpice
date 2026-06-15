@@ -48,7 +48,11 @@ fn delete_confirm_dialog(ctx: &egui::Context, state: &mut AppState) {
                 LibraryDeleteTarget::Cell { library, cell } => {
                     state.pending_delete_cell = Some((library, cell));
                 }
-                LibraryDeleteTarget::View { library, cell, view } => {
+                LibraryDeleteTarget::View {
+                    library,
+                    cell,
+                    view,
+                } => {
                     state.pending_delete_view = Some((library, cell, view));
                 }
             }
@@ -167,9 +171,11 @@ fn handle_keyboard_nav(ui: &Ui, state: &mut AppState) {
                     .iter()
                     .map(|lib| lib.name.clone())
                     .collect();
-                if let Some(next) =
-                    step_in(&names, state.library_manager.selected_library.as_deref(), step)
-                {
+                if let Some(next) = step_in(
+                    &names,
+                    state.library_manager.selected_library.as_deref(),
+                    step,
+                ) {
                     state.library_manager.select_library(&next);
                 }
             }
@@ -267,9 +273,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 state.library_manager.selected_cell.clone(),
                 state.library_manager.selected_view.clone(),
             ) {
-                (Some(library), Some(cell), Some(view)) => {
-                    Some(LibraryDeleteTarget::View { library, cell, view })
-                }
+                (Some(library), Some(cell), Some(view)) => Some(LibraryDeleteTarget::View {
+                    library,
+                    cell,
+                    view,
+                }),
                 (Some(library), Some(cell), None) => {
                     Some(LibraryDeleteTarget::Cell { library, cell })
                 }
@@ -304,171 +312,185 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
             // ---- Library column
             let lib_focus = state.library_manager.nav_column == NavColumn::Library;
-            column(ui, column_width, columns_height, "Library", true, lib_focus, |ui| {
-                let libraries: Vec<(String, usize, bool)> = state
-                    .library_manager
-                    .libraries_sorted()
-                    .iter()
-                    .map(|lib| (lib.name.clone(), lib.cells.len(), lib.read_only))
-                    .collect();
-                for (name, cell_count, read_only) in libraries {
-                    let selected = state.library_manager.selected_library.as_deref()
-                        == Some(name.as_str());
-                    // Read-only libraries wear the same "ro ·" mark as the
-                    // rail's palette groups.
-                    let meta = if read_only {
-                        format!("ro · {cell_count}")
-                    } else {
-                        cell_count.to_string()
-                    };
-                    let row = TreeRow::new(&name)
-                        .meta(&meta)
-                        .selected(selected)
-                        .show(ui);
-                    if selected && state.library_manager.nav_scroll {
-                        row.response.scroll_to_me(Some(egui::Align::Center));
+            column(
+                ui,
+                column_width,
+                columns_height,
+                "Library",
+                true,
+                lib_focus,
+                |ui| {
+                    let libraries: Vec<(String, usize, bool)> = state
+                        .library_manager
+                        .libraries_sorted()
+                        .iter()
+                        .map(|lib| (lib.name.clone(), lib.cells.len(), lib.read_only))
+                        .collect();
+                    for (name, cell_count, read_only) in libraries {
+                        let selected = state.library_manager.selected_library.as_deref()
+                            == Some(name.as_str());
+                        // Read-only libraries wear the same "ro ·" mark as the
+                        // rail's palette groups.
+                        let meta = if read_only {
+                            format!("ro · {cell_count}")
+                        } else {
+                            cell_count.to_string()
+                        };
+                        let row = TreeRow::new(&name).meta(&meta).selected(selected).show(ui);
+                        if selected && state.library_manager.nav_scroll {
+                            row.response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.response.clicked() {
+                            state.library_manager.select_library(&name);
+                            state.library_manager.nav_column = NavColumn::Library;
+                        }
+                        if read_only {
+                            row.response
+                                .on_hover_text("Read-only library — placeable, never editable");
+                        }
                     }
-                    if row.response.clicked() {
-                        state.library_manager.select_library(&name);
-                        state.library_manager.nav_column = NavColumn::Library;
-                    }
-                    if read_only {
-                        row.response
-                            .on_hover_text("Read-only library — placeable, never editable");
-                    }
-                }
-            });
+                },
+            );
 
             // ---- Cell column
             let cell_focus = state.library_manager.nav_column == NavColumn::Cell;
-            column(ui, column_width, columns_height, "Cell", true, cell_focus, |ui| {
-                let Some(library) = state
-                    .library_manager
-                    .selected_library
-                    .clone()
-                else {
-                    column_empty(ui, "Select a library");
-                    return;
-                };
-                let (cells, unfiltered): (Vec<String>, usize) = state
-                    .library_manager
-                    .get_library(&library)
-                    .map(|lib| {
-                        let all = lib.cells_sorted();
-                        let unfiltered = all.len();
-                        let names = all
-                            .iter()
-                            .filter(|cell| {
-                                filter.is_empty()
-                                    || cell.name.to_lowercase().contains(&filter)
-                            })
-                            .map(|cell| cell.name.clone())
-                            .collect();
-                        (names, unfiltered)
-                    })
-                    .unwrap_or_default();
-                if cells.is_empty() {
-                    // Name the filter so a stale one can't gaslight the browser.
-                    if unfiltered == 0 {
-                        column_empty(ui, "No cells yet — New cell creates the first");
-                    } else {
-                        column_empty(
-                            ui,
-                            &format!(
-                                "No cells match '{}'",
-                                state.library_manager.filter_text.trim()
-                            ),
-                        );
+            column(
+                ui,
+                column_width,
+                columns_height,
+                "Cell",
+                true,
+                cell_focus,
+                |ui| {
+                    let Some(library) = state.library_manager.selected_library.clone() else {
+                        column_empty(ui, "Select a library");
+                        return;
+                    };
+                    let (cells, unfiltered): (Vec<String>, usize) = state
+                        .library_manager
+                        .get_library(&library)
+                        .map(|lib| {
+                            let all = lib.cells_sorted();
+                            let unfiltered = all.len();
+                            let names = all
+                                .iter()
+                                .filter(|cell| {
+                                    filter.is_empty() || cell.name.to_lowercase().contains(&filter)
+                                })
+                                .map(|cell| cell.name.clone())
+                                .collect();
+                            (names, unfiltered)
+                        })
+                        .unwrap_or_default();
+                    if cells.is_empty() {
+                        // Name the filter so a stale one can't gaslight the browser.
+                        if unfiltered == 0 {
+                            column_empty(ui, "No cells yet — New cell creates the first");
+                        } else {
+                            column_empty(
+                                ui,
+                                &format!(
+                                    "No cells match '{}'",
+                                    state.library_manager.filter_text.trim()
+                                ),
+                            );
+                        }
+                        return;
                     }
-                    return;
-                }
-                let library_read_only = state
-                    .library_manager
-                    .get_library(&library)
-                    .is_some_and(|lib| lib.read_only);
-                for name in cells {
-                    let selected =
-                        state.library_manager.selected_cell.as_deref() == Some(name.as_str());
-                    let row = TreeRow::new(&name).mono().selected(selected).show(ui);
-                    if selected && state.library_manager.nav_scroll {
-                        row.response.scroll_to_me(Some(egui::Align::Center));
+                    let library_read_only = state
+                        .library_manager
+                        .get_library(&library)
+                        .is_some_and(|lib| lib.read_only);
+                    for name in cells {
+                        let selected =
+                            state.library_manager.selected_cell.as_deref() == Some(name.as_str());
+                        let row = TreeRow::new(&name).mono().selected(selected).show(ui);
+                        if selected && state.library_manager.nav_scroll {
+                            row.response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.response.clicked() {
+                            state.library_manager.select_cell(&library, &name);
+                            state.library_manager.nav_column = NavColumn::Cell;
+                        }
+                        // Right-click selects and offers the cell operations —
+                        // Copy stays live on read-only libraries (copying out
+                        // is the point); Rename and Delete disable.
+                        if row.response.secondary_clicked() {
+                            state.library_manager.select_cell(&library, &name);
+                            state.library_manager.nav_column = NavColumn::Cell;
+                        }
+                        cell_row_menu(&row.response, state, &library, &name, library_read_only);
                     }
-                    if row.response.clicked() {
-                        state.library_manager.select_cell(&library, &name);
-                        state.library_manager.nav_column = NavColumn::Cell;
-                    }
-                    // Right-click selects and offers the cell operations —
-                    // Copy stays live on read-only libraries (copying out
-                    // is the point); Rename and Delete disable.
-                    if row.response.secondary_clicked() {
-                        state.library_manager.select_cell(&library, &name);
-                        state.library_manager.nav_column = NavColumn::Cell;
-                    }
-                    cell_row_menu(&row.response, state, &library, &name, library_read_only);
-                }
-            });
+                },
+            );
 
             // ---- View column
             let view_focus = state.library_manager.nav_column == NavColumn::View;
-            column(ui, column_width, columns_height, "View", false, view_focus, |ui| {
-                if state.library_manager.selected_library.is_none() {
-                    column_empty(ui, "Select a library");
-                    return;
-                }
-                let (Some(library), Some(cell)) = (
-                    state.library_manager.selected_library.clone(),
-                    state.library_manager.selected_cell.clone(),
-                ) else {
-                    column_empty(ui, "Select a cell");
-                    return;
-                };
-                let views: Vec<(String, ViewType)> = state
-                    .library_manager
-                    .get_library(&library)
-                    .and_then(|lib| lib.get_cell(&cell))
-                    .map(|cell| {
-                        cell.views_sorted()
-                            .iter()
-                            .map(|view| (view.name.clone(), view.view_type))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                for (name, view_type) in views {
-                    let selected =
-                        state.library_manager.selected_view.as_deref() == Some(name.as_str());
-                    // Schematic-content views open in the editor; the rest
-                    // say so instead of staying silent.
-                    let openable =
-                        matches!(view_type, ViewType::Schematic | ViewType::Testbench);
-                    let meta = if openable {
-                        "double-click to open"
-                    } else {
-                        "no editor yet"
+            column(
+                ui,
+                column_width,
+                columns_height,
+                "View",
+                false,
+                view_focus,
+                |ui| {
+                    if state.library_manager.selected_library.is_none() {
+                        column_empty(ui, "Select a library");
+                        return;
+                    }
+                    let (Some(library), Some(cell)) = (
+                        state.library_manager.selected_library.clone(),
+                        state.library_manager.selected_cell.clone(),
+                    ) else {
+                        column_empty(ui, "Select a cell");
+                        return;
                     };
-                    let row = TreeRow::new(&name)
-                        .meta(meta)
-                        .mono()
-                        .selected(selected)
-                        .show(ui);
-                    if selected && state.library_manager.nav_scroll {
-                        row.response.scroll_to_me(Some(egui::Align::Center));
+                    let views: Vec<(String, ViewType)> = state
+                        .library_manager
+                        .get_library(&library)
+                        .and_then(|lib| lib.get_cell(&cell))
+                        .map(|cell| {
+                            cell.views_sorted()
+                                .iter()
+                                .map(|view| (view.name.clone(), view.view_type))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    for (name, view_type) in views {
+                        let selected =
+                            state.library_manager.selected_view.as_deref() == Some(name.as_str());
+                        // Schematic-content views open in the editor; the rest
+                        // say so instead of staying silent.
+                        let openable =
+                            matches!(view_type, ViewType::Schematic | ViewType::Testbench);
+                        let meta = if openable {
+                            "double-click to open"
+                        } else {
+                            "no editor yet"
+                        };
+                        let row = TreeRow::new(&name)
+                            .meta(meta)
+                            .mono()
+                            .selected(selected)
+                            .show(ui);
+                        if selected && state.library_manager.nav_scroll {
+                            row.response.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.response.clicked() {
+                            state.library_manager.select_view(&library, &cell, &name);
+                            state.library_manager.nav_column = NavColumn::View;
+                        }
+                        if row.response.double_clicked() && openable {
+                            state.open_workspace_view(CellViewRef {
+                                library: library.clone(),
+                                cell: cell.clone(),
+                                view: name.clone(),
+                            });
+                            state.shell.view = WorkspaceView::Schematic;
+                        }
                     }
-                    if row.response.clicked() {
-                        state
-                            .library_manager
-                            .select_view(&library, &cell, &name);
-                        state.library_manager.nav_column = NavColumn::View;
-                    }
-                    if row.response.double_clicked() && openable {
-                        state.open_workspace_view(CellViewRef {
-                            library: library.clone(),
-                            cell: cell.clone(),
-                            view: name.clone(),
-                        });
-                        state.shell.view = WorkspaceView::Schematic;
-                    }
-                }
-            });
+                },
+            );
         },
     );
 
@@ -476,10 +498,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     state.library_manager.nav_scroll = false;
 
     // ---- Meta strip
-    let (meta_rect, _) = ui.allocate_exact_size(
-        egui::vec2(full_width, meta_height),
-        egui::Sense::hover(),
-    );
+    let (meta_rect, _) =
+        ui.allocate_exact_size(egui::vec2(full_width, meta_height), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(meta_rect, 0.0, c.bg_panel);
     painter.hline(
@@ -646,10 +666,8 @@ fn column(
             }
 
             // Column header.
-            let (head_rect, _) = ui.allocate_exact_size(
-                egui::vec2(width, 30.0),
-                egui::Sense::hover(),
-            );
+            let (head_rect, _) =
+                ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
             let painter = ui.painter();
             painter.rect_filled(head_rect, 0.0, c.bg_panel);
             painter.hline(

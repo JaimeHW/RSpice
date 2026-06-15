@@ -392,8 +392,7 @@ impl TestRunner {
 /// timestep-collapse refusal. Timeouts, panics, parse and build errors stay
 /// genuine defects even on an unsolvable deck.
 fn is_clean_refusal_diagnostic(message: &str) -> bool {
-    message.contains("Convergence failed")
-        || message.contains("timestep pinned at the minimum")
+    message.contains("Convergence failed") || message.contains("timestep pinned at the minimum")
 }
 
 #[cfg(test)]
@@ -423,7 +422,9 @@ mod tests {
         assert!(!is_clean_refusal_diagnostic(
             "Simulation error: Simulation aborted by user"
         ));
-        assert!(!is_clean_refusal_diagnostic("Parse error: unknown card .foo"));
+        assert!(!is_clean_refusal_diagnostic(
+            "Parse error: unknown card .foo"
+        ));
         assert!(!is_clean_refusal_diagnostic(
             "Circuit build error: node q1_e has no DC path to ground"
         ));

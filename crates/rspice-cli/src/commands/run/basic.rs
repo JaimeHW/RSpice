@@ -27,16 +27,20 @@ pub(super) fn run_dc_op(ctx: &RunContext<'_>) -> Result<(), CliError> {
                             .unwrap_or("node");
                         (name, std::slice::from_ref(&result.node_voltages[node]))
                     })
-                    .chain(result.branch_currents.iter().enumerate().map(
-                        |(index, current)| {
-                            let name = result
-                                .branch_names
-                                .get(index)
-                                .map(|n| n.as_str())
-                                .unwrap_or("branch");
-                            (name, std::slice::from_ref(current))
-                        },
-                    )),
+                    .chain(
+                        result
+                            .branch_currents
+                            .iter()
+                            .enumerate()
+                            .map(|(index, current)| {
+                                let name = result
+                                    .branch_names
+                                    .get(index)
+                                    .map(|n| n.as_str())
+                                    .unwrap_or("branch");
+                                (name, std::slice::from_ref(current))
+                            }),
+                    ),
             )?;
 
             if !ctx.quiet {
@@ -127,7 +131,10 @@ fn print_device_op_report(report: &rspice_core::circuit::DeviceOpReport, verbose
             .map(|(name, value)| format!("{}={}", name, format_engineering(*value)))
             .collect::<Vec<_>>()
             .join("  ");
-        println!("  {:<16} {:<7}{} {}", entry.name, entry.device_kind, region, params);
+        println!(
+            "  {:<16} {:<7}{} {}",
+            entry.name, entry.device_kind, region, params
+        );
     }
     if report.entries.len() > cap {
         println!(
@@ -330,10 +337,7 @@ pub(super) fn run_dc_sweep(
 
             ctx.record_measurements(
                 "DC",
-                rspice_core::analysis::advanced::evaluate_dc_measurements(
-                    ctx.netlist,
-                    &results,
-                ),
+                rspice_core::analysis::advanced::evaluate_dc_measurements(ctx.netlist, &results),
             );
 
             if let Some(ref output_path) = ctx.output_path_for("dc") {
@@ -349,8 +353,7 @@ pub(super) fn run_dc_sweep(
 
                         let mut dc_sweep = Hdf5WaveformSection::new(source, sweep_vals.clone());
                         for signal in &signals {
-                            dc_sweep
-                                .add_signal(signal.display_name.clone(), signal.values.clone());
+                            dc_sweep.add_signal(signal.display_name.clone(), signal.values.clone());
                         }
                         data.dc_sweep = Some(dc_sweep);
 
@@ -450,36 +453,32 @@ pub(super) fn run_transient(
         // run to this segment's stop time, and persist the new state (when
         // checkpointing). The core validates the netlist fingerprint, so a
         // checkpoint can never silently continue a different circuit.
-        let run = if let Some(ref resume_path) = ctx.args.resume {
-            let checkpoint =
-                rspice_core::engine::TransientCheckpoint::load(resume_path).map_err(|e| {
-                    CliError::SimulationError {
-                        message: format!(
-                            "cannot resume from {}: {e}",
-                            resume_path.display()
-                        ),
+        let run =
+            if let Some(ref resume_path) = ctx.args.resume {
+                let checkpoint = rspice_core::engine::TransientCheckpoint::load(resume_path)
+                    .map_err(|e| CliError::SimulationError {
+                        message: format!("cannot resume from {}: {e}", resume_path.display()),
                         analysis: Some("Transient".to_string()),
-                    }
-                })?;
-            ctx.engine
-                .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
-        } else {
-            ctx.engine
-                .run_tran_checkpointed(ctx.netlist, tstop, internal_max_step)
-        };
+                    })?;
+                ctx.engine
+                    .run_tran_resume(ctx.netlist, &checkpoint, tstop, internal_max_step)
+            } else {
+                ctx.engine
+                    .run_tran_checkpointed(ctx.netlist, tstop, internal_max_step)
+            };
         pb.finish_and_clear();
         match run {
             Ok((result, checkpoint)) => {
                 if let Some(ref checkpoint_path) = ctx.args.checkpoint {
-                    checkpoint.save(checkpoint_path).map_err(|e| {
-                        CliError::SimulationError {
+                    checkpoint
+                        .save(checkpoint_path)
+                        .map_err(|e| CliError::SimulationError {
                             message: format!(
                                 "cannot save checkpoint to {}: {e}",
                                 checkpoint_path.display()
                             ),
                             analysis: Some("Transient".to_string()),
-                        }
-                    })?;
+                        })?;
                     if !ctx.quiet {
                         println!(
                             "  Checkpoint saved (t={:.6e}s): {}",
@@ -549,16 +548,20 @@ pub(super) fn run_transient(
                             .unwrap_or("node");
                         (name, waveform.as_slice())
                     })
-                    .chain(result.branch_currents.iter().enumerate().map(
-                        |(index, waveform)| {
-                            let name = result
-                                .branch_names
-                                .get(index)
-                                .map(|n| n.as_str())
-                                .unwrap_or("branch");
-                            (name, waveform.as_slice())
-                        },
-                    )),
+                    .chain(
+                        result
+                            .branch_currents
+                            .iter()
+                            .enumerate()
+                            .map(|(index, waveform)| {
+                                let name = result
+                                    .branch_names
+                                    .get(index)
+                                    .map(|n| n.as_str())
+                                    .unwrap_or("branch");
+                                (name, waveform.as_slice())
+                            }),
+                    ),
             )?;
 
             if !ctx.quiet && !ctx.compress {
@@ -570,10 +573,7 @@ pub(super) fn run_transient(
 
             ctx.record_measurements(
                 "TRAN",
-                rspice_core::analysis::advanced::evaluate_tran_measurements(
-                    ctx.netlist,
-                    &result,
-                ),
+                rspice_core::analysis::advanced::evaluate_tran_measurements(ctx.netlist, &result),
             );
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {
@@ -753,7 +753,11 @@ fn write_fourier_output(
 
     match format {
         OutputFormat::Csv | OutputFormat::Tsv => {
-            let sep = if matches!(format, OutputFormat::Tsv) { '\t' } else { ',' };
+            let sep = if matches!(format, OutputFormat::Tsv) {
+                '\t'
+            } else {
+                ','
+            };
             writeln!(
                 file,
                 "output{0}harmonic{0}frequency_hz{0}magnitude{0}phase_deg{0}dc_component{0}thd_percent",
@@ -906,10 +910,7 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
                 let num_nodes = results.first().map(|(_, v)| v.len()).unwrap_or(0);
                 let header: String = (1..num_nodes)
                     .map(|i| {
-                        let name = node_names
-                            .get(i)
-                            .cloned()
-                            .unwrap_or_else(|| i.to_string());
+                        let name = node_names.get(i).cloned().unwrap_or_else(|| i.to_string());
                         format!(",V({})", name)
                     })
                     .collect();

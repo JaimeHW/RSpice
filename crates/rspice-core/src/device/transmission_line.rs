@@ -10,7 +10,7 @@
 //!
 //! # Theory
 //! A lossless transmission line is characterized by:
-//! - Z0: Characteristic impedance (Î©)
+//! - Z0: Characteristic impedance (Ω)
 //! - TD: Propagation delay (s)
 //!
 //! The telegrapher's equations relate voltage and current at both ends:
@@ -224,12 +224,7 @@ VS 168  0  PULSE (0 5 15.9NS 0.2NS 0.2NS 15.8NS 32NS )
         ));
         let engine = crate::engine::Engine::new(config);
         let result = engine
-            .run_tran_with_abort(
-                &netlist,
-                47e-9,
-                0.1e-9,
-                &crate::abort_signal::NoAbort,
-            )
+            .run_tran_with_abort(&netlist, 47e-9, 0.1e-9, &crate::abort_signal::NoAbort)
             .expect("locked transient runs");
 
         let v2_idx = result

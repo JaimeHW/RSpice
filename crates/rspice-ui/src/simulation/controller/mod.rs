@@ -254,10 +254,7 @@ impl SimulationController {
             result.netlist
         };
 
-        netlist = Self::apply_simulation_options_to_netlist(
-            &netlist,
-            &state.sim_setup.options,
-        );
+        netlist = Self::apply_simulation_options_to_netlist(&netlist, &state.sim_setup.options);
 
         log::info!(
             "Prepared netlist ({} bytes):\n{}",

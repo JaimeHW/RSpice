@@ -66,7 +66,12 @@ const GLOBAL_RULES: [ShortcutRule; 20] = [
         Some(true),
         Some(true),
     ),
-    ShortcutRule::new(ShortcutCommand::ToggleBrowserPanel, Key::B, Some(true), None),
+    ShortcutRule::new(
+        ShortcutCommand::ToggleBrowserPanel,
+        Key::B,
+        Some(true),
+        None,
+    ),
     ShortcutRule::new(
         ShortcutCommand::ToggleLogPanel,
         Key::Backtick,
@@ -80,7 +85,12 @@ const GLOBAL_RULES: [ShortcutRule; 20] = [
     ShortcutRule::new(ShortcutCommand::RunChecks, Key::E, Some(true), None),
     ShortcutRule::new(ShortcutCommand::NextViolation, Key::F4, None, Some(false)),
     ShortcutRule::new(ShortcutCommand::PrevViolation, Key::F4, None, Some(true)),
-    ShortcutRule::new(ShortcutCommand::NextWorkspaceTab, Key::Tab, Some(true), None),
+    ShortcutRule::new(
+        ShortcutCommand::NextWorkspaceTab,
+        Key::Tab,
+        Some(true),
+        None,
+    ),
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Plus, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomIn, Key::Equals, Some(true), None),
     ShortcutRule::new(ShortcutCommand::ZoomOut, Key::Minus, Some(true), None),

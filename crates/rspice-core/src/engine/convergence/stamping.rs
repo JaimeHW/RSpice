@@ -4,10 +4,7 @@ use super::*;
 
 impl Engine {
     #[inline]
-    pub(in crate::engine) fn effective_device_junction_gmin(
-        &self,
-        gmin: Value,
-    ) -> Value {
+    pub(in crate::engine) fn effective_device_junction_gmin(&self, gmin: Value) -> Value {
         let configured = self
             .config
             .convergence_config

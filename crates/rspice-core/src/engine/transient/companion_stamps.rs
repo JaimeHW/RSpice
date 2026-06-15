@@ -604,7 +604,7 @@ impl Engine {
         let cq_curr =
             Self::jfet_companion_ccap(method, trap_order, dt, q_curr, q_prev, q_prev_prev, cq_prev);
         // Match ngspice load linearization contract for capacitive branches:
-        //   i(v) â‰ˆ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
+        //   i(v) ≈ ccap + geq * (v - v_hist) = geq * v - (geq * v_hist - ccap).
         // With our companion stamp convention (i = geq * v - i_eq), this gives:
         //   i_eq = geq * v_hist - ccap.
         // NOTE: This intentionally uses branch voltage history, not charge, because

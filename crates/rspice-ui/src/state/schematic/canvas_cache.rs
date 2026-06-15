@@ -58,9 +58,7 @@ impl CanvasCache {
                 min.y = min.y.min(point.y);
                 max.x = max.x.max(point.x);
                 max.y = max.y.max(point.y);
-                self.wire_vertices
-                    .entry(*point)
-                    .or_insert((wire.id, index));
+                self.wire_vertices.entry(*point).or_insert((wire.id, index));
             }
             self.wire_bounds.push((min, max));
         }
@@ -119,7 +117,10 @@ mod tests {
         assert!(state.is_draggable_wire_point(Point::new(40, 40)));
         assert!(!state.is_draggable_wire_point(Point::new(99, 99)));
         let cache = state.canvas_cache().expect("cache fresh");
-        assert_eq!(cache.wire_bounds[1], (Point::new(40, 0), Point::new(40, 40)));
+        assert_eq!(
+            cache.wire_bounds[1],
+            (Point::new(40, 0), Point::new(40, 40))
+        );
 
         // A topology bump invalidates; rebuilding picks up the new bounds.
         state.wires[0].points[0] = Point::new(-20, 0);
@@ -127,6 +128,9 @@ mod tests {
         assert!(state.canvas_cache().is_none());
         state.ensure_canvas_cache();
         let cache = state.canvas_cache().expect("cache rebuilt");
-        assert_eq!(cache.wire_bounds[0], (Point::new(-20, 0), Point::new(40, 0)));
+        assert_eq!(
+            cache.wire_bounds[0],
+            (Point::new(-20, 0), Point::new(40, 0))
+        );
     }
 }

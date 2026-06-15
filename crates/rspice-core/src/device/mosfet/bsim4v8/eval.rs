@@ -223,7 +223,13 @@ impl Bsim4v8Charge {
 /// `BSIM4polyDepletion` (b4ld.c:5402-5433). Returns `(vgs_eff,
 /// dvgs_eff_dvg)`. Note this is the one BSIM4 routine on the modern
 /// `CHARGE` constant rather than the truncated `Charge_q`.
-fn poly_depletion(phi: Value, ngate: Value, epsgate: Value, coxe: Value, vgs: Value) -> (Value, Value) {
+fn poly_depletion(
+    phi: Value,
+    ngate: Value,
+    epsgate: Value,
+    coxe: Value,
+    vgs: Value,
+) -> (Value, Value) {
     if ngate > 1.0e18 && ngate < 1.0e25 && vgs > phi && epsgate != 0.0 {
         let t1 = 1.0e6 * CONST_CHARGE * epsgate * ngate / (coxe * coxe);
         let t8 = vgs - phi;
@@ -504,8 +510,8 @@ pub fn eval(
 
     let temp_ratio = mt.temp_ratio_m1;
     let t0 = (1.0 + p.lpe0 / leff).sqrt();
-    let t1 = p.k1ox * (t0 - 1.0) * p.sqrt_phi
-        + (p.kt1 + p.kt1l / leff + p.kt2 * vbseff) * temp_ratio;
+    let t1 =
+        p.k1ox * (t0 - 1.0) * p.sqrt_phi + (p.kt1 + p.kt1l / leff + p.kt2 * vbseff) * temp_ratio;
     let vth_narrow_w = toxe * p.phi / (p.weff + p.w0);
 
     let t3v = inst.eta0 + p.etab * vbseff;
@@ -520,8 +526,7 @@ pub fn eval(
 
     let lpe_vb = (1.0 + p.lpeb / leff).sqrt();
 
-    let mut vth = model.mtype * inst.vth0
-        + (p.k1ox * sqrt_phis - p.k1 * p.sqrt_phi) * lpe_vb
+    let mut vth = model.mtype * inst.vth0 + (p.k1ox * sqrt_phis - p.k1 * p.sqrt_phi) * lpe_vb
         - inst.k2ox * vbseff
         - delt_vth
         - t2
@@ -550,8 +555,7 @@ pub fn eval(
         let t0 = 1.0 / (3.0 + 8.0 * tmp4);
         n = (1.0 + 3.0 * tmp4) * t0;
         let t0 = t0 * t0;
-        dn_dvb =
-            (-tmp2 / xdep * dxdep_dvb + tmp3 * dtheta0_dvb + p.cdscb * theta0) / mt.coxe * t0;
+        dn_dvb = (-tmp2 / xdep * dxdep_dvb + tmp3 * dtheta0_dvb + p.cdscb * theta0) / mt.coxe * t0;
         dn_dvd = p.cdscd * theta0 / mt.coxe * t0;
     }
 
@@ -1165,7 +1169,8 @@ pub fn eval(
         let dt1_dvb = (dvdsat_dvb - t2 * desat_l_dvb / leff) / esat;
 
         cclm = fp * pvag_term * t0 * t1 / (p.pclm * p.litl);
-        dcclm_dvg = cclm * (dfp_dvg / fp + dpvag_term_dvg / pvag_term + dt0_dvg / t0 + dt1_dvg / t1);
+        dcclm_dvg =
+            cclm * (dfp_dvg / fp + dpvag_term_dvg / pvag_term + dt0_dvg / t0 + dt1_dvg / t1);
         dcclm_dvb = cclm * (dpvag_term_dvb / pvag_term + dt0_dvb / t0 + dt1_dvb / t1);
         dcclm_dvd = cclm * (dpvag_term_dvd / pvag_term + dt0_dvd / t0 + dt1_dvd / t1);
         vaclm = cclm * diff_vds;
@@ -1425,7 +1430,11 @@ pub fn eval(
     op.gds = gds;
     op.gm = gm;
     op.gmbs = gmb;
-    op.idovvds = if ids <= model.idovvdsc { model.idovvdsc } else { ids };
+    op.idovvds = if ids <= model.idovvdsc {
+        model.idovvdsc
+    } else {
+        ids
+    };
 
     // rgateMod <= 1 && trnqsMod == 0 && acnqsMod == 0: no Rg / NQS gcrg.
     // rdsMod = 0: no external bias-dependent S/D resistance.
@@ -1528,7 +1537,11 @@ pub fn eval(
             if t4 > model.gidlclamp {
                 t4 = model.gidlclamp;
             }
-            let t5 = if t4 == 0.0 { EXPL_THRESHOLD } else { p.kgisl / t4 };
+            let t5 = if t4 == 0.0 {
+                EXPL_THRESHOLD
+            } else {
+                p.kgisl / t4
+            };
             let t6;
             if t5 < EXPL_THRESHOLD {
                 t6 = t5.exp();
@@ -1567,7 +1580,11 @@ pub fn eval(
             if t4 > model.gidlclamp {
                 t4 = model.gidlclamp;
             }
-            let t5 = if t4 == 0.0 { EXPL_THRESHOLD } else { p.kgidl / t4 };
+            let t5 = if t4 == 0.0 {
+                EXPL_THRESHOLD
+            } else {
+                p.kgidl / t4
+            };
             let t6;
             if t5 < EXPL_THRESHOLD {
                 t6 = t5.exp();
@@ -1867,9 +1884,7 @@ pub fn eval(
         let mut qgate_l = cox_wlcen * (t1 - t0 * (0.5 - t3));
         let qov_cox = qgate_l / coxeff_inv;
         let mut cgg1 = cox_wlcen * (t4 * dvg_dp_dvg + t5 * dvdseff_cv_dvg);
-        let cgd1 = cox_wlcen * t5 * dvdseff_cv_dvd
-            + cgg1 * dvgsteff_cv_dvd
-            + qov_cox * dcoxeff_dvd;
+        let cgd1 = cox_wlcen * t5 * dvdseff_cv_dvd + cgg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
         let cgb1 = cox_wlcen * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb)
             + cgg1 * dvgsteff_cv_dvb
             + qov_cox * dcoxeff_dvb;
@@ -1885,9 +1900,8 @@ pub fn eval(
         let mut qbulk_l = cox_wlcen * t7 * (0.5 * vdseff_cv - t0 * vdseff_cv / t2);
         let qov_cox = qbulk_l / coxeff_inv;
         let mut cbg1 = cox_wlcen * (t10 + t11 * dvdseff_cv_dvg);
-        let cbd1 = cox_wlcen * t11 * dvdseff_cv_dvd
-            + cbg1 * dvgsteff_cv_dvd
-            + qov_cox * dcoxeff_dvd;
+        let cbd1 =
+            cox_wlcen * t11 * dvdseff_cv_dvd + cbg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
         let cbb1 = cox_wlcen * (t11 * dvdseff_cv_dvb + t12 * dabulk_cv_dvb)
             + cbg1 * dvgsteff_cv_dvb
             + qov_cox * dcoxeff_dvb;
@@ -1906,9 +1920,7 @@ pub fn eval(
             let t6x = t7x * vdseff_cv;
 
             csg = cox_wlcen * (t4x + t5x * dvdseff_cv_dvg);
-            csd = cox_wlcen * t5x * dvdseff_cv_dvd
-                + csg * dvgsteff_cv_dvd
-                + qov_cox * dcoxeff_dvd;
+            csd = cox_wlcen * t5x * dvdseff_cv_dvd + csg * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
             csb = cox_wlcen * (t5x * dvdseff_cv_dvb + t6x * dabulk_cv_dvb)
                 + csg * dvgsteff_cv_dvb
                 + qov_cox * dcoxeff_dvb;
@@ -1917,13 +1929,13 @@ pub fn eval(
             // 40/60 partition.
             let t2x = t2 / 12.0;
             let t3x = 0.5 * cox_wlcen / (t2x * t2x);
-            let t4x = t1 * (2.0 * t0 * t0 / 3.0 + t1 * (t1 - 4.0 * t0 / 3.0))
-                - 2.0 * t0 * t0 * t0 / 15.0;
+            let t4x =
+                t1 * (2.0 * t0 * t0 / 3.0 + t1 * (t1 - 4.0 * t0 / 3.0)) - 2.0 * t0 * t0 * t0 / 15.0;
             qsrc = -t3x * t4x;
             let qov_cox = qsrc / coxeff_inv;
             let t8x = 4.0 / 3.0 * t1 * (t1 - t0) + 0.4 * t0 * t0;
-            let t5x = -2.0 * qsrc / t2x
-                - t3x * (t1 * (3.0 * t1 - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
+            let t5x =
+                -2.0 * qsrc / t2x - t3x * (t1 * (3.0 * t1 - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
             let t6x = abulk_cv * (qsrc / t2x + t3x * t8x);
             let t7x = t6x * vdseff_cv / abulk_cv;
 

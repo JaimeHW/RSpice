@@ -154,10 +154,7 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
     }
 }
 
-fn severity_color(
-    severity: DrcSeverity,
-    palette: &crate::ui::palette::Palette,
-) -> egui::Color32 {
+fn severity_color(severity: DrcSeverity, palette: &crate::ui::palette::Palette) -> egui::Color32 {
     match severity {
         DrcSeverity::Critical | DrcSeverity::Error => palette.err,
         DrcSeverity::Warning => palette.warn,
@@ -273,9 +270,10 @@ fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violati
     if origin.x + width > bounds.right() - 4.0 {
         origin.x = marker.x - width - 12.0;
     }
-    origin.y = origin
-        .y
-        .clamp(bounds.top() + 4.0, (bounds.bottom() - height - 4.0).max(bounds.top() + 4.0));
+    origin.y = origin.y.clamp(
+        bounds.top() + 4.0,
+        (bounds.bottom() - height - 4.0).max(bounds.top() + 4.0),
+    );
 
     let rect = egui::Rect::from_min_size(origin, vec2(width, height));
     painter.rect(

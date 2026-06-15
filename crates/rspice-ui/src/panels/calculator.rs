@@ -59,18 +59,63 @@ struct FunctionEntry {
 }
 
 const MATH_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry { label: "abs(x)", hint: "absolute value", insert: "abs()", caret_back: 1 },
-    FunctionEntry { label: "sqrt(x)", hint: "square root", insert: "sqrt()", caret_back: 1 },
-    FunctionEntry { label: "log(x)", hint: "natural log", insert: "log()", caret_back: 1 },
-    FunctionEntry { label: "log10(x)", hint: "log base 10", insert: "log10()", caret_back: 1 },
-    FunctionEntry { label: "exp(x)", hint: "eˣ", insert: "exp()", caret_back: 1 },
-    FunctionEntry { label: "x ^ n", hint: "power", insert: " ^ ", caret_back: 0 },
+    FunctionEntry {
+        label: "abs(x)",
+        hint: "absolute value",
+        insert: "abs()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "sqrt(x)",
+        hint: "square root",
+        insert: "sqrt()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "log(x)",
+        hint: "natural log",
+        insert: "log()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "log10(x)",
+        hint: "log base 10",
+        insert: "log10()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "exp(x)",
+        hint: "eˣ",
+        insert: "exp()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "x ^ n",
+        hint: "power",
+        insert: " ^ ",
+        caret_back: 0,
+    },
 ];
 
 const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry { label: "dB(x)", hint: "20·log₁₀|x|", insert: "dB()", caret_back: 1 },
-    FunctionEntry { label: "deriv(x)", hint: "d/dt", insert: "deriv()", caret_back: 1 },
-    FunctionEntry { label: "integ(x)", hint: "∫ dt", insert: "integ()", caret_back: 1 },
+    FunctionEntry {
+        label: "dB(x)",
+        hint: "20·log₁₀|x|",
+        insert: "dB()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "deriv(x)",
+        hint: "d/dt",
+        insert: "deriv()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "integ(x)",
+        hint: "∫ dt",
+        insert: "integ()",
+        caret_back: 1,
+    },
     FunctionEntry {
         label: "clip(x, lo, hi)",
         hint: "limit range",
@@ -80,8 +125,18 @@ const SIGNAL_FUNCTIONS: &[FunctionEntry] = &[
 ];
 
 const MEASURE_FUNCTIONS: &[FunctionEntry] = &[
-    FunctionEntry { label: "avg(x)", hint: "mean over the window", insert: "avg()", caret_back: 1 },
-    FunctionEntry { label: "rms(x)", hint: "root mean square", insert: "rms()", caret_back: 1 },
+    FunctionEntry {
+        label: "avg(x)",
+        hint: "mean over the window",
+        insert: "avg()",
+        caret_back: 1,
+    },
+    FunctionEntry {
+        label: "rms(x)",
+        hint: "root mean square",
+        insert: "rms()",
+        caret_back: 1,
+    },
 ];
 
 impl FunctionCategory {
@@ -365,9 +420,11 @@ impl CalculatorPanel {
         self.expression.insert_str(byte, text);
 
         let caret = at + text.chars().count() - caret_back.min(text.chars().count());
-        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-            egui::text::CCursor::new(caret),
-        )));
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(caret),
+            )));
         state.store(ctx, editor_id);
         self.outcome = None;
     }
@@ -433,10 +490,8 @@ fn caption(ui: &mut Ui, text: &str) {
 fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 26.0),
-        egui::Sense::click(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -445,7 +500,11 @@ fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
         .animate_bool_with_time(response.id, response.hovered(), 0.12);
     let painter = ui.painter();
     if hover > 0.0 {
-        painter.rect_filled(rect, 0.0, mix(egui::Color32::TRANSPARENT, c.bg_hover, hover));
+        painter.rect_filled(
+            rect,
+            0.0,
+            mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+        );
     }
     painter.rect_filled(
         egui::Rect::from_center_size(
@@ -475,10 +534,8 @@ fn signal_row(ui: &mut Ui, row: &SignalRow) -> egui::Response {
 fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 26.0),
-        egui::Sense::click(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::click());
     if !ui.is_rect_visible(rect) {
         return response;
     }
@@ -487,7 +544,11 @@ fn function_row(ui: &mut Ui, entry: &FunctionEntry) -> egui::Response {
         .animate_bool_with_time(response.id, response.hovered(), 0.12);
     let painter = ui.painter();
     if hover > 0.0 {
-        painter.rect_filled(rect, 0.0, mix(egui::Color32::TRANSPARENT, c.bg_hover, hover));
+        painter.rect_filled(
+            rect,
+            0.0,
+            mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+        );
     }
     painter.text(
         egui::pos2(rect.left() + 10.0, rect.center().y),

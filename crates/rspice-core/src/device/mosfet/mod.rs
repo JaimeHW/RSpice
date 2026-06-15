@@ -7,8 +7,8 @@
 pub mod b3soi;
 mod bsim3;
 pub mod bsim3v3;
-pub mod bsim4v8;
 mod bsim4;
+pub mod bsim4v8;
 mod ekv;
 mod jfet;
 mod legacy_bsim;
@@ -26,7 +26,5 @@ pub use ekv::EkvMosfet;
 pub use jfet::{Jfet, JfetChannelModel, JfetParams, JfetType};
 pub use mos_models::MosParams;
 pub use mosfet::{MosRegion, MosType, Mosfet, MosfetIndices};
-pub use smooth::{
-    SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step,
-};
+pub use smooth::{SMOOTH_VOLTAGE, smooth_max, smooth_min, smooth_positive, smooth_step};
 pub use vdmos::{Vdmos, VdmosRegion, VdmosType};

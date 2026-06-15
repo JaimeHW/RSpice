@@ -181,8 +181,7 @@ pub struct PlotMapper {
 impl PlotMapper {
     /// Data X → screen X.
     pub fn x(&self, x: f64) -> f32 {
-        self.rect.left()
-            + (self.x_scale.normalize(x, self.x0, self.x1) as f32) * self.rect.width()
+        self.rect.left() + (self.x_scale.normalize(x, self.x0, self.x1) as f32) * self.rect.width()
     }
 
     /// Data Y (left axis) → screen Y.

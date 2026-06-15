@@ -1,4 +1,4 @@
-﻿//! Common UI Components Module
+//! Common UI Components Module
 //!
 //! Shared UI components used across the application.
 //! Contains the main application shell and reusable UI elements.
@@ -18,12 +18,12 @@
 pub mod app;
 pub mod examples;
 pub(crate) mod export_workflow;
-pub(crate) mod time_compat;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
 pub mod menu_bar;
 pub(crate) mod project_workflow;
 pub mod simulation_analysis_tabs;
+pub(crate) mod time_compat;
 
 // Re-export main application type
 pub use app::{AppState, ConsoleMessage, RSpiceApp};

@@ -75,7 +75,8 @@ impl Engine {
             ));
         }
 
-        let (pss, mut circuit, mut matrix, x0) = self.run_pss_with_state(netlist, config.clone())?;
+        let (pss, mut circuit, mut matrix, x0) =
+            self.run_pss_with_state(netlist, config.clone())?;
         let period = pss.period;
         let f0 = 1.0 / period;
 

@@ -1,7 +1,7 @@
 //! Harmonic Balance Newton Solver
 //!
 //! Core solver for Harmonic Balance analysis using Newton-Raphson iteration.
-//! Solves the frequency-domain circuit equations: G*X + jÏ‰*C*X + F_NL(X) = I_S
+//! Solves the frequency-domain circuit equations: G*X + jω*C*X + F_NL(X) = I_S
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use super::config::HbConfig;
@@ -143,12 +143,12 @@ impl HbSolverState {
         self.residual
             .iter()
             .zip(self.residual_scale.iter())
-            .all(|(res_row, scale_row)| {
-                match (res_row.first(), scale_row.first()) {
+            .all(
+                |(res_row, scale_row)| match (res_row.first(), scale_row.first()) {
                     (Some(r), Some(s)) => r.norm() <= abstol + reltol * s,
                     _ => true,
-                }
-            })
+                },
+            )
     }
 
     /// Compute solution norm for relative tolerance
@@ -231,7 +231,7 @@ impl VoltageSourceBranch {
 /// Harmonic Balance solver
 ///
 /// HB solver supporting:
-/// - Linear elements: R, C, L (with proper jÏ‰L admittance)
+/// - Linear elements: R, C, L (with proper jωL admittance)
 /// - MNA voltage sources with branch currents
 /// - Nonlinear device Newton iteration via FFT/IFFT
 #[derive(Debug)]
@@ -261,7 +261,7 @@ pub struct HbSolver {
 
     /// Inductance matrix for each node combination
     /// Stored as sparse: (row, col) -> L
-    /// Admittance Y = 1/(jÏ‰L) at each harmonic
+    /// Admittance Y = 1/(jωL) at each harmonic
     l_matrix: Vec<(usize, usize, Value)>,
 
     /// Voltage source branches for MNA
@@ -403,7 +403,7 @@ pub struct NonlinearDeviceParams {
     pub br: Value,
     /// Threshold voltage (MOSFET)
     pub vth: Value,
-    /// Transconductance parameter K = Î¼Cox W/L (MOSFET)
+    /// Transconductance parameter K = μCox W/L (MOSFET)
     pub kp: Value,
     /// Channel length modulation (MOSFET)
     pub lambda: Value,

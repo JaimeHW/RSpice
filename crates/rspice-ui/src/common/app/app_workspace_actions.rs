@@ -192,10 +192,9 @@ impl AppState {
         self.sync_active_schematic_to_workspace();
         let view_type = view_type_for_reference(self, &reference);
         match instance {
-            Some(name) => {
-                self.workspace
-                    .descend_into(name, reference.clone(), view_type)
-            }
+            Some(name) => self
+                .workspace
+                .descend_into(name, reference.clone(), view_type),
             None => self.workspace.enter_hierarchy(reference.clone(), view_type),
         }
         self.library_manager

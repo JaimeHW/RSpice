@@ -73,8 +73,7 @@ fn write_hdf5_output(path: &std::path::Path, table: &ExportTable) -> Result<(), 
         }
         data.ac = Some(section);
     } else {
-        let mut section =
-            Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
+        let mut section = Hdf5WaveformSection::new(table.scale_name.clone(), table.scale.clone());
         for column in &table.columns {
             if let ColumnData::Real(values) = &column.data {
                 section.add_signal(column.name.clone(), values.clone());

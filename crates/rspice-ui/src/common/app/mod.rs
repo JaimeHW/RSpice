@@ -25,7 +25,6 @@ use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
 
-
 mod active_viewer;
 pub use active_viewer::ActiveViewer;
 
@@ -378,7 +377,11 @@ impl RSpiceApp {
     /// Keep the OS window title (or browser tab title) in sync with the
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
-        let dirty = if self.state.schematic.is_dirty { "*" } else { "" };
+        let dirty = if self.state.schematic.is_dirty {
+            "*"
+        } else {
+            ""
+        };
         let view = &self.state.workspace.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
@@ -473,7 +476,6 @@ impl RSpiceApp {
     pub fn toggle_console(&mut self) {
         self.state.shell.console.collapsed = !self.state.shell.console.collapsed;
     }
-
 }
 
 // =============================================================================

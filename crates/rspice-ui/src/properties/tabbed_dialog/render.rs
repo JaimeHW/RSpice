@@ -247,8 +247,12 @@ fn render_property_row(
                 label_color,
             );
             if !def.description.is_empty() {
-                ui.interact(label_rect, ui.id().with(("prop-label", &def.name)), egui::Sense::hover())
-                    .on_hover_text(&def.description);
+                ui.interact(
+                    label_rect,
+                    ui.id().with(("prop-label", &def.name)),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text(&def.description);
             }
 
             // Right-side reserve: modified dot, unit, browse.

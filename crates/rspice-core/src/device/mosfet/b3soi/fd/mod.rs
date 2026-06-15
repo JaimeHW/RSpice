@@ -236,13 +236,7 @@ impl B3SoiFd {
     /// delta against the previous iterate's state is inside the Newton
     /// tolerances and the linear current predictions `cdhat`/`cbhat` match the
     /// stored device currents. FD has no `vps` branch (`vps == 0` always).
-    fn bypass_check(
-        &self,
-        raw: B3SoiFdBias,
-        reltol: Value,
-        abstol: Value,
-        vntol: Value,
-    ) -> bool {
+    fn bypass_check(&self, raw: B3SoiFdBias, reltol: Value, abstol: Value, vntol: Value) -> bool {
         let vtol = |new: Value, old: Value| reltol * new.abs().max(old.abs()) + vntol;
         let old = &self.bias;
         let delvbs = raw.vbs - old.vbs;
@@ -276,11 +270,8 @@ impl B3SoiFd {
                 + (op.gmbs - op.gjdb) * delvbd
                 + (op.gme - op.gjde) * delved
         };
-        let cbhat = op.cb
-            + op.gbgs * delvgs
-            + op.gbbs * delvbs
-            + op.gbds * delvds
-            + op.gbes * delves;
+        let cbhat =
+            op.cb + op.gbgs * delvgs + op.gbbs * delvbs + op.gbds * delvds + op.gbes * delves;
         (cdhat - op.cd).abs() < reltol * cdhat.abs().max(op.cd.abs()) + abstol
             && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
@@ -494,9 +485,8 @@ impl NonlinearDevice for B3SoiFd {
         }
         let reltol = criteria.relative_tolerance();
         let vtol = criteria.voltage_tolerance();
-        let cmp = |new: Value, old: Value| {
-            (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol
-        };
+        let cmp =
+            |new: Value, old: Value| (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol;
         cmp(self.bias.vbs, self.converged_ref.vbs)
             && cmp(self.bias.vgs, self.converged_ref.vgs)
             && cmp(self.bias.vds, self.converged_ref.vds)
@@ -582,7 +572,11 @@ impl B3SoiFd {
         }
 
         // type<0: flip junction equivalent currents (b3soifdld.c:3118).
-        let (ceqbs, ceqbd) = if mt < 0.0 { (-ceqbs, -ceqbd) } else { (ceqbs, ceqbd) };
+        let (ceqbs, ceqbd) = if mt < 0.0 {
+            (-ceqbs, -ceqbd)
+        } else {
+            (ceqbs, ceqbd)
+        };
 
         // ----- RHS (b3soifdld.c:3131-3135) -----
         stamp_rhs(matrix, dp, ceqbd - cdreq);

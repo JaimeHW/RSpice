@@ -268,7 +268,6 @@ impl SimulationRunner {
     ) -> Result<(), SimulationError> {
         self.start_with_source_path(AnalysisConfig::DcOp, netlist, source_path)
     }
-
 }
 
 fn lock_progress<'a>(

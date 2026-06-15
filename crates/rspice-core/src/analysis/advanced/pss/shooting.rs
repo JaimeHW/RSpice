@@ -298,7 +298,7 @@ impl ShootingNewtonSolver {
     /// Extract Floquet multipliers from Monodromy matrix
     ///
     /// Floquet multipliers are eigenvalues of the Monodromy matrix.
-    /// For a stable orbit, all multipliers should have |Î»| â‰¤ 1.
+    /// For a stable orbit, all multipliers should have |λ| ≤ 1.
     /// One multiplier is always 1 (corresponding to perturbations along the orbit).
     pub fn compute_floquet_multipliers(
         &self,

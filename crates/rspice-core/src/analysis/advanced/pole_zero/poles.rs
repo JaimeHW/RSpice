@@ -3,8 +3,8 @@ use super::*;
 impl PoleZeroAnalyzer {
     /// Create analyzer from G and C matrices
     ///
-    /// The MNA equation is: (G + sÂ·C)Â·x = b
-    /// Poles are values of s where det(G + sÂ·C) = 0
+    /// The MNA equation is: (G + s·C)·x = b
+    /// Poles are values of s where det(G + s·C) = 0
     pub fn new(g_matrix: Matrix, c_matrix: Matrix) -> Self {
         let num_nodes = g_matrix.dims().0;
         Self {
@@ -16,8 +16,8 @@ impl PoleZeroAnalyzer {
 
     /// Find poles using companion matrix method
     ///
-    /// Poles are eigenvalues of -Câ»Â¹Â·G (if C is invertible)
-    /// For singular C, use generalized eigenvalue: GÂ·x = -sÂ·CÂ·x
+    /// Poles are eigenvalues of -C⁻¹·G (if C is invertible)
+    /// For singular C, use generalized eigenvalue: G·x = -s·C·x
     pub fn find_poles(&self, config: &PoleZeroConfig) -> Vec<Complex> {
         let n = self.num_nodes;
         if n == 0 {
@@ -26,7 +26,7 @@ impl PoleZeroAnalyzer {
         let expected_poles = self.finite_pole_count();
 
         // For single-node RC circuit:
-        // G + sÂ·C = 0 â†’ s = -G/C
+        // G + s·C = 0 → s = -G/C
         if n == 1 {
             let g = self.g_matrix.get(0, 0);
             let c = self.c_matrix.get(0, 0);

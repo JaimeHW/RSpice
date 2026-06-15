@@ -297,7 +297,8 @@ impl StateSpaceFilter {
     /// Convert (re, im) root pairs to real polynomial coefficients in
     /// ascending powers of s, validating that complex roots cancel.
     pub fn roots_to_polynomial_ascending(roots: &[(f64, f64)]) -> Result<Vec<f64>, String> {
-        let complex_roots: Vec<Complex> = roots.iter().map(|&(re, im)| Complex::new(re, im)).collect();
+        let complex_roots: Vec<Complex> =
+            roots.iter().map(|&(re, im)| Complex::new(re, im)).collect();
 
         // Validate that the imaginary parts cancel (conjugate pairs)
         let mut im_sum = 0.0;

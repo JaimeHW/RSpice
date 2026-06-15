@@ -247,7 +247,11 @@ impl B3SoiDdModel {
     /// `is_pmos` selects the device polarity, `nominal_temp_k` supplies the
     /// circuit nominal temperature in Kelvin (ngspice `CKTnomTemp`) used when
     /// `TNOM` is absent (TNOM on the card is in Celsius).
-    pub fn from_params(params: &HashMap<String, Value>, is_pmos: bool, nominal_temp_k: Value) -> Self {
+    pub fn from_params(
+        params: &HashMap<String, Value>,
+        is_pmos: bool,
+        nominal_temp_k: Value,
+    ) -> Self {
         let p = params;
         let mtype: Value = if is_pmos { -1.0 } else { 1.0 };
 
@@ -340,14 +344,7 @@ impl B3SoiDdModel {
             dvt0w: binned(p, "DVT0W", 0.0, 0.0, 0.0, 0.0),
             dvt1w: binned(p, "DVT1W", 5.3e6, 0.0, 0.0, 0.0),
             dvt2w: binned(p, "DVT2W", -0.032, 0.0, 0.0, 0.0),
-            u0: binned(
-                p,
-                "U0",
-                if is_pmos { 0.025 } else { 0.067 },
-                0.0,
-                0.0,
-                0.0,
-            ),
+            u0: binned(p, "U0", if is_pmos { 0.025 } else { 0.067 }, 0.0, 0.0, 0.0),
             ua: binned(p, "UA", 2.25e-9, 0.0, 0.0, 0.0),
             ub: binned(p, "UB", 5.87e-19, 0.0, 0.0, 0.0),
             uc: binned(

@@ -99,7 +99,11 @@ fn check_topology(netlist: &Netlist, result: &mut ValidationResult) {
 
     let canonical = |node: &str| -> String {
         let lower = node.to_ascii_lowercase();
-        if lower == "gnd" { "0".to_string() } else { lower }
+        if lower == "gnd" {
+            "0".to_string()
+        } else {
+            lower
+        }
     };
 
     // Union-find over voltage-source/inductor edges: an edge that joins two

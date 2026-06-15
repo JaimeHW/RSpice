@@ -316,7 +316,7 @@ impl NonlinearDeviceInstance {
         }
     }
 
-    /// Compute Jacobian entries (âˆ‚I/âˆ‚V for each terminal pair)
+    /// Compute Jacobian entries (∂I/∂V for each terminal pair)
     /// Returns Vec of ((from_node, to_node), dI/dV) - linearized conductance stamps
     pub fn jacobian(&self, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
         match self.device_type {
@@ -359,7 +359,11 @@ impl NonlinearDeviceInstance {
         match self.device_type {
             NonlinearDeviceType::Diode => "shot",
             NonlinearDeviceType::NpnBjt | NonlinearDeviceType::PnpBjt => {
-                if branch == 0 { "ic shot" } else { "ib shot" }
+                if branch == 0 {
+                    "ic shot"
+                } else {
+                    "ib shot"
+                }
             }
             NonlinearDeviceType::Nmos
             | NonlinearDeviceType::Pmos
@@ -606,12 +610,14 @@ impl NonlinearDeviceInstance {
         let (i_r, gr) = junction_current(self.params.is, vbc, self.params.nr * self.params.vt);
 
         // Forward Early effect on the transport current (SPICE level-1 form).
-        let (early, d_early_d_vbc) =
-            if self.params.vaf.is_finite() && self.params.vaf > 0.0 {
-                ((1.0 - vbc / self.params.vaf).max(0.01), -1.0 / self.params.vaf)
-            } else {
-                (1.0, 0.0)
-            };
+        let (early, d_early_d_vbc) = if self.params.vaf.is_finite() && self.params.vaf > 0.0 {
+            (
+                (1.0 - vbc / self.params.vaf).max(0.01),
+                -1.0 / self.params.vaf,
+            )
+        } else {
+            (1.0, 0.0)
+        };
 
         // Transport current Ict = Is*(exp(Vbe/NfVt) - exp(Vbc/NrVt)).
         let i_ct = i_f - i_r;
@@ -940,10 +946,8 @@ impl NonlinearDeviceInstance {
         let v_g = self.get_terminal_voltage(node_voltages, 1);
         let v_s = self.get_terminal_voltage(node_voltages, 2);
 
-        let (igs, ggs) =
-            junction_current(self.params.is, polarity * (v_g - v_s), self.params.vt);
-        let (igd, ggd) =
-            junction_current(self.params.is, polarity * (v_g - v_d), self.params.vt);
+        let (igs, ggs) = junction_current(self.params.is, polarity * (v_g - v_s), self.params.vt);
+        let (igd, ggd) = junction_current(self.params.is, polarity * (v_g - v_d), self.params.vt);
         (igs, ggs, igd, ggd)
     }
 
@@ -1095,7 +1099,11 @@ impl NonlinearDeviceInstance {
     /// forward diffusion `TF * i_f`, B-C depletion plus reverse diffusion
     /// `TR * i_r`. The polarity factors cancel in node space exactly as for
     /// the transport currents.
-    fn bjt_junction_charges(&self, p: Value, node_voltages: &[Value]) -> (Value, Value, Value, Value) {
+    fn bjt_junction_charges(
+        &self,
+        p: Value,
+        node_voltages: &[Value],
+    ) -> (Value, Value, Value, Value) {
         let v_c = self.get_terminal_voltage(node_voltages, 0);
         let v_b = self.get_terminal_voltage(node_voltages, 1);
         let v_e = self.get_terminal_voltage(node_voltages, 2);
@@ -1120,11 +1128,7 @@ impl NonlinearDeviceInstance {
         let c = self.terminals[0];
         let b = self.terminals[1];
         let e = self.terminals[2];
-        vec![
-            (b, -p * (q_be + q_bc)),
-            (c, p * q_bc),
-            (e, p * q_be),
-        ]
+        vec![(b, -p * (q_be + q_bc)), (c, p * q_bc), (e, p * q_be)]
     }
 
     fn cap_bjt(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
@@ -1224,8 +1228,8 @@ impl NonlinearDeviceInstance {
 
         let s2 = s * s;
         let k = 2.0 * cox / 15.0;
-        let qd = -k * (2.0 * a * a * a + 4.0 * a * a * bq + 6.0 * a * bq * bq + 3.0 * bq * bq * bq)
-            / s2;
+        let qd =
+            -k * (2.0 * a * a * a + 4.0 * a * a * bq + 6.0 * a * bq * bq + 3.0 * bq * bq * bq) / s2;
         let qd_a = -k * 2.0 * a * (a * a + 3.0 * a * bq + bq * bq) / (s2 * s);
         let qd_b = -k * bq * (8.0 * a * a + 9.0 * a * bq + 3.0 * bq * bq) / (s2 * s);
 
@@ -1242,12 +1246,7 @@ impl NonlinearDeviceInstance {
         };
 
         // Absorbed charges per node row [eff_d, g, eff_s, b].
-        let q = [
-            p * qd,
-            p * (qg + qgb),
-            p * (-qg - qd),
-            -p * qgb,
-        ];
+        let q = [p * qd, p * (qg + qgb), p * (-qg - qd), -p * qgb];
         let mut dq = [[0.0; 4]; 4];
         for (c, (&da_c, &db_c)) in da.iter().zip(db.iter()).enumerate() {
             let dqg = qg_a * da_c + qg_b * db_c;
@@ -1313,7 +1312,11 @@ impl NonlinearDeviceInstance {
     }
 
     /// JFET gate junction depletion charges in the polarity frame.
-    fn jfet_junction_charges(&self, p: Value, node_voltages: &[Value]) -> (Value, Value, Value, Value) {
+    fn jfet_junction_charges(
+        &self,
+        p: Value,
+        node_voltages: &[Value],
+    ) -> (Value, Value, Value, Value) {
         let v_d = self.get_terminal_voltage(node_voltages, 0);
         let v_g = self.get_terminal_voltage(node_voltages, 1);
         let v_s = self.get_terminal_voltage(node_voltages, 2);
@@ -1328,11 +1331,7 @@ impl NonlinearDeviceInstance {
         let d = self.terminals[0];
         let g = self.terminals[1];
         let s = self.terminals[2];
-        vec![
-            (g, -p * (q_gs + q_gd)),
-            (s, p * q_gs),
-            (d, p * q_gd),
-        ]
+        vec![(g, -p * (q_gs + q_gd)), (s, p * q_gs), (d, p * q_gd)]
     }
 
     fn cap_jfet(&self, p: Value, node_voltages: &[Value]) -> Vec<((usize, usize), Value)> {
@@ -1464,8 +1463,7 @@ mod tests {
                     // rounding floor of the evaluated currents themselves; the
                     // junction linear-continuation region reaches ampere scales
                     // where small cross-junction terms cancel out of f64 sums.
-                    let noise_floor =
-                        8.0 * f64::EPSILON * into_p[i].abs().max(into_m[i].abs()) / h;
+                    let noise_floor = 8.0 * f64::EPSILON * into_p[i].abs().max(into_m[i].abs()) / h;
                     assert!(
                         (got - expected).abs() <= tol_rel * scale + tol_abs + noise_floor,
                         "{} sample {} stamp ({}, {}): jacobian {:.6e} vs finite-difference {:.6e} at V={:?}",
@@ -1555,8 +1553,8 @@ mod tests {
             NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.04).with_body_effect(0.6, 0.7);
         assert_jacobian_matches_finite_difference(&nmos_body, 4, (-3.0, 3.0), 80, 31);
 
-        let pmos_body =
-            NonlinearDeviceInstance::pmos(0, 1, 2, 3, 0.7, 1.2e-5, 0.05).with_body_effect(0.5, 0.65);
+        let pmos_body = NonlinearDeviceInstance::pmos(0, 1, 2, 3, 0.7, 1.2e-5, 0.05)
+            .with_body_effect(0.5, 0.65);
         assert_jacobian_matches_finite_difference(&pmos_body, 4, (-3.0, 3.0), 80, 37);
 
         // Bulk diodes conducting: the source-bulk and drain-bulk junction
@@ -1711,8 +1709,8 @@ mod tests {
     #[test]
     fn mos_intrinsic_gate_charge_matches_the_square_law_limits() {
         let cox = 1e-12;
-        let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.0)
-            .with_intrinsic_gate(cox);
+        let nmos =
+            NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.0).with_intrinsic_gate(cox);
         let c_gg = |v: &[Value]| -> Value {
             nmos.charge_jacobian(v)
                 .iter()
@@ -1772,13 +1770,12 @@ mod tests {
     fn mos_bulk_junction_capacitance_follows_the_power_law() {
         let cj0 = 10e-12;
         let (pb, mj) = (0.8, 0.5);
-        let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.0)
-            .with_bulk_junctions(
-                DepletionCap::new(cj0, pb, mj, 0.5),
-                DepletionCap::none(),
-                1e-14,
-                1e-14,
-            );
+        let nmos = NonlinearDeviceInstance::nmos(0, 1, 2, 3, 0.7, 2e-5, 0.0).with_bulk_junctions(
+            DepletionCap::new(cj0, pb, mj, 0.5),
+            DepletionCap::none(),
+            1e-14,
+            1e-14,
+        );
 
         // Vd=Vg=Vs=0, Vb=-2: source-bulk junction at vj = -2 (reverse).
         let v = vec![0.0, 0.0, 0.0, -2.0];

@@ -31,10 +31,17 @@ fn am_reference(t: f64, vo: f64, vmo: f64, vma: f64, fm: f64, fc: f64, td: f64) 
     }
 }
 
-fn transient_node_values(deck: &str, node: &str, tstop: f64, max_step: f64) -> (Vec<f64>, Vec<f64>) {
+fn transient_node_values(
+    deck: &str,
+    node: &str,
+    tstop: f64,
+    max_step: f64,
+) -> (Vec<f64>, Vec<f64>) {
     let netlist = Netlist::parse(deck).expect("parse");
     let engine = Engine::new(SimulationConfig::default());
-    let result = engine.run_tran(&netlist, tstop, max_step).expect("transient");
+    let result = engine
+        .run_tran(&netlist, tstop, max_step)
+        .expect("transient");
     let idx = result
         .node_names
         .iter()

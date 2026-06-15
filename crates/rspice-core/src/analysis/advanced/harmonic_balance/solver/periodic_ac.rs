@@ -96,7 +96,9 @@ impl HbSolver {
                 if max_g < 1e-30 {
                     continue;
                 }
-                let spectrum = self.fft.to_frequency_domain_n(&g_time[i][j], harmonic_count);
+                let spectrum = self
+                    .fft
+                    .to_frequency_domain_n(&g_time[i][j], harmonic_count);
                 spectra.push((i, j, spectrum));
             }
         }
@@ -112,7 +114,11 @@ impl HbSolver {
         harmonic_count: usize,
     ) -> Vec<(usize, usize, Vec<Complex64>)> {
         let n = self.num_nodes;
-        if !self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+        if !self
+            .nonlinear_devices
+            .iter()
+            .any(|d| d.has_charge_storage())
+        {
             return Vec::new();
         }
         let n_time = self.fft.size();
@@ -143,7 +149,9 @@ impl HbSolver {
                 if max_c < 1e-30 {
                     continue;
                 }
-                let spectrum = self.fft.to_frequency_domain_n(&c_time[i][j], harmonic_count);
+                let spectrum = self
+                    .fft
+                    .to_frequency_domain_n(&c_time[i][j], harmonic_count);
                 spectra.push((i, j, spectrum));
             }
         }

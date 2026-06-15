@@ -372,7 +372,6 @@ impl PacDialogState {
             *self = Self::from_config(&PacConfig::default());
         }
     }
-
 }
 
 // =============================================================================

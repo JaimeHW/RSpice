@@ -100,8 +100,8 @@ impl DelayBuffer {
     /// Given points p0 and p1 with values v0, v1 and slopes m0, m1,
     /// interpolates smoothly with continuous first derivative.
     ///
-    /// H(t) = (2tÂ³ - 3tÂ² + 1)v0 + (tÂ³ - 2tÂ² + t)Î”tÂ·m0
-    ///      + (-2tÂ³ + 3tÂ²)v1 + (tÂ³ - tÂ²)Î”tÂ·m1
+    /// H(t) = (2t³ - 3t² + 1)v0 + (t³ - 2t² + t)Δt·m0
+    ///      + (-2t³ + 3t²)v1 + (t³ - t²)Δt·m1
     #[inline]
     fn cubic_hermite(p0: &Sample, p1: &Sample, t: Value) -> Value {
         let dt = p1.time - p0.time;
@@ -109,7 +109,7 @@ impl DelayBuffer {
             return p1.value;
         }
 
-        // Normalized parameter s âˆˆ [0, 1]
+        // Normalized parameter s ∈ [0, 1]
         let s = (t - p0.time) / dt;
         let s2 = s * s;
         let s3 = s2 * s;

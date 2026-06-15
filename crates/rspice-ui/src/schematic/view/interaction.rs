@@ -314,10 +314,10 @@ fn handle_probe_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
                 "Probe: wire at {:?} not in netlist (regenerate netlist?)",
                 grid_pos
             );
-            state
-                .shell
-                .toasts
-                .warn(ui.ctx(), "Wire not in the netlist — run the simulation to update");
+            state.shell.toasts.warn(
+                ui.ctx(),
+                "Wire not in the netlist — run the simulation to update",
+            );
             state.push_user_message(ConsoleMessage::warning(
                 "Wire not in netlist. Run simulation to update.".to_string(),
             ));
@@ -364,6 +364,5 @@ fn open_component_properties(state: &mut AppState, grid_pos: Point) {
         state.schematic.selection.clear();
         state.schematic.selection.select_component(comp_id);
         crate::common::app::open_property_editor(state, comp_id);
-
     }
 }

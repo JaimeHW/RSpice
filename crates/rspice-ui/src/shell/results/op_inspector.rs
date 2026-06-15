@@ -55,14 +55,14 @@ fn region_colors(region: &str, t: &Tokens) -> (egui::Color32, egui::Color32) {
 
 /// The most recent device-OP report in the active run, with its analysis
 /// label for the header.
-fn active_report(
-    state: &AppState,
-) -> Option<(&rspice_core::circuit::DeviceOpReport, &str)> {
+fn active_report(state: &AppState) -> Option<(&rspice_core::circuit::DeviceOpReport, &str)> {
     let run = state.simulation.active_run()?;
-    run.analyses
-        .iter()
-        .rev()
-        .find_map(|analysis| analysis.device_op.as_ref().map(|r| (r, analysis.label.as_str())))
+    run.analyses.iter().rev().find_map(|analysis| {
+        analysis
+            .device_op
+            .as_ref()
+            .map(|r| (r, analysis.label.as_str()))
+    })
 }
 
 /// One flattened, filter-matched row.
@@ -85,7 +85,11 @@ impl Row<'_> {
         }
         let filter = filter.to_ascii_lowercase();
         self.entry.name.to_ascii_lowercase().contains(&filter)
-            || self.entry.device_kind.to_ascii_lowercase().contains(&filter)
+            || self
+                .entry
+                .device_kind
+                .to_ascii_lowercase()
+                .contains(&filter)
             || self
                 .entry
                 .region
@@ -147,10 +151,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     ((width - NAME_W - REGION_W - 16.0) / columns.len().max(1) as f32).max(64.0);
 
                 // Family section header.
-                let (head, _) = ui.allocate_exact_size(
-                    egui::vec2(width, 26.0),
-                    egui::Sense::hover(),
-                );
+                let (head, _) =
+                    ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::hover());
                 ui.painter().text(
                     egui::pos2(head.left() + 10.0, head.center().y),
                     egui::Align2::LEFT_CENTER,
@@ -186,7 +188,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     let sorted_here = sort.as_ref().is_some_and(|(k, _)| k == key);
                     let label = if sorted_here {
                         let ascending = sort.as_ref().is_some_and(|(_, a)| *a);
-                        format!("{} {}", key.to_uppercase(), if ascending { "▲" } else { "▼" })
+                        format!(
+                            "{} {}",
+                            key.to_uppercase(),
+                            if ascending { "▲" } else { "▼" }
+                        )
                     } else {
                         key.to_uppercase()
                     };
@@ -195,7 +201,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         theme::mono(tokens::FS_0, FontWeight::Regular),
                         if sorted_here { c.accent } else { c.text_faint },
                     );
-                    let pos = egui::pos2(x - galley.size().x, header.center().y - galley.size().y / 2.0);
+                    let pos = egui::pos2(
+                        x - galley.size().x,
+                        header.center().y - galley.size().y / 2.0,
+                    );
                     let hit = egui::Rect::from_min_size(pos, galley.size()).expand(4.0);
                     let response = ui.interact(
                         hit,
@@ -213,8 +222,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
                 // Device rows.
                 for row in &rows {
-                    let (rect, response) = ui
-                        .allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
+                    let (rect, response) =
+                        ui.allocate_exact_size(egui::vec2(width, ROW_H), egui::Sense::hover());
                     if !ui.is_rect_visible(rect) {
                         continue;
                     }
@@ -249,8 +258,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             ),
                             galley.size() + egui::vec2(12.0, 4.0),
                         );
-                        ui.painter()
-                            .rect_filled(chip, chip.height() / 2.0, bg);
+                        ui.painter().rect_filled(chip, chip.height() / 2.0, bg);
                         ui.painter()
                             .galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
                     }
@@ -301,7 +309,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
     section_header(ui, "OP report", None);
     let total = report.entries.len();
-    let count_kind = |kind: &str| report.entries.iter().filter(|e| e.device_kind == kind).count();
+    let count_kind = |kind: &str| {
+        report
+            .entries
+            .iter()
+            .filter(|e| e.device_kind == kind)
+            .count()
+    };
     let count_region = |region: &str| {
         report
             .entries

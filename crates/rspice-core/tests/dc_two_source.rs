@@ -39,9 +39,10 @@ fn second_source_parses_into_the_analysis() {
 fn single_source_dc_still_parses_without_sweep2() {
     let deck = "* single\nv1 a 0 dc 1\nr1 a 0 1k\n.dc v1 0 1 0.5\n.end\n";
     let netlist = Netlist::parse(deck).expect("deck parses");
-    let has_plain_dc = netlist.analyses.iter().any(
-        |analysis| matches!(analysis, AnalysisCommand::Dc { sweep2: None, .. }),
-    );
+    let has_plain_dc = netlist
+        .analyses
+        .iter()
+        .any(|analysis| matches!(analysis, AnalysisCommand::Dc { sweep2: None, .. }));
     assert!(has_plain_dc, "single-source .DC must carry no second sweep");
 }
 

@@ -322,7 +322,11 @@ fn source_row(
                 let painter = ui.painter();
                 if selected {
                     painter.rect_filled(rect, 0.0, c.bg_hover);
-                    painter.vline(rect.left() + 1.0, rect.y_range(), Stroke::new(2.0, c.accent));
+                    painter.vline(
+                        rect.left() + 1.0,
+                        rect.y_range(),
+                        Stroke::new(2.0, c.accent),
+                    );
                 } else if hover > 0.0 {
                     painter.rect_filled(
                         rect,
@@ -617,7 +621,11 @@ fn env_add_prompt_row(ui: &mut Ui) -> bool {
         .animate_bool_with_time(response.id, response.hovered(), 0.12);
     let painter = ui.painter();
     if hover > 0.0 {
-        painter.rect_filled(rect, 0.0, mix(egui::Color32::TRANSPARENT, c.bg_hover, hover));
+        painter.rect_filled(
+            rect,
+            0.0,
+            mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
+        );
     }
     painter.text(
         egui::pos2(rect.left() + 10.0, rect.center().y),
@@ -713,8 +721,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
             Some(entry) => (entry.path.clone(), c.text_dim),
             None => ("all sources".to_owned(), c.text_faint),
         };
-        let (path_rect, path_response) =
-            ui.allocate_exact_size(vec2(path_w, 24.0), Sense::hover());
+        let (path_rect, path_response) = ui.allocate_exact_size(vec2(path_w, 24.0), Sense::hover());
         let galley = ui.fonts(|f| {
             let mut job = egui::text::LayoutJob::simple_singleline(
                 text,
@@ -865,7 +872,13 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
         "sp" | "cir" => (c.text_dim, "SP"),
         _ => (c.text_faint, "???"),
     };
-    paint_badge(ui, rect.left() + 10.0, rect.center().y, badge_text, badge_color);
+    paint_badge(
+        ui,
+        rect.left() + 10.0,
+        rect.center().y,
+        badge_text,
+        badge_color,
+    );
 
     let sections_x = rect.right() - SECTIONS_W;
     let name_w = (sections_x - rect.left() - FILE_COL_X - 8.0).max(24.0);
@@ -903,10 +916,7 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
         f.layout_job(job)
     });
     ui.painter().galley(
-        egui::pos2(
-            sections_x,
-            rect.center().y - sections_galley.size().y * 0.5,
-        ),
+        egui::pos2(sections_x, rect.center().y - sections_galley.size().y * 0.5),
         sections_galley,
         c.text_faint,
     );
@@ -967,7 +977,10 @@ fn scan_summary(state: &PdkSettingsDialogState) -> String {
         .max()
     {
         let now = crate::common::time_compat::unix_epoch().as_secs();
-        line.push_str(&format!("scanned {} · ", fmt_ago(now.saturating_sub(scanned))));
+        line.push_str(&format!(
+            "scanned {} · ",
+            fmt_ago(now.saturating_sub(scanned))
+        ));
     }
     line.push_str(&format!(
         "{total} file{} across {enabled} enabled source{}",

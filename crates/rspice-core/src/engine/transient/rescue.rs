@@ -100,9 +100,8 @@ impl Engine {
             // is what flattens an exponential's knife edge; the diagonal
             // shunt alone regularizes only the node rows. The zero level
             // resolves to the configured floor, i.e. the genuine system.
-            circuit.set_semiconductor_junction_gmin(
-                self.effective_device_junction_gmin(extra_gmin),
-            );
+            circuit
+                .set_semiconductor_junction_gmin(self.effective_device_junction_gmin(extra_gmin));
             let mut level_converged = false;
             let mut last_failure = (false, false, false);
             for level_iter in 0..budget {
@@ -166,11 +165,7 @@ impl Engine {
 
                 if !circuit.bjts.devices.is_empty()
                     && Self::limit_bjt_junction_external_updates(
-                        circuit,
-                        &mut sol,
-                        &iterate,
-                        num_nodes,
-                        None,
+                        circuit, &mut sol, &iterate, num_nodes, None,
                     )
                 {
                     needs_constraint_projection = true;
@@ -226,8 +221,7 @@ impl Engine {
                         best_point = Some(trial);
                     }
                     let armijo_ok = trial_merit <= 1.0
-                        || trial_merit
-                            <= base_merit * (1.0 - RESCUE_LINE_SEARCH_ARMIJO_C1 * alpha);
+                        || trial_merit <= base_merit * (1.0 - RESCUE_LINE_SEARCH_ARMIJO_C1 * alpha);
                     if armijo_ok {
                         break;
                     }
@@ -245,8 +239,8 @@ impl Engine {
                 // The line search leaves the freshest stamp at (or near) the
                 // accepted point, so this judges the true deformed-system
                 // residual rather than the linear solve's.
-                let residual_converged = accepted_merit <= 1.0
-                    || self.residual_convergence_met(matrix, &accepted, rhs);
+                let residual_converged =
+                    accepted_merit <= 1.0 || self.residual_convergence_met(matrix, &accepted, rhs);
                 if debug && level_iter >= budget.saturating_sub(6) {
                     let max_dv = Self::max_abs_delta_prefix(&iterate, &accepted, num_nodes);
                     log::warn!(

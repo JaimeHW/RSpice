@@ -103,9 +103,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Axis::linear(-extent, extent, "Im"),
     );
     spec.ref_lines.push(plot::RefLine { y: 0.0 });
-    spec.traces.push(
-        Trace::new(&re, &im, c.traces[0]).cache_key(0x917_00FF),
-    );
+    spec.traces
+        .push(Trace::new(&re, &im, c.traces[0]).cache_key(0x917_00FF));
 
     // Critical point.
     spec.markers.push(plot::Marker {
@@ -237,14 +236,20 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "Stability", None);
     let Some(s) = derived(state) else {
-        super::panel_note(ui, "Stability numbers appear once AC loop-gain data is loaded.");
+        super::panel_note(
+            ui,
+            "Stability numbers appear once AC loop-gain data is loaded.",
+        );
         return;
     };
 
-    let verdict = if s.encirclements == 0 { "stable" } else { "unstable" };
-    let fmt_opt = |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String {
-        v.map_or("—".to_owned(), f)
+    let verdict = if s.encirclements == 0 {
+        "stable"
+    } else {
+        "unstable"
     };
+    let fmt_opt =
+        |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
     let rows = [
         ("Encirclements", s.encirclements.to_string(), true),
         ("Verdict", verdict.to_owned(), true),

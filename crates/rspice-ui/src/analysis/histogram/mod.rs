@@ -23,7 +23,6 @@ pub use data::{Histogram, HistogramBuilder};
 pub use state::{HistogramDisplayMode, HistogramState};
 pub use statistics::HistogramStats;
 
-
 // =============================================================================
 // Tests
 // =============================================================================

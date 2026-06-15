@@ -105,7 +105,11 @@ impl<'a> NetlistGenerator<'a> {
             ComponentType::BehavioralSource => {
                 let nodes = self.format_nodes(&node_names, 2);
                 let expression = component.value.trim();
-                let expression = if expression.is_empty() { "V=0" } else { expression };
+                let expression = if expression.is_empty() {
+                    "V=0"
+                } else {
+                    expression
+                };
                 Some(format!("{} {} {}", instance_name, nodes, expression))
             }
 
@@ -146,7 +150,10 @@ impl<'a> NetlistGenerator<'a> {
                 (node_names.len() >= 3).then(|| {
                     format!(
                         "{} {} 0 {} {} {}",
-                        instance_name, node_names[2], node_names[0], node_names[1],
+                        instance_name,
+                        node_names[2],
+                        node_names[0],
+                        node_names[1],
                         gain_with_params
                     )
                 })

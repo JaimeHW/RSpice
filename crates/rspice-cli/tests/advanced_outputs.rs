@@ -122,7 +122,12 @@ fn monte_carlo_exports_samples_and_is_seed_deterministic() {
     let variables = json["variables"].as_array().expect("variables array");
     let vout = variables
         .iter()
-        .find(|v| v["name"].as_str().unwrap_or("").eq_ignore_ascii_case("V(OUT)"))
+        .find(|v| {
+            v["name"]
+                .as_str()
+                .unwrap_or("")
+                .eq_ignore_ascii_case("V(OUT)")
+        })
         .expect("V(OUT) variable");
     assert_eq!(vout["samples"].as_array().unwrap().len(), 6);
     let std_dev = vout["std_dev"].as_f64().unwrap();

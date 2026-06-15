@@ -60,8 +60,8 @@ fn varactor_fundamental_sees_the_bias_point_capacitance() {
     // C0 = CJ0 * (1 + VBIAS/VJ)^-M at vd = -5 V.
     let c0 = CJ0 * (1.0 + VBIAS / VJ).powf(-M);
     let w = 2.0 * PI * F0;
-    let h_expected = num_complex::Complex64::new(1.0, 0.0)
-        / num_complex::Complex64::new(1.0, w * R * c0);
+    let h_expected =
+        num_complex::Complex64::new(1.0, 0.0) / num_complex::Complex64::new(1.0, w * R * c0);
 
     let vdc = coefficient(&result, "vc", 0).re;
     assert!(
@@ -77,8 +77,7 @@ fn varactor_fundamental_sees_the_bias_point_capacitance() {
 }
 
 #[test]
-fn varactor_second_harmonic_matches_the_capacitance_slope()
-{
+fn varactor_second_harmonic_matches_the_capacitance_slope() {
     let result = run_varactor();
 
     // C' = dC/dv at vd = -5: CJ0*(M/VJ)*(1 + VBIAS/VJ)^-(M+1).

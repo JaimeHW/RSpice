@@ -189,7 +189,11 @@ fn console_tab(ui: &mut Ui, label: &str, count: Option<usize>, active: bool) -> 
     );
     x += label_galley.size().x + 4.0;
     if let Some(g) = count_galley {
-        painter.galley(egui::pos2(x, rect.center().y - g.size().y * 0.5), g, c.text_faint);
+        painter.galley(
+            egui::pos2(x, rect.center().y - g.size().y * 0.5),
+            g,
+            c.text_faint,
+        );
     }
 
     response
@@ -267,10 +271,8 @@ fn script_body(ui: &mut Ui, state: &mut AppState) {
                 .stick_to_bottom(true)
                 .show(ui, |ui| {
                     if state.script_console.history.is_empty() {
-                        let (rect, _) = ui.allocate_exact_size(
-                            vec2(ui.available_width(), 20.0),
-                            Sense::hover(),
-                        );
+                        let (rect, _) = ui
+                            .allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
                         ui.painter().text(
                             egui::pos2(rect.left() + 12.0, rect.center().y),
                             egui::Align2::LEFT_CENTER,
@@ -281,8 +283,7 @@ fn script_body(ui: &mut Ui, state: &mut AppState) {
                     }
                     for item in &state.script_console.history {
                         let width = ui.available_width();
-                        let (rect, _) =
-                            ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+                        let (rect, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
                         let painter = ui.painter();
                         painter.text(
                             egui::pos2(rect.left() + 12.0, rect.center().y),
@@ -364,8 +365,7 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                 } else {
                     Sense::hover()
                 };
-                let (rect, response) =
-                    ui.allocate_exact_size(vec2(width, row_height), sense);
+                let (rect, response) = ui.allocate_exact_size(vec2(width, row_height), sense);
                 let painter = ui.painter();
                 if entry.anchor.is_some() {
                     if response.hovered() {
@@ -407,7 +407,13 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
     // Click-to-source: jump the canvas to the finding's anchor and select
     // the offending object. The console stays open — the row is the map,
     // the canvas is the territory.
-    if let Some(crate::panels::LogAnchor::Schematic { x, y, component, wire }) = jump {
+    if let Some(crate::panels::LogAnchor::Schematic {
+        x,
+        y,
+        component,
+        wire,
+    }) = jump
+    {
         state.shell.view = crate::shell::WorkspaceView::Schematic;
         state.schematic.center_request = Some(crate::state::Point::new(x, y));
         state.schematic.net_highlight.clear();

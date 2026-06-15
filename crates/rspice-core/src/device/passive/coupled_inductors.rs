@@ -15,7 +15,7 @@
 //! ```text
 //! M = k * sqrt(L1 * L2)
 //! ```
-//! where k is the coupling coefficient (0 < k â‰¤ 1).
+//! where k is the coupling coefficient (0 < k ≤ 1).
 //!
 //! For perfectly coupled inductors (k=1), the turns ratio is:
 //! ```text
@@ -25,17 +25,17 @@
 //! # Implementation
 //! Uses the flux linkage formulation:
 //! ```text
-//! Î»1 = L1*i1 + M*i2
-//! Î»2 = M*i1 + L2*i2
-//! v1 = dÎ»1/dt, v2 = dÎ»2/dt
+//! λ1 = L1*i1 + M*i2
+//! λ2 = M*i1 + L2*i2
+//! v1 = dλ1/dt, v2 = dλ2/dt
 //! ```
 //!
 //! For N coupled inductors, this generalizes to matrix form:
 //! ```text
-//! [Î»] = [L] * [i]
-//! [v] = d[Î»]/dt
+//! [λ] = [L] * [i]
+//! [v] = d[λ]/dt
 //! ```
-//! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for iâ‰ j.
+//! where [L] is the inductance matrix with Lij = k*sqrt(Li*Lj) for i≠j.
 
 #![allow(clippy::needless_range_loop, clippy::too_many_arguments)]
 use crate::analysis::CompanionCoefficients;
@@ -53,7 +53,7 @@ pub struct InductorCoupling {
     pub name: String,
     /// Names of coupled inductors
     pub inductor_names: Vec<String>,
-    /// Coupling coefficient (0 < k â‰¤ 1)
+    /// Coupling coefficient (0 < k ≤ 1)
     pub coefficient: Value,
 }
 
@@ -189,7 +189,11 @@ impl CoupledInductorPair {
     /// Mutual-coupling history magnitudes — the M-only terms of the dual of
     /// `CompanionCoefficients::inductor_veq` (the standalone inductors carry
     /// the self terms, including the trapezoidal voltage history).
-    fn mutual_companion_values(&self, dt: Value, coeff: &CompanionCoefficients) -> (Value, Value, Value) {
+    fn mutual_companion_values(
+        &self,
+        dt: Value,
+        coeff: &CompanionCoefficients,
+    ) -> (Value, Value, Value) {
         let r12 = coeff.inductor_req(self.m, dt);
         let h = coeff.coeff_v_n * self.m / dt;
         let mut v1_mut = h * self.current2_prev;

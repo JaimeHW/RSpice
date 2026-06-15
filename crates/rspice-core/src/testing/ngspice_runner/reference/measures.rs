@@ -101,7 +101,10 @@ impl TestRunner {
 
             let (node_pos, node_neg) =
                 Self::parse_voltage_probe(&gate.signal).ok_or_else(|| {
-                    format!("measure gate signal '{}' is not a voltage probe", gate.signal)
+                    format!(
+                        "measure gate signal '{}' is not a voltage probe",
+                        gate.signal
+                    )
                 })?;
             let idx_pos = Self::resolve_node_index(&node_to_idx, &node_pos).ok_or_else(|| {
                 format!("measure gate node '{node_pos}' is absent from the simulation")
@@ -185,10 +188,16 @@ impl TestRunner {
             let mut fields = line.split_whitespace();
             let signal = fields
                 .next()
-                .ok_or_else(|| format!("{}:{}: missing signal", sidecar.display(), line_number + 1))?
+                .ok_or_else(|| {
+                    format!("{}:{}: missing signal", sidecar.display(), line_number + 1)
+                })?
                 .to_string();
             let kind_token = fields.next().ok_or_else(|| {
-                format!("{}:{}: missing measure kind", sidecar.display(), line_number + 1)
+                format!(
+                    "{}:{}: missing measure kind",
+                    sidecar.display(),
+                    line_number + 1
+                )
             })?;
 
             let mut args: HashMap<&str, &str> = HashMap::new();
@@ -330,10 +339,8 @@ impl TestRunner {
             } => {
                 let mut seen = 0usize;
                 for window in x.windows(2).zip(y.windows(2)) {
-                    let ((&t0, &t1), (&y0, &y1)) = (
-                        (&window.0[0], &window.0[1]),
-                        (&window.1[0], &window.1[1]),
-                    );
+                    let ((&t0, &t1), (&y0, &y1)) =
+                        ((&window.0[0], &window.0[1]), (&window.1[0], &window.1[1]));
                     if t1 <= t0 {
                         continue;
                     }

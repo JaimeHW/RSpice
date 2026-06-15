@@ -146,15 +146,13 @@ impl Engine {
                 Err(_) => return (solution, false, used_iterations),
             };
 
-            let mut new_solution =
-                self.apply_damping_strategy_with_junction_ownership(
-                    &solution,
-                    &raw_solution,
-                    damping_state,
-                    Self::junction_limiting_owns_newton_steps(circuit),
-                    |trial| {
-                    self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale)
-                });
+            let mut new_solution = self.apply_damping_strategy_with_junction_ownership(
+                &solution,
+                &raw_solution,
+                damping_state,
+                Self::junction_limiting_owns_newton_steps(circuit),
+                |trial| self.nonlinear_merit_scaled(circuit, matrix, trial, source_scale),
+            );
             Self::clamp_solution_to_physical_bounds(&mut new_solution, node_count);
 
             let voltage_converged =
@@ -433,8 +431,8 @@ impl Engine {
     /// The linear presolve doesn't include BJT connections, so the base
     /// and emitter may have unrealistic voltage differences. This function
     /// corrects the initial guess to place the BJT in forward-active region:
-    /// - VBE â‰ˆ 0.7V (typical forward bias)
-    /// - VCE > VCE(sat) â‰ˆ 0.2V (avoid saturation)
+    /// - VBE ≈ 0.7V (typical forward bias)
+    /// - VCE > VCE(sat) ≈ 0.2V (avoid saturation)
     pub(in crate::engine::convergence) fn apply_bjt_initial_guess_correction(
         guess: &mut [Value],
         circuit: &CircuitData,
@@ -469,7 +467,7 @@ impl Engine {
             let is_npn = matches!(bjt.bjt_type, crate::device::BjtType::Npn);
 
             if is_npn {
-                // NPN: Vc > Vb > Ve, VBE â‰ˆ 0.7V, VCE > 0.2V
+                // NPN: Vc > Vb > Ve, VBE ≈ 0.7V, VCE > 0.2V
                 // Keep emitter at linear presolve value (grounded through resistor)
                 // Set base = emitter + 0.7V
                 // Set collector to be above base (midpoint to VCC or similar)
@@ -496,7 +494,7 @@ impl Engine {
                     }
                 }
             } else {
-                // PNP: Ve > Vb > Vc, VEB â‰ˆ 0.7V, VEC > 0.2V
+                // PNP: Ve > Vb > Vc, VEB ≈ 0.7V, VEC > 0.2V
                 let ve_new = ve;
                 let vb_new = ve_new - VBE_FORWARD;
                 let vc_new = vb_new - VCE_SAT;

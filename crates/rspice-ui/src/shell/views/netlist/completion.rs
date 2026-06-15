@@ -34,27 +34,75 @@ struct Candidate {
 
 /// Dot-commands with signatures (the popover's static source).
 const DOT_COMMANDS: &[(&str, &str, &str)] = &[
-    (".tran", "<step> <stop> [start [maxstep]]", "Transient analysis."),
-    (".ac", "dec|oct|lin <points> <fstart> <fstop>", "Small-signal frequency sweep."),
-    (".dc", "<source> <start> <stop> <step>", "DC transfer sweep."),
+    (
+        ".tran",
+        "<step> <stop> [start [maxstep]]",
+        "Transient analysis.",
+    ),
+    (
+        ".ac",
+        "dec|oct|lin <points> <fstart> <fstop>",
+        "Small-signal frequency sweep.",
+    ),
+    (
+        ".dc",
+        "<source> <start> <stop> <step>",
+        "DC transfer sweep.",
+    ),
     (".op", "", "DC operating point."),
-    (".noise", "v(<out>) <source> dec <pts> <f0> <f1>", "Output-referred noise analysis."),
-    (".meas", "tran|ac|dc <name> <type> <signal> …", "Post-run measurement (drives the specs matrix)."),
-    (".param", "<name>=<value> …", "Deck parameter — appears in the tuner."),
-    (".model", "<name> <type> (<param>=<value> …)", "Device model card."),
-    (".subckt", "<name> <ports…> [params:]", "Subcircuit definition, closed by .ends."),
+    (
+        ".noise",
+        "v(<out>) <source> dec <pts> <f0> <f1>",
+        "Output-referred noise analysis.",
+    ),
+    (
+        ".meas",
+        "tran|ac|dc <name> <type> <signal> …",
+        "Post-run measurement (drives the specs matrix).",
+    ),
+    (
+        ".param",
+        "<name>=<value> …",
+        "Deck parameter — appears in the tuner.",
+    ),
+    (
+        ".model",
+        "<name> <type> (<param>=<value> …)",
+        "Device model card.",
+    ),
+    (
+        ".subckt",
+        "<name> <ports…> [params:]",
+        "Subcircuit definition, closed by .ends.",
+    ),
     (".ends", "[name]", "End of the enclosing .subckt."),
     (".include", "<path>", "Splice another deck file."),
     (".lib", "<path> <section>", "Include a library section."),
-    (".options", "<name>=<value> …", "Simulator options (reltol, abstol, temp…)."),
-    (".ic", "v(<node>)=<value> …", "Transient initial conditions."),
+    (
+        ".options",
+        "<name>=<value> …",
+        "Simulator options (reltol, abstol, temp…).",
+    ),
+    (
+        ".ic",
+        "v(<node>)=<value> …",
+        "Transient initial conditions.",
+    ),
     (".nodeset", "v(<node>)=<value> …", "DC convergence hints."),
     (".save", "<signal> …", "Restrict saved outputs."),
     (".probe", "<signal> …", "Mark signals for output."),
-    (".print", "<analysis> <signal> …", "Tabular output selection."),
+    (
+        ".print",
+        "<analysis> <signal> …",
+        "Tabular output selection.",
+    ),
     (".global", "<node> …", "Declare global nodes."),
     (".temp", "<celsius>", "Simulation temperature."),
-    (".four", "<freq> <signal> …", "Fourier analysis of a transient."),
+    (
+        ".four",
+        "<freq> <signal> …",
+        "Fourier analysis of a transient.",
+    ),
     (".end", "", "End of the deck."),
 ];
 
@@ -115,16 +163,12 @@ pub fn show(
         return None;
     }
 
-    state.completion_index = (state.completion_index as i32 + move_delta)
-        .rem_euclid(candidates.len() as i32) as usize;
+    state.completion_index =
+        (state.completion_index as i32 + move_delta).rem_euclid(candidates.len() as i32) as usize;
     let selected = state.completion_index.min(candidates.len() - 1);
 
     let clicked = draw_popover(ui, output, &candidates, selected);
-    let take = if accept {
-        Some(selected)
-    } else {
-        clicked
-    };
+    let take = if accept { Some(selected) } else { clicked };
 
     if let Some(index) = take {
         let chosen = &candidates[index];

@@ -75,10 +75,11 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
         .find(|(_, w)| w.name == format!("phase({base})"))
         .map(|(phase_index, w)| (phase_index, Arc::clone(&w.y)));
 
-    let gain_db = state.shell.results.derived.db(
-        (analysis_index as u64) << 32 | mag_index as u64,
-        &mag.y,
-    );
+    let gain_db = state
+        .shell
+        .results
+        .derived
+        .db((analysis_index as u64) << 32 | mag_index as u64, &mag.y);
     let frequency = Arc::clone(&mag.x);
 
     // Margins + extremes from the curves, cached on (data version, resolved
@@ -105,9 +106,7 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
                 gm_db: None,
                 f3db: None,
                 gain_extremes: super::finite_extremes(&gain_db).unwrap_or((0.0, 0.0)),
-                phase_extremes: phase
-                    .as_ref()
-                    .and_then(|(_, y)| super::finite_extremes(y)),
+                phase_extremes: phase.as_ref().and_then(|(_, y)| super::finite_extremes(y)),
             };
             if let Some(adc) = d.adc_db {
                 d.f3db = crossing(&frequency, &gain_db, adc - 3.0);
@@ -160,7 +159,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let Some(model) = build_model(state) else {
-        well_hint(ui, "No AC analysis in the active run — enable ac and re-run");
+        well_hint(
+            ui,
+            "No AC analysis in the active run — enable ac and re-run",
+        );
         return;
     };
 
@@ -269,9 +271,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 .cache_key(if continuous { 0xB0DE_0003 } else { 0xB0DE_0002 }),
         );
     }
-    spec.traces.push(
-        Trace::new(&model.frequency, &model.gain_db, c.traces[0]).cache_key(0xB0DE_0001),
-    );
+    spec.traces
+        .push(Trace::new(&model.frequency, &model.gain_db, c.traces[0]).cache_key(0xB0DE_0001));
 
     // Margin markers — first-class objects per the design.
     let m = model.margins;
@@ -355,13 +356,24 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let m = model.margins;
 
-    let fmt_opt = |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String {
-        v.map_or("—".to_owned(), f)
-    };
+    let fmt_opt =
+        |v: Option<f64>, f: &dyn Fn(f64) -> String| -> String { v.map_or("—".to_owned(), f) };
     let rows = [
-        ("Phase margin", fmt_opt(m.pm_deg, &|v| format!("{v:.1}°")), true),
-        ("Gain margin", fmt_opt(m.gm_db, &|v| format!("{v:.1} dB")), true),
-        ("Unity-gain freq", fmt_opt(m.ugf, &|v| fmt_si(v, "Hz", 1)), false),
+        (
+            "Phase margin",
+            fmt_opt(m.pm_deg, &|v| format!("{v:.1}°")),
+            true,
+        ),
+        (
+            "Gain margin",
+            fmt_opt(m.gm_db, &|v| format!("{v:.1} dB")),
+            true,
+        ),
+        (
+            "Unity-gain freq",
+            fmt_opt(m.ugf, &|v| fmt_si(v, "Hz", 1)),
+            false,
+        ),
         ("f₁₈₀", fmt_opt(m.f180, &|v| fmt_si(v, "Hz", 0)), false),
         ("A_dc", fmt_opt(m.adc_db, &|v| format!("{v:.1} dB")), false),
         ("f₋₃dB", fmt_opt(m.f3db, &|v| fmt_si(v, "Hz", 0)), false),
@@ -374,6 +386,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             "Phase data unavailable for this run — re-run the AC analysis to compute margins.",
         );
     } else {
-        super::panel_note(ui, "Margins measured on the simulated curves; the plot markers show the same values.");
+        super::panel_note(
+            ui,
+            "Margins measured on the simulated curves; the plot markers show the same values.",
+        );
     }
 }

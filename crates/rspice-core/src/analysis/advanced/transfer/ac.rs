@@ -13,7 +13,7 @@ pub struct AcTransferPoint {
     /// Frequency (Hz)
     pub frequency: Value,
 
-    /// Complex transfer function H(jÏ‰)
+    /// Complex transfer function H(jω)
     pub transfer: Complex64,
 
     /// Magnitude (linear)
@@ -525,7 +525,7 @@ impl AcTransferAnalyzer {
 
     /// Analyze using a transfer function evaluator
     ///
-    /// The evaluator should return H(jÏ‰) for given frequency
+    /// The evaluator should return H(jω) for given frequency
     pub fn analyze<F>(&self, mut evaluator: F) -> AcTransferResult
     where
         F: FnMut(Value) -> Complex64,
@@ -543,7 +543,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test lowpass filter transfer function
     ///
-    /// H(s) = Ï‰â‚€ / (s + Ï‰â‚€) = 1 / (1 + s/Ï‰â‚€)
+    /// H(s) = ω₀ / (s + ω₀) = 1 / (1 + s/ω₀)
     pub fn test_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
 
@@ -555,7 +555,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test highpass filter transfer function
     ///
-    /// H(s) = s / (s + Ï‰â‚€)
+    /// H(s) = s / (s + ω₀)
     pub fn test_highpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
 
@@ -567,7 +567,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test bandpass filter transfer function
     ///
-    /// H(s) = Ï‰â‚’/Q Â· s / (sÂ² + Ï‰â‚’/Q Â· s + Ï‰â‚’Â²)
+    /// H(s) = ωₒ/Q · s / (s² + ωₒ/Q · s + ωₒ²)
     pub fn test_bandpass(&self, center_freq: Value, q_factor: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * center_freq;
         let omega_q = omega_0 / q_factor;
@@ -583,7 +583,7 @@ impl AcTransferAnalyzer {
 
     /// Create a test two-pole lowpass (Butterworth-like)
     ///
-    /// H(s) = Ï‰â‚€Â² / (sÂ² + âˆš2Â·Ï‰â‚€Â·s + Ï‰â‚€Â²)
+    /// H(s) = ω₀² / (s² + √2·ω₀·s + ω₀²)
     pub fn test_butterworth_lowpass(&self, cutoff_freq: Value) -> AcTransferResult {
         let omega_0 = 2.0 * PI * cutoff_freq;
         let omega_0_sq = omega_0 * omega_0;

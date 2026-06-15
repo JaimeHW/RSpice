@@ -24,7 +24,10 @@ fn random_stream_is_deterministic_per_seed() {
 
     let c = RandomState::new(43);
     let third: Vec<Value> = (0..64).map(|_| c.next_uniform()).collect();
-    assert_ne!(first, third, "different seeds must give different sequences");
+    assert_ne!(
+        first, third,
+        "different seeds must give different sequences"
+    );
 }
 
 #[test]
@@ -59,7 +62,10 @@ fn random_standard_normal_has_unit_moments_and_stays_finite() {
     let mean = sum / n as Value;
     let var = sum_sq / n as Value - mean * mean;
     assert!((mean).abs() < 0.02, "normal mean {mean} too far from 0");
-    assert!((var - 1.0).abs() < 0.05, "normal variance {var} too far from 1");
+    assert!(
+        (var - 1.0).abs() < 0.05,
+        "normal variance {var} too far from 1"
+    );
 }
 
 #[test]
@@ -167,10 +173,7 @@ fn agauss_matches_absolute_deviation_semantics() {
     let mean = sum / n as Value;
     let std = (sum_sq / n as Value - mean * mean).sqrt();
     assert!((mean - 1.5).abs() < 0.005, "agauss mean {mean} != 1.5");
-    assert!(
-        (std - 0.1).abs() < 0.005,
-        "agauss std {std} != 0.3/3 = 0.1"
-    );
+    assert!((std - 0.1).abs() < 0.005, "agauss std {std} != 0.3/3 = 0.1");
 }
 
 #[test]
@@ -182,7 +185,10 @@ fn unif_and_aunif_respect_bounds() {
         assert!((8.0..12.0).contains(&v), "unif draw {v} outside [8, 12)");
         // aunif: nom ± avar bounds.
         let w = eval_with(&ctx, "aunif(-3, 0.5)");
-        assert!((-3.5..-2.5).contains(&w), "aunif draw {w} outside [-3.5, -2.5)");
+        assert!(
+            (-3.5..-2.5).contains(&w),
+            "aunif draw {w} outside [-3.5, -2.5)"
+        );
     }
 }
 
@@ -199,7 +205,10 @@ fn unif_covers_both_sides_of_nominal() {
             below += 1;
         }
     }
-    assert!(above > 500 && below > 500, "unif draws one-sided: +{above}/-{below}");
+    assert!(
+        above > 500 && below > 500,
+        "unif draws one-sided: +{above}/-{below}"
+    );
 }
 
 #[test]

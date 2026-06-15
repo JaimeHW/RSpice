@@ -102,10 +102,7 @@ fn implicit_transcendental_equation_solves() {
         ),
         "out",
     );
-    assert!(
-        (v - std::f64::consts::LN_2).abs() < 1e-9,
-        "ln(2): got {v}"
-    );
+    assert!((v - std::f64::consts::LN_2).abs() < 1e-9, "ln(2): got {v}");
 }
 
 const CURRENT_REGULATOR: &str = r#"

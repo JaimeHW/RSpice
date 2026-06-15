@@ -73,7 +73,9 @@ impl CircuitData {
         for binding in &mut self.coupled_inductor_pairs {
             let br1 = num_nodes + binding.branch1_ordinal;
             let br2 = num_nodes + binding.branch2_ordinal;
-            binding.device.update_state_with_branches(solution, br1, br2);
+            binding
+                .device
+                .update_state_with_branches(solution, br1, br2);
         }
     }
 

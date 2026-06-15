@@ -53,8 +53,8 @@ fn assert_divider(result: &HbAnalysisResult, c_expected: f64, label: &str) {
     assert!(result.converged, "{label}: HB must converge");
 
     let w = 2.0 * PI * F0;
-    let h_expected =
-        num_complex::Complex64::new(1.0, 0.0) / num_complex::Complex64::new(1.0, w * R * c_expected);
+    let h_expected = num_complex::Complex64::new(1.0, 0.0)
+        / num_complex::Complex64::new(1.0, w * R * c_expected);
 
     let h1 = coefficient(result, "g", 1) / num_complex::Complex64::new(A, 0.0);
     assert!(

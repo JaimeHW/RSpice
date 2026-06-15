@@ -302,10 +302,8 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 28.0),
-        egui::Sense::click(),
-    );
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::click());
     if !ui.is_rect_visible(rect) {
         return false;
     }
@@ -364,10 +362,7 @@ fn command_row(ui: &mut egui::Ui, row: &PaletteRow, selected: bool) -> bool {
     }
     let galley = ui.fonts(|f| f.layout_job(job));
     painter.galley(
-        egui::pos2(
-            rect.left() + 12.0,
-            rect.center().y - galley.size().y * 0.5,
-        ),
+        egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y * 0.5),
         galley,
         base_color,
     );

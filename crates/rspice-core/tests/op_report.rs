@@ -47,7 +47,10 @@ m1 d g 0 0 nmod w=10u l=1u
     );
     let gm = get("gm");
     // gm = KP * W/L * (Vgs - Vth) = 1m
-    assert!((gm - 1e-3).abs() / 1e-3 < 1e-3, "transconductance: got {gm}");
+    assert!(
+        (gm - 1e-3).abs() / 1e-3 < 1e-3,
+        "transconductance: got {gm}"
+    );
     assert!((get("vgs") - 2.0).abs() < 1e-9);
     assert!((get("vds") - 5.0).abs() < 1e-9);
     assert!((get("vth") - 1.0).abs() < 1e-9);
@@ -143,10 +146,7 @@ q1 col b 0 qmod
 
     // Forward-active: vbe near 0.7V, ic = beta*ib with beta near BF.
     let vbe = get("vbe");
-    assert!(
-        (0.55..0.85).contains(&vbe),
-        "forward-active vbe: got {vbe}"
-    );
+    assert!((0.55..0.85).contains(&vbe), "forward-active vbe: got {vbe}");
     let beta = get("beta");
     assert!(
         (50.0..150.0).contains(&beta),

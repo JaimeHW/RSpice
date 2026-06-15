@@ -49,9 +49,7 @@ pub mod eval;
 pub mod params;
 pub mod temp;
 
-use crate::device::traits::{
-    MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
-};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Value, circuit::NodeId};
 use eval::{B3SoiDdBias, B3SoiDdOp, ModelConsts};
 use std::sync::Arc;
@@ -271,13 +269,7 @@ impl B3SoiDd {
     /// tolerances and the linear current predictions `cdhat`/`cbhat` match the
     /// stored device currents. `bodyMod` 0/2 skips the `vps` voltage test
     /// exactly as ngspice does.
-    fn bypass_check(
-        &self,
-        raw: B3SoiDdBias,
-        reltol: Value,
-        abstol: Value,
-        vntol: Value,
-    ) -> bool {
+    fn bypass_check(&self, raw: B3SoiDdBias, reltol: Value, abstol: Value, vntol: Value) -> bool {
         let vtol = |new: Value, old: Value| reltol * new.abs().max(old.abs()) + vntol;
         let old = &self.bias;
         let delvbs = raw.vbs - old.vbs;
@@ -614,9 +606,8 @@ impl NonlinearDevice for B3SoiDd {
         }
         let reltol = criteria.relative_tolerance();
         let vtol = criteria.voltage_tolerance();
-        let cmp = |new: Value, old: Value| {
-            (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol
-        };
+        let cmp =
+            |new: Value, old: Value| (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol;
         cmp(self.bias.vbs, self.converged_ref.vbs)
             && cmp(self.bias.vgs, self.converged_ref.vgs)
             && cmp(self.bias.vds, self.converged_ref.vds)
@@ -986,7 +977,8 @@ mod tests {
             let netlist = Netlist::parse(&deck).expect("parse");
             let engine = Engine::new(crate::SimulationConfig::default());
             let res = engine.run_dc_op(&netlist).expect("dc op");
-            res.try_voltage_named("m1.__body.internal").expect("body node")
+            res.try_voltage_named("m1.__body.internal")
+                .expect("body node")
         };
         // Off (Vg=0): body near the t=0 RampVg2 reference (~0.092 V).
         let vb0 = solve_vb(0.0);
@@ -1213,14 +1205,28 @@ mod tests {
         )
         .charge
         .unwrap();
-        let ok = |actual: Value, oracle: Value| {
-            (actual - oracle).abs() <= 1e-6 * oracle.abs()
-        };
+        let ok = |actual: Value, oracle: Value| (actual - oracle).abs() <= 1e-6 * oracle.abs();
         assert!(ok(charge.qb, -5.755219597e-15), "qb={:.9e}", charge.qb);
-        assert!(ok(charge.gcbgb, -6.264670704e-15), "gcbgb={:.9e}", charge.gcbgb);
-        assert!(ok(charge.gcbdb, -1.482516887e-15), "gcbdb={:.9e}", charge.gcbdb);
-        assert!(ok(charge.gcbsb, -8.674246038e-15), "gcbsb={:.9e}", charge.gcbsb);
-        assert!(ok(charge.gcbeb, -2.308017492e-15), "gcbeb={:.9e}", charge.gcbeb);
+        assert!(
+            ok(charge.gcbgb, -6.264670704e-15),
+            "gcbgb={:.9e}",
+            charge.gcbgb
+        );
+        assert!(
+            ok(charge.gcbdb, -1.482516887e-15),
+            "gcbdb={:.9e}",
+            charge.gcbdb
+        );
+        assert!(
+            ok(charge.gcbsb, -8.674246038e-15),
+            "gcbsb={:.9e}",
+            charge.gcbsb
+        );
+        assert!(
+            ok(charge.gcbeb, -2.308017492e-15),
+            "gcbeb={:.9e}",
+            charge.gcbeb
+        );
     }
 
     #[test]
@@ -1232,7 +1238,13 @@ mod tests {
             eval::eval(
                 &sized,
                 &mc,
-                B3SoiDdBias { vbs: vb, vgs: vg, vds: 1.5, ves: 0.0, vps: 0.0 },
+                B3SoiDdBias {
+                    vbs: vb,
+                    vgs: vg,
+                    vds: 1.5,
+                    ves: 0.0,
+                    vps: 0.0,
+                },
                 1.0,
                 true,
             )

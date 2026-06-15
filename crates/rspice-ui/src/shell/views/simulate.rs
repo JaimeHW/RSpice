@@ -100,10 +100,8 @@ fn card_header(
 ) -> Option<egui::Response> {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 34.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::hover());
     let painter = ui.painter();
     painter.hline(
         rect.x_range(),
@@ -118,7 +116,10 @@ fn card_header(
         )
     });
     painter.galley(
-        egui::pos2(rect.left() + 14.0, rect.center().y - title_galley.size().y * 0.5),
+        egui::pos2(
+            rect.left() + 14.0,
+            rect.center().y - title_galley.size().y * 0.5,
+        ),
         title_galley.clone(),
         c.text,
     );
@@ -159,9 +160,16 @@ fn card_header(
         ui.painter().rect_filled(action_rect, t.radius, c.bg_hover);
     }
     ui.painter().galley(
-        egui::pos2(action_rect.left() + 8.0, action_rect.center().y - galley.size().y * 0.5),
+        egui::pos2(
+            action_rect.left() + 8.0,
+            action_rect.center().y - galley.size().y * 0.5,
+        ),
         galley,
-        if response.hovered() { c.text } else { c.text_dim },
+        if response.hovered() {
+            c.text
+        } else {
+            c.text_dim
+        },
     );
     Some(response.on_hover_cursor(egui::CursorIcon::PointingHand))
 }
@@ -173,9 +181,12 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
     let mut palette_anchor: Option<egui::Rect> = None;
 
     card(ui, |ui| {
-        if let Some(action) =
-            card_header(ui, "Analyses", "run in listed order", Some("+ Add analysis"))
-        {
+        if let Some(action) = card_header(
+            ui,
+            "Analyses",
+            "run in listed order",
+            Some("+ Add analysis"),
+        ) {
             if action.clicked() {
                 if state.sim_setup.palette_open {
                     state.sim_setup.palette_open = false;
@@ -198,10 +209,8 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                 continue;
             }
 
-            let (rect, response) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 33.0),
-                egui::Sense::click(),
-            );
+            let (rect, response) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), 33.0), egui::Sense::click());
             let hovered = ui.rect_contains_pointer(rect);
             let painter = ui.painter();
             if selected {
@@ -294,7 +303,11 @@ fn analyses_card(ui: &mut Ui, state: &mut AppState, mut palette_opened: bool) {
                 if x_response.hovered() {
                     ui.painter().rect_filled(x_rect, t.radius, c.bg_hover);
                 }
-                let x_color = if x_response.hovered() { c.err } else { c.text_faint };
+                let x_color = if x_response.hovered() {
+                    c.err
+                } else {
+                    c.text_faint
+                };
                 ui.painter().text(
                     x_rect.center(),
                     egui::Align2::CENTER_CENTER,
@@ -354,10 +367,8 @@ fn outputs_card(ui: &mut Ui, state: &mut AppState) {
     card(ui, |ui| {
         card_header(ui, "Outputs", "saved to results database", None);
         if state.simulation.waveforms.is_empty() {
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 40.0),
-                egui::Sense::hover(),
-            );
+            let (rect, _) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
             ui.painter().text(
                 egui::pos2(rect.left() + 14.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
@@ -375,10 +386,8 @@ fn outputs_card(ui: &mut Ui, state: &mut AppState) {
             .map(|waveform| (waveform.name.clone(), waveform.visible))
             .collect();
         for (idx, (name, visible)) in names.iter().enumerate() {
-            let (rect, _) = ui.allocate_exact_size(
-                egui::vec2(ui.available_width(), 30.0),
-                egui::Sense::hover(),
-            );
+            let (rect, _) = ui
+                .allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
             let painter = ui.painter();
             if idx + 1 < names.len() {
                 painter.hline(
@@ -541,8 +550,7 @@ fn analysis_palette(ui: &Ui, state: &mut AppState, anchor: egui::Rect, just_open
     }
     let mut keyed = false;
     if down && !items.is_empty() {
-        state.sim_setup.palette_active =
-            (state.sim_setup.palette_active + 1).min(items.len() - 1);
+        state.sim_setup.palette_active = (state.sim_setup.palette_active + 1).min(items.len() - 1);
         keyed = true;
     } else if up {
         state.sim_setup.palette_active = state.sim_setup.palette_active.saturating_sub(1);
@@ -612,8 +620,11 @@ fn palette_search_strip(ui: &mut Ui, state: &mut AppState, just_opened: bool) {
             }
         });
     let y = ui.cursor().top();
-    ui.painter()
-        .hline(ui.min_rect().x_range(), y - 0.5, egui::Stroke::new(1.0, c.border));
+    ui.painter().hline(
+        ui.min_rect().x_range(),
+        y - 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
 }
 
 /// The categorized, scrolling type list.
@@ -656,10 +667,7 @@ fn palette_list(ui: &mut Ui, state: &mut AppState, items: &[(usize, &'static str
                 }
                 // A resting cursor must not fight the arrow keys: only an
                 // actually-moving pointer steals the active row.
-                if response.hovered()
-                    && !active
-                    && ui.input(|i| i.pointer.is_moving())
-                {
+                if response.hovered() && !active && ui.input(|i| i.pointer.is_moving()) {
                     state.sim_setup.palette_active = position;
                 }
                 if response.clicked() {
@@ -733,7 +741,11 @@ fn palette_row(ui: &mut Ui, state: &AppState, index: usize, active: bool) -> egu
         egui::Align2::LEFT_CENTER,
         id,
         theme::mono(tokens::FS_1, FontWeight::Medium),
-        if active { c.text } else { mix(c.text_dim, c.text, 0.5) },
+        if active {
+            c.text
+        } else {
+            mix(c.text_dim, c.text, 0.5)
+        },
     );
     let meta = if enabled {
         "in run set"
@@ -786,7 +798,11 @@ fn palette_hint_strip(ui: &mut Ui) {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
     let painter = ui.painter();
-    painter.hline(rect.x_range(), rect.top() + 0.5, egui::Stroke::new(1.0, c.border));
+    painter.hline(
+        rect.x_range(),
+        rect.top() + 0.5,
+        egui::Stroke::new(1.0, c.border),
+    );
     painter.text(
         egui::pos2(rect.left() + 10.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
@@ -830,12 +846,9 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
 
                 // Progress track.
                 let status_width = 200.0;
-                let track_width =
-                    (ui.available_width() - status_width - 12.0).max(60.0);
-                let (track_rect, _) = ui.allocate_exact_size(
-                    egui::vec2(track_width, 5.0),
-                    egui::Sense::hover(),
-                );
+                let track_width = (ui.available_width() - status_width - 12.0).max(60.0);
+                let (track_rect, _) =
+                    ui.allocate_exact_size(egui::vec2(track_width, 5.0), egui::Sense::hover());
                 let painter = ui.painter();
                 painter.rect_filled(track_rect, 3.0, c.bg_inset);
                 let progress = state.simulation.progress.clamp(0.0, 1.0) as f32;

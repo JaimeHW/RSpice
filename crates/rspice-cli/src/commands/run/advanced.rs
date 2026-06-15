@@ -126,8 +126,7 @@ fn export_step_sweep(
             let mut data = crate::hdf5::Hdf5SimulationData::new();
             data.title = "Step Sweep".to_string();
 
-            let mut sweep =
-                crate::hdf5::Hdf5WaveformSection::new(step_name, sweep_vals.clone());
+            let mut sweep = crate::hdf5::Hdf5WaveformSection::new(step_name, sweep_vals.clone());
             for signal in &signals {
                 sweep.add_signal(signal.display_name.clone(), signal.values.clone());
             }
@@ -240,7 +239,10 @@ pub(super) fn run_monte_carlo(
             variables.sort_by(|a, b| a.name.cmp(&b.name));
 
             if !ctx.quiet {
-                println!("✓ Monte Carlo complete: {} runs (seed={})", result.num_runs, seed);
+                println!(
+                    "✓ Monte Carlo complete: {} runs (seed={})",
+                    result.num_runs, seed
+                );
                 if !variables.is_empty() {
                     println!(
                         "  {:<24} {:>13} {:>13} {:>13} {:>13}",
@@ -303,9 +305,8 @@ fn export_monte_carlo(
                 })
             }).collect::<Vec<_>>(),
         });
-        let mut file = std::fs::File::create(output_path).map_err(|e| {
-            CliError::output_error(output_path, e)
-        })?;
+        let mut file = std::fs::File::create(output_path)
+            .map_err(|e| CliError::output_error(output_path, e))?;
         serde_json::to_writer_pretty(&mut file, &json)
             .map_err(|e| CliError::output_json_error(output_path, e))?;
         file.write_all(b"\n")
@@ -348,7 +349,10 @@ fn export_monte_carlo(
     }
 
     if !ctx.quiet {
-        println!("  Monte Carlo samples exported to: {}", output_path.display());
+        println!(
+            "  Monte Carlo samples exported to: {}",
+            output_path.display()
+        );
     }
     Ok(())
 }
@@ -457,15 +461,13 @@ fn export_pss(
             }
         })
         .collect();
-    let signals =
-        crate::commands::run_signals::apply_save_set(signals, &ctx.netlist.saves);
+    let signals = crate::commands::run_signals::apply_save_set(signals, &ctx.netlist.saves);
 
     match ctx.format {
         crate::cli::OutputFormat::Hdf5 => {
             let mut data = crate::hdf5::Hdf5SimulationData::new();
             data.title = "Periodic Steady State".to_string();
-            let mut section =
-                crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
+            let mut section = crate::hdf5::Hdf5WaveformSection::new("time", result.time.clone());
             for signal in &signals {
                 section.add_signal(signal.display_name.clone(), signal.values.clone());
             }
@@ -600,8 +602,7 @@ fn export_hb(
             }
         })
         .collect();
-    let signals =
-        crate::commands::run_signals::apply_save_set_complex(signals, &ctx.netlist.saves);
+    let signals = crate::commands::run_signals::apply_save_set_complex(signals, &ctx.netlist.saves);
 
     if matches!(ctx.format, crate::cli::OutputFormat::Hdf5) {
         let mut data = crate::hdf5::Hdf5SimulationData::new();
@@ -808,8 +809,7 @@ fn run_corner_job(
         None => setup.source.clone(),
     };
 
-    let corner_netlist = match rspice_core::Netlist::parse_with_path(&corner_source, &setup.base)
-    {
+    let corner_netlist = match rspice_core::Netlist::parse_with_path(&corner_source, &setup.base) {
         Ok(netlist) => netlist,
         Err(e) => {
             return CornerOutcome {
@@ -968,13 +968,14 @@ fn run_corner_with_lib(
         .source_path
         .clone()
         .unwrap_or_else(|| ctx.args.input.clone());
-    let corner_netlist = rspice_core::Netlist::parse_with_path(&corner_source, &base).map_err(
-        |e| CliError::ParseError {
-            message: format!("corner '{}': {}", corner, e),
-            line: None,
-            suggestion: None,
-        },
-    )?;
+    let corner_netlist =
+        rspice_core::Netlist::parse_with_path(&corner_source, &base).map_err(|e| {
+            CliError::ParseError {
+                message: format!("corner '{}': {}", corner, e),
+                line: None,
+                suggestion: None,
+            }
+        })?;
 
     let corner_engine = rspice_core::Engine::new(ctx.engine.config().clone());
     let corner_ctx = RunContext {
@@ -1078,11 +1079,7 @@ fn corner_output_path(
 /// S-parameters directly — `Sjj = Vj − 1`, `Sij = Vi` — with no matrix
 /// inversion and no floating-port hazard. The deck supplies the bias
 /// network and sweep; its own sources must not carry AC specifications.
-pub(super) fn run_sparam(
-    ctx: &RunContext<'_>,
-    ports_spec: &str,
-    z0: f64,
-) -> Result<(), CliError> {
+pub(super) fn run_sparam(ctx: &RunContext<'_>, ports_spec: &str, z0: f64) -> Result<(), CliError> {
     if !z0.is_finite() || z0 <= 0.0 {
         return Err(CliError::InvalidArgument {
             message: format!("--sparam-z0 must be a positive impedance, got {z0}"),
@@ -1148,10 +1145,7 @@ pub(super) fn run_sparam(
 
     // One AC sweep per driven port, with the excitation network appended.
     let drive = |drive_port: usize| -> Result<Vec<rspice_core::analysis::AcResult>, CliError> {
-        let (dp, dm) = (
-            &port_nodes[2 * drive_port],
-            &port_nodes[2 * drive_port + 1],
-        );
+        let (dp, dm) = (&port_nodes[2 * drive_port], &port_nodes[2 * drive_port + 1]);
         let (lp, lm) = (
             &port_nodes[2 * (1 - drive_port)],
             &port_nodes[2 * (1 - drive_port) + 1],
@@ -1229,9 +1223,10 @@ pub(super) fn run_sparam(
     }
 
     if let Some(ref output_path) = ctx.output_path_for("sparam") {
-        if output_path.extension().is_some_and(|ext| {
-            ext.eq_ignore_ascii_case("s2p") || ext.eq_ignore_ascii_case("snp")
-        }) {
+        if output_path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("s2p") || ext.eq_ignore_ascii_case("snp"))
+        {
             write_touchstone_2port(output_path, z0, &frequencies, [&s11, &s21, &s12, &s22])?;
         } else {
             let signal = |name: &str, values: &[rspice_core::Complex64]| {

@@ -237,7 +237,10 @@ fn summary_json_carries_the_verdict() {
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&summary).expect("summary file"))
             .expect("valid json");
-    assert_eq!(json["passed"], false, "summary verdict must match exit code");
+    assert_eq!(
+        json["passed"], false,
+        "summary verdict must match exit code"
+    );
     assert_eq!(json["tool"]["name"], "rspice");
     assert_eq!(
         json["runs"][0]["measurements"][0]["passed"], false,

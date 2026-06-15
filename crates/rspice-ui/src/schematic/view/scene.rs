@@ -20,7 +20,11 @@ pub(super) fn draw_scene(
     state: &AppState,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    painter.rect_filled(available, 0.0, crate::ui::tokens::active_palette().canvas_bg);
+    painter.rect_filled(
+        available,
+        0.0,
+        crate::ui::tokens::active_palette().canvas_bg,
+    );
     draw_grid(painter, available, state);
 
     // First-run guidance: an empty sheet says what to do next instead of
@@ -101,7 +105,10 @@ pub(super) fn draw_scene(
             painter.circle_stroke(
                 pos,
                 radius,
-                Stroke::new(1.0 * viewport.zoom, crate::ui::tokens::active_palette().accent),
+                Stroke::new(
+                    1.0 * viewport.zoom,
+                    crate::ui::tokens::active_palette().accent,
+                ),
             );
         }
     }

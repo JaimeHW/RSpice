@@ -65,8 +65,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let width = ui.available_width();
 
             // Header row.
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
+            let (header, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
@@ -142,7 +141,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 );
                 ui.painter()
                     .rect_filled(chip, chip.height() / 2.0, fg.gamma_multiply(0.16));
-                ui.painter().galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
+                ui.painter()
+                    .galley(chip.min + egui::vec2(6.0, 2.0), galley, fg);
 
                 ui.painter().text(
                     egui::pos2(

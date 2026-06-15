@@ -59,10 +59,7 @@ r1 out 0 1k
 .end
 ";
     let v = op_voltage(deck, "out");
-    assert!(
-        (v - 5.0).abs() < 1e-9,
-        "(75-25)*0.1 must give 5, got {v}"
-    );
+    assert!((v - 5.0).abs() < 1e-9, "(75-25)*0.1 must give 5, got {v}");
 }
 
 #[test]

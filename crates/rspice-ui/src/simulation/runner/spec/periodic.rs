@@ -119,7 +119,11 @@ fn run_pss(
         })
         .collect();
 
-    Ok(SimulationResult::Transient { time, waveforms, measurements: Vec::new() })
+    Ok(SimulationResult::Transient {
+        time,
+        waveforms,
+        measurements: Vec::new(),
+    })
 }
 
 fn run_harmonic_balance(

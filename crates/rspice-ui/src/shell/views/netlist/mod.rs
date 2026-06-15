@@ -149,8 +149,7 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
                 netlist.revision += 1;
             }
             if Button::new("Copy").show(ui).clicked() {
-                ui.ctx()
-                    .copy_text(state.simulation.netlist_content.clone());
+                ui.ctx().copy_text(state.simulation.netlist_content.clone());
                 state
                     .shell
                     .toasts

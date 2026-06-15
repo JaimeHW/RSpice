@@ -628,7 +628,9 @@ impl JitCompiler {
                     let result = match *query_id {
                         0..=4 => {
                             let cmp =
-                                builder.ins().icmp_imm(IntCC::Equal, current, *query_id as i64);
+                                builder
+                                    .ins()
+                                    .icmp_imm(IntCC::Equal, current, *query_id as i64);
                             builder.ins().select(cmp, one, zero)
                         }
                         5 => {
@@ -783,10 +785,9 @@ impl JitCompiler {
 
         builder.switch_to_block(load_block);
         builder.seal_block(load_block);
-        let loaded =
-            builder
-                .ins()
-                .load(types::F64, MemFlags::new(), prev_ptr, (idx * 8) as i32);
+        let loaded = builder
+            .ins()
+            .load(types::F64, MemFlags::new(), prev_ptr, (idx * 8) as i32);
         builder.ins().jump(merge_block, &[loaded]);
 
         builder.switch_to_block(merge_block);

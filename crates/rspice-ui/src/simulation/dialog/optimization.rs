@@ -364,7 +364,6 @@ impl OptimizationDialogState {
             *self = Self::from_config(&OptimizationConfig::default());
         }
     }
-
 }
 
 fn format_scalar(v: f64) -> String {

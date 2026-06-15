@@ -410,7 +410,11 @@ impl VerilogADevice {
                     .iter()
                     .position(|p| p.aliases.iter().any(|a| a.as_str() == name))
             })
-            .or_else(|| params.iter().position(|p| p.name.eq_ignore_ascii_case(name)))
+            .or_else(|| {
+                params
+                    .iter()
+                    .position(|p| p.name.eq_ignore_ascii_case(name))
+            })
             .or_else(|| {
                 params
                     .iter()
@@ -458,10 +462,7 @@ impl VerilogADevice {
                 let mut vm = Vm::new(&mut self.context);
                 vm.execute(&program).unwrap_or(0.0)
             };
-            let (min, max) = (
-                self.model.parameters[i].min,
-                self.model.parameters[i].max,
-            );
+            let (min, max) = (self.model.parameters[i].min, self.model.parameters[i].max);
             let clamped = match (min, max) {
                 (Some(min), Some(max)) => value.clamp(min, max),
                 (Some(min), None) => value.max(min),
@@ -737,7 +738,11 @@ impl VerilogADevice {
                 continue;
             }
             // Charge of m parallel copies scales the same way as current
-            let scale = if program.branch_ordinal.is_none() { m } else { 1.0 };
+            let scale = if program.branch_ordinal.is_none() {
+                m
+            } else {
+                1.0
+            };
 
             for entry in &matrix_indices.reactive[program_idx] {
                 let model_entry = &program.reactive_jacobians[entry.jacobian_idx];
@@ -1227,7 +1232,12 @@ impl VerilogADevice {
         }
 
         for (program_idx, program) in model.stamp_programs.iter().enumerate() {
-            if !self.program_active.get(program_idx).copied().unwrap_or(true) {
+            if !self
+                .program_active
+                .get(program_idx)
+                .copied()
+                .unwrap_or(true)
+            {
                 continue;
             }
 
@@ -1256,7 +1266,11 @@ impl VerilogADevice {
 
             // Flow contributions of m parallel copies inject m times the
             // per-copy current; potential and constraint rows are per-copy
-            let scale = if program.branch_ordinal.is_none() { m } else { 1.0 };
+            let scale = if program.branch_ordinal.is_none() {
+                m
+            } else {
+                1.0
+            };
 
             // Companion model: solve A*x_new = z with the device linearized
             // at x_old.
@@ -1297,8 +1311,7 @@ impl VerilogADevice {
                 match (program.branch_ordinal, program.indirect) {
                     (None, _) | (Some(_), true) => {
                         if model_entry.sign > 0.0 {
-                            let x_col =
-                                Self::axis_value(vm.context, &model_entry.col_axis);
+                            let x_col = Self::axis_value(vm.context, &model_entry.col_axis);
                             eq_value -= deriv * x_col;
                         }
                     }
@@ -1353,12 +1366,8 @@ impl VerilogADevice {
         let circuit_node = |index: &StampIndex| -> usize {
             match index {
                 StampIndex::Terminal(t) => self.node_mapping.get(*t).copied().unwrap_or(0),
-                StampIndex::Internal(i) => {
-                    self.internal_node_indices.get(*i).copied().unwrap_or(0)
-                }
-                StampIndex::Branch(k) => {
-                    self.branch_current_indices.get(*k).copied().unwrap_or(0)
-                }
+                StampIndex::Internal(i) => self.internal_node_indices.get(*i).copied().unwrap_or(0),
+                StampIndex::Branch(k) => self.branch_current_indices.get(*k).copied().unwrap_or(0),
                 StampIndex::Ground => 0,
             }
         };
@@ -1392,7 +1401,10 @@ impl VerilogADevice {
             // equation row; current noise injects across the node pair
             let (node_pos, node_neg) = match (source.is_current, source.branch_ordinal) {
                 (false, Some(ordinal)) => (
-                    self.branch_current_indices.get(ordinal).copied().unwrap_or(0),
+                    self.branch_current_indices
+                        .get(ordinal)
+                        .copied()
+                        .unwrap_or(0),
                     0,
                 ),
                 _ => (circuit_node(&source.pos), circuit_node(&source.neg)),
@@ -1418,9 +1430,7 @@ impl VerilogADevice {
     /// branch-current unknown
     fn axis_value(context: &VmContext, axis: &crate::codegen::ColumnAxis) -> f64 {
         match axis {
-            crate::codegen::ColumnAxis::Node(node) => {
-                Self::unified_node_voltage(context, *node)
-            }
+            crate::codegen::ColumnAxis::Node(node) => Self::unified_node_voltage(context, *node),
             crate::codegen::ColumnAxis::Branch(k) => context
                 .branch_current_values
                 .get(*k)

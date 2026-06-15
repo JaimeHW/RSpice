@@ -77,10 +77,7 @@ impl<'a> Pill<'a> {
             dot_color,
         );
         painter.galley(
-            egui::pos2(
-                rect.left() + 12.0,
-                rect.center().y - galley.size().y * 0.5,
-            ),
+            egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y * 0.5),
             galley,
             c.text_dim,
         );

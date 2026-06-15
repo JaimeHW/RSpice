@@ -152,8 +152,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             let run_x = |idx: usize| NAME_W + RAIL_W + (idx as f32 + 1.0) * RUN_W;
 
             // Header row.
-            let (header, _) =
-                ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
+            let (header, _) = ui.allocate_exact_size(egui::vec2(width, 22.0), egui::Sense::hover());
             ui.painter().hline(
                 header.x_range(),
                 header.bottom() - 0.5,
@@ -269,10 +268,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                     );
                                 }
                             }
-                            (
-                                fmt_si(*v, &spec.unit, 3),
-                                if pass { c.text } else { c.err },
-                            )
+                            (fmt_si(*v, &spec.unit, 3), if pass { c.text } else { c.err })
                         }
                         Some(None) => {
                             failed_runs[idx] = true;
@@ -449,10 +445,8 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
                     ("MAX", 110.0),
                     ("UNIT", 70.0),
                 ] {
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(width, 18.0),
-                        egui::Sense::hover(),
-                    );
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(width, 18.0), egui::Sense::hover());
                     ui.painter().text(
                         egui::pos2(rect.left() + 4.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,

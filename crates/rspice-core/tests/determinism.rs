@@ -81,9 +81,7 @@ c1 out 0 1n
     .expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
 
-    let freqs: Vec<f64> = (0..=360)
-        .map(|i| 10f64.powf(i as f64 / 40.0))
-        .collect();
+    let freqs: Vec<f64> = (0..=360).map(|i| 10f64.powf(i as f64 / 40.0)).collect();
     let a = engine.run_ac(&netlist, &freqs).expect("ac runs");
     let b = engine.run_ac(&netlist, &freqs).expect("ac runs");
     assert_eq!(a.len(), b.len());

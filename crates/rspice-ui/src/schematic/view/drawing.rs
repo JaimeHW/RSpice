@@ -420,12 +420,7 @@ fn quantize_font_size(size: f32) -> f32 {
     ((size * 4.0).round() * 0.25).max(1.0)
 }
 
-fn draw_component_labels(
-    painter: &Painter,
-    pos: Pos2,
-    scale: f32,
-    component: &Component,
-) {
+fn draw_component_labels(painter: &Painter, pos: Pos2, scale: f32, component: &Component) {
     // Skip labels for Ground (too small, clutters schematic)
     if matches!(component.kind, crate::state::ComponentType::Ground) {
         return;

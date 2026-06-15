@@ -175,7 +175,12 @@ pub(in crate::shell) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usiz
             input_row(ui, "Source", &mut setup.hb.fundamental_source);
             input_row(ui, "Oversample", &mut setup.hb.oversample);
             input_row(ui, "Max iters", &mut setup.hb.maxiter);
-            choice_row(ui, "Solver", &["newton", "krylov"], &mut setup.hb.solver_idx);
+            choice_row(
+                ui,
+                "Solver",
+                &["newton", "krylov"],
+                &mut setup.hb.solver_idx,
+            );
             check_row(ui, "Source stepping", &mut setup.hb.source_stepping);
             let mut remove: Option<usize> = None;
             for (idx, tone) in setup.hb.additional_tones.iter_mut().enumerate() {
@@ -351,9 +356,17 @@ pub(in crate::shell) fn form(ui: &mut Ui, setup: &mut SimSetupState, index: usiz
         }
         21 => {
             input_row(ui, "Years", &mut setup.reliability.years_csv);
-            input_row(ui, "Min stress V", &mut setup.reliability.min_stress_voltage);
+            input_row(
+                ui,
+                "Min stress V",
+                &mut setup.reliability.min_stress_voltage,
+            );
             check_row(ui, "Hot carrier (HCI)", &mut setup.reliability.enable_hci);
-            check_row(ui, "Bias instability (NBTI)", &mut setup.reliability.enable_nbti);
+            check_row(
+                ui,
+                "Bias instability (NBTI)",
+                &mut setup.reliability.enable_nbti,
+            );
             check_row(ui, "Electromigration", &mut setup.reliability.enable_em);
             "Projects device aging across the lifetime points."
         }

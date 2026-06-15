@@ -48,9 +48,7 @@ fn build_model(state: &mut AppState) -> Option<FftModel> {
     let magnitude_db = Arc::clone(&series.magnitude_db);
 
     let analysis = fft.analysis.as_ref();
-    let fundamental = analysis.and_then(|a| {
-        Some((a.fundamental_frequency?, a.fundamental_db?))
-    });
+    let fundamental = analysis.and_then(|a| Some((a.fundamental_frequency?, a.fundamental_db?)));
     // Harmonic list: order, frequency, dBc relative to the fundamental.
     let harmonics = match (analysis, fundamental) {
         (Some(a), Some((f0, db0))) if f0 > 0.0 => a
@@ -257,14 +255,26 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         .map_or("—".to_owned(), |v| format!("{v:.3} %"));
 
     let rows = [
-        ("Fundamental", f(analysis.fundamental_frequency, "Hz", 1), false),
-        ("Amplitude", db(analysis.fundamental_db).replace(" dB", " dBV"), false),
+        (
+            "Fundamental",
+            f(analysis.fundamental_frequency, "Hz", 1),
+            false,
+        ),
+        (
+            "Amplitude",
+            db(analysis.fundamental_db).replace(" dB", " dBV"),
+            false,
+        ),
         ("THD", thd, true),
         ("SNR", db(analysis.snr_db), false),
         ("SINAD", db(analysis.sinad_db), false),
         ("SFDR", db(analysis.sfdr_db), false),
         ("ENOB", enob.unwrap_or_else(|| "—".to_owned()), false),
-        ("Noise floor", db(analysis.noise_floor_db).replace(" dB", " dBV"), false),
+        (
+            "Noise floor",
+            db(analysis.noise_floor_db).replace(" dB", " dBV"),
+            false,
+        ),
     ];
     super::stat_table(ui, &rows);
 

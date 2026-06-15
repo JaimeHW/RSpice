@@ -135,7 +135,8 @@ impl HbFft {
             .map(|&x| Complex64::new(x, 0.0))
             .collect();
         buffer.resize(n, Complex64::new(0.0, 0.0));
-        self.fft.process_with_scratch(&mut buffer, &mut self.scratch);
+        self.fft
+            .process_with_scratch(&mut buffer, &mut self.scratch);
 
         let norm = 1.0 / n as f64;
         let max_kept = (n / 2).saturating_sub(1);
@@ -183,9 +184,9 @@ impl HbFft {
         spectrum
     }
 
-    /// Compute derivative spectrum (multiply by jÏ‰)
+    /// Compute derivative spectrum (multiply by jω)
     ///
-    /// For a signal x(t), if X(Ï‰) is its spectrum, then dx/dt has spectrum jÏ‰X(Ï‰)
+    /// For a signal x(t), if X(ω) is its spectrum, then dx/dt has spectrum jωX(ω)
     ///
     /// # Arguments
     /// * `spectrum` - Input spectral coefficients
@@ -207,9 +208,9 @@ impl HbFft {
             .collect()
     }
 
-    /// Compute integral spectrum (divide by jÏ‰)
+    /// Compute integral spectrum (divide by jω)
     ///
-    /// For a signal x(t), if X(Ï‰) is its spectrum, then âˆ«x dt has spectrum X(Ï‰)/(jÏ‰)
+    /// For a signal x(t), if X(ω) is its spectrum, then ∫x dt has spectrum X(ω)/(jω)
     /// Note: DC component remains unchanged
     ///
     /// # Arguments
@@ -236,14 +237,14 @@ impl HbFft {
             .collect()
     }
 
-    /// Compute spectral power (|X|Â²) for each harmonic
+    /// Compute spectral power (|X|²) for each harmonic
     pub fn spectral_power(&self, spectrum: &[Complex64]) -> Vec<Value> {
         spectrum.iter().map(|c| c.norm_sqr()).collect()
     }
 
     /// Compute total signal power via Parseval's theorem
     pub fn total_power(&self, spectrum: &[Complex64]) -> Value {
-        // For real signal: P = |Xâ‚€|Â² + 2*Î£|Xâ‚–|Â² for k > 0
+        // For real signal: P = |X₀|² + 2*Σ|Xₖ|² for k > 0
         let dc_power = spectrum.first().map(|c| c.norm_sqr()).unwrap_or(0.0);
         let harmonic_power: Value = spectrum.iter().skip(1).map(|c| c.norm_sqr()).sum();
         dc_power + 2.0 * harmonic_power

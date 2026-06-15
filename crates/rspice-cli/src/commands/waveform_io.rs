@@ -42,8 +42,7 @@ fn conversion_error(path: &Path, message: impl std::fmt::Display) -> CliError {
 }
 
 fn load_rawfile(path: &Path) -> Result<ExportTable, CliError> {
-    let data =
-        rspice_core::compat::parse_raw_file(path).map_err(|e| conversion_error(path, e))?;
+    let data = rspice_core::compat::parse_raw_file(path).map_err(|e| conversion_error(path, e))?;
 
     let mut waveforms = data.waveforms.into_iter();
     let Some(scale) = waveforms.next() else {
@@ -107,12 +106,19 @@ fn load_delimited(path: &Path, separator: char) -> Result<ExportTable, CliError>
             field.trim().parse::<f64>().map_err(|_| {
                 conversion_error(
                     path,
-                    format!("non-numeric value '{}' in column '{}', row {}", field.trim(), column, row + 2),
+                    format!(
+                        "non-numeric value '{}' in column '{}', row {}",
+                        field.trim(),
+                        column,
+                        row + 2
+                    ),
                 )
             })
         };
 
-        let Some(first) = fields.first() else { continue };
+        let Some(first) = fields.first() else {
+            continue;
+        };
         scale.push(parse(first, &header[0])?);
         for (i, field) in fields.iter().skip(1).enumerate() {
             if i < series.len() {
@@ -170,8 +176,9 @@ fn load_json(path: &Path) -> Result<ExportTable, CliError> {
             .ok_or_else(|| conversion_error(path, format!("'{}' is not an array", what)))?
             .iter()
             .map(|v| {
-                v.as_f64()
-                    .ok_or_else(|| conversion_error(path, format!("non-numeric entry in '{}'", what)))
+                v.as_f64().ok_or_else(|| {
+                    conversion_error(path, format!("non-numeric entry in '{}'", what))
+                })
             })
             .collect()
     };
@@ -206,15 +213,15 @@ fn load_json(path: &Path) -> Result<ExportTable, CliError> {
             } else {
                 ColumnData::Complex {
                     real: to_f64_vec(
-                        signal
-                            .get("real")
-                            .ok_or_else(|| conversion_error(path, "signal has no 'values' or 'real'"))?,
+                        signal.get("real").ok_or_else(|| {
+                            conversion_error(path, "signal has no 'values' or 'real'")
+                        })?,
                         &name,
                     )?,
                     imag: to_f64_vec(
-                        signal
-                            .get("imag")
-                            .ok_or_else(|| conversion_error(path, "complex signal has no 'imag'"))?,
+                        signal.get("imag").ok_or_else(|| {
+                            conversion_error(path, "complex signal has no 'imag'")
+                        })?,
                         &name,
                     )?,
                 }

@@ -79,9 +79,9 @@ impl HbSolver {
 
     /// Add inductance stamp
     ///
-    /// In frequency domain, inductor admittance is Y_L = 1/(jÏ‰L).
-    /// At DC (Ï‰=0), inductor is short circuit (infinite admittance) - handled specially.
-    /// At harmonic k: Y_L(k) = 1/(j * k * Ï‰â‚€ * L) = -j/(k * Ï‰â‚€ * L)
+    /// In frequency domain, inductor admittance is Y_L = 1/(jωL).
+    /// At DC (ω=0), inductor is short circuit (infinite admittance) - handled specially.
+    /// At harmonic k: Y_L(k) = 1/(j * k * ω₀ * L) = -j/(k * ω₀ * L)
     pub fn add_inductance(&mut self, node_i: usize, node_j: usize, l: Value) {
         self.l_matrix.push((node_i, node_j, l));
     }
@@ -224,11 +224,11 @@ impl HbSolver {
 
     /// Compute residual for linear circuit (KCL: sum of currents INTO node = 0)
     ///
-    /// Residual = I_source - (G*X + jÏ‰*C*X + (1/jÏ‰L)*X)
+    /// Residual = I_source - (G*X + jω*C*X + (1/jωL)*X)
     ///          = I_source - Y*X
     ///
-    /// For inductors, admittance Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
-    /// At DC (Ï‰=0): inductor is short circuit, requires special handling
+    /// For inductors, admittance Y_L = 1/(jωL) = -j/(ωL)
+    /// At DC (ω=0): inductor is short circuit, requires special handling
     pub fn compute_linear_residual(&self, state: &mut HbSolverState) {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;
 
@@ -270,7 +270,7 @@ impl HbSolver {
             }
         }
 
-        // Subtract jÏ‰*C*X contribution (capacitor admittance current)
+        // Subtract jω*C*X contribution (capacitor admittance current)
         for &(i, j, c) in &self.c_matrix {
             if i < state.x.len() && j < state.x.len() {
                 for k in 0..=self.num_harmonics {
@@ -284,8 +284,8 @@ impl HbSolver {
             }
         }
 
-        // Subtract 1/(jÏ‰L)*X contribution (inductor admittance current)
-        // Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
+        // Subtract 1/(jωL)*X contribution (inductor admittance current)
+        // Y_L = 1/(jωL) = -j/(ωL)
         // At DC (k=0): inductor is short circuit - enforce V=0 (large admittance)
         for &(i, j, l) in &self.l_matrix {
             if i < state.x.len() && j < state.x.len() && l.abs() > 1e-30 {
@@ -299,7 +299,7 @@ impl HbSolver {
                             state.residual_scale[i][k] +=
                                 DC_SHORT_CONDUCTANCE * state.x[j][k].norm();
                         } else {
-                            // AC: Y_L = 1/(jÏ‰L) = -j/(Ï‰L)
+                            // AC: Y_L = 1/(jωL) = -j/(ωL)
                             let y_l = Complex64::new(0.0, -1.0 / (omega_k * l));
                             state.residual[i][k] -= y_l * state.x[j][k];
                             state.residual_scale[i][k] +=
@@ -437,7 +437,7 @@ impl HbSolver {
 
     /// Solve for linear circuit (direct solve for diagonal harmonic blocks).
     ///
-    /// Builds Y = G + jÏ‰C + 1/(jÏ‰L) and augments with MNA branch equations for
+    /// Builds Y = G + jωC + 1/(jωL) and augments with MNA branch equations for
     /// ideal voltage sources when present.
     pub fn solve_linear(&self, state: &mut HbSolverState) -> Result<(), HbError> {
         let omega0 = 2.0 * PI * self.config.fundamental_freq;

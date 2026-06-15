@@ -25,7 +25,9 @@ c1 out 0 {C}
     );
     let netlist = Netlist::parse(&deck).expect("deck parses");
     let engine = Engine::new(SimulationConfig::default());
-    let config = PssConfig::new(F0).with_tstab_periods(8).with_tolerance(1e-7);
+    let config = PssConfig::new(F0)
+        .with_tstab_periods(8)
+        .with_tolerance(1e-7);
     engine.run_pss(&netlist, config).expect("PSS converges")
 }
 
@@ -132,7 +134,6 @@ c1 out 0 0.5n
         "steady-state trough must be e^-1/(1+e^-1): got {v_min:.5}, want {expected_min:.5}"
     );
 }
-
 
 /// Autonomous shooting: a weakly nonlinear LC negative-resistance oscillator
 /// (van der Pol form, eps = g1*sqrt(L/C) = 0.05) has period

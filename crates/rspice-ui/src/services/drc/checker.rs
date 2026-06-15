@@ -153,7 +153,8 @@ impl DrcChecker {
 
         // Merge touching/crossing segments so T-junctions and wire intersections
         // become a single electrical net.
-        let mut tested: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        let mut tested: std::collections::HashSet<(usize, usize)> =
+            std::collections::HashSet::new();
         for bucket in cells.values() {
             for (slot, &i) in bucket.iter().enumerate() {
                 for &j in &bucket[slot + 1..] {
@@ -772,11 +773,7 @@ mod tests {
         let components = vec![
             vsource(0, "V1", "vin", "0"),
             resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
-            resistor(
-                2,
-                "R2",
-                vec![pin("1", "vin"), pin_at("2", "", 0.0, 200.0)],
-            ),
+            resistor(2, "R2", vec![pin("1", "vin"), pin_at("2", "", 0.0, 200.0)]),
         ];
         let labels = vec![label("dangling", 0.0, 200.0)];
         let mut checker = DrcChecker::new();

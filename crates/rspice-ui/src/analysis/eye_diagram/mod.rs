@@ -24,7 +24,6 @@ pub use data::{EyeData, EyeTrace};
 pub use measurements::EyeMeasurements;
 pub use state::{EyeDiagramState, EyeDisplayMode};
 
-
 // =============================================================================
 // Tests
 // =============================================================================

@@ -21,7 +21,7 @@ impl HbSolver {
     ) -> Result<Vec<Value>, HbError> {
         // DC tolerances (more realistic than HB defaults)
         // For DC analysis, we're solving KCL: sum of currents = 0
-        // Typical circuit currents are in mA-ÂµA range, so abstol should be ~pA
+        // Typical circuit currents are in mA-µA range, so abstol should be ~pA
         let dc_reltol = self.config.tolerance.max(1e-3); // At least 0.1% relative
         let dc_abstol = self.config.abstol.max(1e-9); // At least 1 pA absolute
 
@@ -93,8 +93,7 @@ impl HbSolver {
 
                 // Verify final residual at the best achievable GMIN
                 self.compute_dc_residual(state, last_good_gmin.max(target_gmin));
-                if state.residual_norm < dc_abstol
-                    || state.dc_rows_converged(dc_reltol, dc_abstol)
+                if state.residual_norm < dc_abstol || state.dc_rows_converged(dc_reltol, dc_abstol)
                 {
                     return Ok(self.extract_dc_solution(state));
                 }
@@ -244,7 +243,7 @@ impl HbSolver {
             let jacobian = self.build_dc_jacobian(state, gmin);
 
             // Solve for delta_x: J * delta = -residual (standard Newton-Raphson)
-            // We need -R because: R(x) = 0, Taylor: R(x+delta) â‰ˆ R(x) + J*delta = 0
+            // We need -R because: R(x) = 0, Taylor: R(x+delta) ≈ R(x) + J*delta = 0
             // So J*delta = -R
             let neg_residual: Vec<Value> = (0..self.num_nodes)
                 .map(|node| {
@@ -314,8 +313,7 @@ impl HbSolver {
         // Inductor DC shorts, consistent with the full-spectrum residual.
         for &(row, col, l) in &self.l_matrix {
             if row < n && col < n && row < state.residual.len() && l.abs() > 1e-30 {
-                state.residual[row][0] -=
-                    Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
+                state.residual[row][0] -= Complex64::new(DC_SHORT_CONDUCTANCE * v_dc[col], 0.0);
                 state.residual_scale[row][0] += DC_SHORT_CONDUCTANCE * v_dc[col].abs();
             }
         }
@@ -414,7 +412,7 @@ impl HbSolver {
 
         // Nonlinear device Jacobians
         // Device returns MNA conductance stamps (+gd on diagonal for diode)
-        // But dI_into/dV = -gd (more voltage â†’ more current leaving â†’ less current into)
+        // But dI_into/dV = -gd (more voltage → more current leaving → less current into)
         // Since J = dR/dV = dI_into/dV - G - gmin, we need to subtract the device stamps
         // J = -G_device - G_linear - gmin
         for device in &self.nonlinear_devices {

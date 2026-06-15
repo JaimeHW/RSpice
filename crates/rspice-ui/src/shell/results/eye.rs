@@ -30,7 +30,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let eye = &state.analysis.eye_diagram_state;
     let data = &eye.data;
     if data.traces.is_empty() {
-        well_hint(ui, "No eye yet — the eye folds the active transient at the bit period");
+        well_hint(
+            ui,
+            "No eye yet — the eye folds the active transient at the bit period",
+        );
         return;
     }
 
@@ -71,9 +74,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let revision = eye.data_revision();
     let trace_color = c.traces[0];
     let needs_bake = match &state.shell.results.eye_texture {
-        Some(tex) => {
-            tex.revision != revision || tex.size != tex_size || tex.color != trace_color
-        }
+        Some(tex) => tex.revision != revision || tex.size != tex_size || tex.color != trace_color,
         None => true,
     };
     if needs_bake {
@@ -227,7 +228,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let eye = &state.analysis.eye_diagram_state;
     if eye.data.traces.is_empty() {
         section_header(ui, "Eye", None);
-        super::panel_note(ui, "Metrics appear once the eye is built from the transient.");
+        super::panel_note(
+            ui,
+            "Metrics appear once the eye is built from the transient.",
+        );
         return;
     }
     let m = &eye.measurements;

@@ -2,7 +2,7 @@
 //!
 //! Commercial-grade netlist generation following Cadence Spectre conventions:
 //! - Node connectivity extraction via wire tracing
-//! - Ground detection (GND nets â†’ node 0)
+//! - Ground detection (GND nets → node 0)
 //! - SPICE instance line generation for all component types
 //! - Subcircuit and model statement generation
 //! - Analysis command generation from UI configuration
@@ -28,9 +28,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use crate::state::{Component, ComponentType, Point, SchematicState};
 #[cfg(test)]
 use crate::state::Wire;
+use crate::state::{Component, ComponentType, Point, SchematicState};
 
 mod connectivity;
 mod formatting;
@@ -218,8 +218,10 @@ pub fn design_nets(schematic: &SchematicState) -> Vec<DesignNet> {
         .collect();
 
     // Reading order: interface ports, then named nets, then autonamed.
-    let autonamed =
-        |name: &str| name.strip_prefix("net").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()));
+    let autonamed = |name: &str| {
+        name.strip_prefix("net")
+            .is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+    };
     nets.sort_by(|a, b| {
         (!a.is_port, autonamed(&a.name), a.name.to_ascii_lowercase()).cmp(&(
             !b.is_port,
@@ -511,9 +513,10 @@ mod tests {
         );
         // The named node appears in instance lines (R1 ... out ...).
         assert!(
-            result.netlist.lines().any(|l| {
-                l.starts_with('R') && l.split_whitespace().any(|tok| tok == "out")
-            }),
+            result
+                .netlist
+                .lines()
+                .any(|l| { l.starts_with('R') && l.split_whitespace().any(|tok| tok == "out") }),
             "instance lines should reference the labeled node:\n{}",
             result.netlist
         );
@@ -529,7 +532,9 @@ mod tests {
         state
             .wires
             .push(Wire::new(2, vec![Point::new(0, 100), Point::new(40, 100)]));
-        state.net_labels.push(NetLabel::new(1, Point::new(20, 0), "bus"));
+        state
+            .net_labels
+            .push(NetLabel::new(1, Point::new(20, 0), "bus"));
         state
             .net_labels
             .push(NetLabel::new(2, Point::new(20, 100), "bus"));
@@ -556,7 +561,9 @@ mod tests {
         state
             .wires
             .push(Wire::new(1, vec![Point::new(0, 0), Point::new(40, 0)]));
-        state.net_labels.push(NetLabel::new(1, Point::new(20, 0), "GND"));
+        state
+            .net_labels
+            .push(NetLabel::new(1, Point::new(20, 0), "GND"));
 
         let mut generator = NetlistGenerator::new(&state);
         generator.generate();

@@ -78,9 +78,7 @@ fn main() {
                     let mut res = winresource::WindowsResource::new();
                     res.set_icon(path);
                     if let Err(e) = res.compile() {
-                        println!(
-                            "cargo:warning=rspice-ui: could not embed Windows .exe icon: {e}"
-                        );
+                        println!("cargo:warning=rspice-ui: could not embed Windows .exe icon: {e}");
                     }
                 }
                 None => {

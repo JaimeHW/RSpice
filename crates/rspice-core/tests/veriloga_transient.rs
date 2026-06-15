@@ -123,7 +123,10 @@ endmodule
         );
         checked += 1;
     }
-    assert!(checked > 50, "expected many compared samples, got {checked}");
+    assert!(
+        checked > 50,
+        "expected many compared samples, got {checked}"
+    );
 
     // Near-final value should be close to 1 V
     let v_final = *out.last().expect("samples");

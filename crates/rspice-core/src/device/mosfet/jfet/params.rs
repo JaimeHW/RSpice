@@ -101,7 +101,7 @@ impl JfetParams {
     /// Create parameters from IDSS and VTO
     ///
     /// IDSS is the drain current at Vgs=0, Vds >> Vgs-Vto (saturation)
-    /// Beta = IDSS / VtoÂ²
+    /// Beta = IDSS / Vto²
     pub fn from_idss(idss: Value, vto: Value) -> Self {
         let beta = idss / (vto * vto);
         Self {

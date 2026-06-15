@@ -3,7 +3,6 @@
 //! Configuration for Monte Carlo statistical analysis.
 //! Runs multiple iterations with random parameter variations.
 
-
 /// Random distribution type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum McDistribution {
@@ -223,5 +222,4 @@ impl McDialogState {
             *self = Self::from_config(&McConfig::default());
         }
     }
-
 }

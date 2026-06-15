@@ -3,7 +3,6 @@
 //! Configuration for sensitivity analysis (.sens).
 //! Computes the sensitivity of an output to all circuit parameters.
 
-
 /// Sensitivity analysis type
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SensType {
@@ -154,7 +153,6 @@ impl SensDialogState {
             *self = Self::from_config(&SensConfig::default());
         }
     }
-
 }
 
 fn format_freq(f: f64) -> String {

@@ -220,8 +220,9 @@ impl Engine {
             .transpose()?;
 
         let mut output_noise = Vec::with_capacity(offsets.len());
-        let mut input_noise: Option<Vec<Value>> =
-            input_injections.as_ref().map(|_| Vec::with_capacity(offsets.len()));
+        let mut input_noise: Option<Vec<Value>> = input_injections
+            .as_ref()
+            .map(|_| Vec::with_capacity(offsets.len()));
         let mut contributors: Vec<(String, Vec<Value>)> = sources
             .iter()
             .map(|s| (s.name.clone(), Vec::with_capacity(offsets.len())))
@@ -248,8 +249,7 @@ impl Engine {
                 slot.1.push(value);
             }
 
-            if let (Some(injections), Some(acc)) =
-                (input_injections.as_ref(), input_noise.as_mut())
+            if let (Some(injections), Some(acc)) = (input_injections.as_ref(), input_noise.as_mut())
             {
                 let excitation = PeriodicAcExcitation {
                     sideband: 0,

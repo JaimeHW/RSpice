@@ -12,9 +12,9 @@ use super::xspice_parser;
 use super::{
     AnalysisCommand, BjtType, Element, ElementKind, FreqVariation, InitialCondition, JfetType,
     MesfetType, ModelDef, MonteCarloCommand, MonteCarloDistribution, MosType, Netlist, NodeSet,
-    ParamContext, ParametricValue, ParseError, PoleZeroAnalysisType, PoleZeroTransferType,
-    SaveSet, SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StepCommand,
-    StepSweep, StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
+    ParamContext, ParametricValue, ParseError, PoleZeroAnalysisType, PoleZeroTransferType, SaveSet,
+    SaveSignal, SensitivityAcSweep, SimulationOptions, SourceSpec, StepCommand, StepSweep,
+    StepTarget, SubcircuitDef, SwitchState, VerilogAInclude,
 };
 use crate::Value;
 use std::collections::{HashMap, HashSet};
@@ -225,11 +225,7 @@ fn scan_options_tokens_for_seed(
     seed: &mut Option<u64>,
 ) -> Result<(), ParseError> {
     // Normalize `key = value` to `key=value`, then inspect each token.
-    let collapsed: String = body
-        .split('=')
-        .map(str::trim)
-        .collect::<Vec<_>>()
-        .join("=");
+    let collapsed: String = body.split('=').map(str::trim).collect::<Vec<_>>().join("=");
 
     for token in collapsed.split([' ', '\t', ',']) {
         if let Some((key, value)) = token.split_once('=') {

@@ -612,7 +612,7 @@ impl Engine {
         let size = circuit.matrix_size();
         let node_count = circuit.num_nodes().min(size);
 
-        // Check for suspicious values - not just clamped at Â±999V but also
+        // Check for suspicious values - not just clamped at ±999V but also
         // suspiciously uniform values that indicate failed source stepping.
         // Reset to zero if the guess looks like garbage.
         let node_guess_len = node_count.min(initial_guess.len());

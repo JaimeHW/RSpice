@@ -12,9 +12,9 @@ pub mod check;
 pub mod compare;
 pub mod compile_va;
 pub mod convert;
+pub(crate) mod export_table;
 pub mod info;
 pub mod run;
-pub(crate) mod export_table;
 mod run_signals;
 pub(crate) mod waveform_io;
 
@@ -33,12 +33,12 @@ pub(crate) fn is_stdin(path: &std::path::Path) -> bool {
 pub(crate) fn read_stdin_source() -> Result<String, crate::cli::CliError> {
     use std::io::Read;
     let mut source = String::new();
-    std::io::stdin()
-        .read_to_string(&mut source)
-        .map_err(|e| crate::cli::CliError::InputReadError {
+    std::io::stdin().read_to_string(&mut source).map_err(|e| {
+        crate::cli::CliError::InputReadError {
             path: std::path::PathBuf::from("-"),
             source: e,
-        })?;
+        }
+    })?;
     Ok(source)
 }
 

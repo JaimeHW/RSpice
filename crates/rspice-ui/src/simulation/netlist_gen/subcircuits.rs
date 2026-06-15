@@ -157,10 +157,7 @@ fn emit_cell_definition(
     if stack.contains(&lower_cell) {
         let mut chain = stack.clone();
         chain.push(lower_cell);
-        errors.push(format!(
-            "Recursive cell hierarchy: {}",
-            chain.join(" -> ")
-        ));
+        errors.push(format!("Recursive cell hierarchy: {}", chain.join(" -> ")));
         return;
     }
 
@@ -292,8 +289,10 @@ mod tests {
         top.add_component(ComponentType::VoltageSource, Point::new(40, 40));
         top.add_component(ComponentType::Ground, Point::new(130, 20));
         top.add_component(ComponentType::Ground, Point::new(40, 70));
-        top.wires
-            .push(Wire::new(1, vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)]));
+        top.wires.push(Wire::new(
+            1,
+            vec![Point::new(40, 20), Point::new(40, 0), Point::new(70, 0)],
+        ));
         top.wires
             .push(Wire::new(2, vec![Point::new(130, 0), Point::new(130, 10)]));
         top

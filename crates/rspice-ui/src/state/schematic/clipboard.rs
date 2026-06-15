@@ -69,7 +69,11 @@ impl ClipboardData {
     /// that sit on those wires.
     ///
     /// Calculates the center of the selection as the origin for paste offsets.
-    pub fn from_selection(components: Vec<Component>, wires: Vec<Wire>, junctions: Vec<Point>) -> Self {
+    pub fn from_selection(
+        components: Vec<Component>,
+        wires: Vec<Wire>,
+        junctions: Vec<Point>,
+    ) -> Self {
         let origin = Self::calculate_center(&components, &wires);
         Self {
             components,

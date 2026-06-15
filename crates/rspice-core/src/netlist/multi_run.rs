@@ -189,9 +189,10 @@ fn apply_alter(lines: &mut Vec<String>, block: &AlterBlock) {
                 let name = statement[0].split_whitespace().nth(1).unwrap_or("");
                 replace_statement(lines, &statement, |first| {
                     first_token(first).eq_ignore_ascii_case(".model")
-                        && first.split_whitespace().nth(1).is_some_and(|candidate| {
-                            candidate.eq_ignore_ascii_case(name)
-                        })
+                        && first
+                            .split_whitespace()
+                            .nth(1)
+                            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(name))
                 });
             } else {
                 lines.extend(statement);
@@ -407,10 +408,9 @@ fn extract_data_tables(lines: Vec<String>) -> (Vec<DataTable>, Vec<String>) {
                     }
                     match parse_spice_value(raw) {
                         Ok(value) => flat_values.push(value),
-                        Err(_) => log::warn!(
-                            ".data {}: skipping non-numeric token `{raw}`",
-                            table.name
-                        ),
+                        Err(_) => {
+                            log::warn!(".data {}: skipping non-numeric token `{raw}`", table.name)
+                        }
                     }
                 }
             }

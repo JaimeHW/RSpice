@@ -82,7 +82,9 @@ pub fn render_schematic_view(
             / grid;
         (x, y)
     };
-    state.shell.canvas_hover = response.hover_pos().map(|cursor| to_grid_units(cursor, state));
+    state.shell.canvas_hover = response
+        .hover_pos()
+        .map(|cursor| to_grid_units(cursor, state));
     state.shell.canvas_view_center = Some(to_grid_units(available.center(), state));
 }
 

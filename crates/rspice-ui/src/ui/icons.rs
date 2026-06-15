@@ -173,12 +173,7 @@ impl Icon {
             ],
             // Transport glyphs are filled — a stroked square reads as a
             // missing-glyph box, not a stop control.
-            Icon::Stop => &[Fill(&[
-                [7.0, 7.0],
-                [17.0, 7.0],
-                [17.0, 17.0],
-                [7.0, 17.0],
-            ])],
+            Icon::Stop => &[Fill(&[[7.0, 7.0], [17.0, 7.0], [17.0, 17.0], [7.0, 17.0]])],
             Icon::Run => &[Fill(&[[7.0, 4.0], [20.0, 12.0], [7.0, 20.0]])],
             Icon::Library => &[
                 Poly(&[[4.0, 5.0], [20.0, 5.0], [20.0, 9.0], [4.0, 9.0]]),

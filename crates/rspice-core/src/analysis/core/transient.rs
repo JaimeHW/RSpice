@@ -3,7 +3,6 @@
 #![allow(clippy::type_complexity)]
 use crate::Value;
 
-
 type ChargeLteInputs<'a> = (&'a [Value], &'a [Value], &'a [Value], &'a [Value]);
 
 /// Numerical integration methods for transient analysis
@@ -668,7 +667,7 @@ impl LteEstimator {
     /// Richardson extrapolation LTE estimate (more accurate)
     ///
     /// Uses solutions computed with steps h and h/2 to estimate the true error:
-    /// `LTE â‰ˆ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
+    /// `LTE ≈ (x_h - x_{h/2}) / (2^p - 1)` where p is the method order.
     ///
     /// This provides a more accurate LTE estimate by exploiting the known
     /// convergence order of the integration method.
@@ -853,8 +852,8 @@ pub struct CompanionCoefficients {
 impl CompanionCoefficients {
     /// Get coefficients for Backward Euler (first order, unconditionally stable)
     ///
-    /// CÂ·dv/dt = i  â†’  CÂ·(v_{n+1} - v_n)/dt = i_{n+1}
-    /// Companion: G_eq = C/dt, I_eq = G_eqÂ·v_n
+    /// C·dv/dt = i  →  C·(v_{n+1} - v_n)/dt = i_{n+1}
+    /// Companion: G_eq = C/dt, I_eq = G_eq·v_n
     #[inline]
     pub fn backward_euler() -> Self {
         Self {
@@ -869,8 +868,8 @@ impl CompanionCoefficients {
     /// Get coefficients for Trapezoidal rule (second order, A-stable)
     ///
     /// Uses average of derivatives at n and n+1:
-    /// CÂ·(v_{n+1} - v_n)/dt = 0.5Â·(i_{n+1} + i_n)
-    /// Companion: G_eq = 2C/dt, I_eq = G_eqÂ·v_n + i_n
+    /// C·(v_{n+1} - v_n)/dt = 0.5·(i_{n+1} + i_n)
+    /// Companion: G_eq = 2C/dt, I_eq = G_eq·v_n + i_n
     #[inline]
     pub fn trapezoidal() -> Self {
         Self {
@@ -885,8 +884,8 @@ impl CompanionCoefficients {
     /// Get coefficients for Gear2/BDF2 (second order, L-stable, good for stiff)
     ///
     /// Uses backward difference formula:
-    /// (3Â·v_{n+1} - 4Â·v_n + v_{n-1}) / (2Â·dt) = f_{n+1}
-    /// Companion: G_eq = 3C/(2Â·dt), I_eq = (4CÂ·v_n - CÂ·v_{n-1})/(2Â·dt)
+    /// (3·v_{n+1} - 4·v_n + v_{n-1}) / (2·dt) = f_{n+1}
+    /// Companion: G_eq = 3C/(2·dt), I_eq = (4C·v_n - C·v_{n-1})/(2·dt)
     #[inline]
     pub fn gear2() -> Self {
         Self {

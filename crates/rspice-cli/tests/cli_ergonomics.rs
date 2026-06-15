@@ -141,7 +141,10 @@ fn check_flags_voltage_source_loops() {
     .expect("write deck");
 
     let output = run_rspice(&["check", deck.to_str().unwrap()]);
-    assert!(!output.status.success(), "singular topology must fail check");
+    assert!(
+        !output.status.success(),
+        "singular topology must fail check"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         stdout.contains("loop of voltage sources"),

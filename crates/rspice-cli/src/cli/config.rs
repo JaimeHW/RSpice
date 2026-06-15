@@ -203,7 +203,9 @@ impl Config {
             if config_path.exists() {
                 match Self::load_layer(&config_path) {
                     Ok(layer) => return Some(layer),
-                    Err(e) => log::warn!("ignoring unreadable config {}: {e}", config_path.display()),
+                    Err(e) => {
+                        log::warn!("ignoring unreadable config {}: {e}", config_path.display())
+                    }
                 }
             }
         }
@@ -299,11 +301,15 @@ impl Config {
 
         // Path lists use the platform separator (';' on Windows, ':' elsewhere)
         if let Some(includes) = std::env::var_os("RSPICE_INCLUDE_PATH") {
-            self.paths.include_paths.extend(std::env::split_paths(&includes));
+            self.paths
+                .include_paths
+                .extend(std::env::split_paths(&includes));
         }
 
         if let Some(libs) = std::env::var_os("RSPICE_LIBRARY_PATH") {
-            self.paths.library_paths.extend(std::env::split_paths(&libs));
+            self.paths
+                .library_paths
+                .extend(std::env::split_paths(&libs));
         }
     }
 }

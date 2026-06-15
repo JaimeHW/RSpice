@@ -445,7 +445,6 @@ impl CornerDialogState {
             *self = Self::from_config(&CornerConfig::commercial_pvt());
         }
     }
-
 }
 
 // =============================================================================

@@ -6,18 +6,18 @@
 //!
 //! # Theory
 //!
-//! For a linear system **GÂ·x = b**, the sensitivity of output xâ‚– to parameter p is:
+//! For a linear system **G·x = b**, the sensitivity of output xₖ to parameter p is:
 //!
 //! ```text
-//! âˆ‚xâ‚–/âˆ‚p = -Î»áµ€ Â· (âˆ‚G/âˆ‚p Â· x + âˆ‚b/âˆ‚p)
+//! ∂xₖ/∂p = -λᵀ · (∂G/∂p · x + ∂b/∂p)
 //! ```
 //!
-//! where Î» is the adjoint vector solving **Gáµ€Â·Î» = eâ‚–** (eâ‚– is unit vector).
+//! where λ is the adjoint vector solving **Gᵀ·λ = eₖ** (eₖ is unit vector).
 //!
 //! # Sensitivity Types
 //!
-//! - **Absolute**: âˆ‚V/âˆ‚R (change in voltage per unit change in resistance)
-//! - **Normalized**: (R/V) Â· âˆ‚V/âˆ‚R (percentage change in output per percentage change in parameter)
+//! - **Absolute**: ∂V/∂R (change in voltage per unit change in resistance)
+//! - **Normalized**: (R/V) · ∂V/∂R (percentage change in output per percentage change in parameter)
 //!
 //! # Example
 //!
@@ -55,9 +55,9 @@ pub struct Sensitivity {
     pub parameter: String,
     /// Nominal parameter value
     pub nominal_value: Value,
-    /// Absolute sensitivity: âˆ‚output/âˆ‚param
+    /// Absolute sensitivity: ∂output/∂param
     pub absolute: Value,
-    /// Normalized sensitivity: (param/output) Â· âˆ‚output/âˆ‚param
+    /// Normalized sensitivity: (param/output) · ∂output/∂param
     pub normalized: Value,
 }
 
@@ -278,7 +278,7 @@ pub struct SensitivityAnalyzer {
     g_matrix: Vec<Vec<Value>>,
     /// Linearized MNA operating-point solution (node voltages + branch currents)
     solution: Vec<Value>,
-    /// Adjoint vector Î»
+    /// Adjoint vector λ
     adjoint: Vec<Value>,
     /// Circuit elements
     elements: Vec<ElementDesc>,
@@ -365,9 +365,9 @@ impl SensitivityAnalyzer {
     /// Compute sensitivity of a resistor
     ///
     /// For resistor R between nodes i and j:
-    /// âˆ‚V/âˆ‚R = -Î»áµ€ Â· (âˆ‚G/âˆ‚R Â· V)
-    ///       = -Î»áµ€ Â· (-1/RÂ² Â· stamps) Â· V
-    ///       = (1/RÂ²) Â· (Î»áµ¢ - Î»â±¼) Â· (Váµ¢ - Vâ±¼)
+    /// ∂V/∂R = -λᵀ · (∂G/∂R · V)
+    ///       = -λᵀ · (-1/R² · stamps) · V
+    ///       = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
     fn resistor_sensitivity(&self, elem: &ElementDesc) -> Value {
         let r = elem.value;
         if r.abs() < 1e-15 {
@@ -377,8 +377,8 @@ impl SensitivityAnalyzer {
         let v_diff = self.voltage_difference(elem.node_pos, elem.node_neg);
         let lambda_diff = self.adjoint_difference(elem.node_pos, elem.node_neg);
 
-        // âˆ‚G/âˆ‚R = -GÂ² = -1/RÂ²
-        // Sensitivity = -Î»áµ€ Â· (âˆ‚G/âˆ‚R Â· V) = (1/RÂ²) Â· (Î»áµ¢ - Î»â±¼) Â· (Váµ¢ - Vâ±¼)
+        // ∂G/∂R = -G² = -1/R²
+        // Sensitivity = -λᵀ · (∂G/∂R · V) = (1/R²) · (λᵢ - λⱼ) · (Vᵢ - Vⱼ)
         (1.0 / (r * r)) * lambda_diff * v_diff
     }
 
@@ -461,7 +461,7 @@ impl SensitivityAnalyzer {
                 return None;
             }
 
-            // Combine: Î» = Î»_output - Î»_ref
+            // Combine: λ = λ_output - λ_ref
             for i in 0..self.system_size {
                 self.adjoint[i] = adj_output[i] - self.adjoint[i];
             }

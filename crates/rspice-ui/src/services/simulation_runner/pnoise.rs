@@ -374,8 +374,7 @@ fn run_pnoise_analysis_with_config_typed(
     }
     if config.noise_ref == PnoiseReference::Input && exact_input_noise.is_none() {
         warnings.push(
-            "PNOISE input-referred estimate uses the stationary sideband approximation"
-                .to_string(),
+            "PNOISE input-referred estimate uses the stationary sideband approximation".to_string(),
         );
     }
     let mut input_noise = None;

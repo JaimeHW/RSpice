@@ -53,7 +53,11 @@ fn bound_step_caps_transient_steps() {
     // Every accepted step after startup must respect the bound (allow
     // a tolerance for the very first ramp-in steps)
     let times = &result.time;
-    assert!(times.len() >= 40, "bound forces many steps: {}", times.len());
+    assert!(
+        times.len() >= 40,
+        "bound forces many steps: {}",
+        times.len()
+    );
     let mut max_step: f64 = 0.0;
     for pair in times.windows(2).skip(3) {
         max_step = max_step.max(pair[1] - pair[0]);

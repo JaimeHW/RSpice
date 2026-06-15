@@ -134,9 +134,7 @@ impl<'a> Button<'a> {
         });
 
         let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
-        let hint_w = hint_galley
-            .as_ref()
-            .map_or(0.0, |g| g.size().x + 5.0);
+        let hint_w = hint_galley.as_ref().map_or(0.0, |g| g.size().x + 5.0);
         let width = (galley.size().x + icon_w + hint_w + 24.0).max(self.min_width);
         let (rect, mut response) = ui.allocate_exact_size(
             vec2(width, t.metrics.ctl_h),
@@ -151,9 +149,9 @@ impl<'a> Button<'a> {
             return response;
         }
 
-        let hover = ui
-            .ctx()
-            .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
+        let hover =
+            ui.ctx()
+                .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let (fill, stroke_color) = if self.accent {
@@ -285,9 +283,9 @@ impl<'a> IconButton<'a> {
             return response;
         }
 
-        let hover = ui
-            .ctx()
-            .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
+        let hover =
+            ui.ctx()
+                .animate_bool_with_time(response.id, response.hovered() && self.enabled, 0.16);
         let pressed = response.is_pointer_button_down_on() && self.enabled;
 
         let opacity = if self.enabled { 1.0 } else { 0.35 };
@@ -319,4 +317,3 @@ impl<'a> IconButton<'a> {
         response
     }
 }
-

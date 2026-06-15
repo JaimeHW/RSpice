@@ -149,7 +149,6 @@ impl StbDialogState {
             *self = Self::from_config(&StbConfig::default());
         }
     }
-
 }
 
 fn format_freq(f: f64) -> String {

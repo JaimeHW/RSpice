@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 impl Mosfet {
     /// Create a new NMOS with default parameters
@@ -46,11 +46,11 @@ impl Mosfet {
 
             // Level 1 parameters (mos1set.c model-card defaults; level 2/6
             // reset their own below in with_params)
-            vto: 0.0,    // Threshold voltage
-            kp: 2e-5,    // Transconductance
-            gamma: 0.0,  // Body effect
-            phi: 0.6,    // Surface potential
-            lambda: 0.0, // Channel-length modulation (mos1set.c default)
+            vto: 0.0,       // Threshold voltage
+            kp: 2e-5,       // Transconductance
+            gamma: 0.0,     // Body effect
+            phi: 0.6,       // Surface potential
+            lambda: 0.0,    // Channel-length modulation (mos1set.c default)
             is_bulk: 1e-14, // Bulk diode saturation current
             js_bulk: 0.0,
             // Oxide capacitance per area at the mos1set.c default
@@ -97,15 +97,15 @@ impl Mosfet {
             mos2_fast_surface_state_density: 0.0,
 
             // BSIM4 parameters
-            dvt0: 2.2,     // Short-channel Vth roll-off
-            dvt1: 0.53,    // First-order roll-off
-            dvt2: -0.032,  // Body-bias dependent roll-off
-            k1: 0.53,      // First body effect coefficient
-            k2: -0.186,    // Second body effect coefficient
-            cgso: 0.0, // Gate-source overlap cap (F/m), mos1set.c default
-            cgdo: 0.0, // Gate-drain overlap cap (F/m)
-            cgbo: 0.0, // Gate-bulk overlap cap (F/m)
-            rsh: 0.0,      // Sheet resistance (ohm/sq)
+            dvt0: 2.2,    // Short-channel Vth roll-off
+            dvt1: 0.53,   // First-order roll-off
+            dvt2: -0.032, // Body-bias dependent roll-off
+            k1: 0.53,     // First body effect coefficient
+            k2: -0.186,   // Second body effect coefficient
+            cgso: 0.0,    // Gate-source overlap cap (F/m), mos1set.c default
+            cgdo: 0.0,    // Gate-drain overlap cap (F/m)
+            cgbo: 0.0,    // Gate-bulk overlap cap (F/m)
+            rsh: 0.0,     // Sheet resistance (ohm/sq)
             rd_model: 0.0,
             rs_model: 0.0,
             nrd: 1.0,
@@ -303,11 +303,7 @@ impl Mosfet {
     }
 
     #[inline]
-    pub(crate) fn dev_fetlim(
-        vnew: Value,
-        vold: Value,
-        vto: Value,
-    ) -> Value {
+    pub(crate) fn dev_fetlim(vnew: Value, vold: Value, vto: Value) -> Value {
         let vtsthi = (2.0 * (vold - vto)).abs() + 2.0;
         let vtstlo = (vold - vto).abs() + 1.0;
         let vtox = vto + 3.5;
@@ -1035,7 +1031,8 @@ impl Mosfet {
                     if denom == 0.0 {
                         return 1.0;
                     }
-                    let factor = (1.0 + grading * (4e-4 * (temp - TEMP_REFERENCE) - gmanew)) / denom;
+                    let factor =
+                        (1.0 + grading * (4e-4 * (temp - TEMP_REFERENCE) - gmanew)) / denom;
                     if factor.is_finite() && factor > 0.0 {
                         factor
                     } else {
@@ -1157,11 +1154,19 @@ mod tests {
         let (kp0, vto0, phi0, pb0, is0, cj0) =
             (mos.kp, mos.vto, mos.phi, mos.pb, mos.is_bulk, mos.cj);
 
-        mos.set_temperature(crate::constants::TEMP_REFERENCE, crate::constants::TEMP_REFERENCE);
+        mos.set_temperature(
+            crate::constants::TEMP_REFERENCE,
+            crate::constants::TEMP_REFERENCE,
+        );
 
         assert_eq!(mos.vt, crate::constants::VT_REFERENCE);
         assert!((mos.kp - kp0).abs() <= kp0 * 1e-12);
-        assert!((mos.vto - vto0).abs() <= 1e-12, "vto={} vs {}", mos.vto, vto0);
+        assert!(
+            (mos.vto - vto0).abs() <= 1e-12,
+            "vto={} vs {}",
+            mos.vto,
+            vto0
+        );
         assert!((mos.phi - phi0).abs() <= phi0 * 1e-12);
         assert!((mos.pb - pb0).abs() <= pb0 * 1e-12);
         assert!((mos.is_bulk - is0).abs() <= is0 * 1e-12);
@@ -1280,4 +1285,3 @@ mod tests {
         assert!((mos.kc - expected_kc).abs() <= expected_kc * 1.0e-12);
     }
 }
-

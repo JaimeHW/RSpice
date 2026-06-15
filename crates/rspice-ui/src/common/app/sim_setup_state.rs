@@ -266,12 +266,19 @@ impl SimSetupState {
                 "f0 {} · {} tone{}",
                 self.hb.fundamental,
                 1 + self.hb.additional_tones.len(),
-                if self.hb.additional_tones.is_empty() { "" } else { "s" }
+                if self.hb.additional_tones.is_empty() {
+                    ""
+                } else {
+                    "s"
+                }
             ),
             12 => format!("{} ports · Z0 {}", self.sp.ports.len(), self.sp.z0),
             13 => format!(
                 "{} <- {} · {} -> {}",
-                self.pac.output_node, self.pac.input_source, self.pac.start_freq, self.pac.stop_freq
+                self.pac.output_node,
+                self.pac.input_source,
+                self.pac.start_freq,
+                self.pac.stop_freq
             ),
             14 => format!(
                 "{} · {} -> {}",
@@ -279,7 +286,10 @@ impl SimSetupState {
             ),
             15 => format!(
                 "{} <- {} · {} -> {}",
-                self.pxf.output_node, self.pxf.input_source, self.pxf.start_freq, self.pxf.stop_freq
+                self.pxf.output_node,
+                self.pxf.input_source,
+                self.pxf.start_freq,
+                self.pxf.stop_freq
             ),
             16 => format!(
                 "probe {} · {} harmonics",
@@ -324,7 +334,11 @@ impl SimSetupState {
                 format!(
                     "{} y · {}",
                     self.reliability.years_csv,
-                    if on.is_empty() { "no mechanisms".to_owned() } else { on.join(" ") }
+                    if on.is_empty() {
+                        "no mechanisms".to_owned()
+                    } else {
+                        on.join(" ")
+                    }
                 )
             }
             22 => format!(
@@ -345,7 +359,11 @@ impl SimSetupState {
                 format!(
                     "to {} · {}",
                     soa.stop_time,
-                    if on.is_empty() { "no checks".to_owned() } else { on.join(" ") }
+                    if on.is_empty() {
+                        "no checks".to_owned()
+                    } else {
+                        on.join(" ")
+                    }
                 )
             }
             24 => {
@@ -478,7 +496,10 @@ impl SimSetupState {
     fn points_error(&self) -> Option<String> {
         match self.ac.points.trim().parse::<usize>() {
             Ok(points) if points > 0 => None,
-            _ => Some(format!("points: '{}' is not a positive integer", self.ac.points)),
+            _ => Some(format!(
+                "points: '{}' is not a positive integer",
+                self.ac.points
+            )),
         }
     }
 
@@ -491,7 +512,11 @@ impl SimSetupState {
         }
         let sweep_kind = ["dec", "oct", "lin"][self.ac.sweep.min(2)];
         Ok(match index {
-            0 => self.op.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            0 => self
+                .op
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
             1 => {
                 let start = self.tran.start.trim();
                 let mut card = format!(
@@ -544,19 +569,71 @@ impl SimSetupState {
                     self.noise.fstop
                 )
             }
-            5 => self.pz.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            6 => self.sens.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            7 => self.mc.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            8 => self.pss.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            9 => self.stb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            10 => self.temp.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            11 => self.hb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            12 => self.sp.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            13 => self.pac.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            14 => self.pnoise.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            15 => self.pxf.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            16 => self.pstb.to_config().map(|c| c.to_spice()).unwrap_or_default(),
-            17 => self.xf.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            5 => self
+                .pz
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            6 => self
+                .sens
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            7 => self
+                .mc
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            8 => self
+                .pss
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            9 => self
+                .stb
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            10 => self
+                .temp
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            11 => self
+                .hb
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            12 => self
+                .sp
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            13 => self
+                .pac
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            14 => self
+                .pnoise
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            15 => self
+                .pxf
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            16 => self
+                .pstb
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
+            17 => self
+                .xf
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
             18 => {
                 // Corner is a run plan, not a single card — preview the plan.
                 let corner = &self.corner;
@@ -590,7 +667,11 @@ impl SimSetupState {
                 .to_config()
                 .map(|c| c.to_spice())
                 .unwrap_or_default(),
-            23 => self.soa.to_config().map(|c| c.to_spice()).unwrap_or_default(),
+            23 => self
+                .soa
+                .to_config()
+                .map(|c| c.to_spice())
+                .unwrap_or_default(),
             24 => {
                 let mut card = format!(
                     ".disto {sweep_kind} {} {} {}",

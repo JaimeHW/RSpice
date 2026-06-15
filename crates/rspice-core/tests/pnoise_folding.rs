@@ -140,7 +140,6 @@ c1 mid 0 1n
     }
 }
 
-
 /// Input-referred pnoise divides the output PSD by the squared conversion
 /// transfer from the input source. With no LO and a linear divider both
 /// pieces are closed-form: H(f) = (R2 || Zc) / (R1 + R2 || Zc).

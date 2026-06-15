@@ -709,9 +709,7 @@ impl CodeGenerator {
             }
             IrExpr::Ddx { .. } => {
                 return Err(CompileError::CodeGen(CodeGenError::new(
-                    CodeGenErrorKind::Internal(
-                        "unresolved ddx() reached code generation".into(),
-                    ),
+                    CodeGenErrorKind::Internal("unresolved ddx() reached code generation".into()),
                 )));
             }
             IrExpr::Limit(inner, step) => {

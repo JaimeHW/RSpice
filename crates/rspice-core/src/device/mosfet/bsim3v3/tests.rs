@@ -187,7 +187,12 @@ fn long_channel_square_law_limit() {
     // Same formula modulo Rds and the Early factors; at vds=50mV they are
     // sub-percent for this geometry.
     let rel = (op.cd - expected).abs() / expected.abs();
-    assert!(rel < 0.02, "Id={:.6e} square-law={:.6e} rel={rel:.3e}", op.cd, expected);
+    assert!(
+        rel < 0.02,
+        "Id={:.6e} square-law={:.6e} rel={rel:.3e}",
+        op.cd,
+        expected
+    );
 }
 
 #[test]
@@ -211,9 +216,7 @@ fn subthreshold_slope_matches_n_vtm_ln10() {
         t1 * (1.0 + 2.0 * t1)
     };
     let n = 1.0
-        + (p.nfactor * super::common::EPSSI / p.xdep0
-            + (p.cdsc + p.cdscd * vds) * theta0
-            + p.cit)
+        + (p.nfactor * super::common::EPSSI / p.xdep0 + (p.cdsc + p.cdscd * vds) * theta0 + p.cit)
             / dev.model.cox;
     let expected = n * mt.vtm * (10.0_f64).ln() * 1e3;
     let rel = (slope_mv_per_dec - expected).abs() / expected;
@@ -235,7 +238,11 @@ fn vth_rolloff_sign_short_channel() {
         Bsim3v3::new(
             "m1".to_string(),
             model,
-            Bsim3v3Geometry { l, w: 10e-6, ..Bsim3v3Geometry::default() },
+            Bsim3v3Geometry {
+                l,
+                w: 10e-6,
+                ..Bsim3v3Geometry::default()
+            },
             T300,
         )
         .expect("device")
@@ -256,7 +263,10 @@ fn body_bias_raises_vth() {
     let dev = device(0.5e-6, 10e-6);
     let v0 = op_at(&dev, 0.05, 1.0, 0.0).von;
     let vb = op_at(&dev, 0.05, 1.0, -0.9).von;
-    assert!(vb > v0 + 0.05, "body effect: von(vbs=-0.9)={vb:.4} von(0)={v0:.4}");
+    assert!(
+        vb > v0 + 0.05,
+        "body effect: von(vbs=-0.9)={vb:.4} von(0)={v0:.4}"
+    );
 }
 
 #[test]
@@ -268,9 +278,9 @@ fn gm_gds_gmbs_match_finite_differences() {
         (1.2, 0.8, 0.0),
         (1.8, 1.8, 0.0),
         (0.6, 0.45, -0.5),
-        (1.0, 0.25, 0.0),   // subthreshold
-        (0.02, 1.8, -0.9),  // deep linear, body bias
-        (1.5, 0.37, 0.3),   // near Vth, forward body
+        (1.0, 0.25, 0.0),  // subthreshold
+        (0.02, 1.8, -0.9), // deep linear, body bias
+        (1.5, 0.37, 0.3),  // near Vth, forward body
         (0.4, 1.2, -1.5),
     ];
     for &(vds, vgs, vbs) in &biases {
@@ -282,9 +292,21 @@ fn gm_gds_gmbs_match_finite_differences() {
         let fd_gds = (id(vds + h, vgs, vbs) - id(vds - h, vgs, vbs)) / (2.0 * h);
         let fd_gmb = (id(vds, vgs, vbs + h) - id(vds, vgs, vbs - h)) / (2.0 * h);
         let ok = |a: Value, b: Value| (a - b).abs() <= 1e-4 * a.abs().max(b.abs()) + 1e-12;
-        assert!(ok(op.gm, fd_gm), "({vds},{vgs},{vbs}): gm {:.8e} vs FD {fd_gm:.8e}", op.gm);
-        assert!(ok(op.gds, fd_gds), "({vds},{vgs},{vbs}): gds {:.8e} vs FD {fd_gds:.8e}", op.gds);
-        assert!(ok(op.gmbs, fd_gmb), "({vds},{vgs},{vbs}): gmbs {:.8e} vs FD {fd_gmb:.8e}", op.gmbs);
+        assert!(
+            ok(op.gm, fd_gm),
+            "({vds},{vgs},{vbs}): gm {:.8e} vs FD {fd_gm:.8e}",
+            op.gm
+        );
+        assert!(
+            ok(op.gds, fd_gds),
+            "({vds},{vgs},{vbs}): gds {:.8e} vs FD {fd_gds:.8e}",
+            op.gds
+        );
+        assert!(
+            ok(op.gmbs, fd_gmb),
+            "({vds},{vgs},{vbs}): gmbs {:.8e} vs FD {fd_gmb:.8e}",
+            op.gmbs
+        );
     }
 }
 
@@ -307,8 +329,7 @@ fn substrate_current_jacobian_matches() {
     )
     .expect("device");
     let h = 1e-6;
-    let isub =
-        |vds: Value, vgs: Value, vbs: Value| op_at(&dev, vds, vgs, vbs).csub;
+    let isub = |vds: Value, vgs: Value, vbs: Value| op_at(&dev, vds, vgs, vbs).csub;
     let (vds, vgs, vbs) = (1.8, 1.0, 0.0);
     let op = op_at(&dev, vds, vgs, vbs);
     assert!(op.csub > 0.0, "Isub should be active: {:.3e}", op.csub);
@@ -463,8 +484,7 @@ fn charge_model_capmod3_jacobian_consistency() {
         // d/dvgs; cggb is dQg/dVg with the b3ld sign/frame conventions.
         if vds >= 0.0 {
             let fd_g = (qg_int(vds, vgs + h, vbs) - qg_int(vds, vgs - h, vbs)) / (2.0 * h);
-            let ok =
-                |a: Value, b: Value| (a - b).abs() <= 2e-2 * a.abs().max(b.abs()) + 1e-16;
+            let ok = |a: Value, b: Value| (a - b).abs() <= 2e-2 * a.abs().max(b.abs()) + 1e-16;
             assert!(
                 ok(c0.cggb, fd_g),
                 "({vds},{vgs},{vbs}): cggb {:.6e} vs FD {fd_g:.6e}",
@@ -492,14 +512,26 @@ fn capmod_below_3_charge_request_is_typed_error() {
     .expect("device");
     // DC is fine.
     let op = dev.eval(
-        Bsim3v3Bias { vds: 0.1, vgs: 1.0, vbs: 0.0 },
+        Bsim3v3Bias {
+            vds: 0.1,
+            vgs: 1.0,
+            vbs: 0.0,
+        },
         GMIN,
         false,
     );
     assert!(op.is_ok());
     // Charges are a typed error.
     let err = dev
-        .eval(Bsim3v3Bias { vds: 0.1, vgs: 1.0, vbs: 0.0 }, GMIN, true)
+        .eval(
+            Bsim3v3Bias {
+                vds: 0.1,
+                vgs: 1.0,
+                vbs: 0.0,
+            },
+            GMIN,
+            true,
+        )
         .unwrap_err();
     assert!(err.contains("CAPMOD=2"), "unexpected error: {err}");
 }
@@ -507,10 +539,18 @@ fn capmod_below_3_charge_request_is_typed_error() {
 #[test]
 fn limiting_follows_b3ld_sequence() {
     let dev = device(0.5e-6, 10e-6);
-    let old = Bsim3v3Bias { vds: 0.0, vgs: 0.0, vbs: 0.0 };
+    let old = Bsim3v3Bias {
+        vds: 0.0,
+        vgs: 0.0,
+        vbs: 0.0,
+    };
     // A huge forward body jump must be clipped by pnjlim.
     let (lim, check) = dev.limit_voltages(
-        Bsim3v3Bias { vds: 0.1, vgs: 0.5, vbs: 5.0 },
+        Bsim3v3Bias {
+            vds: 0.1,
+            vgs: 0.5,
+            vbs: 5.0,
+        },
         old,
         0.0,
     );
@@ -518,7 +558,11 @@ fn limiting_follows_b3ld_sequence() {
     assert!(lim.vbs < 1.0, "vbs should be limited, got {}", lim.vbs);
     // A small step passes through unchanged.
     let (lim, check) = dev.limit_voltages(
-        Bsim3v3Bias { vds: 0.01, vgs: 0.02, vbs: -0.01 },
+        Bsim3v3Bias {
+            vds: 0.01,
+            vgs: 0.02,
+            vbs: -0.01,
+        },
         old,
         0.0,
     );
@@ -571,12 +615,48 @@ fn ngspice_pinned_nmos_idvg_linear() {
     // m1 = 10u/0.18u, vds=0.05, vbs=0, T=27C (nmos_idvg_vd50m_vb0).
     let dev = device(0.18e-6, 10e-6);
     let table: [(Value, Value, Value, Value, Value); 6] = [
-        (0.0, 1.888412160e-11, 5.173372990e-10, 1.023756720e-10, 1.701520030e-10),
-        (0.3, 6.554309470e-08, 1.735273730e-06, 3.562440100e-07, 4.889285300e-07),
-        (0.6, 5.074543660e-05, 6.568843820e-04, 6.547648060e-04, 1.636396300e-04),
-        (0.9, 2.881440310e-04, 7.283444000e-04, 5.056831740e-03, 1.921903430e-04),
-        (1.2, 4.767365090e-04, 5.314142340e-04, 8.737667630e-03, 1.589392620e-04),
-        (1.8, 6.899502130e-04, 2.010887270e-04, 1.307953140e-02, 1.091537670e-04),
+        (
+            0.0,
+            1.888412160e-11,
+            5.173372990e-10,
+            1.023756720e-10,
+            1.701520030e-10,
+        ),
+        (
+            0.3,
+            6.554309470e-08,
+            1.735273730e-06,
+            3.562440100e-07,
+            4.889285300e-07,
+        ),
+        (
+            0.6,
+            5.074543660e-05,
+            6.568843820e-04,
+            6.547648060e-04,
+            1.636396300e-04,
+        ),
+        (
+            0.9,
+            2.881440310e-04,
+            7.283444000e-04,
+            5.056831740e-03,
+            1.921903430e-04,
+        ),
+        (
+            1.2,
+            4.767365090e-04,
+            5.314142340e-04,
+            8.737667630e-03,
+            1.589392620e-04,
+        ),
+        (
+            1.8,
+            6.899502130e-04,
+            2.010887270e-04,
+            1.307953140e-02,
+            1.091537670e-04,
+        ),
     ];
     for &(vgs, id, gm, gds, gmbs) in &table {
         let op = op_at(&dev, 0.05, vgs, 0.0);
@@ -603,12 +683,33 @@ fn ngspice_pinned_nmos_idvg_saturation() {
     // m1 = 10u/0.18u, vds=1.2, vbs=0 (nmos_idvg_vd1200m_vb0).
     let dev = device(0.18e-6, 10e-6);
     let table: [(Value, Value, Value, Value, Value, Value, Value); 3] = [
-        (0.6, 1.225790620e-04, 1.745467450e-03, 4.231575200e-05, 4.274622410e-04,
-         4.967558170e-01, 9.841355690e-02),
-        (1.2, 2.389567960e-03, 4.543583450e-03, 2.234402370e-04, 1.134341020e-03,
-         4.967558170e-01, 3.733014340e-01),
-        (1.8, 5.118486640e-03, 4.396534130e-03, 3.517967690e-04, 1.192932080e-03,
-         4.967558170e-01, 5.923702990e-01),
+        (
+            0.6,
+            1.225790620e-04,
+            1.745467450e-03,
+            4.231575200e-05,
+            4.274622410e-04,
+            4.967558170e-01,
+            9.841355690e-02,
+        ),
+        (
+            1.2,
+            2.389567960e-03,
+            4.543583450e-03,
+            2.234402370e-04,
+            1.134341020e-03,
+            4.967558170e-01,
+            3.733014340e-01,
+        ),
+        (
+            1.8,
+            5.118486640e-03,
+            4.396534130e-03,
+            3.517967690e-04,
+            1.192932080e-03,
+            4.967558170e-01,
+            5.923702990e-01,
+        ),
     ];
     for &(vgs, id, gm, gds, gmbs, vth, vdsat) in &table {
         let op = op_at(&dev, 1.2, vgs, 0.0);
@@ -679,8 +780,7 @@ fn ngspice_pinned_nmos_temperature() {
     let op0 = op_at(&hot, 0.05, 0.0, 0.0);
     assert_rel(op0.cd, 5.621104480e-10, "T125 leakage id");
 
-    let cold = Bsim3v3::new("m1".to_string(), model, geom, -40.0 + 273.15)
-        .expect("cold device");
+    let cold = Bsim3v3::new("m1".to_string(), model, geom, -40.0 + 273.15).expect("cold device");
     let op = op_at(&cold, 0.05, 0.9, 0.0);
     assert_rel(op.cd, 4.303247600e-04, "Tm40 id");
     assert_rel(op.gm, 1.061098670e-03, "Tm40 gm");
@@ -735,14 +835,46 @@ fn ngspice_pinned_nmos_charges_capmod3() {
     // Id-Vd at vgs=1.2: charge state across linear-to-saturation
     // (nmos_idvd_vg1200m_vb0).
     let table: [(Value, Value, Value, Value, Value); 4] = [
-        (0.1, 8.767909750e-04, 7.292463720e-03, 3.104280690e-14, 1.145796740e-14),
-        (0.5, 2.166427230e-03, 6.902089060e-04, 2.728467320e-14, 9.985041030e-15),
-        (1.0, 2.343182810e-03, 2.428145710e-04, 2.335256890e-14, 9.936896910e-15),
-        (1.8, 2.516572950e-03, 2.047779910e-04, 1.707814390e-14, 9.935598650e-15),
+        (
+            0.1,
+            8.767909750e-04,
+            7.292463720e-03,
+            3.104280690e-14,
+            1.145796740e-14,
+        ),
+        (
+            0.5,
+            2.166427230e-03,
+            6.902089060e-04,
+            2.728467320e-14,
+            9.985041030e-15,
+        ),
+        (
+            1.0,
+            2.343182810e-03,
+            2.428145710e-04,
+            2.335256890e-14,
+            9.936896910e-15,
+        ),
+        (
+            1.8,
+            2.516572950e-03,
+            2.047779910e-04,
+            1.707814390e-14,
+            9.935598650e-15,
+        ),
     ];
     for &(vds, id, gds, qg, cgg) in &table {
         let op = dev
-            .eval(Bsim3v3Bias { vds, vgs: 1.2, vbs: 0.0 }, GMIN, true)
+            .eval(
+                Bsim3v3Bias {
+                    vds,
+                    vgs: 1.2,
+                    vbs: 0.0,
+                },
+                GMIN,
+                true,
+            )
             .expect("eval");
         assert_rel(op.cd, id, &format!("id(vds={vds})"));
         assert_rel(op.gds, gds, &format!("gds(vds={vds})"));
@@ -773,12 +905,33 @@ fn ngspice_pinned_pmos() {
     )
     .expect("pmos device");
     let table: [(Value, Value, Value, Value, Value, Value, Value); 3] = [
-        (-0.6, 2.190448330e-05, 2.130193240e-04, 3.420662180e-04, 6.462213390e-05,
-         4.802688480e-01, 1.345257640e-14),
-        (-1.2, 1.417817060e-04, 1.571937100e-04, 2.720356250e-03, 6.626002240e-05,
-         4.802688480e-01, 2.683623020e-14),
-        (-1.8, 2.162855600e-04, 9.544283270e-05, 4.229858380e-03, 5.423827330e-05,
-         4.802688480e-01, 4.063189500e-14),
+        (
+            -0.6,
+            2.190448330e-05,
+            2.130193240e-04,
+            3.420662180e-04,
+            6.462213390e-05,
+            4.802688480e-01,
+            1.345257640e-14,
+        ),
+        (
+            -1.2,
+            1.417817060e-04,
+            1.571937100e-04,
+            2.720356250e-03,
+            6.626002240e-05,
+            4.802688480e-01,
+            2.683623020e-14,
+        ),
+        (
+            -1.8,
+            2.162855600e-04,
+            9.544283270e-05,
+            4.229858380e-03,
+            5.423827330e-05,
+            4.802688480e-01,
+            4.063189500e-14,
+        ),
     ];
     for &(vgs_node, id, gm, gds, gmbs, vth, qg) in &table {
         let op = dev
@@ -852,15 +1005,53 @@ mod oracle {
                     ("m1", 10e-6, 0.18e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
                     ("m2", 10e-6, 10e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
                     ("m3", 10e-6, 0.5e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
-                    ("m4", 0.6e-6, 0.18e-6, 0.252e-12, 0.252e-12, 2.04e-6, 2.04e-6),
+                    (
+                        "m4", 0.6e-6, 0.18e-6, 0.252e-12, 0.252e-12, 2.04e-6, 2.04e-6,
+                    ),
                 ],
                 sweeps: &[
-                    Sweep { file: "nmos_idvg_vd50m_vb0", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "nmos_idvg_vd50m_vbm09", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: -0.9 },
-                    Sweep { file: "nmos_idvg_vd1200m_vb0", sweep_is_vg: true, vd: 1.2, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "nmos_idvd_vg1200m_vb0", sweep_is_vg: false, vd: 0.0, vg: 1.2, vb: 0.0 },
-                    Sweep { file: "nmos_idvd_vg600m_vb0", sweep_is_vg: false, vd: 0.0, vg: 0.6, vb: 0.0 },
-                    Sweep { file: "nmos_idvd_vg900m_vbm045", sweep_is_vg: false, vd: 0.0, vg: 0.9, vb: -0.45 },
+                    Sweep {
+                        file: "nmos_idvg_vd50m_vb0",
+                        sweep_is_vg: true,
+                        vd: 0.05,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvg_vd50m_vbm09",
+                        sweep_is_vg: true,
+                        vd: 0.05,
+                        vg: 0.0,
+                        vb: -0.9,
+                    },
+                    Sweep {
+                        file: "nmos_idvg_vd1200m_vb0",
+                        sweep_is_vg: true,
+                        vd: 1.2,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvd_vg1200m_vb0",
+                        sweep_is_vg: false,
+                        vd: 0.0,
+                        vg: 1.2,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvd_vg600m_vb0",
+                        sweep_is_vg: false,
+                        vd: 0.0,
+                        vg: 0.6,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvd_vg900m_vbm045",
+                        sweep_is_vg: false,
+                        vd: 0.0,
+                        vg: 0.9,
+                        vb: -0.45,
+                    },
                 ],
             },
             DeckSpec {
@@ -872,8 +1063,20 @@ mod oracle {
                     ("m2", 10e-6, 0.5e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
                 ],
                 sweeps: &[
-                    Sweep { file: "nmos_idvg_vd50m_t125", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "nmos_idvg_vd1200m_t125", sweep_is_vg: true, vd: 1.2, vg: 0.0, vb: 0.0 },
+                    Sweep {
+                        file: "nmos_idvg_vd50m_t125",
+                        sweep_is_vg: true,
+                        vd: 0.05,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvg_vd1200m_t125",
+                        sweep_is_vg: true,
+                        vd: 1.2,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
                 ],
             },
             DeckSpec {
@@ -885,8 +1088,20 @@ mod oracle {
                     ("m2", 10e-6, 0.5e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
                 ],
                 sweeps: &[
-                    Sweep { file: "nmos_idvg_vd50m_tm40", sweep_is_vg: true, vd: 0.05, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "nmos_idvg_vd1200m_tm40", sweep_is_vg: true, vd: 1.2, vg: 0.0, vb: 0.0 },
+                    Sweep {
+                        file: "nmos_idvg_vd50m_tm40",
+                        sweep_is_vg: true,
+                        vd: 0.05,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "nmos_idvg_vd1200m_tm40",
+                        sweep_is_vg: true,
+                        vd: 1.2,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
                 ],
             },
             DeckSpec {
@@ -898,10 +1113,34 @@ mod oracle {
                     ("m2", 10e-6, 0.5e-6, 4.2e-12, 4.2e-12, 20.84e-6, 20.84e-6),
                 ],
                 sweeps: &[
-                    Sweep { file: "pmos_idvg_vdm50m_vb0", sweep_is_vg: true, vd: -0.05, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "pmos_idvg_vdm50m_vb09", sweep_is_vg: true, vd: -0.05, vg: 0.0, vb: 0.9 },
-                    Sweep { file: "pmos_idvg_vdm1200m_vb0", sweep_is_vg: true, vd: -1.2, vg: 0.0, vb: 0.0 },
-                    Sweep { file: "pmos_idvd_vgm1200m_vb0", sweep_is_vg: false, vd: 0.0, vg: -1.2, vb: 0.0 },
+                    Sweep {
+                        file: "pmos_idvg_vdm50m_vb0",
+                        sweep_is_vg: true,
+                        vd: -0.05,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "pmos_idvg_vdm50m_vb09",
+                        sweep_is_vg: true,
+                        vd: -0.05,
+                        vg: 0.0,
+                        vb: 0.9,
+                    },
+                    Sweep {
+                        file: "pmos_idvg_vdm1200m_vb0",
+                        sweep_is_vg: true,
+                        vd: -1.2,
+                        vg: 0.0,
+                        vb: 0.0,
+                    },
+                    Sweep {
+                        file: "pmos_idvd_vgm1200m_vb0",
+                        sweep_is_vg: false,
+                        vd: 0.0,
+                        vg: -1.2,
+                        vb: 0.0,
+                    },
                 ],
             },
         ]
@@ -938,8 +1177,8 @@ mod oracle {
 
     /// Parse a `wrdata` table (wr_vecnames + wr_singlescale).
     pub fn parse_wrdata(path: &Path) -> (Vec<String>, Vec<Vec<Value>>) {
-        let text = fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let text =
+            fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let mut lines = text.lines();
         let header: Vec<String> = lines
             .next()
@@ -1079,7 +1318,10 @@ fn live_ngspice_oracle_dc_and_charge() {
         }
         let _ = std::fs::remove_dir_all(&work);
     }
-    println!("live BSIM3 oracle: {points} comparisons passed; worst rel err {:.3e} ({})", worst.0, worst.1);
+    println!(
+        "live BSIM3 oracle: {points} comparisons passed; worst rel err {:.3e} ({})",
+        worst.0, worst.1
+    );
 }
 
 /// PMOS card matching testdata/models018.lib `p018`.
@@ -1209,5 +1451,9 @@ fn pmos_polarity_mirrors_nmos_conventions() {
         .eval_polarity(-0.6, -1.2, 0.0, GMIN, false)
         .expect("eval");
     assert_eq!(op.mode, 1);
-    assert!(op.cd > 0.0, "internal-frame current positive, got {}", op.cd);
+    assert!(
+        op.cd > 0.0,
+        "internal-frame current positive, got {}",
+        op.cd
+    );
 }

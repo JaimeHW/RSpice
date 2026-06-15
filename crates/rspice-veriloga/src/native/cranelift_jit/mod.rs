@@ -341,7 +341,9 @@ impl JitCompiler {
         let stamp_value_fns: Vec<_> = stamp_value_ids
             .iter()
             .map(|id| {
-                id.map(|id| unsafe { NativeModel::cast_stamp_fn(module.get_finalized_function(id)) })
+                id.map(|id| unsafe {
+                    NativeModel::cast_stamp_fn(module.get_finalized_function(id))
+                })
             })
             .collect();
         let jacobian_fns: Vec<Vec<_>> = jacobian_ids
@@ -391,12 +393,12 @@ impl JitCompiler {
         let mut pending = Pending::None;
 
         let emit_chunk = |this: &Self,
-                              plan: &mut Vec<PlanStep>,
-                              module: &mut JITModule,
-                              ctx: &mut cranelift::prelude::codegen::Context,
-                              chunk_fn_ids: &mut Vec<FuncId>,
-                              from: usize,
-                              to: usize|
+                          plan: &mut Vec<PlanStep>,
+                          module: &mut JITModule,
+                          ctx: &mut cranelift::prelude::codegen::Context,
+                          chunk_fn_ids: &mut Vec<FuncId>,
+                          from: usize,
+                          to: usize|
          -> JitResult<()> {
             let programs: Vec<&crate::codegen::AssignmentProgram> = steps[from..to]
                 .iter()
@@ -491,7 +493,15 @@ impl JitCompiler {
 
         match pending {
             Pending::Chunk(start) => {
-                emit_chunk(self, &mut plan, module, ctx, chunk_fn_ids, start, steps.len())?;
+                emit_chunk(
+                    self,
+                    &mut plan,
+                    module,
+                    ctx,
+                    chunk_fn_ids,
+                    start,
+                    steps.len(),
+                )?;
             }
             Pending::Interpret(start) => {
                 plan.push(PlanStep::Interpret {

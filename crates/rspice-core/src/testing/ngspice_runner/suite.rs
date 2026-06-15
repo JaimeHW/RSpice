@@ -22,16 +22,12 @@ impl TestRunner {
             .count();
         let failed = total - passed - skipped;
 
-        println!(
-            "\nâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•"
-        );
+        println!("\n════════════════════════════════════════════════════════════");
         println!(
             "  Test Summary: {} total | {} passed | {} failed | {} skipped",
             total, passed, failed, skipped
         );
-        println!(
-            "â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n"
-        );
+        println!("════════════════════════════════════════════════════════════\n");
 
         // Print failures first
         for result in results
@@ -39,7 +35,7 @@ impl TestRunner {
             .filter(|r| !r.passed && r.error.as_ref().is_none_or(|e| !e.starts_with("SKIPPED")))
         {
             let analysis = result.analysis_type.as_deref().unwrap_or("?");
-            println!("  âœ— {} [{}] - {:?}", result.name, analysis, result.error);
+            println!("  ✗ {} [{}] - {:?}", result.name, analysis, result.error);
             for mismatch in result.mismatches.iter().take(3) {
                 println!(
                     "      mismatch: {} @ x={} expected={} actual={} rel_err={:.3e}",
@@ -60,7 +56,7 @@ impl TestRunner {
                 .filter(|r| r.error.as_ref().is_some_and(|e| e.starts_with("SKIPPED")))
             {
                 if let Some(ref err) = result.error {
-                    println!("  âŠ˜ {} - {}", result.name, err);
+                    println!("  ⊘ {} - {}", result.name, err);
                 }
             }
         }

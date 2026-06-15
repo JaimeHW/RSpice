@@ -70,10 +70,7 @@ impl NewtonMeritBacktrack {
     /// step left the basin of its linearization: order-of-magnitude residual
     /// growth (or a non-finite residual) while the iterate is still
     /// unconverged.
-    pub(super) fn step_needs_globalization(
-        previous_merit: Value,
-        current_merit: Value,
-    ) -> bool {
+    pub(super) fn step_needs_globalization(previous_merit: Value, current_merit: Value) -> bool {
         if !previous_merit.is_finite() {
             return false;
         }
@@ -129,8 +126,8 @@ impl NewtonMeritBacktrack {
             self.best_alpha = self.alpha;
         }
 
-        let armijo_ok = trial_merit <= 1.0
-            || trial_merit <= self.base_merit * (1.0 - ARMIJO_C1 * self.alpha);
+        let armijo_ok =
+            trial_merit <= 1.0 || trial_merit <= self.base_merit * (1.0 - ARMIJO_C1 * self.alpha);
         if armijo_ok {
             return BacktrackAction::Accept;
         }
@@ -140,11 +137,7 @@ impl NewtonMeritBacktrack {
             if self.best_alpha == self.alpha {
                 return BacktrackAction::Accept;
             }
-            return BacktrackAction::Trial(Self::point_at(
-                &self.base,
-                &self.step,
-                self.best_alpha,
-            ));
+            return BacktrackAction::Trial(Self::point_at(&self.base, &self.step, self.best_alpha));
         }
 
         self.alpha *= BACKTRACK_FACTOR;
@@ -170,7 +163,9 @@ mod tests {
         // flat unconverged plateaus of pnjlim wandering are left alone.
         assert!(!NewtonMeritBacktrack::step_needs_globalization(50.0, 49.0));
         assert!(!NewtonMeritBacktrack::step_needs_globalization(50.0, 400.0));
-        assert!(!NewtonMeritBacktrack::step_needs_globalization(1.6e3, 1.9e3));
+        assert!(!NewtonMeritBacktrack::step_needs_globalization(
+            1.6e3, 1.9e3
+        ));
         // Converged-scale residuals never engage regardless of ratio.
         assert!(!NewtonMeritBacktrack::step_needs_globalization(0.05, 0.9));
         // The blow-up signature engages.
@@ -195,8 +190,7 @@ mod tests {
     fn search_accepts_first_trial_with_sufficient_decrease() {
         let base = vec![1.0, 2.0];
         let candidate = vec![3.0, 6.0];
-        let (mut search, trial) =
-            NewtonMeritBacktrack::engage(&base, 100.0, &candidate, 5000.0);
+        let (mut search, trial) = NewtonMeritBacktrack::engage(&base, 100.0, &candidate, 5000.0);
         assert_eq!(trial, vec![2.0, 4.0]);
 
         // Half step decreased the merit below the Armijo line: accepted.
@@ -210,8 +204,7 @@ mod tests {
     fn search_halves_until_decrease_then_accepts() {
         let base = vec![0.0];
         let candidate = vec![8.0];
-        let (mut search, trial) =
-            NewtonMeritBacktrack::engage(&base, 100.0, &candidate, 4000.0);
+        let (mut search, trial) = NewtonMeritBacktrack::engage(&base, 100.0, &candidate, 4000.0);
         assert_eq!(trial, vec![4.0]);
 
         // Still worse than base at alpha = 1/2 and 1/4.

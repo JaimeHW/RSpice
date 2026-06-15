@@ -199,7 +199,7 @@ impl Engine {
     /// Run pole-zero analysis
     ///
     /// Finds poles and zeros of the transfer function from input to output node.
-    /// Uses the MNA formulation: (G + sÂ·C)Â·V = I
+    /// Uses the MNA formulation: (G + s·C)·V = I
     pub fn run_pz(
         &self,
         netlist: &Netlist,

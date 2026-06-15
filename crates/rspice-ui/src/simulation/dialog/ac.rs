@@ -2,7 +2,6 @@
 //!
 //! Configuration for small-signal AC analysis (.ac).
 
-
 // =============================================================================
 // Frequency Sweep Type
 // =============================================================================
@@ -139,7 +138,6 @@ impl AcConfig {
         }
     }
 }
-
 
 fn format_freq(freq: f64) -> String {
     if freq >= 1e9 {

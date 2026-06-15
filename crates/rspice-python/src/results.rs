@@ -840,9 +840,7 @@ impl PyDcSweepResult {
         let len = self.results.len() as isize;
         let idx = if index < 0 { index + len } else { index };
         if idx < 0 || idx >= len {
-            return Err(
-                invalid_sweep_index_error(index.unsigned_abs(), self.results.len()).into(),
-            );
+            return Err(invalid_sweep_index_error(index.unsigned_abs(), self.results.len()).into());
         }
         let (value, result) = &self.results[idx as usize];
         Ok((*value, PySimulationResult::new(result.clone())))

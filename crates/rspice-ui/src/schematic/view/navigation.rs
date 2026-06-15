@@ -12,8 +12,7 @@ pub(super) fn handle_viewport_navigation(
     // event: egui's click-vs-drag threshold would swallow the first few
     // pixels as a dead zone, and the canvas has no competing middle-click
     // action. Shift+primary keeps the threshold so clicks stay clicks.
-    let middle_pan =
-        response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down());
+    let middle_pan = response.is_pointer_button_down_on() && ui.input(|i| i.pointer.middle_down());
     let shift_pan =
         response.dragged_by(egui::PointerButton::Primary) && ui.input(|i| i.modifiers.shift);
     if middle_pan || shift_pan {

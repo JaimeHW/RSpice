@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn decade_ticks_span() {
-        let ticks = decade_ticks(1.0, 1e9, );
+        let ticks = decade_ticks(1.0, 1e9);
         assert_eq!(ticks.len(), 10);
         assert_eq!(ticks[3].1, "1k");
         assert_eq!(ticks[9].1, "1G");

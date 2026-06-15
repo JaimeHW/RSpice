@@ -370,9 +370,7 @@ impl TestRunner {
                         element.nodes.first()?.clone(),
                         element.nodes.get(2)?.clone(),
                     )),
-                    "vgs" => {
-                        Some((element.nodes.get(1)?.clone(), element.nodes.get(2)?.clone()))
-                    }
+                    "vgs" => Some((element.nodes.get(1)?.clone(), element.nodes.get(2)?.clone())),
                     "vbs" => {
                         let body = soi_body.unwrap_or(element.nodes.get(3)?.clone());
                         Some((body, element.nodes.get(2)?.clone()))

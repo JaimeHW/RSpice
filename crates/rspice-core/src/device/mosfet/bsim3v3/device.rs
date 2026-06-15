@@ -482,9 +482,8 @@ impl NonlinearDevice for Bsim3v3Device {
         }
         let reltol = criteria.relative_tolerance();
         let vtol = criteria.voltage_tolerance();
-        let cmp = |new: Value, old: Value| {
-            (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol
-        };
+        let cmp =
+            |new: Value, old: Value| (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol;
         cmp(self.bias.vds, self.converged_ref.vds)
             && cmp(self.bias.vgs, self.converged_ref.vgs)
             && cmp(self.bias.vbs, self.converged_ref.vbs)

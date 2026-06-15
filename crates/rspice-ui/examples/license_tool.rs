@@ -14,8 +14,7 @@
 
 use ed25519_dalek::{Signer, SigningKey};
 use rspice_ui::services::license::{
-    LicensePayload, SIGNING_DOMAIN, crockford_encode, date_from_unix_days, group5,
-    parse_and_verify,
+    LicensePayload, SIGNING_DOMAIN, crockford_encode, date_from_unix_days, group5, parse_and_verify,
 };
 
 fn main() {
@@ -120,9 +119,7 @@ fn issue(args: &[String]) {
 }
 
 fn parse_or<T: std::str::FromStr>(value: Option<String>, default: T) -> T {
-    value
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
+    value.and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
 fn hex(bytes: &[u8]) -> String {

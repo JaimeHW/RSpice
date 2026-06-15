@@ -146,7 +146,6 @@ impl ReliabilityDialogState {
             *self = Self::from_config(&ReliabilityConfig::default());
         }
     }
-
 }
 
 fn parse_years_list(input: &str) -> Result<Vec<f64>, String> {

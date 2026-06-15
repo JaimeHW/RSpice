@@ -249,4 +249,3 @@ pub(crate) fn ac_signals(results: &[AcResult]) -> Vec<ComplexSignal> {
 
     signals
 }
-

@@ -175,10 +175,7 @@ pub(super) fn run_ac(
 
             ctx.record_measurements(
                 "AC",
-                rspice_core::analysis::advanced::evaluate_ac_measurements(
-                    ctx.netlist,
-                    &results,
-                ),
+                rspice_core::analysis::advanced::evaluate_ac_measurements(ctx.netlist, &results),
             );
 
             if !ctx.quiet {
@@ -210,8 +207,7 @@ pub(super) fn run_ac(
                     ac_signals(&results),
                     &ctx.netlist.saves,
                 );
-                let frequencies: Vec<f64> =
-                    results.iter().map(|result| result.frequency).collect();
+                let frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
                 if matches!(ctx.format, OutputFormat::Hdf5) {
                     let mut data = Hdf5SimulationData::new();
                     data.title = "AC Analysis".to_string();
@@ -474,10 +470,7 @@ pub(super) fn run_noise(
 
             ctx.record_measurements(
                 "NOISE",
-                rspice_core::analysis::advanced::evaluate_noise_measurements(
-                    ctx.netlist,
-                    &results,
-                ),
+                rspice_core::analysis::advanced::evaluate_noise_measurements(ctx.netlist, &results),
             );
 
             if !ctx.quiet {
@@ -581,10 +574,7 @@ pub(super) fn run_noise(
 /// Compact (top 10) by default; `verbose` lifts the cap. Rows carry the
 /// device, mechanism, integrated output power, and share of the total so
 /// the dominant contributor is visible at a glance.
-fn print_noise_contribution_summary(
-    results: &[rspice_core::analysis::NoiseResult],
-    verbose: bool,
-) {
+fn print_noise_contribution_summary(results: &[rspice_core::analysis::NoiseResult], verbose: bool) {
     let integrated = rspice_core::analysis::IntegratedNoise::new(results.to_vec());
     let summary = integrated.contribution_summary();
     if summary.is_empty() {
@@ -684,23 +674,29 @@ fn report_pz(
         reject_hdf5(ctx.format, "pole-zero")?;
         use super::export::{ColumnData, ExportColumn, ExportTable};
 
-        let singularity = |label: &str,
-                           index: usize,
-                           value: &rspice_core::analysis::advanced::pole_zero::Complex| {
-            ExportColumn {
-                name: format!("{label}({})", index + 1),
-                var_type: "frequency".to_string(),
-                data: ColumnData::Complex {
-                    real: vec![value.re],
-                    imag: vec![value.im],
-                },
-            }
-        };
+        let singularity =
+            |label: &str,
+             index: usize,
+             value: &rspice_core::analysis::advanced::pole_zero::Complex| {
+                ExportColumn {
+                    name: format!("{label}({})", index + 1),
+                    var_type: "frequency".to_string(),
+                    data: ColumnData::Complex {
+                        real: vec![value.re],
+                        imag: vec![value.im],
+                    },
+                }
+            };
         let columns: Vec<ExportColumn> = poles
             .iter()
             .enumerate()
             .map(|(i, p)| singularity("pole", i, p))
-            .chain(zeros.iter().enumerate().map(|(i, z)| singularity("zero", i, z)))
+            .chain(
+                zeros
+                    .iter()
+                    .enumerate()
+                    .map(|(i, z)| singularity("zero", i, z)),
+            )
             .collect();
 
         ExportTable {

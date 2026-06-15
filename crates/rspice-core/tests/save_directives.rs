@@ -21,8 +21,18 @@ r2 out 0 1k
 ",
     );
 
-    assert!(netlist.saves.signals.contains(&SaveSignal::Voltage("out".into())));
-    assert!(netlist.saves.signals.contains(&SaveSignal::Current("v1".into())));
+    assert!(
+        netlist
+            .saves
+            .signals
+            .contains(&SaveSignal::Voltage("out".into()))
+    );
+    assert!(
+        netlist
+            .saves
+            .signals
+            .contains(&SaveSignal::Current("v1".into()))
+    );
     assert!(netlist.saves.signals.contains(&SaveSignal::All));
 }
 
@@ -40,7 +50,12 @@ r2 out 0 1k
 ",
     );
 
-    assert!(netlist.saves.signals.contains(&SaveSignal::Voltage("out".into())));
+    assert!(
+        netlist
+            .saves
+            .signals
+            .contains(&SaveSignal::Voltage("out".into()))
+    );
     assert!(
         netlist
             .saves

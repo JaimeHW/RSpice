@@ -55,8 +55,11 @@ fn lowpass_dc_gain_is_unity() {
 #[test]
 fn lowpass_ac_matches_the_closed_form() {
     // |H(j2πf)| = 1/sqrt(1 + (f/fc)^2)
-    for (freq, _label) in [(FC, "corner"), (10.0 * FC, "decade above"), (FC / 10.0, "decade below")]
-    {
+    for (freq, _label) in [
+        (FC, "corner"),
+        (10.0 * FC, "decade above"),
+        (FC / 10.0, "decade below"),
+    ] {
         let expected = 1.0 / (1.0 + (freq / FC).powi(2)).sqrt();
         let got = ac_magnitude(&lowpass_deck(), "out", freq);
         assert!(

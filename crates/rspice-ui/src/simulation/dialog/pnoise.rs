@@ -439,7 +439,6 @@ impl PnoiseDialogState {
             *self = Self::from_config(&PnoiseConfig::default());
         }
     }
-
 }
 
 // =============================================================================

@@ -150,8 +150,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Completion popover: trigger, render, and apply an acceptance.
     if let Some(output) = &te_output
-        && let Some((start, end, text, caret)) =
-            completion::show(ui, &mut state.shell.netlist, output, &buffer, completion_keys)
+        && let Some((start, end, text, caret)) = completion::show(
+            ui,
+            &mut state.shell.netlist,
+            output,
+            &buffer,
+            completion_keys,
+        )
     {
         buffer.replace_range(start..end, &text);
         completion::place_caret(ui, editor_id(), caret);
@@ -186,7 +191,14 @@ fn diagnostics_strip(ui: &mut Ui, state: &AppState, rows: usize) {
         egui::Stroke::new(1.0, c.border),
     );
 
-    for (idx, diagnostic) in state.shell.netlist.diagnostics.iter().take(rows).enumerate() {
+    for (idx, diagnostic) in state
+        .shell
+        .netlist
+        .diagnostics
+        .iter()
+        .take(rows)
+        .enumerate()
+    {
         let y = rect.top() + 5.0 + idx as f32 * 22.0 + 11.0;
         ui.painter()
             .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, c.err);

@@ -13,7 +13,7 @@ use crate::{Value, circuit::NodeId};
 /// Separate smoothing width for Vds-dependent region transitions.
 ///
 /// Keep this much smaller than threshold smoothing to avoid artificial channel
-/// current at Vdsâ‰ˆ0 while retaining C1 continuity for Newton.
+/// current at Vds≈0 while retaining C1 continuity for Newton.
 mod capacitance;
 mod construction;
 mod current;

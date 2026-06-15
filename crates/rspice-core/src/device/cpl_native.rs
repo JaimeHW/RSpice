@@ -1750,10 +1750,7 @@ impl NativeCplSetup {
                 }
 
                 let a_b = if row == col {
-                    self.g[row][row]
-                        .div(self.r[row][row])
-                        .sqrt()
-                        .div(constant)
+                    self.g[row][row].div(self.r[row][row]).sqrt().div(constant)
                 } else {
                     Dd::ZERO
                 };
@@ -1924,9 +1921,7 @@ impl NativeCplSetup {
         let mu = self.zy[p][p].sub(self.zy[q][q]).mul_f64(0.5);
         let ve = ld.mul(ld).add(mu.mul(mu)).sqrt();
         let co = ve.add(mu.abs()).div(ve.mul_f64(2.0)).sqrt();
-        let si = Dd::from_f64(mu_sign)
-            .mul(ld)
-            .div(ve.mul_f64(2.0).mul(co));
+        let si = Dd::from_f64(mu_sign).mul(ld).div(ve.mul_f64(2.0).mul(co));
 
         let mut t = vec![Dd::ZERO; self.dim];
         for col in p + 1..self.dim {
@@ -3198,7 +3193,11 @@ mod tests {
                 (x1, -0.5 * a1, 0.5 * (-t).sqrt(), true)
             } else {
                 t = t.sqrt();
-                let x2 = if a1 >= 0.0 { -0.5 * (a1 + t) } else { -0.5 * (a1 - t) };
+                let x2 = if a1 >= 0.0 {
+                    -0.5 * (a1 + t)
+                } else {
+                    -0.5 * (a1 - t)
+                };
                 (x1, x2, a2 / x2, false)
             }
         }
@@ -3208,7 +3207,8 @@ mod tests {
             let mut n = -(q1 * (a * a - bb * bb) + q2 * a + q3) * (6.0 * a * bb + 2.0 * p1 * bb);
             n += (2.0 * q1 * a * bb + q2 * bb) * (3.0 * (a * a - bb * bb) + 2.0 * p1 * a + p2);
             let ci = n / d;
-            n = (3.0 * (a * a - bb * bb) + 2.0 * p1 * a + p2) * (q1 * (a * a - bb * bb) + q2 * a + q3);
+            n = (3.0 * (a * a - bb * bb) + 2.0 * p1 * a + p2)
+                * (q1 * (a * a - bb * bb) + q2 * a + q3);
             n += (6.0 * a * bb + 2.0 * p1 * bb) * (2.0 * q1 * a * bb + q2 * bb);
             let cr = n / d;
             (cr, ci)
@@ -3288,10 +3288,7 @@ mod tests {
         // Representative well-behaved inputs (well-separated roots, no
         // degeneracy). Captured-shape moments from the CPL setup chain.
         let cases: &[(f64, [f64; 7])] = &[
-            (
-                0.0,
-                [1.0, 8.0e-3, 2.0e-5, 5.5e-9, 7.0e-12, 9.0e-15, 0.0],
-            ),
+            (0.0, [1.0, 8.0e-3, 2.0e-5, 5.5e-9, 7.0e-12, 9.0e-15, 0.0]),
             (
                 0.5,
                 [1.0, 1.11e-2, 2.95e-5, -9.36e-9, 1.2e-11, -2.0e-14, 0.0],
@@ -3432,7 +3429,10 @@ mod oracle_replay {
                 .collect();
             assert_eq!(f.len(), 2 + 2 * N);
             let label = (f[0] * 1.0e12).trunc() as i64;
-            inputs.insert(label, (f[1], f[2..2 + N].to_vec(), f[2 + N..2 + 2 * N].to_vec()));
+            inputs.insert(
+                label,
+                (f[1], f[2..2 + N].to_vec(), f[2 + N..2 + 2 * N].to_vec()),
+            );
         }
 
         // .MODEL LOSSYMODE CPL: R=diag(0.3), L tridiag(9n, 5.4n),

@@ -231,9 +231,7 @@ impl<'a> NetlistGenerator<'a> {
                 Some(&primary) if primary != net_id => self.merge_nets(primary, net_id),
                 _ => {
                     name_to_net.insert(name.to_ascii_lowercase(), net_id);
-                    let existing = self
-                        .net(net_id)
-                        .and_then(|net| net.label.clone());
+                    let existing = self.net(net_id).and_then(|net| net.label.clone());
                     match existing {
                         Some(existing) if !existing.eq_ignore_ascii_case(name) => {
                             self.warnings.push(format!(

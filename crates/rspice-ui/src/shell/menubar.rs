@@ -183,7 +183,11 @@ fn item_impl(ui: &mut Ui, label: &str, kbd: Option<&str>, enabled: bool) -> bool
     let width = ui.available_width().max(220.0);
     let (rect, response) = ui.allocate_exact_size(
         vec2(width, 26.0),
-        if enabled { Sense::click() } else { Sense::hover() },
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
     );
     if !ui.is_rect_visible(rect) {
         return false;
@@ -288,10 +292,7 @@ fn file_menu(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     separator(ui);
     set(FileMenuAction::NewProject, item(ui, "New project", None));
-    set(
-        FileMenuAction::OpenProject,
-        item(ui, "Open project…", None),
-    );
+    set(FileMenuAction::OpenProject, item(ui, "Open project…", None));
     set(FileMenuAction::SaveProject, item(ui, "Save project", None));
     set(
         FileMenuAction::SaveProjectAs,

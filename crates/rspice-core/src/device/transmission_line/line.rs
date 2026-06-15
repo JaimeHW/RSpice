@@ -30,7 +30,7 @@ pub struct TransmissionLine {
     pub node2_neg: NodeId,
 
     // Parameters
-    /// Characteristic impedance (Î©)
+    /// Characteristic impedance (Ω)
     pub z0: Value,
     /// Propagation delay (s)
     pub td: Value,
@@ -953,8 +953,7 @@ impl TransmissionLine {
         self.history_forward.push(time, self.launched_forward);
 
         // Backward wave: V2 + Z0*I2 propagates to port 1
-        self.history_backward
-            .push(time, self.launched_backward);
+        self.history_backward.push(time, self.launched_backward);
         self.state_history.push_back(TlineStateSample {
             time,
             v1,
@@ -1218,10 +1217,7 @@ mod ltra_oracle_replay {
             .map(|line| {
                 let f: Vec<&str> = line.split_whitespace().collect();
                 let t: Value = f[0].parse().unwrap();
-                (
-                    t.to_bits(),
-                    (f[2].parse().unwrap(), f[3].parse().unwrap()),
-                )
+                (t.to_bits(), (f[2].parse().unwrap(), f[3].parse().unwrap()))
             })
             .collect();
 

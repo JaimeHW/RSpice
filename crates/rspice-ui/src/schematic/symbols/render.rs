@@ -61,16 +61,34 @@ pub fn bake_symbol(
                 PathCommand::MoveTo(x, y) => {
                     flush(&mut points, &mut baked);
                     let (tx, ty) = transform_point_nonuniform(
-                        *x, *y, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
-                        mirror_h, mirror_v, Pos2::ZERO,
+                        *x,
+                        *y,
+                        cx,
+                        cy,
+                        cos_r,
+                        sin_r,
+                        view_scale_x,
+                        view_scale_y,
+                        mirror_h,
+                        mirror_v,
+                        Pos2::ZERO,
                     );
                     points.push(Vec2::new(tx, ty));
                     current_pos = (*x, *y);
                 }
                 PathCommand::LineTo(x, y) => {
                     let (tx, ty) = transform_point_nonuniform(
-                        *x, *y, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
-                        mirror_h, mirror_v, Pos2::ZERO,
+                        *x,
+                        *y,
+                        cx,
+                        cy,
+                        cos_r,
+                        sin_r,
+                        view_scale_x,
+                        view_scale_y,
+                        mirror_h,
+                        mirror_v,
+                        Pos2::ZERO,
                     );
                     points.push(Vec2::new(tx, ty));
                     current_pos = (*x, *y);
@@ -81,8 +99,17 @@ pub fn bake_symbol(
                         let t = i as f32 / segments as f32;
                         let (bx, by) = cubic_bezier(current_pos, *ctrl1, *ctrl2, *end, t);
                         let (tx, ty) = transform_point_nonuniform(
-                            bx, by, cx, cy, cos_r, sin_r, view_scale_x, view_scale_y,
-                            mirror_h, mirror_v, Pos2::ZERO,
+                            bx,
+                            by,
+                            cx,
+                            cy,
+                            cos_r,
+                            sin_r,
+                            view_scale_x,
+                            view_scale_y,
+                            mirror_h,
+                            mirror_v,
+                            Pos2::ZERO,
                         );
                         // Skip a t=0 point that duplicates the previous vertex.
                         if i == 0 && !points.is_empty() {

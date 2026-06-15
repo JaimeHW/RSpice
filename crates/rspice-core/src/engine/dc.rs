@@ -90,7 +90,8 @@ impl Engine {
 
     /// Run DC operating point analysis
     pub fn run_dc_op(&self, netlist: &Netlist) -> Result<SimulationResult, SimulationError> {
-        self.run_dc_op_with_report(netlist).map(|(result, _)| result)
+        self.run_dc_op_with_report(netlist)
+            .map(|(result, _)| result)
     }
 
     /// Run DC operating point analysis and return the per-device
@@ -183,7 +184,12 @@ impl Engine {
         };
 
         use crate::analysis::DcSweep;
-        let outer = DcSweep::new(sweep2.source.clone(), sweep2.start, sweep2.stop, sweep2.step);
+        let outer = DcSweep::new(
+            sweep2.source.clone(),
+            sweep2.start,
+            sweep2.stop,
+            sweep2.step,
+        );
         let outer_points = outer.points();
         if outer_points.is_empty() {
             return Err(SimulationError::Circuit(

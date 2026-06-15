@@ -215,8 +215,16 @@ impl SymbolLibrary {
                 "xspice_multiplier.svg",
                 "Multiplier",
             ),
-            (ComponentType::XspiceDivider, "xspice_divider.svg", "Divider"),
-            (ComponentType::XspiceLimiter, "xspice_limiter.svg", "Limiter"),
+            (
+                ComponentType::XspiceDivider,
+                "xspice_divider.svg",
+                "Divider",
+            ),
+            (
+                ComponentType::XspiceLimiter,
+                "xspice_limiter.svg",
+                "Limiter",
+            ),
             (
                 ComponentType::XspiceIntegrator,
                 "xspice_integrator.svg",
@@ -235,7 +243,11 @@ impl SymbolLibrary {
             (ComponentType::XspiceBuffer, "xspice_buffer.svg", "Buffer"),
             (ComponentType::XspiceAndGate, "xspice_and.svg", "AND Gate"),
             (ComponentType::XspiceOrGate, "xspice_or.svg", "OR Gate"),
-            (ComponentType::XspiceNandGate, "xspice_nand.svg", "NAND Gate"),
+            (
+                ComponentType::XspiceNandGate,
+                "xspice_nand.svg",
+                "NAND Gate",
+            ),
             (ComponentType::XspiceNorGate, "xspice_nor.svg", "NOR Gate"),
             (ComponentType::XspiceXorGate, "xspice_xor.svg", "XOR Gate"),
             (
@@ -243,7 +255,11 @@ impl SymbolLibrary {
                 "xspice_tristate.svg",
                 "Tri-State Buffer",
             ),
-            (ComponentType::XspiceDFlipFlop, "xspice_dff.svg", "D Flip-Flop"),
+            (
+                ComponentType::XspiceDFlipFlop,
+                "xspice_dff.svg",
+                "D Flip-Flop",
+            ),
             (
                 ComponentType::XspiceJkFlipFlop,
                 "xspice_jkff.svg",
@@ -600,7 +616,10 @@ mod tests {
             ComponentType::XspiceDacBridge,
         ];
         for kind in must_have {
-            assert!(library.get(kind).is_some(), "{kind:?} has no symbol mapping");
+            assert!(
+                library.get(kind).is_some(),
+                "{kind:?} has no symbol mapping"
+            );
         }
     }
 
@@ -628,10 +647,7 @@ mod parse_sanity {
         let library = SymbolLibrary::load_embedded().expect("library loads");
         for name in library.asset_names() {
             let symbol = library.get_asset(&name).expect("asset");
-            assert!(
-                !symbol.paths.is_empty(),
-                "{name}: parsed to zero paths"
-            );
+            assert!(!symbol.paths.is_empty(), "{name}: parsed to zero paths");
             for (index, path) in symbol.paths.iter().enumerate() {
                 assert!(
                     !path.commands.is_empty(),

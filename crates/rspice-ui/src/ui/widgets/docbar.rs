@@ -34,7 +34,10 @@ pub fn docbar<R>(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerR
     );
     child.spacing_mut().item_spacing.x = 8.0;
     let inner = add_contents(&mut child);
-    InnerResponse::new(inner, ui.interact(rect, ui.id().with("docbar"), egui::Sense::hover()))
+    InnerResponse::new(
+        inner,
+        ui.interact(rect, ui.id().with("docbar"), egui::Sense::hover()),
+    )
 }
 
 /// Render breadcrumb text ("work_amp › **ota_5t** › schematic"): mono 11 px,

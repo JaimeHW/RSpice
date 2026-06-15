@@ -496,8 +496,8 @@ impl Mosfet {
         let vl = self.mos2_max_drift_vel * self.level2_effective_length();
         let dfunds = vl * dqdsat - ueff * vqchan;
         let dfundg = (vl - ueff * vdsat) / eta;
-        let dfundb = -vl * (1.0 + dqdsat - factor / eta)
-            + ueff * (gdbdvs - dgdvbs * bodys / 1.5) / eta;
+        let dfundb =
+            -vl * (1.0 + dqdsat - factor / eta) + ueff * (gdbdvs - dgdvbs * bodys / 1.5) / eta;
         if dfunds == 0.0 || !dfunds.is_finite() {
             return (0.0, 0.0);
         }

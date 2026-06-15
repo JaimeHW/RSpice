@@ -7,16 +7,16 @@
 //! For a linear circuit, the transfer function H(s) can be expressed as:
 //!
 //! ```text
-//! H(s) = K Â· âˆ(s - záµ¢) / âˆ(s - pâ±¼)
+//! H(s) = K · ∏(s - zᵢ) / ∏(s - pⱼ)
 //! ```
 //!
-//! - **Poles (pâ±¼)**: Values of s where H(s) â†’ âˆž (natural frequencies)
-//! - **Zeros (záµ¢)**: Values of s where H(s) = 0
+//! - **Poles (pⱼ)**: Values of s where H(s) → ∞ (natural frequencies)
+//! - **Zeros (zᵢ)**: Values of s where H(s) = 0
 //!
 //! # Algorithm
 //!
-//! 1. Build MNA matrix as Y(s) = G + sÂ·C where G is conductance, C is capacitance
-//! 2. **Poles**: Solve generalized eigenvalue problem GÂ·x = -sÂ·CÂ·x
+//! 1. Build MNA matrix as Y(s) = G + s·C where G is conductance, C is capacitance
+//! 2. **Poles**: Solve generalized eigenvalue problem G·x = -s·C·x
 //! 3. **Zeros**: Augment matrix with input/output and solve eigenvalue problem
 //!
 //! # Example
@@ -76,14 +76,14 @@ impl Complex {
     }
 
     /// Get damping factor (for complex pole)
-    /// Î¶ = -Re(p) / |p|
+    /// ζ = -Re(p) / |p|
     pub fn damping_factor(&self) -> Value {
         let mag = self.magnitude();
         if mag > 1e-15 { -self.re / mag } else { 0.0 }
     }
 
     /// Get time constant (for real pole)
-    /// Ï„ = -1/Re(p)
+    /// τ = -1/Re(p)
     pub fn time_constant(&self) -> Option<Value> {
         if self.is_real(1e-10) && self.re.abs() > 1e-15 {
             Some(-1.0 / self.re)
@@ -116,7 +116,7 @@ pub struct PoleZeroResult {
     pub zeros: Vec<Complex>,
     /// DC gain H(0)
     pub dc_gain: Value,
-    /// High-frequency gain H(âˆž) if finite
+    /// High-frequency gain H(∞) if finite
     pub hf_gain: Option<Value>,
     /// Input specification
     pub input: String,

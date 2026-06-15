@@ -306,7 +306,6 @@ impl PxfDialogState {
             *self = Self::from_config(&PxfConfig::default());
         }
     }
-
 }
 
 // =============================================================================

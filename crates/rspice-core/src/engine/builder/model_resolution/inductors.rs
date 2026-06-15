@@ -47,11 +47,8 @@ pub(in crate::engine::builder) fn resolve_inductor_instance_value(
     if let Some(model_def) = model_def
         && inductance.is_none()
     {
-        inductance = resolve_model_param(
-            model_def,
-            &["L", "IND", "VALUE", "INDUCTANCE"],
-            &eval_ctx,
-        )?;
+        inductance =
+            resolve_model_param(model_def, &["L", "IND", "VALUE", "INDUCTANCE"], &eval_ctx)?;
 
         if inductance.is_none() {
             return Err(SimulationError::Circuit(format!(

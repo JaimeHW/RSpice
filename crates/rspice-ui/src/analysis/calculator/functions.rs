@@ -283,9 +283,7 @@ fn unwrap(args: Vec<CalcValue>) -> Result<CalcValue, EvaluationError> {
     match &args[0] {
         // A single sample has no jumps to unwrap.
         CalcValue::Scalar(s) => Ok(CalcValue::Scalar(*s)),
-        CalcValue::Waveform(x, y) => {
-            Ok(CalcValue::create_waveform(x.clone(), unwrap_phase_deg(y)))
-        }
+        CalcValue::Waveform(x, y) => Ok(CalcValue::create_waveform(x.clone(), unwrap_phase_deg(y))),
     }
 }
 

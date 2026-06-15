@@ -71,8 +71,9 @@ fn element_trnoise(element: &Element) -> Option<()> {
 fn spec_contains_trnoise(spec: &SourceSpec) -> bool {
     match spec {
         SourceSpec::TrNoise { .. } => true,
-        SourceSpec::DcTransient { transient, .. }
-        | SourceSpec::DcAcTransient { transient, .. } => spec_contains_trnoise(transient),
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
+            spec_contains_trnoise(transient)
+        }
         _ => false,
     }
 }
@@ -94,8 +95,7 @@ fn replace_trnoise(
             *spec = SourceSpec::Pwl { points };
             Ok(())
         }
-        SourceSpec::DcTransient { transient, .. }
-        | SourceSpec::DcAcTransient { transient, .. } => {
+        SourceSpec::DcTransient { transient, .. } | SourceSpec::DcAcTransient { transient, .. } => {
             replace_trnoise(transient, tstop, seed, name)
         }
         _ => Ok(()),
@@ -276,8 +276,7 @@ mod tests {
         let mut rng = SplitMix64::new(7);
         let series = kasdin_one_over_f(n, alpha, 1.0, &mut rng);
 
-        let mut buf: Vec<Complex<f64>> =
-            series.iter().map(|v| Complex::new(*v, 0.0)).collect();
+        let mut buf: Vec<Complex<f64>> = series.iter().map(|v| Complex::new(*v, 0.0)).collect();
         FftPlanner::new().plan_fft_forward(n).process(&mut buf);
 
         let band_power = |lo: usize, hi: usize| -> f64 {
@@ -298,13 +297,22 @@ mod tests {
         let b = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 1e-6, 99, "v1").unwrap();
         let c = generate_noise_points(1e-3, 1e-9, 0.0, 0.0, 1e-6, 100, "v1").unwrap();
         assert_eq!(a.len(), b.len());
-        assert!(a.iter().zip(&b).all(|(x, y)| x == y), "same seed => identical train");
-        assert!(a.iter().zip(&c).any(|(x, y)| x.1 != y.1), "different seed => different train");
+        assert!(
+            a.iter().zip(&b).all(|(x, y)| x == y),
+            "same seed => identical train"
+        );
+        assert!(
+            a.iter().zip(&c).any(|(x, y)| x.1 != y.1),
+            "different seed => different train"
+        );
     }
 
     #[test]
     fn sample_cap_is_enforced_with_a_clear_error() {
         let err = generate_noise_points(1e-3, 1e-12, 0.0, 0.0, 1.0, 1, "vbig").unwrap_err();
-        assert!(err.contains("Raise NT"), "diagnostic explains the fix: {err}");
+        assert!(
+            err.contains("Raise NT"),
+            "diagnostic explains the fix: {err}"
+        );
     }
 }

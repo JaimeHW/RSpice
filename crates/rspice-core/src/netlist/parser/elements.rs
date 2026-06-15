@@ -332,8 +332,7 @@ fn parse_passive_tail(
                 tail.value = Some(expect_value(stream, line_num, params)?);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
-                if defer_simple_param_refs
-                    && matches!(stream.peek().kind, TokenKind::Expression(_))
+                if defer_simple_param_refs && matches!(stream.peek().kind, TokenKind::Expression(_))
                 {
                     tail.value_expr = take_value_expression_string(stream, params);
                 } else {
@@ -772,10 +771,7 @@ pub(super) fn parse_bjt(
                         None => {
                             return Err(ParseError::Syntax {
                                 line: line_num,
-                                message: format!(
-                                    "Expected value for BJT parameter '{}'",
-                                    raw_name
-                                ),
+                                message: format!("Expected value for BJT parameter '{}'", raw_name),
                             });
                         }
                     }
@@ -1284,10 +1280,7 @@ fn try_controlled_source_form(
 
 /// Collect a signed numeric list (POLY coefficients, TABLE pairs) to end of
 /// line, tolerating commas and parentheses as pair decoration.
-fn collect_numeric_tail(
-    stream: &mut TokenStream,
-    params: &ParamContext,
-) -> Vec<Value> {
+fn collect_numeric_tail(stream: &mut TokenStream, params: &ParamContext) -> Vec<Value> {
     let mut values = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
@@ -1444,10 +1437,7 @@ fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
 /// PSpice TABLE sources clamp to the endpoint outputs outside the listed
 /// range; clamping the *input* into `[x_first, x_last]` reproduces that
 /// exactly with the runtime's interpolating `table()` function.
-fn table_transfer_expression(
-    input_expr: &str,
-    pairs: &[(Value, Value)],
-) -> String {
+fn table_transfer_expression(input_expr: &str, pairs: &[(Value, Value)]) -> String {
     let mut sorted = pairs.to_vec();
     sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let x_min = sorted.first().map(|(x, _)| *x).unwrap_or(0.0);
@@ -1462,11 +1452,7 @@ fn table_transfer_expression(
     format!("table({})", args.join(", "))
 }
 
-fn unsupported_form_error(
-    line_num: usize,
-    element: &str,
-    form: &str,
-) -> ParseError {
+fn unsupported_form_error(line_num: usize, element: &str, form: &str) -> ParseError {
     ParseError::Syntax {
         line: line_num,
         message: format!(
@@ -1492,7 +1478,11 @@ fn parse_voltage_controlled_source(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
-    let element_label = if is_voltage_output { "E (VCVS)" } else { "G (VCCS)" };
+    let element_label = if is_voltage_output {
+        "E (VCVS)"
+    } else {
+        "G (VCCS)"
+    };
 
     let lower_behavioral = |expression: String| -> ElementKind {
         if is_voltage_output {
@@ -1550,14 +1540,10 @@ fn parse_voltage_controlled_source(
             if flat.len() < 4 || flat.len() % 2 != 0 {
                 return Err(ParseError::Syntax {
                     line: line_num,
-                    message: format!(
-                        "{} TABLE requires at least two (x,y) pairs",
-                        element_label
-                    ),
+                    message: format!("{} TABLE requires at least two (x,y) pairs", element_label),
                 });
             }
-            let pairs: Vec<(Value, Value)> =
-                flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+            let pairs: Vec<(Value, Value)> = flat.chunks_exact(2).map(|c| (c[0], c[1])).collect();
             elements.push(Element {
                 name,
                 kind: lower_behavioral(table_transfer_expression(&input_expr, &pairs)),
@@ -1626,7 +1612,11 @@ fn parse_current_controlled_source(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
-    let element_label = if is_voltage_output { "H (CCVS)" } else { "F (CCCS)" };
+    let element_label = if is_voltage_output {
+        "H (CCVS)"
+    } else {
+        "F (CCCS)"
+    };
 
     match try_controlled_source_form(stream, line_num)? {
         Some(ControlledSourceForm::Poly(dims)) => {

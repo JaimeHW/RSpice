@@ -1,4 +1,4 @@
-﻿//! Analysis Viewers Module
+//! Analysis Viewers Module
 //!
 //! Commercial-grade analysis visualization components for circuit simulation results.
 //! Each viewer provides specialized plotting and measurement capabilities:
@@ -33,9 +33,7 @@ pub mod smith_chart;
 pub use bode::{BodeData, BodeDisplayMode, BodePlotState, FrequencyResponse};
 
 // FFT
-pub use fft::{
-    FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction,
-};
+pub use fft::{FftData, FftPoint, FftState, InputFidelity, SpectrumAnalysis, WindowFunction};
 
 // Histogram
 pub use histogram::{
@@ -52,6 +50,4 @@ pub use pole_zero::{ComplexRoot, PoleZeroData, PoleZeroState, RootType};
 pub use smith_chart::{Admittance, Complex, Impedance, SmithChartMode, SmithChartState};
 
 // Eye Diagram
-pub use eye_diagram::{
-    EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace,
-};
+pub use eye_diagram::{EyeData, EyeDiagramState, EyeDisplayMode, EyeMeasurements, EyeTrace};

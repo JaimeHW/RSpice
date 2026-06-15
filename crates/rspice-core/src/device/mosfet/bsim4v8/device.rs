@@ -29,8 +29,8 @@
 //! junction-diode equations — no second per-device gmin shunt may be
 //! applied on top (see `eval.rs` scope notes).
 
-use super::eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8Op};
 use super::Bsim4v8;
+use super::eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8Op};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Value, circuit::NodeId};
 
@@ -394,8 +394,7 @@ impl Bsim4v8Device {
                     - (op.gbds + op.ggidld) * bias.vds
                     - (op.gbgs + op.ggidlg) * bias.vgs
                     - (op.gbbs + op.ggidlb) * bias.vbs);
-            ceqbs = mt
-                * (op.igisl + op.ggisls * bias.vds - op.ggislg * vgd - op.ggislb * vbd);
+            ceqbs = mt * (op.igisl + op.ggisls * bias.vds - op.ggislg * vgd - op.ggislb * vbd);
 
             gbbdp = -op.gbds;
             gbbsp = op.gbds + op.gbgs + op.gbbs;
@@ -421,10 +420,7 @@ impl Bsim4v8Device {
                     - (op.gbgs + op.ggislg) * vgd
                     - (op.gbbs + op.ggislb) * vbd);
             ceqbd = mt
-                * (op.igidl
-                    - op.ggidld * bias.vds
-                    - op.ggidlg * bias.vgs
-                    - op.ggidlb * bias.vbs);
+                * (op.igidl - op.ggidld * bias.vds - op.ggidlg * bias.vgs - op.ggidlb * bias.vbs);
 
             gbbsp = -op.gbds;
             gbbdp = op.gbds + op.gbgs + op.gbbs;
@@ -459,18 +455,33 @@ impl Bsim4v8Device {
 
         // Matrix (b4ld.c:5299-5348, gc**/ggt*/T1/gI*tot = 0, series G
         // external, with the gidl/gisl stamp blocks folded in).
-        stamp(matrix, dp, dp, m * (op.gds + op.gbd + rev_sum + gbdpdp + op.ggidld));
+        stamp(
+            matrix,
+            dp,
+            dp,
+            m * (op.gds + op.gbd + rev_sum + gbdpdp + op.ggidld),
+        );
         stamp(matrix, dp, g, m * (gm + gbdpg + op.ggidlg));
         stamp(matrix, dp, sp, -m * (op.gds + fwd_sum - gbdpsp + ggidl_sum));
         stamp(matrix, dp, b, -m * (op.gbd - gmbs - gbdpb - op.ggidlb));
         stamp(matrix, sp, dp, -m * (op.gds + rev_sum - gbspdp + ggisl_sum));
         stamp(matrix, sp, g, m * (gbspg - gm + op.ggislg));
-        stamp(matrix, sp, sp, m * (op.gds + op.gbs + fwd_sum + gbspsp + op.ggisls));
+        stamp(
+            matrix,
+            sp,
+            sp,
+            m * (op.gds + op.gbs + fwd_sum + gbspsp + op.ggisls),
+        );
         stamp(matrix, sp, b, -m * (op.gbs + gmbs - gbspb - op.ggislb));
         stamp(matrix, b, dp, m * (gbbdp - op.gbd - op.ggidld + ggisl_sum));
         stamp(matrix, b, g, -m * (op.gbgs + op.ggidlg + op.ggislg));
         stamp(matrix, b, sp, m * (gbbsp - op.gbs + ggidl_sum - op.ggisls));
-        stamp(matrix, b, b, m * (op.gbd + op.gbs - op.gbbs - op.ggidlb - op.ggislb));
+        stamp(
+            matrix,
+            b,
+            b,
+            m * (op.gbd + op.gbs - op.gbbs - op.ggidlb - op.ggislb),
+        );
     }
 }
 
@@ -511,9 +522,8 @@ impl NonlinearDevice for Bsim4v8Device {
         }
         let reltol = criteria.relative_tolerance();
         let vtol = criteria.voltage_tolerance();
-        let cmp = |new: Value, old: Value| {
-            (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol
-        };
+        let cmp =
+            |new: Value, old: Value| (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol;
         cmp(self.bias.vds, self.converged_ref.vds)
             && cmp(self.bias.vgs, self.converged_ref.vgs)
             && cmp(self.bias.vbs, self.converged_ref.vbs)

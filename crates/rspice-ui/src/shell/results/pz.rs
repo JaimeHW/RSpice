@@ -113,7 +113,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
 
-    let response = plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+    let response = plot::show(
+        &mut plot_ui,
+        &spec,
+        &mut state.shell.results.cache,
+        None,
+        None,
+    );
 
     // Nearest root on hover, click to pin: σ, jω, natural frequency, and Q
     // turn the s-plane picture into numbers.
@@ -197,7 +203,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             ),
         ];
         if root.imag.abs() > 1e-12 && root.real.abs() > 1e-12 {
-            rows.push(("Q".to_owned(), format!("{:.2}", magnitude / (2.0 * root.real.abs()))));
+            rows.push((
+                "Q".to_owned(),
+                format!("{:.2}", magnitude / (2.0 * root.real.abs())),
+            ));
         }
         let title = if root.is_pole() { "pole" } else { "zero" };
         super::point_card(&plot_ui, response.plot_rect, pos, title, color, &rows);

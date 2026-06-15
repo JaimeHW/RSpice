@@ -63,10 +63,8 @@ pub fn select(
             ui.spacing_mut().item_spacing.y = 0.0;
             for (index, option) in options.iter().enumerate() {
                 let is_current = option == selected;
-                let (row, row_response) = ui.allocate_exact_size(
-                    vec2(ui.available_width(), 24.0),
-                    Sense::click(),
-                );
+                let (row, row_response) =
+                    ui.allocate_exact_size(vec2(ui.available_width(), 24.0), Sense::click());
                 let painter = ui.painter();
                 if row_response.hovered() {
                     painter.rect_filled(row, t.radius, c.bg_hover);

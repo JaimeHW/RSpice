@@ -337,7 +337,9 @@ fn render_compiling_pane(ui: &mut Ui, state: &VerilogALoadDialogState, now: f64)
                     .color(c.text_dim),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let elapsed = state.compile_started_at.map_or(0.0, |t0| (now - t0).max(0.0));
+                let elapsed = state
+                    .compile_started_at
+                    .map_or(0.0, |t0| (now - t0).max(0.0));
                 ui.label(
                     egui::RichText::new(format!("{elapsed:.1} s"))
                         .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -402,7 +404,11 @@ fn render_success_pane(ui: &mut Ui, state: &VerilogALoadDialogState) {
                         module.ports.len(),
                         if module.ports.len() == 1 { "" } else { "s" },
                         module.parameters.len(),
-                        if module.parameters.len() == 1 { "" } else { "s" },
+                        if module.parameters.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        },
                     );
                     if module.internal_nodes > 0 {
                         meta.push_str(&format!(" · {} internal", module.internal_nodes));
@@ -482,7 +488,10 @@ fn render_failed_pane(ui: &mut Ui, state: &VerilogALoadDialogState) {
         .iter()
         .filter(|e| e.severity == ErrorSeverity::Warning)
         .count();
-    let mut title = format!("PROBLEMS · {errors} ERROR{}", if errors == 1 { "" } else { "S" });
+    let mut title = format!(
+        "PROBLEMS · {errors} ERROR{}",
+        if errors == 1 { "" } else { "S" }
+    );
     if warnings > 0 {
         title.push_str(&format!(
             " · {warnings} WARNING{}",
@@ -507,8 +516,7 @@ fn render_failed_pane(ui: &mut Ui, state: &VerilogALoadDialogState) {
 /// One problem row: severity dot, mono location, dim message.
 fn problem_row(ui: &mut Ui, err: &super::types::CompileErrorDisplay) {
     let c = Tokens::get(ui.ctx()).color;
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
@@ -518,7 +526,11 @@ fn problem_row(ui: &mut Ui, err: &super::types::CompileErrorDisplay) {
         ErrorSeverity::Warning => c.warn,
         ErrorSeverity::Note => c.text_faint,
     };
-    painter.circle_filled(egui::pos2(rect.left() + 5.0, rect.center().y), 3.0, dot_color);
+    painter.circle_filled(
+        egui::pos2(rect.left() + 5.0, rect.center().y),
+        3.0,
+        dot_color,
+    );
 
     let mut x = rect.left() + 16.0;
     let location = err.location_str();
@@ -611,8 +623,7 @@ fn badge(ui: &mut Ui, label: &str, color: egui::Color32) {
         },
     );
     let galley = ui.fonts(|f| f.layout_job(job));
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(galley.size().x + 12.0, 14.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(galley.size().x + 12.0, 14.0), Sense::hover());
     let painter = ui.painter();
     painter.rect(
         rect,

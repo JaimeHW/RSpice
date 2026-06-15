@@ -77,7 +77,10 @@ fn corner_lib_sections_change_results() {
     let v_tt = read_op_voltage(&dir.join("res.tt.csv"), "V(OUT)");
     let v_ss = read_op_voltage(&dir.join("res.ss.csv"), "V(OUT)");
     assert!((v_tt - 5.0).abs() < 1e-6, "tt corner wrong: {v_tt}");
-    assert!((v_ss - 7.5).abs() < 1e-6, "ss corner must use its own models: {v_ss}");
+    assert!(
+        (v_ss - 7.5).abs() < 1e-6,
+        "ss corner must use its own models: {v_ss}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -88,8 +91,7 @@ fn corner_lib_sections_change_results() {
 fn parallel_corners_match_serial() {
     // Own top-level dir: the sibling tests remove the shared pid-keyed
     // directory when they finish, racing anything nested inside it.
-    let dir =
-        std::env::temp_dir().join(format!("rspice_corner_parallel_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("rspice_corner_parallel_{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create test dir");
     let lib = dir.join("corners.lib");
     std::fs::write(

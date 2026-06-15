@@ -210,5 +210,4 @@ impl PzDialogState {
             *self = Self::from_config(&PzConfig::default());
         }
     }
-
 }

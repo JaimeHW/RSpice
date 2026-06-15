@@ -350,10 +350,7 @@ impl StaticMatrix {
         self.residual_scratch.fill(0.0);
         self.residual_gross_scratch.resize(self.nrows, 0.0);
         self.residual_gross_scratch.fill(0.0);
-        let (ax, ax_gross) = (
-            &mut self.residual_scratch,
-            &mut self.residual_gross_scratch,
-        );
+        let (ax, ax_gross) = (&mut self.residual_scratch, &mut self.residual_gross_scratch);
         for col in 0..self.ncols {
             let x = solution[col];
             if !x.is_finite() {
@@ -390,8 +387,7 @@ impl StaticMatrix {
             // the net.
             const CANCELLATION_NOISE_TERMS: Value = 256.0;
             let noise_floor = CANCELLATION_NOISE_TERMS * Value::EPSILON * ax_gross[row];
-            let scale =
-                safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
+            let scale = safe_abstol + noise_floor + safe_reltol * row_ax.abs().max(row_rhs.abs());
             let normalized = residual / scale.max(safe_abstol);
             residual_inf = residual_inf.max(normalized);
         }
@@ -522,7 +518,11 @@ impl StaticMatrix {
     /// the experiment can degrade performance but never a result.
     fn try_solve_klu(&mut self, rhs: &[Value]) -> Option<Vec<Value>> {
         let Self {
-            nrows, csc, values, klu, ..
+            nrows,
+            csc,
+            values,
+            klu,
+            ..
         } = self;
         let n = *nrows;
         let col_ptr = csc.col_ptr();
@@ -646,7 +646,6 @@ impl ComplexMatrix {
         })
     }
 
-
     /// Zero all values
     #[inline]
     pub fn clear_values(&mut self) {
@@ -726,9 +725,8 @@ impl ComplexMatrix {
         }
 
         if self.lu.is_none() {
-            let symbolic =
-                sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
-                    .map_err(|_| SolverError::SingularMatrix)?;
+            let symbolic = sparse_lu::factorize_symbolic_lu(self.csc.as_ref(), Default::default())
+                .map_err(|_| SolverError::SingularMatrix)?;
             self.lu = Some(Self::workspace_from_symbolic(n, Arc::new(symbolic))?);
             self.factorization_valid = false;
         }

@@ -69,7 +69,6 @@ impl Engine {
         })
     }
 
-
     #[inline]
     pub(in crate::engine::transient) fn solve_vbic_dynamic_snapshot(
         bjt: &crate::device::Bjt,

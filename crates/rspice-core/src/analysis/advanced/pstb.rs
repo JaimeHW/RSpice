@@ -10,22 +10,22 @@
 //!
 //! # Theory
 //!
-//! For a periodic orbit x*(t) with period T, small perturbations Î´x(t) evolve as:
+//! For a periodic orbit x*(t) with period T, small perturbations δx(t) evolve as:
 //!
-//! Î´x(t) â‰ˆ Î¦(t,0) Â· Î´x(0)
+//! δx(t) ≈ Φ(t,0) · δx(0)
 //!
-//! where Î¦(t,0) is the state transition (Monodromy) matrix. The eigenvalues of
-//! Î¦(T,0) are called **Floquet multipliers** (Î»). Stability is determined by:
+//! where Φ(t,0) is the state transition (Monodromy) matrix. The eigenvalues of
+//! Φ(T,0) are called **Floquet multipliers** (λ). Stability is determined by:
 //!
-//! - |Î»| < 1 for all Î» (except one Î» = 1 for autonomous systems): Stable
-//! - |Î»| > 1 for any Î»: Unstable
-//! - |Î»| = 1 (beyond the trivial one): Marginally stable / bifurcation point
+//! - |λ| < 1 for all λ (except one λ = 1 for autonomous systems): Stable
+//! - |λ| > 1 for any λ: Unstable
+//! - |λ| = 1 (beyond the trivial one): Marginally stable / bifurcation point
 //!
 //! # Floquet Exponents
 //!
-//! Floquet exponents Î¼ relate to multipliers as: Î» = exp(Î¼Â·T)
+//! Floquet exponents μ relate to multipliers as: λ = exp(μ·T)
 //!
-//! For oscillators, one Î¼ = 0 always (corresponding to phase shifts along orbit).
+//! For oscillators, one μ = 0 always (corresponding to phase shifts along orbit).
 //! The other exponents determine amplitude stability.
 
 #![allow(clippy::needless_range_loop)]
@@ -55,7 +55,7 @@ pub struct PstbConfig {
     /// Whether to compute eigenvectors (mode shapes)
     pub compute_eigenvectors: bool,
 
-    /// Stability margin threshold (|Î»| below this is considered stable)
+    /// Stability margin threshold (|λ| below this is considered stable)
     pub stability_threshold: Value,
 
     /// Enable subharmonic detection (multipliers at roots of unity)
@@ -127,7 +127,7 @@ pub struct FloquetMultiplier {
     /// Complex eigenvalue (Floquet multiplier)
     pub value: Complex64,
 
-    /// Floquet exponent: Î¼ = ln(Î»)/T
+    /// Floquet exponent: μ = ln(λ)/T
     pub exponent: Complex64,
 
     /// Index in sorted order (0 = most unstable)
@@ -136,10 +136,10 @@ pub struct FloquetMultiplier {
     /// Whether this multiplier indicates instability
     pub is_unstable: bool,
 
-    /// Whether this is the trivial multiplier (Î» â‰ˆ 1 for autonomous systems)
+    /// Whether this is the trivial multiplier (λ ≈ 1 for autonomous systems)
     pub is_trivial: bool,
 
-    /// Subharmonic order if |Î»| â‰ˆ 1 and Î» is near a root of unity
+    /// Subharmonic order if |λ| ≈ 1 and λ is near a root of unity
     pub subharmonic_order: Option<usize>,
 
     /// Associated eigenvector (if computed)
@@ -152,10 +152,10 @@ impl FloquetMultiplier {
         let exponent = value.ln() / period;
         let magnitude = value.norm();
 
-        // Check if this is the trivial multiplier (Î» â‰ˆ 1)
+        // Check if this is the trivial multiplier (λ ≈ 1)
         let is_trivial = (value - Complex64::new(1.0, 0.0)).norm() < 1e-6;
 
-        // Check for subharmonic (Î» near n-th root of unity)
+        // Check for subharmonic (λ near n-th root of unity)
         let subharmonic_order = Self::detect_subharmonic(&value);
 
         Self {
@@ -214,7 +214,7 @@ impl FloquetMultiplier {
         self.exponent.im.abs() / (2.0 * PI)
     }
 
-    /// Stability margin in dB (20Â·log10(1/|Î»|))
+    /// Stability margin in dB (20·log10(1/|λ|))
     pub fn stability_margin_db(&self) -> Value {
         -20.0 * self.magnitude().log10()
     }
@@ -236,13 +236,13 @@ pub enum StabilityType {
     /// Pair of complex multipliers outside unit circle
     UnstableComplex,
 
-    /// Multiplier at Î» = -1 (period-doubling bifurcation)
+    /// Multiplier at λ = -1 (period-doubling bifurcation)
     PeriodDoubling,
 
     /// Complex pair on unit circle (Neimark-Sacker/torus bifurcation)
     NeimarkSacker,
 
-    /// Multiplier at Î» = +1 (saddle-node bifurcation)
+    /// Multiplier at λ = +1 (saddle-node bifurcation)
     SaddleNode,
 
     /// Marginal stability (numerical uncertainty)
@@ -318,7 +318,7 @@ impl PstbResult {
         self.multipliers.iter().filter(|m| m.is_unstable).collect()
     }
 
-    /// Get the trivial multiplier (should be â‰ˆ 1)
+    /// Get the trivial multiplier (should be ≈ 1)
     pub fn trivial_multiplier(&self) -> Option<&FloquetMultiplier> {
         self.multipliers.iter().find(|m| m.is_trivial)
     }
@@ -568,7 +568,7 @@ impl PstbAnalyzer {
             *x /= v_norm;
         }
 
-        // Small complex shift keeps (A - Î»I) solvable for inverse iteration.
+        // Small complex shift keeps (A - λI) solvable for inverse iteration.
         let shift = self.config.eigenvalue_tolerance.max(1e-12);
         let lambda_shifted = lambda + Complex64::new(shift, shift * 0.1);
 
@@ -607,7 +607,7 @@ impl PstbAnalyzer {
         }
     }
 
-    /// Solve (A - Î»I)x = rhs for x, where A is real and Î», rhs are complex.
+    /// Solve (A - λI)x = rhs for x, where A is real and λ, rhs are complex.
     fn solve_shifted_complex_system(
         &self,
         matrix: &[Vec<Value>],
@@ -768,12 +768,12 @@ impl PstbAnalyzer {
                 let mag = m.magnitude();
                 let imag = m.value.im.abs();
 
-                // Near Î» = -1: period doubling
+                // Near λ = -1: period doubling
                 if (m.value + Complex64::new(1.0, 0.0)).norm() < 0.01 {
                     return StabilityType::PeriodDoubling;
                 }
 
-                // Near Î» = +1 (non-trivial): saddle-node
+                // Near λ = +1 (non-trivial): saddle-node
                 if (m.value - Complex64::new(1.0, 0.0)).norm() < 0.01 && !m.is_trivial {
                     return StabilityType::SaddleNode;
                 }

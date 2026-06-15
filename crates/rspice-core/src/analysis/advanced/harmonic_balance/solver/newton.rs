@@ -14,7 +14,7 @@ impl HbSolver {
     /// 3. Use GMIN as a constant stabilizer throughout
     ///
     /// The Jacobian includes:
-    /// - Linear part: block-diagonal Y = G + jÏ‰C + 1/(jÏ‰L) per harmonic
+    /// - Linear part: block-diagonal Y = G + jωC + 1/(jωL) per harmonic
     /// - Nonlinear part: FFT-based convolution of time-domain Jacobians
     /// - GMIN: diagonal conductance for numerical stability
     pub fn solve_newton(&mut self, state: &mut HbSolverState) -> Result<(), HbError> {
@@ -297,7 +297,7 @@ impl HbSolver {
 
     /// Build Jacobian with GMIN on diagonal
     ///
-    /// Residual = I_source - Y*V - gmin*V, so J = âˆ‚res/âˆ‚V = -Y - gmin
+    /// Residual = I_source - Y*V - gmin*V, so J = ∂res/∂V = -Y - gmin
     fn build_full_jacobian_with_gmin(
         &mut self,
         state: &HbSolverState,
@@ -470,7 +470,11 @@ impl HbSolver {
         // d/dt of the delivered charge, i.e. jw_k * Q_k per harmonic. The
         // charge waveform comes from the same time grid as the resistive
         // currents, so charge and current stay phase-consistent.
-        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+        if self
+            .nonlinear_devices
+            .iter()
+            .any(|d| d.has_charge_storage())
+        {
             let omega0 = 2.0 * PI * self.config.fundamental_freq;
             let mut q_time = vec![vec![0.0; n_time]; self.num_nodes];
             let mut node_voltages = vec![0.0; self.num_nodes];
@@ -519,7 +523,7 @@ impl HbSolver {
         let mut jac = vec![vec![Complex64::new(0.0, 0.0); size]; size];
 
         // --- Linear part: block-diagonal per harmonic ---
-        // Residual = I_source - Y*V, so J = âˆ‚res/âˆ‚V = -Y
+        // Residual = I_source - Y*V, so J = ∂res/∂V = -Y
         for k in 0..h {
             let omega_k = (k as f64) * omega0;
 
@@ -532,7 +536,7 @@ impl HbSolver {
                 }
             }
 
-            // Capacitance contribution: -jÏ‰C
+            // Capacitance contribution: -jωC
             for &(i, j, c) in &self.c_matrix {
                 if i < n && j < n {
                     let row = i * h + k;
@@ -541,7 +545,7 @@ impl HbSolver {
                 }
             }
 
-            // Inductance contribution: -1/(jÏ‰L)
+            // Inductance contribution: -1/(jωL)
             for &(i, j, l) in &self.l_matrix {
                 if i < n && j < n && l.abs() > 1e-30 {
                     let row = i * h + k;
@@ -550,7 +554,7 @@ impl HbSolver {
                         // DC: short circuit
                         jac[row][col] -= DC_SHORT_CONDUCTANCE;
                     } else {
-                        // AC: Y_L = -j/(Ï‰L)
+                        // AC: Y_L = -j/(ωL)
                         jac[row][col] -= Complex64::new(0.0, -1.0 / (omega_k * l));
                     }
                 }
@@ -667,7 +671,7 @@ impl HbSolver {
                                 g_spectrum[g_idx].conj()
                             };
                             // SUBTRACT device Jacobian for KCL: residual = I_source - I_device
-                            // So J = âˆ‚res/âˆ‚V = -âˆ‚I_device/âˆ‚V = -gd
+                            // So J = ∂res/∂V = -∂I_device/∂V = -gd
                             jac[row][col] -= g_val;
                         }
                     }
@@ -678,7 +682,11 @@ impl HbSolver {
         // Charge-storage coupling: the residual carries jw_k * Q_k, so its
         // derivative is jw_k * C[k-m] - the same Toeplitz structure as the
         // conductances with the ROW harmonic's frequency in front.
-        if self.nonlinear_devices.iter().any(|d| d.has_charge_storage()) {
+        if self
+            .nonlinear_devices
+            .iter()
+            .any(|d| d.has_charge_storage())
+        {
             let omega0 = 2.0 * PI * self.config.fundamental_freq;
             let mut c_time = vec![vec![vec![0.0; n_time]; n]; n];
             let mut node_voltages = vec![0.0; n];
@@ -756,7 +764,11 @@ impl HbSolver {
 
         // Row/column index helpers in the real layout.
         let re_idx = |node: usize, k: usize| -> usize {
-            if k == 0 { node * w } else { node * w + 2 * k - 1 }
+            if k == 0 {
+                node * w
+            } else {
+                node * w + 2 * k - 1
+            }
         };
         let im_idx = |node: usize, k: usize| -> usize { node * w + 2 * k };
 
@@ -846,7 +858,11 @@ impl HbSolver {
         for node in 0..n {
             for k in 0..h {
                 let re = solution[re_idx(node, k)];
-                let im = if k > 0 { solution[im_idx(node, k)] } else { 0.0 };
+                let im = if k > 0 {
+                    solution[im_idx(node, k)]
+                } else {
+                    0.0
+                };
                 delta_x[node][k] = Complex64::new(re, im);
             }
         }
@@ -880,8 +896,7 @@ impl HbSolver {
             }
         }
 
-        let try_krylov =
-            self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
+        let try_krylov = self.config.use_krylov || size >= super::krylov::KRYLOV_AUTO_THRESHOLD;
         let flat_solution = if try_krylov && n > 0 && h > 0 {
             match self.solve_jacobian_krylov(jac, &rhs, n, h) {
                 Some(solution) => solution,
@@ -949,7 +964,7 @@ impl HbSolver {
 
     /// Apply Armijo line search for robust convergence
     ///
-    /// Starts with Î± = 1 (full Newton step), reduces if residual doesn't decrease.
+    /// Starts with α = 1 (full Newton step), reduces if residual doesn't decrease.
     /// This is critical for convergence on highly nonlinear circuits.
 
     /// Legacy newton_step for backward compatibility

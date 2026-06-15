@@ -75,9 +75,12 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
     let half = width / 2.0;
 
-    for (index, (tab, label)) in [(RailTab::Navigator, "NAVIGATOR"), (RailTab::Library, "LIBRARY")]
-        .into_iter()
-        .enumerate()
+    for (index, (tab, label)) in [
+        (RailTab::Navigator, "NAVIGATOR"),
+        (RailTab::Library, "LIBRARY"),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let tab_rect = egui::Rect::from_min_size(
             egui::pos2(rect.left() + half * index as f32, rect.top()),
@@ -89,9 +92,9 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
             egui::Sense::click(),
         );
         let active = state.shell.rail_tab == tab;
-        let hover = ui
-            .ctx()
-            .animate_bool_with_time(response.id, response.hovered() && !active, 0.16);
+        let hover =
+            ui.ctx()
+                .animate_bool_with_time(response.id, response.hovered() && !active, 0.16);
         let painter = ui.painter();
         if hover > 0.0 {
             painter.rect_filled(
@@ -119,7 +122,11 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
         }
     }
     let painter = ui.painter();
-    painter.hline(rect.x_range(), rect.bottom(), egui::Stroke::new(1.0, c.border));
+    painter.hline(
+        rect.x_range(),
+        rect.bottom(),
+        egui::Stroke::new(1.0, c.border),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -202,8 +209,7 @@ fn nameplate(ui: &mut Ui, state: &mut AppState) {
                 let lib_font = theme::mono(tokens::FS_0, FontWeight::Regular);
                 let cell_font = theme::mono(tokens::FS_2, FontWeight::Medium);
                 let chip_width =
-                    text_width(ui, &reference.view, &theme::mono(10.0, FontWeight::Regular))
-                        + 10.0;
+                    text_width(ui, &reference.view, &theme::mono(10.0, FontWeight::Regular)) + 10.0;
                 let budget = (ui.available_width() - chip_width - 18.0).max(50.0);
                 let lib_text = fit_text(
                     ui,
@@ -213,7 +219,11 @@ fn nameplate(ui: &mut Ui, state: &mut AppState) {
                 );
                 let cell_budget = budget - text_width(ui, &lib_text, &lib_font);
                 let cell_text = fit_text(ui, &reference.cell, &cell_font, cell_budget);
-                ui.label(egui::RichText::new(lib_text).font(lib_font).color(c.text_faint));
+                ui.label(
+                    egui::RichText::new(lib_text)
+                        .font(lib_font)
+                        .color(c.text_faint),
+                );
                 ui.label(egui::RichText::new(cell_text).font(cell_font).color(c.text));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     view_chip(ui, &reference.view);
@@ -251,8 +261,12 @@ fn view_chip(ui: &mut Ui, text: &str) {
         egui::vec2(galley.size().x + 10.0, 16.0),
         egui::Sense::hover(),
     );
-    ui.painter()
-        .rect(rect, t.radius, egui::Color32::TRANSPARENT, egui::Stroke::new(1.0, c.border));
+    ui.painter().rect(
+        rect,
+        t.radius,
+        egui::Color32::TRANSPARENT,
+        egui::Stroke::new(1.0, c.border),
+    );
     ui.painter().galley(
         egui::pos2(rect.left() + 5.0, rect.center().y - galley.size().y * 0.5),
         galley,
@@ -294,7 +308,11 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
                     .iter()
                     .enumerate()
                     .map(|(index, label)| {
-                        let display = if index == 0 { "TOP".to_owned() } else { label.clone() };
+                        let display = if index == 0 {
+                            "TOP".to_owned()
+                        } else {
+                            label.clone()
+                        };
                         (display, index)
                     })
                     .collect();
@@ -341,7 +359,11 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
                                 .color(c.accent),
                         );
                     } else if ui
-                        .link(egui::RichText::new(display).font(font.clone()).color(c.accent))
+                        .link(
+                            egui::RichText::new(display)
+                                .font(font.clone())
+                                .color(c.accent),
+                        )
                         .clicked()
                     {
                         focus = Some(*index);
@@ -352,10 +374,8 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
                                 .font(font.clone())
                                 .color(c.accent.gamma_multiply(0.5)),
                         );
-                        ui.label(
-                            egui::RichText::new("…").font(font.clone()).color(c.accent),
-                        )
-                        .on_hover_text(hidden.join(" ▸ "));
+                        ui.label(egui::RichText::new("…").font(font.clone()).color(c.accent))
+                            .on_hover_text(hidden.join(" ▸ "));
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -421,17 +441,14 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
                 let (rect, response) =
                     ui.allocate_exact_size(egui::vec2(third, 21.0), egui::Sense::click());
                 let active = state.shell.nav_mode == mode;
-                let hover = ui
-                    .ctx()
-                    .animate_bool_with_time(response.id, response.hovered() && !active, 0.16);
+                let hover = ui.ctx().animate_bool_with_time(
+                    response.id,
+                    response.hovered() && !active,
+                    0.16,
+                );
                 let painter = ui.painter();
                 if active {
-                    painter.rect(
-                        rect,
-                        t.radius,
-                        c.bg_inset,
-                        egui::Stroke::new(1.0, c.border),
-                    );
+                    painter.rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
                 } else if hover > 0.0 {
                     painter.rect_filled(
                         rect,
@@ -475,10 +492,7 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         }
     } else {
         let cell = state.workspace.active_view.cell.clone();
-        TreeRow::new(&cell)
-            .twist(true)
-            .meta("sheet 1/1")
-            .show(ui);
+        TreeRow::new(&cell).twist(true).meta("sheet 1/1").show(ui);
     }
 
     let mut clicked: Option<u64> = None;
@@ -503,8 +517,8 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         } else {
             component.value.clone()
         };
-        let hierarchical = component.kind == ComponentType::CellInstance
-            && component.library_cell.is_some();
+        let hierarchical =
+            component.kind == ComponentType::CellInstance && component.library_cell.is_some();
         let peeked = state.shell.nav_peek.contains(&component.id);
         let selected = state.schematic.selection.has_component(component.id);
 
@@ -636,9 +650,7 @@ fn net_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
     let visible: Vec<usize> = nets
         .iter()
         .enumerate()
-        .filter(|(_, net)| {
-            query.is_none_or(|q| net.name.to_ascii_lowercase().contains(q))
-        })
+        .filter(|(_, net)| query.is_none_or(|q| net.name.to_ascii_lowercase().contains(q)))
         .map(|(index, _)| index)
         .collect();
 
@@ -780,7 +792,9 @@ fn design_nets_cached(state: &AppState) -> Rc<Vec<crate::simulation::netlist_gen
         {
             return Rc::clone(nets);
         }
-        let nets = Rc::new(crate::simulation::netlist_gen::design_nets(&state.schematic));
+        let nets = Rc::new(crate::simulation::netlist_gen::design_nets(
+            &state.schematic,
+        ));
         *cache = Some((key, Rc::clone(&nets)));
         nets
     })
@@ -1041,9 +1055,7 @@ fn library(
                         ui.add_space(12.0);
                         paint_entry_thumb(ui, entry, symbol_library);
                         let meta = match entry {
-                            CellEntry::Primitive(..) => {
-                                if pinned { "★" } else { "" }.to_owned()
-                            }
+                            CellEntry::Primitive(..) => if pinned { "★" } else { "" }.to_owned(),
                             CellEntry::LibraryCell(lib, _) => {
                                 if pinned {
                                     format!("★ {lib}")
@@ -1065,7 +1077,11 @@ fn library(
                         }
                         row.response.context_menu(|ui| {
                             if ui
-                                .button(if pinned { "Unpin from favorites" } else { "Pin to favorites" })
+                                .button(if pinned {
+                                    "Unpin from favorites"
+                                } else {
+                                    "Pin to favorites"
+                                })
                                 .clicked()
                             {
                                 toggle_pin = Some(entry_ref.clone());
@@ -1118,7 +1134,13 @@ fn paint_entry_thumb(
     let inner = rect.shrink(2.0);
     match entry {
         CellEntry::Primitive(kind, _) => {
-            crate::schematic::view::draw_symbol_preview(painter, inner, *kind, c.symbol, symbol_library);
+            crate::schematic::view::draw_symbol_preview(
+                painter,
+                inner,
+                *kind,
+                c.symbol,
+                symbol_library,
+            );
         }
         CellEntry::LibraryCell(..) => {
             let block = egui::Rect::from_center_size(inner.center(), egui::vec2(14.0, 12.0));
@@ -1154,10 +1176,8 @@ fn preview_card(
         .clone()
         .and_then(|entry_ref| entry_from_ref(state, &entry_ref));
     let Some(entry) = entry else {
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), 64.0),
-            egui::Sense::hover(),
-        );
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover());
         ui.painter()
             .rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
         ui.painter().text(
@@ -1172,16 +1192,20 @@ fn preview_card(
     };
 
     // Symbol stage.
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 64.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 64.0), egui::Sense::hover());
     let painter = ui.painter();
     painter.rect(rect, t.radius, c.bg_inset, egui::Stroke::new(1.0, c.border));
     let stage = rect.shrink(6.0);
     let (name, meta) = match &entry {
         CellEntry::Primitive(kind, label) => {
-            crate::schematic::view::draw_symbol_preview(painter, stage, *kind, c.symbol, symbol_library);
+            crate::schematic::view::draw_symbol_preview(
+                painter,
+                stage,
+                *kind,
+                c.symbol,
+                symbol_library,
+            );
             (
                 format!("primitives / {label}"),
                 format!("symbol · {}", kind.display_name()),
@@ -1238,8 +1262,11 @@ fn preview_card(
         // Measured, not guessed: Place + the pin chip must fill the row
         // exactly — one extra pixel here ratchets the panel wider.
         let pin_label = if pinned { "★ pinned" } else { "☆ pin" };
-        let chip_width =
-            text_width(ui, pin_label, &theme::mono(tokens::FS_0, FontWeight::Regular)) + 18.0;
+        let chip_width = text_width(
+            ui,
+            pin_label,
+            &theme::mono(tokens::FS_0, FontWeight::Regular),
+        ) + 18.0;
         let place_width = ui.available_width() - chip_width - 6.0;
         if Button::new("Place")
             .min_width(place_width.max(60.0))
@@ -1362,7 +1389,11 @@ fn fit_text(ui: &Ui, text: &str, font: &egui::FontId, budget: f32) -> String {
 fn ref_chip_label(entry_ref: &str) -> &str {
     entry_ref
         .strip_prefix("prim:")
-        .or_else(|| entry_ref.strip_prefix("cell:").and_then(|p| p.split('/').nth(1)))
+        .or_else(|| {
+            entry_ref
+                .strip_prefix("cell:")
+                .and_then(|p| p.split('/').nth(1))
+        })
         .unwrap_or(entry_ref)
 }
 
@@ -1414,8 +1445,7 @@ fn place_strip(
                     state.shell.place_pop_index = (state.shell.place_pop_index + 1) % count;
                 }
                 if i.key_pressed(egui::Key::ArrowUp) {
-                    state.shell.place_pop_index =
-                        (state.shell.place_pop_index + count - 1) % count;
+                    state.shell.place_pop_index = (state.shell.place_pop_index + count - 1) % count;
                 }
             });
             state.shell.place_pop_index = state.shell.place_pop_index.min(count - 1);
@@ -1441,9 +1471,7 @@ fn place_strip(
                         .show(ui, |ui| {
                             ui.set_width(input.rect.width() - 6.0);
                             ui.spacing_mut().item_spacing.y = 0.0;
-                            for (index, (entry_ref, label, group)) in
-                                matches.iter().enumerate()
-                            {
+                            for (index, (entry_ref, label, group)) in matches.iter().enumerate() {
                                 let row = TreeRow::new(label)
                                     .meta(group)
                                     .mono()
@@ -1457,8 +1485,7 @@ fn place_strip(
                         });
                 });
 
-            let commit = input.lost_focus()
-                && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let commit = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if commit {
                 armed = matches
                     .get(state.shell.place_pop_index)
@@ -1495,11 +1522,14 @@ fn place_strip(
                     (Tool::Place(active), Some(CellEntry::Primitive(kind, _))) => {
                         *active == kind && kind != ComponentType::CellInstance
                     }
-                    (Tool::Place(ComponentType::CellInstance), Some(CellEntry::LibraryCell(lib, cell))) => {
-                        state.schematic.pending_library_cell.as_ref().is_some_and(
-                            |binding| binding.library == lib && binding.cell == cell,
-                        )
-                    }
+                    (
+                        Tool::Place(ComponentType::CellInstance),
+                        Some(CellEntry::LibraryCell(lib, cell)),
+                    ) => state
+                        .schematic
+                        .pending_library_cell
+                        .as_ref()
+                        .is_some_and(|binding| binding.library == lib && binding.cell == cell),
                     _ => false,
                 };
                 if chip(ui, ref_chip_label(entry_ref), armed)
@@ -1662,8 +1692,7 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
     // Apply edits live so typing reflects immediately, but capture the
     // pre-edit snapshot once per session — every keystroke used to deep-
     // clone the whole design twice and mint its own undo entry.
-    let changed =
-        name != snapshot.name || value != snapshot.value || params != snapshot.params;
+    let changed = name != snapshot.name || value != snapshot.value || params != snapshot.params;
     if changed {
         if state.shell.inspector_edit.is_none() {
             state.shell.inspector_edit = Some(crate::shell::state::InspectorEdit {
@@ -1732,10 +1761,8 @@ mod tests {
             let mut content_width: f32 = 0.0;
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let rect = egui::Rect::from_min_size(
-                        ui.max_rect().min,
-                        egui::vec2(WIDTH, 700.0),
-                    );
+                    let rect =
+                        egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(WIDTH, 700.0));
                     let mut rail = ui.new_child(
                         egui::UiBuilder::new()
                             .max_rect(rect)

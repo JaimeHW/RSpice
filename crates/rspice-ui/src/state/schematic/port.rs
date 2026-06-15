@@ -165,11 +165,7 @@ mod tests {
         let mut state = SchematicState::default();
         state.add_component(ComponentType::Port, Point::new(0, 0));
         state.add_component(ComponentType::Port, Point::new(10, 0));
-        let names: Vec<String> = state
-            .components
-            .iter()
-            .map(|c| c.value.clone())
-            .collect();
+        let names: Vec<String> = state.components.iter().map(|c| c.value.clone()).collect();
         assert_eq!(names.len(), 2);
         assert_ne!(names[0], names[1]);
         assert!(names.iter().all(|n| !n.is_empty()));
@@ -190,11 +186,26 @@ mod tests {
         use crate::state::LibraryCellInstance;
 
         let specs = vec![
-            PortSpec { name: "inp".into(), direction: PortDirection::In },
-            PortSpec { name: "inn".into(), direction: PortDirection::In },
-            PortSpec { name: "out".into(), direction: PortDirection::Out },
-            PortSpec { name: "vdd".into(), direction: PortDirection::Supply },
-            PortSpec { name: "vss".into(), direction: PortDirection::Supply },
+            PortSpec {
+                name: "inp".into(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "inn".into(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "out".into(),
+                direction: PortDirection::Out,
+            },
+            PortSpec {
+                name: "vdd".into(),
+                direction: PortDirection::Supply,
+            },
+            PortSpec {
+                name: "vss".into(),
+                direction: PortDirection::Supply,
+            },
         ];
         let mut binding = LibraryCellInstance::new("work", "ota_5t", "schematic");
         binding.bind_interface(&specs);

@@ -91,10 +91,7 @@ fn stb_card_runs_and_exports_loop_gain() {
         .lines()
         .position(|line| line.contains("loopgain_mag_db"))
         .expect("header row");
-    let first_data = content
-        .lines()
-        .nth(header_idx + 1)
-        .expect("first data row");
+    let first_data = content.lines().nth(header_idx + 1).expect("first data row");
     let fields: Vec<&str> = first_data.split(',').map(str::trim).collect();
     let header_fields: Vec<&str> = content
         .lines()
@@ -108,7 +105,10 @@ fn stb_card_runs_and_exports_loop_gain() {
         .position(|name| *name == "loopgain_mag_db")
         .expect("mag column");
     let mag: f64 = fields[mag_col].parse().expect("magnitude parses");
-    assert!((mag - 60.0).abs() < 0.1, "DC-ish magnitude ~60 dB, got {mag}");
+    assert!(
+        (mag - 60.0).abs() < 0.1,
+        "DC-ish magnitude ~60 dB, got {mag}"
+    );
 }
 
 #[test]

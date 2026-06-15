@@ -36,10 +36,10 @@
 // retain the assignments for a faithful seam rather than dropping them.
 #![allow(unused_assignments)]
 
-use super::super::common::{EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP};
 use super::super::common::{
     DELT_VBS0DIO, DELT_VBS0EFF, DELT_VBSDIO, DELT_VBSEFF, DELT_VBSMOS, DELT_XCSAT, OFF_VBSDIO,
 };
+use super::super::common::{EPSSI, EXP_THRESHOLD, MAX_EXP, MIN_EXP};
 use super::temp::B3SoiFdSized;
 use crate::Value;
 
@@ -172,12 +172,7 @@ pub struct B3SoiFdBias {
 /// `temp_k` is the (constant, no self-heating) device temperature in Kelvin and
 /// `mtype` the polarity (+1 NMOS / -1 PMOS).
 #[allow(clippy::too_many_lines)]
-pub fn eval_dc(
-    p: &B3SoiFdSized,
-    m: &ModelConsts,
-    bias: B3SoiFdBias,
-    mtype: Value,
-) -> B3SoiFdOp {
+pub fn eval_dc(p: &B3SoiFdSized, m: &ModelConsts, bias: B3SoiFdBias, mtype: Value) -> B3SoiFdOp {
     eval(p, m, bias, mtype, false)
 }
 
@@ -386,11 +381,11 @@ pub fn eval(
         let ddibl_sft_dvd = t3d * p.theta0vb0;
         let ddibl_sft_dvb = p.theta0vb0 * vds * dt3_dvb;
 
-        vthfd = mtype * p.vth0 + p.k1 * (sqrt_phis - sqrt_phi) - p.k2 * vbs0mos - delt_vth
-            - delt_vthw
-            + (p.k3 + p.k3b * vbs0mos) * tmp2
-            + delt_vthtemp
-            - dibl_sft;
+        vthfd =
+            mtype * p.vth0 + p.k1 * (sqrt_phis - sqrt_phi) - p.k2 * vbs0mos - delt_vth - delt_vthw
+                + (p.k3 + p.k3b * vbs0mos) * tmp2
+                + delt_vthtemp
+                - dibl_sft;
 
         let t6 = p.k3b * tmp2 - p.k2 + p.kt2 * temp_ratio;
         dvthfd_dvd = -ddibl_sft_dvd;
@@ -421,8 +416,7 @@ pub fn eval(
         vbs0eff = vbs0 - nfb * 0.5 * (t1 + t2);
         dvbs0eff_dvg = nfb * half * dvgs_eff_dvg;
         dvbs0eff_dvd = -nfb * half * dvthfd_dvd;
-        dvbs0eff_dve =
-            dvbs0_dve - nfb * half * dvthfd_dve - t7 * 0.5 * (t1 + t2) * dvbs0mos_dve;
+        dvbs0eff_dve = dvbs0_dve - nfb * half * dvthfd_dve - t7 * 0.5 * (t1 + t2) * dvbs0mos_dve;
     }
 
     // --- Vbs / Vbsdio (b3soifdld.c:1087-1095) ---
@@ -550,8 +544,7 @@ pub fn eval(
     let ddibl_sft_dvd = p.theta0vb0 * t3e;
     let ddibl_sft_dvb = p.theta0vb0 * vds * dt3_dvb_eta;
 
-    let vth = mtype * p.vth0 + p.k1 * (sqrt_phis - sqrt_phi) - p.k2 * vbseff - delt_vth
-        - deltvthw
+    let vth = mtype * p.vth0 + p.k1 * (sqrt_phis - sqrt_phi) - p.k2 * vbseff - delt_vth - deltvthw
         + (p.k3 + p.k3b * vbseff) * tmp2
         + delt_vthtemp
         - dibl_sft;
@@ -618,8 +611,10 @@ pub fn eval(
         let dt1_dvd = -dt1_dvg * (dvth_dvd + vgst / n * dn_dvd) + t1 / n * dn_dvd;
         let dt2_dvg = -m.cox / (vtm * p.cdep0) * exp_arg.exp();
         let t2 = 1.0 - t10 * dt2_dvg;
-        let dt2_dvd = -dt2_dvg * (dvth_dvd - 2.0 * vtm * exp_arg * dn_dvd) + (t2 - 1.0) / n * dn_dvd;
-        let dt2_dvb = -dt2_dvg * (dvth_dvb - 2.0 * vtm * exp_arg * dn_dvb) + (t2 - 1.0) / n * dn_dvb;
+        let dt2_dvd =
+            -dt2_dvg * (dvth_dvd - 2.0 * vtm * exp_arg * dn_dvd) + (t2 - 1.0) / n * dn_dvd;
+        let dt2_dvb =
+            -dt2_dvg * (dvth_dvb - 2.0 * vtm * exp_arg * dn_dvb) + (t2 - 1.0) / n * dn_dvb;
         vgsteff = t1 / t2;
         let t3 = t2 * t2;
         let t4 = (t2 * dt1_dvb - t1 * dt2_dvb) / t3;
@@ -856,15 +851,16 @@ pub fn eval(
         let t7 = vgst2vtm * t9;
         let t6 = vgst2vtm * wvcox_rds;
         let t0 = 2.0 * abeff * (t9 - 1.0 + 1.0 / lambda);
-        let dt0_dvg = 2.0
-            * (t8 * tmp2v - abeff * tmp1l + (2.0 * t9 + 1.0 / lambda - 1.0) * dabeff_dvg);
-        let dt0_dvb = 2.0
-            * (t8 * (2.0 / abeff * dabeff_dvb + tmp3v) + (1.0 / lambda - 1.0) * dabeff_dvb);
+        let dt0_dvg =
+            2.0 * (t8 * tmp2v - abeff * tmp1l + (2.0 * t9 + 1.0 / lambda - 1.0) * dabeff_dvg);
+        let dt0_dvb =
+            2.0 * (t8 * (2.0 / abeff * dabeff_dvb + tmp3v) + (1.0 / lambda - 1.0) * dabeff_dvb);
         let _dt0_dvd = 0.0; // ngspice dT0_dVd = 0 in this branch (unused below)
         let dt0_dvc = 4.0 * t9 * dabeff_dvc;
 
         let t1 = vgst2vtm * (2.0 / lambda - 1.0) + abeff * esat_l + 3.0 * t7;
-        let dt1_dvg = (2.0 / lambda - 1.0) - 2.0 * vgst2vtm * tmp1l + abeff * desat_l_dvg
+        let dt1_dvg = (2.0 / lambda - 1.0) - 2.0 * vgst2vtm * tmp1l
+            + abeff * desat_l_dvg
             + esat_l * dabeff_dvg
             + 3.0 * (t9 + t7 * tmp2v + t6 * dabeff_dvg);
         let dt1_dvb =
@@ -873,22 +869,18 @@ pub fn eval(
         let dt1_dvc = esat_l * dabeff_dvc + 3.0 * t6 * dabeff_dvc;
 
         let t2 = vgst2vtm * (esat_l + 2.0 * t6);
-        let dt2_dvg =
-            esat_l + vgst2vtm * desat_l_dvg + t6 * (4.0 + 2.0 * vgst2vtm * tmp2v);
+        let dt2_dvg = esat_l + vgst2vtm * desat_l_dvg + t6 * (4.0 + 2.0 * vgst2vtm * tmp2v);
         let dt2_dvb = vgst2vtm * (desat_l_dvb + 2.0 * t6 * tmp3v);
         let dt2_dvd = vgst2vtm * desat_l_dvd;
 
         let t3 = (t1 * t1 - 2.0 * t0 * t2).sqrt();
         vdsat = (t1 - t3) / t0;
-        dvdsat_dvg = (dt1_dvg - (t1 * dt1_dvg - dt0_dvg * t2 - t0 * dt2_dvg) / t3
-            - vdsat * dt0_dvg)
-            / t0;
-        dvdsat_dvb = (dt1_dvb - (t1 * dt1_dvb - dt0_dvb * t2 - t0 * dt2_dvb) / t3
-            - vdsat * dt0_dvb)
-            / t0;
+        dvdsat_dvg =
+            (dt1_dvg - (t1 * dt1_dvg - dt0_dvg * t2 - t0 * dt2_dvg) / t3 - vdsat * dt0_dvg) / t0;
+        dvdsat_dvb =
+            (dt1_dvb - (t1 * dt1_dvb - dt0_dvb * t2 - t0 * dt2_dvb) / t3 - vdsat * dt0_dvb) / t0;
         dvdsat_dvd = (dt1_dvd - (t1 * dt1_dvd - t0 * dt2_dvd) / t3) / t0;
-        dvdsat_dvc =
-            (dt1_dvc - (t1 * dt1_dvc - dt0_dvc * t2) / t3 - vdsat * dt0_dvc) / t0;
+        dvdsat_dvc = (dt1_dvc - (t1 * dt1_dvc - dt0_dvc * t2) / t3 - vdsat * dt0_dvc) / t0;
     }
     op.vdsat = vdsat;
 
@@ -1134,10 +1126,8 @@ pub fn eval(
             * (abeff * dvdseff_dvg - abeff * vdseff / vgst2vtm + vdseff * dabeff_dvg)
             / vgst2vtm;
         let dt0_dvd = -0.5 * abeff * dvdseff_dvd / vgst2vtm;
-        let dt0_dvb =
-            -0.5 * (abeff * dvdseff_dvb + dabeff_dvb * vdseff) / vgst2vtm;
-        let dt0_dvc =
-            -0.5 * (abeff * dvdseff_dvc + dabeff_dvc * vdseff) / vgst2vtm;
+        let dt0_dvb = -0.5 * (abeff * dvdseff_dvb + dabeff_dvb * vdseff) / vgst2vtm;
+        let dt0_dvc = -0.5 * (abeff * dvdseff_dvc + dabeff_dvc * vdseff) / vgst2vtm;
         fgche1 = vgsteff * t0;
         dfgche1_dvg = vgsteff * dt0_dvg + t0;
         dfgche1_dvd = vgsteff * dt0_dvd;
@@ -1199,7 +1189,16 @@ pub fn eval(
     // currents are computed in full and stamped against a real body node. The
     // upstream `gm0/gds0/gmb0/gmc` (channel-current derivatives) are retained for
     // the charge model but no longer feed any body current.
-    let _ = (gm0, gds0, gmb0, gmc, diff_vdsii, dvdseffii_dvg, dvdseffii_dvd, dvdseffii_dvb);
+    let _ = (
+        gm0,
+        gds0,
+        gmb0,
+        gmc,
+        diff_vdsii,
+        dvdseffii_dvg,
+        dvdseffii_dvd,
+        dvdseffii_dvb,
+    );
     let (iii, giig, giib, giid, giie) = (0.0, 0.0, 0.0, 0.0, 0.0);
 
     // GIDL, body diodes, parasitic BJT and tunneling are all disabled in FD
@@ -1242,15 +1241,17 @@ pub fn eval(
     op.gjdd = gjdd - (giid + gdgidld);
     op.gjdg = -(giig + gdgidlg);
     op.gjde = -giie;
-    op.cjd = ibd - iii - idgidl - min_isub / 2.0
+    op.cjd = ibd
+        - iii
+        - idgidl
+        - min_isub / 2.0
         - (op.gjdb * vbs + op.gjdd * vds + op.gjdg * vgs + op.gjde * ves);
 
     // Source-side junction current into source prime.
     op.gjsb = gjsb;
     op.gjsd = gjsd;
     op.gjsg = -gsgidlg;
-    op.cjs = ibs - isgidl - min_isub / 2.0
-        - (op.gjsb * vbs + op.gjsd * vds + op.gjsg * vgs);
+    op.cjs = ibs - isgidl - min_isub / 2.0 - (op.gjsb * vbs + op.gjsd * vds + op.gjsg * vgs);
 
     // Body-node KCL.
     op.gbbs = giib - gjsb - gjdb;
@@ -1850,9 +1851,9 @@ fn eval_charges_capmod3(
         - t6 * i.dvbsdio_dvg;
     let dqe1_dvb = t5 * (dxc_dvg * dvgsteff_dvb + dxc_dvb * i.dvbseff_dvb + dxc_dvc * i.dvcs_dvb)
         - t6 * i.dvbsdio_dvb;
-    let dqe1_dvd =
-        t5 * (dxc_dvg * dvgsteff_dvd + dxc_dvb * i.dvbseff_dvd + dxc_dvc * i.dvcs_dvd + dxc_dvd)
-            - t6 * i.dvbsdio_dvd;
+    let dqe1_dvd = t5
+        * (dxc_dvg * dvgsteff_dvd + dxc_dvb * i.dvbseff_dvd + dxc_dvc * i.dvcs_dvd + dxc_dvd)
+        - t6 * i.dvbsdio_dvd;
     let dqe1_dve = dqbf0_dve + t6 * (i.dvbs0_dve - i.dvbsdio_dve);
 
     let t2 = -m.cboxt * p.weff_cv * p.leff_cv;
@@ -1864,14 +1865,17 @@ fn eval_charges_capmod3(
     let t12g = t3 * (dvds_cv_dvc - dvcs_cv_dvc) - t4 * dxc_dvc;
     let dqe2_dvg = t10g * dvgsteff_dvg + t11g * i.dvbseff_dvg + t12g * i.dvcs_dvg;
     let dqe2_dvb = t10g * dvgsteff_dvb + t11g * i.dvbseff_dvb + t12g * i.dvcs_dvb;
-    let dqe2_dvd = t10g * dvgsteff_dvd + t11g * i.dvbseff_dvd + t12g * i.dvcs_dvd
+    let dqe2_dvd = t10g * dvgsteff_dvd
+        + t11g * i.dvbseff_dvd
+        + t12g * i.dvcs_dvd
         + t3 * (dvds_cv_dvd - dvcs_cv_dvd)
         - t4 * dxc_dvd;
     let dqe2_dve = t10g * dvgsteff_dve + t11g * i.dvbseff_dve + t12g * i.dvcs_dve;
 
     // Transform Qbf dependency on (Vgsteff,Vbseff,Vcs) into node ones
     // (b3soifdld.c:3288-3311).
-    let cbg = dqbf_dvrg + dqbf_dvg * dvgsteff_dvg + dqbf_dvb * i.dvbseff_dvg + dqbf_dvc * i.dvcs_dvg;
+    let cbg =
+        dqbf_dvrg + dqbf_dvg * dvgsteff_dvg + dqbf_dvb * i.dvbseff_dvg + dqbf_dvc * i.dvcs_dvg;
     let cbb = dqbf_dvg * dvgsteff_dvb + dqbf_dvb * i.dvbseff_dvb + dqbf_dvc * i.dvcs_dvb;
     let cbd = dqbf_dvg * dvgsteff_dvd + dqbf_dvb * i.dvbseff_dvd + dqbf_dvc * i.dvcs_dvd + dqbf_dvd;
     let cbe = dqbf_dvg * dvgsteff_dve + dqbf_dvb * i.dvbseff_dve + dqbf_dvc * i.dvcs_dve + dqbf_dve;

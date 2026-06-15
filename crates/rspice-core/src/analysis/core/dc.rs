@@ -40,7 +40,6 @@ pub struct DcSweep {
     pub step: Value,
 }
 
-
 impl DcSweep {
     pub fn new(source_name: String, start: Value, stop: Value, step: Value) -> Self {
         Self {

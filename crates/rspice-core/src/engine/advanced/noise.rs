@@ -126,7 +126,12 @@ impl Engine {
             if let Some(&Some((coefficient, af, ef))) = circuit.resistors.flicker.get(i) {
                 let v_pos = Self::noise_node_voltage(dc_solution, stamp.pp.row);
                 let v_neg = Self::noise_node_voltage(dc_solution, stamp.nn.row);
-                let current = circuit.resistors.conductances.get(i).copied().unwrap_or(0.0)
+                let current = circuit
+                    .resistors
+                    .conductances
+                    .get(i)
+                    .copied()
+                    .unwrap_or(0.0)
                     * (v_pos - v_neg);
                 if current.abs() > 1e-18 {
                     noise_sources.push(NoiseSource::flicker_with_frequency_exponent(
@@ -877,7 +882,10 @@ M1 D G 0 0 NM W=20u L=2u
     /// (shot-free deck: every noise source is temperature-bearing).
     #[test]
     fn mos_dtemp_noise_matches_the_ngspice46_oracle() {
-        let deck = MOS_RDRS_NOISE_DECK.replace("M1 D G 0 0 NM W=20u L=2u", "M1 D G 0 0 NM W=20u L=2u DTEMP=150");
+        let deck = MOS_RDRS_NOISE_DECK.replace(
+            "M1 D G 0 0 NM W=20u L=2u",
+            "M1 D G 0 0 NM W=20u L=2u DTEMP=150",
+        );
         assert_ne!(deck, MOS_RDRS_NOISE_DECK);
         let netlist = Netlist::parse(&deck).expect("deck parses");
         let engine = Engine::default().resolved_for_netlist(&netlist);
@@ -1270,7 +1278,10 @@ Q1 C B 0 QN
     fn gp_dtemp_noise_matches_the_ngspice46_oracle() {
         let deck = GP_RCRE_NOISE_DECK
             .replace("Q1 C B 0 QN", "Q1 C B 0 QN DTEMP=150")
-            .replace(".NOISE v(c) VIN DEC 5 10k 100Meg", ".NOISE v(c) VIN DEC 5 10k 10Meg");
+            .replace(
+                ".NOISE v(c) VIN DEC 5 10k 100Meg",
+                ".NOISE v(c) VIN DEC 5 10k 10Meg",
+            );
         assert_ne!(deck, GP_RCRE_NOISE_DECK);
         assert_onoise_matches(
             &deck,
@@ -1359,8 +1370,7 @@ J1 D G 0 JN M=2
     /// the official ngspice-46 binary.
     const RES_FLICKER_ORACLE: &str =
         include_str!("../../../tests/testdata/res_flicker_ngspice46.dat");
-    const RES_QUIET_ORACLE: &str =
-        include_str!("../../../tests/testdata/res_quiet_ngspice46.dat");
+    const RES_QUIET_ORACLE: &str = include_str!("../../../tests/testdata/res_quiet_ngspice46.dat");
 
     /// A current-carrying semiconductor resistor with model-card flicker:
     /// KF at AF=1.5 over the effective noise area

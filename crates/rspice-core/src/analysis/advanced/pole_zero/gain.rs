@@ -4,7 +4,7 @@ impl PoleZeroAnalyzer {
     /// Compute DC gain H(0)
     pub fn dc_gain(&self, input_node: usize, output_node: usize) -> Option<Value> {
         // At DC (s=0), Y = G
-        // Solve GÂ·V = I where I is unit current at input
+        // Solve G·V = I where I is unit current at input
         let n = self.num_nodes;
         if input_node >= n || output_node >= n {
             return None;
@@ -14,7 +14,7 @@ impl PoleZeroAnalyzer {
         let mut b = vec![0.0; n];
         b[input_node] = 1.0;
 
-        // Solve GÂ·x = b using Gaussian elimination
+        // Solve G·x = b using Gaussian elimination
         let x = self.solve_linear(&self.g_matrix, &b)?;
 
         Some(x[output_node])

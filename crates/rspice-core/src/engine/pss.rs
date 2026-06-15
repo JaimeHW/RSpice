@@ -141,7 +141,8 @@ impl Engine {
         netlist: &Netlist,
         config: PssConfig,
     ) -> Result<PssAnalysisResult, SimulationError> {
-        self.run_pss_with_state(netlist, config).map(|(result, _, _, _)| result)
+        self.run_pss_with_state(netlist, config)
+            .map(|(result, _, _, _)| result)
     }
 
     /// `run_pss` plus the converged artifacts the oscillator phase-noise
@@ -429,16 +430,15 @@ impl Engine {
 
         if tstab > 0.0 {
             let max_step = period / 50.0;
-            let waveform =
-                self.pss_run_tran_internal(
-                    circuit,
-                    matrix,
-                    dc_solution.to_vec(),
-                    tstab,
-                    max_step,
-                    false,
-                    None,
-                )?;
+            let waveform = self.pss_run_tran_internal(
+                circuit,
+                matrix,
+                dc_solution.to_vec(),
+                tstab,
+                max_step,
+                false,
+                None,
+            )?;
 
             let final_state = self.pss_extract_reactive_state(circuit);
             Ok((waveform, final_state))
@@ -709,9 +709,7 @@ impl Engine {
         self.pss_set_reactive_state(&mut worker, &state.x0);
         let (x_t_plus, _) =
             self.pss_simulate_one_period(&mut worker, &mut worker_matrix, period + h_t, config)?;
-        let dphi_dt: Vec<Value> = (0..n)
-            .map(|i| (x_t_plus[i] - state.x_t[i]) / h_t)
-            .collect();
+        let dphi_dt: Vec<Value> = (0..n).map(|i| (x_t_plus[i] - state.x_t[i]) / h_t).collect();
 
         let mut jacobian = vec![vec![0.0; n + 1]; n + 1];
         for (j, column) in columns.iter().enumerate() {

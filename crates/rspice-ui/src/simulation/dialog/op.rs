@@ -3,7 +3,6 @@
 //! Configuration for DC operating point analysis (.op).
 //! The simplest analysis - computes the DC bias point with all AC sources zeroed.
 
-
 /// DC operating point analysis configuration
 #[derive(Debug, Clone)]
 pub struct OpConfig {
@@ -120,5 +119,4 @@ impl OpDialogState {
             *self = Self::from_config(&OpConfig::default());
         }
     }
-
 }

@@ -244,11 +244,7 @@ fn val(map: &HashMap<String, Value>, key: &str, default: Value) -> Value {
 }
 
 /// Fetch a binned family: `name`, `l<name>`, `w<name>`, `p<name>`.
-fn binned(
-    map: &HashMap<String, Value>,
-    name: &str,
-    v_def: Value,
-) -> Binned {
+fn binned(map: &HashMap<String, Value>, name: &str, v_def: Value) -> Binned {
     Binned {
         v: val(map, name, v_def),
         l: val(map, &format!("L{name}"), 0.0),

@@ -116,7 +116,7 @@ impl Engine {
 
     /// Check voltage convergence using explicit absolute and relative tolerances.
     ///
-    /// Criterion: `|Î”V| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
+    /// Criterion: `|ΔV| <= VABSTOL + RELTOL * max(|Vnew|, |Vold|)`
     pub(crate) fn check_voltage_convergence_with_tolerances(
         old: &[Value],
         new: &[Value],

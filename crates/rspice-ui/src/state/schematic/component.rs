@@ -69,8 +69,7 @@ impl LibraryCellInstance {
     /// The bound interface as port specs, when directions are available
     /// and consistent with the terminal order.
     pub fn interface(&self) -> Option<Vec<super::port::PortSpec>> {
-        if self.terminal_order.is_empty() || self.terminal_dirs.len() != self.terminal_order.len()
-        {
+        if self.terminal_order.is_empty() || self.terminal_dirs.len() != self.terminal_order.len() {
             return None;
         }
         Some(

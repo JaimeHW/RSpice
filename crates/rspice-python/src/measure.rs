@@ -6,10 +6,10 @@
 //! measurement statements. Only the mapping to Python result objects lives
 //! here.
 
+use rspice_core::Netlist;
 use rspice_core::analysis::advanced::measure_signals;
 use rspice_core::engine::TransientResult;
 use rspice_core::solver::SimulationResult;
-use rspice_core::Netlist;
 
 use crate::results::PyMeasurement;
 

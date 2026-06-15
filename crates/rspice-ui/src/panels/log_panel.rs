@@ -19,9 +19,9 @@
 //! - Timestamp with sub-millisecond precision
 //! - Search/filter by text pattern
 
+use crate::common::time_compat::Instant;
 use std::collections::VecDeque;
 use std::time::Duration;
-use crate::common::time_compat::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +58,6 @@ impl LogSeverity {
             Self::Trace => "TRACE",
         }
     }
-
 }
 
 // =============================================================================

@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 /// Echo evaluated `.MEAS` results to the console, the way the CLI prints
 /// them — value lines for successes, warnings for failures.
@@ -52,9 +52,10 @@ impl SimulationController {
                 const DC_OP_CONSOLE_ECHO_LIMIT: usize = 24;
                 if dc_result.node_voltages.len() <= DC_OP_CONSOLE_ECHO_LIMIT {
                     for (node, voltage) in &dc_result.node_voltages {
-                        state.push_sim_message(crate::common::app::ConsoleMessage::info(
-                            format!("V({}) = {:.6} V", node, voltage),
-                        ));
+                        state.push_sim_message(crate::common::app::ConsoleMessage::info(format!(
+                            "V({}) = {:.6} V",
+                            node, voltage
+                        )));
                     }
                 }
 
@@ -62,7 +63,6 @@ impl SimulationController {
                     "DC OP: {} node voltages computed",
                     dc_result.node_voltages.len()
                 )));
-
             }
 
             SimulationResult::Transient {
@@ -123,7 +123,6 @@ impl SimulationController {
                     frequencies.len(),
                     integrated
                 )));
-
             }
 
             SimulationResult::PoleZero { poles, zeros, gain } => {
@@ -224,7 +223,6 @@ impl SimulationController {
                         var.name, var.mean, var.std_dev, var.min, var.max
                     )));
                 }
-
             }
 
             SimulationResult::Parametric {
@@ -240,7 +238,6 @@ impl SimulationController {
                     waveforms.len(),
                     num_failures
                 )));
-
             }
 
             SimulationResult::Corner {
@@ -255,7 +252,6 @@ impl SimulationController {
                     waveforms.len(),
                     num_failures
                 )));
-
             }
 
             SimulationResult::Reliability {
@@ -269,7 +265,6 @@ impl SimulationController {
                     years.len(),
                     device_results.len()
                 )));
-
             }
 
             SimulationResult::Optimization {
@@ -291,7 +286,6 @@ impl SimulationController {
                         name, value
                     )));
                 }
-
             }
 
             SimulationResult::Soa {
@@ -305,7 +299,6 @@ impl SimulationController {
                     time.len(),
                     violations.len()
                 )));
-
             }
 
             SimulationResult::MeasurementsOnly { .. } => {

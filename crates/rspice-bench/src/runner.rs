@@ -341,7 +341,7 @@ fn timing_stats(samples_ms: &[f64]) -> Option<TimingStats> {
     let mut sorted = samples_ms.to_vec();
     sorted.sort_by(f64::total_cmp);
     let count = sorted.len();
-    let median = if count % 2 == 0 {
+    let median = if count.is_multiple_of(2) {
         (sorted[count / 2 - 1] + sorted[count / 2]) / 2.0
     } else {
         sorted[count / 2]
@@ -369,7 +369,11 @@ fn locate_rspice() -> Result<PathBuf, BenchError> {
             })
         };
     }
-    let exe_name = if cfg!(windows) { "rspice.exe" } else { "rspice" };
+    let exe_name = if cfg!(windows) {
+        "rspice.exe"
+    } else {
+        "rspice"
+    };
     let mut tried = Vec::new();
     if let Ok(current) = env::current_exe() {
         let sibling = current.with_file_name(exe_name);
@@ -442,18 +446,18 @@ fn discover_decks(dir: &Path) -> Result<Vec<PathBuf>, BenchError> {
 /// Serializes the scoreboard to pretty JSON and writes it to `out`,
 /// creating parent directories as needed.
 fn write_scoreboard(out: &Path, scoreboard: &Scoreboard) -> Result<(), BenchError> {
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|err| {
-                BenchError::io(
-                    format!(
-                        "failed to create scoreboard directory `{}`",
-                        parent.display()
-                    ),
-                    err,
-                )
-            })?;
-        }
+    if let Some(parent) = out.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).map_err(|err| {
+            BenchError::io(
+                format!(
+                    "failed to create scoreboard directory `{}`",
+                    parent.display()
+                ),
+                err,
+            )
+        })?;
     }
     let mut json = serde_json::to_string_pretty(scoreboard).map_err(|err| BenchError::Json {
         context: "failed to serialize the scoreboard to JSON".to_string(),

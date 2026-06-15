@@ -45,9 +45,9 @@ pub const RELEASE_UNIX_DAYS: u32 = 20_615; // 2026-06-11
 const VERIFYING_KEYS: &[(u8, [u8; 32])] = &[(
     0x01,
     [
-        0xbd, 0x8c, 0x6d, 0x6a, 0xa9, 0xbb, 0x49, 0x1c, 0xb5, 0xcf, 0x8f, 0x08, 0xa1, 0x50,
-        0x8a, 0x4e, 0x49, 0x4d, 0x43, 0x48, 0xa0, 0x9d, 0x52, 0xbe, 0x1e, 0xe0, 0x83, 0xb2,
-        0xd9, 0xca, 0x44, 0xc9,
+        0xbd, 0x8c, 0x6d, 0x6a, 0xa9, 0xbb, 0x49, 0x1c, 0xb5, 0xcf, 0x8f, 0x08, 0xa1, 0x50, 0x8a,
+        0x4e, 0x49, 0x4d, 0x43, 0x48, 0xa0, 0x9d, 0x52, 0xbe, 0x1e, 0xe0, 0x83, 0xb2, 0xd9, 0xca,
+        0x44, 0xc9,
     ],
 )];
 
@@ -342,14 +342,12 @@ pub fn parse_and_verify(raw: &str) -> Result<LicenseInfo, LicenseError> {
         ));
     };
 
-    let payload_bytes = crockford_decode(&canonical(payload_part))
-        .ok_or(LicenseError::Malformed(
-            "The key contains characters outside the base32 alphabet.",
-        ))?;
-    let signature_bytes = crockford_decode(&canonical(signature_part))
-        .ok_or(LicenseError::Malformed(
-            "The key contains characters outside the base32 alphabet.",
-        ))?;
+    let payload_bytes = crockford_decode(&canonical(payload_part)).ok_or(
+        LicenseError::Malformed("The key contains characters outside the base32 alphabet."),
+    )?;
+    let signature_bytes = crockford_decode(&canonical(signature_part)).ok_or(
+        LicenseError::Malformed("The key contains characters outside the base32 alphabet."),
+    )?;
     let signature_bytes: [u8; 64] = signature_bytes
         .try_into()
         .map_err(|_| LicenseError::BadSignature)?;
@@ -361,8 +359,7 @@ pub fn parse_and_verify(raw: &str) -> Result<LicenseInfo, LicenseError> {
         ));
     }
 
-    let Some((_, key_bytes)) = VERIFYING_KEYS.iter().find(|(id, _)| *id == payload.key_id)
-    else {
+    let Some((_, key_bytes)) = VERIFYING_KEYS.iter().find(|(id, _)| *id == payload.key_id) else {
         return Err(LicenseError::BadSignature);
     };
     let verifying_key =
@@ -380,10 +377,7 @@ pub fn parse_and_verify(raw: &str) -> Result<LicenseInfo, LicenseError> {
     }
 
     Ok(LicenseInfo {
-        licensed_to: payload
-            .licensee
-            .clone()
-            .unwrap_or_else(|| "—".to_owned()),
+        licensed_to: payload.licensee.clone().unwrap_or_else(|| "—".to_owned()),
         tier: payload.tier_label().to_owned(),
         updates_until: date_from_unix_days(payload.expires_days),
         license_id: payload.license_id_display(),

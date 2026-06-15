@@ -397,9 +397,8 @@ impl CoupledTransmissionLine {
             .map_err(|err| format!("CPL '{}' DC convolution seed failed: {err}", self.name))?;
 
         let conductors = self.conductors();
-        let mut history =
-            NativeCplViHistory::new(conductors, near_dc.to_vec(), far_dc.to_vec())
-                .map_err(|err| format!("CPL '{}' history init failed: {err}", self.name))?;
+        let mut history = NativeCplViHistory::new(conductors, near_dc.to_vec(), far_dc.to_vec())
+            .map_err(|err| format!("CPL '{}' history init failed: {err}", self.name))?;
         // ngspice seeds the first VI sample at t=0 with the DC port voltages and
         // zero branch currents.
         history

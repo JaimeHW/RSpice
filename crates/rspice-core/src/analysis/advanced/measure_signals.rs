@@ -186,31 +186,23 @@ impl AcSweepSeries {
         let axis: Vec<Value> = sweep.iter().map(|point| point.frequency).collect();
 
         let mut storage: Vec<(String, Vec<Value>)> = Vec::new();
-        let mut push_complex_series =
-            |prefix: char, raw: &str, values: Vec<crate::Complex64>| {
-                let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
-                let db: Vec<Value> = magnitude
-                    .iter()
-                    .map(|m| {
-                        if *m > 1e-30 {
-                            20.0 * m.log10()
-                        } else {
-                            -600.0
-                        }
-                    })
-                    .collect();
-                let phase_deg: Vec<Value> =
-                    values.iter().map(|c| c.arg().to_degrees()).collect();
-                let real: Vec<Value> = values.iter().map(|c| c.re).collect();
-                let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
+        let mut push_complex_series = |prefix: char, raw: &str, values: Vec<crate::Complex64>| {
+            let magnitude: Vec<Value> = values.iter().map(|c| c.norm()).collect();
+            let db: Vec<Value> = magnitude
+                .iter()
+                .map(|m| if *m > 1e-30 { 20.0 * m.log10() } else { -600.0 })
+                .collect();
+            let phase_deg: Vec<Value> = values.iter().map(|c| c.arg().to_degrees()).collect();
+            let real: Vec<Value> = values.iter().map(|c| c.re).collect();
+            let imag: Vec<Value> = values.iter().map(|c| c.im).collect();
 
-                storage.push((format!("{prefix}({raw})"), magnitude.clone()));
-                storage.push((format!("{prefix}M({raw})"), magnitude));
-                storage.push((format!("{prefix}DB({raw})"), db));
-                storage.push((format!("{prefix}P({raw})"), phase_deg));
-                storage.push((format!("{prefix}R({raw})"), real));
-                storage.push((format!("{prefix}I({raw})"), imag));
-            };
+            storage.push((format!("{prefix}({raw})"), magnitude.clone()));
+            storage.push((format!("{prefix}M({raw})"), magnitude));
+            storage.push((format!("{prefix}DB({raw})"), db));
+            storage.push((format!("{prefix}P({raw})"), phase_deg));
+            storage.push((format!("{prefix}R({raw})"), real));
+            storage.push((format!("{prefix}I({raw})"), imag));
+        };
 
         for (index, name) in first.node_names.iter().enumerate() {
             let raw = if name.is_empty() {

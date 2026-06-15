@@ -48,23 +48,19 @@ pub(in crate::engine::builder) fn resolve_capacitor_instance_value(
 
     if let Some(model_def) = model_def {
         if capacitance.is_none() {
-            capacitance = resolve_model_param(
-                model_def,
-                &["C", "CAP", "VALUE", "CAPACITANCE"],
-                &eval_ctx,
-            )?;
+            capacitance =
+                resolve_model_param(model_def, &["C", "CAP", "VALUE", "CAPACITANCE"], &eval_ctx)?;
         }
 
         if capacitance.is_none() {
-            let cj = resolve_model_param(model_def, &["CJ", "CJA"], &eval_ctx)?.ok_or_else(
-                || {
+            let cj =
+                resolve_model_param(model_def, &["CJ", "CJA"], &eval_ctx)?.ok_or_else(|| {
                     SimulationError::Circuit(format!(
                         "Capacitor '{}' model '{}' requires C/CAP or CJ with geometry",
                         element_name,
                         model_name.unwrap_or_default()
                     ))
-                },
-            )?;
+                })?;
             let cjsw = resolve_model_param(model_def, &["CJSW", "CJP"], &eval_ctx)?.unwrap_or(0.0);
 
             let width = instance_param(instance_params, &["W", "WIDTH"])
@@ -216,19 +212,13 @@ mod tests {
 
     #[test]
     fn plain_value_passes_through() {
-        let c = resolve_capacitor_from_source(
-            "plain cap\nC1 a 0 2.2u\n.end\n",
-            "C1",
-        );
+        let c = resolve_capacitor_from_source("plain cap\nC1 a 0 2.2u\n.end\n", "C1");
         assert!((c - 2.2e-6).abs() < 1e-18, "resolved {c}");
     }
 
     #[test]
     fn multiplicity_multiplies_capacitance() {
-        let c = resolve_capacitor_from_source(
-            "m cap\nC1 a 0 1u m=4\n.end\n",
-            "C1",
-        );
+        let c = resolve_capacitor_from_source("m cap\nC1 a 0 1u m=4\n.end\n", "C1");
         assert!((c - 4.0e-6).abs() < 1e-18, "resolved {c}");
     }
 

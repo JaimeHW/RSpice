@@ -415,7 +415,10 @@ mod tests {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
         }
         fn next_c(&mut self) -> Complex64 {
@@ -518,10 +521,17 @@ mod tests {
         let mut a = vec![ZERO; n * n];
         for i in 0..n {
             for j in 0..n {
-                a[i * n + j] = rng.next_c() + if i == j { Complex64::new(5.0, 0.0) } else { ZERO };
+                a[i * n + j] = rng.next_c()
+                    + if i == j {
+                        Complex64::new(5.0, 0.0)
+                    } else {
+                        ZERO
+                    };
             }
         }
-        let x_true: Vec<Complex64> = (0..n).map(|i| Complex64::new(i as f64 + 1.0, -(i as f64))).collect();
+        let x_true: Vec<Complex64> = (0..n)
+            .map(|i| Complex64::new(i as f64 + 1.0, -(i as f64)))
+            .collect();
         let mut b = vec![ZERO; n];
         for i in 0..n {
             for j in 0..n {

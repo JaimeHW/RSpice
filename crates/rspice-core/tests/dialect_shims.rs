@@ -93,12 +93,8 @@ fn inductor_rser_synthesizes_a_series_resistor() {
         .find(|e| e.name.eq_ignore_ascii_case("L1"))
         .expect("L1");
     assert_eq!(l1.nodes[0], "L1#SER");
-    assert!(
-        netlist
-            .elements
-            .iter()
-            .any(|e| e.name == "RL1#SER" && matches!(e.kind, ElementKind::Resistor { value, .. } if value == 2.0))
-    );
+    assert!(netlist.elements.iter().any(|e| e.name == "RL1#SER"
+        && matches!(e.kind, ElementKind::Resistor { value, .. } if value == 2.0)));
     // Rser must not linger as an instance parameter.
     if let ElementKind::Inductor {
         instance_params, ..

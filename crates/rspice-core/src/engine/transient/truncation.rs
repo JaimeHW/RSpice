@@ -1353,8 +1353,7 @@ impl Engine {
         let jfet_controlled = circuit.jfets.is_empty() || jfet_truncation_limit.is_some();
         // Zero-charge diodes (CJO=0, TT=0) report no truncation limit; the
         // generic node-voltage estimator stays in charge for those decks.
-        let diode_controlled =
-            circuit.diodes.is_empty() || diode_truncation_limit.is_some();
+        let diode_controlled = circuit.diodes.is_empty() || diode_truncation_limit.is_some();
         let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
 
         capacitor_controlled

@@ -56,7 +56,11 @@ impl RSpiceApp {
                     "Version",
                     concat!(env!("CARGO_PKG_VERSION"), " · ", env!("RSPICE_BUILD_HASH")),
                 );
-                kv_row(ui, "Engine", concat!("rspice-core ", env!("CARGO_PKG_VERSION")));
+                kv_row(
+                    ui,
+                    "Engine",
+                    concat!("rspice-core ", env!("CARGO_PKG_VERSION")),
+                );
                 kv_row(ui, "Matrix pkg", "faer sparse");
                 kv_row(ui, "License", &license_for_body);
             });
@@ -243,11 +247,7 @@ impl RSpiceApp {
                             c.bg_inset,
                             egui::Stroke::new(1.0, c.border_strong),
                         );
-                        painter.galley(
-                            key_rect.min + pad,
-                            key_galley,
-                            c.text,
-                        );
+                        painter.galley(key_rect.min + pad, key_galley, c.text);
                     }
                 }
 

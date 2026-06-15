@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::common::time_compat::Instant;
+use std::collections::HashMap;
 
 use super::*;
 

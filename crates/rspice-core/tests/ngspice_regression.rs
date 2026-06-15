@@ -373,13 +373,12 @@ fn unique_case_result_path(cir_path: &Path) -> PathBuf {
 fn get_tests_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR points to crates/rspice-core/
     // We need to go up two levels to reach the workspace root
-    let tests_dir = PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"),
-    )
-    .parent() // crates/
-    .and_then(|p| p.parent()) // workspace root
-    .expect("Could not find workspace root")
-    .join("tests");
+    let tests_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
+            .parent() // crates/
+            .and_then(|p| p.parent()) // workspace root
+            .expect("Could not find workspace root")
+            .join("tests");
 
     // Canonicalize so paths returned by the runner (which canonicalizes its
     // root, yielding `\\?\`-prefixed paths on Windows) stay prefix-comparable
@@ -595,7 +594,6 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     ))
 }
 
-
 fn load_validation_manifest() -> HashMap<String, String> {
     let manifest_path = get_tests_dir().join("validation-manifest.tsv");
     let content = fs::read_to_string(&manifest_path).expect("validation manifest should exist");
@@ -793,7 +791,8 @@ fn test_hard_case_timeout_is_always_finite_and_capped() {
 
 #[test]
 fn test_debug_watchdog_reclassification_is_profile_gated() {
-    let timed_out = || TestResult {
+    let timed_out = || {
+        TestResult {
         name: "fourbitadder".to_string(),
         passed: false,
         error: Some(
@@ -803,6 +802,7 @@ fn test_debug_watchdog_reclassification_is_profile_gated() {
         mismatches: Vec::new(),
         duration_ms: 29_011,
         analysis_type: Some("Transient".to_string()),
+    }
     };
 
     let out = reclassify_debug_watchdog_timeout(timed_out(), 30_000);
@@ -819,8 +819,14 @@ fn test_debug_watchdog_reclassification_is_profile_gated() {
         );
     } else {
         let original = timed_out();
-        assert_eq!(out.passed, original.passed, "release keeps timeouts failing");
-        assert_eq!(out.error, original.error, "release leaves the diagnostic untouched");
+        assert_eq!(
+            out.passed, original.passed,
+            "release keeps timeouts failing"
+        );
+        assert_eq!(
+            out.error, original.error,
+            "release leaves the diagnostic untouched"
+        );
     }
 
     // A genuine failure class is never reclassified in any profile.

@@ -146,7 +146,10 @@ impl RSpiceApp {
                 let source_library = self.state.dialogs.copy_cell_source_library.clone();
                 let source_cell = self.state.dialogs.copy_cell_source_cell.clone();
                 let target = self.state.dialogs.copy_cell_target_library.clone();
-                match self.state.copy_cell(&source_library, &source_cell, &target, &name) {
+                match self
+                    .state
+                    .copy_cell(&source_library, &source_cell, &target, &name)
+                {
                     Ok(views) => {
                         self.state.push_user_message(ConsoleMessage::info(format!(
                             "Copied '{source_cell}' to '{target}/{name}' ({views} views)"

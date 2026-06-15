@@ -606,11 +606,8 @@ impl SemanticAnalyzer {
         }
 
         // Phase 7: Analyze parameters (defaults may reference earlier ones)
-        let param_names: std::collections::HashSet<SmolStr> = module
-            .parameters
-            .iter()
-            .map(|p| p.name.clone())
-            .collect();
+        let param_names: std::collections::HashSet<SmolStr> =
+            module.parameters.iter().map(|p| p.name.clone()).collect();
         for param in &module.parameters {
             let value_type = match param.param_type {
                 ParamType::Real => ValueType::Real,
@@ -719,8 +716,7 @@ impl SemanticAnalyzer {
                     self.param_consts.insert(localparam.name.clone(), value);
                 }
                 if let Some(value) = self.eval_const_invariant(default) {
-                    self.invariant_consts
-                        .insert(localparam.name.clone(), value);
+                    self.invariant_consts.insert(localparam.name.clone(), value);
                 }
             }
         }
@@ -797,8 +793,7 @@ impl SemanticAnalyzer {
             // invariant localparams) cannot vary per instance, so it may
             // participate in loop unrolling and other code folding
             if let Some(value) = self.eval_const_invariant(default) {
-                self.invariant_consts
-                    .insert(localparam.name.clone(), value);
+                self.invariant_consts.insert(localparam.name.clone(), value);
             }
 
             let var_index = analyzed.variables.len();
@@ -1109,16 +1104,14 @@ impl SemanticAnalyzer {
                     };
                     for item in &var_decl.items {
                         self.local_counter += 1;
-                        let hoisted: SmolStr = if module
-                            .variables
-                            .iter()
-                            .any(|v| v.name == item.name)
-                            || self.arrays.contains_key(&item.name)
-                        {
-                            format!("{}__blk{}", item.name, self.local_counter).into()
-                        } else {
-                            item.name.clone()
-                        };
+                        let hoisted: SmolStr =
+                            if module.variables.iter().any(|v| v.name == item.name)
+                                || self.arrays.contains_key(&item.name)
+                            {
+                                format!("{}__blk{}", item.name, self.local_counter).into()
+                            } else {
+                                item.name.clone()
+                            };
 
                         if !item.dimensions.is_empty() {
                             if let Some(layout) = self.register_array_variable(
@@ -1239,16 +1232,14 @@ impl SemanticAnalyzer {
                 // before any arm executes (LRM case semantics); snapshot
                 // them so arm bodies cannot perturb later guards.
                 let selector = self.lower_expression(&case_stmt.expr)?;
-                let selector =
-                    self.snapshot_guard(selector, case_stmt.span, module, sink)?;
+                let selector = self.snapshot_guard(selector, case_stmt.span, module, sink)?;
 
                 let mut item_guards: Vec<Option<Expression>> = Vec::new();
                 for item in &case_stmt.items {
                     let mut item_match: Option<Expression> = None;
                     for m in &item.matches {
                         let m_lowered = self.lower_expression(m)?;
-                        let eq =
-                            Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered);
+                        let eq = Self::binary_expr(BinaryOp::Eq, selector.clone(), m_lowered);
                         item_match = Some(match item_match {
                             Some(acc) => Self::binary_expr(BinaryOp::Or, acc, eq),
                             None => eq,
@@ -1268,7 +1259,9 @@ impl SemanticAnalyzer {
                 let mut prior_match: Option<Expression> = None;
 
                 for (item, item_match) in case_stmt.items.iter().zip(item_guards) {
-                    let Some(item_match) = item_match else { continue };
+                    let Some(item_match) = item_match else {
+                        continue;
+                    };
 
                     let guard = match &prior_match {
                         Some(prior) => Self::binary_expr(
@@ -1348,8 +1341,7 @@ impl SemanticAnalyzer {
                             );
                         }
                         let condition = self.fold_guard_into_condition(condition);
-                        let body =
-                            self.analyze_loop_body(&while_stmt.body, None, module)?;
+                        let body = self.analyze_loop_body(&while_stmt.body, None, module)?;
                         sink.push(AnalyzedStatement::Loop(AnalyzedLoop {
                             condition,
                             body,
@@ -1362,8 +1354,7 @@ impl SemanticAnalyzer {
                 match self.event_guard(&event_ctrl.event)? {
                     EventLowering::Guard(guard) => {
                         // Snapshot: the body must not perturb its own guard
-                        let guard =
-                            self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
+                        let guard = self.snapshot_guard(guard, event_ctrl.span, module, sink)?;
                         self.guard_stack.push(guard);
                         self.analyze_statement(&event_ctrl.statement, module, sink)?;
                         self.guard_stack.pop();
@@ -1528,10 +1519,7 @@ impl SemanticAnalyzer {
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<Expression> {
         // Identifiers and literals are stable by construction
-        if matches!(
-            condition,
-            Expression::Identifier(_) | Expression::Number(_)
-        ) {
+        if matches!(condition, Expression::Identifier(_) | Expression::Number(_)) {
             return Ok(condition);
         }
 
@@ -1960,13 +1948,8 @@ impl SemanticAnalyzer {
             );
             return Ok(());
         };
-        let var_index = self.ensure_task_variable(
-            "$bound_step",
-            f64::INFINITY,
-            module,
-            sink,
-            call.span,
-        );
+        let var_index =
+            self.ensure_task_variable("$bound_step", f64::INFINITY, module, sink, call.span);
         let bound = self.lower_expression(arg)?;
         let current = Expression::Identifier(Identifier {
             name: "$bound_step".into(),
@@ -1998,8 +1981,7 @@ impl SemanticAnalyzer {
         module: &mut AnalyzedModule,
         sink: &mut Vec<AnalyzedStatement>,
     ) -> CompileResult<()> {
-        let var_index =
-            self.ensure_task_variable("$discontinuity", 0.0, module, sink, call.span);
+        let var_index = self.ensure_task_variable("$discontinuity", 0.0, module, sink, call.span);
         let current = Expression::Identifier(Identifier {
             name: "$discontinuity".into(),
             span: call.span,
@@ -2197,15 +2179,18 @@ impl SemanticAnalyzer {
         }
 
         if let Some(index) = dyn_index {
-            return self.push_indexed_assignment(target_name, index, expression, value_type, span, sink);
+            return self.push_indexed_assignment(
+                target_name,
+                index,
+                expression,
+                value_type,
+                span,
+                sink,
+            );
         }
 
         // Find variable index; assignments to unknown storage are an error
-        let Some(var_index) = module
-            .variables
-            .iter()
-            .position(|v| v.name == target_name)
-        else {
+        let Some(var_index) = module.variables.iter().position(|v| v.name == target_name) else {
             self.record_error_at(
                 SemanticErrorKind::UndeclaredSymbol {
                     name: target_name.clone(),
@@ -2360,10 +2345,10 @@ impl SemanticAnalyzer {
                     && matches!(call.args.len(), 1 | 2)
                     && call.args.iter().all(|a| {
                         matches!(a, Expression::Identifier(id)
-                            if self.symbols.lookup(&id.name).is_some_and(|s| matches!(
-                                s.kind,
-                                SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch
-                            )))
+                        if self.symbols.lookup(&id.name).is_some_and(|s| matches!(
+                            s.kind,
+                            SymbolKind::Port | SymbolKind::Node | SymbolKind::Branch
+                        )))
                     })
                 {
                     let mut nodes = call.args.iter().map(|a| match a {
@@ -2604,7 +2589,9 @@ impl SemanticAnalyzer {
                             None => eq,
                         });
                     }
-                    let Some(item_match) = item_match else { continue };
+                    let Some(item_match) = item_match else {
+                        continue;
+                    };
                     let mut item_guard = match &prior_match {
                         Some(prior) => Self::binary_expr(
                             BinaryOp::And,
@@ -3249,9 +3236,7 @@ mod tests {
         // No residual user-function calls may remain after inlining
         fn has_user_call(expr: &Expression) -> bool {
             match expr {
-                Expression::Call(c) => {
-                    c.name == "double_it" || c.args.iter().any(has_user_call)
-                }
+                Expression::Call(c) => c.name == "double_it" || c.args.iter().any(has_user_call),
                 Expression::Binary(b) => has_user_call(&b.left) || has_user_call(&b.right),
                 Expression::Unary(u) => has_user_call(&u.operand),
                 Expression::Conditional(c) => {
@@ -3338,7 +3323,10 @@ mod tests {
         let snapshot = flat_assignments(&m)[0];
         assert!(snapshot.target.starts_with("__guard"));
         let Expression::Call(call) = &snapshot.expression else {
-            panic!("expected analysis() snapshot, got {:?}", snapshot.expression);
+            panic!(
+                "expected analysis() snapshot, got {:?}",
+                snapshot.expression
+            );
         };
         assert_eq!(call.name.as_str(), "analysis");
         let Expression::Conditional(c) = &flat_assignments(&m)[1].expression else {

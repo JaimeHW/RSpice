@@ -534,18 +534,20 @@ mod tests {
         let h = 1e-4;
         for (vgs, vds, vbs) in bias_points {
             let (gm, gds, gmb) = m.small_signal(vgs, vds, vbs);
-            let gm_ref =
-                (m.calculate_id(vgs + h, vds, vbs).0 - m.calculate_id(vgs - h, vds, vbs).0)
-                    / (2.0 * h);
-            let gds_ref =
-                (m.calculate_id(vgs, vds + h, vbs).0 - m.calculate_id(vgs, vds - h, vbs).0)
-                    / (2.0 * h);
-            let gmb_ref =
-                (m.calculate_id(vgs, vds, vbs + h).0 - m.calculate_id(vgs, vds, vbs - h).0)
-                    / (2.0 * h);
-            for (got, want, name) in
-                [(gm, gm_ref, "gm"), (gds, gds_ref, "gds"), (gmb, gmb_ref, "gmb")]
-            {
+            let gm_ref = (m.calculate_id(vgs + h, vds, vbs).0
+                - m.calculate_id(vgs - h, vds, vbs).0)
+                / (2.0 * h);
+            let gds_ref = (m.calculate_id(vgs, vds + h, vbs).0
+                - m.calculate_id(vgs, vds - h, vbs).0)
+                / (2.0 * h);
+            let gmb_ref = (m.calculate_id(vgs, vds, vbs + h).0
+                - m.calculate_id(vgs, vds, vbs - h).0)
+                / (2.0 * h);
+            for (got, want, name) in [
+                (gm, gm_ref, "gm"),
+                (gds, gds_ref, "gds"),
+                (gmb, gmb_ref, "gmb"),
+            ] {
                 let tol = 1e-3 * want.abs().max(1e-9);
                 assert!(
                     (got - want).abs() <= tol,

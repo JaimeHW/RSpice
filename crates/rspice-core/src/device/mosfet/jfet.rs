@@ -6,22 +6,22 @@
 //!
 //! For N-JFET (P-JFET uses opposite polarities):
 //!
-//! **Cutoff** (Vgs - Vto â‰¤ 0):
+//! **Cutoff** (Vgs - Vto ≤ 0):
 //! ```text
 //! Ids = 0
 //! ```
 //!
 //! **Linear** (Vds < Vgs - Vto):
 //! ```text
-//! Ids = Beta * (2*(Vgs-Vto)*Vds - VdsÂ²) * (1 + Lambda*Vds)
+//! Ids = Beta * (2*(Vgs-Vto)*Vds - Vds²) * (1 + Lambda*Vds)
 //! ```
 //!
-//! **Saturation** (Vds â‰¥ Vgs - Vto):
+//! **Saturation** (Vds ≥ Vgs - Vto):
 //! ```text
-//! Ids = Beta * (Vgs - Vto)Â² * (1 + Lambda*Vds)
+//! Ids = Beta * (Vgs - Vto)² * (1 + Lambda*Vds)
 //! ```
 //!
-//! where Beta is typically derived from IDSS: `Beta = IDSS / VtoÂ²`
+//! where Beta is typically derived from IDSS: `Beta = IDSS / Vto²`
 //!
 //! # Example
 //!
@@ -134,7 +134,7 @@ impl MesaLevel2Linearization {
 pub struct JfetParams {
     /// Threshold voltage (V) - negative for N-JFET depletion mode
     pub vto: Value,
-    /// Transconductance coefficient (A/VÂ²)
+    /// Transconductance coefficient (A/V²)
     pub beta: Value,
     /// Channel-length modulation (1/V)
     pub lambda: Value,
@@ -148,9 +148,9 @@ pub struct JfetParams {
     pub pb: Value,
     /// Capacitance grading coefficient
     pub m: Value,
-    /// Drain ohmic resistance (Î©)
+    /// Drain ohmic resistance (Ω)
     pub rd: Value,
-    /// Source ohmic resistance (Î©)
+    /// Source ohmic resistance (Ω)
     pub rs: Value,
     /// Forward bias junction coefficient
     pub fc: Value,

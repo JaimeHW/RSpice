@@ -83,10 +83,7 @@ pub fn font_definitions() -> FontDefinitions {
     );
 
     // Prepend our faces so they take priority; egui defaults stay as fallback.
-    let proportional = fonts
-        .families
-        .entry(FontFamily::Proportional)
-        .or_default();
+    let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
     proportional.insert(0, "plex-sans".to_owned());
 
     let monospace = fonts.families.entry(FontFamily::Monospace).or_default();

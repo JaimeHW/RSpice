@@ -95,8 +95,6 @@ fn write_png(path: &std::path::Path, image: &egui::ColorImage) -> Result<(), Str
     for pixel in &image.pixels {
         data.extend_from_slice(&pixel.to_array());
     }
-    writer
-        .write_image_data(&data)
-        .map_err(|e| e.to_string())?;
+    writer.write_image_data(&data).map_err(|e| e.to_string())?;
     Ok(())
 }

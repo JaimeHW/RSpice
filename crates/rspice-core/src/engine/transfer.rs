@@ -184,9 +184,7 @@ fn source_nodes(netlist: &Netlist, name: &str) -> Result<(String, String), Simul
         .elements
         .iter()
         .find(|element| element.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| {
-            SimulationError::Netlist(format!(".TF element `{name}` not found"))
-        })?;
+        .ok_or_else(|| SimulationError::Netlist(format!(".TF element `{name}` not found")))?;
     match element.nodes.as_slice() {
         [pos, neg, ..] => Ok((pos.clone(), neg.clone())),
         _ => Err(SimulationError::Netlist(format!(
@@ -209,9 +207,7 @@ fn node_voltage(solution: &AcResult, node: &str) -> Result<Value, SimulationErro
         .position(|candidate| candidate.eq_ignore_ascii_case(node))
         .and_then(|idx| solution.voltages.get(idx))
         .map(|value| value.re)
-        .ok_or_else(|| {
-            SimulationError::Netlist(format!(".TF references unknown node `{node}`"))
-        })
+        .ok_or_else(|| SimulationError::Netlist(format!(".TF references unknown node `{node}`")))
 }
 
 fn voltage_difference(

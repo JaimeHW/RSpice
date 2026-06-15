@@ -13,9 +13,7 @@ use egui::Ui;
 use crate::analysis::calculator;
 use crate::common::AppState;
 use crate::state::{AnalysisType, SimulationState};
-use crate::ui::plot::{
-    self, Axis, CursorPair, PlotSpec, Trace, XScale, fmt_si, sample_at,
-};
+use crate::ui::plot::{self, Axis, CursorPair, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::section_header;
@@ -154,7 +152,15 @@ impl StripModel {
     }
 
     fn format_x(&self, x: f64) -> String {
-        fmt_si(x, if self.x_unit.is_empty() { "" } else { self.x_unit }, 3)
+        fmt_si(
+            x,
+            if self.x_unit.is_empty() {
+                ""
+            } else {
+                self.x_unit
+            },
+            3,
+        )
     }
 
     fn format_trace_value(&self, trace: &StripTrace, value: f64) -> String {
@@ -257,7 +263,12 @@ pub(super) fn build_models(
             for signal_index in 0..signal_trace_count {
                 let (signal_name, signal_color, signal_kind, signal_visible) = {
                     let signal = &traces[signal_index];
-                    (signal.name.clone(), signal.color, signal.kind, signal.visible)
+                    (
+                        signal.name.clone(),
+                        signal.color,
+                        signal.kind,
+                        signal.visible,
+                    )
                 };
                 let Some((overlay_index, overlay_waveform)) = overlay_analysis
                     .waveforms
@@ -340,9 +351,8 @@ fn y_range(derived: &mut DerivedSeries, model: &StripModel, phase: bool) -> Opti
         if is_phase != phase || !trace.visible {
             continue;
         }
-        let extremes = derived.range_or(trace_key(model, trace), || {
-            super::finite_extremes(&trace.y)
-        });
+        let extremes =
+            derived.range_or(trace_key(model, trace), || super::finite_extremes(&trace.y));
         if let Some((lo, hi)) = extremes {
             min = min.min(lo);
             max = max.max(hi);
@@ -626,10 +636,8 @@ fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
     }
     let mut action = Action::None;
 
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 34.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 34.0), egui::Sense::hover());
     ui.painter().rect_filled(rect, 0.0, c.bg_panel);
     ui.painter().hline(
         rect.x_range(),
@@ -758,9 +766,10 @@ fn evaluate_expression(
             (Err("expression produced no samples".to_owned()), None)
         }
         Ok(calculator::CalcValue::Scalar(value)) => {
-            let span = analysis.waveforms.first().and_then(|w| {
-                (w.x.len() >= 2).then(|| (w.x[0], w.x[w.x.len() - 1]))
-            });
+            let span = analysis
+                .waveforms
+                .first()
+                .and_then(|w| (w.x.len() >= 2).then(|| (w.x[0], w.x[w.x.len() - 1])));
             match span {
                 Some((x0, x1)) => (
                     Ok((vec![x0, x1].into(), vec![value, value].into())),
@@ -861,7 +870,11 @@ fn expr_cache_key(analysis_index: usize, text: &str) -> u64 {
 }
 
 /// Flip a waveform's visibility on the run, keeping the live copy in sync.
-pub(crate) fn toggle_visibility(state: &mut AppState, analysis_index: usize, waveform_index: usize) {
+pub(crate) fn toggle_visibility(
+    state: &mut AppState,
+    analysis_index: usize,
+    waveform_index: usize,
+) {
     let Some(run_idx) = state.simulation.active_run_idx else {
         return;
     };
@@ -1075,7 +1088,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         (Some(model), Some(a)) => {
             cursor_block(ui, "A", c.accent, &model.format_x(a), &value_rows(model, a));
             if let Some(b) = cursors.b {
-                cursor_block(ui, "B", c.traces[4], &model.format_x(b), &value_rows(model, b));
+                cursor_block(
+                    ui,
+                    "B",
+                    c.traces[4],
+                    &model.format_x(b),
+                    &value_rows(model, b),
+                );
                 cursor_block(
                     ui,
                     "B − A",
@@ -1192,8 +1211,7 @@ fn cursor_block(
             ui.spacing_mut().item_spacing.y = 0.0;
             let width = ui.available_width();
             // Head row.
-            let (head, _) =
-                ui.allocate_exact_size(egui::vec2(width, 24.0), egui::Sense::hover());
+            let (head, _) = ui.allocate_exact_size(egui::vec2(width, 24.0), egui::Sense::hover());
             let painter = ui.painter();
             painter.rect_filled(
                 egui::Rect::from_center_size(
@@ -1294,9 +1312,6 @@ fn measurement_rows(
             rows.push((format!("{} rms", trace.name), fmt(rms)));
         }
     }
-    let refs: Vec<(&str, &str)> = rows
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
+    let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     crate::ui::widgets::measurement_table(ui, &refs);
 }

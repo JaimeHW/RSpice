@@ -95,10 +95,10 @@ impl Diode {
             name,
             node_anode,
             node_cathode,
-            is: 2.52e-9, // Saturation current
-            n: 1.752,    // Emission coefficient
+            is: 2.52e-9,          // Saturation current
+            n: 1.752,             // Emission coefficient
             vt: KOVERQ * REFTEMP, // Thermal voltage at 27C (ngspice REFTEMP)
-            rs: 0.568,   // Series resistance
+            rs: 0.568,            // Series resistance
             bv: None,
             ibv: 1e-6,
 
@@ -334,9 +334,9 @@ impl Diode {
 
         // IS(T) = IS * exp(((T/TNOM)-1)*EG/(N*vt) + (XTI/N)*ln(T/TNOM))
         let vte = self.n * vt;
-        let is_factor =
-            (((temp / tnom) - 1.0) * self.eg / vte + (self.xti / self.n) * (temp / tnom).ln())
-                .exp();
+        let is_factor = (((temp / tnom) - 1.0) * self.eg / vte
+            + (self.xti / self.n) * (temp / tnom).ln())
+        .exp();
         if is_factor.is_finite() && is_factor > 0.0 {
             self.is *= is_factor;
         }
@@ -422,8 +422,7 @@ impl Diode {
                 qd += self.cj0 * f1
                     + czof2
                         * (f3 * (vd - dep_cap_knee)
-                            + (self.m / (2.0 * self.vj))
-                                * (vd * vd - dep_cap_knee * dep_cap_knee));
+                            + (self.m / (2.0 * self.vj)) * (vd * vd - dep_cap_knee * dep_cap_knee));
                 capd += czof2 * (f3 + self.m * vd / self.vj);
             }
         }
@@ -692,8 +691,7 @@ mod tests {
         d.set_temperature(temp, tnom);
 
         let vt = KOVERQ * temp;
-        let expected = 1e-14
-            * (((temp / tnom) - 1.0) * 1.11 / vt + 3.0 * (temp / tnom).ln()).exp();
+        let expected = 1e-14 * (((temp / tnom) - 1.0) * 1.11 / vt + 3.0 * (temp / tnom).ln()).exp();
         assert!(
             (d.is - expected).abs() <= expected * 1e-12,
             "is={:e} expected={:e}",

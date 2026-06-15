@@ -86,14 +86,12 @@ pub(super) fn parse_source_spec(
             dc_value,
             transient: Box::new(transient),
         },
-        (dc_value, Some((ac_magnitude, ac_phase)), Some(transient)) => {
-            SourceSpec::DcAcTransient {
-                dc_value: dc_value.unwrap_or(0.0),
-                ac_magnitude,
-                ac_phase,
-                transient: Box::new(transient),
-            }
-        }
+        (dc_value, Some((ac_magnitude, ac_phase)), Some(transient)) => SourceSpec::DcAcTransient {
+            dc_value: dc_value.unwrap_or(0.0),
+            ac_magnitude,
+            ac_phase,
+            transient: Box::new(transient),
+        },
     })
 }
 

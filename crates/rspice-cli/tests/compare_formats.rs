@@ -241,7 +241,11 @@ fn bless_updates_the_golden_file() {
         ])
         .output()
         .expect("run rspice");
-    assert_eq!(output.status.code(), Some(0), "blessed golden must now match");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "blessed golden must now match"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -169,9 +169,7 @@ impl SimulationController {
                 output_node: output_node.clone(),
                 reference_node: state.sim_setup.noise.reference.trim().to_string(),
                 input_source: state.sim_setup.noise.input.trim().to_string(),
-                sweep_type: Self::map_ac_sweep(Self::map_frequency_sweep(
-                    state.sim_setup.ac.sweep,
-                )),
+                sweep_type: Self::map_ac_sweep(Self::map_frequency_sweep(state.sim_setup.ac.sweep)),
                 num_points: *points_per_decade,
                 start_freq: *start_freq,
                 stop_freq: *stop_freq,

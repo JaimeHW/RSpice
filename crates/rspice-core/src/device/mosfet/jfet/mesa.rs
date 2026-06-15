@@ -930,8 +930,7 @@ impl Jfet {
                 ids_fwd += a1 * (d_corr * cgd - cgs_g);
                 gds_fwd += a1 * (d_corr * gmd + f_corr * (vgte * dvdsevds_c + e_corr * sigma));
                 gm_fwd +=
-                    a1 * (d_corr * gmg + f_corr * (vgte * dvdsevgs_c + e_corr * delvgtvgs)
-                        - ggs_g);
+                    a1 * (d_corr * gmg + f_corr * (vgte * dvdsevgs_c + e_corr * delvgtvgs) - ggs_g);
             }
 
             Some(Hfet1GateEval {

@@ -100,11 +100,7 @@ impl<'a> RunContext<'a> {
 
     /// Record evaluated .MEAS results: print them under `--meas` and keep
     /// them for report files and the exit status.
-    fn record_measurements(
-        &self,
-        analysis: &str,
-        results: Vec<rspice_core::MeasureResult>,
-    ) {
+    fn record_measurements(&self, analysis: &str, results: Vec<rspice_core::MeasureResult>) {
         if results.is_empty() {
             return;
         }
@@ -359,7 +355,10 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     let plan = rspice_core::netlist::multi_run::expand_multi_run(&source);
     let multi_run = plan.len() > 1;
     if multi_run && !quiet {
-        println!("Multi-run deck: {} runs (.alter/.data expansion)", plan.len());
+        println!(
+            "Multi-run deck: {} runs (.alter/.data expansion)",
+            plan.len()
+        );
     }
 
     let start_time = Instant::now();
@@ -382,24 +381,22 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
             .map_err(|e| CliError::InternalError {
                 message: format!("failed to build the multi-run worker pool: {e}"),
             })?;
-        let outcomes: Vec<Result<(SimulationReport, Vec<PathBuf>), CliError>> = pool.install(|| {
-            use rayon::prelude::*;
-            plan.par_iter()
-                .map(|deck| {
-                    let netlist = load_netlist_from_source(&deck.source, &args, config)?;
-                    run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
-                })
-                .collect()
-        });
+        let outcomes: Vec<Result<(SimulationReport, Vec<PathBuf>), CliError>> =
+            pool.install(|| {
+                use rayon::prelude::*;
+                plan.par_iter()
+                    .map(|deck| {
+                        let netlist = load_netlist_from_source(&deck.source, &args, config)?;
+                        run_deck(&netlist, &args, config, false, true, deck.label.as_deref())
+                    })
+                    .collect()
+            });
         for (deck, outcome) in plan.iter().zip(outcomes) {
             let label = deck.label.as_deref().unwrap_or("base");
             let (report, deck_outputs) = outcome?;
             if !quiet {
                 match &report.error {
-                    None => println!(
-                        "  ✓ {label} ({:.3}s)",
-                        report.duration_secs
-                    ),
+                    None => println!("  ✓ {label} ({:.3}s)", report.duration_secs),
                     Some(error) => println!("  ✗ {label}: {error}"),
                 }
             }
@@ -412,10 +409,7 @@ pub fn execute(args: RunArgs, config: &Config, verbose: bool, quiet: bool) -> Re
     } else {
         for deck in &plan {
             if multi_run && !quiet {
-                println!(
-                    "\n=== run: {} ===",
-                    deck.label.as_deref().unwrap_or("base")
-                );
+                println!("\n=== run: {} ===", deck.label.as_deref().unwrap_or("base"));
             }
             let netlist = load_netlist_from_source(&deck.source, &args, config)?;
             let (report, deck_outputs) = run_deck(
@@ -547,8 +541,8 @@ fn write_run_summary(
         return Ok(());
     }
 
-    let text = serde_json::to_string_pretty(&json)
-        .map_err(|e| CliError::output_json_error(path, e))?;
+    let text =
+        serde_json::to_string_pretty(&json).map_err(|e| CliError::output_json_error(path, e))?;
     std::fs::write(path, text + "\n").map_err(|e| CliError::output_error(path, e))?;
     Ok(())
 }
@@ -778,9 +772,12 @@ fn load_netlist_from_source(
         // and must be visible at parse time (simple `{param}` references are
         // resolved while parsing). Rewrite the include-expanded source so the
         // override is indistinguishable from a deck edit, then re-parse.
-        let source = netlist.source_text.clone().ok_or_else(|| CliError::InternalError {
-            message: "netlist source unavailable for --define substitution".to_string(),
-        })?;
+        let source = netlist
+            .source_text
+            .clone()
+            .ok_or_else(|| CliError::InternalError {
+                message: "netlist source unavailable for --define substitution".to_string(),
+            })?;
         let rewritten = apply_defines_to_source(&source, &defines);
         netlist = Netlist::parse_with_path(&rewritten, &args.input).map_err(map_parse_error)?;
         for (name, value) in &defines {
@@ -867,7 +864,10 @@ fn parse_define(define: &str) -> Result<(String, f64), CliError> {
         .ok_or_else(|| invalid(format!("malformed --define '{}'", define)))?;
     let name = name.trim();
     if name.is_empty() {
-        return Err(invalid(format!("missing parameter name in --define '{}'", define)));
+        return Err(invalid(format!(
+            "missing parameter name in --define '{}'",
+            define
+        )));
     }
 
     let value = rspice_core::netlist::lexer::parse_spice_value(value.trim())
@@ -1061,9 +1061,7 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
             });
         }
         let distribution = match ctx.args.mc_distribution.as_deref() {
-            Some("uniform") => {
-                rspice_core::analysis::Distribution::Uniform { tolerance: spread }
-            }
+            Some("uniform") => rspice_core::analysis::Distribution::Uniform { tolerance: spread },
             Some("worst-case") => {
                 rspice_core::analysis::Distribution::WorstCase { tolerance: spread }
             }
@@ -1102,9 +1100,10 @@ fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, Cl
         return Ok(true);
     }
 
-    if let (Some(output_node), Some(param)) =
-        (ctx.args.sens_output.as_deref(), ctx.args.sens_param.as_deref())
-    {
+    if let (Some(output_node), Some(param)) = (
+        ctx.args.sens_output.as_deref(),
+        ctx.args.sens_param.as_deref(),
+    ) {
         let output_node = resolve_node(ctx, output_node, "--sens-output")?;
         frequency::run_sensitivity(ctx, output_node, param, ctx.args.sens_value.unwrap_or(1.0))?;
         return Ok(true);

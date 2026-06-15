@@ -270,7 +270,11 @@ impl<'a> Dialog<'a> {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
                     if let Some(label) = self.ghost {
-                        if crate::ui::widgets::Button::new(label).ghost().show(ui).clicked() {
+                        if crate::ui::widgets::Button::new(label)
+                            .ghost()
+                            .show(ui)
+                            .clicked()
+                        {
                             choice = DialogChoice::Ghost;
                         }
                     }
@@ -323,13 +327,11 @@ pub fn dialog_tabs(ui: &mut Ui, tabs: &[&str], active: &mut usize) {
                 },
             );
             let galley = ui.fonts(|f| f.layout_job(job));
-            let (rect, response) = ui.allocate_exact_size(
-                vec2(galley.size().x + 22.0, 24.0),
-                Sense::click(),
-            );
-            let hover = ui
-                .ctx()
-                .animate_bool_with_time(response.id, response.hovered() && !selected, 0.16);
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(galley.size().x + 22.0, 24.0), Sense::click());
+            let hover =
+                ui.ctx()
+                    .animate_bool_with_time(response.id, response.hovered() && !selected, 0.16);
             let color = if selected {
                 c.accent
             } else {

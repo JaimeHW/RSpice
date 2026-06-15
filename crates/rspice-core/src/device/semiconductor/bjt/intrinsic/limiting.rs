@@ -295,8 +295,7 @@ impl Bjt {
         previous_iterate_available: bool,
     ) -> IntrinsicTerminalState {
         let raw = [
-            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
-            state.vrth,
+            state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
         let previous = if previous_iterate_available {
             [

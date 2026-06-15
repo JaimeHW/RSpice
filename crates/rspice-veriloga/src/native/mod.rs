@@ -24,8 +24,8 @@ pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
 
     // A compiler panic (e.g. a register-allocator limit on a pathological
     // function) must degrade to the interpreter, never kill a simulation
-    let compiled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        match JitCompiler::new() {
+    let compiled =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match JitCompiler::new() {
             Ok(compiler) => match compiler.compile(model) {
                 Ok(native_model) => {
                     log::info!(
@@ -46,8 +46,7 @@ pub fn try_compile_native(model: &CompiledModel) -> Option<NativeModel> {
                 log::warn!("[JIT] Failed to create compiler: {}", e);
                 None
             }
-        }
-    }));
+        }));
     match compiled {
         Ok(result) => result,
         Err(_) => {

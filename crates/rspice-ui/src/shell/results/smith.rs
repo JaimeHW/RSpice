@@ -138,7 +138,13 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .layout(egui::Layout::top_down(egui::Align::Min)),
     );
 
-    let response = plot::show(&mut plot_ui, &spec, &mut state.shell.results.cache, None, None);
+    let response = plot::show(
+        &mut plot_ui,
+        &spec,
+        &mut state.shell.results.cache,
+        None,
+        None,
+    );
 
     // Interactive readout: nearest locus point on hover, click to pin.
     // The chart space IS the Γ plane, so the conversion to impedance is
@@ -151,12 +157,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let mut best = 14.0f32 * 14.0;
         for (slot, (_, re, im)) in arrays.iter().enumerate() {
             for i in 0..re.len() {
-                let pos = super::xy_screen_pos(
-                    response.plot_rect,
-                    (re[i], im[i]),
-                    ranges.0,
-                    ranges.1,
-                );
+                let pos =
+                    super::xy_screen_pos(response.plot_rect, (re[i], im[i]), ranges.0, ranges.1);
                 let d2 = pos.distance_sq(pointer);
                 if d2 < best {
                     best = d2;
@@ -187,23 +189,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .rf_pin
         .get(&super::ResultViewer::Smith)
         .copied()
-        .filter(|(slot, i)| {
-            arrays
-                .get(*slot)
-                .is_some_and(|(_, re, _)| *i < re.len())
-        });
+        .filter(|(slot, i)| arrays.get(*slot).is_some_and(|(_, re, _)| *i < re.len()));
     let target = hovered.or(pinned);
 
     if let Some((slot, i)) = target {
         let (trace_index, re, im) = &arrays[slot];
         let gamma_re = re[i];
         let gamma_im = im[i];
-        let pos = super::xy_screen_pos(
-            response.plot_rect,
-            (gamma_re, gamma_im),
-            ranges.0,
-            ranges.1,
-        );
+        let pos =
+            super::xy_screen_pos(response.plot_rect, (gamma_re, gamma_im), ranges.0, ranges.1);
         let color = c.traces[slot % c.traces.len()];
         let painter = plot_ui.painter();
         if pinned == Some((slot, i)) {
@@ -233,10 +227,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         };
         let rows = [
             ("f".to_owned(), fmt_si(frequency, "Hz", 2)),
-            (
-                "Γ".to_owned(),
-                format!("{mag:.3} ∠ {phase_deg:.1}°"),
-            ),
+            ("Γ".to_owned(), format!("{mag:.3} ∠ {phase_deg:.1}°")),
             (
                 "Z".to_owned(),
                 if r.is_finite() {
@@ -264,7 +255,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     section_header(ui, "S-parameters", None);
     let smith = &state.analysis.smith_chart_state;
-    let Some(trace) = smith.traces.iter().find(|tr| tr.visible && !tr.points.is_empty())
+    let Some(trace) = smith
+        .traces
+        .iter()
+        .find(|tr| tr.visible && !tr.points.is_empty())
     else {
         super::panel_note(ui, "Trace metrics appear once S-parameter data is loaded.");
         return;

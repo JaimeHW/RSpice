@@ -49,9 +49,7 @@ pub fn render_pwl_editor(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditorRe
             if Button::new("+ Add point").ghost().show(ui).clicked() {
                 state.adding_point = true;
             }
-            if state.selected_row.is_some()
-                && Button::new("Remove").ghost().show(ui).clicked()
-            {
+            if state.selected_row.is_some() && Button::new("Remove").ghost().show(ui).clicked() {
                 state.delete_selected();
                 result = PwlEditorResult::Modified;
             }
@@ -103,10 +101,8 @@ fn render_new_point_row(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pw
 fn render_table_header(ui: &mut Ui, state: &PwlEditorState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), 20.0),
-        egui::Sense::hover(),
-    );
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
     let painter = ui.painter();
     let header = theme::mono(tokens::FS_0, FontWeight::Regular);
     let cell = ((rect.width() - INDEX_COL - 12.0) * 0.5).max(70.0);
@@ -161,8 +157,7 @@ fn render_points_table(ui: &mut Ui, state: &mut PwlEditorState, result: &mut Pwl
                         egui::Sense::click(),
                     );
                     if is_selected {
-                        ui.painter()
-                            .rect_filled(index_rect, t.radius, c.accent_dim);
+                        ui.painter().rect_filled(index_rect, t.radius, c.accent_dim);
                     } else if index_response.hovered() {
                         ui.painter().rect_filled(index_rect, t.radius, c.bg_hover);
                     }

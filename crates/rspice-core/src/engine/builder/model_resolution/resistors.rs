@@ -18,10 +18,14 @@ pub(in crate::engine::builder) fn resolve_resistor_flicker_noise(
     let Some(model_def) = find_model_def(netlist, model_name) else {
         return Ok(None);
     };
-    let (eval_ctx, _, _) =
-        resolve_resistor_eval_context(netlist, Some(model_def), instance_params, temperature_kelvin)?;
-    let Some(kf) = resolve_model_param(model_def, &["KF"], &eval_ctx)?
-        .filter(|v| v.is_finite() && *v > 0.0)
+    let (eval_ctx, _, _) = resolve_resistor_eval_context(
+        netlist,
+        Some(model_def),
+        instance_params,
+        temperature_kelvin,
+    )?;
+    let Some(kf) =
+        resolve_model_param(model_def, &["KF"], &eval_ctx)?.filter(|v| v.is_finite() && *v > 0.0)
     else {
         return Ok(None);
     };

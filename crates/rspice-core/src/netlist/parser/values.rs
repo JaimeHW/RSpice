@@ -421,14 +421,12 @@ pub(super) fn take_deferrable_value(
     if defer {
         match &stream.peek().kind {
             TokenKind::Expression(_) => {
-                return take_value_expression_string(stream, params)
-                    .map(DeferrableValue::Deferred);
+                return take_value_expression_string(stream, params).map(DeferrableValue::Deferred);
             }
             TokenKind::Minus | TokenKind::Plus
                 if matches!(stream.peek_n(1).kind, TokenKind::Expression(_)) =>
             {
-                return take_value_expression_string(stream, params)
-                    .map(DeferrableValue::Deferred);
+                return take_value_expression_string(stream, params).map(DeferrableValue::Deferred);
             }
             TokenKind::Ident(name) => {
                 // Engineering-suffixed numerics ("1u", "2.5k") resolve below;

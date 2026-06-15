@@ -58,7 +58,10 @@ fn drain_current_at(model: &Path, vgs: f64, vds: f64, temp_c: Option<f64>) -> f6
         .iter()
         .position(|n| n.eq_ignore_ascii_case("vd"))
         .expect("vd branch");
-    -result.branch_currents[idx].last().copied().expect("samples")
+    -result.branch_currents[idx]
+        .last()
+        .copied()
+        .expect("samples")
 }
 
 fn assert_within(label: &str, got: f64, oracle: f64, rel_tol: f64) {
@@ -118,7 +121,11 @@ fn bsim4_temperature_law_tracks_ngspice_oracle() {
 
     // ngspice-46, .options tnom=25 (matching the VA's DEFAULT_TNOM),
     // vgs=1.0 vds=1.2: mobility-dominated negative tempco
-    for (temp_c, oracle) in [(-40.0, 6.124726e-4), (27.0, 5.377553e-4), (125.0, 4.425617e-4)] {
+    for (temp_c, oracle) in [
+        (-40.0, 6.124726e-4),
+        (27.0, 5.377553e-4),
+        (125.0, 4.425617e-4),
+    ] {
         assert_within(
             &format!("Id(vgs=1.0, vds=1.2, T={temp_c}C)"),
             drain_current_at(&model, 1.0, 1.2, Some(temp_c)),

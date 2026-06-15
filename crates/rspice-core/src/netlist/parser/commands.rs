@@ -360,8 +360,7 @@ pub(super) fn parse_save_command(
                     _ => {
                         return Err(ParseError::Syntax {
                             line: line_num,
-                            message: "Expected device name after '@' in save directive"
-                                .to_string(),
+                            message: "Expected device name after '@' in save directive".to_string(),
                         });
                     }
                 };
@@ -383,7 +382,9 @@ pub(super) fn parse_save_command(
                         }
                     };
                     stream.consume(&TokenKind::RBracket);
-                    saves.signals.push(SaveSignal::DeviceParam { device, param });
+                    saves
+                        .signals
+                        .push(SaveSignal::DeviceParam { device, param });
                 } else {
                     saves.signals.push(SaveSignal::Raw(device));
                 }
@@ -439,9 +440,7 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
             return None;
         }
         return Some(match inner.split_once(',') {
-            Some((a, b)) => {
-                SaveSignal::VoltageDiff(a.trim().to_string(), b.trim().to_string())
-            }
+            Some((a, b)) => SaveSignal::VoltageDiff(a.trim().to_string(), b.trim().to_string()),
             None => SaveSignal::Voltage(inner.to_string()),
         });
     }
@@ -554,9 +553,7 @@ pub(super) fn parse_options_command(
                 // compatibility knobs misleads users into thinking they took
                 // effect, so say so once per key.
                 if unknown_warned.insert(format!(".options {key_upper}")) {
-                    log::warn!(
-                        "line {line_num}: unknown .options key '{key}' ignored"
-                    );
+                    log::warn!("line {line_num}: unknown .options key '{key}' ignored");
                 }
                 if has_equals
                     && try_value(stream, params).is_none()
@@ -877,8 +874,7 @@ pub(super) fn parse_meas_command(
                                 if !stream.consume(&TokenKind::Equals) {
                                     return Err(ParseError::Syntax {
                                         line: line_num,
-                                        message: "Expected '=' after AT in .MEAS DERIV"
-                                            .to_string(),
+                                        message: "Expected '=' after AT in .MEAS DERIV".to_string(),
                                     });
                                 }
                                 at = Some(expect_value(stream, line_num, params)?);

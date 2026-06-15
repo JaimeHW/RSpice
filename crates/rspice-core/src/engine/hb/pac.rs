@@ -66,8 +66,10 @@ impl Engine {
         // coupling G[k-m] over the sideband span exists, with headroom for
         // the drive itself.
         let span = (config.sideband_max - config.sideband_min).unsigned_abs() as usize;
-        let extreme =
-            (config.sideband_min.unsigned_abs().max(config.sideband_max.unsigned_abs())) as usize;
+        let extreme = (config
+            .sideband_min
+            .unsigned_abs()
+            .max(config.sideband_max.unsigned_abs())) as usize;
         let op_harmonics = span.max(extreme).max(8);
 
         let hb_config = HbConfig::new(config.fundamental_freq)
@@ -130,11 +132,10 @@ impl Engine {
             result.set_output_node(out);
         }
 
-        let output_idx = config.output_node.as_deref().and_then(|name| {
-            node_names
-                .iter()
-                .position(|n| n.eq_ignore_ascii_case(name))
-        });
+        let output_idx = config
+            .output_node
+            .as_deref()
+            .and_then(|name| node_names.iter().position(|n| n.eq_ignore_ascii_case(name)));
 
         // Excitation columns: the input source's own frequency (m = 0)
         // always; every input sideband when a conversion matrix is wanted.

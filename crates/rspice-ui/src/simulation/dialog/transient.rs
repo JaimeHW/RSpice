@@ -2,7 +2,6 @@
 //!
 //! Configuration for time-domain transient analysis (.tran).
 
-
 // =============================================================================
 // Integration Method
 // =============================================================================
@@ -181,7 +180,6 @@ impl TransientConfig {
         Ok(())
     }
 }
-
 
 fn format_time(time: f64) -> String {
     let abs = time.abs();

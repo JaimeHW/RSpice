@@ -327,7 +327,7 @@ pub struct EyeMetrics {
     pub eye_width_ui: Value,
     /// Eye width in seconds
     pub eye_width_time: Value,
-    /// Eye area (height Ã— width, normalized)
+    /// Eye area (height × width, normalized)
     pub eye_area: Value,
     /// Crossing point histogram (for jitter estimation)
     pub crossing_histogram: Vec<usize>,
@@ -391,11 +391,11 @@ impl JitterAnalysis {
         let tie_range = tie_max - tie_min;
 
         // Estimate DJ from tail behavior
-        // DJ-pp â‰ˆ TIE range - 6Ã—RJ (removes 99.7% Gaussian contribution)
+        // DJ-pp ≈ TIE range - 6×RJ (removes 99.7% Gaussian contribution)
         let dj_pp = (tie_range - 6.0 * rj_rms).max(0.0);
 
         // Total jitter at target BER
-        // TJ = DJ + 2 Ã— Q Ã— RJ, where Q corresponds to BER
+        // TJ = DJ + 2 × Q × RJ, where Q corresponds to BER
         let q_factor = Self::ber_to_q(target_ber);
         let tj = dj_pp + 2.0 * q_factor * rj_rms;
 
@@ -421,7 +421,7 @@ impl JitterAnalysis {
 
     /// Convert BER to Q-factor
     fn ber_to_q(ber: Value) -> Value {
-        // Q â‰ˆ sqrt(2) Ã— erfc_inv(2Ã—BER)
+        // Q ≈ sqrt(2) × erfc_inv(2×BER)
         // Approximation for common BER values
         if ber <= 1e-15 {
             8.2 // Q for BER=1e-16
@@ -460,7 +460,7 @@ impl JitterAnalysis {
             max_mag = max_mag.max(mag);
         }
 
-        // PJ-pp â‰ˆ 2 Ã— peak magnitude
+        // PJ-pp ≈ 2 × peak magnitude
         2.0 * max_mag
     }
 
@@ -539,7 +539,7 @@ impl BathtubCurve {
             } else {
                 // Q = distance / RJ
                 let q = dist_from_edge / rj;
-                // BER â‰ˆ erfc(Q/sqrt(2))/2 â‰ˆ exp(-QÂ²/2) for large Q
+                // BER ≈ erfc(Q/sqrt(2))/2 ≈ exp(-Q²/2) for large Q
                 let log_ber_val = -0.5 * q * q / std::f64::consts::LN_10;
                 log_ber.push(log_ber_val.max(-20.0)); // Cap at BER=1e-20
             }

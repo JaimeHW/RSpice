@@ -175,7 +175,6 @@ impl EnvelopeDialogState {
             *self = Self::from_config(&EnvelopeConfig::default());
         }
     }
-
 }
 
 fn format_freq(f: f64) -> String {

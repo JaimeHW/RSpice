@@ -160,9 +160,15 @@ fn multi_run_expansion_survives_chaos() {
 
 #[test]
 fn spef_parse_survives_chaos() {
-    chaos("SpefFile::parse", &[SPEF_SEED], 0x5EED_0003, 8000, |input| {
-        let _ = SpefFile::parse(input);
-    });
+    chaos(
+        "SpefFile::parse",
+        &[SPEF_SEED],
+        0x5EED_0003,
+        8000,
+        |input| {
+            let _ = SpefFile::parse(input);
+        },
+    );
 }
 
 #[test]
@@ -175,6 +181,9 @@ fn spef_parse_survives_every_truncation() {
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _ = SpefFile::parse(input);
         }));
-        assert!(result.is_ok(), "SPEF parse panicked on truncation:\n{input}");
+        assert!(
+            result.is_ok(),
+            "SPEF parse panicked on truncation:\n{input}"
+        );
     }
 }

@@ -97,8 +97,7 @@ impl KluSolver {
     /// is discovered during the first `factor`.
     pub fn analyze(&mut self, n: usize, col_ptr: &[usize], row_idx: &[usize]) {
         self.n = n;
-        self.col_perm = amd_order(n, col_ptr, row_idx)
-            .unwrap_or_else(|| (0..n).collect());
+        self.col_perm = amd_order(n, col_ptr, row_idx).unwrap_or_else(|| (0..n).collect());
         self.row_perm.clear();
         self.row_perm_inv.clear();
         self.factored = false;
@@ -385,10 +384,7 @@ impl KluSolver {
             }
             col_max = col_max.max(pivot.abs());
 
-            if pivot == 0.0
-                || !pivot.is_finite()
-                || pivot.abs() < REFACTOR_GROWTH_TOL * col_max
-            {
+            if pivot == 0.0 || !pivot.is_finite() || pivot.abs() < REFACTOR_GROWTH_TOL * col_max {
                 self.factored = false;
                 return Err(SolverError::PivotGrowth);
             }
@@ -489,9 +485,8 @@ mod tests {
         let mut m: Vec<Vec<Value>> = a.to_vec();
         let mut x: Vec<Value> = b.to_vec();
         for col in 0..n {
-            let piv = (col..n).max_by(|&i, &j| {
-                m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap()
-            })?;
+            let piv =
+                (col..n).max_by(|&i, &j| m[i][col].abs().partial_cmp(&m[j][col].abs()).unwrap())?;
             if m[piv][col].abs() < 1e-300 {
                 return None;
             }
@@ -535,7 +530,10 @@ mod tests {
 
     /// Random circuit-like sparse matrix: dominant diagonal plus a few
     /// symmetric-ish couplings and one asymmetric entry per column.
-    fn random_system(rng: &mut Rng, n: usize) -> (Vec<usize>, Vec<usize>, Vec<Value>, Vec<Vec<Value>>) {
+    fn random_system(
+        rng: &mut Rng,
+        n: usize,
+    ) -> (Vec<usize>, Vec<usize>, Vec<Value>, Vec<Vec<Value>>) {
         let mut dense = vec![vec![0.0; n]; n];
         for j in 0..n {
             dense[j][j] = 1.0 + 4.0 * rng.unit();

@@ -1,4 +1,4 @@
-﻿use super::super::point::Point;
+use super::super::point::Point;
 use super::ComponentType;
 
 impl ComponentType {
@@ -153,9 +153,10 @@ impl ComponentType {
             | ComponentType::XspiceInverter
             | ComponentType::XspiceBuffer
             | ComponentType::XspiceAdcBridge
-            | ComponentType::XspiceDacBridge => {
-                &[("in", Point { x: -20, y: 0 }), ("out", Point { x: 20, y: 0 })]
-            }
+            | ComponentType::XspiceDacBridge => &[
+                ("in", Point { x: -20, y: 0 }),
+                ("out", Point { x: 20, y: 0 }),
+            ],
             // (40, 20): hw 20, hh/2 5
             ComponentType::XspiceSummer
             | ComponentType::XspiceMultiplier

@@ -148,7 +148,10 @@ impl SpefFile {
                     Ok(()) => report.rewired_pins += 1,
                     Err(reason) => {
                         report.skipped_pins += 1;
-                        log::warn!("SPEF: pin {inst}:{pin} on net {} skipped: {reason}", net.name);
+                        log::warn!(
+                            "SPEF: pin {inst}:{pin} on net {} skipped: {reason}",
+                            net.name
+                        );
                     }
                 }
             }
@@ -254,8 +257,9 @@ fn terminal_index(
             .position(|port| *port == pin_upper),
         ElementKind::Mosfet { .. } => position_in(&["D", "G", "S", "B"], &pin_upper),
         ElementKind::Bjt { .. } => position_in(&["C", "B", "E", "S"], &pin_upper),
-        ElementKind::Diode { .. } => position_in(&["A", "K"], &pin_upper)
-            .or_else(|| position_in(&["P", "N"], &pin_upper)),
+        ElementKind::Diode { .. } => {
+            position_in(&["A", "K"], &pin_upper).or_else(|| position_in(&["P", "N"], &pin_upper))
+        }
         ElementKind::Resistor { .. }
         | ElementKind::Capacitor { .. }
         | ElementKind::Inductor { .. } => position_in(&["1", "2"], &pin_upper)
@@ -342,9 +346,7 @@ impl<'a> Parser<'a> {
             let keyword = fields[0].to_ascii_uppercase();
 
             // Name-map entries: `*<index> <name>`.
-            if in_name_map
-                && let Some(index) = parse_map_index(fields[0])
-            {
+            if in_name_map && let Some(index) = parse_map_index(fields[0]) {
                 if let Some(name) = fields.get(1) {
                     self.name_map.insert(index, (*name).to_owned());
                 }
@@ -364,13 +366,21 @@ impl<'a> Parser<'a> {
                 }
                 "*C_UNIT" => {
                     in_name_map = false;
-                    self.cap_scale = self.parse_unit(&fields, &[("FF", 1e-15), ("PF", 1e-12),
-                        ("NF", 1e-9), ("UF", 1e-6), ("F", 1.0)])?;
+                    self.cap_scale = self.parse_unit(
+                        &fields,
+                        &[
+                            ("FF", 1e-15),
+                            ("PF", 1e-12),
+                            ("NF", 1e-9),
+                            ("UF", 1e-6),
+                            ("F", 1.0),
+                        ],
+                    )?;
                 }
                 "*R_UNIT" => {
                     in_name_map = false;
-                    self.res_scale = self.parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3),
-                        ("MOHM", 1e6)])?;
+                    self.res_scale =
+                        self.parse_unit(&fields, &[("OHM", 1.0), ("KOHM", 1e3), ("MOHM", 1e6)])?;
                 }
                 "*NAME_MAP" => in_name_map = true,
                 "*PORTS" | "*PHYSICAL_PORTS" => in_name_map = false,
@@ -418,7 +428,9 @@ impl<'a> Parser<'a> {
                     section = NetSection::None;
                 }
                 "*P" | "*I" if section == NetSection::Conn => {
-                    let Some(net) = current.as_mut() else { continue };
+                    let Some(net) = current.as_mut() else {
+                        continue;
+                    };
                     let node_field = fields
                         .get(1)
                         .ok_or_else(|| self.error("connection entry without a node"))?;
@@ -432,7 +444,9 @@ impl<'a> Parser<'a> {
                     // Internal-node coordinates: topology only, no action.
                 }
                 _ if section == NetSection::Cap => {
-                    let Some(net) = current.as_mut() else { continue };
+                    let Some(net) = current.as_mut() else {
+                        continue;
+                    };
                     // `id node value` (ground) or `id node node value`.
                     match fields.len() {
                         3 => {
@@ -444,7 +458,11 @@ impl<'a> Parser<'a> {
                             let farads = self.parse_value(fields[3])? * self.cap_scale;
                             let a = self.parse_node_ref(fields[1]);
                             let b = self.parse_node_ref(fields[2]);
-                            net.caps.push(Cap { a, b: Some(b), farads });
+                            net.caps.push(Cap {
+                                a,
+                                b: Some(b),
+                                farads,
+                            });
                         }
                         _ => {
                             return Err(self.error(format!(
@@ -454,11 +472,12 @@ impl<'a> Parser<'a> {
                     }
                 }
                 _ if section == NetSection::Res => {
-                    let Some(net) = current.as_mut() else { continue };
+                    let Some(net) = current.as_mut() else {
+                        continue;
+                    };
                     if fields.len() != 4 {
-                        return Err(self.error(format!(
-                            "malformed *RES entry `{line}` (expected 4 fields)"
-                        )));
+                        return Err(self
+                            .error(format!("malformed *RES entry `{line}` (expected 4 fields)")));
                     }
                     let ohms = self.parse_value(fields[3])? * self.res_scale;
                     let a = self.parse_node_ref(fields[1]);
@@ -475,11 +494,7 @@ impl<'a> Parser<'a> {
         Ok(SpefFile { nets })
     }
 
-    fn parse_unit(
-        &self,
-        fields: &[&str],
-        table: &[(&str, Value)],
-    ) -> Result<Value, ParseError> {
+    fn parse_unit(&self, fields: &[&str], table: &[(&str, Value)]) -> Result<Value, ParseError> {
         let multiplier: Value = fields
             .get(1)
             .and_then(|f| f.parse().ok())

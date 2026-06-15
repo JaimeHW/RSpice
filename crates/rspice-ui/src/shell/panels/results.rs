@@ -19,10 +19,10 @@ pub fn left(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let run_label = state
-        .simulation
-        .active_run()
-        .map_or_else(|| "Signals".to_owned(), |run| format!("Signals — run #{}", run.id));
+    let run_label = state.simulation.active_run().map_or_else(
+        || "Signals".to_owned(),
+        |run| format!("Signals — run #{}", run.id),
+    );
     section_header(ui, &run_label, None);
 
     let Some(run_idx) = state.simulation.active_run_idx else {

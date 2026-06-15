@@ -51,9 +51,7 @@ pub mod temp;
 pub use device::{Bsim3v3ChargeMatrix, Bsim3v3Device};
 pub use eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
 pub use params::{Binned, Bsim3v3Model};
-pub use temp::{
-    Bsim3v3Geometry, Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep, SizeDepCache,
-};
+pub use temp::{Bsim3v3Geometry, Bsim3v3InstTemp, Bsim3v3ModelTemp, Bsim3v3SizeDep, SizeDepCache};
 
 use crate::Value;
 use crate::device::mosfet::Mosfet;
@@ -228,7 +226,13 @@ impl Bsim3v3 {
 
         let mut check = false;
         if vds >= 0.0 {
-            vbs = pnjlim(vbs, old.vbs, common::CONST_VT0, self.model_temp.vcrit, &mut check);
+            vbs = pnjlim(
+                vbs,
+                old.vbs,
+                common::CONST_VT0,
+                self.model_temp.vcrit,
+                &mut check,
+            );
         } else {
             let vbd_old = old.vbs - old.vds;
             let vbd = pnjlim(

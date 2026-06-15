@@ -343,7 +343,7 @@ pub enum IrExpr {
     },
     /// zi_* - z-domain (sampled-data) filter: the input samples every
     /// `period` seconds and the difference equation output holds between
-    /// samples. Coefficients ascend in zâ»Â¹.
+    /// samples. Coefficients ascend in z⁻¹.
     ZiFilter {
         expr: Box<IrExpr>,
         numerator: Vec<f64>,
@@ -428,7 +428,7 @@ pub struct NoiseSourceDef {
     /// with the program's instance-static condition)
     pub equation_index: usize,
     /// Power spectral density at the operating point, including any
-    /// multiplicative amplitude squared (AÂ²/Hz, or VÂ²/Hz for potential
+    /// multiplicative amplitude squared (A²/Hz, or V²/Hz for potential
     /// contributions)
     pub psd: IrExpr,
     /// Flicker frequency exponent (None = white): S(f) = psd / f^exp
@@ -499,7 +499,9 @@ impl DeviceIR {
 
         // Attach aliasparam names to their target parameters
         for alias in &module.param_aliases {
-            ir.parameters[alias.target].aliases.push(alias.alias.clone());
+            ir.parameters[alias.target]
+                .aliases
+                .push(alias.alias.clone());
         }
 
         // Build variables
@@ -560,15 +562,11 @@ impl DeviceIR {
         // (min,max) node pair -> (ordinal, oriented positive node)
         let mut branch_table: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
         for contrib in &module.contributions {
-            let branch_ref =
-                Self::parse_branch_name(&contrib.branch, &ctx).ok_or_else(|| {
-                    crate::error::CodeGenError::new(
-                        crate::error::CodeGenErrorKind::InvalidExpression(format!(
-                            "Unknown contribution branch '{}'",
-                            contrib.branch
-                        )),
-                    )
-                })?;
+            let branch_ref = Self::parse_branch_name(&contrib.branch, &ctx).ok_or_else(|| {
+                crate::error::CodeGenError::new(crate::error::CodeGenErrorKind::InvalidExpression(
+                    format!("Unknown contribution branch '{}'", contrib.branch),
+                ))
+            })?;
 
             // Potential contributions and indirect contributions (either
             // target kind) introduce a branch-current unknown
@@ -597,15 +595,15 @@ impl DeviceIR {
                 if registered_indirect != contrib.indirect
                     || (contrib.indirect && registered_indirect && {
                         // Second indirect contribution on the same pair
-                        parsed_contribs
-                            .iter()
-                            .zip(module.contributions.iter())
-                            .any(|(prev_ref, prev)| {
+                        parsed_contribs.iter().zip(module.contributions.iter()).any(
+                            |(prev_ref, prev)| {
                                 prev.indirect
-                                    && (prev_ref.pos_terminal.min(prev_ref.neg_terminal),
-                                        prev_ref.pos_terminal.max(prev_ref.neg_terminal))
-                                        == key
-                            })
+                                    && (
+                                        prev_ref.pos_terminal.min(prev_ref.neg_terminal),
+                                        prev_ref.pos_terminal.max(prev_ref.neg_terminal),
+                                    ) == key
+                            },
+                        )
                     })
                 {
                     return Err(crate::error::CodeGenError::new(
@@ -715,8 +713,7 @@ impl DeviceIR {
 
             // Generate derivatives for Jacobian (over node voltages and
             // branch-current unknowns)
-            let derivatives =
-                Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
+            let derivatives = Self::generate_derivatives(&expr, num_nodes, num_branches, &shadows);
 
             // Reactive (charge/flux) derivatives for AC analysis: extract
             // the ddt() operand and differentiate it
@@ -781,11 +778,11 @@ impl DeviceIR {
     }
 
     /// Structurally extract noise sources from a contribution expression:
-    /// `expr ~ deterministic + Î£ amplitude_i Â· noise_i(...)`. Each source
-    /// records its operating-point PSD as `amplitudeÂ² Â· power`, so scaled
+    /// `expr ~ deterministic + Σ amplitude_i · noise_i(...)`. Each source
+    /// records its operating-point PSD as `amplitude² · power`, so scaled
     /// and guarded noise terms (`gain * white_noise(S)`, conditionals)
     /// keep exact small-signal semantics. Noise functions in nonlinear
-    /// positions are hard errors â€” silently mis-shaping a noise spectrum
+    /// positions are hard errors — silently mis-shaping a noise spectrum
     /// would be worse than refusing the model.
     #[allow(clippy::too_many_arguments)]
     fn extract_noise_sources(
@@ -820,11 +817,7 @@ impl DeviceIR {
             ))
         };
         let square = |amp: &IrExpr| {
-            IrExpr::Binary(
-                BinaryOp::Mul,
-                Box::new(amp.clone()),
-                Box::new(amp.clone()),
-            )
+            IrExpr::Binary(BinaryOp::Mul, Box::new(amp.clone()), Box::new(amp.clone()))
         };
 
         match expr {
@@ -834,11 +827,7 @@ impl DeviceIR {
                     is_current,
                     branch_ordinal,
                     equation_index,
-                    psd: IrExpr::Binary(
-                        BinaryOp::Mul,
-                        Box::new(square(amplitude)),
-                        power.clone(),
-                    ),
+                    psd: IrExpr::Binary(BinaryOp::Mul, Box::new(square(amplitude)), power.clone()),
                     exponent: None,
                     table: None,
                     name: name.as_deref().map(SmolStr::from),
@@ -855,11 +844,7 @@ impl DeviceIR {
                     is_current,
                     branch_ordinal,
                     equation_index,
-                    psd: IrExpr::Binary(
-                        BinaryOp::Mul,
-                        Box::new(square(amplitude)),
-                        power.clone(),
-                    ),
+                    psd: IrExpr::Binary(BinaryOp::Mul, Box::new(square(amplitude)), power.clone()),
                     exponent: Some((**exponent).clone()),
                     table: None,
                     name: name.as_deref().map(SmolStr::from),
@@ -897,19 +882,13 @@ impl DeviceIR {
                 match (Self::contains_noise(l), Self::contains_noise(r)) {
                     (true, true) => Err(unsupported("product of noise terms")),
                     (true, false) => {
-                        let amp = IrExpr::Binary(
-                            BinaryOp::Mul,
-                            Box::new(amplitude.clone()),
-                            r.clone(),
-                        );
+                        let amp =
+                            IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), r.clone());
                         recurse(l, &amp, out)
                     }
                     (false, true) => {
-                        let amp = IrExpr::Binary(
-                            BinaryOp::Mul,
-                            Box::new(amplitude.clone()),
-                            l.clone(),
-                        );
+                        let amp =
+                            IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), l.clone());
                         recurse(r, &amp, out)
                     }
                     (false, false) => Ok(()),
@@ -919,11 +898,7 @@ impl DeviceIR {
                 if Self::contains_noise(r) {
                     return Err(unsupported("divisor"));
                 }
-                let amp = IrExpr::Binary(
-                    BinaryOp::Div,
-                    Box::new(amplitude.clone()),
-                    r.clone(),
-                );
+                let amp = IrExpr::Binary(BinaryOp::Div, Box::new(amplitude.clone()), r.clone());
                 recurse(l, &amp, out)
             }
             // Sign is irrelevant under the square
@@ -940,11 +915,8 @@ impl DeviceIR {
                         Box::new(IrExpr::Const(1.0)),
                         Box::new(IrExpr::Const(0.0)),
                     );
-                    let amp = IrExpr::Binary(
-                        BinaryOp::Mul,
-                        Box::new(amplitude.clone()),
-                        Box::new(gate),
-                    );
+                    let amp =
+                        IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), Box::new(gate));
                     recurse(t, &amp, out)?;
                 }
                 if Self::contains_noise(e) {
@@ -953,11 +925,8 @@ impl DeviceIR {
                         Box::new(IrExpr::Const(0.0)),
                         Box::new(IrExpr::Const(1.0)),
                     );
-                    let amp = IrExpr::Binary(
-                        BinaryOp::Mul,
-                        Box::new(amplitude.clone()),
-                        Box::new(gate),
-                    );
+                    let amp =
+                        IrExpr::Binary(BinaryOp::Mul, Box::new(amplitude.clone()), Box::new(gate));
                     recurse(e, &amp, out)?;
                 }
                 Ok(())
@@ -1007,8 +976,9 @@ impl DeviceIR {
                 IrExpr::Conditional(c, t, e) => {
                     contains_ddt(c) || contains_ddt(t) || contains_ddt(e)
                 }
-                IrExpr::TableLookup { input, .. }
-                | IrExpr::TableDerivative { input, .. } => contains_ddt(input),
+                IrExpr::TableLookup { input, .. } | IrExpr::TableDerivative { input, .. } => {
+                    contains_ddt(input)
+                }
                 IrExpr::AbsDelay { expr, delay_time } => {
                     contains_ddt(expr) || contains_ddt(delay_time)
                 }
@@ -1062,22 +1032,20 @@ impl DeviceIR {
                     Box::new(qr.unwrap_or(IrExpr::Const(0.0))),
                 ))
             }
-            IrExpr::Binary(BinaryOp::Mul, l, r) => {
-                match (contains_ddt(l), contains_ddt(r)) {
-                    (false, false) => None,
-                    (false, true) => Self::extract_charge(r)
-                        .map(|q| IrExpr::Binary(BinaryOp::Mul, l.clone(), Box::new(q))),
-                    (true, false) => Self::extract_charge(l)
-                        .map(|q| IrExpr::Binary(BinaryOp::Mul, Box::new(q), r.clone())),
-                    (true, true) => {
-                        log::warn!(
-                            "ddt() on both sides of a product; reactive AC \
+            IrExpr::Binary(BinaryOp::Mul, l, r) => match (contains_ddt(l), contains_ddt(r)) {
+                (false, false) => None,
+                (false, true) => Self::extract_charge(r)
+                    .map(|q| IrExpr::Binary(BinaryOp::Mul, l.clone(), Box::new(q))),
+                (true, false) => Self::extract_charge(l)
+                    .map(|q| IrExpr::Binary(BinaryOp::Mul, Box::new(q), r.clone())),
+                (true, true) => {
+                    log::warn!(
+                        "ddt() on both sides of a product; reactive AC \
                              contribution omitted"
-                        );
-                        None
-                    }
+                    );
+                    None
                 }
-            }
+            },
             IrExpr::Binary(BinaryOp::Div, l, r) if !contains_ddt(r) => Self::extract_charge(l)
                 .map(|q| IrExpr::Binary(BinaryOp::Div, Box::new(q), r.clone())),
             IrExpr::Unary(op @ (UnaryOp::Neg | UnaryOp::Pos), e) => {
@@ -1122,9 +1090,7 @@ impl DeviceIR {
                         && matches!(*else_expr, IrExpr::Const(v) if v == 0.0) =>
                 {
                     condition = Some(match condition {
-                        Some(prev) => {
-                            IrExpr::Binary(BinaryOp::And, Box::new(prev), cond)
-                        }
+                        Some(prev) => IrExpr::Binary(BinaryOp::And, Box::new(prev), cond),
                         None => *cond,
                     });
                     current = *then_expr;
@@ -1331,8 +1297,7 @@ impl DeviceIR {
                                     );
                                 if !write_static {
                                     for k in target.lower..target.lower + target.len as i64 {
-                                        let elem: SmolStr =
-                                            format!("{}[{k}]", target.array).into();
+                                        let elem: SmolStr = format!("{}[{k}]", target.array).into();
                                         if static_vars.remove(&elem) {
                                             *changed = true;
                                         }
@@ -1343,10 +1308,7 @@ impl DeviceIR {
                             let name = &variables[a.var_index].name;
                             if static_vars.contains(name)
                                 && (!enclosing_static
-                                    || !DeviceIR::is_instance_static_expr(
-                                        &a.expr,
-                                        static_vars,
-                                    ))
+                                    || !DeviceIR::is_instance_static_expr(&a.expr, static_vars))
                             {
                                 static_vars.remove(name);
                                 *changed = true;
@@ -1377,7 +1339,7 @@ pub mod autodiff {
 
     /// Bitmask over differentiation axes (node voltages first, then
     /// branch-current unknowns). Devices with more than 128 axes saturate
-    /// to "all axes" â€” dense but always correct.
+    /// to "all axes" — dense but always correct.
     pub(crate) type AxisMask = u128;
 
     /// All-axes mask (saturation value)
@@ -1412,7 +1374,7 @@ pub mod autodiff {
     /// sequences.
     ///
     /// For every variable whose value depends (transitively) on node
-    /// voltages, a shadow variable holds d(var)/d(axis) â€” but only along
+    /// voltages, a shadow variable holds d(var)/d(axis) — but only along
     /// the axes the variable can actually vary with (its dependency mask):
     /// a variable computed from V(g) and V(s) never carries shadows along
     /// the drain or any branch-current axis. The shadows are updated by
@@ -1471,7 +1433,10 @@ pub mod autodiff {
 
     /// All differentiation axes of a device: node voltages first, then
     /// branch-current unknowns
-    pub(crate) fn axes(num_nodes: usize, num_branches: usize) -> impl Iterator<Item = DerivativeWrt> {
+    pub(crate) fn axes(
+        num_nodes: usize,
+        num_branches: usize,
+    ) -> impl Iterator<Item = DerivativeWrt> {
         (0..num_nodes)
             .map(DerivativeWrt::Voltage)
             .chain((0..num_branches).map(DerivativeWrt::BranchCurrent))
@@ -1529,13 +1494,15 @@ pub mod autodiff {
     /// only such results (e.g. snapshotted branch guards) never need
     /// shadow slots; current probes are treated as constants in the DC
     /// Jacobian (matching [`differentiate_with_shadows`]).
-    fn derivative_axes(expr: &IrExpr, deps: &HashMap<SmolStr, AxisMask>, num_nodes: usize) -> AxisMask {
+    fn derivative_axes(
+        expr: &IrExpr,
+        deps: &HashMap<SmolStr, AxisMask>,
+        num_nodes: usize,
+    ) -> AxisMask {
         let recurse = |e: &IrExpr| derivative_axes(e, deps, num_nodes);
         match expr {
             IrExpr::Voltage(p, n) => node_bit(*p) | node_bit(*n),
-            IrExpr::BranchCurrent(k) => {
-                axis_bit(&DerivativeWrt::BranchCurrent(*k), num_nodes)
-            }
+            IrExpr::BranchCurrent(k) => axis_bit(&DerivativeWrt::BranchCurrent(*k), num_nodes),
             // Current probes differentiate to zero in the DC Jacobian
             IrExpr::Current(..) => 0,
             IrExpr::Var(name) => deps.get(name).copied().unwrap_or(0),
@@ -1550,11 +1517,9 @@ pub mod autodiff {
             | IrExpr::Mfactor
             | IrExpr::Analysis(_) => 0,
             IrExpr::Binary(op, l, r) => match op {
-                BinaryOp::Add
-                | BinaryOp::Sub
-                | BinaryOp::Mul
-                | BinaryOp::Div
-                | BinaryOp::Pow => recurse(l) | recurse(r),
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Pow => {
+                    recurse(l) | recurse(r)
+                }
                 // Piecewise-constant results: derivative identically zero
                 BinaryOp::Mod
                 | BinaryOp::Eq
@@ -1626,9 +1591,9 @@ pub mod autodiff {
                     if mask == 0 {
                         continue;
                     }
-                    let enclosing = arrays.iter().find(|a| {
-                        assign.var_index >= a.base && assign.var_index < a.base + a.len
-                    });
+                    let enclosing = arrays
+                        .iter()
+                        .find(|a| assign.var_index >= a.base && assign.var_index < a.base + a.len);
                     if let Some(array) = enclosing {
                         let current = deps.get(&array.name).copied().unwrap_or(0);
                         if current | mask != current {
@@ -1890,8 +1855,7 @@ pub mod autodiff {
                     continue;
                 }
                 let run_base = ir.variables.len() + shadow_runs.len();
-                array_shadow_base
-                    .insert(ShadowContext::shadow_name(&array.name, &wrt), run_base);
+                array_shadow_base.insert(ShadowContext::shadow_name(&array.name, &wrt), run_base);
                 for k in array.lower..array.lower + array.len as i64 {
                     let element = format!("{}[{k}]", array.name);
                     let shadow = ShadowContext::shadow_name(&element, &wrt);
@@ -2519,9 +2483,7 @@ pub mod autodiff {
 
             // idtmod: the wrap is the identity almost everywhere, so the
             // small-signal derivative matches idt
-            IrExpr::IdtMod { expr, .. } => {
-                IrExpr::IdtCompanion(Box::new(differentiate(expr)))
-            }
+            IrExpr::IdtMod { expr, .. } => IrExpr::IdtCompanion(Box::new(differentiate(expr))),
 
             // $limit passes its value through at convergence
             IrExpr::Limit(inner, _) => differentiate(inner),
@@ -2538,7 +2500,11 @@ pub mod autodiff {
                     x_data: x_data.clone(),
                     y_data: y_data.clone(),
                 };
-                IrExpr::Binary(BinaryOp::Mul, Box::new(slope), Box::new(differentiate(input)))
+                IrExpr::Binary(
+                    BinaryOp::Mul,
+                    Box::new(slope),
+                    Box::new(differentiate(input)),
+                )
             }
 
             // Smoothing filters pass DC small-signal through; their

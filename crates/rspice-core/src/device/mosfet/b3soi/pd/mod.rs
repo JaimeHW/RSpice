@@ -49,9 +49,7 @@ pub mod eval;
 pub mod params;
 pub mod temp;
 
-use crate::device::traits::{
-    MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice,
-};
+use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Value, circuit::NodeId};
 use eval::{B3SoiPdBias, B3SoiPdOp, ModelConsts};
 use std::sync::Arc;
@@ -284,13 +282,7 @@ impl B3SoiPd {
     /// tolerances and the linear current predictions `cdhat`/`cbhat` match the
     /// stored device currents. `bodyMod` 0/2 skips the `vps` voltage test
     /// exactly as ngspice does.
-    fn bypass_check(
-        &self,
-        raw: B3SoiPdBias,
-        reltol: Value,
-        abstol: Value,
-        vntol: Value,
-    ) -> bool {
+    fn bypass_check(&self, raw: B3SoiPdBias, reltol: Value, abstol: Value, vntol: Value) -> bool {
         let vtol = |new: Value, old: Value| reltol * new.abs().max(old.abs()) + vntol;
         let old = &self.bias;
         let delvbs = raw.vbs - old.vbs;
@@ -323,11 +315,8 @@ impl B3SoiPd {
             op.cd + (op.gm - op.gjdg) * delvgd - (op.gds - op.gjdd) * delvds
                 + (op.gmbs - op.gjdb) * delvbd
         };
-        let cbhat = op.cb
-            + op.gbgs * delvgs
-            + op.gbbs * delvbs
-            + op.gbds * delvds
-            + op.gbps * delvps;
+        let cbhat =
+            op.cb + op.gbgs * delvgs + op.gbbs * delvbs + op.gbds * delvds + op.gbps * delvps;
         (cdhat - op.cd).abs() < reltol * cdhat.abs().max(op.cd.abs()) + abstol
             && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
@@ -624,9 +613,8 @@ impl NonlinearDevice for B3SoiPd {
         }
         let reltol = criteria.relative_tolerance();
         let vtol = criteria.voltage_tolerance();
-        let cmp = |new: Value, old: Value| {
-            (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol
-        };
+        let cmp =
+            |new: Value, old: Value| (new - old).abs() < reltol * new.abs().max(old.abs()) + vtol;
         cmp(self.bias.vbs, self.converged_ref.vbs)
             && cmp(self.bias.vgs, self.converged_ref.vgs)
             && cmp(self.bias.vds, self.converged_ref.vds)
@@ -789,7 +777,11 @@ impl B3SoiPd {
         if self.body_mode == BodyMode::TiedResistive {
             let p = self.node_p;
             let rtot = self.sized.rbody + self.sized.rbodyext;
-            let gbp = if rtot > 1e-30 { 1.0 / rtot } else { 1.0 / 1e-30 };
+            let gbp = if rtot > 1e-30 {
+                1.0 / rtot
+            } else {
+                1.0 / 1e-30
+            };
             stamp(matrix, b, b, gbp);
             stamp(matrix, b, p, -gbp);
             stamp(matrix, p, b, -gbp);

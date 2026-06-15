@@ -6,11 +6,11 @@ pub struct LossyTransmissionLine {
     pub base: TransmissionLine,
 
     // Loss parameters (per unit length, normalized)
-    /// DC resistance (Î©)
+    /// DC resistance (Ω)
     pub r: Value,
     /// Shunt conductance (S)
     pub g: Value,
-    /// Skin effect resistance (Î©/âˆšHz)
+    /// Skin effect resistance (Ω/√Hz)
     pub rs: Value,
 
     /// Attenuation factor

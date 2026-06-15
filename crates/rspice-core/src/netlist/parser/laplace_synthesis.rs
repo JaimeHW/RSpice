@@ -467,7 +467,9 @@ pub(super) fn synthesize_laplace(
     } else {
         0.0
     };
-    let r: Vec<Value> = (0..n).map(|k| num.get(k).unwrap_or(&0.0) - d * a[k]).collect();
+    let r: Vec<Value> = (0..n)
+        .map(|k| num.get(k).unwrap_or(&0.0) - d * a[k])
+        .collect();
 
     let output_kind = |expression: String| -> ElementKind {
         if voltage_output {
@@ -547,7 +549,7 @@ pub(super) fn synthesize_laplace(
         });
     }
 
-    // Last state: dz_n/dτ = −Σ â_k z_{k+1} + u.
+    // Last state: dz_n/dτ = −Σ a_hat[k] z_{k+1} + u.
     let mut feedback_terms: Vec<String> = (0..n)
         .filter(|k| a_hat[*k] != 0.0)
         .map(|k| format!("-{}*V({})", fmt_value(a_hat[k]), state_node(k + 1)))
@@ -624,7 +626,10 @@ mod tests {
     fn cancels_common_s_factors_exactly() {
         let (num, den) = parse_rational_in_s("s/(s*(1+s))").unwrap();
         // After exact s-cancellation the DC value must be finite (1.0).
-        assert!(num[0] != 0.0 || den[0] != 0.0, "common s factor must cancel");
+        assert!(
+            num[0] != 0.0 || den[0] != 0.0,
+            "common s factor must cancel"
+        );
         assert_ratio_eq((&num, &den), (&[1.0], &[1.0, 1.0]));
     }
 
@@ -642,16 +647,9 @@ mod tests {
     fn first_order_synthesis_has_expected_structure() {
         // H = 1/(1 + s/wc): one state, cap 1/wc, unit feedback, unit output.
         let wc = 6283.185307179586;
-        let elements = synthesize_laplace(
-            "e1",
-            "out",
-            "0",
-            "v(in)",
-            &format!("1/(1+s/{wc})"),
-            true,
-            1,
-        )
-        .unwrap();
+        let elements =
+            synthesize_laplace("e1", "out", "0", "v(in)", &format!("1/(1+s/{wc})"), true, 1)
+                .unwrap();
 
         // cap + state derivative + output
         assert_eq!(elements.len(), 3);

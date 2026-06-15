@@ -683,7 +683,10 @@ mod tests {
     #[test]
     fn grid_snap_on_grid_passthrough() {
         let engine = engine_with(|e| e.grid_size = 10);
-        assert_eq!(engine.snap_to_grid_point(Point::new(20, 30)), Point::new(20, 30));
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(20, 30)),
+            Point::new(20, 30)
+        );
         assert_eq!(engine.snap_to_grid_point(Point::origin()), Point::origin());
     }
 
@@ -691,24 +694,42 @@ mod tests {
     #[test]
     fn grid_snap_rounds_to_nearest() {
         let engine = engine_with(|e| e.grid_size = 10);
-        assert_eq!(engine.snap_to_grid_point(Point::new(4, 6)), Point::new(0, 10));
-        assert_eq!(engine.snap_to_grid_point(Point::new(5, 15)), Point::new(10, 20));
-        assert_eq!(engine.snap_to_grid_point(Point::new(14, 16)), Point::new(10, 20));
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(4, 6)),
+            Point::new(0, 10)
+        );
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(5, 15)),
+            Point::new(10, 20)
+        );
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(14, 16)),
+            Point::new(10, 20)
+        );
     }
 
     /// Unit grid is the identity, including negative coordinates.
     #[test]
     fn grid_snap_unit_grid_is_identity() {
         let engine = SnapEngine::default(); // grid_size = 1
-        assert_eq!(engine.snap_to_grid_point(Point::new(-7, -3)), Point::new(-7, -3));
-        assert_eq!(engine.snap_to_grid_point(Point::new(13, -41)), Point::new(13, -41));
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(-7, -3)),
+            Point::new(-7, -3)
+        );
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(13, -41)),
+            Point::new(13, -41)
+        );
     }
 
     /// A non-positive grid_size is clamped to 1 rather than dividing by zero.
     #[test]
     fn grid_snap_clamps_grid_size_to_one() {
         let engine = engine_with(|e| e.grid_size = 0);
-        assert_eq!(engine.snap_to_grid_point(Point::new(7, -9)), Point::new(7, -9));
+        assert_eq!(
+            engine.snap_to_grid_point(Point::new(7, -9)),
+            Point::new(7, -9)
+        );
     }
 
     /// With no nearby targets and a coarse grid, find_snap_target falls back to
@@ -950,10 +971,7 @@ mod tests {
     #[test]
     fn degenerate_wires_handled() {
         let engine = SnapEngine::default();
-        let wires = [
-            Wire::new(1, vec![Point::new(5, 5)]),
-            Wire::new(2, vec![]),
-        ];
+        let wires = [Wire::new(1, vec![Point::new(5, 5)]), Wire::new(2, vec![])];
         let result = engine.find_snap_target(Point::new(5, 6), &[], &wires, &[]);
         assert_eq!(
             result.target_type(),
@@ -1039,14 +1057,23 @@ mod tests {
         let engine = SnapEngine::default();
         let comps = [resistor(1, Point::origin()), resistor(2, Point::new(43, 0))];
         // Cursor at (21,0): R1 "-" at (20,0) dist 1; R2 "+" at (23,0) dist 2.
-        let nearest = engine.find_nearest_terminal(Point::new(21, 0), &comps).unwrap();
+        let nearest = engine
+            .find_nearest_terminal(Point::new(21, 0), &comps)
+            .unwrap();
         assert_eq!(nearest.position, Point::new(20, 0));
         assert!(matches!(
             nearest.target_type,
-            SnapTargetType::Terminal { component_id: 1, .. }
+            SnapTargetType::Terminal {
+                component_id: 1,
+                ..
+            }
         ));
 
-        assert!(engine.find_nearest_terminal(Point::new(100, 100), &comps).is_none());
+        assert!(
+            engine
+                .find_nearest_terminal(Point::new(100, 100), &comps)
+                .is_none()
+        );
     }
 
     /// is_at_terminal matches exact positions only.

@@ -90,7 +90,9 @@ fn draw_component_preview(
         // Ghost the symbol in dimmed accent until it is placed.
         let preview_stroke = Stroke::new(
             1.0 * viewport.zoom,
-            crate::ui::tokens::active_palette().accent.gamma_multiply(0.7),
+            crate::ui::tokens::active_palette()
+                .accent
+                .gamma_multiply(0.7),
         );
 
         let svg_rendered = if let Some(library) = symbol_library {

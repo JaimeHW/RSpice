@@ -64,7 +64,10 @@ fn define_overrides_netlist_param() {
     ]);
     assert!(output.status.success(), "nominal run failed");
     let v_nom = read_op_voltage(&out_nom, "V(OUT)");
-    assert!((v_nom - 5.0).abs() < 1e-6, "expected 5V nominal, got {v_nom}");
+    assert!(
+        (v_nom - 5.0).abs() < 1e-6,
+        "expected 5V nominal, got {v_nom}"
+    );
 
     // Override: 10V * 3k/4k = 7.5V, with a SPICE-suffixed value
     let out_def = dir.join("def.csv");

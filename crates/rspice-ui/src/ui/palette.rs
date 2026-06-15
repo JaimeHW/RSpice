@@ -275,4 +275,3 @@ pub const GRAPHITE_LIGHT: Palette = Palette {
     shadow_color: Color32::from_rgba_premultiplied(8, 7, 6, 41),
     shadow_geom: (6, 24),
 };
-

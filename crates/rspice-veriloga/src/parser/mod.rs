@@ -448,7 +448,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a parameter declaration (one or more comma-separated assignments)
-    fn parse_parameter(&mut self, attributes: &[Attribute]) -> Result<Vec<ParameterDecl>, ParseError> {
+    fn parse_parameter(
+        &mut self,
+        attributes: &[Attribute],
+    ) -> Result<Vec<ParameterDecl>, ParseError> {
         let start = self.current_span();
         self.advance(); // consume 'parameter' or 'localparam'
 

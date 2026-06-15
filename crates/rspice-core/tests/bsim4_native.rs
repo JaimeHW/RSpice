@@ -56,7 +56,10 @@ fn single_nmos_op_matches_module_oracle() {
         .iter()
         .find(|e| e.name.eq_ignore_ascii_case("m1"))
         .expect("m1 op entry");
-    assert_eq!(entry.device_kind, "BSIM4", "native port, not an approximation");
+    assert_eq!(
+        entry.device_kind, "BSIM4",
+        "native port, not an approximation"
+    );
     assert_eq!(entry.region, Some("saturation"));
     let get = |key: &str| {
         entry
@@ -133,9 +136,7 @@ fn cmos_inverter_vtc_matches_ngspice() {
             .iter()
             .find(|(v, _)| (v - vin).abs() < 1e-9)
             .unwrap_or_else(|| panic!("sweep point vin={vin} present"));
-        let node = result
-            .node_index_named("out")
-            .expect("node out in result");
+        let node = result.node_index_named("out").expect("node out in result");
         let vout = result.voltage(node);
         // The device math matches ngspice to ~5e-9; the budget here is the
         // two solvers' Newton stopping criteria. The high-gain transition

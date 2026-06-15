@@ -368,8 +368,12 @@ impl<'a> Flattener<'a> {
             }
         }
 
-        let param_map =
-            build_subcircuit_param_scope(subckt, caller_scope_params, instance_params, &self.random)?;
+        let param_map = build_subcircuit_param_scope(
+            subckt,
+            caller_scope_params,
+            instance_params,
+            &self.random,
+        )?;
 
         // X-line multiplicity: `M=` on a subcircuit instance multiplies the
         // parallel multiplicity of every device it expands to (HSPICE/ngspice
@@ -996,7 +1000,10 @@ fn scale_source_amplitudes(spec: &mut SourceSpec, m: Value) {
             *dc_value *= m;
             *ac_magnitude *= m;
         }
-        SourceSpec::DcTransient { dc_value, transient } => {
+        SourceSpec::DcTransient {
+            dc_value,
+            transient,
+        } => {
             *dc_value *= m;
             scale_source_amplitudes(transient, m);
         }

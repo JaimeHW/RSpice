@@ -283,10 +283,15 @@ impl ShellState {
                 .map(str::to_owned)
                 .collect(),
             // The bench staples seed both favorites and the recents chips.
-            lib_pins: ["prim:Resistor", "prim:Capacitor", "prim:Ground", "prim:V DC"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            lib_pins: [
+                "prim:Resistor",
+                "prim:Capacitor",
+                "prim:Ground",
+                "prim:V DC",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
             lib_recents: [
                 "prim:Resistor",
                 "prim:Capacitor",

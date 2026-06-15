@@ -187,6 +187,6 @@ impl HbSolver {
     // This establishes nonlinear device operating points and provides a
     // much better initial guess for the HB Newton iteration.
     //
-    // Flow: DC Solve â†’ Initialize Harmonics â†’ Full HB Newton
+    // Flow: DC Solve → Initialize Harmonics → Full HB Newton
     // =========================================================================
 }

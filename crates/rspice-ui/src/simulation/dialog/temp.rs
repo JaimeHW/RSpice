@@ -3,7 +3,6 @@
 //! Configuration for temperature sweep analysis.
 //! Runs a base analysis across a range of temperatures.
 
-
 /// Base analysis for temperature sweep
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TempBaseAnalysis {
@@ -186,5 +185,4 @@ impl TempDialogState {
             *self = Self::from_config(&TempConfig::default());
         }
     }
-
 }

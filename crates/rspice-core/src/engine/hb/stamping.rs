@@ -36,14 +36,12 @@ impl Engine {
                     collector, base, emitter, bjt.is, bjt.bf, bjt.br, bjt.nf, bjt.nr, bjt.vaf,
                 ),
             };
-            solver.add_nonlinear_device(
-                instance.with_thermal_voltage(bjt.vt).with_junction_caps(
-                    DepletionCap::new(bjt.cje, bjt.vje, bjt.mje, bjt.fc),
-                    DepletionCap::new(bjt.cjc, bjt.vjc, bjt.mjc, bjt.fc),
-                    bjt.tf,
-                    bjt.tr,
-                ),
-            );
+            solver.add_nonlinear_device(instance.with_thermal_voltage(bjt.vt).with_junction_caps(
+                DepletionCap::new(bjt.cje, bjt.vje, bjt.mje, bjt.fc),
+                DepletionCap::new(bjt.cjc, bjt.vjc, bjt.mjc, bjt.fc),
+                bjt.tf,
+                bjt.tr,
+            ));
         }
 
         for mos in &circuit.mosfets.devices {
@@ -143,14 +141,12 @@ impl Engine {
             };
             let vt_jfet = crate::constants::K_BOLTZMANN * self.config.temperature
                 / crate::constants::Q_ELECTRON;
-            solver.add_nonlinear_device(
-                instance.with_thermal_voltage(vt_jfet).with_junction_caps(
-                    DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
-                    DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
-                    0.0,
-                    0.0,
-                ),
-            );
+            solver.add_nonlinear_device(instance.with_thermal_voltage(vt_jfet).with_junction_caps(
+                DepletionCap::new(jfet.params.cgs, jfet.params.pb, jfet.params.m, 0.5),
+                DepletionCap::new(jfet.params.cgd, jfet.params.pb, jfet.params.m, 0.5),
+                0.0,
+                0.0,
+            ));
         }
 
         for sw in &circuit.vswitches {

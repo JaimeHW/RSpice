@@ -124,10 +124,11 @@ impl RSpiceApp {
 
         if !path.exists() {
             self.state.recent_files.retain(|r| r.path != path);
-            self.state.push_user_message(ConsoleMessage::warning(format!(
-                "File no longer exists: {}",
-                path.display()
-            )));
+            self.state
+                .push_user_message(ConsoleMessage::warning(format!(
+                    "File no longer exists: {}",
+                    path.display()
+                )));
             return;
         }
 

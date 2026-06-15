@@ -174,7 +174,6 @@ impl SoaDialogState {
             *self = Self::from_config(&SoaConfig::default());
         }
     }
-
 }
 
 fn format_scalar(v: f64) -> String {

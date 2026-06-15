@@ -249,7 +249,6 @@ impl XfDialogState {
             *self = Self::from_config(&XfConfig::default());
         }
     }
-
 }
 
 fn format_freq(f: f64) -> String {

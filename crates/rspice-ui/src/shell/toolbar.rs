@@ -7,8 +7,8 @@ use crate::common::AppState;
 use crate::shell::WorkspaceView;
 use crate::state::Tool;
 use crate::ui::icons::Icon;
-use crate::ui::widgets::{Button, IconButton};
 use crate::ui::tokens::Tokens;
+use crate::ui::widgets::{Button, IconButton};
 
 /// Toolbar height.
 pub const TOOLBAR_HEIGHT: f32 = 42.0;
@@ -75,8 +75,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
 
 fn toolbar_separator(ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(13.0, TOOLBAR_HEIGHT), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(13.0, TOOLBAR_HEIGHT), egui::Sense::hover());
     ui.painter().vline(
         rect.center().x,
         egui::Rangef::new(rect.center().y - 11.0, rect.center().y + 11.0),

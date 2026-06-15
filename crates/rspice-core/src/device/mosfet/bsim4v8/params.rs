@@ -646,7 +646,10 @@ impl Bsim4v8Model {
         let (cigs, cigd) = if cigsd_given {
             (cigsd, cigsd)
         } else {
-            (binned(p, "CIGS", ig_def(0.075, 0.03)), binned(p, "CIGD", ig_def(0.075, 0.03)))
+            (
+                binned(p, "CIGS", ig_def(0.075, 0.03)),
+                binned(p, "CIGD", ig_def(0.075, 0.03)),
+            )
         };
 
         let ckappas = binned(p, "CKAPPAS", 0.6);
@@ -678,7 +681,8 @@ impl Bsim4v8Model {
         // formula only needs card values, so it is resolved here.
         let cf_given = get(p, "CF").is_some();
         let cf = Binned {
-            v: get(p, "CF").unwrap_or_else(|| 2.0 * epsrox * EPS0 / PI * (1.0 + 0.4e-6 / toxe).ln()),
+            v: get(p, "CF")
+                .unwrap_or_else(|| 2.0 * epsrox * EPS0 / PI * (1.0 + 0.4e-6 / toxe).ln()),
             l: val(p, "LCF", 0.0),
             w: val(p, "WCF", 0.0),
             p: val(p, "PCF", 0.0),
@@ -867,12 +871,36 @@ impl Bsim4v8Model {
             // 4.8.1+ defaults (ngspice-46 resolves every "4.8x" version
             // string to the 4.8.3 physics, so the <=4.8.0 default branch
             // of b4set.c is unreachable).
-            ua: binned(p, "UA", if mob_mod == 2 || mob_mod == 6 { 1.0e-15 } else { 1.0e-9 }),
+            ua: binned(
+                p,
+                "UA",
+                if mob_mod == 2 || mob_mod == 6 {
+                    1.0e-15
+                } else {
+                    1.0e-9
+                },
+            ),
             ua1: binned(p, "UA1", 1.0e-9),
             ub: binned(p, "UB", 1.0e-19),
             ub1: binned(p, "UB1", -1.0e-18),
-            uc: binned(p, "UC", if mob_mod == 1 || mob_mod == 5 { -0.0465 } else { -0.0465e-9 }),
-            uc1: binned(p, "UC1", if mob_mod == 1 || mob_mod == 5 { -0.056 } else { -0.056e-9 }),
+            uc: binned(
+                p,
+                "UC",
+                if mob_mod == 1 || mob_mod == 5 {
+                    -0.0465
+                } else {
+                    -0.0465e-9
+                },
+            ),
+            uc1: binned(
+                p,
+                "UC1",
+                if mob_mod == 1 || mob_mod == 5 {
+                    -0.056
+                } else {
+                    -0.056e-9
+                },
+            ),
             ud: binned(p, "UD", 0.0),
             ud1: binned(p, "UD1", 0.0),
             up: binned(p, "UP", 0.0),

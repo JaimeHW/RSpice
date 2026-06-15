@@ -87,9 +87,7 @@ pub fn install_interrupt_handler() {
             // Second interrupt: the user wants out now.
             std::process::exit(130);
         }
-        eprintln!(
-            "\nInterrupted — stopping at the next safe point (Ctrl-C again to force quit)"
-        );
+        eprintln!("\nInterrupted — stopping at the next safe point (Ctrl-C again to force quit)");
         request(AbortReason::Interrupt);
     });
 }

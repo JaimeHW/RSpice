@@ -82,10 +82,8 @@ r1 a 0 1k
     let mut signals: HashMap<String, &[f64]> = HashMap::new();
     signals.insert("V(OUT)".to_string(), &out);
     let results = engine.evaluate(&time, &signals);
-    let by_name: HashMap<&str, Option<f64>> = results
-        .iter()
-        .map(|r| (r.name.as_str(), r.value))
-        .collect();
+    let by_name: HashMap<&str, Option<f64>> =
+        results.iter().map(|r| (r.name.as_str(), r.value)).collect();
     assert_eq!(by_name["SWING"], Some(2.0), "vmax-vmin = 2-0");
     assert_eq!(
         by_name["MARGIN"],

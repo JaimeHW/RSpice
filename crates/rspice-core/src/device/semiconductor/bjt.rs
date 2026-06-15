@@ -1211,7 +1211,13 @@ impl Bjt {
     /// per-iterate junction-limited point (raw biases otherwise); off-cache
     /// callers evaluate fresh at the raw biases, so those anchor raw.
     #[inline]
-    fn companion_anchor(&self, vc: Value, vb: Value, ve: Value, vs: Value) -> [Value; EXTERNAL_DIM] {
+    fn companion_anchor(
+        &self,
+        vc: Value,
+        vb: Value,
+        ve: Value,
+        vs: Value,
+    ) -> [Value; EXTERNAL_DIM] {
         if self.reduced_linearization_cache_valid.get()
             && self.cache_matches_external_biases(vc, vb, ve, vs)
         {

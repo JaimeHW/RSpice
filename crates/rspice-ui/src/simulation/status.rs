@@ -6,8 +6,8 @@
 //! - Time estimates
 //! - Error states
 
-use std::time::Duration;
 use crate::common::time_compat::Instant;
+use std::time::Duration;
 
 //=============================================================================
 // Simulation Status

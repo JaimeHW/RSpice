@@ -20,7 +20,7 @@ pub use property_types::{
 };
 pub use schematic::*;
 pub use simulation::{
-    AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, NoiseContributorRow,
-    NoiseSummary, OperatingPointValue, SimulationRun, SimulationState, WaveformData,
+    AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, NoiseContributorRow, NoiseSummary,
+    OperatingPointValue, SimulationRun, SimulationState, WaveformData,
 };
 pub use workspace::{CellViewRef, OpenCellView, ProjectDescriptor, ProjectWorkspace, SpecEntry};

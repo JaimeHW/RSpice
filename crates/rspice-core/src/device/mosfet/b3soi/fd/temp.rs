@@ -211,11 +211,7 @@ impl B3SoiFdSized {
     ///
     /// `temp` is the device operating temperature in Kelvin (ngspice
     /// `CKTtemp`).
-    pub fn new(
-        model: &B3SoiFdModel,
-        geom: &B3SoiFdGeometry,
-        temp: Value,
-    ) -> Result<Self, String> {
+    pub fn new(model: &B3SoiFdModel, geom: &B3SoiFdGeometry, temp: Value) -> Result<Self, String> {
         let mut p = Self::default();
         let m = model;
 

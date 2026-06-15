@@ -1120,9 +1120,7 @@ impl Engine {
                 charge.qd,
                 charge.qe,
             );
-            dev.stamp_charge_companion(
-                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
-            );
+            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
             idx += 1;
         }
         for dev in &circuit.b3soi_fd.devices {
@@ -1142,9 +1140,7 @@ impl Engine {
                 charge.qd,
                 charge.qe,
             );
-            dev.stamp_charge_companion(
-                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
-            );
+            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
             idx += 1;
         }
         for dev in &circuit.b3soi_pd.devices {
@@ -1164,9 +1160,7 @@ impl Engine {
                 charge.qd,
                 charge.qe,
             );
-            dev.stamp_charge_companion(
-                &charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper,
-            );
+            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
             idx += 1;
         }
     }
@@ -1285,9 +1279,30 @@ impl Engine {
         for dev in &circuit.bsim3v3.devices {
             let (c, _mode) = dev.charge_at(solution);
             for (q, slots) in [
-                (c.qg_state(), [&mut h.qg_prev, &mut h.qg_prev_prev, &mut h.qg_prev_prev_prev]),
-                (c.qb_state(), [&mut h.qb_prev, &mut h.qb_prev_prev, &mut h.qb_prev_prev_prev]),
-                (c.qd_state(), [&mut h.qd_prev, &mut h.qd_prev_prev, &mut h.qd_prev_prev_prev]),
+                (
+                    c.qg_state(),
+                    [
+                        &mut h.qg_prev,
+                        &mut h.qg_prev_prev,
+                        &mut h.qg_prev_prev_prev,
+                    ],
+                ),
+                (
+                    c.qb_state(),
+                    [
+                        &mut h.qb_prev,
+                        &mut h.qb_prev_prev,
+                        &mut h.qb_prev_prev_prev,
+                    ],
+                ),
+                (
+                    c.qd_state(),
+                    [
+                        &mut h.qd_prev,
+                        &mut h.qd_prev_prev,
+                        &mut h.qd_prev_prev_prev,
+                    ],
+                ),
             ] {
                 for slot in slots {
                     slot.push(q);
@@ -1386,9 +1401,7 @@ impl Engine {
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b3ld.c: m * ceqq*).
-            dev.stamp_charge_companion(
-                &charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper,
-            );
+            dev.stamp_charge_companion(&charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper);
         }
     }
 
@@ -1465,9 +1478,30 @@ impl Engine {
         for dev in &circuit.bsim4v8.devices {
             let (c, _mode) = dev.charge_at(solution);
             for (q, slots) in [
-                (c.qg_state(), [&mut h.qg_prev, &mut h.qg_prev_prev, &mut h.qg_prev_prev_prev]),
-                (c.qb_state(), [&mut h.qb_prev, &mut h.qb_prev_prev, &mut h.qb_prev_prev_prev]),
-                (c.qd_state(), [&mut h.qd_prev, &mut h.qd_prev_prev, &mut h.qd_prev_prev_prev]),
+                (
+                    c.qg_state(),
+                    [
+                        &mut h.qg_prev,
+                        &mut h.qg_prev_prev,
+                        &mut h.qg_prev_prev_prev,
+                    ],
+                ),
+                (
+                    c.qb_state(),
+                    [
+                        &mut h.qb_prev,
+                        &mut h.qb_prev_prev,
+                        &mut h.qb_prev_prev_prev,
+                    ],
+                ),
+                (
+                    c.qd_state(),
+                    [
+                        &mut h.qd_prev,
+                        &mut h.qd_prev_prev,
+                        &mut h.qd_prev_prev_prev,
+                    ],
+                ),
             ] {
                 for slot in slots {
                     slot.push(q);
@@ -1566,9 +1600,7 @@ impl Engine {
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
-            dev.stamp_charge_companion(
-                &charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper,
-            );
+            dev.stamp_charge_companion(&charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper);
         }
     }
 
@@ -2302,11 +2334,8 @@ impl Engine {
                     &tl.near_nodes,
                     tl.near_ref,
                 );
-                let far_physical = Self::differential_port_voltages(
-                    accepted_solution,
-                    &tl.far_nodes,
-                    tl.far_ref,
-                );
+                let far_physical =
+                    Self::differential_port_voltages(accepted_solution, &tl.far_nodes, tl.far_ref);
                 let conductors = tl.conductors();
                 let mut near_i = vec![0.0; conductors];
                 let mut far_i = vec![0.0; conductors];
@@ -2720,7 +2749,14 @@ impl Engine {
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
 
-        Self::update_b3soi_history(circuit, accepted_solution, method, trap_order, dt, b3soi_history);
+        Self::update_b3soi_history(
+            circuit,
+            accepted_solution,
+            method,
+            trap_order,
+            dt,
+            b3soi_history,
+        );
         Self::update_bsim3_history(
             circuit,
             accepted_solution,
