@@ -7,7 +7,7 @@
 <meta name="description" content="Every RSpice release, diffed point-for-point against independent oracles on locked time grids — cluster by cluster, with the worst deviation reported.">
 <meta property="og:title" content="Validation dashboard — RSpice">
 <meta property="og:description" content="Every release, diffed point-for-point against independent oracles on locked time grids.">
-<meta property="og:image" content="https://jaimehw.github.io/RSpice/assets/og-card.png">
+<meta property="og:image" content="https://rspice.app/assets/og-card.png">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
 <link rel="stylesheet" href="assets/site.css">
@@ -552,6 +552,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     "transient-sources": { zeta: 0.28, f0: 800,  deck: "sffm_am_mix.cir",      oracle: "ngspice-46" },
     "dc-sweep":          { zeta: 0.92, f0: 600,  deck: "bjt_curve_trace.cir",  oracle: "ngspice-46" },
     "ac-noise":          { zeta: 0.45, f0: 1200, deck: "opamp_noise_ref.cir",  oracle: "ngspice-46" },
+    "vbic":              { zeta: 0.52, f0: 900,  deck: "vbic_diffpair.cir",    oracle: "ngspice-46" },
+    "transmission-lines": { zeta: 0.34, f0: 700,  deck: "cpl_ibm2.cir",         oracle: "ngspice-46" },
     "monte-carlo":       { zeta: 0.38, f0: 800,  deck: "mismatch_seeded.cir",  oracle: "ngspice-46" },
     "digital-xspice":    { zeta: 1.05, f0: 400,  deck: "adc_bridge_mixed.cir", oracle: "ngspice-46" },
     "rf-pss":            { zeta: 0.22, f0: 1600, deck: "lc_osc_shooting.cir",  oracle: "analytic" },
