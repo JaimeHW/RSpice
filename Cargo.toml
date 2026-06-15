@@ -47,7 +47,7 @@ serde_json = "1.0"
 
 
 # Internal crates
-rspice-core = { path = "crates/rspice-core" }
+rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 
 # Enable incremental compilation for faster rebuilds
 [profile.dev]

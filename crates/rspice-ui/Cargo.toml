@@ -30,7 +30,7 @@ veriloga = []
 # builds keep the default fast paths (parallel + simd), wasm opts out.
 
 # Verilog-A compiler (pure Rust, works on all platforms)
-rspice-veriloga = { path = "../rspice-veriloga" }
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 
 # Async runtime — multi-thread runtime is a native-only luxury; the wasm
 # build keeps the sync primitives + current-thread rt (see target sections)
@@ -96,7 +96,7 @@ rand = "0.8"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Default features on: faer-parallel/parallel/simd so the desktop app gets
 # the same fast solver paths as the CLI (incl. the Verilog-A JIT).
-rspice-core = { path = "../rspice-core", features = ["veriloga-native"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", features = ["veriloga-native"] }
 env_logger = "0.11"
 tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
 
@@ -109,7 +109,7 @@ winresource = "0.1"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # No rayon/simd on wasm; the "wasm" feature wires up wasm-bindgen and the
 # browser entropy source (getrandom/js) that faer needs on this target.
-rspice-core = { path = "../rspice-core", default-features = false, features = ["veriloga", "wasm"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown

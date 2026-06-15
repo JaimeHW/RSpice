@@ -1,9 +1,9 @@
 use super::*;
 
 /// Embedded transistor model library used for fallback model resolution.
-const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../../../models/spice/transistor.lib");
+const BUILTIN_TRANSISTOR_LIB: &str = include_str!("../../../models/spice/transistor.lib");
 /// Embedded diode model library used for fallback model resolution.
-const BUILTIN_DIODE_LIB: &str = include_str!("../../../../../models/spice/diode.lib");
+const BUILTIN_DIODE_LIB: &str = include_str!("../../../models/spice/diode.lib");
 
 /// Lazily parsed builtin BJT model parameter map (MODEL_NAME -> params).
 pub(in crate::engine::builder) fn builtin_bjt_model_map()

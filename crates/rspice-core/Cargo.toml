@@ -60,7 +60,7 @@ getrandom = { version = "0.2", optional = true }
 libloading = { version = "0.8", optional = true }
 
 # Verilog-A support (optional)
-rspice-veriloga = { path = "../rspice-veriloga", optional = true }
+rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0", optional = true }
 
 # SIMD acceleration (optional)
 wide = { version = "0.7", optional = true }

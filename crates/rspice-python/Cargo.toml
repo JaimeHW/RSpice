@@ -27,7 +27,7 @@ pyo3 = { version = "0.23", features = ["abi3-py38"] }
 numpy = "0.23"
 
 # Internal crate dependency
-rspice-core = { path = "../rspice-core" }
+rspice-core = { path = "../rspice-core", version = "0.1.0" }
 
 # For complex number support in AC results
 num-complex.workspace = true
