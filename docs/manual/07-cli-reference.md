@@ -43,7 +43,7 @@ simulation options; CLI flags override it.
 | `--convergence PRESET` | Convergence preset selection. |
 | `--compress [--compress-tol TOL]` | Waveform compression for long transients. |
 | `--checkpoint FILE` | Save end-of-run transient state. |
-| `--restore FILE` | Resume a transient from a checkpoint (conflicts with `--compress`). |
+| `--resume FILE` | Resume a transient from a checkpoint. |
 
 **Analysis triggers (beyond deck cards)**
 

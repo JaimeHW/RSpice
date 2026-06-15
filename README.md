@@ -82,7 +82,7 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Periodic / RF | Periodic steady state (shooting), harmonic balance, two-port S-parameters with Touchstone export † |
 | Post-processing | `.MEAS` over TRAN/DC/AC/NOISE with `GOAL`/`TOL` pass-fail gating, `.FOUR`; THD/IMD, eye-diagram, and jitter metrics † |
 
-† invoked through CLI flags (`--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, `--sparam`, …) rather than netlist cards. There is no dedicated `.DISTO` Volterra engine — distortion figures come from THD/IMD post-processing. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
+† invoked through CLI flags (`--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, `--sparam`, …) rather than netlist cards. `.DISTO` cards are parsed for compatibility and currently run the matching small-signal AC sweep; there is no dedicated Volterra distortion engine yet, so distortion figures come from THD/IMD post-processing. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
 
 ### Devices
 

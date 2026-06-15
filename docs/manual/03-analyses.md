@@ -13,7 +13,7 @@ A deck with no analysis card runs a DC operating point.
 | `.ac dec\|oct\|lin N fstart fstop` | Small-signal frequency sweep. |
 | `.tran tstep tstop [tstart [tmax]]` | Transient; `tstep` is the output interval, integration is variable-step (trap/Gear with LTE control). |
 | `.noise v(out[,ref]) SRC dec\|oct\|lin N f0 f1` | Small-signal noise: output/input-referred spectra, per-contributor breakdown, band-integrated totals. |
-| `.disto dec\|oct\|lin N f0 f1 [f2/f1]` | Small-signal distortion. |
+| `.disto dec\|oct\|lin N f0 f1 [f2/f1]` | Compatibility card; currently runs the matching small-signal AC sweep and does not emit Volterra distortion products. |
 | `.pz in+ in- out+ out- cur\|vol pol\|zer\|pz` | Pole-zero extraction. |
 | `.sens v(out[,ref]) [AC sweep]` | DC or AC sensitivity. |
 | `.tf v(out) SRC` / `.tf i(VSRC) SRC` | DC transfer function (gain, Rin, Rout). |
@@ -21,8 +21,8 @@ A deck with no analysis card runs a DC operating point.
 | `.stb dec\|oct\|lin N fstart fstop probe=VNAME` | Loop stability: Tian double-injection loop gain at a 0 V probe source placed in series with the feedback path (both terminals off ground). Prints phase/gain margins; exports `loopgain` (complex), `loopgain_mag_db`, `loopgain_phase_deg` under the `stb` tag. |
 
 Initial conditions: `.ic v(node)=value …` seeds the transient start;
-`.nodeset` hints the DC solve. `.options uic` semantics are not yet
-implemented (a warning is printed; the run uses the DC start).
+`.nodeset` hints the DC solve. `.TRAN ... UIC` skips the operating point
+and starts integration from the explicit `.IC` / element `IC=` state.
 
 ## Convergence aids
 
@@ -55,11 +55,11 @@ Long transients can be segmented:
 
 ```sh
 rspice run long.cir --checkpoint seg1.ckpt          # runs to tstop, saves state
-rspice run long2.cir --restore seg1.ckpt            # continues from the checkpoint
+rspice run long2.cir --resume seg1.ckpt             # continues from the checkpoint
 ```
 
 The checkpoint stores the exact reactive integrator state and is
-fingerprint-guarded against a mismatched deck. `--restore` requires the
+fingerprint-guarded against a mismatched deck. `--resume` requires the
 deck's `tstop` to exceed the checkpoint time, and combines with
 `--checkpoint` to chain segments. TRNOISE decks regenerate their noise
 train per segment — run those unsegmented when one continuous sample

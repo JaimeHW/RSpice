@@ -33,6 +33,8 @@ rspice check circuit.sp --connectivity
 
 `.OP`, `.DC`, `.TRAN`, `.AC`, `.DISTO`, `.NOISE`, `.SENS`, `.PZ`, `.STEP`, `.FOUR`, `.TEMP`, and Monte Carlo cards. If the netlist contains no analysis cards, a DC operating point is run by default.
 
+Compatibility note: `.DISTO` is accepted as a deck card, but the CLI currently maps it to the corresponding linearized AC sweep and does not emit Volterra distortion products. Use `.FOUR`/THD/IMD post-processing for distortion metrics.
+
 A handful of analyses can instead be requested from the command line. When one of these flags is present, it runs **instead of** the netlist's analysis cards:
 
 | Mode | Flags |

@@ -20,7 +20,7 @@ RSPICE_BENCH_NGSPICE=/path/to/ngspice target/release/rspice-bench run
   release profile; debug builds are several times slower.
 - **`--compress`** caps waveform memory and file size for long
   transients (lossy within `--compress-tol`).
-- **Checkpointing** (`--checkpoint` / `--restore`) splits very long
+- **Checkpointing** (`--checkpoint` / `--resume`) splits very long
   transients into segments without losing integrator state.
 - **Output selection** (`.save`/`.probe`) trims recording overhead on
   large circuits.
