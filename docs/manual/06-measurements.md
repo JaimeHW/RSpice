@@ -8,17 +8,26 @@
 .meas tran trise  TRIG v(in)  VAL=0.5 RISE=1  TARG v(out) VAL=0.5 RISE=1
 .meas tran vfind  FIND v(out) AT=2u
 .meas tran vwhen  FIND v(out) WHEN v(in)=0.5
+.meas tran slew   DERIV v(out) AT=2u
+.meas tran ratio  PARAM='{vmax/vavg}'
+.meas tran spec   MAX  v(out) GOAL=1.2 TOL=0.02
 .meas ac   peak   MAX  v(out)
 ```
 
 Measurement types: `MAX`, `MIN`, `PP`, `AVG`, `RMS`, `INTEG`,
-`FIND … AT=`/`WHEN`, `TRIG…TARG` delay, `RISE`/`FALL` times. `.meas
+`FIND … AT=`/`WHEN`, `DERIV`/`DERIVATIVE`, `PARAM='{expr}'` over previously
+evaluated measurements, `TRIG…TARG` delay, `RISE`/`FALL` times. `.meas
 tran|ac|dc` statements evaluate after the matching analysis. Signal lookup
 is case-insensitive and accepts both `V(out)` and bare `out` spellings. For
 AC, plain `V(out)` / `VM(out)` measure magnitude; `VDB(out)` measures dB
 magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)`
 imaginary. The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`;
 branch currents use the same `I*` variants.
+
+`GOAL=value` and `TOL=value` turn a measurement into a pass/fail contract.
+The measurement still evaluates and is written to reports; a missed goal
+marks the run failed and `rspice run` exits with code `3` unless
+`--allow-failed-meas` is set.
 
 Results print with `--meas`, and export for CI with
 `--meas-file results.json` (or `.csv` via `--meas-format csv`). In

@@ -25,9 +25,9 @@ The first letter of an element name selects the device:
 | `B` | Behavioral source (`V=expr` / `I=expr`) | `B1 y 0 V=v(a)*v(a)` |
 | `D` | Diode | `D1 a k DMOD` |
 | `Q` | BJT (Gummel-Poon, VBIC via model level) | `Q1 c b e QMOD` |
-| `M` | MOSFET (level 1/…, BSIM3, BSIM4, B3SOI) | `M1 d g s b NCH W=10u L=1u` |
-| `J` | JFET | `J1 d g s JMOD` |
-| `Z` | MESFET/HFET | `Z1 d g s ZMOD` |
+| `M` | MOSFET (native BSIM4/BSIM3/B3SOI plus classic and opt-in fallback levels) | `M1 d g s b NCH W=10u L=1u` |
+| `J` | JFET level 1; `LEVEL=2` warns and falls back to level 1 | `J1 d g s JMOD` |
+| `Z` | MES/MESA/HFET-family devices | `Z1 d g s ZMOD` |
 | `S` / `W` | Voltage-/current-controlled switch | `S1 a b c d SWMOD` |
 | `T` | Ideal transmission line | `T1 a 0 b 0 Z0=50 TD=1n` |
 | `O` | Lossy line (LTRA) | `O1 a 0 b 0 LMOD` |
@@ -39,11 +39,28 @@ The first letter of an element name selects the device:
 Instance multiplicity `m=` and `AREA` scaling compose hierarchically
 through subcircuits.
 
+Controlled-source compatibility is intentionally bounded: voltage-controlled
+`E`/`G` sources support linear, `POLY`, `VALUE`, `TABLE`, and `LAPLACE`
+forms; `FREQ` is recognized and rejected as unsupported. Current-controlled
+`F`/`H` sources support linear and `POLY` forms only.
+
+MOS model routing is explicit. Native production paths cover BSIM4 v4.8
+(`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`), BSIM3-SOI
+FD/DD/PD (`LEVEL=55/56/57`), Berkeley MOS1/MOS2/MOS6, legacy BSIM1/BSIM2,
+EKV, and VDMOS. Unsupported BSIM4 mode selectors such as external
+source/drain resistance networks, gate/body resistance networks, NQS,
+non-default charge paths, gate tunneling, WPE/stress, and unsupported
+geometry modes fail with typed errors rather than being silently simplified.
+Other non-native bulk-MOS levels require `.options allow_simplified_mos=1`
+and use the documented simplified fallback.
+
 ## Sources
 
 Transient source functions: `PULSE`, `SIN`, `EXP`, `PWL`, `SFFM`, `AM`,
-`TRNOISE` (Gaussian + 1/f), `TRRANDOM`. DC and `AC mag [phase]`
-specifications combine with any transient function.
+`TRNOISE` (white Gaussian + 1/f). DC and `AC mag [phase]` specifications
+combine with any transient function. `TRNOISE` RTS-tail parameters and
+`TRRANDOM` are not implemented; decks requesting those forms should fail
+explicitly instead of being treated as supported noise sources.
 
 ## Parameters and expressions
 

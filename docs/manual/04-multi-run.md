@@ -56,22 +56,35 @@ stop the remaining ones; the exit code reflects any failure.
 .dc data=corners
 ```
 
-Each row binds the listed parameters and re-runs. A bare
-`.dc data=name` is one operating point per row; `.tran … sweep
-data=name` / `.ac … sweep data=name` re-run that analysis per row.
+Each row binds the listed parameters and re-runs. Values are numeric SPICE
+values (suffixes such as `k`, `u`, and `meg` are accepted); string-valued
+HSPICE-style data tables are not part of the current `.data` surface. A bare
+`.dc data=name` is one operating point per row; `.tran … sweep data=name` /
+`.ac … sweep data=name` re-run that analysis per row.
 `.alter` and `.data` compose (every variant runs the full table).
 
 ## Monte Carlo
 
 ```spice
-.param r={agauss(1k, 50, 1)}
-.mc 500 tran 1n 10u
+.param r=1k
+.op
+.mc 500 DIST GAUSS SPREAD 0.05 SEED 1337 PARAMS r
 ```
 
-or from the CLI: `rspice run deck.cir --monte-carlo 500 --seed 1337`.
-Statistical expression functions (`gauss/agauss/unif/aunif`) draw from
-per-run, seed-stable RNG streams, so a run is reproducible regardless of
-machine. Results aggregate into per-variable statistics and histograms.
+`.mc` currently runs operating-point parameter variation over eligible numeric
+parameters; it is not a general wrapper that repeats `.tran` or `.ac` analyses
+yet. Accepted distributions are `GAUSS`/`GAUSSIAN`, `UNIFORM`, and
+`WORSTCASE`, with `SPREAD`/`SIGMA`/`TOL` and optional `PARAMS` filters.
+Shorthand such as `.mc 500 gauss 0.05` is also accepted.
+
+The equivalent CLI surface is
+`rspice run deck.cir --monte-carlo 500 --seed 1337 --mc-distribution gauss --mc-spread 0.05 --mc-param r`.
+Statistical expression functions (`gauss/agauss/unif/aunif`) and Monte Carlo
+parameter perturbations draw from seed-stable RNG streams, so a run is
+reproducible regardless of machine. `.alter`/`.data` plans and corner sweeps
+use `-j N` for worker control; Monte Carlo samples are parallelized internally
+by the engine.
+Results aggregate into per-variable statistics and histograms.
 
 ## Reports across runs
 

@@ -36,18 +36,20 @@ breakpoint-style integration restart. Tuning knobs (`.options` or CLI):
 
 ## Advanced / RF set
 
-These run through the CLI flags or the IDE's analysis setup (they are
-configured per run rather than as deck cards):
+These run through CLI flags, the IDE's analysis setup, or engine APIs
+(they are configured per run rather than as deck cards, except for `.stb`
+in the core table above):
 
 | Analysis | CLI / IDE |
 |---|---|
 | Periodic steady state (shooting) | `--pss-freq F [--pss-harmonics N] [--pss-tstab T]` |
 | Harmonic balance (Krylov for ≥256 unknowns) | `--hb-freq F [--hb-harmonics N]` |
-| PAC / PXF / PSTB / periodic noise / envelope | IDE analysis setup |
-| S-parameters (Touchstone export) | IDE analysis setup |
-| Monte Carlo | `--monte-carlo N [--seed S]` or `.mc` card |
+| S-parameters (Touchstone export) | `--sparam "P1+,P1-,P2+,P2-" [--sparam-z0 Z0]` over the deck's AC sweep, or IDE analysis setup |
+| Monte Carlo | Operating-point parameter variation via `--monte-carlo N [--seed S]` or `.mc` card |
+| Process corners | `--corners tt,ss,ff [--corner-lib FILE]` or IDE analysis setup |
 | Pole-zero via nodes | `--pz-input N --pz-output M` |
 | Sensitivity | `--sens-output N [--sens-param NAME]` |
+| PAC / PXF / PSTB / periodic noise / envelope | IDE / engine-runner surface; not CLI flags or deck cards in the current release |
 
 ## Transient checkpointing
 
