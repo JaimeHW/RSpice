@@ -11,7 +11,7 @@ use std::sync::{
     Arc, Mutex, MutexGuard,
     atomic::{AtomicBool, Ordering},
 };
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 
 use super::config::AnalysisConfig;
 use super::multi_run::AnalysisSpec;
@@ -64,6 +64,9 @@ pub struct SimulationRunner {
 
     /// Current simulation thread handle
     thread_handle: Option<JoinHandle<Result<SimulationResult, SimulationError>>>,
+
+    /// Completed inline result waiting for the controller to poll it.
+    pending_result: Option<Result<SimulationResult, SimulationError>>,
 }
 
 impl Default for SimulationRunner {
@@ -79,6 +82,7 @@ impl SimulationRunner {
             progress: Arc::new(Mutex::new(SimulationProgress::default())),
             abort_flag: Arc::new(AtomicBool::new(false)),
             thread_handle: None,
+            pending_result: None,
         }
     }
 
@@ -124,6 +128,10 @@ impl SimulationRunner {
     ///
     /// Returns `Some(result)` if simulation completed, `None` if still running or no simulation.
     pub fn poll_result(&mut self) -> Option<Result<SimulationResult, SimulationError>> {
+        if let Some(result) = self.pending_result.take() {
+            return Some(result);
+        }
+
         // Check if thread is finished
         let is_finished = self.thread_handle.as_ref().is_some_and(|h| h.is_finished());
 
@@ -142,6 +150,27 @@ impl SimulationRunner {
         }
 
         None
+    }
+
+    fn has_unpolled_result(&self) -> bool {
+        self.pending_result.is_some()
+            || self
+                .thread_handle
+                .as_ref()
+                .is_some_and(|handle| handle.is_finished())
+    }
+
+    #[cfg(any(target_arch = "wasm32", test))]
+    fn store_pending_result(
+        &mut self,
+        result: Result<SimulationResult, SimulationError>,
+    ) -> Result<(), SimulationError> {
+        if self.pending_result.is_some() || self.thread_handle.is_some() {
+            return Err(SimulationError::AlreadyRunning);
+        }
+
+        self.pending_result = Some(result);
+        Ok(())
     }
 
     /// Start a simulation with the given configuration
@@ -221,7 +250,7 @@ impl SimulationRunner {
         request: SimulationRequest,
         input: NetlistInput,
     ) -> Result<(), SimulationError> {
-        if self.is_running() {
+        if self.is_running() || self.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
         }
 
@@ -243,13 +272,15 @@ impl SimulationRunner {
         // because completion is observed through `progress`, not the handle.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let handle =
-                thread::spawn(move || run_simulation_thread(request, input, progress, abort_flag));
+            let handle = std::thread::spawn(move || {
+                run_simulation_thread(request, input, progress, abort_flag)
+            });
             self.thread_handle = Some(handle);
         }
         #[cfg(target_arch = "wasm32")]
         {
-            run_simulation_thread(request, input, progress, abort_flag);
+            let result = run_simulation_thread(request, input, progress, abort_flag);
+            self.store_pending_result(result)?;
         }
         Ok(())
     }
@@ -638,3 +669,82 @@ impl std::error::Error for SimulationError {}
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn poll_result_returns_pending_result_once() {
+        let mut runner = SimulationRunner::new();
+
+        runner
+            .store_pending_result(Ok(SimulationResult::default()))
+            .expect("stores pending result");
+
+        let first = runner
+            .poll_result()
+            .expect("pending result should be delivered");
+        assert!(matches!(
+            first,
+            Ok(SimulationResult::MeasurementsOnly { .. })
+        ));
+        assert!(
+            runner.poll_result().is_none(),
+            "pending result should be consumed"
+        );
+    }
+
+    #[test]
+    fn start_rejects_unpolled_pending_result() {
+        let mut runner = SimulationRunner::new();
+
+        runner
+            .store_pending_result(Err(SimulationError::InvalidConfig(
+                "inline failure".to_string(),
+            )))
+            .expect("stores pending error");
+
+        let start_result = runner.start(AnalysisConfig::DcOp, String::new());
+        assert_eq!(start_result, Err(SimulationError::AlreadyRunning));
+
+        let pending = runner
+            .poll_result()
+            .expect("pending error should remain available");
+        assert!(matches!(
+            pending,
+            Err(SimulationError::InvalidConfig(message)) if message == "inline failure"
+        ));
+        assert!(
+            runner.poll_result().is_none(),
+            "pending error should be consumed"
+        );
+    }
+
+    #[test]
+    fn start_rejects_unpolled_finished_thread_result() {
+        let mut runner = SimulationRunner::new();
+        runner.thread_handle = Some(std::thread::spawn(|| Ok(SimulationResult::default())));
+        while !runner
+            .thread_handle
+            .as_ref()
+            .expect("thread handle is set")
+            .is_finished()
+        {
+            std::thread::yield_now();
+        }
+
+        let start_result = runner.start(AnalysisConfig::DcOp, String::new());
+        assert_eq!(start_result, Err(SimulationError::AlreadyRunning));
+
+        let pending = runner
+            .poll_result()
+            .expect("finished thread result should remain available")
+            .expect("thread result should be ok");
+        assert!(matches!(pending, SimulationResult::MeasurementsOnly { .. }));
+        assert!(
+            runner.poll_result().is_none(),
+            "thread result should be consumed"
+        );
+    }
+}
