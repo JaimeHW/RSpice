@@ -17,7 +17,7 @@ Python and WebAssembly bindings, and a Verilog-A compiler.
 
 ## Overview
 
-RSpice simulates analog and mixed-signal circuits described as SPICE netlists. The engine assembles modified-nodal-analysis systems over [faer](https://crates.io/crates/faer)'s sparse solvers and solves them with a damped Newton iteration — merit-based line search, gmin and source stepping, pseudo-transient continuation — under an adaptive-timestep transient loop with local-truncation-error control. Monte Carlo runs and matrix factorizations parallelize across cores with rayon, and the hottest device-evaluation paths have optional SIMD batch implementations.
+RSpice simulates analog and mixed-signal circuits described as SPICE netlists. The engine assembles modified-nodal-analysis systems and solves them with a damped Newton iteration — merit-based line search, gmin and source stepping, pseudo-transient continuation — under an adaptive-timestep transient loop with local-truncation-error control. The real-valued path defaults to an in-tree KLU-class sparse solver, while [faer](https://crates.io/crates/faer) backs complex/AC-family sparse solves; AC sweeps and Monte Carlo runs parallelize across cores with rayon, and the hottest device-evaluation paths have optional SIMD batch implementations.
 
 Around the engine sit a CLI built for batch runs and CI, a desktop application for schematic capture and waveform inspection, and Python and WebAssembly bindings; a Verilog-A compiler brings behavioral models to all of them.
 
@@ -78,25 +78,33 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Operating point & sweeps | `.OP`, `.DC` (including two-source sweeps), temperature sweeps, `.STEP` |
 | Time domain | `.TRAN`, with LTE-controlled adaptive timestepping and checkpoint/resume segmentation |
 | Small-signal | `.AC`, `.NOISE`, `.PZ`, `.TF`, `.SENS` |
-| Statistical | Monte Carlo, process corners † |
+| Statistical | Operating-point Monte Carlo parameter variation, process corners † |
 | Periodic / RF | Periodic steady state (shooting), harmonic balance, two-port S-parameters with Touchstone export † |
 | Post-processing | `.MEAS` over TRAN/DC/AC/NOISE with `GOAL`/`TOL` pass-fail gating, `.FOUR`; THD/IMD, eye-diagram, and jitter metrics † |
 
-† invoked through CLI flags (`--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, `--sparam`, …) rather than netlist cards. `.DISTO` cards are parsed for compatibility and currently run the matching small-signal AC sweep; there is no dedicated Volterra distortion engine yet, so distortion figures come from THD/IMD post-processing. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
+† selected through a mix of deck cards and CLI/IDE surfaces: `.mc` and `.stb` have deck-card paths, while Monte Carlo, process corners, PSS, HB, and S-parameters are also exposed through CLI flags such as `--monte-carlo`, `--corners`, `--pss-freq`, `--hb-freq`, and `--sparam`. `.DISTO` cards are parsed for compatibility and currently run the matching small-signal AC sweep; there is no dedicated Volterra distortion engine yet, so distortion figures come from THD/IMD post-processing. PAC, PNoise, PXF, PSTB, envelope, and multi-rate ship as engine-level mathematics (conversion-matrix and monodromy kernels) without a circuit-extraction layer yet; they are not end-to-end analyses and are not claimed as such.
 
 ### Devices
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | BSIM4, BSIM3, BSIM3-SOI (FD / DD / PD), EKV, VDMOS, classic levels 1–3 |
+| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`, `CAPMOD=3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
 | Bipolar | Gummel–Poon BJT, with a VBIC charge model including excess phase |
-| Junction | Diode, JFET (levels 1–2), GaN HEMT |
+| Junction | Diode, JFET level 1, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
-| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL` waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
+| Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
 | Switches & macromodels | Voltage- and current-controlled switches, op-amp macromodel |
 | Mixed-signal | XSPICE-style analog/digital elements, tri-state drivers, A/D–D/A bridges |
 | Verilog-A | Compiled behavioral modules (below) |
+
+BSIM-class models fail with typed errors when a model card requests unported
+physics such as BSIM4 external S/D resistance networks, gate/body resistance
+networks, NQS, non-default charge models, gate tunneling, WPE/stress, or
+unsupported geometry modes. That is deliberate: a commercial simulator should
+reject unsupported physics rather than silently produce plausible but wrong
+currents. The GaN HEMT path is an in-tree physics-style model; CMC ASM-HEMT /
+MVSG qualification remains roadmap work.
 
 ### Netlist dialect
 
@@ -217,8 +225,9 @@ The harness design — oracle-replay methodology, comparison gating, debug envir
 | `rspice-veriloga` | Verilog-A parser, semantic pipeline, VM runtime, optional native codegen |
 | `rspice-python` | Python bindings built with PyO3 |
 | `rspice-wasm` | WebAssembly bindings for the simulation engine |
+| `rspice-bench` | Whole-process benchmark rig against local ngspice |
 
-Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) the vendored ngspice test suite and validation manifest, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual and testing methodology.
+Beyond the crates: [models/](models/) holds starter SPICE and Verilog-A libraries, [tests/](tests/) the vendored ngspice test suite and validation manifest, [examples/](examples/) CI-ready usage patterns, [benchmarks/](benchmarks/) the macro-benchmark decks and published scoreboards, and [docs/](docs/) the user manual, testing methodology, and roadmap.
 
 ## License
 
@@ -226,4 +235,4 @@ RSpice is source-available software under the [RSpice Personal Use License](LICE
 
 ## Acknowledgments
 
-RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from its BSD-licensed code base (ngspice 46), and its test suite is RSpice's primary accuracy reference. Sparse linear algebra is built on [faer](https://crates.io/crates/faer).
+RSpice's device models and transient engine owe a great deal to [ngspice](https://ngspice.sourceforge.io/): several models are ported from its BSD-licensed code base (ngspice 46), and its test suite is RSpice's primary accuracy reference. Sparse linear algebra uses the in-tree KLU-class real solver plus [faer](https://crates.io/crates/faer) for complex/AC-family paths.

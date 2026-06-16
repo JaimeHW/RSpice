@@ -79,7 +79,7 @@ hysteresis model.
 **Semiconductors** (`semiconductor/`) — junction diode; BJT (with a VBIC
 path exercised by `tests/vbic_excess_phase_oracle.rs`).
 
-**MOSFETs** (`mosfet/`) —
+**MOSFETs and FET-family models** (`mosfet/`) —
 
 - Classic MOS levels 1–3 (`mosfet.rs`, `mos_models.rs`, `legacy_bsim.rs`)
 - BSIM3v3 (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
@@ -87,7 +87,8 @@ path exercised by `tests/vbic_excess_phase_oracle.rs`).
 - EKV (`ekv.rs`)
 - VDMOS power MOSFET (`vdmos/` — device, recovery, thermal submodules)
 - B3SOI silicon-on-insulator, in DD/FD/PD variants (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
-- JFET (`jfet/`, `jfet.rs`)
+- JFET level 1 (`jfet/`, `jfet.rs`); `LEVEL=2` cards currently warn and
+  fall back to level-1 equations.
 
 `bsim4v8/` is the native BSIM4 v4.8 path for MOS `LEVEL=14/54`, ported from
 ngspice-46's `src/spicelib/devices/bsim4/`. It is wired through the builder,
@@ -114,7 +115,8 @@ coupled multi-conductor lines (`coupled_transmission_line.rs`,
 `cpl_native.rs`).
 
 **Other** — switches (`switch.rs`), ideal op-amp (`opamp.rs`), GaN HEMT
-(`gan_hemt.rs`), thermal network elements (`thermal.rs`), tristate
+(`gan_hemt.rs`, in-tree physics-style model; ASM-HEMT/MVSG CMC
+qualification is roadmap work), thermal network elements (`thermal.rs`), tristate
 (`tristate.rs`), device bypass for latent devices (`model_bypass.rs`).
 
 **Extension points** — Verilog-A devices via the `rspice-veriloga` compiler
