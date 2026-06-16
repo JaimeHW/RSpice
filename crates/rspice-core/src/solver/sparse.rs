@@ -76,6 +76,12 @@ pub struct StaticMatrix {
     residual_gross_scratch: Vec<Value>,
 }
 
+#[cold]
+#[inline(never)]
+fn panic_missing_matrix_position(method: &'static str, row: usize, col: usize) -> ! {
+    panic!("{method} missing matrix position ({row}, {col})");
+}
+
 /// Whether the KLU-class backend handles real solves for this process.
 ///
 /// Default ON: the full ngspice conformance run under the backend
@@ -244,15 +250,11 @@ impl StaticMatrix {
     /// Add value at (row, col) - O(1) using position map
     #[inline]
     pub fn add(&mut self, row: usize, col: usize, value: Value) {
-        if let Some(&idx) = self.position_map.get(&(row, col)) {
-            self.values[idx] += value;
-        } else {
-            #[cfg(debug_assertions)]
-            panic!(
-                "StaticMatrix::add called with unknown position ({}, {})",
-                row, col
-            );
-        }
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => panic_missing_matrix_position("StaticMatrix::add", row, col),
+        };
+        self.values[idx] += value;
     }
 
     /// Rows whose entries are all exactly zero (or absent): the immediate
@@ -656,28 +658,34 @@ impl ComplexMatrix {
     /// Add real value at (row, col)
     #[inline]
     pub fn add_real(&mut self, row: usize, col: usize, value: Value) {
-        if let Some(&idx) = self.position_map.get(&(row, col)) {
-            self.values[idx] += Complex64::new(value, 0.0);
-            self.factorization_valid = false;
-        }
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => panic_missing_matrix_position("ComplexMatrix::add_real", row, col),
+        };
+        self.values[idx] += Complex64::new(value, 0.0);
+        self.factorization_valid = false;
     }
 
     /// Add complex value at (row, col)
     #[inline]
     pub fn add(&mut self, row: usize, col: usize, value: Complex64) {
-        if let Some(&idx) = self.position_map.get(&(row, col)) {
-            self.values[idx] += value;
-            self.factorization_valid = false;
-        }
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => panic_missing_matrix_position("ComplexMatrix::add", row, col),
+        };
+        self.values[idx] += value;
+        self.factorization_valid = false;
     }
 
     /// Add imaginary value (for frequency-dependent terms like jwC)
     #[inline]
     pub fn add_imag(&mut self, row: usize, col: usize, value: Value) {
-        if let Some(&idx) = self.position_map.get(&(row, col)) {
-            self.values[idx] += Complex64::new(0.0, value);
-            self.factorization_valid = false;
-        }
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => panic_missing_matrix_position("ComplexMatrix::add_imag", row, col),
+        };
+        self.values[idx] += Complex64::new(0.0, value);
+        self.factorization_valid = false;
     }
 
     /// Materialize the real part of the sparse matrix as a dense matrix.
