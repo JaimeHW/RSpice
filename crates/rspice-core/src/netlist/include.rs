@@ -11,10 +11,9 @@
 //! - Case-insensitive matching for Windows compatibility
 
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::ParseError;
+use super::{ParseError, read_file_with_encoding};
 
 //=============================================================================
 // Include Processor
@@ -195,7 +194,7 @@ impl IncludeProcessor {
         self.enter_include(&key)?;
 
         let result = (|| {
-            let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
+            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
                 line: 0,
                 message: format!("Failed to include '{}': {}", filename, e),
             })?;
@@ -220,7 +219,7 @@ impl IncludeProcessor {
         self.enter_include(&key)?;
 
         let result = (|| {
-            let content = fs::read_to_string(&path).map_err(|e| ParseError::Syntax {
+            let content = read_file_with_encoding(&path).map_err(|e| ParseError::Syntax {
                 line: 0,
                 message: format!("Failed to include '{}': {}", filename, e),
             })?;
