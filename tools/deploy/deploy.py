@@ -54,12 +54,17 @@ def commit_for_ref(ref):
         sys.exit("ref '%s' does not resolve to a commit" % ref)
 
 
+def is_site_path(path):
+    norm = path.replace("\\", "/")
+    return norm == "site" or norm.startswith("site/")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Push + tag to deploy the site (git only).")
     ap.add_argument("--ref", help="branch to push and deploy (default: current branch)")
     ap.add_argument("--tag", help="tag name to create (default: next site-vN)")
     ap.add_argument("--allow-dirty", action="store_true",
-                    help="proceed despite uncommitted tracked changes "
+                    help="proceed despite undeployed working-tree changes "
                          "(they will NOT be included — CI builds the pushed commit)")
     args = ap.parse_args()
 
@@ -69,14 +74,23 @@ def main():
     branch = args.ref or out(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     commit = commit_for_ref(branch)
 
-    # clean-tree guard — untracked files are fine (they never deploy);
-    # uncommitted edits to *tracked* files are the foot-gun.
+    # Clean-tree guard. Untracked scratch files outside site/ are fine; tracked
+    # edits and untracked site files are the deploy foot-guns.
     status = out(["git", "status", "--porcelain"])
     tracked_dirty = [ln for ln in status.splitlines() if not ln.startswith("??")]
-    if tracked_dirty and not args.allow_dirty:
-        print("Uncommitted changes to tracked files - these will NOT be deployed\n"
-              "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
-        print("\n".join(tracked_dirty), file=sys.stderr)
+    untracked_site = [ln[3:] for ln in status.splitlines()
+                      if ln.startswith("?? ") and is_site_path(ln[3:])]
+    if (tracked_dirty or untracked_site) and not args.allow_dirty:
+        if tracked_dirty:
+            print("Uncommitted changes to tracked files - these will NOT be deployed\n"
+                  "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
+            print("\n".join(tracked_dirty), file=sys.stderr)
+        if untracked_site:
+            if tracked_dirty:
+                print("", file=sys.stderr)
+            print("Untracked site files - these will NOT be deployed\n"
+                  "(CI builds the pushed commit, not your working tree):\n", file=sys.stderr)
+            print("\n".join(untracked_site), file=sys.stderr)
         sys.exit("\ncommit them first, or re-run with --allow-dirty")
 
     if branch != "main":

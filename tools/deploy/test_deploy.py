@@ -73,6 +73,17 @@ class DeployScriptTest(unittest.TestCase):
         self.assertEqual(target_commit, tag_commit)
         self.assertNotEqual(main_commit, tag_commit)
 
+    def test_untracked_site_files_block_deploy(self):
+        write_file(self.repo, "site/new-page.html", "untracked\n")
+
+        result = self.deploy("--tag", "site-v1000")
+
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Untracked site files", result.stderr)
+        self.assertIn("site/new-page.html", result.stderr.replace("\\", "/"))
+        tag = git(self.remote, "rev-parse", "--verify", "refs/tags/site-v1000", check=False)
+        self.assertNotEqual(tag.returncode, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
