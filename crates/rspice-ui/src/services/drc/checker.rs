@@ -3,8 +3,8 @@ use std::collections::HashMap;
 
 use super::input::{ComponentInfo, NetLabelInfo, WireInfo};
 use super::net::{
-    DisjointSet, NetAccumulator, NetInfo, PointKey, ensure_point_id, is_auto_generated_net_name,
-    merge_net_accumulator, point_on_segment, segment_intersection_point,
+    DisjointSet, NetAccumulator, NetInfo, PointKey, ensure_point_id, merge_net_accumulator,
+    point_on_segment, segment_intersection_point,
 };
 use super::types::{DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType};
 
@@ -353,11 +353,6 @@ impl DrcChecker {
                 continue;
             }
             if net.connection_count < self.config.min_connections && !net.is_ground {
-                // Skip auto-generated net names from wire coordinates
-                if is_auto_generated_net_name(name) {
-                    continue;
-                }
-
                 let id = self.next_id();
                 result.add_violation(
                     DrcViolation::new(
@@ -653,9 +648,10 @@ mod tests {
     }
 
     #[test]
-    fn auto_named_nets_are_not_reported_floating() {
+    fn auto_named_single_connection_nets_are_reported_floating() {
         // A pin with coordinates but no net name lands in a geometry cluster
-        // whose canonical name is auto-generated; the floating check skips it.
+        // whose canonical name is auto-generated; it is still a real dangling
+        // schematic connection and should be reported.
         let components = vec![
             vsource(0, "V1", "vin", "0"),
             resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
@@ -667,7 +663,38 @@ mod tests {
         ];
         let mut checker = DrcChecker::new();
         let result = checker.check_connectivity(&components, &[], &[]);
-        assert!(of_type(&result, DrcViolationType::FloatingNode).is_empty());
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        assert_eq!(floating.len(), 1);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "net_300_300".to_string()
+            }
+        );
+        assert_eq!(floating[0].related_items, vec!["R2".to_string()]);
+    }
+
+    #[test]
+    fn explicit_net_label_starting_with_net_prefix_is_reported_floating() {
+        // User labels may intentionally start with "net_"; string shape alone
+        // must not cause DRC to treat them as generated and suppress them.
+        let components = vec![
+            vsource(0, "V1", "vin", "0"),
+            resistor(1, "R1", vec![pin("1", "vin"), pin("2", "0")]),
+            resistor(2, "R2", vec![pin("1", "vin"), pin_at("2", "", 0.0, 200.0)]),
+        ];
+        let labels = vec![label("net_out", 0.0, 200.0)];
+        let mut checker = DrcChecker::new();
+        let result = checker.check_connectivity(&components, &[], &labels);
+        let floating = of_type(&result, DrcViolationType::FloatingNode);
+        assert_eq!(floating.len(), 1);
+        assert_eq!(
+            floating[0].location,
+            DrcLocation::Node {
+                net_name: "net_out".to_string()
+            }
+        );
+        assert_eq!(floating[0].related_items, vec!["R2".to_string()]);
     }
 
     #[test]
