@@ -4,6 +4,12 @@
 **Scope:** RSpice repository (`C:\Users\James\Desktop\RSpice`) audited against the local ngspice-46 source tree (`C:\Users\James\Desktop\ngspice-46-release\ngspice-46`).
 **Status:** Engineering research, not legal advice. Prepared by automated/manual code survey; have counsel review before relying on it for licensing or distribution decisions.
 
+**Maintenance note (2026-06-16):** this is a dated provenance audit, not a
+live feature inventory. The current tree now contains RSpice's own
+KLU-class real solver backend in `crates/rspice-core/src/solver/klu.rs`.
+That later solver work is not re-audited here; refresh this document before
+any release that relies on the solver provenance claim.
+
 ---
 
 ## 1. Methodology
@@ -74,7 +80,10 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 - `crates/rspice-bench/**`, `benchmarks/circuits/*` — original harness; decks written fresh (ring51.cir adapted from the vendored test family, which is BSD-covered).
 - `docs/ROADMAP.md`, `README.md`, `design/` — descriptive references only.
 - `crates/rspice-ui/src/io/waveform_io/**` — reads/writes the NUTMEG raw **file format** (format compatibility, no code derivation).
-- `crates/rspice-ui/src/simulation/dialog/options/enums.rs` — mentions KLU only as a *named option in ngspice* for UI parity; **no KLU code or binding exists in the tree** (`faer` is the solver).
+- `crates/rspice-ui/src/simulation/dialog/options/enums.rs` — as of the
+  2026-06-10 audit, this mentioned KLU only as a *named option in ngspice*
+  for UI parity and no KLU code/binding existed in the audited tree. Later
+  RSpice KLU-class solver work requires a refreshed audit before release.
 
 ## 4. Vendored test decks assessment
 
@@ -111,7 +120,7 @@ No LGPL/GPL crates in the dependency graph's direct tier. (`rustyhdf5` confirmed
 ## 7. What to avoid going forward
 
 1. **Never port, translate, or "study-then-rewrite" code from these ngspice directories** (copyleft): `src/maths/KLU` (LGPLv2), `src/frontend/numparam` (LGPLv2+), `src/xspice/icm/table` (GPLv2+), `src/tclspice.c` (LGPLv2), `src/osdi` (MPL-2.0). Matching their *behavior* from documentation, black-box testing, or the (CC-BY-SA) manual's described semantics is fine — that is exactly how the `.if/.elseif` numparam-semantics work was done; keep that discipline.
-2. **Solver work:** when building the KLU-class solver (ROADMAP WS: BTF + AMD + left-looking LU), implement from the published papers (Davis/Palamadai Natarajan, AMD/BTF literature) or use/keep pure-Rust libraries (`faer`). Do **not** read KLU source as a reference. If a KLU binding is ever truly needed, link SuiteSparse KLU dynamically and respect LGPL terms — keep it an optional, clearly isolated feature.
+2. **Solver work:** for any KLU-class solver work, implement from the published papers (Davis/Palamadai Natarajan, AMD/BTF literature) or use/keep pure-Rust libraries (`faer`). Do **not** read KLU source as a reference. If a KLU binding is ever truly needed, link SuiteSparse KLU dynamically and respect LGPL terms — keep it an optional, clearly isolated feature. Refresh this audit against the current solver source before release.
 3. **A `table` code model** for xspice compatibility must be written from the ngspice manual's description only — the reference implementation is GPLv2+.
 4. When porting any further ngspice device (BSD-covered dirs), check the file header first, and carry the upstream copyright line into the Rust module header at port time, plus a `NOTICE` entry.
 5. Keep Xyce and Xyce_Regression (GPL-3) CI-clone-only; never vendor decks, scripts, or `.va` files from those repos. Replace `models/veriloga/bsim4.va` with the pristine Berkeley release copy.
