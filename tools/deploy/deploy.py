@@ -46,6 +46,14 @@ def actions_url():
             if m else None)
 
 
+def commit_for_ref(ref):
+    """Resolve the deploy ref once so push/tag target the same commit."""
+    try:
+        return out(["git", "rev-parse", "--verify", "%s^{commit}" % ref])
+    except subprocess.CalledProcessError:
+        sys.exit("ref '%s' does not resolve to a commit" % ref)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Push + tag to deploy the site (git only).")
     ap.add_argument("--ref", help="branch to push and deploy (default: current branch)")
@@ -59,6 +67,7 @@ def main():
         sys.exit("required tool not found on PATH: git")
 
     branch = args.ref or out(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    commit = commit_for_ref(branch)
 
     # clean-tree guard — untracked files are fine (they never deploy);
     # uncommitted edits to *tracked* files are the foot-gun.
@@ -75,15 +84,15 @@ def main():
               "is main; this will publish %s's site/ to production." % (branch, branch))
 
     tag = args.tag or next_site_tag()
-    short = out(["git", "rev-parse", "--short", "HEAD"])
+    short = out(["git", "rev-parse", "--short", commit])
 
     print("-> pushing %s to origin..." % branch)
     subprocess.run(["git", "push", "origin", branch], check=True)
 
     print("-> tagging %s at %s and pushing it (this is what triggers the deploy)..."
           % (tag, short))
-    subprocess.run(["git", "tag", "-a", tag, "-m", "deploy site (%s %s)" % (branch, short)],
-                   check=True)
+    subprocess.run(["git", "tag", "-a", tag, commit,
+                    "-m", "deploy site (%s %s)" % (branch, short)], check=True)
     subprocess.run(["git", "push", "origin", tag], check=True)
 
     url = actions_url()
