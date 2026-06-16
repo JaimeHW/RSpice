@@ -13,9 +13,12 @@
 
 Measurement types: `MAX`, `MIN`, `PP`, `AVG`, `RMS`, `INTEG`,
 `FIND … AT=`/`WHEN`, `TRIG…TARG` delay, `RISE`/`FALL` times. `.meas
-tran|ac|dc` statements evaluate after the matching analysis; AC
-measurements operate on magnitude. Signal lookup is case-insensitive
-and accepts both `V(out)` and bare `out` spellings.
+tran|ac|dc` statements evaluate after the matching analysis. Signal lookup
+is case-insensitive and accepts both `V(out)` and bare `out` spellings. For
+AC, plain `V(out)` / `VM(out)` measure magnitude; `VDB(out)` measures dB
+magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)`
+imaginary. The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`;
+branch currents use the same `I*` variants.
 
 Results print with `--meas`, and export for CI with
 `--meas-file results.json` (or `.csv` via `--meas-format csv`). In

@@ -92,14 +92,16 @@ def test_rc_step_response():
 - `report.tran` / `report.ac` / `report.op` / `report.dc` / `report.noise` /
   `report.tf` / `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
-  `report.all_passed` — `.MEAS` outcomes (TRAN and DC supported; AC not yet)
+  `report.all_passed` — `.MEAS` outcomes for TRAN, DC, and AC analyses
+  (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data)
 - `report.records` — one record per directive; anything the engine could not
   execute is listed with `skipped=True` and a reason, never dropped silently
 - `report.assert_passed()` — raises `MeasurementError` unless at least one
   measurement ran and all of them passed, so a deck whose measurements were
   skipped cannot green-wash a pipeline
 
-Measurements can also run against results you already have:
+Measurements can also run against transient and DC-sweep results you already
+have:
 
 ```python
 tran = engine.run_tran(netlist, stop_time=1e-3)
@@ -107,10 +109,19 @@ for m in engine.measure(netlist, tran):
     print(m.name, m.value, m.passed)
 ```
 
+`Engine.run(...)` is the automated-verification entry point and evaluates
+matching TRAN, DC, and AC `.MEAS` statements after it executes the deck.
+Standalone `Engine.measure(...)` is intentionally narrower today: it accepts
+`TransientResult` and `DcSweepResult` only.
+
 Supported `.MEAS` forms: `MAX`, `MIN`, `AVG`, `RMS`, `PP`, `INTEG`
 (`FROM=`/`TO=` windows), `FIND ... AT=` / `FIND ... WHEN ...` (including
 `FIND TIME WHEN ...`), and `TRIG ... TARG ...` delay measurements. Signals
-address node voltages (`V(out)`) and branch currents (`I(V1)`).
+address node voltages (`V(out)`) and branch currents (`I(V1)`). For AC,
+plain `V(out)` / `VM(out)` measure magnitude; `VDB(out)` measures dB
+magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)`
+imaginary. The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`;
+branch currents use the same `I*` variants.
 
 ## API Overview
 
@@ -267,14 +278,42 @@ arriving after it completes.
 
 ## Testing
 
-The binding test suite lives in `tests/` and runs against a development
-build:
+For routine Rust workspace checks, keep PyO3 and the wasm target out of the
+fast path:
+
+```bash
+cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+```
+
+Check the Python binding crate separately after selecting a real Python
+interpreter:
+
+```bash
+cargo check -p rspice-python
+```
+
+On Windows, the Microsoft Store `python`/`python3` aliases can point PyO3 at
+stub executables under `WindowsApps` and break local checks. `PYO3_PYTHON` is
+the reliable override:
+
+```powershell
+py -3 -m venv .venv
+$env:PYO3_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+cargo check -p rspice-python
+```
+
+The binding test suite lives in `tests/` and should run through a maturin
+development install:
 
 ```bash
 cd crates/rspice-python
-maturin develop
-python -m pytest tests/
+python -m pip install maturin numpy pytest
+maturin develop --release
+python -m pytest tests/ -v
 ```
+
+`cargo test -p rspice-python --lib` is not the recommended binding test: it
+does not replace importing the built extension from pytest.
 
 ## License
 

@@ -89,14 +89,18 @@ path exercised by `tests/vbic_excess_phase_oracle.rs`).
 - B3SOI silicon-on-insulator, in DD/FD/PD variants (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
 - JFET (`jfet/`, `jfet.rs`)
 
-`bsim4v8/` is a second, self-contained BSIM4 v4.8 port taken directly from
-ngspice-46's `src/spicelib/devices/bsim4/`. Per its module documentation it
-has **no engine integration yet** — nothing stamps a matrix or registers
-with the builder — and several mode selectors (`rdsMod`, `rgateMod`,
-`rbodyMod`, NQS, `mobMod≥3`, gate tunneling, `capMod≠2`, the stress model)
-are deliberately rejected with typed errors rather than silently ignored.
-See `src/device/mosfet/bsim4v8/mod.rs` for the precise ported/not-ported
-inventory.
+`bsim4v8/` is the native BSIM4 v4.8 path for MOS `LEVEL=14/54`, ported from
+ngspice-46's `src/spicelib/devices/bsim4/`. It is wired through the builder,
+matrix reservation, nonlinear Newton stamping, AC small-signal stamping, and
+transient charge integration; `tests/bsim4_native.rs` pins the engine wiring
+against OP, DC sweep, transient, and `LEVEL=54` decks. The port still rejects
+unported mode selectors with typed errors rather than silently changing
+physics: external bias-dependent S/D resistance (`rdsMod=1`), distributed
+body and gate-resistance networks (`rbodyMod`, `rgateMod`), NQS, `mobMod`
+3-6, gate tunneling currents, non-default `capMod`/`cvchargeMod` charge
+paths, `dioMod=0/2`, `mtrlMod=1`, WPE/stress, and some `geoMod>0`
+implicit-geometry cases. See `src/device/mosfet/bsim4v8/params.rs` and
+`device.rs` for the exact ported/not-ported inventory.
 
 **Sources and behavioral** — independent sources (`sources.rs`), the four
 controlled sources E/F/G/H (`controlled.rs`), behavioral B-sources whose
