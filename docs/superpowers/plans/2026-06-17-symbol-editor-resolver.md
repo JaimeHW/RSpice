@@ -213,12 +213,13 @@ pub struct SymbolResolver<'a> {
 
 Implement `SymbolResolver::new`, `resolve_binding`, `resolve_reference`, and internal helpers that:
 
-- read the sibling schematic contract from `schematic_buffers`;
-- fall back to `LibraryCellInstance::interface()` when available;
+- use `LibraryCellInstance::interface()` first for placed bindings so displayed, snapped, and netlisted terminals stay aligned with the instance's saved electrical contract;
+- read the sibling schematic contract from `schematic_buffers` first for master/reference resolution, and as fallback for legacy bindings without a complete saved interface;
 - load `SymbolDocument` from the `symbol` view metadata;
 - generate `SymbolDocument::generated_from_ports(&ports)` when there is no authored metadata;
+- fall back to generated geometry with a resolver issue when authored symbol metadata is invalid;
 - keep connectable pins in port order;
-- convert unplaced, orphaned, and off-grid findings into `ResolvedSymbolIssue`.
+- convert unplaced, orphaned, off-grid, and invalid-metadata findings into `ResolvedSymbolIssue`.
 
 Export the module from `state/mod.rs`:
 

@@ -29,7 +29,7 @@ This design implements the resolver-first path approved for `codex/symbol-viewer
 - `origin`: instance reference point.
 - `name_anchor` and `value_anchor`: label locations in symbol coordinates.
 
-The sibling schematic view remains the source of the cell interface when it exists. For generated fallback symbol views, the existing `generated` and `ports` metadata continue to provide the legacy contract until the symbol is authored.
+The sibling schematic view remains the source of the master cell interface when it exists. Placed `LibraryCellInstance` bindings are the exception: once an instance is on a parent schematic, its saved `terminal_order` and directions are the electrical contract used by drawing, snapping, and netlisting. The resolver therefore uses the saved binding interface first for placed instances, falling back to the sibling schematic only for legacy/incomplete bindings. For generated fallback symbol views, the existing `generated` and `ports` metadata continue to provide the legacy contract until the symbol is authored.
 
 ### Resolver Layer
 
@@ -40,7 +40,7 @@ Add `crates/rspice-ui/src/state/symbol_resolver.rs` with focused, testable types
 - `ResolvedSymbolPin`: terminal-order-aware pin data with name, direction, optional authored placement status, and local offset.
 - `ResolvedSymbolIssue`: non-UI contract issues such as unplaced pins, orphaned pins, and off-grid pins.
 
-The resolver always returns pins in interface/terminal order for connectivity. Authored pin positions override generated positions only for matching schematic ports. Orphaned pins are kept visible in the symbol editor but excluded from placed-instance connectivity. Missing authored pins resolve to generated fallback offsets only for non-authored generated symbols; hand-authored symbols with unplaced pins produce check errors and do not pretend the pin is placed.
+The resolver always returns pins in interface/terminal order for connectivity. Authored pin positions override generated positions only for matching contract ports. Orphaned pins are kept visible in the symbol editor but excluded from placed-instance connectivity. Missing authored pins resolve to generated fallback offsets only for non-authored generated symbols; hand-authored symbols with unplaced pins produce check errors and do not pretend the pin is placed. Invalid authored metadata reports an explicit resolver issue and falls back to generated geometry when a port contract is available, so a corrupt symbol payload cannot silently erase drawing or snapping.
 
 ### Runtime Use
 
