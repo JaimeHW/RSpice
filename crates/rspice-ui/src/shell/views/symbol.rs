@@ -17,6 +17,14 @@ const BODY_GRID: i32 = SYMBOL_TERMINAL_GRID / 4;
 const PIN_HIT_RADIUS: f32 = 10.0;
 const RAIL_WIDTH: f32 = 280.0;
 const DOT_RADIUS: i32 = 3;
+const SCROLL_ZOOM_SENSITIVITY: f32 = 0.001;
+const PREVIEW_TILE_MAX_WIDTH: f32 = 240.0;
+const PREVIEW_TILE_MAX_HEIGHT: f32 = 168.0;
+const PREVIEW_TILE_MIN_WIDTH: f32 = 168.0;
+const PREVIEW_TILE_MIN_HEIGHT: f32 = 118.0;
+const PREVIEW_TILE_MARGIN: f32 = 12.0;
+const PREVIEW_TILE_HEADER: f32 = 26.0;
+const PREVIEW_FIT_PADDING: f32 = 10.0;
 
 #[derive(Clone, Copy)]
 struct SymbolViewport {
@@ -228,9 +236,10 @@ fn update_viewport(
         state.shell.symbol.needs_fit = false;
     }
     if response.hovered() {
-        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-        if scroll.abs() > f32::EPSILON {
-            let factor = if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 };
+        let factor = ui.input(|input| {
+            symbol_scroll_zoom_factor(input.raw_scroll_delta.y, input.smooth_scroll_delta.y)
+        });
+        if let Some(factor) = factor {
             state.shell.symbol.zoom = (state.shell.symbol.zoom * factor).clamp(1.0, 18.0);
         }
     }
@@ -244,6 +253,17 @@ fn update_viewport(
         zoom: state.shell.symbol.zoom,
         pan: vec2(state.shell.symbol.pan.0, state.shell.symbol.pan.1),
     }
+}
+
+fn symbol_scroll_zoom_factor(raw_scroll_y: f32, smooth_scroll_y: f32) -> Option<f32> {
+    let scroll = if raw_scroll_y.abs() > f32::EPSILON {
+        raw_scroll_y
+    } else if smooth_scroll_y.abs() > f32::EPSILON {
+        smooth_scroll_y
+    } else {
+        return None;
+    };
+    Some((scroll * SCROLL_ZOOM_SENSITIVITY).exp().clamp(0.5, 2.0))
 }
 
 fn fit_symbol_view(state: &mut AppState, rect: Rect, document: &SymbolDocument) {
@@ -911,14 +931,14 @@ fn draw_preview_tile(
     state: &AppState,
     t: &Tokens,
 ) {
-    let rect = Rect::from_min_size(
-        canvas.right_bottom() - vec2(180.0, 138.0),
-        vec2(168.0, 126.0),
-    );
+    let rect = preview_tile_rect(canvas);
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, t.radius_lg, t.color.bg_panel);
     painter.rect_stroke(rect, t.radius_lg, Stroke::new(1.0, t.color.border_strong));
-    let header = Rect::from_min_max(rect.min, pos2(rect.right(), rect.top() + 24.0));
+    let header = Rect::from_min_max(
+        rect.min,
+        pos2(rect.right(), rect.top() + PREVIEW_TILE_HEADER),
+    );
     painter.hline(
         header.x_range(),
         header.bottom() - 0.5,
@@ -931,11 +951,11 @@ fn draw_preview_tile(
         theme::mono(10.0, FontWeight::Regular),
         t.color.text_faint,
     );
-    let viewport = SymbolViewport {
-        rect: Rect::from_min_max(pos2(rect.left(), rect.top() + 24.0), rect.max),
-        zoom: 1.8,
-        pan: Vec2::ZERO,
-    };
+    let body = Rect::from_min_max(
+        pos2(rect.left(), rect.top() + PREVIEW_TILE_HEADER),
+        rect.max,
+    );
+    let viewport = preview_viewport_for_tile(body, document);
     let mut binding = LibraryCellInstance::new(
         &state.workspace.active_view.library,
         &state.workspace.active_view.cell,
@@ -947,14 +967,46 @@ fn draw_preview_tile(
     component.name = "X1".to_owned();
     component.value = state.workspace.active_view.cell.clone();
     let resolved = ResolvedCellSymbol::from_authored_document(document.clone(), ports);
+    let symbol_painter = painter.with_clip_rect(body.shrink(2.0));
     draw_resolved_symbol(
-        &painter,
+        &symbol_painter,
         viewport.world_to_screen(Point::origin()),
         viewport.zoom,
         &component,
         &resolved,
         Stroke::new(1.1, t.color.symbol),
     );
+}
+
+fn preview_tile_rect(canvas: Rect) -> Rect {
+    let available_width = (canvas.width() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
+    let available_height = (canvas.height() - PREVIEW_TILE_MARGIN * 2.0).max(96.0);
+    let width = PREVIEW_TILE_MAX_WIDTH
+        .min(available_width)
+        .max(PREVIEW_TILE_MIN_WIDTH.min(available_width));
+    let height = PREVIEW_TILE_MAX_HEIGHT
+        .min(available_height)
+        .max(PREVIEW_TILE_MIN_HEIGHT.min(available_height));
+    Rect::from_min_size(
+        canvas.right_bottom() - vec2(width + PREVIEW_TILE_MARGIN, height + PREVIEW_TILE_MARGIN),
+        vec2(width, height),
+    )
+}
+
+fn preview_viewport_for_tile(rect: Rect, document: &SymbolDocument) -> SymbolViewport {
+    let (min, max) = document_bounds(document);
+    let width = (max.x - min.x).abs().max(1) as f32;
+    let height = (max.y - min.y).abs().max(1) as f32;
+    let fit_rect = rect.shrink(PREVIEW_FIT_PADDING);
+    let zoom = (fit_rect.width() / width)
+        .min(fit_rect.height() / height)
+        .clamp(0.05, 1.8);
+    let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
+    SymbolViewport {
+        rect,
+        zoom,
+        pan: vec2(-(center.x as f32) * zoom, -(center.y as f32) * zoom),
+    }
 }
 
 fn pins_rail(
@@ -1433,5 +1485,70 @@ mod tests {
         state.shell.symbol.clear_drag_state();
 
         assert!(!state.shell.symbol.drag_undo_recorded);
+    }
+
+    #[test]
+    fn smooth_scroll_zoom_factor_is_proportional_not_binary() {
+        let tiny = symbol_scroll_zoom_factor(0.0, 1.0).expect("tiny smooth scroll should zoom");
+        assert!(
+            tiny > 1.0 && tiny < 1.01,
+            "tiny smooth-scroll residue must not apply a full wheel notch: {tiny}"
+        );
+
+        let wheel = symbol_scroll_zoom_factor(120.0, 1.0).expect("wheel scroll should zoom");
+        assert!(
+            wheel > tiny && wheel < 1.2,
+            "a normal wheel notch should be noticeable but restrained: {wheel}"
+        );
+    }
+
+    #[test]
+    fn preview_viewport_fits_large_symbols_inside_tile_body() {
+        let document = SymbolDocument {
+            body: vec![SymbolShape::Polyline {
+                points: vec![
+                    Point::new(-300, -220),
+                    Point::new(300, -220),
+                    Point::new(300, 220),
+                    Point::new(-300, 220),
+                ],
+                closed: true,
+            }],
+            ..SymbolDocument::default()
+        };
+        let body_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(168.0, 102.0));
+
+        let viewport = preview_viewport_for_tile(body_rect, &document);
+        let (min, max) = document_bounds(&document);
+        let min_screen = viewport.world_to_screen(min);
+        let max_screen = viewport.world_to_screen(max);
+
+        assert!(
+            body_rect.shrink(10.0).contains(min_screen),
+            "min={min_screen:?}"
+        );
+        assert!(
+            body_rect.shrink(10.0).contains(max_screen),
+            "max={max_screen:?}"
+        );
+        assert!(
+            viewport.zoom < 0.25,
+            "large authored symbols must be scaled down for preview: {}",
+            viewport.zoom
+        );
+    }
+
+    #[test]
+    fn preview_tile_uses_larger_size_when_canvas_allows() {
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(960.0, 640.0));
+
+        let tile = preview_tile_rect(canvas);
+
+        assert!(
+            tile.width() >= 220.0 && tile.height() >= 156.0,
+            "preview tile should be large enough for readable symbols: {tile:?}"
+        );
+        assert!(canvas.contains(tile.min));
+        assert!(canvas.contains(tile.max));
     }
 }
