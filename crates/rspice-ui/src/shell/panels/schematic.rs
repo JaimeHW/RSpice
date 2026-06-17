@@ -8,7 +8,8 @@
 //! preview. The PLACE strip at the bottom serves both, so recall
 //! placement never requires leaving the navigator.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, hash_map::DefaultHasher};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use egui::Ui;
@@ -170,9 +171,20 @@ fn navigator(ui: &mut Ui, state: &mut AppState) {
                 }
             } else {
                 // One query, all three kinds, grouped — click stays live.
-                instance_rows(ui, state, Some(&query));
-                net_rows(ui, state, Some(&query));
-                port_rows(ui, state, Some(&query));
+                let counts = navigator_search_counts(state, &query);
+                if counts.is_empty() {
+                    nav_no_match(ui, state, &query);
+                } else {
+                    if counts.instances > 0 {
+                        instance_rows(ui, state, Some(&query));
+                    }
+                    if counts.nets > 0 {
+                        net_rows(ui, state, Some(&query));
+                    }
+                    if counts.ports > 0 {
+                        port_rows(ui, state, Some(&query));
+                    }
+                }
             }
             ui.add_space(8.0);
         });
@@ -519,6 +531,10 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         };
         let hierarchical =
             component.kind == ComponentType::CellInstance && component.library_cell.is_some();
+        let status = component
+            .library_cell
+            .as_ref()
+            .map(|binding| master_status(state, binding));
         let peeked = state.shell.nav_peek.contains(&component.id);
         let selected = state.schematic.selection.has_component(component.id);
 
@@ -526,9 +542,13 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
             .meta(&meta)
             .indent(1)
             .mono()
-            .selected(selected);
+            .selected(selected)
+            .highlight_query(query);
         if hierarchical {
             row = row.twist(peeked);
+        }
+        if status.is_some_and(MasterStatus::is_missing) {
+            row = row.chip_dot(c.err);
         }
         let result = row.show(ui);
 
@@ -561,10 +581,14 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         // impossible to edit by accident. Descend to make it real.
         if peeked && hierarchical {
             let binding = component.library_cell.as_ref().expect("hierarchical");
-            let key = format!("{}/{}/schematic", binding.library, binding.cell);
-            let master = state.workspace.schematic_buffers.get(&key);
-            match master {
-                Some(master) => {
+            match master_status(state, binding) {
+                MasterStatus::Open => {
+                    let key = format!("{}/{}/{}", binding.library, binding.cell, binding.view);
+                    let master = state
+                        .workspace
+                        .schematic_buffers
+                        .get(&key)
+                        .expect("open status requires a schematic buffer");
                     for child in master.components.iter().take(8) {
                         if child.kind == ComponentType::Port {
                             continue;
@@ -595,11 +619,13 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
                             .show(ui);
                     }
                 }
-                None => {
-                    TreeRow::new("master not open in this project")
-                        .indent(2)
-                        .dim()
-                        .show(ui);
+                status => {
+                    let message = status.peek_message(binding);
+                    let mut row = TreeRow::new(&message).indent(2).dim();
+                    if status.is_missing() {
+                        row = row.chip_dot(c.err);
+                    }
+                    row.show(ui);
                 }
             }
             ui.horizontal(|ui| {
@@ -644,8 +670,67 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MasterStatus {
+    Open,
+    NotOpen,
+    MissingLibrary,
+    MissingCell,
+    MissingView,
+}
+
+impl MasterStatus {
+    fn is_missing(self) -> bool {
+        matches!(
+            self,
+            Self::MissingLibrary | Self::MissingCell | Self::MissingView
+        )
+    }
+
+    fn peek_message(self, binding: &crate::state::LibraryCellInstance) -> String {
+        match self {
+            Self::Open => String::new(),
+            Self::NotOpen => format!(
+                "{} / {} / {} is available; descend to inspect",
+                binding.library, binding.cell, binding.view
+            ),
+            Self::MissingLibrary => format!("missing library {}", binding.library),
+            Self::MissingCell => format!("missing cell {} / {}", binding.library, binding.cell),
+            Self::MissingView => format!(
+                "missing view {} / {} / {}",
+                binding.library, binding.cell, binding.view
+            ),
+        }
+    }
+}
+
+fn master_status(state: &AppState, binding: &crate::state::LibraryCellInstance) -> MasterStatus {
+    let Some(library) = state.library_manager.get_library(&binding.library) else {
+        return MasterStatus::MissingLibrary;
+    };
+    let Some(cell) = library.get_cell(&binding.cell) else {
+        return MasterStatus::MissingCell;
+    };
+    if cell.get_view(&binding.view).is_none() {
+        return MasterStatus::MissingView;
+    }
+
+    let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
+    if state
+        .workspace
+        .schematic_buffers
+        .contains_key(&reference.key())
+    {
+        MasterStatus::Open
+    } else {
+        MasterStatus::NotOpen
+    }
+}
+
 /// Net rows — click cross-probes the canvas (net highlight).
 fn net_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
     let nets = design_nets_cached(state);
     let visible: Vec<usize> = nets
         .iter()
@@ -673,15 +758,25 @@ fn net_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         } else {
             format!("{} pins", net.pin_count)
         };
-        let selected = !net.wire_ids.is_empty()
-            && net.wire_ids.iter().all(|id| highlighted.contains(id))
-            && state.schematic.net_highlight.active;
-        let row = TreeRow::new(&net.name)
+        let selected = net_row_is_probed(
+            &net.wire_ids,
+            highlighted,
+            state.schematic.net_highlight.active,
+        );
+        let mut row = TreeRow::new(&net.name)
             .meta(&meta)
             .indent(1)
             .mono()
             .selected(selected)
-            .show(ui);
+            .highlight_query(query);
+        if net_row_is_probed(
+            &net.wire_ids,
+            highlighted,
+            state.schematic.net_highlight.active,
+        ) {
+            row = row.chip_dot(c.warn);
+        }
+        let row = row.show(ui);
         if row.response.clicked() {
             highlight = Some(if selected {
                 HashSet::new() // toggle off
@@ -697,6 +792,10 @@ fn net_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
 }
 
 /// Port rows — the cell's interface, in document (netlist) order.
+fn net_row_is_probed(wire_ids: &[u64], highlighted: &HashSet<u64>, active: bool) -> bool {
+    active && wire_ids.iter().any(|id| highlighted.contains(id))
+}
+
 fn port_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
     let ports = state.schematic.interface_ports();
     let visible: Vec<&PortSpec> = ports
@@ -722,6 +821,7 @@ fn port_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
             .meta(port.direction.keyword())
             .indent(1)
             .mono()
+            .highlight_query(query)
             .show(ui);
     }
 }
@@ -762,6 +862,81 @@ fn empty_note(ui: &mut Ui, text: &str) {
     ui.add_space(14.0);
 }
 
+fn nav_no_match(ui: &mut Ui, state: &mut AppState, query: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.add_space(14.0);
+    egui::Frame::none()
+        .inner_margin(egui::Margin {
+            left: 18.0,
+            right: 18.0,
+            top: 10.0,
+            bottom: 10.0,
+        })
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(format!("No match for \"{query}\" in this cell"))
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+            ui.add_space(4.0);
+            if ui
+                .link(
+                    egui::RichText::new("Clear search")
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.accent),
+                )
+                .clicked()
+            {
+                state.shell.nav_search.clear();
+            }
+        });
+    ui.add_space(14.0);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NavigatorSearchCounts {
+    instances: usize,
+    nets: usize,
+    ports: usize,
+}
+
+impl NavigatorSearchCounts {
+    fn is_empty(self) -> bool {
+        self.instances == 0 && self.nets == 0 && self.ports == 0
+    }
+}
+
+fn navigator_search_counts(state: &AppState, query: &str) -> NavigatorSearchCounts {
+    let query = query.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return NavigatorSearchCounts {
+            instances: 0,
+            nets: 0,
+            ports: 0,
+        };
+    }
+
+    NavigatorSearchCounts {
+        instances: state
+            .schematic
+            .components
+            .iter()
+            .filter(|component| component.kind != ComponentType::Port)
+            .filter(|component| row_matches(component, &query))
+            .count(),
+        nets: design_nets_cached(state)
+            .iter()
+            .filter(|net| net.name.to_ascii_lowercase().contains(&query))
+            .count(),
+        ports: state
+            .schematic
+            .interface_ports()
+            .iter()
+            .filter(|port| port.name.to_ascii_lowercase().contains(&query))
+            .count(),
+    }
+}
+
 fn row_matches(component: &crate::state::Component, query: &str) -> bool {
     component.name.to_ascii_lowercase().contains(query)
         || component.value.to_ascii_lowercase().contains(query)
@@ -778,12 +953,14 @@ fn design_nets_cached(state: &AppState) -> Rc<Vec<crate::simulation::netlist_gen
     thread_local! {
         #[allow(clippy::type_complexity)]
         static NET_CACHE: std::cell::RefCell<
-            Option<((String, u64), Rc<Vec<crate::simulation::netlist_gen::DesignNet>>)>,
+            Option<((String, u64, u64, u64), Rc<Vec<crate::simulation::netlist_gen::DesignNet>>)>,
         > = const { std::cell::RefCell::new(None) };
     }
     let key = (
         state.workspace.active_view.key(),
         state.schematic.topology_version(),
+        state.library_manager.revision(),
+        schematic_buffers_signature(state),
     );
     NET_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
@@ -792,12 +969,34 @@ fn design_nets_cached(state: &AppState) -> Rc<Vec<crate::simulation::netlist_gen
         {
             return Rc::clone(nets);
         }
-        let nets = Rc::new(crate::simulation::netlist_gen::design_nets(
+        let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+            &state.library_manager,
+            &state.workspace.schematic_buffers,
+        );
+        let nets = Rc::new(crate::simulation::netlist_gen::design_nets_with_hierarchy(
             &state.schematic,
+            &hierarchy,
         ));
         *cache = Some((key, Rc::clone(&nets)));
         nets
     })
+}
+
+fn schematic_buffers_signature(state: &AppState) -> u64 {
+    let mut entries: Vec<_> = state
+        .workspace
+        .schematic_buffers
+        .iter()
+        .map(|(key, schematic)| (key, schematic.topology_version()))
+        .collect();
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+
+    let mut hasher = DefaultHasher::new();
+    for (key, version) in entries {
+        key.hash(&mut hasher);
+        version.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 // ---------------------------------------------------------------------------
@@ -941,7 +1140,7 @@ fn browser_groups(state: &AppState) -> Vec<BrowserGroup> {
             })
             .map(|cell| CellEntry::LibraryCell(library.name.clone(), cell.name.clone()))
             .collect();
-        if !entries.is_empty() {
+        if !entries.is_empty() || (query.is_empty() && !library.read_only) {
             groups.push(BrowserGroup {
                 title: library.name.clone(),
                 read_only: library.read_only,
@@ -1005,6 +1204,11 @@ fn library(
 
     let groups = browser_groups(state);
     let searching = !state.shell.cell_search.trim().is_empty();
+    let highlight_query = if searching {
+        Some(state.shell.cell_search.trim().to_owned())
+    } else {
+        None
+    };
 
     egui::ScrollArea::vertical()
         .id_salt("volta.rail.lib")
@@ -1044,6 +1248,17 @@ fn library(
                 if !open {
                     continue;
                 }
+                if group.entries.is_empty() {
+                    TreeRow::new("No cells yet")
+                        .meta("Library Manager")
+                        .indent(1)
+                        .dim()
+                        .height(30.0)
+                        .show(ui)
+                        .response
+                        .on_hover_text("Create a cell or import a design from the Library view");
+                    continue;
+                }
 
                 for entry in &group.entries {
                     let entry_ref = entry.entry_ref();
@@ -1064,12 +1279,25 @@ fn library(
                                 }
                             }
                         };
-                        let row = TreeRow::new(entry.label())
-                            .meta(&meta)
-                            .mono()
-                            .selected(selected)
-                            .height(30.0)
-                            .show(ui);
+                        let row_width = (ui.available_width() - 26.0).max(80.0);
+                        let row = ui
+                            .allocate_ui_with_layout(
+                                egui::vec2(row_width, 30.0),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    TreeRow::new(entry.label())
+                                        .meta(&meta)
+                                        .mono()
+                                        .selected(selected)
+                                        .highlight_query(highlight_query.as_deref())
+                                        .height(30.0)
+                                        .show(ui)
+                                },
+                            )
+                            .inner;
+                        if pin_star(ui, pinned).clicked() {
+                            toggle_pin = Some(entry_ref.clone());
+                        }
                         if row.response.double_clicked() {
                             place = Some(entry_ref.clone());
                         } else if row.response.clicked() {
@@ -1119,7 +1347,27 @@ fn library(
         });
 }
 
-/// 34×22 leading thumbnail: the real symbol for primitives, a block glyph
+fn pin_star(ui: &mut Ui, pinned: bool) -> egui::Response {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let label = if pinned { "★" } else { "☆" };
+    ui.add_sized(
+        egui::vec2(18.0, 24.0),
+        egui::Button::new(
+            egui::RichText::new(label)
+                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                .color(if pinned { c.accent } else { c.text_faint }),
+        )
+        .frame(false),
+    )
+    .on_hover_text(if pinned {
+        "Unpin from favorites"
+    } else {
+        "Pin to favorites"
+    })
+}
+
+/// 34x22 leading thumbnail: the real symbol for primitives, a block glyph
 /// for cells.
 fn paint_entry_thumb(
     ui: &mut Ui,
@@ -1162,6 +1410,10 @@ fn paint_entry_thumb(
 }
 
 /// Stable-height preview: symbol, identity, pins, one accent action.
+fn preview_place_label() -> &'static str {
+    "Place ⏎"
+}
+
 fn preview_card(
     ui: &mut Ui,
     state: &mut AppState,
@@ -1268,7 +1520,8 @@ fn preview_card(
             &theme::mono(tokens::FS_0, FontWeight::Regular),
         ) + 18.0;
         let place_width = ui.available_width() - chip_width - 6.0;
-        if Button::new("Place")
+        if Button::new(preview_place_label())
+            .accent()
             .min_width(place_width.max(60.0))
             .show(ui)
             .clicked()
@@ -1476,6 +1729,7 @@ fn place_strip(
                                     .meta(group)
                                     .mono()
                                     .selected(index == active)
+                                    .highlight_query(Some(query.as_str()))
                                     .height(24.0)
                                     .show(ui);
                                 if row.response.clicked() {
@@ -1485,7 +1739,7 @@ fn place_strip(
                         });
                 });
 
-            let commit = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let commit = input.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if commit {
                 armed = matches
                     .get(state.shell.place_pop_index)
@@ -1721,6 +1975,120 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_place_label_matches_design() {
+        assert_eq!(preview_place_label(), "Place \u{23ce}");
+    }
+
+    #[test]
+    fn net_probe_dot_tracks_active_highlighted_net() {
+        let mut highlighted = HashSet::new();
+        highlighted.insert(42);
+
+        assert!(net_row_is_probed(&[42], &highlighted, true));
+        assert!(net_row_is_probed(&[7, 42], &highlighted, true));
+        assert!(!net_row_is_probed(&[42], &highlighted, false));
+        assert!(!net_row_is_probed(&[7], &highlighted, true));
+        assert!(!net_row_is_probed(&[], &highlighted, true));
+    }
+
+    #[test]
+    fn navigator_search_counts_all_visible_groups() {
+        let mut state = AppState::default();
+        state.schematic.components.clear();
+        state.schematic.components.push(
+            crate::state::Component::new(
+                1,
+                ComponentType::Resistor,
+                crate::state::Point::new(0, 0),
+            )
+            .with_name_value("RLOAD", "10k"),
+        );
+        state.schematic.components.push(
+            crate::state::Component::new(2, ComponentType::Port, crate::state::Point::new(10, 0))
+                .with_name_value("P1", "LOAD_OUT"),
+        );
+
+        let counts = navigator_search_counts(&state, "load");
+        assert_eq!(counts.instances, 1);
+        assert_eq!(counts.nets, 1);
+        assert_eq!(counts.ports, 1);
+        assert!(!counts.is_empty());
+
+        let empty = navigator_search_counts(&state, "definitely-missing");
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn browser_groups_include_empty_editable_libraries_when_not_searching() {
+        let mut state = AppState::default();
+        let mut library = crate::state::Library::new("empty_project");
+        library
+            .metadata
+            .insert("role".to_string(), "project".to_string());
+        state.library_manager.add_library(library);
+
+        let groups = browser_groups(&state);
+        assert!(
+            groups
+                .iter()
+                .any(|group| group.title == "empty_project" && group.entries.is_empty())
+        );
+
+        state.shell.cell_search = "res".to_string();
+        let groups = browser_groups(&state);
+        assert!(!groups.iter().any(|group| group.title == "empty_project"));
+    }
+
+    #[test]
+    fn master_status_distinguishes_missing_and_not_open_states() {
+        let mut state = AppState::default();
+        let mut binding = crate::state::LibraryCellInstance::new("status_lib", "amp", "schematic");
+
+        assert_eq!(
+            master_status(&state, &binding),
+            MasterStatus::MissingLibrary
+        );
+
+        state
+            .library_manager
+            .add_library(crate::state::Library::new("status_lib"));
+        assert_eq!(master_status(&state, &binding), MasterStatus::MissingCell);
+
+        let mut cell = crate::state::Cell::new("amp");
+        cell.add_view(crate::state::View::new(
+            "symbol",
+            crate::state::ViewType::Symbol,
+        ));
+        state
+            .library_manager
+            .get_library_mut("status_lib")
+            .expect("library exists")
+            .add_cell(cell);
+        assert_eq!(master_status(&state, &binding), MasterStatus::MissingView);
+
+        state
+            .library_manager
+            .get_library_mut("status_lib")
+            .expect("library exists")
+            .get_cell_mut("amp")
+            .expect("cell exists")
+            .add_view(crate::state::View::new(
+                "schematic",
+                crate::state::ViewType::Schematic,
+            ));
+        assert_eq!(master_status(&state, &binding), MasterStatus::NotOpen);
+
+        state.workspace.schematic_buffers.insert(
+            "status_lib/amp/schematic".to_string(),
+            crate::state::SchematicState::default(),
+        );
+        assert_eq!(master_status(&state, &binding), MasterStatus::Open);
+
+        binding.view = "layout".to_string();
+        assert_eq!(master_status(&state, &binding), MasterStatus::MissingView);
+    }
 
     /// egui persists the CONTENT rect as a panel's next-frame width, so any
     /// row wider than the rail ratchets the panel toward its maximum and
