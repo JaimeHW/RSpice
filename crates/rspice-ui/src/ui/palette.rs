@@ -5,6 +5,10 @@
 
 use egui::Color32;
 
+const fn color_is_rgb(color: Color32, r: u8, g: u8, b: u8) -> bool {
+    color.r() == r && color.g() == g && color.b() == b && color.a() == 255
+}
+
 /// One complete color palette (a design direction in one mode).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
@@ -81,7 +85,7 @@ pub const INSTRUMENT_DARK: Palette = Palette {
     err: Color32::from_rgb(224, 108, 90),
     canvas_bg: Color32::from_rgb(7, 12, 16),
     canvas_grid: Color32::from_rgb(28, 35, 39),
-    wire: Color32::from_rgb(211, 183, 127),
+    wire: Color32::from_rgb(127, 191, 149),
     symbol: Color32::from_rgb(203, 210, 215),
     net_label: Color32::from_rgb(220, 177, 85),
     traces: [
@@ -275,3 +279,17 @@ pub const GRAPHITE_LIGHT: Palette = Palette {
     shadow_color: Color32::from_rgba_premultiplied(8, 7, 6, 41),
     shadow_geom: (6, 24),
 };
+
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_DARK.wire, 0x7f, 0xbf, 0x95) as usize];
+const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x72, 0x4e, 0x00) as usize];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instrument_wire_tokens_match_volta_schematic_design_refs() {
+        assert_eq!(INSTRUMENT_DARK.wire, Color32::from_rgb(0x7f, 0xbf, 0x95));
+        assert_eq!(INSTRUMENT_LIGHT.wire, Color32::from_rgb(0x72, 0x4e, 0x00));
+    }
+}

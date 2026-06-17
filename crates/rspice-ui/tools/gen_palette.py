@@ -102,8 +102,8 @@ PALETTES = {
         # from the yellow accent (spec amber sat at the same hue).
         "ok": "#65D68A", "warn": (74, 0.14, 60), "err": "#E06C5A",
         "canvas_bg": (15, 0.012, 235), "canvas_grid": (25, 0.012, 235),
-        # schematic tints keep spec L/C, re-hued phosphor green -> brand yellow (h 84)
-        "wire": (79, 0.08, 84), "symbol": (86, 0.01, 235), "net_label": (78, 0.12, 84),
+        # schematic wire follows the schematic editor token exactly.
+        "wire": "#7FBF95", "symbol": (86, 0.01, 235), "net_label": (78, 0.12, 84),
         # site trace order: out=yellow, in=blue, ph=pink; spec green moves to 4
         "trace_1": "#F2B824", "trace_2": "#7CB8E8", "trace_3": "#D984B0",
         "trace_4": (78, 0.16, 152), "trace_5": (72, 0.12, 260), "trace_6": (70, 0.16, 25),
