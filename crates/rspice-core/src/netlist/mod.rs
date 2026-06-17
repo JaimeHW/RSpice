@@ -21,6 +21,7 @@ pub mod lexer;
 pub mod multi_run;
 pub mod param_scope;
 mod parser;
+pub mod source_map;
 pub mod spef;
 mod xspice_parser;
 
@@ -31,6 +32,7 @@ pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::{IncludeProcessor, parse_include_directive, parse_lib_directive};
 pub use param_scope::{ParamResolver, ParamScope, ScopedParam};
 pub use parser::*;
+pub use source_map::*;
 
 use thiserror::Error;
 
@@ -135,6 +137,7 @@ impl Netlist {
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, file_path);
         Self::apply_spef_includes(&mut netlist, file_path)?;
+        netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(file_path.to_path_buf());
         Ok(netlist)
     }
@@ -221,6 +224,7 @@ impl Netlist {
         let mut netlist = Self::parse(&processed)?;
         Self::normalize_model_string_paths(&mut netlist, path);
         Self::apply_spef_includes(&mut netlist, path)?;
+        netlist.source_text = Some(input.to_string());
         netlist.source_path = Some(path.to_path_buf());
         Ok(netlist)
     }
