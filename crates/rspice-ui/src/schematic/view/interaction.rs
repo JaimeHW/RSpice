@@ -3,6 +3,7 @@ use egui::{Response, Ui};
 use crate::common::app::{AppState, ConsoleMessage, DragType};
 use crate::state::{ComponentType, NetGraph, Point, Tool};
 
+use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_wire_grid};
 use super::drawing::nearest_terminal;
 use super::viewport::Viewport;
@@ -12,12 +13,13 @@ pub(super) fn handle_tool_interactions(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
 ) {
     let grid_size = state.schematic.grid_size;
     let current_tool = state.schematic.tool;
 
     if matches!(current_tool, Tool::Select) {
-        handle_select_dragging(ui, response, state, viewport, grid_size);
+        handle_select_dragging(ui, response, state, viewport, grid_size, symbol_context);
     }
 
     if response.clicked_by(egui::PointerButton::Primary)
@@ -33,7 +35,11 @@ pub(super) fn handle_tool_interactions(
                 place_component(state, component_type, grid_pos);
             }
             Tool::Wire => {
-                let wire_pos = screen_to_wire_grid(viewport, grid_size, pos);
+                let wire_pos = resolved_snap_position(
+                    state,
+                    symbol_context,
+                    screen_to_wire_grid(viewport, grid_size, pos),
+                );
                 if state.schematic.wire_drawing.active {
                     state.schematic.extend_wire(wire_pos);
                 } else {
@@ -42,11 +48,11 @@ pub(super) fn handle_tool_interactions(
             }
             Tool::Select => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_select_click(ui, state, grid_pos);
+                handle_select_click(ui, state, grid_pos, symbol_context);
             }
             Tool::Probe => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
-                handle_probe_click(ui, state, grid_pos);
+                handle_probe_click(ui, state, grid_pos, symbol_context);
             }
             Tool::Label => {
                 let grid_pos = screen_to_grid(viewport, grid_size, pos);
@@ -66,9 +72,9 @@ pub(super) fn handle_tool_interactions(
         // Hierarchical instances descend on double-click (the Virtuoso
         // gesture); the breadcrumb pops back out. Everything else opens
         // its properties.
-        let cell_instance = state
-            .schematic
-            .component_at(grid_pos)
+        let cell_instance = symbol_context
+            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .or_else(|| state.schematic.component_at(grid_pos))
             .and_then(|id| state.schematic.components.iter().find(|c| c.id == id))
             .filter(|c| c.kind == ComponentType::CellInstance)
             .map(|c| c.id);
@@ -86,12 +92,31 @@ pub(super) fn handle_tool_interactions(
     }
 }
 
+fn resolved_snap_position(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    grid_pos: Point,
+) -> Point {
+    state
+        .schematic
+        .snap_engine
+        .find_snap_target_resolved(
+            grid_pos,
+            &state.schematic.components,
+            &state.schematic.wires,
+            &state.schematic.junctions,
+            |component| symbol_context.resolved_symbol(component),
+        )
+        .snapped_position
+}
+
 fn handle_select_dragging(
     ui: &Ui,
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
     grid_size: i32,
+    symbol_context: &SchematicSymbolContext,
 ) {
     if let Some(pos) = response.hover_pos() {
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
@@ -110,11 +135,8 @@ fn handle_select_dragging(
         let grid_pos = screen_to_grid(viewport, grid_size, pos);
         let wire_grid_pos = screen_to_wire_grid(viewport, grid_size, pos);
 
-        if ui.input(|i| i.modifiers.shift) {
-            // Shift+drag is always an additive marquee — even when it starts
-            // on a component, the intent is to extend the selection, not to
-            // move the part (Virtuoso convention).
-            state.schematic.selection_rect.start_at(grid_pos);
+        if !select_drag_can_start(ui.input(|i| i.modifiers.shift)) {
+            return;
         } else if state.schematic.read_only {
             // No moves on read-only views — every drag is a marquee.
             state.schematic.selection_rect.start_at(grid_pos);
@@ -126,7 +148,10 @@ fn handle_select_dragging(
                 .interaction
                 .drag
                 .start((wire_grid_pos.x, wire_grid_pos.y), DragType::WireVertex);
-        } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
+        } else if let Some(comp_id) = symbol_context
+            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .or_else(|| state.schematic.component_at(grid_pos))
+        {
             if !state.schematic.selection.has_component(comp_id) {
                 state.schematic.selection.clear();
                 state.schematic.selection.select_component(comp_id);
@@ -160,7 +185,11 @@ fn handle_select_dragging(
             let delta = Point::new(grid_pos.x - last_x, grid_pos.y - last_y);
 
             if delta.x != 0 || delta.y != 0 {
-                state.schematic.move_selection_with_rubber_band(delta);
+                state
+                    .schematic
+                    .move_selection_with_rubber_band_resolved(delta, |component| {
+                        symbol_context.terminal_points(component)
+                    });
                 state.dialogs.last_drag_pos = Some((grid_pos.x, grid_pos.y));
             }
         } else if state.schematic.selection_rect.is_active() {
@@ -189,6 +218,10 @@ fn handle_select_dragging(
     }
 }
 
+fn select_drag_can_start(shift_pressed: bool) -> bool {
+    !shift_pressed
+}
+
 fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos: Point) {
     if component_type == ComponentType::CellInstance {
         if let Some(library_cell) = state.schematic.pending_library_cell.clone() {
@@ -213,13 +246,20 @@ fn place_component(state: &mut AppState, component_type: ComponentType, grid_pos
     }
 }
 
-fn handle_select_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
+fn handle_select_click(
+    ui: &Ui,
+    state: &mut AppState,
+    grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
     // Ctrl and Shift both extend the selection (toggle the clicked item);
     // a plain click replaces it.
     let additive = ui.input(|i| i.modifiers.ctrl || i.modifiers.shift);
     let alt_held = ui.input(|i| i.modifiers.alt);
 
-    let comp_id = state.schematic.component_at(grid_pos);
+    let comp_id = symbol_context
+        .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+        .or_else(|| state.schematic.component_at(grid_pos));
     let wire_id = state.schematic.wire_at(grid_pos);
 
     if let Some(id) = comp_id {
@@ -288,7 +328,12 @@ fn toggle_probe_with_feedback(ui: &Ui, state: &mut AppState, name: &str, display
     }
 }
 
-fn handle_probe_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
+fn handle_probe_click(
+    ui: &Ui,
+    state: &mut AppState,
+    grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
     if let Some(_wire_id) = state.schematic.wire_at(grid_pos) {
         if let Some(net_name) = state.simulation.cross_probe.net_at(grid_pos) {
             let net_name = net_name.clone();
@@ -322,15 +367,24 @@ fn handle_probe_click(ui: &Ui, state: &mut AppState, grid_pos: Point) {
                 "Wire not in netlist. Run simulation to update.".to_string(),
             ));
         }
-    } else if let Some(comp_id) = state.schematic.component_at(grid_pos) {
-        handle_component_probe(ui, state, comp_id, grid_pos);
+    } else if let Some(comp_id) = symbol_context
+        .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+        .or_else(|| state.schematic.component_at(grid_pos))
+    {
+        handle_component_probe(ui, state, comp_id, grid_pos, symbol_context);
     } else {
         state.schematic.net_highlight.clear();
         log::debug!("Probe: clicked empty space at {:?}", grid_pos);
     }
 }
 
-fn handle_component_probe(ui: &Ui, state: &mut AppState, comp_id: u64, grid_pos: Point) {
+fn handle_component_probe(
+    ui: &Ui,
+    state: &mut AppState,
+    comp_id: u64,
+    grid_pos: Point,
+    symbol_context: &SchematicSymbolContext,
+) {
     if let Some(component) = state.schematic.components.iter().find(|c| c.id == comp_id) {
         let comp_name = component.name.clone();
         log::info!(
@@ -342,7 +396,8 @@ fn handle_component_probe(ui: &Ui, state: &mut AppState, comp_id: u64, grid_pos:
         let probe_name = if component.kind.spice_prefix() == "V" {
             format!("I(V{})", comp_name)
         } else {
-            let terminals = component.terminal_positions();
+            let terminals =
+                component.terminal_positions_resolved(symbol_context.resolved_symbol(component));
             if let Some((_, term_pos)) = nearest_terminal(&terminals, grid_pos) {
                 if let Some(net_name) = state.simulation.cross_probe.net_at(term_pos) {
                     format!("V({})", net_name)
@@ -364,5 +419,16 @@ fn open_component_properties(state: &mut AppState, grid_pos: Point) {
         state.schematic.selection.clear();
         state.schematic.selection.select_component(comp_id);
         crate::common::app::open_property_editor(state, comp_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shift_primary_drag_is_reserved_for_pan() {
+        assert!(select_drag_can_start(false));
+        assert!(!select_drag_can_start(true));
     }
 }

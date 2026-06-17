@@ -4,6 +4,7 @@ use crate::common::app::AppState;
 use crate::state::Point;
 
 use super::super::symbols::SymbolLibrary;
+use super::SchematicSymbolContext;
 use super::drawing::{draw_component, draw_junction, draw_wire};
 use super::grid::draw_grid;
 use super::viewport::Viewport;
@@ -19,6 +20,7 @@ pub(super) fn draw_scene(
     viewport: &Viewport,
     state: &AppState,
     symbol_library: Option<&SymbolLibrary>,
+    symbol_context: &SchematicSymbolContext,
 ) {
     painter.rect_filled(
         available,
@@ -82,7 +84,14 @@ pub(super) fn draw_scene(
                 && component.pos.y <= max_y;
         }
 
-        draw_component(painter, viewport, component, is_selected, symbol_library);
+        draw_component(
+            painter,
+            viewport,
+            component,
+            is_selected,
+            symbol_library,
+            symbol_context,
+        );
     }
 
     for junction in &state.schematic.junctions {

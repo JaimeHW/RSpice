@@ -4,6 +4,8 @@ use crate::common::app::AppState;
 use crate::state::{Component, ComponentType, Point, Wire};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
+use super::SchematicSymbolContext;
+use super::resolved_symbol_render::draw_resolved_symbol;
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_cccs_symbol, draw_ccvs_symbol, draw_diode_symbol,
     draw_ground_symbol, draw_inductor_symbol, draw_isource_symbol, draw_nmos_symbol,
@@ -11,6 +13,14 @@ use super::symbol_primitives::{
     draw_vcvs_symbol, draw_vsource_symbol, rotation_to_index,
 };
 use super::viewport::Viewport;
+
+const DEFAULT_WIRE_STROKE_WIDTH: f32 = 1.1;
+const SELECTED_WIRE_STROKE_WIDTH: f32 = 2.0;
+const HIGHLIGHTED_WIRE_STROKE_WIDTH: f32 = 2.0;
+
+const _: [(); 1] = [(); (DEFAULT_WIRE_STROKE_WIDTH.to_bits() == 1.1f32.to_bits()) as usize];
+const _: [(); 1] = [(); (SELECTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
+const _: [(); 1] = [(); (HIGHLIGHTED_WIRE_STROKE_WIDTH.to_bits() == 2.0f32.to_bits()) as usize];
 
 /// Draw a wire on the canvas
 pub(super) fn draw_wire(
@@ -24,11 +34,11 @@ pub(super) fn draw_wire(
     // Priority: selected > highlighted > default
     let palette = crate::ui::tokens::active_palette();
     let (color, width) = if selected {
-        (palette.accent, 2.0) // Accent for selected
+        (palette.accent, SELECTED_WIRE_STROKE_WIDTH) // Accent for selected
     } else if highlighted {
-        (palette.warn, 2.0) // Net highlight (cross-probe)
+        (palette.warn, HIGHLIGHTED_WIRE_STROKE_WIDTH) // Net highlight (cross-probe)
     } else {
-        (palette.wire, 1.0)
+        (palette.wire, DEFAULT_WIRE_STROKE_WIDTH)
     };
 
     // Draw each segment of the wire polyline
@@ -46,6 +56,7 @@ pub(super) fn draw_component(
     component: &Component,
     selected: bool,
     symbol_library: Option<&SymbolLibrary>,
+    symbol_context: &SchematicSymbolContext,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
@@ -66,6 +77,11 @@ pub(super) fn draw_component(
     // Procedural drawing uses rotation_to_delta() which expects index (0-3)
     let rotation_degrees = component.rotation.degrees();
     let rotation_index = rotation_to_index(component.rotation);
+    let resolved_cell_symbol = if component.kind == ComponentType::CellInstance {
+        symbol_context.resolved_symbol(component)
+    } else {
+        None
+    };
 
     // Try to use SVG symbol if available — via the library's baked
     // (pre-flattened, pre-transformed) geometry: per frame this is one
@@ -146,7 +162,11 @@ pub(super) fn draw_component(
                 draw_cccs_symbol(painter, pos, scale, rotation_index, stroke);
             }
             ComponentType::CellInstance => {
-                draw_cell_instance_symbol(painter, pos, scale, rotation_index, component, stroke);
+                if let Some(symbol) = resolved_cell_symbol {
+                    draw_resolved_symbol(painter, pos, scale, component, symbol, stroke);
+                } else {
+                    draw_cell_instance_symbol(painter, pos, scale, component, stroke);
+                }
             }
             _ => {
                 // Generic component: draw a rectangle
@@ -159,7 +179,9 @@ pub(super) fn draw_component(
     // Smart label placement based on component type, rotation, and dimensions
     // Commercial EDA tools (Cadence Virtuoso) place labels to avoid overlapping
     // terminals and component body, with name/value on opposite sides
-    draw_component_labels(painter, pos, scale, component);
+    if resolved_cell_symbol.is_none() {
+        draw_component_labels(painter, pos, scale, component);
+    }
 }
 
 /// Interface port: a flag whose tip is the attachment point at (-10, 0).
@@ -199,7 +221,6 @@ fn draw_cell_instance_symbol(
     painter: &Painter,
     pos: Pos2,
     scale: f32,
-    _rotation_index: i32,
     component: &Component,
     stroke: Stroke,
 ) {
@@ -225,7 +246,8 @@ fn draw_cell_instance_symbol(
     // Pin stubs from each terminal to the body edge, a connection dot at
     // the terminal, and the port name just inside the body.
     let label_font = 6.5 * scale;
-    for (name, offset) in component.instance_pin_layout() {
+    let pin_layout = component.instance_pin_layout();
+    for (name, offset) in pin_layout {
         let inner = if offset.y.abs() > hh_body {
             Point::new(offset.x, offset.y.signum() * hh_body) // supply rail
         } else {
@@ -503,11 +525,53 @@ fn manhattan_distance(a: Point, b: Point) -> i32 {
 
 #[inline]
 pub(super) fn nearest_terminal(
-    terminals: &[(&'static str, Point)],
+    terminals: &[(String, Point)],
     target: Point,
-) -> Option<(&'static str, Point)> {
+) -> Option<(&str, Point)> {
     terminals
         .iter()
-        .copied()
+        .map(|(name, pos)| (name.as_str(), *pos))
         .min_by_key(|(_, pos)| manhattan_distance(*pos, target))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Context, Id, LayerId, Order, Shape};
+
+    fn wire_stroke_width(selected: bool, highlighted: bool, zoom: f32) -> f32 {
+        let ctx = Context::default();
+        let painter = Painter::new(
+            ctx,
+            LayerId::new(Order::Foreground, Id::new("wire-stroke-test")),
+            Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0)),
+        );
+        let viewport = Viewport {
+            offset: Pos2::ZERO,
+            zoom,
+            bounds: Rect::from_min_size(Pos2::ZERO, Vec2::splat(100.0)),
+        };
+        let wire = Wire::segment(1, Point::new(0, 0), Point::new(10, 0));
+
+        draw_wire(&painter, &viewport, &wire, selected, highlighted);
+
+        let mut widths = Vec::new();
+        painter.for_each_shape(|shape| {
+            if let Shape::LineSegment { stroke, .. } = &shape.shape {
+                widths.push(stroke.width);
+            }
+        });
+
+        assert_eq!(widths.len(), 1);
+        widths[0]
+    }
+
+    #[test]
+    fn wire_strokes_use_design_default_width_without_changing_state_widths() {
+        let zoom = 2.0;
+
+        assert!((wire_stroke_width(false, false, zoom) - 2.2).abs() < f32::EPSILON);
+        assert!((wire_stroke_width(true, false, zoom) - 4.0).abs() < f32::EPSILON);
+        assert!((wire_stroke_width(false, true, zoom) - 4.0).abs() < f32::EPSILON);
+    }
 }

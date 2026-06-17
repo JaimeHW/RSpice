@@ -15,6 +15,7 @@ use crate::state::{ComponentType, NetGraph, Point};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
+use super::SchematicSymbolContext;
 use super::coordinates::screen_to_grid;
 use super::viewport::Viewport;
 
@@ -23,6 +24,7 @@ pub(super) fn handle_context_menu(
     state: &mut AppState,
     viewport: &Viewport,
     wire_was_active: bool,
+    symbol_context: &SchematicSymbolContext,
 ) {
     if wire_was_active || state.schematic.wire_drawing.active {
         return;
@@ -36,7 +38,10 @@ pub(super) fn handle_context_menu(
         && let Some(pos) = response.interact_pointer_pos()
     {
         let grid_pos = screen_to_grid(viewport, state.schematic.grid_size, pos);
-        let target = if let Some(id) = state.schematic.component_at(grid_pos) {
+        let target = if let Some(id) = symbol_context
+            .component_at_resolved_terminal(&state.schematic.components, grid_pos)
+            .or_else(|| state.schematic.component_at(grid_pos))
+        {
             state.schematic.net_highlight.clear();
             state.schematic.selection.clear();
             state.schematic.selection.select_component(id);
@@ -60,7 +65,7 @@ pub(super) fn handle_context_menu(
         };
         let click_pos = Point::new(x, y);
         match target {
-            ContextTarget::Component(id) => instance_menu(ui, state, id),
+            ContextTarget::Component(id) => instance_menu(ui, state, id, symbol_context),
             ContextTarget::Wire(id) => wire_menu(ui, state, id, click_pos),
             ContextTarget::Canvas => canvas_menu(ui, state, click_pos),
         }
@@ -100,7 +105,12 @@ fn menu_header(ui: &mut Ui, label: &str) {
     ui.add_space(2.0);
 }
 
-fn instance_menu(ui: &mut Ui, state: &mut AppState, id: u64) {
+fn instance_menu(
+    ui: &mut Ui,
+    state: &mut AppState,
+    id: u64,
+    symbol_context: &SchematicSymbolContext,
+) {
     let Some((name, kind)) = state
         .schematic
         .components
@@ -120,15 +130,21 @@ fn instance_menu(ui: &mut Ui, state: &mut AppState, id: u64) {
         ui.close_menu();
     }
     if edit_item(ui, ro, "Rotate", Some("R")) {
-        state.schematic.rotate_selection();
+        state
+            .schematic
+            .rotate_selection_resolved(|component| symbol_context.terminal_points(component));
         ui.close_menu();
     }
     if edit_item(ui, ro, "Mirror horizontal", Some("H")) {
-        state.schematic.mirror_selection_h();
+        state
+            .schematic
+            .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component));
         ui.close_menu();
     }
     if edit_item(ui, ro, "Mirror vertical", Some("Y")) {
-        state.schematic.mirror_selection_v();
+        state
+            .schematic
+            .mirror_selection_v_resolved(|component| symbol_context.terminal_points(component));
         ui.close_menu();
     }
     separator(ui);

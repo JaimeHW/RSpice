@@ -4,6 +4,7 @@ use crate::common::app::AppState;
 use crate::state::{ComponentType, Point, Tool};
 
 use super::super::symbols::{SymbolLibrary, draw_symbol};
+use super::SchematicSymbolContext;
 use super::coordinates::{screen_to_grid, screen_to_wire_grid};
 use super::symbol_primitives::{
     draw_capacitor_symbol, draw_diode_symbol, draw_ground_symbol, draw_inductor_symbol,
@@ -12,14 +13,18 @@ use super::symbol_primitives::{
 };
 use super::viewport::Viewport;
 
+const WIRE_PREVIEW_STROKE_WIDTH: f32 = 1.5;
+const COMPONENT_PREVIEW_GHOST_ALPHA: f32 = 0.55;
+
 pub(super) fn draw_interaction_previews(
     painter: &Painter,
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    draw_wire_preview(painter, response, state, viewport);
+    draw_wire_preview(painter, response, state, viewport, symbol_context);
     draw_component_preview(painter, response, state, viewport, symbol_library);
     draw_selection_rect(painter, state, viewport);
 }
@@ -29,11 +34,16 @@ fn draw_wire_preview(
     response: &Response,
     state: &mut AppState,
     viewport: &Viewport,
+    symbol_context: &SchematicSymbolContext,
 ) {
     let wire_active = state.schematic.wire_drawing.active;
 
     if wire_active && let Some(hover_pos) = response.hover_pos() {
-        let grid_pos = screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos);
+        let grid_pos = wire_preview_snap_position(
+            state,
+            symbol_context,
+            screen_to_wire_grid(viewport, state.schematic.grid_size, hover_pos),
+        );
         state.schematic.update_wire_preview(grid_pos);
     }
 
@@ -43,7 +53,7 @@ fn draw_wire_preview(
 
         if !wire_points.is_empty() {
             let wire_color = crate::ui::tokens::active_palette().accent;
-            let stroke = Stroke::new(1.0 * viewport.zoom, wire_color);
+            let stroke = Stroke::new(WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom, wire_color);
 
             for segment in wire_points.windows(2) {
                 let p1 = viewport.schematic_to_screen(segment[0]);
@@ -58,7 +68,10 @@ fn draw_wire_preview(
                 let p2 = viewport.schematic_to_screen(preview);
                 painter.line_segment(
                     [p1, p2],
-                    Stroke::new(1.0 * viewport.zoom, wire_color.gamma_multiply(0.6)),
+                    Stroke::new(
+                        WIRE_PREVIEW_STROKE_WIDTH * viewport.zoom,
+                        wire_color.gamma_multiply(0.6),
+                    ),
                 );
             }
 
@@ -70,6 +83,24 @@ fn draw_wire_preview(
     }
 }
 
+fn wire_preview_snap_position(
+    state: &AppState,
+    symbol_context: &SchematicSymbolContext,
+    grid_pos: Point,
+) -> Point {
+    state
+        .schematic
+        .snap_engine
+        .find_snap_target_resolved(
+            grid_pos,
+            &state.schematic.components,
+            &state.schematic.wires,
+            &state.schematic.junctions,
+            |component| symbol_context.resolved_symbol(component),
+        )
+        .snapped_position
+}
+
 fn draw_component_preview(
     painter: &Painter,
     response: &Response,
@@ -77,6 +108,10 @@ fn draw_component_preview(
     viewport: &Viewport,
     symbol_library: Option<&SymbolLibrary>,
 ) {
+    if !component_preview_enabled(state.schematic.read_only) {
+        return;
+    }
+
     let preview_tool = state.schematic.tool;
     let preview_rotation_degrees = state.schematic.preview_rotation.degrees();
     let preview_rotation_index = rotation_to_index(state.schematic.preview_rotation);
@@ -92,7 +127,7 @@ fn draw_component_preview(
             1.0 * viewport.zoom,
             crate::ui::tokens::active_palette()
                 .accent
-                .gamma_multiply(0.7),
+                .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
         );
 
         let svg_rendered = if let Some(library) = symbol_library {
@@ -174,6 +209,55 @@ pub(super) fn draw_procedural_component_preview(
             let rect = Rect::from_center_size(preview_pos, Vec2::splat(30.0 * zoom));
             painter.rect_stroke(rect, 2.0, preview_stroke);
         }
+    }
+}
+
+fn component_preview_enabled(read_only: bool) -> bool {
+    !read_only
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_preview_ghost_uses_design_alpha_and_hides_on_read_only() {
+        assert!((COMPONENT_PREVIEW_GHOST_ALPHA - 0.55).abs() < f32::EPSILON);
+        assert!(component_preview_enabled(false));
+        assert!(!component_preview_enabled(true));
+    }
+
+    #[test]
+    fn wire_preview_stroke_width_matches_live_preview_spec() {
+        assert!((WIRE_PREVIEW_STROKE_WIDTH - 1.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn wire_preview_snap_position_uses_resolved_cell_terminals() {
+        let mut state = AppState::default();
+        let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[crate::state::PortSpec {
+            name: "IN".to_string(),
+            direction: crate::state::PortDirection::In,
+        }]);
+        state.schematic.components.push(
+            crate::state::Component::new(
+                1,
+                ComponentType::CellInstance,
+                crate::state::Point::new(40, 40),
+            )
+            .with_library_cell(binding),
+        );
+        let symbol_context = crate::schematic::view::SchematicSymbolContext::from_state(&state);
+        let component = &state.schematic.components[0];
+        let terminal =
+            component.terminal_positions_resolved(symbol_context.resolved_symbol(component))[0].1;
+        let near_terminal = crate::state::Point::new(terminal.x + 1, terminal.y);
+
+        assert_eq!(
+            wire_preview_snap_position(&state, &symbol_context, near_terminal),
+            terminal
+        );
     }
 }
 

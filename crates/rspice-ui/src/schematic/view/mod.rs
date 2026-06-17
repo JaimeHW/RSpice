@@ -3,9 +3,12 @@
 //! The main schematic canvas using egui's painter for vectorized rendering.
 //! This will be optimized for 60fps with direct GPU rendering.
 
+use std::collections::HashMap;
+
 use egui::{Sense, Ui};
 
 use crate::common::app::AppState;
+use crate::state::{Component, ComponentType, Point, ResolvedCellSymbol, SymbolResolver};
 
 use super::symbols::SymbolLibrary;
 
@@ -16,6 +19,7 @@ mod grid;
 mod interaction;
 mod navigation;
 mod preview;
+pub(crate) mod resolved_symbol_render;
 mod scene;
 mod symbol_primitives;
 mod viewport;
@@ -26,6 +30,59 @@ use self::interaction::handle_tool_interactions;
 use self::navigation::handle_viewport_navigation;
 use self::preview::draw_interaction_previews;
 use self::scene::draw_scene;
+
+pub(crate) struct SchematicSymbolContext {
+    resolved_by_component_id: HashMap<u64, ResolvedCellSymbol>,
+}
+
+impl SchematicSymbolContext {
+    pub(crate) fn from_state(state: &AppState) -> Self {
+        let resolver =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        let resolved_by_component_id = state
+            .schematic
+            .components
+            .iter()
+            .filter(|component| component.kind == ComponentType::CellInstance)
+            .filter_map(|component| {
+                let binding = component.library_cell.as_ref()?;
+                let resolved = resolver.resolve_binding(binding)?;
+                Some((component.id, resolved))
+            })
+            .collect();
+
+        Self {
+            resolved_by_component_id,
+        }
+    }
+
+    pub(super) fn resolved_symbol(&self, component: &Component) -> Option<&ResolvedCellSymbol> {
+        self.resolved_by_component_id.get(&component.id)
+    }
+
+    pub(crate) fn terminal_points(&self, component: &Component) -> Vec<Point> {
+        component
+            .terminal_positions_resolved(self.resolved_symbol(component))
+            .into_iter()
+            .map(|(_, position)| position)
+            .collect()
+    }
+
+    pub(super) fn component_at_resolved_terminal(
+        &self,
+        components: &[Component],
+        pos: Point,
+    ) -> Option<u64> {
+        components
+            .iter()
+            .find(|component| {
+                self.terminal_points(component)
+                    .iter()
+                    .any(|terminal_pos| *terminal_pos == pos)
+            })
+            .map(|component| component.id)
+    }
+}
 
 /// Render the schematic view (central canvas)
 pub fn render_schematic_view(
@@ -56,20 +113,41 @@ pub fn render_schematic_view(
     // frame during pans and drags.
     handle_viewport_navigation(ui, &response, available, state);
     let viewport = viewport_from_state(state, available, ui.ctx().pixels_per_point());
+    let symbol_context = SchematicSymbolContext::from_state(state);
     // Right-click owns two meanings: finishing a live wire run (inside the
     // tool handler) and the context menu (here). Capture whether a run was
     // live before the tool handler so the click that finishes a wire can
     // never also open the menu.
     let wire_was_active = state.schematic.wire_drawing.active;
-    handle_tool_interactions(ui, &response, state, &viewport);
-    context_menu::handle_context_menu(&response, state, &viewport, wire_was_active);
+    handle_tool_interactions(ui, &response, state, &viewport, &symbol_context);
+    context_menu::handle_context_menu(
+        &response,
+        state,
+        &viewport,
+        wire_was_active,
+        &symbol_context,
+    );
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
     state.schematic.ensure_canvas_cache();
 
-    draw_scene(&painter, available, &viewport, state, symbol_library);
-    draw_interaction_previews(&painter, &response, state, &viewport, symbol_library);
+    draw_scene(
+        &painter,
+        available,
+        &viewport,
+        state,
+        symbol_library,
+        &symbol_context,
+    );
+    draw_interaction_previews(
+        &painter,
+        &response,
+        state,
+        &viewport,
+        &symbol_context,
+        symbol_library,
+    );
 
     // Report the cursor position in grid units; the shell status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
