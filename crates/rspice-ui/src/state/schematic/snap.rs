@@ -28,6 +28,7 @@
 //! ```
 
 use super::{Component, Junction, Point, Wire};
+use crate::state::ResolvedCellSymbol;
 use serde::{Deserialize, Serialize};
 
 // =============================================================================
@@ -481,6 +482,62 @@ impl SnapEngine {
         SnapResult::grid_only(pos, pos)
     }
 
+    /// Find the best snap target, resolving cell-instance terminals through
+    /// authored symbol geometry when the caller has frame-local symbol context.
+    pub fn find_snap_target_resolved<'a>(
+        &self,
+        pos: Point,
+        components: &[Component],
+        wires: &[Wire],
+        junctions: &[Junction],
+        mut resolved_symbol_for: impl FnMut(&Component) -> Option<&'a ResolvedCellSymbol>,
+    ) -> SnapResult {
+        if !self.enabled {
+            return SnapResult::no_snap(pos);
+        }
+
+        let mut candidates: Vec<SnapTarget> = Vec::new();
+
+        if self.snap_to_terminals {
+            self.collect_terminal_targets_resolved(
+                pos,
+                components,
+                &mut candidates,
+                &mut resolved_symbol_for,
+            );
+        }
+
+        if self.snap_to_junctions {
+            self.collect_junction_targets(pos, junctions, &mut candidates);
+        }
+
+        if self.snap_to_wire_endpoints {
+            self.collect_wire_endpoint_targets(pos, wires, &mut candidates);
+        }
+
+        if self.snap_to_wire_segments {
+            self.collect_wire_segment_targets(pos, wires, &mut candidates);
+        }
+
+        let radius_sq = (self.snap_radius as f64).powi(2);
+        candidates.retain(|t| t.distance * t.distance <= radius_sq);
+
+        if let Some(best) = self.select_best_target(&candidates) {
+            return SnapResult::with_target(best, pos);
+        }
+
+        if self.snap_to_grid {
+            let snapped = self.snap_to_grid_point(pos);
+            if snapped != pos {
+                let dist = ((snapped.x - pos.x).pow(2) + (snapped.y - pos.y).pow(2)) as f64;
+                let target = SnapTarget::grid(snapped, dist.sqrt());
+                return SnapResult::with_target(target, pos);
+            }
+        }
+
+        SnapResult::grid_only(pos, pos)
+    }
+
     /// Collect terminal snap targets from components
     fn collect_terminal_targets(
         &self,
@@ -495,6 +552,25 @@ impl SnapEngine {
                 let dist = (dx * dx + dy * dy).sqrt();
 
                 candidates.push(SnapTarget::terminal(term_pos, comp.id, name, dist));
+            }
+        }
+    }
+
+    fn collect_terminal_targets_resolved<'a>(
+        &self,
+        pos: Point,
+        components: &[Component],
+        candidates: &mut Vec<SnapTarget>,
+        resolved_symbol_for: &mut impl FnMut(&Component) -> Option<&'a ResolvedCellSymbol>,
+    ) {
+        for comp in components {
+            let resolved_symbol = resolved_symbol_for(comp);
+            for (name, term_pos) in comp.terminal_positions_resolved(resolved_symbol) {
+                let dx = (term_pos.x - pos.x) as f64;
+                let dy = (term_pos.y - pos.y) as f64;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                candidates.push(SnapTarget::terminal(term_pos, comp.id, name.as_str(), dist));
             }
         }
     }
@@ -663,6 +739,12 @@ impl SnapEngine {
 mod tests {
     use super::super::ComponentType;
     use super::*;
+    use crate::state::{
+        Cell, Library, LibraryCellInstance, LibraryManager, PortDirection, PortSpec,
+        ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin, SymbolResolver, View,
+        ViewType,
+    };
+    use std::collections::HashMap;
 
     fn engine_with(f: impl FnOnce(&mut SnapEngine)) -> SnapEngine {
         let mut e = SnapEngine::default();
@@ -673,6 +755,54 @@ mod tests {
     /// A resistor at `pos` exposes "+" at (-20, 0) and "-" at (+20, 0).
     fn resistor(id: u64, pos: Point) -> Component {
         Component::new(id, ComponentType::Resistor, pos)
+    }
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn resolved_amp_symbol() -> ResolvedCellSymbol {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+
+        let buffers = HashMap::<String, SchematicState>::new();
+        SymbolResolver::new(&libraries, &buffers)
+            .resolve_binding(&binding)
+            .expect("symbol resolves")
+    }
+
+    fn amp_instance(id: u64, pos: Point) -> Component {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        Component::new(id, ComponentType::CellInstance, pos).with_library_cell(binding)
     }
 
     // -------------------------------------------------------------------------
@@ -935,6 +1065,25 @@ mod tests {
 
         let result = engine.find_snap_target(Point::new(29, 0), &[], &wires, &[]);
         assert!(result.target.is_none());
+    }
+
+    /// Resolved-aware snapping uses authored symbol pin offsets instead of the
+    /// generated fallback block geometry.
+    #[test]
+    fn resolved_instance_terminal_snap_uses_authored_offsets() {
+        let engine = SnapEngine::terminals_only();
+        let comps = [amp_instance(7, Point::new(100, 50))];
+        let resolved = resolved_amp_symbol();
+
+        let result =
+            engine.find_snap_target_resolved(Point::new(61, 40), &comps, &[], &[], |component| {
+                (component.id == 7).then_some(&resolved)
+            });
+
+        assert!(result.is_terminal_snap());
+        assert_eq!(result.snapped_position, Point::new(60, 40));
+        assert_eq!(result.terminal_component_id(), Some(7));
+        assert_eq!(result.terminal_name(), Some("IN"));
     }
 
     // -------------------------------------------------------------------------

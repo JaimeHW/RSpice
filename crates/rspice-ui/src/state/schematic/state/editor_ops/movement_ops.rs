@@ -3,13 +3,20 @@ use super::super::*;
 impl SchematicState {
     /// Move a component and update all attached wire endpoints (rubber-banding)
     pub fn move_component_with_wires(&mut self, component_id: u64, delta: Point) {
+        self.move_component_with_wires_resolved(component_id, delta, legacy_terminal_points);
+    }
+
+    /// Move a component and update attached wire endpoints using caller-supplied terminal geometry.
+    pub fn move_component_with_wires_resolved(
+        &mut self,
+        component_id: u64,
+        delta: Point,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) {
         // Get the component's terminal positions BEFORE moving
         let terminals: Vec<Point> = {
             if let Some(comp) = self.components.iter().find(|c| c.id == component_id) {
-                comp.terminal_positions()
-                    .into_iter()
-                    .map(|(_, pos)| pos)
-                    .collect()
+                terminal_points_for(comp)
             } else {
                 return;
             }
@@ -58,6 +65,15 @@ impl SchematicState {
     /// Runs on every drag frame: one O(1)-membership pass over the wires —
     /// no nested terminal scans, no per-update id searches.
     pub fn move_selection_with_rubber_band(&mut self, delta: Point) {
+        self.move_selection_with_rubber_band_resolved(delta, legacy_terminal_points);
+    }
+
+    /// Move selected components and rubber-band wires using caller-supplied terminal geometry.
+    pub fn move_selection_with_rubber_band_resolved(
+        &mut self,
+        delta: Point,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) {
         if self.selection.components.is_empty() && self.selection.wires.is_empty() {
             return;
         }
@@ -69,7 +85,7 @@ impl SchematicState {
             .iter()
             .filter(|c| self.selection.components.contains(&c.id))
         {
-            terminals.extend(comp.terminal_positions().into_iter().map(|(_, pos)| pos));
+            terminals.extend(terminal_points_for(comp));
         }
 
         // Classify unselected wires in one pass, by index (stable here):
@@ -180,6 +196,15 @@ impl SchematicState {
 
     /// Move all selected components and wires by a delta
     pub fn move_selection(&mut self, delta: Point) {
+        self.move_selection_resolved(delta, legacy_terminal_points);
+    }
+
+    /// Move all selected components and wires using caller-supplied terminal geometry.
+    pub fn move_selection_resolved(
+        &mut self,
+        delta: Point,
+        mut terminal_points_for: impl FnMut(&Component) -> Vec<Point>,
+    ) {
         // Union of selected components' terminals, BEFORE moving.
         let mut terminals: std::collections::HashSet<Point> = std::collections::HashSet::new();
         for comp in self
@@ -187,7 +212,7 @@ impl SchematicState {
             .iter()
             .filter(|c| self.selection.components.contains(&c.id))
         {
-            terminals.extend(comp.terminal_positions().into_iter().map(|(_, pos)| pos));
+            terminals.extend(terminal_points_for(comp));
         }
 
         // Rubber-band stretch: any unselected wire point on a selected
@@ -263,5 +288,108 @@ impl SchematicState {
         }
 
         self.is_dirty = true;
+    }
+}
+
+fn legacy_terminal_points(component: &Component) -> Vec<Point> {
+    component
+        .terminal_positions()
+        .into_iter()
+        .map(|(_, pos)| pos)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        Cell, Component, ComponentType, Library, LibraryCellInstance, LibraryManager,
+        PortDirection, PortSpec, ResolvedCellSymbol, SchematicState, SymbolDocument, SymbolPin,
+        SymbolResolver, View, ViewType, Wire,
+    };
+    use std::collections::HashMap;
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn resolved_amp_symbol() -> ResolvedCellSymbol {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+
+        SymbolResolver::new(&libraries, &HashMap::new())
+            .resolve_binding(&binding)
+            .expect("symbol resolves")
+    }
+
+    fn resolved_terminal_points(
+        component: &Component,
+        resolved: &ResolvedCellSymbol,
+    ) -> Vec<Point> {
+        component
+            .terminal_positions_resolved(Some(resolved))
+            .into_iter()
+            .map(|(_, pos)| pos)
+            .collect()
+    }
+
+    fn selected_amp_with_wire(resolved_pin: Point) -> SchematicState {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+
+        let mut schematic = SchematicState::default();
+        schematic.components.push(
+            Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(binding),
+        );
+        schematic.wires.push(Wire::segment(
+            2,
+            resolved_pin,
+            Point::new(resolved_pin.x, 0),
+        ));
+        schematic.selection.select_component(1);
+        schematic
+    }
+
+    #[test]
+    fn moving_selected_cell_uses_resolved_symbol_terminals_for_wire_updates() {
+        let resolved = resolved_amp_symbol();
+        let mut schematic = selected_amp_with_wire(Point::new(60, 40));
+
+        schematic.move_selection_with_rubber_band_resolved(Point::new(10, 5), |component| {
+            resolved_terminal_points(component, &resolved)
+        });
+
+        assert_eq!(schematic.components[0].pos, Point::new(110, 55));
+        assert_eq!(schematic.wires[0].points[0], Point::new(70, 45));
+        assert_eq!(schematic.wires[0].points[1], Point::new(60, 0));
     }
 }

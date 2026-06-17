@@ -266,6 +266,33 @@ impl Component {
             .collect()
     }
 
+    /// Get terminal positions in world coordinates, using a resolved authored
+    /// cell symbol when one is available for a placed cell instance.
+    pub fn terminal_positions_resolved(
+        &self,
+        resolved_symbol: Option<&crate::state::ResolvedCellSymbol>,
+    ) -> Vec<(String, Point)> {
+        if self.kind == ComponentType::CellInstance
+            && let Some(resolved_symbol) = resolved_symbol
+        {
+            return resolved_symbol
+                .connectable_pins()
+                .map(|pin| {
+                    let transformed = self.transform_point(pin.offset);
+                    (
+                        pin.name.clone(),
+                        Point::new(self.pos.x + transformed.x, self.pos.y + transformed.y),
+                    )
+                })
+                .collect();
+        }
+
+        self.terminal_positions()
+            .into_iter()
+            .map(|(name, pos)| (name.to_owned(), pos))
+            .collect()
+    }
+
     /// Local pin layout of a bound cell instance, in interface order:
     /// `(port name when known, unrotated offset)`. Direction-aware when the
     /// binding carries directions; the legacy distributed block otherwise.
@@ -450,3 +477,76 @@ impl Component {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        Cell, ComponentType, Library, LibraryManager, PortDirection, PortSpec, SchematicState,
+        SymbolDocument, SymbolPin, SymbolResolver, View, ViewType,
+    };
+    use std::collections::HashMap;
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn resolved_amp_symbol() -> crate::state::ResolvedCellSymbol {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+
+        let buffers = HashMap::<String, SchematicState>::new();
+        SymbolResolver::new(&libraries, &buffers)
+            .resolve_binding(&binding)
+            .expect("symbol resolves")
+    }
+
+    #[test]
+    fn resolved_instance_terminals_use_authored_symbol_offsets() {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        let component = Component::new(7, ComponentType::CellInstance, Point::new(100, 50))
+            .with_library_cell(binding)
+            .with_rotation(Rotation::R90)
+            .with_mirror_h(true);
+        let resolved = resolved_amp_symbol();
+
+        let terminals = component.terminal_positions_resolved(Some(&resolved));
+
+        assert_eq!(
+            terminals,
+            vec![
+                ("IN".to_owned(), Point::new(110, 90)),
+                ("OUT".to_owned(), Point::new(80, -20)),
+            ]
+        );
+    }
+}
