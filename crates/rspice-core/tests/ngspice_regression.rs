@@ -583,17 +583,6 @@ fn suite_config_with_timeout(subdir: &str, max_time_per_test_ms: u128) -> TestRu
     cfg
 }
 
-fn unique_temp_dir(prefix: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "rspice-{prefix}-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos()
-    ))
-}
-
 fn load_validation_manifest() -> HashMap<String, String> {
     let manifest_path = get_tests_dir().join("validation-manifest.tsv");
     let content = fs::read_to_string(&manifest_path).expect("validation manifest should exist");
