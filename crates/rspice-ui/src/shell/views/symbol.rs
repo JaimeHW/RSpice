@@ -94,10 +94,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         changed |= handle_symbol_keys(ui, state, &mut document);
         changed |= handle_canvas_interaction(state, &mut document, viewport, &response);
         draw_canvas(ui, viewport, &document, &ports, state);
-        if changed {
-            if let Err(error) = state.store_active_symbol_document(&document) {
-                state.push_user_message(ConsoleMessage::warning(error));
-            }
+        if changed && let Err(error) = state.store_active_symbol_document(&document) {
+            state.push_user_message(ConsoleMessage::warning(error));
         }
         if show_rail {
             pins_rail(ui, state, &mut document, &ports, height);
@@ -325,13 +323,13 @@ fn handle_canvas_interaction(
     viewport: SymbolViewport,
     response: &egui::Response,
 ) -> bool {
+    let center = viewport.screen_to_world(viewport.rect.center());
+    state.shell.canvas_view_center = Some((center.x as f64, center.y as f64));
     if let Some(pos) = response.hover_pos() {
         let world = viewport.screen_to_world(pos);
         state.shell.canvas_hover = Some((world.x as f64, world.y as f64));
-        state.shell.canvas_view_center = Some((
-            viewport.screen_to_world(viewport.rect.center()).x as f64,
-            viewport.screen_to_world(viewport.rect.center()).y as f64,
-        ));
+    } else {
+        state.shell.canvas_hover = None;
     }
 
     let Some(pointer) = response.interact_pointer_pos() else {
@@ -352,18 +350,14 @@ fn handle_canvas_interaction(
     {
         state.shell.symbol.select_pin(pin.clone());
         state.shell.symbol.dragging_pin = Some(pin);
-        if !state.active_view_read_only() {
-            state.record_symbol_edit(document);
-        }
+        state.shell.symbol.drag_undo_recorded = false;
     }
     if response.drag_started_by(egui::PointerButton::Primary)
         && state.shell.symbol.dragging_pin.is_none()
         && let Some(label) = hit_label(document, viewport, pointer)
     {
         state.shell.symbol.dragging_label = Some(label);
-        if !state.active_view_read_only() {
-            state.record_symbol_edit(document);
-        }
+        state.shell.symbol.drag_undo_recorded = false;
     }
     if response.drag_started_by(egui::PointerButton::Primary)
         && state.shell.symbol.dragging_pin.is_none()
@@ -372,9 +366,7 @@ fn handle_canvas_interaction(
     {
         state.shell.symbol.clear_selection();
         state.shell.symbol.dragging_origin = true;
-        if !state.active_view_read_only() {
-            state.record_symbol_edit(document);
-        }
+        state.shell.symbol.drag_undo_recorded = false;
     }
     if response.drag_started_by(egui::PointerButton::Primary)
         && state.shell.symbol.dragging_pin.is_none()
@@ -384,9 +376,7 @@ fn handle_canvas_interaction(
     {
         state.shell.symbol.select_shape(shape_index);
         state.shell.symbol.dragging_shape = Some((shape_index, body_point));
-        if !state.active_view_read_only() {
-            state.record_symbol_edit(document);
-        }
+        state.shell.symbol.drag_undo_recorded = false;
     }
     if response.drag_started_by(egui::PointerButton::Primary)
         && matches!(state.shell.symbol.tool, SymbolTool::Select)
@@ -403,45 +393,55 @@ fn handle_canvas_interaction(
         && let Some(name) = state.shell.symbol.dragging_pin.clone()
     {
         if state.deny_read_only_edit() {
-            state.shell.symbol.dragging_pin = None;
+            state.shell.symbol.clear_drag_state();
             return false;
         }
-        if let Some(pin) = document.pin_mut(&name) {
-            pin.position = Some(terminal_point);
-            return true;
+        if document.pin(&name).and_then(|pin| pin.position) != Some(terminal_point) {
+            record_drag_symbol_edit(state, document);
+            if let Some(pin) = document.pin_mut(&name) {
+                pin.position = Some(terminal_point);
+                return true;
+            }
         }
     }
     if response.dragged_by(egui::PointerButton::Primary)
         && let Some(label) = state.shell.symbol.dragging_label.clone()
     {
         if state.deny_read_only_edit() {
-            state.shell.symbol.dragging_label = None;
+            state.shell.symbol.clear_drag_state();
             return false;
         }
-        if label == "name" {
+        if label == "name" && document.name_anchor != body_point {
+            record_drag_symbol_edit(state, document);
             document.name_anchor = body_point;
-        } else {
+            return true;
+        } else if label != "name" && document.value_anchor != body_point {
+            record_drag_symbol_edit(state, document);
             document.value_anchor = body_point;
+            return true;
         }
-        return true;
     }
     if response.dragged_by(egui::PointerButton::Primary) && state.shell.symbol.dragging_origin {
         if state.deny_read_only_edit() {
-            state.shell.symbol.dragging_origin = false;
+            state.shell.symbol.clear_drag_state();
             return false;
         }
-        document.origin = body_point;
-        return true;
+        if document.origin != body_point {
+            record_drag_symbol_edit(state, document);
+            document.origin = body_point;
+            return true;
+        }
     }
     if response.dragged_by(egui::PointerButton::Primary)
         && let Some((shape_index, last_point)) = state.shell.symbol.dragging_shape
     {
         if state.deny_read_only_edit() {
-            state.shell.symbol.dragging_shape = None;
+            state.shell.symbol.clear_drag_state();
             return false;
         }
         let delta = body_point - last_point;
-        if delta != Point::origin() {
+        if delta != Point::origin() && shape_index < document.body.len() {
+            record_drag_symbol_edit(state, document);
             if let Some(shape) = document.body.get_mut(shape_index) {
                 shape.translate(delta);
                 state.shell.symbol.dragging_shape = Some((shape_index, body_point));
@@ -468,10 +468,7 @@ fn handle_canvas_interaction(
                 .symbol
                 .set_selection(SymbolSelection::in_rect(document, start, end));
         }
-        state.shell.symbol.dragging_pin = None;
-        state.shell.symbol.dragging_shape = None;
-        state.shell.symbol.dragging_label = None;
-        state.shell.symbol.dragging_origin = false;
+        state.shell.symbol.clear_drag_state();
     }
 
     if !response.clicked_by(egui::PointerButton::Primary) {
@@ -512,11 +509,15 @@ fn handle_canvas_interaction(
     }
 }
 
-fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
-    if state.deny_read_only_edit() {
-        return false;
+fn record_drag_symbol_edit(state: &mut AppState, document: &SymbolDocument) {
+    if state.shell.symbol.drag_undo_recorded {
+        return;
     }
     state.record_symbol_edit(document);
+    state.shell.symbol.drag_undo_recorded = true;
+}
+
+fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point: Point) -> bool {
     let selected = state
         .shell
         .symbol
@@ -526,11 +527,21 @@ fn place_selected_pin(state: &mut AppState, document: &mut SymbolDocument, point
     let Some(name) = selected else {
         return false;
     };
+    if state.deny_read_only_edit() {
+        return false;
+    }
+    if document.pin(&name).is_none() {
+        return false;
+    }
+    let changed = document.pin(&name).and_then(|pin| pin.position) != Some(point);
+    if changed {
+        state.record_symbol_edit(document);
+    }
     if let Some(pin) = document.pin_mut(&name) {
         pin.position = Some(point);
         state.shell.symbol.select_pin(name);
         state.shell.symbol.tool = SymbolTool::Select;
-        return true;
+        return changed;
     }
     false
 }
@@ -974,8 +985,9 @@ fn pins_rail(
                 })
                 .collect()
         };
+        let selected_pins = state.shell.symbol.effective_selection().pins;
         for pin in listed {
-            let selected = state.shell.symbol.selected_pin.as_deref() == Some(pin.name.as_str());
+            let selected = selected_pins.contains(&pin.name);
             let response = pin_row(ui, &pin, selected);
             if response.clicked() {
                 state.shell.symbol.select_pin(pin.name.clone());
@@ -1385,5 +1397,41 @@ mod tests {
         assert_eq!(state.shell.symbol.selected_shape, Some(0));
         assert!(state.shell.symbol.selection.shapes.contains(&0));
         assert!(state.shell.symbol.pending_polyline.is_empty());
+    }
+
+    #[test]
+    fn place_pin_without_available_pin_does_not_record_undo() {
+        let mut state = AppState::default();
+        let mut document = SymbolDocument::default();
+
+        assert!(!place_selected_pin(
+            &mut state,
+            &mut document,
+            Point::new(10, 0)
+        ));
+
+        assert!(!state.can_undo_active_symbol_document());
+        assert!(document.pins.is_empty());
+    }
+
+    #[test]
+    fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
+        let mut state = AppState::default();
+        let document = SymbolDocument::default();
+
+        record_drag_symbol_edit(&mut state, &document);
+        record_drag_symbol_edit(&mut state, &document);
+
+        let key = state.workspace.active_key();
+        assert_eq!(
+            state.shell.symbol.undo_stacks.get(&key).map(Vec::len),
+            Some(1),
+            "a drag must create one undo transaction no matter how many snap buckets it crosses"
+        );
+        assert!(state.shell.symbol.drag_undo_recorded);
+
+        state.shell.symbol.clear_drag_state();
+
+        assert!(!state.shell.symbol.drag_undo_recorded);
     }
 }

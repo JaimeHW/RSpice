@@ -734,6 +734,8 @@ impl AppState {
         if self.workspace.active_view == reference {
             return;
         }
+        self.shell.canvas_hover = None;
+        self.shell.canvas_view_center = None;
         let view_type = view_type_for_reference(self, &reference);
         self.workspace.open_as_root(reference.clone(), view_type);
         self.library_manager

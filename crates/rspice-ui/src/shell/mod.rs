@@ -69,6 +69,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
     // them otherwise so the status bar doesn't show stale positions.
     if app.state.shell.view != WorkspaceView::Schematic {
         app.state.shell.canvas_hover = None;
+        app.state.shell.canvas_view_center = None;
     }
 
     app.state.shell.toasts.show(ctx);
