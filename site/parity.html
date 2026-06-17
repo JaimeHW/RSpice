@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Validation dashboard — RSpice</title>
-<meta name="description" content="Every RSpice release, diffed point-for-point against independent oracles on locked time grids — cluster by cluster, with the worst deviation reported.">
+<meta name="description" content="Every RSpice release, checked against ngspice-46 references and per-deck validation contracts — cluster by cluster, with under-review decks shown separately.">
 <meta property="og:title" content="Validation dashboard — RSpice">
-<meta property="og:description" content="Every release, diffed point-for-point against independent oracles on locked time grids.">
+<meta property="og:description" content="Every release, checked against ngspice-46 references and per-deck validation contracts.">
 <meta property="og:image" content="https://rspice.app/assets/og-card.png">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
@@ -272,11 +272,10 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <p class="sample-banner"><span class="sq" aria-hidden="true"></span>sample data — wired to CI at launch</p>
       <p class="kicker"><span class="tick">▶</span>&nbsp; Validation · evidence</p>
       <h1>Every release, diffed against the oracles.</h1>
-      <p class="sub">For each release, RSpice and the reference engine run the same decks on an
-      <strong>identical, locked time grid</strong> — no resampling, no interpolation — and every point
-      of every saved probe is compared. Core analyses are diffed against ngspice-46; RF steady-state
-      results are checked against closed-form analytic decks. A cluster passes only
-      when its worst point agrees.</p>
+      <p class="sub">For each release, RSpice runs the vendored ngspice decks against checked-in
+      ngspice-46 references. Most analyses compare recorded rows with probe-aware tolerances;
+      timing-sensitive cases may use locked-grid replay or measurement sidecars. Under-review
+      decks stay visible instead of being counted as passes.</p>
     </div>
   </header>
 
@@ -298,7 +297,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="strip-cell">
         <p class="kicker">Decks passed · sample</p>
         <p class="stat-val" id="stat-passed">111 / 113</p>
-        <p class="stat-sub">grid-locked or contract-gated</p>
+        <p class="stat-sub">row-by-row or contract-gated</p>
       </div>
       <div class="strip-cell">
         <p class="kicker">Points compared · sample</p>
@@ -308,7 +307,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="strip-cell">
         <p class="kicker">Max waveform deviation · sample</p>
         <p class="stat-val" id="stat-dev">&lt; 1e-9 V</p>
-        <p class="stat-sub">worst point across grid-locked decks</p>
+        <p class="stat-sub">worst point across passing decks</p>
       </div>
     </div>
   </div>
@@ -424,8 +423,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
           </span>
         </div>
         <svg id="parity-plot" viewBox="0 0 760 340" role="img"
-             aria-label="Overlay of the selected cluster's RSpice trace on its oracle trace, with a flat grid-locked residual underneath"></svg>
-        <figcaption id="fig-cap">bjt_curve_trace.cir · rspice (yellow) over ngspice-46 oracle (dashed) — grid-locked · max |Δ| 6.4e-13 V · sample data</figcaption>
+             aria-label="Overlay of the selected cluster's RSpice trace on its oracle trace, with a residual underneath"></svg>
+        <figcaption id="fig-cap">bjt_curve_trace.cir · rspice (yellow) over ngspice-46 oracle (dashed) — sample residual · max |Δ| 6.4e-13 V · sample data</figcaption>
       </figure>
     </div>
   </section>
@@ -440,26 +439,27 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="val-grid">
         <div class="val-copy">
           <ol class="val-steps">
-            <li><span class="num">01</span><div><strong>Lock the grid.</strong> RSpice replays the
-            oracle's exact timestep sequence, so both engines produce values at identical time
-            points — any difference is numerics, never interpolation.</div></li>
-            <li><span class="num">02</span><div><strong>Diff every point.</strong> Every saved probe
-            of every deck is compared point-for-point; the table reports the worst absolute
-            deviation in each cluster, not an average.</div></li>
-            <li><span class="num">03</span><div><strong>Cross-check RF.</strong> Harmonic balance and
-            PSS have no ngspice reference — they are pinned to closed-form analytic decks, and the
-            Verilog-A BSIM4 is pinned to ngspice's native BSIM4 bias-for-bias.</div></li>
+            <li><span class="num">01</span><div><strong>Pick the oracle.</strong> Most decks compare
+            RSpice output to checked-in ngspice-46 reference rows; timing-sensitive cases use
+            locked-grid replay, engineering-measure sidecars, or certified refusal when an oracle
+            cannot solve the deck.</div></li>
+            <li><span class="num">02</span><div><strong>Diff recorded data.</strong> Saved probes
+            are compared with documented relative tolerances and probe-aware absolute floors; the
+            table reports the worst observed deviation for passing clusters.</div></li>
+            <li><span class="num">03</span><div><strong>Keep gaps visible.</strong> Under-review
+            decks stay out of the pass count, while focused RF/math tests use analytic or
+            cross-check fixtures until broader RF corpus coverage lands.</div></li>
           </ol>
         </div>
         <div>
           <p class="kicker">Rerun this yourself</p>
           <h3>The evidence is a test target, not a webpage.</h3>
           <pre class="code-panel" tabindex="0"><code><span class="c"># from a clean checkout — decks and ngspice-46 goldens are in the repo</span>
-<span class="p">$</span> cargo test -p rspice-core --test ngspice_regression
+<span class="p">$</span> cargo test --release -p rspice-core --test ngspice_regression -- --nocapture --test-threads 1
 
 <span class="c"># or pin against a live local ngspice build instead of the goldens</span>
-<span class="p">$</span> RSPICE_NGSPICE_LIVE_REFERENCES=1 cargo test -p rspice-core \
-    --test ngspice_regression</code></pre>
+<span class="p">$</span> RSPICE_NGSPICE_LIVE_REFERENCES=1 cargo test --release -p rspice-core \
+    --test ngspice_regression -- --nocapture --test-threads 1</code></pre>
           <p class="code-note">decks + golden waveforms live in the
           <a href="https://github.com/JaimeHW/RSpice" style="color:var(--text-dim);">public repo</a> —
           every pass in the table above is reproducible from a clean checkout, not a private CI bucket.</p>
@@ -634,11 +634,11 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     /* in-plot labels */
     el("text", { x: G.L + 10, y: G.T + 16, fill: "var(--text-faint)",
       "font-family": "var(--font-mono)", "font-size": 10 }, plot)
-      .textContent = "V(out) · unit step · " + (N + 1) + " pts on the oracle grid";
+      .textContent = "V(out) · unit step · " + (N + 1) + " recorded reference rows";
     el("text", { x: G.L, y: G.RT - 6, fill: "var(--text-faint)",
       "font-family": "var(--font-mono)", "font-size": 10 }, plot)
-      .textContent = "grid-locked residual (V)";
-    /* oracle (dashed grey, underneath) then rspice (yellow, on top) — same grid, same answer */
+      .textContent = "residual (V)";
+    /* oracle (dashed grey, underneath) then rspice (yellow, on top) */
     el("path", { d: pathFrom(pts, G.L, G.W - G.R, G.T, G.MB, 0, tEnd, G.yMin, G.yMax),
       fill: "none", stroke: "var(--oracle)", "stroke-width": 3,
       "stroke-dasharray": "7 5", opacity: 0.85 }, plot);
@@ -660,7 +660,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     document.getElementById("fig-title").textContent = state.sel + " · " + meta.deck;
     document.getElementById("fig-oracle").textContent = meta.oracle;
     document.getElementById("fig-cap").textContent =
-      meta.deck + " · rspice (yellow) over " + meta.oracle + " (dashed) — grid-locked · max |Δ| " +
+      meta.deck + " · rspice (yellow) over " + meta.oracle + " (dashed) — sample residual · max |Δ| " +
       row[0] + " · sample data";
   }
 
