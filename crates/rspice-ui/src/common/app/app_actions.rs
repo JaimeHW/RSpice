@@ -542,6 +542,7 @@ impl RSpiceApp {
         document.pins = retained;
 
         if cut {
+            clipboard.shapes.reverse();
             self.state.shell.symbol.clipboard = clipboard;
         }
         if changed {
