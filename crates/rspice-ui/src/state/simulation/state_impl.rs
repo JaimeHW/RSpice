@@ -1,6 +1,18 @@
 use super::*;
 
 impl SimulationState {
+    /// Trigger a run from the configured Simulate workspace run set.
+    pub fn request_run_set(&mut self) {
+        self.run_intent = SimulationRunIntent::RunSet;
+        self.trigger_simulation = true;
+    }
+
+    /// Trigger a run from the manual netlist editor buffer.
+    pub fn request_manual_deck(&mut self) {
+        self.run_intent = SimulationRunIntent::ManualDeck;
+        self.trigger_simulation = true;
+    }
+
     /// Clear waveforms and increment version
     pub fn clear_waveforms(&mut self) {
         self.replace_waveforms(Vec::new());

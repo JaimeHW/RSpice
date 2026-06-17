@@ -23,7 +23,7 @@ pub use property_types::{
 pub use schematic::*;
 pub use simulation::{
     AnalysisResult, AnalysisType, CrossProbeMapping, DcOpResult, NoiseContributorRow, NoiseSummary,
-    OperatingPointValue, SimulationRun, SimulationState, WaveformData,
+    OperatingPointValue, SimulationRun, SimulationRunIntent, SimulationState, WaveformData,
 };
 pub use symbol::{
     PinFinding, PinFindingKind, PinSummary, SYMBOL_DOCUMENT_METADATA_KEY, SYMBOL_TERMINAL_GRID,

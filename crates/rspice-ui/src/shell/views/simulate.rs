@@ -833,7 +833,7 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
                     .show(ui)
                     .clicked()
                 {
-                    state.simulation.trigger_simulation = true;
+                    state.request_run_set_simulation();
                 }
                 if Button::new("Stop")
                     .icon(Icon::Stop)

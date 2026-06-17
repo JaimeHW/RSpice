@@ -56,7 +56,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                         .show(ui)
                         .clicked()
                     {
-                        state.simulation.trigger_simulation = true;
+                        state.request_run_set_simulation();
                         state.shell.view = WorkspaceView::Simulate;
                     }
                     if Button::new("Stop")

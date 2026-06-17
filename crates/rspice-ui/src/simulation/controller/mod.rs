@@ -29,13 +29,16 @@ use crate::simulation::multi_run::{
 };
 use crate::simulation::runner::SpecExecutionOptions;
 use crate::simulation::{AnalysisConfig, SimulationRunner, SimulationStatus};
-use crate::state::{AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue};
+use crate::state::{
+    AnalysisResult, AnalysisType, DcOpResult, OperatingPointValue, SimulationRunIntent,
+};
 
 mod analysis_commands;
 mod analysis_helpers;
 mod analysis_plan;
 mod analysis_run_config;
 mod analysis_spec_build;
+mod manual_deck;
 mod results_convert;
 mod results_post;
 mod results_update;
@@ -134,6 +137,8 @@ impl SimulationController {
             self.cached_netlist = None;
             self.current_config = None;
             self.current_spec = None;
+            state.shell.netlist.pending_run_id = None;
+            state.shell.netlist.pending_run_buffer = None;
             state.simulation.status = "Aborted".to_string();
             state.push_sim_message(crate::common::app::ConsoleMessage::warning(
                 "Simulation aborted by user",
@@ -142,6 +147,17 @@ impl SimulationController {
 
         // Poll for completion
         self.poll_completion(state);
+        state.simulation.progress = self
+            .runner
+            .progress_fraction()
+            .map(f64::from)
+            .unwrap_or_else(|| {
+                if state.simulation.is_running {
+                    0.08
+                } else {
+                    0.0
+                }
+            });
 
         // Apply/cancel background transient post-processing work after any
         // selection changes that happened during the previous frame.
@@ -160,7 +176,20 @@ impl SimulationController {
 
         // The UI disables its Run affordances on an empty run set; this
         // backstops the direct trigger paths (tuner re-sim, automation).
-        if state.sim_setup.enabled.is_empty() {
+        let run_intent = state.simulation.run_intent;
+        let manual_source = (run_intent == SimulationRunIntent::ManualDeck)
+            .then(|| state.workspace.netlist_source.clone())
+            .flatten();
+        let manual_source_snapshot = manual_source.clone();
+        if run_intent == SimulationRunIntent::ManualDeck && manual_source.is_none() {
+            state.push_sim_message(ConsoleMessage::error(
+                "Manual netlist source is missing; regenerate or edit the netlist before running"
+                    .to_string(),
+            ));
+            state.simulation.status = "Manual source missing".to_string();
+            return;
+        }
+        if run_intent == SimulationRunIntent::RunSet && state.sim_setup.enabled.is_empty() {
             state.push_sim_message(ConsoleMessage::warning(
                 "Nothing in the run set — tick an analysis in the Simulate view".to_string(),
             ));
@@ -169,33 +198,52 @@ impl SimulationController {
         }
 
         self.pending_analyses.clear();
-        let plan = match self.build_analysis_plan(state) {
-            Ok(plan) => plan,
-            Err(errors) => {
-                for err in errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
+        let queued = if let Some(source) = &manual_source {
+            match Self::build_manual_analysis_queue_from_source(
+                source,
+                state.schematic.current_file.as_deref(),
+            ) {
+                Ok(queue) => queue,
+                Err(errors) => {
+                    for err in errors {
+                        state.push_sim_message(ConsoleMessage::error(err));
+                    }
+                    state.simulation.status = "Configuration error".to_string();
+                    return;
                 }
-                state.simulation.status = "Configuration error".to_string();
-                return;
             }
-        };
-
-        let queued = match self.build_queue_from_plan(state, &plan) {
-            Ok(queue) => queue,
-            Err(errors) => {
-                for err in errors {
-                    state.push_sim_message(ConsoleMessage::error(err));
+        } else {
+            let plan = match self.build_analysis_plan(state) {
+                Ok(plan) => plan,
+                Err(errors) => {
+                    for err in errors {
+                        state.push_sim_message(ConsoleMessage::error(err));
+                    }
+                    state.simulation.status = "Configuration error".to_string();
+                    return;
                 }
-                state.simulation.status = "Configuration error".to_string();
-                return;
+            };
+
+            match self.build_queue_from_plan(state, &plan) {
+                Ok(queue) => queue,
+                Err(errors) => {
+                    for err in errors {
+                        state.push_sim_message(ConsoleMessage::error(err));
+                    }
+                    state.simulation.status = "Configuration error".to_string();
+                    return;
+                }
             }
         };
 
         self.total_analyses = queued.len();
         if self.total_analyses == 0 {
-            state.push_sim_message(ConsoleMessage::error(
-                "No runnable analyses were selected".to_string(),
-            ));
+            let message = if manual_source.is_some() {
+                "Manual netlist contains no runnable analysis commands"
+            } else {
+                "No runnable analyses were selected"
+            };
+            state.push_sim_message(ConsoleMessage::error(message.to_string()));
             state.simulation.status = "Configuration error".to_string();
             return;
         }
@@ -207,9 +255,9 @@ impl SimulationController {
             .collect();
 
         // Manual netlist source (text-first mode): run the edited deck
-        // verbatim with the configured analyses appended. Otherwise
-        // regenerate from the schematic as usual.
-        let mut netlist = if let Some(source) = state.workspace.netlist_source.clone() {
+        // verbatim with its parsed analysis cards. Otherwise regenerate
+        // from the schematic with generated analysis cards as usual.
+        let mut netlist = if let Some(source) = manual_source {
             state.push_sim_message(ConsoleMessage::info(
                 "Running manually edited netlist source".to_string(),
             ));
@@ -278,7 +326,17 @@ impl SimulationController {
         );
 
         // Create new run in Results Browser
-        state.simulation.start_run();
+        let run_id = {
+            let run = state.simulation.start_run();
+            run.id
+        };
+        if let Some(source) = manual_source_snapshot {
+            state.shell.netlist.pending_run_id = Some(run_id);
+            state.shell.netlist.pending_run_buffer = Some(source);
+        } else {
+            state.shell.netlist.pending_run_id = None;
+            state.shell.netlist.pending_run_buffer = None;
+        }
         state.simulation.reliability_results.clear();
         state.simulation.soa_violations.clear();
         log::info!("Created new simulation run");
@@ -408,6 +466,19 @@ impl SimulationController {
 
         // Complete the run (syncs waveforms and selects first analysis)
         state.simulation.complete_run();
+
+        let completed_run_id = state.simulation.active_run().map(|run| run.id);
+        if run_success
+            && completed_run_id == state.shell.netlist.pending_run_id
+            && let Some(buffer) = state.shell.netlist.pending_run_buffer.clone()
+        {
+            state.shell.netlist.last_run_params =
+                crate::shell::netlist_baseline_param_values(&buffer);
+            state.shell.netlist.last_run_buffer = Some(buffer);
+            state.shell.netlist.edited_lines.clear();
+        }
+        state.shell.netlist.pending_run_id = None;
+        state.shell.netlist.pending_run_buffer = None;
 
         // Clear cached netlist
         self.cached_netlist = None;
@@ -685,5 +756,130 @@ impl SimulationController {
     /// Get current status
     pub fn status(&self) -> SimulationStatus {
         self.runner.status()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::examples::load_example_into_app;
+    use crate::common::simulation_analysis_tabs::TAB_TRANSIENT;
+    use crate::state::SimulationRunIntent;
+
+    #[test]
+    fn run_set_intent_ignores_existing_manual_source() {
+        let mut state = AppState::default();
+        assert!(load_example_into_app("RC Lowpass Filter", &mut state));
+        state.sim_setup.enabled.clear();
+        state.sim_setup.enabled.insert(TAB_TRANSIENT);
+        state.workspace.netlist_source =
+            Some("manual sentinel\nVmanual in 0 1\n.op\n.end\n".to_owned());
+
+        let mut controller = SimulationController::new();
+        state.simulation.request_run_set();
+        controller.update(&mut state);
+
+        let cached = controller
+            .cached_netlist
+            .as_deref()
+            .expect("run-set start should cache a generated deck");
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::RunSet);
+        assert!(!cached.contains("manual sentinel"));
+        assert!(!cached.contains("Vmanual"));
+        assert!(
+            cached.contains("VIN") || cached.contains("R1"),
+            "expected generated schematic deck, got:\n{cached}"
+        );
+        controller.abort();
+    }
+
+    #[test]
+    fn manual_deck_intent_runs_source_without_simulate_run_set() {
+        let mut state = AppState::default();
+        state.sim_setup.enabled.clear();
+        state.workspace.netlist_source =
+            Some("manual sentinel\nVmanual in 0 1\nR1 in 0 1k\n.op\n.end\n".to_owned());
+
+        let mut controller = SimulationController::new();
+        state.simulation.request_manual_deck();
+        controller.update(&mut state);
+
+        let cached = controller
+            .cached_netlist
+            .as_deref()
+            .expect("manual-deck start should cache the editor source");
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::ManualDeck);
+        assert!(cached.contains("manual sentinel"));
+        assert!(cached.contains("Vmanual"));
+        assert!(cached.contains(".op"));
+        controller.abort();
+    }
+
+    #[test]
+    fn manual_deck_intent_without_source_reports_configuration_error() {
+        let mut state = AppState::default();
+        assert!(load_example_into_app("RC Lowpass Filter", &mut state));
+        state.workspace.netlist_source = None;
+
+        let mut controller = SimulationController::new();
+        state.simulation.request_manual_deck();
+        controller.update(&mut state);
+
+        assert!(
+            controller.cached_netlist.is_none(),
+            "manual-deck intent must not fall back to generated run-set deck"
+        );
+        assert_eq!(state.simulation.status, "Manual source missing");
+    }
+
+    #[test]
+    fn successful_manual_run_promotes_editor_baseline_snapshot() {
+        let mut state = AppState::default();
+        let run_id = {
+            let run = state.simulation.start_run();
+            run.id
+        };
+        let buffer = "deck\n.param r=1k\nR1 in 0 {r}\n.op\n.end\n".to_owned();
+        state.shell.netlist.pending_run_id = Some(run_id);
+        state.shell.netlist.pending_run_buffer = Some(buffer.clone());
+        state.shell.netlist.edited_lines.insert(1);
+
+        let mut controller = SimulationController::new();
+        controller.finish_simulation_batch(&mut state);
+
+        assert_eq!(
+            state.shell.netlist.last_run_buffer.as_deref(),
+            Some(buffer.as_str())
+        );
+        assert_eq!(state.shell.netlist.last_run_params["r"], 1_000.0);
+        assert!(state.shell.netlist.edited_lines.is_empty());
+        assert_eq!(state.shell.netlist.pending_run_id, None);
+        assert_eq!(state.shell.netlist.pending_run_buffer, None);
+    }
+
+    #[test]
+    fn failed_manual_run_does_not_replace_editor_baseline_snapshot() {
+        let mut state = AppState::default();
+        state.shell.netlist.last_run_buffer = Some("old\n.op\n.end\n".to_owned());
+        state.shell.netlist.edited_lines.insert(1);
+        let run_id = {
+            let run = state.simulation.start_run();
+            run.success = false;
+            run.id
+        };
+        state.shell.netlist.pending_run_id = Some(run_id);
+        state.shell.netlist.pending_run_buffer =
+            Some("new\n.param r=2k\nR1 in 0 {r}\n.op\n.end\n".to_owned());
+
+        let mut controller = SimulationController::new();
+        controller.finish_simulation_batch(&mut state);
+
+        assert_eq!(
+            state.shell.netlist.last_run_buffer.as_deref(),
+            Some("old\n.op\n.end\n")
+        );
+        assert!(state.shell.netlist.edited_lines.contains(&1));
+        assert_eq!(state.shell.netlist.pending_run_id, None);
+        assert_eq!(state.shell.netlist.pending_run_buffer, None);
     }
 }

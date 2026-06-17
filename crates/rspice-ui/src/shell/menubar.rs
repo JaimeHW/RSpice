@@ -578,7 +578,7 @@ fn simulate_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     let can_run = state.can_run_simulation();
     if can_run {
         if item(ui, "Run", Some("F5")) {
-            state.simulation.trigger_simulation = true;
+            state.request_run_set_simulation();
             state.shell.view = WorkspaceView::Simulate;
         }
     } else {

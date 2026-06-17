@@ -26,5 +26,5 @@ pub use analysis_result::{
 pub use analysis_type::AnalysisType;
 pub use cross_probe::CrossProbeMapping;
 pub use run::SimulationRun;
-pub use state_model::SimulationState;
+pub use state_model::{SimulationRunIntent, SimulationState};
 pub use waveform::WaveformData;

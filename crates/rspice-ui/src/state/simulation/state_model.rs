@@ -4,6 +4,16 @@ use super::*;
 // Simulation State
 //=============================================================================
 
+/// Requested simulation source for the next controller start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SimulationRunIntent {
+    /// Run the analyses configured in the Simulate workspace.
+    #[default]
+    RunSet,
+    /// Run the text deck currently owned by the netlist editor.
+    ManualDeck,
+}
+
 /// Simulation execution state
 #[derive(Debug, Clone, Default)]
 pub struct SimulationState {
@@ -13,6 +23,9 @@ pub struct SimulationState {
     /// Flag to trigger simulation from menu (toolbar watches this)
     /// When set to true, toolbar will start simulation and reset to false
     pub trigger_simulation: bool,
+
+    /// Source selected for the next simulation trigger.
+    pub run_intent: SimulationRunIntent,
 
     /// Flag to trigger simulation abort from stop button
     /// When set to true, SimulationController will call runner.abort() and reset to false
