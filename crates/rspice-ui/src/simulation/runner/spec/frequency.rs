@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep, SpPort};
@@ -9,6 +10,7 @@ pub(super) fn run_frequency_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     match spec {
         AnalysisSpec::SParameter {
@@ -26,24 +28,28 @@ pub(super) fn run_frequency_spec(
             sweep,
             z0,
             ports,
+            source_path,
         ),
-        AnalysisSpec::Tf => run_tf(netlist, options),
-        AnalysisSpec::Pac => run_pac(netlist, options),
-        AnalysisSpec::Pxf => run_pxf(netlist, options),
-        AnalysisSpec::Pnoise => run_pnoise(netlist, options),
+        AnalysisSpec::Tf => run_tf(netlist, options, source_path),
+        AnalysisSpec::Pac => run_pac(netlist, options, source_path),
+        AnalysisSpec::Pxf => run_pxf(netlist, options, source_path),
+        AnalysisSpec::Pnoise => run_pnoise(netlist, options, source_path),
         AnalysisSpec::Stb {
             probe_node,
             start_freq,
             stop_freq,
+            sweep,
             points_per_decade,
         } => run_stb(
             netlist,
             probe_node,
             start_freq,
             stop_freq,
+            sweep,
             points_per_decade,
+            source_path,
         ),
-        AnalysisSpec::Pstb => run_pstb(netlist, options),
+        AnalysisSpec::Pstb => run_pstb(netlist, options, source_path),
         _ => unreachable!("non-frequency spec routed to frequency runner"),
     }
 }
@@ -56,6 +62,7 @@ fn run_sparameter(
     sweep: FrequencySweep,
     z0: f64,
     ports: Vec<SpPort>,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let sweep = match sweep {
         FrequencySweep::Decade => svc_runner::SParameterSweep::Decade,
@@ -77,7 +84,7 @@ fn run_sparameter(
             })
             .collect(),
     };
-    let data = svc_runner::run_sparameter_analysis(netlist, &cfg)
+    let data = svc_runner::run_sparameter_analysis_with_source_path(netlist, &cfg, source_path)
         .map_err(SimulationError::InvalidConfig)?;
     let mut waveforms = HashMap::new();
     for row in 0..data.num_ports {
@@ -110,12 +117,14 @@ fn run_sparameter(
 fn run_tf(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let data = if let Some(tf_cfg) = options.tf {
-        svc_runner::run_tf_analysis_with_config(netlist, &tf_cfg)
+        svc_runner::run_tf_analysis_with_config_and_source_path(netlist, &tf_cfg, source_path)
             .map_err(SimulationError::InvalidConfig)?
     } else {
-        svc_runner::run_tf_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_tf_analysis_with_source_path(netlist, source_path)
+            .map_err(SimulationError::InvalidConfig)?
     };
 
     let mut waveforms = HashMap::new();
@@ -167,14 +176,15 @@ fn run_tf(
 fn run_pac(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let pac_cfg = options.pac.ok_or_else(|| {
         SimulationError::InvalidConfig(
             "PAC analysis requires explicit PAC execution options".to_string(),
         )
     })?;
-    let data =
-        svc_runner::run_pac_analysis(netlist, &pac_cfg).map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_pac_analysis_with_source_path(netlist, &pac_cfg, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
 
     Ok(SimulationResult::Ac {
         frequencies: data.frequencies,
@@ -186,14 +196,16 @@ fn run_pac(
 fn run_pxf(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let pxf_cfg = options.pxf.ok_or_else(|| {
         SimulationError::InvalidConfig(
             "PXF analysis requires explicit PXF execution options".to_string(),
         )
     })?;
-    let data = svc_runner::run_pxf_analysis_with_config(netlist, &pxf_cfg)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data =
+        svc_runner::run_pxf_analysis_with_config_and_source_path(netlist, &pxf_cfg, source_path)
+            .map_err(SimulationError::InvalidConfig)?;
 
     let mut waveforms = HashMap::new();
     let transfer_name = format!(
@@ -221,12 +233,18 @@ fn run_pxf(
 fn run_pnoise(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let data = if let Some(pnoise_cfg) = options.pnoise {
-        svc_runner::run_pnoise_analysis_with_config(netlist, &pnoise_cfg)
-            .map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_pnoise_analysis_with_config_and_source_path(
+            netlist,
+            &pnoise_cfg,
+            source_path,
+        )
+        .map_err(SimulationError::InvalidConfig)?
     } else {
-        svc_runner::run_pnoise_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_pnoise_analysis_with_source_path(netlist, source_path)
+            .map_err(SimulationError::InvalidConfig)?
     };
 
     let freq_len = data.frequencies.len().max(1);
@@ -252,14 +270,23 @@ fn run_stb(
     probe_node: String,
     start_freq: f64,
     stop_freq: f64,
+    sweep: FrequencySweep,
     points_per_decade: usize,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = svc_runner::run_stb_analysis(
+    let sweep = match sweep {
+        FrequencySweep::Decade => rspice_core::analysis::advanced::stb::StbSweepType::Decade,
+        FrequencySweep::Octave => rspice_core::analysis::advanced::stb::StbSweepType::Octave,
+        FrequencySweep::Linear => rspice_core::analysis::advanced::stb::StbSweepType::Linear,
+    };
+    let data = svc_runner::run_stb_analysis_with_sweep_and_source_path(
         netlist,
         &probe_node,
         start_freq,
         stop_freq,
+        sweep,
         points_per_decade,
+        source_path,
     )
     .map_err(SimulationError::InvalidConfig)?;
 
@@ -291,14 +318,16 @@ fn run_stb(
 fn run_pstb(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let pstb_cfg = options.pstb.ok_or_else(|| {
         SimulationError::InvalidConfig(
             "PSTB analysis requires explicit PSTB execution options".to_string(),
         )
     })?;
-    let data = svc_runner::run_pstb_analysis_with_config(netlist, &pstb_cfg)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data =
+        svc_runner::run_pstb_analysis_with_config_and_source_path(netlist, &pstb_cfg, source_path)
+            .map_err(SimulationError::InvalidConfig)?;
 
     let mut waveforms = HashMap::new();
     insert_scalar_waveform(

@@ -273,6 +273,7 @@ impl AnalysisSpec {
                 start_freq,
                 stop_freq,
                 points_per_decade,
+                ..
             } => {
                 if probe_node.trim().is_empty() {
                     return Err("STB probe_node is required".to_string());

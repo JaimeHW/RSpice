@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
@@ -8,13 +9,20 @@ use crate::simulation::runner::SimulationError;
 pub(super) fn run_periodic_spec(
     spec: AnalysisSpec,
     netlist: &str,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     match spec {
         AnalysisSpec::Pss {
             fundamental_freq,
             num_harmonics,
             tolerance,
-        } => run_pss(netlist, fundamental_freq, num_harmonics, tolerance),
+        } => run_pss(
+            netlist,
+            fundamental_freq,
+            num_harmonics,
+            tolerance,
+            source_path,
+        ),
         AnalysisSpec::HarmonicBalance {
             tones,
             reltol,
@@ -50,7 +58,7 @@ pub(super) fn run_periodic_spec(
                 source_stepping,
                 verbose,
             };
-            run_harmonic_balance(netlist, &hb_cfg)
+            run_harmonic_balance(netlist, &hb_cfg, source_path)
         }
         AnalysisSpec::Envelope {
             fundamental_freq,
@@ -63,6 +71,7 @@ pub(super) fn run_periodic_spec(
             stop_time,
             num_harmonics,
             max_step,
+            source_path,
         ),
         AnalysisSpec::Fourier {
             fundamental_freq,
@@ -79,6 +88,7 @@ pub(super) fn run_periodic_spec(
             output_ref,
             start_time,
             stop_time,
+            source_path,
         ),
         AnalysisSpec::Disto {
             start_freq,
@@ -93,6 +103,7 @@ pub(super) fn run_periodic_spec(
             points_per_unit,
             sweep,
             f2_over_f1,
+            source_path,
         ),
         _ => unreachable!("non-periodic spec routed to periodic runner"),
     }
@@ -103,9 +114,16 @@ fn run_pss(
     fundamental_freq: f64,
     num_harmonics: usize,
     tolerance: f64,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
-    let data = svc_runner::run_pss_analysis(netlist, fundamental_freq, num_harmonics, tolerance)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_pss_analysis_with_source_path(
+        netlist,
+        fundamental_freq,
+        num_harmonics,
+        tolerance,
+        source_path,
+    )
+    .map_err(SimulationError::InvalidConfig)?;
 
     let time = data.time;
     let waveforms: HashMap<String, WaveformData> = data
@@ -129,9 +147,10 @@ fn run_pss(
 fn run_harmonic_balance(
     netlist: &str,
     hb_cfg: &svc_runner::HbRunConfig,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
-    let data =
-        svc_runner::run_hb_analysis(netlist, hb_cfg).map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_hb_analysis_with_source_path(netlist, hb_cfg, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
 
     let waveforms = spectra_to_complex_waveforms(data.spectra);
     let frequencies = waveforms
@@ -153,6 +172,7 @@ fn run_envelope(
     stop_time: f64,
     num_harmonics: usize,
     max_step: Option<f64>,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::EnvelopeRunConfig {
         fundamental_freq,
@@ -160,8 +180,8 @@ fn run_envelope(
         num_harmonics,
         max_step,
     };
-    let data =
-        svc_runner::run_envelope_analysis(netlist, &cfg).map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_envelope_analysis_with_source_path(netlist, &cfg, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
     let waveforms: HashMap<String, WaveformData> = data
         .waveforms
         .into_iter()
@@ -188,6 +208,7 @@ fn run_fourier(
     output_ref: String,
     start_time: f64,
     stop_time: f64,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let output_ref = (!output_ref.trim().is_empty()).then_some(output_ref);
     let cfg = svc_runner::FourierRunConfig {
@@ -198,8 +219,8 @@ fn run_fourier(
         start_time,
         stop_time,
     };
-    let data =
-        svc_runner::run_fourier_analysis(netlist, &cfg).map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_fourier_analysis_with_source_path(netlist, &cfg, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
 
     let mut waveforms = HashMap::new();
     waveforms.insert(
@@ -242,6 +263,7 @@ fn run_disto(
     points_per_unit: usize,
     sweep: FrequencySweep,
     f2_over_f1: Option<f64>,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let sweep = match sweep {
         FrequencySweep::Decade => svc_runner::DistoFrequencySweep::Decade,
@@ -256,8 +278,8 @@ fn run_disto(
         f2_over_f1,
         allow_linearized_fallback: false,
     };
-    let data =
-        svc_runner::run_disto_analysis(netlist, &cfg).map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_disto_analysis_with_source_path(netlist, &cfg, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
     let frequencies = data.frequencies;
 
     let mut waveforms = HashMap::new();

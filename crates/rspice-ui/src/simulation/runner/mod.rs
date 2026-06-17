@@ -673,6 +673,8 @@ impl std::error::Error for SimulationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn poll_result_returns_pending_result_once() {
@@ -745,6 +747,61 @@ mod tests {
         assert!(
             runner.poll_result().is_none(),
             "thread result should be consumed"
+        );
+    }
+
+    #[test]
+    fn spec_run_uses_source_path_for_relative_includes() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "rspice-spec-source-path-{}-{stamp}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("create temp deck directory");
+        fs::write(dir.join("load.inc"), "RLOAD out 0 1k\n").expect("write include");
+        let source_path = dir.join("main.cir");
+        let deck = "source path tf\n\
+            .include \"load.inc\"\n\
+            V1 in 0 1\n\
+            R1 in out 1k\n\
+            .tf V(out) V1\n\
+            .end\n";
+        fs::write(&source_path, deck).expect("write deck");
+
+        let mut options = SpecExecutionOptions::default();
+        options.tf = Some(crate::services::simulation_runner::TfRunConfig {
+            input_source: "V1".to_string(),
+            output_node: "out".to_string(),
+            stop_freq: 10.0,
+            ..crate::services::simulation_runner::TfRunConfig::default()
+        });
+
+        let mut runner = SimulationRunner::new();
+        runner
+            .start_spec_with_options_with_source_path(
+                AnalysisSpec::Tf,
+                deck.to_string(),
+                options,
+                Some(source_path),
+            )
+            .expect("start tf spec run");
+
+        let mut result = None;
+        for _ in 0..100 {
+            if let Some(polled) = runner.poll_result() {
+                result = Some(polled);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let result = result.expect("test simulation should finish quickly");
+        let _ = fs::remove_dir_all(&dir);
+        assert!(
+            result.is_ok(),
+            "relative include should resolve: {result:?}"
         );
     }
 }

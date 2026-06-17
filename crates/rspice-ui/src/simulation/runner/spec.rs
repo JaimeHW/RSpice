@@ -29,23 +29,23 @@ pub(super) fn run_spec_request(
 
     match spec {
         AnalysisSpec::MonteCarlo | AnalysisSpec::Parametric | AnalysisSpec::Corner => {
-            sweeps::run_sweep_spec(spec, options, netlist)
+            sweeps::run_sweep_spec(spec, options, netlist, source_path)
         }
         AnalysisSpec::Reliability { .. }
         | AnalysisSpec::Optimization { .. }
-        | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist),
+        | AnalysisSpec::Soa { .. } => device::run_device_spec(spec, netlist, source_path),
         AnalysisSpec::Pss { .. }
         | AnalysisSpec::HarmonicBalance { .. }
         | AnalysisSpec::Envelope { .. }
         | AnalysisSpec::Fourier { .. }
-        | AnalysisSpec::Disto { .. } => periodic::run_periodic_spec(spec, netlist),
+        | AnalysisSpec::Disto { .. } => periodic::run_periodic_spec(spec, netlist, source_path),
         AnalysisSpec::SParameter { .. }
         | AnalysisSpec::Tf
         | AnalysisSpec::Pac
         | AnalysisSpec::Pxf
         | AnalysisSpec::Pnoise
         | AnalysisSpec::Stb { .. }
-        | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist),
+        | AnalysisSpec::Pstb => frequency::run_frequency_spec(spec, options, netlist, source_path),
         unsupported => Err(SimulationError::InvalidConfig(format!(
             "{:?} is not supported by SimulationRunner::start_spec",
             unsupported.run_type()

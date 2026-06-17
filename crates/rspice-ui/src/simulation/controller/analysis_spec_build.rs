@@ -278,6 +278,7 @@ impl SimulationController {
             probe_node: stb_cfg.probe_source,
             start_freq: stb_cfg.start_freq,
             stop_freq: stb_cfg.stop_freq,
+            sweep: FrequencySweep::Decade,
             points_per_decade: stb_cfg.points_per_decade as usize,
         })
     }

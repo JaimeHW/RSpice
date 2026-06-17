@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::{AnalysisSpec, OptimizationAlgorithm, OptimizationGoal};
@@ -8,6 +9,7 @@ use crate::simulation::runner::SimulationError;
 pub(super) fn run_device_spec(
     spec: AnalysisSpec,
     netlist: &str,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     match spec {
         AnalysisSpec::Reliability {
@@ -23,6 +25,7 @@ pub(super) fn run_device_spec(
             enable_nbti,
             enable_em,
             min_stress_voltage,
+            source_path,
         ),
         AnalysisSpec::Optimization {
             variables,
@@ -49,6 +52,7 @@ pub(super) fn run_device_spec(
             fd_step,
             initial_step,
             min_step,
+            source_path,
         ),
         AnalysisSpec::Soa {
             stop_time,
@@ -73,6 +77,7 @@ pub(super) fn run_device_spec(
             max_vbe,
             check_vce_max,
             max_vce,
+            source_path,
         ),
         _ => unreachable!("non-device spec routed to device runner"),
     }
@@ -85,6 +90,7 @@ fn run_reliability(
     enable_nbti: bool,
     enable_em: bool,
     min_stress_voltage: f64,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::ReliabilityRunConfig {
         target_years,
@@ -93,8 +99,12 @@ fn run_reliability(
         enable_em,
         min_stress_voltage,
     };
-    let data = svc_runner::run_reliability_analysis_with_config(netlist, &cfg)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_reliability_analysis_with_config_and_source_path(
+        netlist,
+        &cfg,
+        source_path,
+    )
+    .map_err(SimulationError::InvalidConfig)?;
 
     let mut waveforms = HashMap::new();
     for device in &data.device_results {
@@ -158,6 +168,7 @@ fn run_optimization(
     fd_step: f64,
     initial_step: f64,
     min_step: f64,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::OptimizationRunConfig {
         variables: variables
@@ -195,8 +206,12 @@ fn run_optimization(
         min_step,
     };
 
-    let data = svc_runner::run_optimization_analysis_with_config(netlist, &cfg)
-        .map_err(SimulationError::InvalidConfig)?;
+    let data = svc_runner::run_optimization_analysis_with_config_and_source_path(
+        netlist,
+        &cfg,
+        source_path,
+    )
+    .map_err(SimulationError::InvalidConfig)?;
 
     let mut waveforms = HashMap::new();
     insert_scalar_waveform(
@@ -240,6 +255,7 @@ fn run_soa(
     max_vbe: f64,
     check_vce_max: bool,
     max_vce: f64,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let cfg = svc_runner::SoaRunConfig {
         stop_time,
@@ -253,7 +269,7 @@ fn run_soa(
         check_vce_max,
         max_vce,
     };
-    let data = svc_runner::run_soa_analysis_with_config(netlist, &cfg)
+    let data = svc_runner::run_soa_analysis_with_config_and_source_path(netlist, &cfg, source_path)
         .map_err(SimulationError::InvalidConfig)?;
     let mut waveforms = HashMap::new();
     insert_scalar_waveform(

@@ -39,7 +39,8 @@ pub use disto::{
 };
 pub use envelope_fourier::{
     EnvelopeData, EnvelopeRunConfig, FourierData, FourierRunConfig, run_envelope_analysis,
-    run_fourier_analysis,
+    run_envelope_analysis_with_source_path, run_fourier_analysis,
+    run_fourier_analysis_with_source_path,
 };
 pub use hb::{
     HbData, HbRunConfig, HbToneRunConfig, run_hb_analysis, run_hb_analysis_with_source_path,
@@ -95,7 +96,10 @@ pub use sparameter::{
     SParameterData, SParameterPort, SParameterRunConfig, SParameterSweep, run_sparameter_analysis,
     run_sparameter_analysis_with_source_path,
 };
-pub use stb::{StbData, run_stb_analysis, run_stb_analysis_with_source_path};
+pub use stb::{
+    StbData, run_stb_analysis, run_stb_analysis_with_source_path,
+    run_stb_analysis_with_sweep_and_source_path,
+};
 pub use sweeps::{
     CornerBaseMode, CornerData, CornerFrequencySweep, CornerProcess, CornerRunConfig,
     ParametricData, TempRunConfig, run_corner_analysis, run_corner_analysis_with_config,

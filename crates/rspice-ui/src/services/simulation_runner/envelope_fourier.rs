@@ -1,7 +1,8 @@
-use super::{TransientData, run_transient_analysis};
+use super::{TransientData, run_transient_analysis_with_source_path};
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::analysis::{FourierAnalysis, FourierConfig};
+use std::path::Path;
 
 /// Configuration for envelope analysis.
 #[derive(Debug, Clone)]
@@ -44,6 +45,16 @@ pub fn run_envelope_analysis(
     netlist_text: &str,
     config: &EnvelopeRunConfig,
 ) -> Result<EnvelopeData, String> {
+    run_envelope_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run envelope analysis with a source path used to resolve relative includes
+/// and model file references.
+pub fn run_envelope_analysis_with_source_path(
+    netlist_text: &str,
+    config: &EnvelopeRunConfig,
+    source_path: Option<&Path>,
+) -> Result<EnvelopeData, String> {
     config.validate()?;
 
     let samples_per_cycle = (config.num_harmonics.max(1) as f64 * 16.0).max(32.0);
@@ -55,7 +66,12 @@ pub fn run_envelope_analysis(
         .unwrap_or_else(|| carrier_step.min(coarse_step).max(fine_floor));
     step_time = step_time.clamp(fine_floor, config.stop_time);
 
-    let transient = run_transient_analysis(netlist_text, config.stop_time, step_time)?;
+    let transient = run_transient_analysis_with_source_path(
+        netlist_text,
+        config.stop_time,
+        step_time,
+        source_path,
+    )?;
     if transient.time.is_empty() {
         return Err("Envelope analysis produced no transient samples".to_string());
     }
@@ -153,6 +169,16 @@ pub fn run_fourier_analysis(
     netlist_text: &str,
     config: &FourierRunConfig,
 ) -> Result<FourierData, String> {
+    run_fourier_analysis_with_source_path(netlist_text, config, None)
+}
+
+/// Run Fourier analysis with a source path used to resolve relative includes
+/// and model file references.
+pub fn run_fourier_analysis_with_source_path(
+    netlist_text: &str,
+    config: &FourierRunConfig,
+    source_path: Option<&Path>,
+) -> Result<FourierData, String> {
     config.validate()?;
 
     let window = config.stop_time - config.start_time;
@@ -166,7 +192,12 @@ pub fn run_fourier_analysis(
         .max(floor_step)
         .min(config.stop_time);
 
-    let transient = run_transient_analysis(netlist_text, config.stop_time, step_time)?;
+    let transient = run_transient_analysis_with_source_path(
+        netlist_text,
+        config.stop_time,
+        step_time,
+        source_path,
+    )?;
     if transient.time.len() < 3 {
         return Err("Fourier analysis requires at least 3 transient samples".to_string());
     }

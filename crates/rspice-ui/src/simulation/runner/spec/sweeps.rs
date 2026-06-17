@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::services::simulation_runner as svc_runner;
 use crate::simulation::multi_run::AnalysisSpec;
@@ -9,18 +10,22 @@ pub(super) fn run_sweep_spec(
     spec: AnalysisSpec,
     options: SpecExecutionOptions,
     netlist: &str,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     match spec {
-        AnalysisSpec::MonteCarlo => run_monte_carlo(netlist),
-        AnalysisSpec::Parametric => run_parametric(netlist, options),
-        AnalysisSpec::Corner => run_corner(netlist, options),
+        AnalysisSpec::MonteCarlo => run_monte_carlo(netlist, source_path),
+        AnalysisSpec::Parametric => run_parametric(netlist, options, source_path),
+        AnalysisSpec::Corner => run_corner(netlist, options, source_path),
         _ => unreachable!("non-sweep spec routed to sweep runner"),
     }
 }
 
-fn run_monte_carlo(netlist: &str) -> Result<SimulationResult, SimulationError> {
-    let data =
-        svc_runner::run_monte_carlo_analysis(netlist).map_err(SimulationError::InvalidConfig)?;
+fn run_monte_carlo(
+    netlist: &str,
+    source_path: Option<&Path>,
+) -> Result<SimulationResult, SimulationError> {
+    let data = svc_runner::run_monte_carlo_analysis_with_source_path(netlist, source_path)
+        .map_err(SimulationError::InvalidConfig)?;
     let variables = data
         .variables
         .into_iter()
@@ -47,12 +52,18 @@ fn run_monte_carlo(netlist: &str) -> Result<SimulationResult, SimulationError> {
 fn run_parametric(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let data = if let Some(temp_cfg) = options.temp {
-        svc_runner::run_parametric_analysis_with_config(netlist, &temp_cfg)
-            .map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_parametric_analysis_with_config_and_source_path(
+            netlist,
+            &temp_cfg,
+            source_path,
+        )
+        .map_err(SimulationError::InvalidConfig)?
     } else {
-        svc_runner::run_parametric_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_parametric_analysis_with_source_path(netlist, source_path)
+            .map_err(SimulationError::InvalidConfig)?
     };
     let sweep_values = data.sweep_values;
     let waveforms: HashMap<String, WaveformData> = data
@@ -77,12 +88,18 @@ fn run_parametric(
 fn run_corner(
     netlist: &str,
     options: SpecExecutionOptions,
+    source_path: Option<&Path>,
 ) -> Result<SimulationResult, SimulationError> {
     let data = if let Some(corner_cfg) = options.corner {
-        svc_runner::run_corner_analysis_with_config(netlist, &corner_cfg)
-            .map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_corner_analysis_with_config_and_source_path(
+            netlist,
+            &corner_cfg,
+            source_path,
+        )
+        .map_err(SimulationError::InvalidConfig)?
     } else {
-        svc_runner::run_corner_analysis(netlist).map_err(SimulationError::InvalidConfig)?
+        svc_runner::run_corner_analysis_with_source_path(netlist, source_path)
+            .map_err(SimulationError::InvalidConfig)?
     };
     let x_values = data.x_values;
     let x_label = data.x_label;

@@ -189,6 +189,8 @@ pub enum AnalysisSpec {
         probe_node: String,
         start_freq: f64,
         stop_freq: f64,
+        #[serde(default)]
+        sweep: FrequencySweep,
         points_per_decade: usize,
     },
     /// Monte Carlo

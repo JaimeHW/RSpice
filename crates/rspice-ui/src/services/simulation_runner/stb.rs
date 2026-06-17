@@ -111,6 +111,27 @@ pub fn run_stb_analysis_with_source_path(
     points_per_decade: usize,
     source_path: Option<&Path>,
 ) -> Result<StbData, String> {
+    run_stb_analysis_with_sweep_and_source_path(
+        netlist_text,
+        probe,
+        start_freq,
+        stop_freq,
+        rspice_core::analysis::advanced::stb::StbSweepType::Decade,
+        points_per_decade,
+        source_path,
+    )
+}
+
+/// Run STB analysis with an explicit sweep type and source path.
+pub fn run_stb_analysis_with_sweep_and_source_path(
+    netlist_text: &str,
+    probe: &str,
+    start_freq: Value,
+    stop_freq: Value,
+    sweep_type: rspice_core::analysis::advanced::stb::StbSweepType,
+    points_per_decade: usize,
+    source_path: Option<&Path>,
+) -> Result<StbData, String> {
     use rspice_core::analysis::advanced::stb::StbConfig;
 
     let netlist = parse_runner_netlist(netlist_text, source_path)?;
@@ -118,6 +139,7 @@ pub fn run_stb_analysis_with_source_path(
 
     let stb_config = StbConfig::new()
         .with_sweep(start_freq, stop_freq, points_per_decade)
+        .with_sweep_type(sweep_type)
         .with_probe(probe)
         .with_nyquist(true);
 
