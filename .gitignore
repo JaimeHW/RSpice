@@ -30,5 +30,7 @@ Thumbs.db
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
+/diagnostics/
+design/tools/marks_out.txt
 .agent/
 /_site
