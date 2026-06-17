@@ -1,6 +1,8 @@
 use super::checker::{DrcChecker, DrcConfig};
 use super::input::{ComponentInfo, NetLabelInfo, PinInfo, WireInfo};
 use super::types::DrcResult;
+use crate::simulation::netlist_gen::HierarchySource;
+use crate::state::{Component, Point};
 
 /// Extract DRC-compatible data from a SchematicState.
 ///
@@ -23,6 +25,32 @@ use super::types::DrcResult;
 pub fn extract_drc_data(
     schematic: &crate::state::SchematicState,
 ) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
+    extract_drc_data_with_terminals(schematic, |comp| {
+        comp.terminal_positions()
+            .into_iter()
+            .map(|(name, pos)| (name.to_owned(), pos))
+            .collect()
+    })
+}
+
+/// Extract DRC data with project-cell symbol resolution enabled.
+pub fn extract_drc_data_with_hierarchy(
+    schematic: &crate::state::SchematicState,
+    hierarchy: &HierarchySource<'_>,
+) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
+    extract_drc_data_with_terminals(schematic, |comp| {
+        let resolved_symbol = comp
+            .library_cell
+            .as_ref()
+            .and_then(|binding| hierarchy.resolved_symbol_for(binding));
+        comp.terminal_positions_resolved(resolved_symbol.as_ref())
+    })
+}
+
+fn extract_drc_data_with_terminals(
+    schematic: &crate::state::SchematicState,
+    mut terminal_positions_for: impl FnMut(&Component) -> Vec<(String, Point)>,
+) -> (Vec<ComponentInfo>, Vec<WireInfo>, Vec<NetLabelInfo>) {
     use crate::state::ComponentType;
 
     let mut components = Vec::with_capacity(schematic.components.len());
@@ -34,7 +62,7 @@ pub fn extract_drc_data(
 
     // Extract components
     for comp in &schematic.components {
-        let terminal_positions = comp.terminal_positions();
+        let terminal_positions = terminal_positions_for(comp);
         let mut pins = Vec::with_capacity(terminal_positions.len());
 
         for (pin_name, pin_pos) in terminal_positions {
@@ -54,7 +82,7 @@ pub fn extract_drc_data(
             ) && pin_name == "+";
 
             pins.push(PinInfo {
-                name: pin_name.to_string(),
+                name: pin_name,
                 net_name,
                 is_output,
                 x: Some(pin_pos.x as f64),
@@ -156,6 +184,16 @@ pub fn run_drc_check(schematic: &crate::state::SchematicState) -> DrcResult {
     checker.check_connectivity(&components, &wires, &net_labels)
 }
 
+/// Run a complete DRC check with project-cell symbol resolution enabled.
+pub fn run_drc_check_with_hierarchy(
+    schematic: &crate::state::SchematicState,
+    hierarchy: &HierarchySource<'_>,
+) -> DrcResult {
+    let (components, wires, net_labels) = extract_drc_data_with_hierarchy(schematic, hierarchy);
+    let mut checker = DrcChecker::new();
+    checker.check_connectivity(&components, &wires, &net_labels)
+}
+
 /// Run a complete DRC check with custom configuration.
 pub fn run_drc_check_with_config(
     schematic: &crate::state::SchematicState,
@@ -164,4 +202,97 @@ pub fn run_drc_check_with_config(
     let (components, wires, net_labels) = extract_drc_data(schematic);
     let mut checker = DrcChecker::with_config(config);
     checker.check_connectivity(&components, &wires, &net_labels)
+}
+
+/// Run a configured DRC check with project-cell symbol resolution enabled.
+pub fn run_drc_check_with_hierarchy_and_config(
+    schematic: &crate::state::SchematicState,
+    hierarchy: &HierarchySource<'_>,
+    config: DrcConfig,
+) -> DrcResult {
+    let (components, wires, net_labels) = extract_drc_data_with_hierarchy(schematic, hierarchy);
+    let mut checker = DrcChecker::with_config(config);
+    checker.check_connectivity(&components, &wires, &net_labels)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{
+        Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, LibraryManager,
+        PortDirection, PortSpec, SchematicState, SymbolDocument, SymbolPin, View, ViewType,
+    };
+    use std::collections::HashMap;
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn library_with_authored_amp_symbol() -> (LibraryManager, HashMap<String, SchematicState>) {
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut master = SchematicState::default();
+        for (idx, name) in ["IN", "OUT"].iter().enumerate() {
+            let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
+            master
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("port component")
+                .value = (*name).to_owned();
+        }
+
+        let mut buffers = HashMap::new();
+        buffers.insert(CellViewRef::new("work", "amp", "schematic").key(), master);
+        (libraries, buffers)
+    }
+
+    fn authored_amp_instance() -> Component {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+            .with_library_cell(binding)
+    }
+
+    #[test]
+    fn hierarchy_extraction_uses_authored_symbol_pin_coordinates() {
+        let (libraries, buffers) = library_with_authored_amp_symbol();
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let mut schematic = SchematicState::default();
+        schematic.components.push(authored_amp_instance());
+
+        let (components, _, _) = extract_drc_data_with_hierarchy(&schematic, &hierarchy);
+        let pins: HashMap<_, _> = components[0]
+            .pins
+            .iter()
+            .map(|pin| (pin.name.as_str(), (pin.x, pin.y)))
+            .collect();
+
+        assert_eq!(pins.get("IN"), Some(&(Some(60.0), Some(40.0))));
+        assert_eq!(pins.get("OUT"), Some(&(Some(170.0), Some(70.0))));
+    }
 }

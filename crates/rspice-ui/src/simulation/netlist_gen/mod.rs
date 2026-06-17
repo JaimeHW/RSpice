@@ -175,6 +175,22 @@ pub struct DesignNet {
 /// by `topology_version`.
 pub fn design_nets(schematic: &SchematicState) -> Vec<DesignNet> {
     let mut generator = NetlistGenerator::new(schematic);
+    collect_design_nets(schematic, &mut generator)
+}
+
+/// Live net summary with project hierarchy/symbol resolution enabled.
+pub fn design_nets_with_hierarchy(
+    schematic: &SchematicState,
+    hierarchy: &HierarchySource<'_>,
+) -> Vec<DesignNet> {
+    let mut generator = NetlistGenerator::with_hierarchy(schematic, hierarchy);
+    collect_design_nets(schematic, &mut generator)
+}
+
+fn collect_design_nets(
+    schematic: &SchematicState,
+    generator: &mut NetlistGenerator<'_>,
+) -> Vec<DesignNet> {
     generator.extract_nets();
     generator.apply_interface_ports();
     generator.apply_net_labels();
@@ -188,7 +204,7 @@ pub fn design_nets(schematic: &SchematicState) -> Vec<DesignNet> {
 
     let mut pin_counts: HashMap<usize, usize> = HashMap::new();
     for component in &schematic.components {
-        for (_, position) in component.terminal_positions() {
+        for (_, position) in generator.component_terminal_positions(component) {
             if let Some(net) = generator.net_at(position) {
                 *pin_counts.entry(net.id).or_default() += 1;
             }
@@ -450,6 +466,17 @@ impl<'a> NetlistGenerator<'a> {
 }
 
 impl<'a> NetlistGenerator<'a> {
+    pub(super) fn component_terminal_positions(
+        &self,
+        component: &Component,
+    ) -> Vec<(String, Point)> {
+        let resolved_symbol = component
+            .library_cell
+            .as_ref()
+            .and_then(|binding| self.hierarchy?.resolved_symbol_for(binding));
+        component.terminal_positions_resolved(resolved_symbol.as_ref())
+    }
+
     pub fn nets(&self) -> &[Net] {
         &self.nets
     }
@@ -497,7 +524,93 @@ fn chrono_lite_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::NetLabel;
+    use crate::state::{
+        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel, PortDirection,
+        PortSpec, SymbolDocument, SymbolPin, View, ViewType,
+    };
+    use std::collections::HashMap;
+
+    fn port(name: &str, direction: PortDirection) -> PortSpec {
+        PortSpec {
+            name: name.to_owned(),
+            direction,
+        }
+    }
+
+    fn library_with_authored_amp_symbol() -> (LibraryManager, HashMap<String, SchematicState>) {
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut buffers = HashMap::new();
+        let mut master = SchematicState::default();
+        for (idx, name) in ["IN", "OUT"].iter().enumerate() {
+            let id = master.add_component(ComponentType::Port, Point::new(idx as i32 * 40, 0));
+            master
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("port component")
+                .value = (*name).to_owned();
+        }
+        buffers.insert(CellViewRef::new("work", "amp", "schematic").key(), master);
+        (libraries, buffers)
+    }
+
+    fn authored_amp_instance() -> Component {
+        let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
+        binding.bind_interface(&[
+            port("IN", PortDirection::In),
+            port("OUT", PortDirection::Out),
+        ]);
+        Component::new(1, ComponentType::CellInstance, Point::new(100, 50))
+            .with_library_cell(binding)
+    }
+
+    #[test]
+    fn design_nets_with_hierarchy_counts_authored_symbol_pin_positions() {
+        let (libraries, buffers) = library_with_authored_amp_symbol();
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let mut schematic = SchematicState::default();
+        schematic.components.push(authored_amp_instance());
+        schematic
+            .wires
+            .push(Wire::segment(2, Point::new(60, 40), Point::new(40, 40)));
+        schematic
+            .wires
+            .push(Wire::segment(3, Point::new(170, 70), Point::new(190, 70)));
+        schematic
+            .net_labels
+            .push(NetLabel::new(4, Point::new(40, 40), "vin"));
+        schematic
+            .net_labels
+            .push(NetLabel::new(5, Point::new(190, 70), "vout"));
+
+        let nets = design_nets_with_hierarchy(&schematic, &hierarchy);
+        let pin_counts: HashMap<_, _> = nets
+            .iter()
+            .map(|net| (net.name.as_str(), net.pin_count))
+            .collect();
+
+        assert_eq!(pin_counts.get("vin"), Some(&1));
+        assert_eq!(pin_counts.get("vout"), Some(&1));
+    }
 
     /// A label sitting on a wire names that net in the netlist.
     #[test]

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::state::{CellViewRef, Point};
+
 /// Severity level for DRC violations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum DrcSeverity {
@@ -81,6 +83,16 @@ pub enum DrcViolationType {
     ValueOutOfRange,
     /// Unknown component type
     UnknownComponent,
+
+    //-------------------------------------------------------------------------
+    // Symbol Contract Issues
+    //-------------------------------------------------------------------------
+    /// Symbol pin required by the cell interface has no terminal location.
+    SymbolUnplacedPin,
+    /// Symbol pin no longer exists in the paired schematic interface.
+    SymbolOrphanedPin,
+    /// Symbol pin terminal is not on the required terminal grid.
+    SymbolPinOffGrid,
 }
 
 impl DrcViolationType {
@@ -97,6 +109,9 @@ impl DrcViolationType {
             Self::ShortCircuit => DrcSeverity::Error,
             Self::SourceToSource => DrcSeverity::Error,
             Self::MissingParameter => DrcSeverity::Error,
+            Self::SymbolUnplacedPin | Self::SymbolOrphanedPin | Self::SymbolPinOffGrid => {
+                DrcSeverity::Error
+            }
 
             // Warning - may affect results
             Self::UnconnectedPin => DrcSeverity::Warning,
@@ -128,6 +143,9 @@ impl DrcViolationType {
             Self::MissingParameter => "Required component parameter is missing",
             Self::ValueOutOfRange => "Component value is outside expected range",
             Self::UnknownComponent => "Component type is not recognized",
+            Self::SymbolUnplacedPin => "Symbol pin is not placed",
+            Self::SymbolOrphanedPin => "Symbol pin is not in the schematic interface",
+            Self::SymbolPinOffGrid => "Symbol pin is off the terminal grid",
         }
     }
 
@@ -148,6 +166,9 @@ impl DrcViolationType {
             Self::MissingParameter => "Set the required parameter value",
             Self::ValueOutOfRange => "Check the parameter value is within valid range",
             Self::UnknownComponent => "Check the component type or define the model",
+            Self::SymbolUnplacedPin => "Place the symbol pin on the terminal grid",
+            Self::SymbolOrphanedPin => "Delete the orphaned pin or add the schematic port back",
+            Self::SymbolPinOffGrid => "Move the symbol pin onto the terminal grid",
         }
     }
 }
@@ -219,6 +240,12 @@ pub enum DrcLocation {
     Node { net_name: String },
     /// Global (no specific location)
     Global,
+    /// On a symbol pin in a cell's symbol view.
+    SymbolPin {
+        reference: CellViewRef,
+        pin_name: String,
+        point: Option<Point>,
+    },
 }
 
 impl DrcLocation {
@@ -231,6 +258,11 @@ impl DrcLocation {
             Self::NetLabel { name } => format!("Net '{}'", name),
             Self::Node { net_name } => format!("Node '{}'", net_name),
             Self::Global => "Global".to_string(),
+            Self::SymbolPin {
+                reference,
+                pin_name,
+                ..
+            } => format!("{} pin {}", reference.display_path(), pin_name),
         }
     }
 }

@@ -21,7 +21,7 @@ impl<'a> NetlistGenerator<'a> {
             }
         }
         for component in &self.schematic.components {
-            for (_, terminal_pos) in component.terminal_positions() {
+            for (_, terminal_pos) in self.component_terminal_positions(component) {
                 point_graph.entry(terminal_pos).or_default();
             }
         }
@@ -166,7 +166,11 @@ impl<'a> NetlistGenerator<'a> {
                 ));
                 continue;
             };
-            let Some((_, terminal)) = component.terminal_positions().into_iter().next() else {
+            let Some((_, terminal)) = self
+                .component_terminal_positions(component)
+                .into_iter()
+                .next()
+            else {
                 continue;
             };
             let Some(&net_id) = self.point_to_net.get(&terminal) else {
@@ -279,7 +283,7 @@ impl<'a> NetlistGenerator<'a> {
         for component in &self.schematic.components {
             if component.kind == ComponentType::Ground {
                 // Find the net connected to this ground symbol
-                let terminals = component.terminal_positions();
+                let terminals = self.component_terminal_positions(component);
                 if let Some((_, terminal_pos)) = terminals.first()
                     && let Some(&net_id) = self.point_to_net.get(terminal_pos)
                 {

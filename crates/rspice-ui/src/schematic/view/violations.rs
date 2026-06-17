@@ -36,18 +36,12 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 
     // Owned snapshot of the anchored findings so the borrows drop before
     // the selection/viewport mutations below.
-    let mut anchored: Vec<(DrcSeverity, Point, Option<Anchor>, String)> = result
+    let mut anchored: Vec<(DrcSeverity, crate::panels::LogAnchor, String)> = result
         .violations()
         .iter()
         .filter_map(|violation| {
-            anchor(state, violation).map(|world| {
-                let select = match &violation.location {
-                    DrcLocation::Component { id, .. } => Some(Anchor::Component(*id as u64)),
-                    DrcLocation::Wire { id } => Some(Anchor::Wire(*id as u64)),
-                    _ => None,
-                };
-                (violation.severity, world, select, violation.message.clone())
-            })
+            finding_anchor(state, violation)
+                .map(|anchor| (violation.severity, anchor, violation.message.clone()))
         })
         .collect();
     if anchored.is_empty() {
@@ -68,15 +62,8 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     };
     state.dialogs.drc_cycle = Some(index);
 
-    let (severity, world, select, message) = anchored.swap_remove(index);
-    state.schematic.selection.clear();
-    state.schematic.net_highlight.clear();
-    match select {
-        Some(Anchor::Component(id)) => state.schematic.selection.select_component(id),
-        Some(Anchor::Wire(id)) => state.schematic.selection.select_wire(id),
-        None => {}
-    }
-    state.schematic.center_request = Some(world);
+    let (severity, anchor, message) = anchored.swap_remove(index);
+    state.jump_to_log_anchor(anchor);
     state.push_user_message(ConsoleMessage::info(format!(
         "Finding {}/{} — {} · {}",
         index + 1,
@@ -87,17 +74,25 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
 }
 
 /// What a cycled finding selects on arrival.
-enum Anchor {
-    Component(u64),
-    Wire(u64),
-}
-
 /// Resolve a finding to a console jump target — shared by the check
 /// runner's per-finding rows and anything else that wants click-to-source.
 pub(crate) fn finding_anchor(
     state: &AppState,
     violation: &DrcViolation,
 ) -> Option<crate::panels::LogAnchor> {
+    if let DrcLocation::SymbolPin {
+        reference,
+        pin_name,
+        point,
+    } = &violation.location
+    {
+        return Some(crate::panels::LogAnchor::Symbol {
+            reference: reference.clone(),
+            pin_name: pin_name.clone(),
+            point: *point,
+        });
+    }
+
     let world = anchor(state, violation)?;
     let (component, wire) = match &violation.location {
         DrcLocation::Component { id, .. } => (Some(*id as u64), None),
@@ -193,7 +188,7 @@ fn anchor(state: &AppState, violation: &DrcViolation) -> Option<Point> {
             .iter()
             .find(|l| l.name == *name)
             .map(|l| l.pos),
-        DrcLocation::Node { .. } | DrcLocation::Global => None,
+        DrcLocation::Node { .. } | DrcLocation::Global | DrcLocation::SymbolPin { .. } => None,
     }
 }
 

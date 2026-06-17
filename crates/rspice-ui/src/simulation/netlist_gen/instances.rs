@@ -29,7 +29,7 @@ impl<'a> NetlistGenerator<'a> {
 
     /// Generate a single SPICE instance line
     fn generate_instance_line(&mut self, component: &Component) -> Option<String> {
-        let terminals = component.terminal_positions();
+        let terminals = self.component_terminal_positions(component);
         let node_names: Vec<String> = terminals
             .iter()
             .map(|(_, pos)| self.get_node_name(*pos))
@@ -273,15 +273,13 @@ impl<'a> NetlistGenerator<'a> {
                 // so this is a hard stop, not a guess.
                 if let Some(ports) = master_ports.as_deref()
                     && !binding.terminal_order.is_empty()
-                    && ports.len() != binding.terminal_order.len()
+                    && !same_terminal_sequence(ports, &binding.terminal_order)
                 {
                     self.errors.push(format!(
-                        "Cell instance '{}' is stale: master {}/{} now defines {} port(s) but the instance was placed with {} — re-place the instance",
+                        "Cell instance '{}' is stale: master {}/{} interface no longer matches the instance terminal order — re-place the instance",
                         component.name,
                         binding.library,
-                        binding.cell,
-                        ports.len(),
-                        binding.terminal_order.len()
+                        binding.cell
                     ));
                     return None;
                 }
@@ -339,4 +337,12 @@ impl<'a> NetlistGenerator<'a> {
             }
         }
     }
+}
+
+fn same_terminal_sequence(master_ports: &[String], placed_ports: &[String]) -> bool {
+    master_ports.len() == placed_ports.len()
+        && master_ports
+            .iter()
+            .zip(placed_ports)
+            .all(|(master, placed)| master.eq_ignore_ascii_case(placed))
 }

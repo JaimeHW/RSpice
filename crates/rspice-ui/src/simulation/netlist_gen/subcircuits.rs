@@ -8,6 +8,7 @@
 //! generator simulates anywhere — no side files, no implicit project state.
 
 use super::*;
+use crate::state::{LibraryCellInstance, LibraryManager, ResolvedCellSymbol, SymbolResolver};
 
 /// Read-only access to project cell masters for hierarchical netlisting.
 ///
@@ -16,6 +17,8 @@ use super::*;
 /// netlist masters, case-insensitively.
 pub struct HierarchySource<'a> {
     masters: HashMap<String, &'a SchematicState>,
+    libraries: Option<&'a LibraryManager>,
+    schematic_buffers: Option<&'a HashMap<String, SchematicState>>,
 }
 
 impl<'a> HierarchySource<'a> {
@@ -33,7 +36,23 @@ impl<'a> HierarchySource<'a> {
                 masters.insert(Self::key(library, cell), schematic);
             }
         }
-        Self { masters }
+        Self {
+            masters,
+            libraries: None,
+            schematic_buffers: None,
+        }
+    }
+
+    /// Index workspace schematic buffers and library symbol metadata so placed
+    /// cell instances can use the same authored terminal geometry as the UI.
+    pub fn from_workspace(
+        libraries: &'a LibraryManager,
+        buffers: &'a HashMap<String, SchematicState>,
+    ) -> Self {
+        let mut source = Self::from_buffers(buffers);
+        source.libraries = Some(libraries);
+        source.schematic_buffers = Some(buffers);
+        source
     }
 
     /// An empty source — netlisting behaves exactly as before hierarchy
@@ -41,6 +60,8 @@ impl<'a> HierarchySource<'a> {
     pub fn empty() -> Self {
         Self {
             masters: HashMap::new(),
+            libraries: None,
+            schematic_buffers: None,
         }
     }
 
@@ -52,6 +73,12 @@ impl<'a> HierarchySource<'a> {
     /// Look up the schematic master of `library/cell`.
     pub fn master(&self, library: &str, cell: &str) -> Option<&'a SchematicState> {
         self.masters.get(&Self::key(library, cell)).copied()
+    }
+
+    pub fn resolved_symbol_for(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
+        let libraries = self.libraries?;
+        let schematic_buffers = self.schematic_buffers?;
+        SymbolResolver::new(libraries, schematic_buffers).resolve_binding(binding)
     }
 
     fn key(library: &str, cell: &str) -> String {
@@ -253,7 +280,10 @@ fn emit_cell_definition(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{LibraryCellInstance, Point, Wire};
+    use crate::state::{
+        Cell, CellViewRef, Library, LibraryCellInstance, LibraryManager, NetLabel, Point,
+        PortDirection, PortSpec, SymbolDocument, SymbolPin, View, ViewType, Wire,
+    };
 
     fn place_port(state: &mut SchematicState, name: &str, pos: Point) {
         let id = state.add_component(ComponentType::Port, pos);
@@ -268,6 +298,12 @@ mod tests {
     fn binding(cell: &str, terminals: &[&str]) -> LibraryCellInstance {
         let mut binding = LibraryCellInstance::new("work", cell, "schematic");
         binding.terminal_order = terminals.iter().map(|t| t.to_string()).collect();
+        binding
+    }
+
+    fn binding_with_interface(cell: &str, ports: &[PortSpec]) -> LibraryCellInstance {
+        let mut binding = LibraryCellInstance::new("work", cell, "schematic");
+        binding.bind_interface(ports);
         binding
     }
 
@@ -454,6 +490,83 @@ mod tests {
             result.errors.iter().any(|e| e.contains("is stale")),
             "errors: {:?}",
             result.errors
+        );
+    }
+
+    #[test]
+    fn same_count_reordered_binding_is_an_error() {
+        let master = div_master(); // master order: a, b
+        let mut hierarchy = HierarchySource::empty();
+        hierarchy.insert("work", "div", &master);
+
+        let top = top_with_instance(&["b", "a"]); // same count, wrong order
+        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+        assert!(
+            result.errors.iter().any(|e| e.contains("is stale")),
+            "errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
+        let ports = vec![
+            PortSpec {
+                name: "IN".to_owned(),
+                direction: PortDirection::In,
+            },
+            PortSpec {
+                name: "OUT".to_owned(),
+                direction: PortDirection::Out,
+            },
+        ];
+
+        let mut master = SchematicState::default();
+        place_port(&mut master, "IN", Point::new(0, 0));
+        place_port(&mut master, "OUT", Point::new(40, 0));
+
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("OUT", PortDirection::Out, Some(Point::new(70, 20))),
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-40, -10))),
+            ],
+            ..SymbolDocument::default()
+        };
+        let mut libraries = LibraryManager::new();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("amp");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        let mut symbol_view = View::new("symbol", ViewType::Symbol);
+        document
+            .store_in_view(&mut symbol_view)
+            .expect("symbol stores");
+        cell.add_view(symbol_view);
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let mut buffers = HashMap::new();
+        buffers.insert(CellViewRef::new("work", "amp", "schematic").key(), master);
+
+        let mut top = SchematicState::default();
+        top.add_library_cell_component(Point::new(100, 50), binding_with_interface("amp", &ports));
+        top.net_labels
+            .push(NetLabel::new(1, Point::new(60, 40), "vin"));
+        top.net_labels
+            .push(NetLabel::new(2, Point::new(170, 70), "vout"));
+
+        let hierarchy = HierarchySource::from_workspace(&libraries, &buffers);
+        let result = generate_netlist_hierarchical(&top, &[], &hierarchy);
+
+        assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+        let x_line = result
+            .netlist
+            .lines()
+            .find(|line| line.to_ascii_lowercase().starts_with("x1 "))
+            .expect("X line present");
+        assert!(
+            x_line.split_whitespace().eq(["X1", "vin", "vout", "amp"]),
+            "unexpected instance line: {x_line}\n{}",
+            result.netlist
         );
     }
 
