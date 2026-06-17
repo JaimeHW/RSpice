@@ -209,7 +209,7 @@ exercise the parallel + SIMD paths.
 # Build (library only)
 cargo build -p rspice-core
 
-# Full test suite — 48 integration test files under tests/
+# Full test suite — 52 integration test files under tests/
 cargo test -p rspice-core
 
 # With Verilog-A device tests (veriloga_*.rs oracle tests need the JIT)
