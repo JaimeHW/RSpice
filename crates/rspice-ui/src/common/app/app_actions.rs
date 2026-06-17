@@ -51,12 +51,39 @@ fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
     candidate
 }
 
+fn symbol_shortcut_command_allowed(
+    command: ShortcutCommand,
+    snapshot: &ShortcutInputSnapshot,
+) -> bool {
+    if matches!(
+        command,
+        ShortcutCommand::ToolSelect
+            | ShortcutCommand::ToolWire
+            | ShortcutCommand::ToolProbe
+            | ShortcutCommand::PlaceCapacitor
+            | ShortcutCommand::PlaceDiode
+            | ShortcutCommand::PlaceGround
+            | ShortcutCommand::RotateSelectionOrPreview
+            | ShortcutCommand::MirrorSelectionHorizontal
+            | ShortcutCommand::MirrorSelectionVertical
+            | ShortcutCommand::ZoomFit
+    ) {
+        return snapshot.plain();
+    }
+    true
+}
+
 impl RSpiceApp {
     /// Handle keyboard shortcuts
     pub(super) fn handle_shortcuts(&mut self, ctx: &Context) {
         let has_focus = ctx.memory(|memory| memory.focused().is_some());
         let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, has_focus));
         for command in collect_shortcut_commands(&snapshot) {
+            if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+                && !symbol_shortcut_command_allowed(command, &snapshot)
+            {
+                continue;
+            }
             self.execute_shortcut_command(command);
         }
     }
@@ -317,12 +344,12 @@ impl RSpiceApp {
                 true
             }
             ShortcutCommand::EscapeCancel => {
+                self.finish_pending_symbol_polyline_from_shortcut();
                 self.state.shell.symbol.tool = SymbolTool::Select;
-                self.state.shell.symbol.dragging_pin = None;
-                self.state.shell.symbol.dragging_shape = None;
-                self.state.shell.symbol.dragging_origin = false;
-                self.state.shell.symbol.pending_polyline.clear();
+                self.state.shell.symbol.clear_drag_state();
                 self.state.shell.symbol.shape_start = None;
+                self.state.shell.symbol.marquee_start = None;
+                self.state.shell.symbol.marquee_current = None;
                 true
             }
             ShortcutCommand::ZoomIn => {
@@ -579,6 +606,37 @@ impl RSpiceApp {
             .unwrap_or_else(|| Point::new(10, 10))
     }
 
+    fn finish_pending_symbol_polyline_from_shortcut(&mut self) {
+        if self.state.shell.symbol.pending_polyline.len() < 2 {
+            self.state.shell.symbol.pending_polyline.clear();
+            return;
+        }
+        if self.state.deny_read_only_edit() {
+            self.state.shell.symbol.pending_polyline.clear();
+            return;
+        }
+        let mut document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let before = document.clone();
+        let points = std::mem::take(&mut self.state.shell.symbol.pending_polyline);
+        document.body.push(SymbolShape::Polyline {
+            points,
+            closed: false,
+        });
+        self.state.record_symbol_edit(&before);
+        if let Some(index) = document.body.len().checked_sub(1) {
+            self.state.shell.symbol.select_shape(index);
+        }
+        if let Err(error) = self.state.store_active_symbol_document(&document) {
+            self.state.push_user_message(ConsoleMessage::warning(error));
+        }
+    }
+
     pub(super) fn action_edit_undo(&mut self) {
         if self.state.schematic.can_undo() {
             let desc = self
@@ -718,5 +776,50 @@ mod symbol_action_tests {
                 .collect::<Vec<_>>(),
             vec!["TRIM"]
         );
+    }
+
+    #[test]
+    fn modified_app_symbol_tool_shortcuts_are_rejected() {
+        assert!(symbol_shortcut_command_allowed(
+            ShortcutCommand::ToolSelect,
+            &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers::NONE)
+        ));
+
+        for modifiers in [
+            egui::Modifiers {
+                alt: true,
+                ..egui::Modifiers::NONE
+            },
+            egui::Modifiers {
+                command: true,
+                ..egui::Modifiers::NONE
+            },
+            egui::Modifiers {
+                ctrl: true,
+                ..egui::Modifiers::NONE
+            },
+            egui::Modifiers {
+                shift: true,
+                ..egui::Modifiers::NONE
+            },
+        ] {
+            assert!(!symbol_shortcut_command_allowed(
+                ShortcutCommand::ToolSelect,
+                &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
+            ));
+            assert!(!symbol_shortcut_command_allowed(
+                ShortcutCommand::PlaceCapacitor,
+                &ShortcutInputSnapshot::from_modifiers_for_test(modifiers)
+            ));
+        }
+
+        assert!(symbol_shortcut_command_allowed(
+            ShortcutCommand::EditCopy,
+            &ShortcutInputSnapshot::from_modifiers_for_test(egui::Modifiers {
+                ctrl: true,
+                command: true,
+                ..egui::Modifiers::NONE
+            })
+        ));
     }
 }

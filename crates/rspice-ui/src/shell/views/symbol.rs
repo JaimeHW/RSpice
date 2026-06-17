@@ -304,10 +304,7 @@ fn handle_symbol_keys(ui: &mut Ui, state: &mut AppState, document: &mut SymbolDo
             }
             state.shell.symbol.tool = SymbolTool::Select;
             state.shell.symbol.shape_start = None;
-            state.shell.symbol.dragging_pin = None;
-            state.shell.symbol.dragging_shape = None;
-            state.shell.symbol.dragging_label = None;
-            state.shell.symbol.dragging_origin = false;
+            state.shell.symbol.clear_drag_state();
             state.shell.symbol.marquee_start = None;
             state.shell.symbol.marquee_current = None;
         }

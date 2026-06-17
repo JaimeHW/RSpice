@@ -62,6 +62,15 @@ impl ShortcutInputSnapshot {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_modifiers_for_test(modifiers: Modifiers) -> Self {
+        Self {
+            pressed_keys: Vec::new(),
+            modifiers,
+            has_focus: false,
+        }
+    }
+
     pub(super) fn key_pressed(&self, key: Key) -> bool {
         self.pressed_keys.contains(&key)
     }
@@ -72,6 +81,13 @@ impl ShortcutInputSnapshot {
 
     pub(super) fn shift(&self) -> bool {
         self.modifiers.shift
+    }
+
+    pub(crate) fn plain(&self) -> bool {
+        !self.modifiers.alt
+            && !self.modifiers.ctrl
+            && !self.modifiers.command
+            && !self.modifiers.shift
     }
 
     pub(super) fn has_focus(&self) -> bool {

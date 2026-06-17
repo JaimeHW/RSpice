@@ -233,6 +233,7 @@ pub struct SymbolUiState {
     pub dragging_shape: Option<(usize, crate::state::Point)>,
     pub dragging_label: Option<String>,
     pub dragging_origin: bool,
+    pub drag_undo_recorded: bool,
     pub marquee_start: Option<crate::state::Point>,
     pub marquee_current: Option<crate::state::Point>,
     pub zoom: f32,
@@ -256,6 +257,7 @@ impl Default for SymbolUiState {
             dragging_shape: None,
             dragging_label: None,
             dragging_origin: false,
+            drag_undo_recorded: false,
             marquee_start: None,
             marquee_current: None,
             zoom: 4.0,
@@ -303,6 +305,14 @@ impl SymbolUiState {
             selection.shapes.insert(shape);
         }
         selection
+    }
+
+    pub fn clear_drag_state(&mut self) {
+        self.dragging_pin = None;
+        self.dragging_shape = None;
+        self.dragging_label = None;
+        self.dragging_origin = false;
+        self.drag_undo_recorded = false;
     }
 }
 
