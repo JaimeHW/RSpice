@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RSpice — Analog &amp; RF circuit simulation</title>
-<meta name="description" content="RSpice is a ground-up SPICE engine in Rust, validated point-for-point against ngspice on a 113-deck regression corpus. Native, browser, and bench.">
+<meta name="description" content="RSpice is a ground-up SPICE engine in Rust, developed against ngspice-46 references on a 113-deck regression corpus. Native, browser, and bench.">
 <meta property="og:title" content="RSpice — The analog simulator, rebuilt.">
-<meta property="og:description" content="A ground-up SPICE engine in Rust, validated point-for-point against ngspice. RF analyses, a Verilog-A compiler, Python automation — native, browser, and bench.">
+<meta property="og:description" content="A ground-up SPICE engine in Rust, developed against ngspice-46 references. RF analyses, a Verilog-A compiler, Python automation — native, browser, and bench.">
 <meta property="og:image" content="https://rspice.app/assets/og-card.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -522,15 +522,15 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     <div class="wrap">
       <p class="kicker"><span class="tick">▶</span>&nbsp; RSpice · Analog &amp; RF circuit simulation</p>
       <h1>The analog simulator, rebuilt.</h1>
-      <p class="sub">RSpice is a ground-up SPICE engine written in Rust, validated
-      <strong>point-for-point against ngspice on a 113-deck regression corpus</strong>.
-      RF analyses, a Verilog-A compiler, Python automation — one engine that ships
-      native, in the browser, and on the bench.</p>
+      <p class="sub">RSpice is a ground-up SPICE engine written in Rust, developed
+      <strong>against ngspice-46 references on a 113-deck regression corpus</strong>.
+      Core analyses, RF kernels, a Verilog-A compiler, Python automation — one engine
+      with native and browser surfaces.</p>
       <div class="hero-ctas">
         <a class="btn btn-accent" href="ide/" title="Browser IDE — experimental, needs WebGPU">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5 L8 18.5 L19 12 Z"></path></svg>
           Run it in your browser</a>
-        <a class="btn btn-ghost" href="download.html">Download free</a>
+        <a class="btn btn-ghost" href="download.html">Download</a>
       </div>
       <p class="hero-meta">windows · macos · linux · webassembly — no account required · the browser IDE needs WebGPU</p>
 
@@ -721,8 +721,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="wrap proof-grid">
         <div class="proof-cell">
           <p class="kicker">Oracle-validated</p>
-          <p>Every release is diffed <strong>point-for-point against ngspice-46</strong>
-          on a 113-deck regression corpus — rerunnable from a clean checkout.</p>
+          <p>The nightly gate tracks <strong>111 passing decks out of the 113-deck
+          ngspice-46 corpus</strong>, with under-review decks kept visible.</p>
         </div>
         <div class="proof-cell">
           <p class="kicker">Compact models, compiled</p>
@@ -743,10 +743,10 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     <div class="wrap">
       <div class="section-head">
         <p class="kicker">Analyses</p>
-        <h2 id="h-analyses">Everything on the bench, from .OP to phase noise.</h2>
-        <p>The core engine covers the full SPICE repertoire. The RF suite — the analyses that
-        usually cost five figures a seat — is one Pro license. Labels show how each one is
-        reached: netlist card, CLI flag, or engine API.</p>
+        <h2 id="h-analyses">Core SPICE today, RF where it is wired.</h2>
+        <p>The engine covers the shipped deck-card, CLI, and API surfaces below. Advanced RF
+        entries are labelled by access path and validation maturity, so engine-level kernels are
+        not mistaken for deck-card analyses.</p>
       </div>
       <div class="grid-cards">
         <div class="acard">
@@ -778,8 +778,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
           <p>Sweep any parameter; overlay families of curves in one run.</p>
         </div>
         <div class="acard">
-          <div class="acard-head"><h3>S-parameters</h3><span class="cmd">engine api</span></div>
-          <p>Multiport network analysis with Touchstone export, from the Rust API.</p>
+          <div class="acard-head"><h3>S-parameters</h3><span class="cmd">--sparam</span></div>
+          <p>Two-port extraction over the deck's .AC sweep with Touchstone export.</p>
         </div>
         <div class="acard">
           <div class="acard-head"><h3>Verilog-A models</h3><span class="cmd">compile-va</span></div>
@@ -794,8 +794,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
           <p>Shooting PSS for oscillators and switched circuits.</p>
         </div>
         <div class="acard pro">
-          <div class="acard-head"><h3>PNoise &amp; PAC</h3><span class="chip-pro">PRO</span><span class="cmd">engine api</span></div>
-          <p>Phase noise and periodic AC around the steady state.</p>
+          <div class="acard-head"><h3>PNoise &amp; PAC</h3><span class="chip-pro">PRO</span><span class="cmd">engine / IDE</span></div>
+          <p>Engine-level periodic-noise and PAC kernels; not deck-card or CLI analyses in the current release.</p>
         </div>
       </div>
     </div>
@@ -807,8 +807,9 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="section-head">
         <p class="kicker">One engine · three surfaces</p>
         <h2 id="h-plat">The same solver, everywhere you work.</h2>
-        <p>One Rust codebase compiles to native desktop, WebAssembly, and touch devices.
-        Same netlist, same numerics, same answer on all three.</p>
+        <p>One Rust codebase targets native desktop and WebAssembly surfaces. The native app
+        carries the broad engine surface; the browser playground exposes a smaller client-side
+        OP/AC/TRAN subset.</p>
       </div>
       <div class="plat-grid">
         <div class="plat">
@@ -827,7 +828,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
             <svg class="mini js-mini" viewBox="0 0 280 96" aria-hidden="true"></svg>
           </div>
           <h3>In the browser</h3>
-          <p>The full engine compiled to WebAssembly. Nothing to install, nothing uploaded —
+          <p>The OP/AC/TRAN engine compiled to WebAssembly. Nothing to install, nothing uploaded —
           decks simulate on your own silicon.</p>
           <p class="pmeta">wasm · client-side</p>
         </div>
@@ -838,8 +839,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
             </div>
           </div>
           <h3>Tablet &amp; mobile</h3>
-          <p>The browser build is touch-first on tablets — review schematics and carry
-          last night's Monte Carlo to the lab bench.</p>
+          <p>The browser playground is touch-friendly on tablets — review small decks and share
+          client-side results at the lab bench.</p>
           <p class="pmeta">wasm · ipad &amp; android browsers</p>
         </div>
       </div>
@@ -857,16 +858,15 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         <div class="val-copy">
           <p>A simulator earns its place by agreeing with the simulators you already trust —
           then by being honest when it doesn't. RSpice is developed against
-          <strong>independent oracles on locked time grids</strong>, so a passing deck means
-          numerically the same waveform, not "looks close".</p>
+          <strong>checked-in ngspice-46 references, oracle fixtures, and explicit validation contracts</strong>,
+          so a passing deck has documented evidence rather than a visual "looks close".</p>
           <ul class="val-list">
-            <li><strong>ngspice-46 parity</strong> — the regression corpus runs both engines on
-            identical grids and diffs every point of every probe.</li>
-            <li><strong>Analytic RF oracles</strong> — harmonic balance and shooting-PSS are
-            pinned to closed-form decks; the Verilog-A BSIM4 is pinned to ngspice's native
-            BSIM4 bias-for-bias.</li>
-            <li><strong>Open corpus</strong> — the 113 validation decks come from the ngspice
-            example corpus and published test suites, so you can rerun the evidence yourself.</li>
+            <li><strong>ngspice-46 parity</strong> — the regression corpus compares saved RSpice
+            traces row-by-row against checked-in references with probe-aware tolerances.</li>
+            <li><strong>Targeted oracles</strong> — history-coupled devices use replay fixtures,
+            and RF/math kernels use focused analytic or cross-check tests where available.</li>
+            <li><strong>Open corpus</strong> — the 113 conformance decks are vendored from the
+            ngspice test suite; the nightly gate currently tracks a 111/113 watermark.</li>
           </ul>
           <div class="val-cta">
             <a class="btn btn-ghost" href="parity.html">Open the parity dashboard <span class="arr">→</span></a>
@@ -896,9 +896,10 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     <div class="wrap">
       <div class="section-head">
         <p class="kicker">Pricing</p>
-        <h2 id="h-pricing">Free where it should be. Paid where it earns it.</h2>
-        <p>The core simulator is free — including commercial use. You pay when RSpice
-        replaces a five-figure RF seat, not before.</p>
+        <h2 id="h-pricing">Free for personal work. Licensed for commercial use.</h2>
+        <p>The source-available build is free for personal, educational, and open academic use.
+        Commercial use requires a separate license, with paid tiers for teams, support, and RF
+        workflows.</p>
       </div>
       <div class="price-grid">
         <div class="tier">
@@ -911,7 +912,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
             <li>Native + browser apps</li>
             <li>Schematic, netlist, waveforms</li>
             <li>SPICE raw · CSV · HDF5 · JSON output</li>
-            <li><strong>Commercial use allowed</strong></li>
+            <li><strong>Personal, educational, and open academic use</strong></li>
           </ul>
           <a class="btn btn-ghost" href="download.html">Download</a>
         </div>
@@ -969,12 +970,12 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <p class="kicker">Get started</p>
       <h2>Press run.</h2>
       <p>Open the browser app and simulate your first deck before your coffee cools —
-      or download the free Community edition.</p>
+      or download the Community build.</p>
       <div class="cta-actions">
         <a class="btn btn-accent" href="ide/" title="Browser IDE — experimental, needs WebGPU">
           <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5 L8 18.5 L19 12 Z"></path></svg>
           Run it in your browser</a>
-        <a class="btn btn-ghost" href="download.html">Download free</a>
+        <a class="btn btn-ghost" href="download.html">Download</a>
       </div>
     </div>
   </div>
@@ -1485,7 +1486,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     el("path", { d: pathFrom(pts, L, W - R, 14, 226, 0, 6e-3, 0, 1.6), fill: "none",
       stroke: "var(--accent-line)", "stroke-width": 1.7 }, svg);
     el("text", { x: L, y: 244, fill: "var(--text-faint)", "font-family": "var(--font-mono)",
-      "font-size": 10 }, svg).textContent = "residual (V) · grid-locked";
+      "font-size": 10 }, svg).textContent = "residual (V)";
     el("line", { x1: L, y1: 277, x2: W - R, y2: 277, stroke: "var(--accent-line)", "stroke-width": 1.6 }, svg);
     el("text", { x: W - R, y: 271, "text-anchor": "end", fill: "var(--text-faint)",
       "font-family": "var(--font-mono)", "font-size": 10 }, svg).textContent = "0";

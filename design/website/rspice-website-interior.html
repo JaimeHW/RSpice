@@ -594,7 +594,7 @@
         <p class="kicker"><span class="tick">▶</span>&nbsp; Get RSpice</p>
         <h1 id="h-dl">Download</h1>
         <p class="page-sub">One engine, three platforms. The Community edition is the full
-        core simulator — free, including commercial use, no account required.</p>
+        core simulator — free for personal, educational, and open academic use, no account required.</p>
 
         <div class="dl-hero">
           <div class="dl-hero-main">
@@ -602,7 +602,7 @@
             <a class="btn btn-accent btn-lg" href="#" title="Placeholder — release artifact">
               <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5 L8 18.5 L19 12 Z"></path></svg>
               Download for Windows</a>
-            <p class="dl-sub">Community edition · free · commercial use allowed</p>
+            <p class="dl-sub">Community edition · personal and academic use</p>
             <p class="dl-meta">v1.0.0 · 48 MB · win64</p>
           </div>
           <span class="logo-tile dl-tile" aria-hidden="true"><svg><use href="#run"></use></svg></span>
@@ -694,7 +694,7 @@ c10177e27e46ac1133afb5fa203113b9e92fa43accc1f13db390b252d45a3d83  rspice-1.0.0-l
         <ul>
           <li><a href="#" title="Placeholder — docs page">Install</a></li>
           <li><a href="#" title="Current page" aria-current="page">First simulation</a></li>
-          <li><a href="#" title="Placeholder — docs page">Importing LTspice decks</a></li>
+          <li><a href="#" title="Placeholder — docs page">LTspice .raw import</a></li>
         </ul>
         <p class="kicker">Analyses</p>
         <ul>
@@ -722,8 +722,7 @@ c10177e27e46ac1133afb5fa203113b9e92fa43accc1f13db390b252d45a3d83  rspice-1.0.0-l
         </p>
         <h1 id="h-doc">First simulation</h1>
         <p class="lede">Run your first transient analysis in under a minute: a series RLC
-        driven by a voltage step, solved on the same time grid the regression suite uses
-        to diff RSpice against ngspice-46.</p>
+        driven by a voltage step, solved by the adaptive transient timestepper.</p>
 
         <h2 id="the-circuit">The circuit</h2>
         <p>The deck below is the second-order section from the front-page demo: a
@@ -747,8 +746,8 @@ C1 out 0 3957.9n
         <p>Two details worth noticing. <code>V1</code> is a <code>PULSE</code> source with
         1 µs edges and a 1 s pulse width — on a 6 ms window that is effectively an ideal
         step, but the finite edge keeps the breakpoint handling honest.
-        <code>.tran 10u 6m</code> asks for a 10 µs print step over 6 ms, which lands
-        exactly 601 points on the grid.</p>
+        <code>.tran 10u 6m</code> asks for a 10 µs print step over 6 ms; the adaptive
+        timestepper may add points where the waveform bends.</p>
 
         <h2 id="run-it">Run it</h2>
         <p>Save the deck as <code>rlc_step.cir</code> and hand it to the CLI. The
@@ -765,7 +764,7 @@ C1 out 0 3957.9n
         identical engine.</p>
 
         <h3 id="reading-the-csv">Reading the CSV</h3>
-        <p><code>out.csv</code> has one row per timepoint — 601 rows for this deck — with a
+        <p><code>out.csv</code> has one row per solved timepoint, with a
         time column followed by one column per saved node voltage:
         <code>v(in)</code>, <code>v(n1)</code>, <code>v(out)</code>. Plot
         <code>v(out)</code> against time and you should see the classic underdamped step
@@ -774,9 +773,9 @@ C1 out 0 3957.9n
 
         <div class="callout">
           <p class="callout-h">Note</p>
-          <p>The regression suite runs RSpice and ngspice-46 on <strong>identical time
-          grids</strong>, so this CSV can be diffed point-for-point against the oracle —
-          same grid, same answer, not “looks close”.</p>
+          <p>The regression suite compares saved rows against checked-in ngspice-46
+          references with probe-aware tolerances; selected timing-sensitive decks use
+          locked-grid replay or measurement gates.</p>
         </div>
 
         <h2 id="what-you-should-see">What you should see</h2>
@@ -805,7 +804,7 @@ C1 out 0 3957.9n
           </a>
           <a class="next" href="#" title="Placeholder — docs page">
             <span class="lab">Next →</span>
-            <span class="t">Importing LTspice decks</span>
+            <span class="t">LTspice .raw import</span>
           </a>
         </nav>
       </article>
@@ -841,7 +840,8 @@ C1 out 0 3957.9n
           <header class="ver-head">
             <h2 id="vh-1-0-0">v1.0.0</h2>
             <a class="ver-anchor" href="#v1-0-0">#v1-0-0</a>
-            <time class="ver-date" datetime="2026-06-10">2026-06-10</time>
+            <span class="tag">release target</span>
+            <span class="ver-date">in progress on main</span>
           </header>
 
           <div class="chg-group">
@@ -890,10 +890,10 @@ C1 out 0 3957.9n
             <ul class="chg-list" style="margin-top:0;">
               <li><strong>Core analyses</strong> — .op, .dc, .ac, .tran, and .noise on the
               MNA engine, validated against ngspice-46.</li>
-              <li><strong>Netlist import</strong> — LTspice, PSpice, and HSPICE dialect
-              handling for common decks.</li>
+              <li><strong>LTspice .raw reader</strong> — pull existing simulation results
+              in for waveform comparison.</li>
               <li><strong>Native + WebAssembly builds</strong> from a single Rust codebase
-              — same numerics on both targets.</li>
+              — shared numerics for the WebAssembly-supported OP/AC/TRAN subset.</li>
             </ul>
           </div>
         </article>

@@ -297,10 +297,10 @@ Simulation complete in 0.006s.</code></pre>
 
       <div class="callout">
         <p class="callout-h">Note</p>
-        <p>For day-to-day work the adaptive grid is what you want. The regression suite is
-        stricter: it replays ngspice-46's <strong>exact timestep sequence</strong> so the
-        two engines can be diffed point-for-point — same grid, same answer, not
-        “looks close”. The <a href="parity.html">parity dashboard</a> shows the results.</p>
+        <p>For day-to-day work the adaptive grid is what you want. The regression suite
+        compares saved rows against checked-in ngspice-46 references with probe-aware
+        tolerances; selected timing-sensitive decks use locked-grid replay or measurement
+        gates. The <a href="parity.html">parity dashboard</a> shows the results.</p>
       </div>
 
       <h2 id="what-you-should-see">What you should see</h2>
