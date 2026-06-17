@@ -51,7 +51,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                         segment(ui, &coords_text(state));
                     }
                     if width > 520.0 {
-                        segment(ui, &format!("Grid {} · Snap on", state.schematic.grid_size));
+                        grid_segment(ui, state);
                     }
                     segment(ui, &selection_text(state));
                 }
@@ -60,7 +60,7 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                     ui.add_space(10.0);
                     ui.spacing_mut().item_spacing.x = 18.0;
 
-                    segment(ui, &format!("{:.0} %", state.schematic.zoom * 100.0));
+                    segment(ui, &format!("{:.0} %", zoom_percent(state)));
                     engine_pill(ui, state);
                     if width > 600.0 {
                         let threads = thread_count();
@@ -91,7 +91,29 @@ fn coords_text(state: &AppState) -> String {
     }
 }
 
+fn grid_segment(ui: &mut Ui, state: &AppState) {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        segment(ui, "Terminal grid 40 px - pin snap on");
+    } else {
+        segment(ui, &format!("Grid {} · Snap on", state.schematic.grid_size));
+    }
+}
+
+fn zoom_percent(state: &AppState) -> f32 {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        state.shell.symbol.zoom / 4.0 * 100.0
+    } else {
+        (state.schematic.zoom * 100.0) as f32
+    }
+}
+
 fn selection_text(state: &AppState) -> String {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if let Some(pin) = state.shell.symbol.selected_pin.as_deref() {
+            return format!("Pin: {pin}");
+        }
+        return format!("Symbol tool: {}", state.shell.symbol.tool.label());
+    }
     // An armed placement tool owns this slot: placement repeats until
     // Esc, and the hint is what makes that discoverable.
     if let crate::state::Tool::Place(kind) = state.schematic.tool {

@@ -1,9 +1,55 @@
 use egui::Context;
 
+use crate::schematic::view::SchematicSymbolContext;
+use crate::shell::{
+    SymbolClipboard, SymbolSelection, mirror_point_h_about, mirror_point_v_about,
+    mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about, rotate_shape_cw_about,
+};
+use crate::state::{Point, SymbolDocument, SymbolShape};
+
 use super::{
     ConsoleMessage, RSpiceApp,
     app_shortcuts::{ShortcutCommand, ShortcutInputSnapshot, collect_shortcut_commands},
 };
+
+fn symbol_pin_is_contract(ports: &[crate::state::PortSpec], name: &str) -> bool {
+    ports
+        .iter()
+        .any(|port| port.name.eq_ignore_ascii_case(name))
+}
+
+fn symbol_clipboard_from_selection(
+    document: &SymbolDocument,
+    selection: &SymbolSelection,
+    ports: &[crate::state::PortSpec],
+) -> SymbolClipboard {
+    let shapes = selection
+        .shapes
+        .iter()
+        .filter_map(|index| document.body.get(*index).cloned())
+        .collect();
+    let pins = selection
+        .pins
+        .iter()
+        .filter(|name| !symbol_pin_is_contract(ports, name))
+        .filter_map(|name| document.pin(name).cloned())
+        .collect();
+    SymbolClipboard { pins, shapes }
+}
+
+fn unique_symbol_pin_name(document: &SymbolDocument, base: &str) -> String {
+    let mut candidate = format!("{base}_copy");
+    let mut suffix = 2usize;
+    while document
+        .pins
+        .iter()
+        .any(|pin| pin.name.eq_ignore_ascii_case(&candidate))
+    {
+        candidate = format!("{base}_copy{suffix}");
+        suffix += 1;
+    }
+    candidate
+}
 
 impl RSpiceApp {
     /// Handle keyboard shortcuts
@@ -17,6 +63,12 @@ impl RSpiceApp {
 
     pub(super) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
         use crate::state::{ComponentType, Tool};
+
+        if self.state.workspace.active_view_type() == crate::state::ViewType::Symbol
+            && self.execute_symbol_shortcut_command(command)
+        {
+            return;
+        }
 
         if self.state.schematic.read_only && command_edits_schematic(command) {
             self.state.deny_read_only_edit();
@@ -81,17 +133,17 @@ impl RSpiceApp {
                 self.state.schematic.preview_rotation =
                     self.state.schematic.preview_rotation.rotate_cw();
                 if !self.state.schematic.selection.is_empty() {
-                    self.state.schematic.rotate_selection();
+                    self.rotate_schematic_selection_with_symbols();
                 }
             }
             ShortcutCommand::MirrorSelectionHorizontal => {
                 if !self.state.schematic.selection.is_empty() {
-                    self.state.schematic.mirror_selection_h();
+                    self.mirror_schematic_selection_h_with_symbols();
                 }
             }
             ShortcutCommand::MirrorSelectionVertical => {
                 if !self.state.schematic.selection.is_empty() {
-                    self.state.schematic.mirror_selection_v();
+                    self.mirror_schematic_selection_v_with_symbols();
                 }
             }
             ShortcutCommand::OpenPropertiesEditor => {
@@ -175,6 +227,356 @@ impl RSpiceApp {
                 self.state.dialogs.command_palette.open();
             }
         }
+    }
+
+    fn execute_symbol_shortcut_command(&mut self, command: ShortcutCommand) -> bool {
+        use crate::shell::SymbolTool;
+
+        match command {
+            ShortcutCommand::EditUndo => {
+                match self.state.undo_active_symbol_document() {
+                    Ok(true) => self
+                        .state
+                        .push_user_message(ConsoleMessage::info("Undo: symbol edit")),
+                    Ok(false) => self
+                        .state
+                        .push_user_message(ConsoleMessage::info("Nothing to undo")),
+                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
+                }
+                true
+            }
+            ShortcutCommand::EditRedo => {
+                match self.state.redo_active_symbol_document() {
+                    Ok(true) => self
+                        .state
+                        .push_user_message(ConsoleMessage::info("Redo: symbol edit")),
+                    Ok(false) => self
+                        .state
+                        .push_user_message(ConsoleMessage::info("Nothing to redo")),
+                    Err(error) => self.state.push_user_message(ConsoleMessage::warning(error)),
+                }
+                true
+            }
+            ShortcutCommand::EditDelete => {
+                self.delete_selected_symbol_item(false);
+                true
+            }
+            ShortcutCommand::EditCut => {
+                self.delete_selected_symbol_item(true);
+                true
+            }
+            ShortcutCommand::EditCopy => {
+                self.copy_selected_symbol_shape();
+                true
+            }
+            ShortcutCommand::EditPaste => {
+                self.paste_symbol_shape();
+                true
+            }
+            ShortcutCommand::EditSelectAll => {
+                self.select_all_symbol_items();
+                true
+            }
+            ShortcutCommand::ToolSelect => {
+                self.state.shell.symbol.tool = SymbolTool::Select;
+                true
+            }
+            ShortcutCommand::ToolProbe => {
+                self.state.shell.symbol.tool = SymbolTool::PlacePin;
+                self.state.shell.symbol.clear_selection();
+                true
+            }
+            ShortcutCommand::ToolWire => {
+                self.state.shell.symbol.tool = SymbolTool::Polyline;
+                self.state.shell.symbol.pending_polyline.clear();
+                true
+            }
+            ShortcutCommand::PlaceCapacitor => {
+                self.state.shell.symbol.tool = SymbolTool::Circle;
+                self.state.shell.symbol.shape_start = None;
+                true
+            }
+            ShortcutCommand::PlaceDiode => {
+                self.state.shell.symbol.tool = SymbolTool::Arrow;
+                true
+            }
+            ShortcutCommand::PlaceGround => {
+                self.state.shell.symbol.tool = SymbolTool::Dot;
+                true
+            }
+            ShortcutCommand::RotateSelectionOrPreview => {
+                self.transform_selected_symbol_item(rotate_point_cw_about, rotate_shape_cw_about);
+                true
+            }
+            ShortcutCommand::MirrorSelectionHorizontal => {
+                self.transform_selected_symbol_item(mirror_point_h_about, mirror_shape_h_about);
+                true
+            }
+            ShortcutCommand::MirrorSelectionVertical => {
+                self.transform_selected_symbol_item(mirror_point_v_about, mirror_shape_v_about);
+                true
+            }
+            ShortcutCommand::EscapeCancel => {
+                self.state.shell.symbol.tool = SymbolTool::Select;
+                self.state.shell.symbol.dragging_pin = None;
+                self.state.shell.symbol.dragging_shape = None;
+                self.state.shell.symbol.dragging_origin = false;
+                self.state.shell.symbol.pending_polyline.clear();
+                self.state.shell.symbol.shape_start = None;
+                true
+            }
+            ShortcutCommand::ZoomIn => {
+                self.state.shell.symbol.zoom = (self.state.shell.symbol.zoom * 1.25).min(18.0);
+                true
+            }
+            ShortcutCommand::ZoomOut => {
+                self.state.shell.symbol.zoom = (self.state.shell.symbol.zoom / 1.25).max(1.0);
+                true
+            }
+            ShortcutCommand::ZoomFit => {
+                self.state.shell.symbol.needs_fit = true;
+                true
+            }
+            ShortcutCommand::Zoom100 => {
+                self.state.shell.symbol.zoom = 4.0;
+                self.state.shell.symbol.pan = (0.0, 0.0);
+                true
+            }
+            ShortcutCommand::RunChecks => {
+                self.state.run_active_symbol_pin_checks();
+                true
+            }
+            ShortcutCommand::NextViolation => {
+                crate::schematic::view::violations::cycle_violation(&mut self.state, 1);
+                true
+            }
+            ShortcutCommand::PrevViolation => {
+                crate::schematic::view::violations::cycle_violation(&mut self.state, -1);
+                true
+            }
+            ShortcutCommand::OpenPropertiesEditor
+            | ShortcutCommand::PlaceVoltageSource
+            | ShortcutCommand::PlaceCurrentSource
+            | ShortcutCommand::PlaceInductor
+            | ShortcutCommand::PlaceNmos
+            | ShortcutCommand::PlaceNpnBjt
+            | ShortcutCommand::PlaceResistor
+            | ShortcutCommand::ToolLabel
+            | ShortcutCommand::FocusCellSearch
+            | ShortcutCommand::DescendIntoSelected
+            | ShortcutCommand::AscendHierarchy
+            | ShortcutCommand::FocusDesignSearch => true,
+            _ => false,
+        }
+    }
+
+    fn rotate_schematic_selection_with_symbols(&mut self) {
+        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        self.state
+            .schematic
+            .rotate_selection_resolved(|component| symbol_context.terminal_points(component));
+    }
+
+    fn mirror_schematic_selection_h_with_symbols(&mut self) {
+        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        self.state
+            .schematic
+            .mirror_selection_h_resolved(|component| symbol_context.terminal_points(component));
+    }
+
+    fn mirror_schematic_selection_v_with_symbols(&mut self) {
+        let symbol_context = SchematicSymbolContext::from_state(&self.state);
+        self.state
+            .schematic
+            .mirror_selection_v_resolved(|component| symbol_context.terminal_points(component));
+    }
+
+    fn select_all_symbol_items(&mut self) {
+        let document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        self.state
+            .shell
+            .symbol
+            .set_selection(SymbolSelection::all_in(&document));
+    }
+
+    fn copy_selected_symbol_shape(&mut self) {
+        let document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let selection = self.state.shell.symbol.effective_selection();
+        let ports = self.state.active_symbol_ports();
+        self.state.shell.symbol.clipboard =
+            symbol_clipboard_from_selection(&document, &selection, &ports);
+    }
+
+    fn paste_symbol_shape(&mut self) {
+        if self.state.deny_read_only_edit() {
+            return;
+        }
+        let clipboard = self.state.shell.symbol.clipboard.clone();
+        if clipboard.is_empty() {
+            return;
+        }
+        let mut document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let Some((min, max)) = clipboard.bounds() else {
+            return;
+        };
+        let target = self.symbol_paste_target();
+        let center = Point::new((min.x + max.x) / 2, (min.y + max.y) / 2);
+        let delta = target - center;
+        self.state.record_symbol_edit(&document);
+        let mut selection = SymbolSelection::default();
+        for mut shape in clipboard.shapes {
+            shape.translate(delta);
+            document.body.push(shape);
+            if let Some(index) = document.body.len().checked_sub(1) {
+                selection.shapes.insert(index);
+            }
+        }
+        for mut pin in clipboard.pins {
+            pin.name = unique_symbol_pin_name(&document, &pin.name);
+            if let Some(position) = pin.position.as_mut() {
+                *position = *position + delta;
+            }
+            selection.pins.insert(pin.name.clone());
+            document.pins.push(pin);
+        }
+        self.state.shell.symbol.set_selection(selection);
+        if let Err(error) = self.state.store_active_symbol_document(&document) {
+            self.state.push_user_message(ConsoleMessage::warning(error));
+        }
+    }
+
+    fn delete_selected_symbol_item(&mut self, cut: bool) {
+        let selection = self.state.shell.symbol.effective_selection();
+        if selection.is_empty() {
+            return;
+        }
+        if self.state.deny_read_only_edit() {
+            return;
+        }
+        let ports = self.state.active_symbol_ports();
+        let mut document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let before = document.clone();
+        let mut clipboard = SymbolClipboard::default();
+        let mut changed = false;
+
+        for index in selection.shapes.iter().rev().copied() {
+            if index < document.body.len() {
+                let removed = document.body.remove(index);
+                if cut {
+                    clipboard.shapes.push(removed);
+                }
+                changed = true;
+            }
+        }
+
+        let mut retained = Vec::with_capacity(document.pins.len());
+        for mut pin in std::mem::take(&mut document.pins) {
+            if selection.pins.contains(&pin.name) {
+                if symbol_pin_is_contract(&ports, &pin.name) {
+                    if pin.position.is_some() {
+                        pin.position = None;
+                        changed = true;
+                    }
+                    retained.push(pin);
+                } else {
+                    if cut {
+                        clipboard.pins.push(pin);
+                    }
+                    changed = true;
+                }
+            } else {
+                retained.push(pin);
+            }
+        }
+        document.pins = retained;
+
+        if cut {
+            self.state.shell.symbol.clipboard = clipboard;
+        }
+        if changed {
+            self.state.record_symbol_edit(&before);
+            self.state.shell.symbol.clear_selection();
+            if let Err(error) = self.state.store_active_symbol_document(&document) {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+    }
+
+    fn transform_selected_symbol_item(
+        &mut self,
+        pin_transform: impl Fn(Point, Point) -> Point,
+        shape_transform: impl Fn(&mut SymbolShape, Point),
+    ) {
+        let selection = self.state.shell.symbol.effective_selection();
+        if selection.is_empty() {
+            return;
+        }
+        if self.state.deny_read_only_edit() {
+            return;
+        }
+        let mut document = match self.state.load_active_symbol_document() {
+            Ok(document) => document,
+            Err(error) => {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+                return;
+            }
+        };
+        let before = document.clone();
+        let origin = document.origin;
+        let mut changed = false;
+        for index in selection.shapes.iter().copied() {
+            if let Some(shape) = document.body.get_mut(index) {
+                shape_transform(shape, origin);
+                changed = true;
+            }
+        }
+        for name in &selection.pins {
+            if let Some(pin) = document.pin_mut(name)
+                && let Some(position) = pin.position
+            {
+                pin.position = Some(pin_transform(position, origin));
+                changed = true;
+            }
+        }
+        if changed {
+            self.state.record_symbol_edit(&before);
+            if let Err(error) = self.state.store_active_symbol_document(&document) {
+                self.state.push_user_message(ConsoleMessage::warning(error));
+            }
+        }
+    }
+
+    fn symbol_paste_target(&self) -> Point {
+        self.state
+            .shell
+            .canvas_hover
+            .or(self.state.shell.canvas_view_center)
+            .map(|(x, y)| Point::new(x.round() as i32, y.round() as i32))
+            .unwrap_or_else(|| Point::new(10, 10))
     }
 
     pub(super) fn action_edit_undo(&mut self) {
@@ -276,4 +678,45 @@ fn command_edits_schematic(command: ShortcutCommand) -> bool {
             | ShortcutCommand::MirrorSelectionVertical
             | ShortcutCommand::OpenPropertiesEditor
     )
+}
+
+#[cfg(test)]
+mod symbol_action_tests {
+    use super::*;
+    use crate::state::{PortDirection, PortSpec, SymbolPin};
+
+    #[test]
+    fn symbol_clipboard_copies_shapes_and_non_contract_pins_only() {
+        let document = SymbolDocument {
+            pins: vec![
+                SymbolPin::new("IN", PortDirection::In, Some(Point::new(-10, 0))),
+                SymbolPin::new("TRIM", PortDirection::InOut, Some(Point::new(0, 10))),
+            ],
+            body: vec![SymbolShape::Dot {
+                center: Point::origin(),
+                radius: 3,
+            }],
+            ..SymbolDocument::default()
+        };
+        let ports = vec![PortSpec {
+            name: "IN".to_owned(),
+            direction: PortDirection::In,
+        }];
+        let mut selection = SymbolSelection::default();
+        selection.pins.insert("IN".to_owned());
+        selection.pins.insert("TRIM".to_owned());
+        selection.shapes.insert(0);
+
+        let clipboard = symbol_clipboard_from_selection(&document, &selection, &ports);
+
+        assert_eq!(clipboard.shapes.len(), 1);
+        assert_eq!(
+            clipboard
+                .pins
+                .iter()
+                .map(|pin| pin.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["TRIM"]
+        );
+    }
 }

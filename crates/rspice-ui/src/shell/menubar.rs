@@ -11,7 +11,6 @@ use crate::common::RSpiceApp;
 use crate::common::menu_bar::{FileMenuAction, dispatch_file_menu_action};
 use crate::shell::WorkspaceView;
 use crate::state::Tool;
-use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::{Density, Direction, Mode};
@@ -92,19 +91,11 @@ fn brand(ui: &mut Ui) {
         );
         ui.fonts(|f| f.layout_job(job))
     };
-    let width = 12.0 + 14.0 + 7.0 + galley.size().x + 12.0;
+    let width = 12.0 + galley.size().x + 12.0;
     let (rect, _) = ui.allocate_exact_size(vec2(width, MENUBAR_HEIGHT), Sense::hover());
     let painter = ui.painter();
-    let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + 12.0 + 7.0, rect.center().y),
-        vec2(14.0, 14.0),
-    );
-    Icon::Brand.paint(painter, icon_rect, c.accent);
     painter.galley(
-        egui::pos2(
-            rect.left() + 12.0 + 14.0 + 7.0,
-            rect.center().y - galley.size().y * 0.5,
-        ),
+        egui::pos2(rect.left() + 12.0, rect.center().y - galley.size().y * 0.5),
         galley,
         c.text,
     );
@@ -551,7 +542,11 @@ fn create_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
 
 fn check_menu(ui: &mut Ui, state: &mut crate::common::AppState) {
     if item(ui, "Run design checks", Some("Ctrl+E")) {
-        crate::common::menu_bar::run_design_rule_check(state);
+        if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            state.run_active_symbol_pin_checks();
+        } else {
+            crate::common::menu_bar::run_design_rule_check(state);
+        }
     }
     separator(ui);
     if state.dialogs.drc_results.is_some() {

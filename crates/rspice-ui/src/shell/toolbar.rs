@@ -4,7 +4,7 @@
 use egui::{Context, Frame, TopBottomPanel, Ui};
 
 use crate::common::AppState;
-use crate::shell::WorkspaceView;
+use crate::shell::{SymbolTool, WorkspaceView};
 use crate::state::Tool;
 use crate::ui::icons::Icon;
 use crate::ui::tokens::Tokens;
@@ -85,6 +85,10 @@ fn toolbar_separator(ui: &mut Ui) {
 
 fn schematic_tools(ui: &mut Ui, state: &mut AppState) {
     let on_schematic = state.shell.view == WorkspaceView::Schematic;
+    if on_schematic && state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        symbol_tools(ui, state);
+        return;
+    }
     let tool = state.schematic.tool;
 
     let select_on = on_schematic && tool.is_select();
@@ -129,27 +133,103 @@ fn schematic_tools(ui: &mut Ui, state: &mut AppState) {
     }
 }
 
+fn symbol_tools(ui: &mut Ui, state: &mut AppState) {
+    let tool = state.shell.symbol.tool;
+    if IconButton::new(Icon::Select)
+        .on(tool == SymbolTool::Select)
+        .tooltip("Select symbol geometry (S)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Select;
+    }
+    if IconButton::new(Icon::Pin)
+        .on(tool == SymbolTool::PlacePin)
+        .tooltip("Place next pin (P)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::PlacePin;
+        state.shell.symbol.clear_selection();
+    }
+    if IconButton::new(Icon::Wire)
+        .on(tool == SymbolTool::Polyline)
+        .tooltip("Draw symbol polyline (W)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Polyline;
+        state.shell.symbol.pending_polyline.clear();
+    }
+    if IconButton::new(Icon::SymbolCircle)
+        .on(tool == SymbolTool::Circle)
+        .tooltip("Circle body tool (C)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Circle;
+        state.shell.symbol.shape_start = None;
+    }
+    if IconButton::new(Icon::SymbolArc)
+        .on(tool == SymbolTool::Arc)
+        .tooltip("Arc body tool (A)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Arc;
+        state.shell.symbol.shape_start = None;
+    }
+    if IconButton::new(Icon::SymbolArrow)
+        .on(tool == SymbolTool::Arrow)
+        .tooltip("Arrow marker tool (D)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Arrow;
+    }
+    if IconButton::new(Icon::SymbolDot)
+        .on(tool == SymbolTool::Dot)
+        .tooltip("Dot marker tool (O)")
+        .show(ui)
+        .clicked()
+    {
+        state.shell.symbol.tool = SymbolTool::Dot;
+    }
+}
+
 fn view_controls(ui: &mut Ui, state: &mut AppState) {
     if IconButton::new(Icon::ZoomIn)
         .tooltip("Zoom in")
         .show(ui)
         .clicked()
     {
-        state.schematic.zoom = (state.schematic.zoom * 1.25).min(4.0);
+        if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            state.shell.symbol.zoom = (state.shell.symbol.zoom * 1.25).min(18.0);
+        } else {
+            state.schematic.zoom = (state.schematic.zoom * 1.25).min(4.0);
+        }
     }
     if IconButton::new(Icon::ZoomOut)
         .tooltip("Zoom out")
         .show(ui)
         .clicked()
     {
-        state.schematic.zoom = (state.schematic.zoom / 1.25).max(0.25);
+        if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            state.shell.symbol.zoom = (state.shell.symbol.zoom / 1.25).max(1.0);
+        } else {
+            state.schematic.zoom = (state.schematic.zoom / 1.25).max(0.25);
+        }
     }
     if IconButton::new(Icon::ZoomFit)
         .tooltip("Zoom to fit (F)")
         .show(ui)
         .clicked()
     {
-        state.schematic.needs_fit = true;
+        if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+            state.shell.symbol.needs_fit = true;
+        } else {
+            state.schematic.needs_fit = true;
+        }
     }
     // The glyph mirrors the active style; clicking cycles dots → lines → off.
     let grid = state.shell.grid;
@@ -173,6 +253,25 @@ fn view_controls(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn history_controls(ui: &mut Ui, state: &mut AppState) {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if IconButton::new(Icon::Undo)
+            .enabled(state.can_undo_active_symbol_document())
+            .tooltip("Undo symbol edit (Ctrl+Z)")
+            .show(ui)
+            .clicked()
+        {
+            let _ = state.undo_active_symbol_document();
+        }
+        if IconButton::new(Icon::Redo)
+            .enabled(state.can_redo_active_symbol_document())
+            .tooltip("Redo symbol edit (Ctrl+Y)")
+            .show(ui)
+            .clicked()
+        {
+            let _ = state.redo_active_symbol_document();
+        }
+        return;
+    }
     if IconButton::new(Icon::Undo)
         .enabled(state.schematic.can_undo())
         .tooltip("Undo (Ctrl+Z)")
@@ -192,6 +291,20 @@ fn history_controls(ui: &mut Ui, state: &mut AppState) {
 }
 
 fn check_controls(ui: &mut Ui, state: &mut AppState) {
+    if state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+        if IconButton::new(Icon::Check)
+            .tooltip("Run symbol pin checks")
+            .show(ui)
+            .clicked()
+        {
+            state.run_active_symbol_pin_checks();
+        }
+        IconButton::new(Icon::File)
+            .enabled(false)
+            .tooltip("Open the schematic view to generate a netlist")
+            .show(ui);
+        return;
+    }
     if IconButton::new(Icon::Check)
         .tooltip("Run design checks")
         .show(ui)

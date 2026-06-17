@@ -14,7 +14,11 @@ const MAX_FINDING_ROWS: usize = 50;
 /// and console rows — one summary line plus a clickable row per finding
 /// that jumps to its anchor.
 pub(crate) fn run_design_rule_check(state: &mut AppState) {
-    let result = crate::services::drc::run_drc_check(&state.schematic);
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+        &state.library_manager,
+        &state.workspace.schematic_buffers,
+    );
+    let result = crate::services::drc::run_drc_check_with_hierarchy(&state.schematic, &hierarchy);
     let summary = result.summary();
     let msg = if result.passed() {
         format!(

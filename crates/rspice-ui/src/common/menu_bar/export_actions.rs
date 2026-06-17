@@ -5,10 +5,14 @@ pub(super) fn action_export_svg_with_io(
     state: &mut AppState,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
-    use crate::schematic::export::{SvgExportConfig, export_to_svg};
+    use crate::schematic::export::{SvgExportConfig, export_to_svg_with_symbol_resolver};
 
     let config = SvgExportConfig::default();
-    let svg_content = export_to_svg(&state.schematic, &config);
+    let resolver = crate::state::SymbolResolver::new(
+        &state.library_manager,
+        &state.workspace.schematic_buffers,
+    );
+    let svg_content = export_to_svg_with_symbol_resolver(&state.schematic, &config, &resolver);
 
     let default_name = state
         .schematic
@@ -139,7 +143,8 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
 }
 
 fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) -> Option<String> {
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_buffers(
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+        &state.library_manager,
         &state.workspace.schematic_buffers,
     );
     let generation = crate::simulation::netlist_gen::generate_netlist_hierarchical(

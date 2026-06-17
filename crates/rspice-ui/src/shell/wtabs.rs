@@ -46,7 +46,12 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                 ui.add_space(8.0);
                 ui.spacing_mut().item_spacing.x = 0.0;
 
-                let schematic_label = format!("Schematic · {}", state.workspace.active_view.cell);
+                let active_document_type = state.workspace.active_view_type();
+                let schematic_label = if active_document_type == crate::state::ViewType::Symbol {
+                    format!("Symbol · {}", state.workspace.active_view.cell)
+                } else {
+                    format!("Schematic · {}", state.workspace.active_view.cell)
+                };
                 let new_results = state.simulation.data_version > state.shell.results_seen_version
                     && state.shell.view != WorkspaceView::Results;
 
@@ -55,19 +60,19 @@ pub fn show(ctx: &Context, state: &mut AppState) {
                         WorkspaceView::Schematic => schematic_label.as_str(),
                         other => other.label(),
                     };
-                    let dirty = view == WorkspaceView::Schematic && state.schematic.is_dirty;
+                    let dirty = view == WorkspaceView::Schematic
+                        && (state.schematic.is_dirty
+                            || state.workspace.open_views.iter().any(|open| open.dirty));
                     let badge = (view == WorkspaceView::Results && new_results).then_some(1u32);
-
-                    if tab(
-                        ui,
-                        label,
-                        view_icon(view),
-                        state.shell.view == view,
-                        dirty,
-                        badge,
-                    )
-                    .clicked()
+                    let icon = if view == WorkspaceView::Schematic
+                        && active_document_type == crate::state::ViewType::Symbol
                     {
+                        Icon::Pin
+                    } else {
+                        view_icon(view)
+                    };
+
+                    if tab(ui, label, icon, state.shell.view == view, dirty, badge).clicked() {
                         state.shell.view = view;
                         if view == WorkspaceView::Results {
                             state.shell.results_seen_version = state.simulation.data_version;

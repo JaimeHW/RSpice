@@ -309,7 +309,8 @@ fn sync_run_baseline(state: &mut AppState) {
 
 /// Regenerate the buffer from the schematic (generated mode).
 fn regenerate(state: &mut AppState) {
-    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_buffers(
+    let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
+        &state.library_manager,
         &state.workspace.schematic_buffers,
     );
     let result = crate::simulation::netlist_gen::generate_netlist_hierarchical(

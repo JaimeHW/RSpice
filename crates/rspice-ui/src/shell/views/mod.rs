@@ -11,6 +11,7 @@ pub mod netlist;
 pub mod results;
 pub mod schematic;
 pub mod simulate;
+pub mod symbol;
 
 /// Render the central panel for the active workspace view.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
@@ -25,7 +26,11 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
                 WorkspaceView::Library => library::show(ui, &mut app.state),
                 WorkspaceView::Schematic => {
                     let symbol_library = app.symbol_library.as_ref();
-                    schematic::show(ui, &mut app.state, symbol_library);
+                    if app.state.workspace.active_view_type() == crate::state::ViewType::Symbol {
+                        symbol::show(ui, &mut app.state);
+                    } else {
+                        schematic::show(ui, &mut app.state, symbol_library);
+                    }
                 }
                 WorkspaceView::Netlist => netlist::show(ui, &mut app.state),
                 WorkspaceView::Simulate => simulate::show(ui, &mut app.state),

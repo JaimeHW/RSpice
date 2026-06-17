@@ -34,7 +34,10 @@ mod wtabs;
 
 pub use results::{ResultViewer, ResultsState};
 pub use state::{
-    ConsoleUiState, GridStyle, NavMode, RailTab, ShellState, ShellStateSer, WorkspaceView,
+    ConsoleUiState, GridStyle, NavMode, RailTab, ShellState, ShellStateSer, SymbolClipboard,
+    SymbolDocumentSnapshot, SymbolSelection, SymbolTool, SymbolUiState, WorkspaceView,
+    mirror_point_h_about, mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about,
+    rotate_point_cw_about, rotate_shape_cw_about, symbol_shape_bounds,
 };
 
 use egui::Context;

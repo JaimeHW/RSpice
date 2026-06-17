@@ -85,6 +85,320 @@ pub enum GridStyle {
     Off,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SymbolTool {
+    #[default]
+    Select,
+    PlacePin,
+    Polyline,
+    Circle,
+    Arc,
+    Arrow,
+    Dot,
+}
+
+impl SymbolTool {
+    pub fn label(self) -> &'static str {
+        match self {
+            SymbolTool::Select => "Select",
+            SymbolTool::PlacePin => "Place pin",
+            SymbolTool::Polyline => "Polyline",
+            SymbolTool::Circle => "Circle",
+            SymbolTool::Arc => "Arc",
+            SymbolTool::Arrow => "Arrow",
+            SymbolTool::Dot => "Dot",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolSelection {
+    pub pins: std::collections::BTreeSet<String>,
+    pub shapes: std::collections::BTreeSet<usize>,
+}
+
+impl SymbolSelection {
+    pub fn all_in(document: &crate::state::SymbolDocument) -> Self {
+        Self {
+            pins: document.pins.iter().map(|pin| pin.name.clone()).collect(),
+            shapes: (0..document.body.len()).collect(),
+        }
+    }
+
+    pub fn in_rect(
+        document: &crate::state::SymbolDocument,
+        start: crate::state::Point,
+        end: crate::state::Point,
+    ) -> Self {
+        let min = crate::state::Point::new(start.x.min(end.x), start.y.min(end.y));
+        let max = crate::state::Point::new(start.x.max(end.x), start.y.max(end.y));
+        let pins = document
+            .pins
+            .iter()
+            .filter(|pin| {
+                pin.position
+                    .is_some_and(|point| point_in_bounds(point, min, max))
+            })
+            .map(|pin| pin.name.clone())
+            .collect();
+        let shapes = document
+            .body
+            .iter()
+            .enumerate()
+            .filter_map(|(index, shape)| {
+                let (shape_min, shape_max) = symbol_shape_bounds(shape);
+                bounds_intersect(min, max, shape_min, shape_max).then_some(index)
+            })
+            .collect();
+        Self { pins, shapes }
+    }
+
+    pub fn single_pin(name: impl Into<String>) -> Self {
+        Self {
+            pins: [name.into()].into_iter().collect(),
+            shapes: std::collections::BTreeSet::new(),
+        }
+    }
+
+    pub fn single_shape(index: usize) -> Self {
+        Self {
+            pins: std::collections::BTreeSet::new(),
+            shapes: [index].into_iter().collect(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pins.is_empty() && self.shapes.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SymbolClipboard {
+    pub pins: Vec<crate::state::SymbolPin>,
+    pub shapes: Vec<crate::state::SymbolShape>,
+}
+
+impl SymbolClipboard {
+    pub fn is_empty(&self) -> bool {
+        self.pins.is_empty() && self.shapes.is_empty()
+    }
+
+    pub fn bounds(&self) -> Option<(crate::state::Point, crate::state::Point)> {
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for pin in &self.pins {
+            if let Some(position) = pin.position {
+                xs.push(position.x);
+                ys.push(position.y);
+            }
+        }
+        for shape in &self.shapes {
+            let (min, max) = symbol_shape_bounds(shape);
+            xs.extend([min.x, max.x]);
+            ys.extend([min.y, max.y]);
+        }
+        Some((
+            crate::state::Point::new(xs.iter().min().copied()?, ys.iter().min().copied()?),
+            crate::state::Point::new(xs.iter().max().copied()?, ys.iter().max().copied()?),
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolDocumentSnapshot {
+    pub document: crate::state::SymbolDocument,
+    pub symbol_document_metadata: Option<String>,
+    pub generated_metadata: Option<String>,
+    pub ports_metadata: Option<String>,
+}
+
+impl SymbolDocumentSnapshot {
+    pub fn from_document(document: &crate::state::SymbolDocument) -> Self {
+        Self {
+            document: document.clone(),
+            symbol_document_metadata: None,
+            generated_metadata: None,
+            ports_metadata: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SymbolUiState {
+    pub tool: SymbolTool,
+    pub selection: SymbolSelection,
+    pub selected_pin: Option<String>,
+    pub selected_shape: Option<usize>,
+    pub dragging_pin: Option<String>,
+    pub dragging_shape: Option<(usize, crate::state::Point)>,
+    pub dragging_label: Option<String>,
+    pub dragging_origin: bool,
+    pub marquee_start: Option<crate::state::Point>,
+    pub marquee_current: Option<crate::state::Point>,
+    pub zoom: f32,
+    pub pan: (f32, f32),
+    pub needs_fit: bool,
+    pub pending_polyline: Vec<crate::state::Point>,
+    pub shape_start: Option<crate::state::Point>,
+    pub clipboard: SymbolClipboard,
+    pub undo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
+    pub redo_stacks: std::collections::HashMap<String, Vec<SymbolDocumentSnapshot>>,
+}
+
+impl Default for SymbolUiState {
+    fn default() -> Self {
+        Self {
+            tool: SymbolTool::Select,
+            selection: SymbolSelection::default(),
+            selected_pin: None,
+            selected_shape: None,
+            dragging_pin: None,
+            dragging_shape: None,
+            dragging_label: None,
+            dragging_origin: false,
+            marquee_start: None,
+            marquee_current: None,
+            zoom: 4.0,
+            pan: (0.0, 0.0),
+            needs_fit: true,
+            pending_polyline: Vec::new(),
+            shape_start: None,
+            clipboard: SymbolClipboard::default(),
+            undo_stacks: std::collections::HashMap::new(),
+            redo_stacks: std::collections::HashMap::new(),
+        }
+    }
+}
+
+impl SymbolUiState {
+    pub fn clear_selection(&mut self) {
+        self.selection = SymbolSelection::default();
+        self.selected_pin = None;
+        self.selected_shape = None;
+    }
+
+    pub fn set_selection(&mut self, selection: SymbolSelection) {
+        self.selected_pin = selection.pins.iter().next().cloned();
+        self.selected_shape = selection.shapes.iter().next().copied();
+        self.selection = selection;
+    }
+
+    pub fn select_pin(&mut self, name: impl Into<String>) {
+        self.set_selection(SymbolSelection::single_pin(name));
+    }
+
+    pub fn select_shape(&mut self, index: usize) {
+        self.set_selection(SymbolSelection::single_shape(index));
+    }
+
+    pub fn effective_selection(&self) -> SymbolSelection {
+        if !self.selection.is_empty() {
+            return self.selection.clone();
+        }
+        let mut selection = SymbolSelection::default();
+        if let Some(pin) = self.selected_pin.clone() {
+            selection.pins.insert(pin);
+        }
+        if let Some(shape) = self.selected_shape {
+            selection.shapes.insert(shape);
+        }
+        selection
+    }
+}
+
+pub fn rotate_point_cw_about(
+    point: crate::state::Point,
+    origin: crate::state::Point,
+) -> crate::state::Point {
+    let relative = point - origin;
+    origin + crate::state::Point::new(-relative.y, relative.x)
+}
+
+pub fn mirror_point_h_about(
+    point: crate::state::Point,
+    origin: crate::state::Point,
+) -> crate::state::Point {
+    let relative = point - origin;
+    origin + crate::state::Point::new(-relative.x, relative.y)
+}
+
+pub fn mirror_point_v_about(
+    point: crate::state::Point,
+    origin: crate::state::Point,
+) -> crate::state::Point {
+    let relative = point - origin;
+    origin + crate::state::Point::new(relative.x, -relative.y)
+}
+
+pub fn rotate_shape_cw_about(shape: &mut crate::state::SymbolShape, origin: crate::state::Point) {
+    translate_shape_to_origin(shape, origin);
+    shape.rotate_cw();
+    shape.translate(origin);
+}
+
+pub fn mirror_shape_h_about(shape: &mut crate::state::SymbolShape, origin: crate::state::Point) {
+    translate_shape_to_origin(shape, origin);
+    shape.mirror_h();
+    shape.translate(origin);
+}
+
+pub fn mirror_shape_v_about(shape: &mut crate::state::SymbolShape, origin: crate::state::Point) {
+    translate_shape_to_origin(shape, origin);
+    shape.mirror_v();
+    shape.translate(origin);
+}
+
+fn translate_shape_to_origin(shape: &mut crate::state::SymbolShape, origin: crate::state::Point) {
+    shape.translate(crate::state::Point::new(-origin.x, -origin.y));
+}
+
+pub fn symbol_shape_bounds(
+    shape: &crate::state::SymbolShape,
+) -> (crate::state::Point, crate::state::Point) {
+    use crate::state::SymbolShape;
+    match shape {
+        SymbolShape::Polyline { points, .. } => {
+            let min_x = points.iter().map(|point| point.x).min().unwrap_or(0);
+            let max_x = points.iter().map(|point| point.x).max().unwrap_or(0);
+            let min_y = points.iter().map(|point| point.y).min().unwrap_or(0);
+            let max_y = points.iter().map(|point| point.y).max().unwrap_or(0);
+            (
+                crate::state::Point::new(min_x, min_y),
+                crate::state::Point::new(max_x, max_y),
+            )
+        }
+        SymbolShape::Circle { center, radius } | SymbolShape::Dot { center, radius } => (
+            crate::state::Point::new(center.x - radius, center.y - radius),
+            crate::state::Point::new(center.x + radius, center.y + radius),
+        ),
+        SymbolShape::Arc { center, radius, .. } => (
+            crate::state::Point::new(center.x - radius, center.y - radius),
+            crate::state::Point::new(center.x + radius, center.y + radius),
+        ),
+        SymbolShape::Arrow { tip, .. } => (
+            crate::state::Point::new(tip.x - 10, tip.y - 10),
+            crate::state::Point::new(tip.x + 10, tip.y + 10),
+        ),
+    }
+}
+
+fn point_in_bounds(
+    point: crate::state::Point,
+    min: crate::state::Point,
+    max: crate::state::Point,
+) -> bool {
+    (min.x..=max.x).contains(&point.x) && (min.y..=max.y).contains(&point.y)
+}
+
+fn bounds_intersect(
+    a_min: crate::state::Point,
+    a_max: crate::state::Point,
+    b_min: crate::state::Point,
+    b_max: crate::state::Point,
+) -> bool {
+    a_min.x <= b_max.x && a_max.x >= b_min.x && a_min.y <= b_max.y && a_max.y >= b_min.y
+}
+
 impl GridStyle {
     /// All styles in cycle order.
     pub const ALL: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
@@ -245,6 +559,8 @@ pub struct ShellState {
     pub results: super::results::ResultsState,
     /// Netlist editor state (diagnostics, diff pips, tuner mode).
     pub netlist: super::views::netlist::NetlistEditorState,
+    /// Runtime state for the Schematic-family symbol editor surface.
+    pub symbol: SymbolUiState,
     /// In-flight inspector edit session, if any.
     pub inspector_edit: Option<InspectorEdit>,
 }
@@ -436,5 +752,41 @@ impl From<ShellStateSer> for ShellState {
                 });
         }
         shell
+    }
+}
+
+#[cfg(test)]
+mod symbol_selection_tests {
+    use super::*;
+    use crate::state::{Point, PortDirection, SymbolDocument, SymbolPin, SymbolShape};
+
+    #[test]
+    fn select_all_symbol_items_selects_pins_and_shapes() {
+        let document = SymbolDocument {
+            pins: vec![SymbolPin::new(
+                "IN",
+                PortDirection::In,
+                Some(Point::new(-30, 0)),
+            )],
+            body: vec![SymbolShape::Dot {
+                center: Point::origin(),
+                radius: 2,
+            }],
+            ..SymbolDocument::default()
+        };
+
+        let selection = SymbolSelection::all_in(&document);
+
+        assert!(selection.pins.contains("IN"));
+        assert!(selection.shapes.contains(&0));
+    }
+
+    #[test]
+    fn symbol_transforms_are_about_document_origin() {
+        let origin = Point::new(10, 10);
+
+        let point = rotate_point_cw_about(Point::new(20, 10), origin);
+
+        assert_eq!(point, Point::new(10, 20));
     }
 }

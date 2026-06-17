@@ -30,6 +30,11 @@ pub fn show(
     state: &mut AppState,
     symbol_library: Option<&crate::schematic::symbols::SymbolLibrary>,
 ) {
+    if state.shell.view == WorkspaceView::Schematic
+        && state.workspace.active_view_type() == crate::state::ViewType::Symbol
+    {
+        return;
+    }
     if state.shell.panels_hidden || !state.shell.view.has_side_panels() {
         return;
     }

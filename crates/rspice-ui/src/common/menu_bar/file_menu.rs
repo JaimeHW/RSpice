@@ -60,11 +60,22 @@ pub(crate) fn dispatch_file_menu_action(
             crate::common::file_actions::action_file_open_with_io(state, file_workflow_io);
         }
         FileMenuAction::Save => {
-            let _ = crate::common::file_actions::action_file_save_with_io(state, file_workflow_io);
+            if state.should_save_project_for_active_document() {
+                let _ = crate::common::project_workflow::save_project(state);
+            } else {
+                let _ =
+                    crate::common::file_actions::action_file_save_with_io(state, file_workflow_io);
+            }
         }
         FileMenuAction::SaveAs => {
-            let _ =
-                crate::common::file_actions::action_file_save_as_with_io(state, file_workflow_io);
+            if state.should_save_project_for_active_document() {
+                let _ = crate::common::project_workflow::save_project_as(state);
+            } else {
+                let _ = crate::common::file_actions::action_file_save_as_with_io(
+                    state,
+                    file_workflow_io,
+                );
+            }
         }
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)

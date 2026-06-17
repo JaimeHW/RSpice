@@ -39,6 +39,14 @@ pub enum Icon {
     Pin,
     /// Net probe tool.
     Probe,
+    /// Symbol circle body tool.
+    SymbolCircle,
+    /// Symbol arc body tool.
+    SymbolArc,
+    /// Symbol arrow body tool.
+    SymbolArrow,
+    /// Symbol dot body tool.
+    SymbolDot,
     /// Zoom in.
     ZoomIn,
     /// Zoom out.
@@ -111,6 +119,17 @@ impl Icon {
                 Circle([10.0, 10.0], 5.5),
                 Line(&[[14.5, 14.5], [20.0, 20.0]]),
             ],
+            Icon::SymbolCircle => &[Circle([12.0, 12.0], 6.0)],
+            Icon::SymbolArc => &[
+                Arc([12.0, 12.0], 7.0, -35.0, 250.0),
+                Dot([18.0, 8.0], 1.2),
+                Dot([8.0, 18.0], 1.2),
+            ],
+            Icon::SymbolArrow => &[
+                Line(&[[5.0, 18.0], [16.0, 7.0]]),
+                Fill(&[[14.0, 3.0], [21.0, 5.0], [19.0, 12.0]]),
+            ],
+            Icon::SymbolDot => &[Dot([12.0, 12.0], 4.2)],
             Icon::ZoomIn => &[
                 Circle([11.0, 11.0], 7.0),
                 Line(&[[11.0, 8.0], [11.0, 14.0]]),
@@ -299,6 +318,10 @@ mod tests {
             Icon::NetLabel,
             Icon::Pin,
             Icon::Probe,
+            Icon::SymbolCircle,
+            Icon::SymbolArc,
+            Icon::SymbolArrow,
+            Icon::SymbolDot,
             Icon::ZoomIn,
             Icon::ZoomOut,
             Icon::ZoomFit,

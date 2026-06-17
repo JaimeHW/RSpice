@@ -101,7 +101,7 @@ impl LogSource {
 // =============================================================================
 
 /// A canvas location a console row can jump to (click-to-source).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum LogAnchor {
     /// A schematic-space point, optionally with the object to select on
     /// arrival.
@@ -110,6 +110,12 @@ pub enum LogAnchor {
         y: i32,
         component: Option<u64>,
         wire: Option<u64>,
+    },
+    /// A symbol pin in a symbol view.
+    Symbol {
+        reference: crate::state::CellViewRef,
+        pin_name: String,
+        point: Option<crate::state::Point>,
     },
 }
 

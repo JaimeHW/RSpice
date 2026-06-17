@@ -376,7 +376,7 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .clicked()
                     {
-                        jump = entry.anchor;
+                        jump = entry.anchor.clone();
                     }
                 }
                 let cy = rect.center().y;
@@ -407,22 +407,7 @@ fn log_body(ui: &mut Ui, state: &mut AppState) {
     // Click-to-source: jump the canvas to the finding's anchor and select
     // the offending object. The console stays open — the row is the map,
     // the canvas is the territory.
-    if let Some(crate::panels::LogAnchor::Schematic {
-        x,
-        y,
-        component,
-        wire,
-    }) = jump
-    {
-        state.shell.view = crate::shell::WorkspaceView::Schematic;
-        state.schematic.center_request = Some(crate::state::Point::new(x, y));
-        state.schematic.net_highlight.clear();
-        state.schematic.selection.clear();
-        if let Some(id) = component {
-            state.schematic.selection.select_component(id);
-        }
-        if let Some(id) = wire {
-            state.schematic.selection.select_wire(id);
-        }
+    if let Some(anchor) = jump {
+        state.jump_to_log_anchor(anchor);
     }
 }
