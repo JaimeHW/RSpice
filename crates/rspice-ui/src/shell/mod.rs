@@ -40,6 +40,12 @@ pub use state::{
     rotate_point_cw_about, rotate_shape_cw_about, symbol_shape_bounds,
 };
 
+pub(crate) fn netlist_baseline_param_values(
+    buffer: &str,
+) -> std::collections::HashMap<String, f64> {
+    views::netlist::baseline::param_values(buffer)
+}
+
 use egui::Context;
 
 use crate::common::RSpiceApp;

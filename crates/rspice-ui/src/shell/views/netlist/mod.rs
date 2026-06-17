@@ -18,21 +18,16 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, crumb_text, docbar};
 
+pub(crate) mod baseline;
 mod completion;
+mod diagnostics;
 mod editor;
 mod highlight;
+mod summary;
 mod tuner;
 
+pub use diagnostics::{Diagnostic, DiagnosticSeverity};
 pub use tuner::right_panel;
-
-/// One parse diagnostic (the parser reports the first error it hits).
-#[derive(Debug, Clone)]
-pub struct Diagnostic {
-    /// 0-based buffer line, when the parser localizes the error.
-    pub line: Option<usize>,
-    /// Human-readable message.
-    pub message: String,
-}
 
 /// Transient editor state: diagnostics, diff pips, tuner mode.
 #[derive(Debug, Clone, Default)]
@@ -47,8 +42,14 @@ pub struct NetlistEditorState {
     pub diagnostics: Vec<Diagnostic>,
     /// 0-based lines edited since the last completed run (diff pips).
     pub edited_lines: HashSet<usize>,
-    /// `simulation.data_version` that last baselined the diff pips.
-    seen_data_version: u64,
+    /// Exact buffer snapshot used by the last successful manual deck run.
+    pub last_run_buffer: Option<String>,
+    /// Numeric `.param` values from `last_run_buffer`.
+    pub last_run_params: HashMap<String, f64>,
+    /// Buffer captured when the current manual deck run started.
+    pub pending_run_buffer: Option<String>,
+    /// Run id associated with the pending manual deck snapshot.
+    pub pending_run_id: Option<u64>,
     /// Cursor line from the previous frame (drives the scope crumb).
     pub cursor_line: usize,
     /// Tuner re-simulates on every slider movement instead of on release.
@@ -75,7 +76,6 @@ pub fn is_manual(state: &AppState) -> bool {
 
 /// Render the netlist workspace center view.
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    sync_run_baseline(state);
     flush_queued_run(state);
 
     // Ensure the buffer exists: manual source wins, otherwise generate.
@@ -133,6 +133,7 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
             if run.clicked() {
                 request_run(state);
             }
+            run_progress(ui, state);
 
             let regen_label = if manual {
                 "Regenerate (discard edits)"
@@ -159,6 +160,36 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
             delta_chips(ui, state);
         });
     });
+}
+
+fn run_progress(ui: &mut Ui, state: &AppState) {
+    if !state.simulation.is_running {
+        return;
+    }
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let label = if state.simulation.status.is_empty() {
+        "running".to_string()
+    } else {
+        state.simulation.status.clone()
+    };
+
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(120.0, 4.0), egui::Sense::hover());
+    ui.painter().rect_filled(rect, 2.0, c.bg_inset);
+    let progress = state.simulation.progress.clamp(0.0, 1.0) as f32;
+    let fill = egui::Rect::from_min_max(
+        rect.min,
+        egui::pos2(
+            rect.left() + rect.width() * progress.max(0.08),
+            rect.bottom(),
+        ),
+    );
+    ui.painter().rect_filled(fill, 2.0, c.accent);
+    ui.label(
+        egui::RichText::new(label)
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .color(c.text_dim),
+    );
 }
 
 /// Delta chips: latest run's measurements against the previous run.
@@ -276,34 +307,19 @@ fn strip_dot_command<'a>(line: &'a str, command: &str) -> Option<&'a str> {
 /// run set drops the request — the tuner's live loop must not spam the
 /// controller's empty-set warning on every slider move.
 pub(super) fn request_run(state: &mut AppState) {
-    if state.sim_setup.enabled.is_empty() {
-        return;
-    }
     if state.simulation.is_running {
+        state.simulation.run_intent = crate::state::SimulationRunIntent::ManualDeck;
         state.shell.netlist.rerun_queued = true;
     } else {
-        state.simulation.trigger_simulation = true;
+        state.simulation.request_manual_deck();
     }
 }
 
 /// Fire a queued re-run once the engine is idle (live-tuning loop).
 fn flush_queued_run(state: &mut AppState) {
-    if state.shell.netlist.rerun_queued
-        && !state.simulation.is_running
-        && !state.sim_setup.enabled.is_empty()
-    {
+    if state.shell.netlist.rerun_queued && !state.simulation.is_running {
         state.shell.netlist.rerun_queued = false;
-        state.simulation.trigger_simulation = true;
-    }
-}
-
-/// Clear the diff pips when a run lands — the run baselines the edits.
-fn sync_run_baseline(state: &mut AppState) {
-    let version = state.simulation.data_version;
-    let netlist = &mut state.shell.netlist;
-    if netlist.seen_data_version != version {
-        netlist.seen_data_version = version;
-        netlist.edited_lines.clear();
+        state.simulation.request_manual_deck();
     }
 }
 
@@ -324,5 +340,77 @@ fn regenerate(state: &mut AppState) {
             crate::panels::LogSource::Netlist,
             crate::common::app::ConsoleMessage::warning(warning.clone()),
         );
+    }
+}
+
+#[cfg(test)]
+mod run_intent_tests {
+    use super::*;
+    use crate::state::SimulationRunIntent;
+
+    #[test]
+    fn netlist_run_uses_manual_deck_intent_without_simulate_run_set() {
+        let mut state = AppState::default();
+        state.sim_setup.enabled.clear();
+        state.workspace.netlist_source = Some("V1 in 0 1\n.op\n.end\n".to_owned());
+        state.simulation.netlist_content = state.workspace.netlist_source.clone().unwrap();
+
+        request_run(&mut state);
+
+        assert!(state.simulation.trigger_simulation);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::ManualDeck);
+        assert!(!state.shell.netlist.rerun_queued);
+    }
+
+    #[test]
+    fn queued_netlist_rerun_preserves_manual_deck_intent() {
+        let mut state = AppState::default();
+        state.sim_setup.enabled.clear();
+        state.workspace.netlist_source = Some("V1 in 0 1\n.tran 1n 10n\n.end\n".to_owned());
+        state.simulation.netlist_content = state.workspace.netlist_source.clone().unwrap();
+        state.simulation.is_running = true;
+
+        request_run(&mut state);
+
+        assert!(!state.simulation.trigger_simulation);
+        assert!(state.shell.netlist.rerun_queued);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::ManualDeck);
+
+        state.simulation.is_running = false;
+        flush_queued_run(&mut state);
+
+        assert!(state.simulation.trigger_simulation);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::ManualDeck);
+        assert!(!state.shell.netlist.rerun_queued);
+    }
+
+    #[test]
+    fn run_set_request_records_run_set_intent() {
+        let mut state = AppState::default();
+        state.simulation.request_manual_deck();
+
+        state.simulation.request_run_set();
+
+        assert!(state.simulation.trigger_simulation);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::RunSet);
+    }
+
+    #[test]
+    fn explicit_run_set_request_drops_stale_manual_rerun() {
+        let mut state = AppState::default();
+        state.workspace.netlist_source = Some("V1 in 0 1\n.op\n.end\n".to_owned());
+        state.simulation.is_running = true;
+
+        request_run(&mut state);
+
+        assert!(state.shell.netlist.rerun_queued);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::ManualDeck);
+
+        state.simulation.is_running = false;
+        state.request_run_set_simulation();
+
+        assert!(!state.shell.netlist.rerun_queued);
+        assert!(state.simulation.trigger_simulation);
+        assert_eq!(state.simulation.run_intent, SimulationRunIntent::RunSet);
     }
 }

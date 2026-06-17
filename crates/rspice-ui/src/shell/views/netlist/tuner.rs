@@ -6,15 +6,19 @@
 //! (queued behind the running engine), "on release" on commit. Values are
 //! written back in SPICE notation (`Meg` = 1e6, `m` = 1e-3).
 
+use std::collections::HashMap;
+
 use egui::Ui;
 
 use crate::common::AppState;
 use crate::properties::engineering::{format_engineering_value, parse_engineering_value};
+use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, section_header};
 
 /// One tunable row: a `.param` assignment found in the buffer.
+#[derive(Clone)]
 struct ParamRow {
     name: String,
     /// 0-based buffer line carrying the assignment.
@@ -23,6 +27,10 @@ struct ParamRow {
     value: Option<f64>,
     /// Raw value text, for the expression readout.
     raw: String,
+    /// Optional explicit slider range from a preceding `* @tune` annotation.
+    range: Option<(f64, f64)>,
+    /// Last successful run's numeric value for this parameter.
+    baseline: Option<f64>,
 }
 
 /// Render the tuner right panel (Netlist workspace).
@@ -51,7 +59,15 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     });
     ui.add_space(6.0);
 
-    let rows = scan_params(&state.simulation.netlist_content);
+    let mut rows = scan_params(&state.simulation.netlist_content);
+    for row in &mut rows {
+        row.baseline = state
+            .shell
+            .netlist
+            .last_run_params
+            .get(&row.name.to_ascii_lowercase())
+            .copied();
+    }
     if rows.is_empty() {
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -68,7 +84,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     // row loop so the scan stays consistent within the frame.
     let mut write: Option<(ParamRow, f64, bool)> = None;
 
-    for row in rows {
+    for row in &rows {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add_space(8.0);
@@ -84,7 +100,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                     None => row.raw.clone(),
                 };
                 let color = if row.value.is_some() {
-                    c.traces[1]
+                    match (row.value, row.baseline) {
+                        (Some(value), Some(baseline))
+                            if (value - baseline).abs() > f64::EPSILON =>
+                        {
+                            c.accent
+                        }
+                        _ => c.traces[1],
+                    }
                 } else {
                     c.text_faint
                 };
@@ -100,11 +123,13 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             continue; // expression-bound: readout only
         };
 
-        let (lo, hi) = slider_range(state, &row.name, value);
+        let (lo, hi) = row
+            .range
+            .unwrap_or_else(|| slider_range(state, &row.name, value));
         let mut slider_value = value;
         ui.horizontal(|ui| {
             ui.add_space(8.0);
-            ui.spacing_mut().slider_width = (ui.available_width() - 16.0).max(80.0);
+            ui.spacing_mut().slider_width = (ui.available_width() - 24.0).clamp(80.0, 220.0);
             let logarithmic = lo > 0.0;
             let response = ui.add(
                 egui::Slider::new(&mut slider_value, lo..=hi)
@@ -113,15 +138,38 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             );
             if response.changed() && slider_value != value {
                 let fire = state.shell.netlist.tuner_live;
-                write = Some((row, slider_value, fire));
+                write = Some((row.clone(), slider_value, fire));
             } else if response.drag_stopped() && !state.shell.netlist.tuner_live {
-                write = Some((row, slider_value, true));
+                write = Some((row.clone(), slider_value, true));
             }
         });
     }
 
     if let Some((row, new_value, fire_run)) = write {
         apply_param_edit(ui, state, &row, new_value, fire_run);
+    }
+
+    ui.add_space(8.0);
+    let reset_clicked = crate::ui::widgets::Button::new("reset to last run")
+        .enabled(!state.shell.netlist.last_run_params.is_empty())
+        .show(ui)
+        .clicked();
+    if reset_clicked {
+        let values = reset_values(&rows, &state.shell.netlist.last_run_params);
+        let changed = !values.is_empty();
+        for (name, value) in values {
+            if let Some(row) = rows.iter().find(|row| row.name.eq_ignore_ascii_case(&name)) {
+                apply_param_edit(ui, state, row, value, false);
+            }
+        }
+        if changed {
+            super::request_run(state);
+        }
+    }
+
+    if let Some(summary) = super::summary::active_run_summary(state) {
+        render_mini_bode(ui, state, &summary);
+        render_as_tuned(ui, &summary);
     }
 }
 
@@ -216,10 +264,147 @@ pub(super) fn buffer_assignments(buffer: &str) -> Vec<(String, usize, usize)> {
         .collect()
 }
 
+fn reset_values(rows: &[ParamRow], baseline: &HashMap<String, f64>) -> Vec<(String, f64)> {
+    rows.iter()
+        .filter(|row| row.value.is_some())
+        .filter_map(|row| {
+            baseline
+                .get(&row.name.to_ascii_lowercase())
+                .map(|value| (row.name.clone(), *value))
+        })
+        .collect()
+}
+
+fn render_mini_bode(
+    ui: &mut Ui,
+    state: &mut AppState,
+    summary: &super::summary::NetlistRunSummary,
+) {
+    let Some((&x0, &x1)) = summary
+        .frequency
+        .first()
+        .zip(summary.frequency.last())
+        .filter(|(lo, hi)| **lo > 0.0 && **hi > **lo)
+    else {
+        return;
+    };
+    let (g_min, g_max) = summary.stability.gain_extremes.unwrap_or((-20.0, 20.0));
+    let pad = ((g_max - g_min) * 0.12).max(6.0);
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+
+    ui.add_space(8.0);
+    ui.allocate_ui(egui::vec2(ui.available_width(), 130.0), |ui| {
+        let mut spec = PlotSpec::new(
+            Axis::log_decades(x0, x1, "Hz"),
+            XScale::Log10,
+            Axis::linear(g_min - pad, g_max + pad, "dB"),
+        );
+        spec.left_margin = 42.0;
+        spec.ref_lines.push(plot::RefLine { y: 0.0 });
+        spec.traces.push(
+            Trace::new(&summary.frequency, &summary.gain_db, c.traces[0])
+                .thin()
+                .cache_key(0x4E45_544C_4953_5401),
+        );
+        if let Some(ugf) = summary.stability.ugf {
+            spec.markers.push(plot::Marker {
+                x: ugf,
+                y: 0.0,
+                side: plot::YSide::Left,
+                color: c.accent,
+                label: "UGF".to_string(),
+                drop_line: true,
+                label_dy: 0.0,
+            });
+        }
+        plot::show(ui, &spec, &mut state.shell.results.cache, None, None);
+    });
+}
+
+fn render_as_tuned(ui: &mut Ui, summary: &super::summary::NetlistRunSummary) {
+    section_header(ui, "As tuned", None);
+    let rows = [
+        (
+            "ADC",
+            fmt_opt(summary.stability.adc_db, |v| format!("{v:.1} dB")),
+            false,
+        ),
+        (
+            "UGF",
+            fmt_opt(summary.stability.ugf, |v| fmt_si(v, "Hz", 2)),
+            true,
+        ),
+        (
+            "PM",
+            fmt_opt(summary.stability.pm_deg, |v| format!("{v:.1} deg")),
+            true,
+        ),
+        (
+            "GM",
+            fmt_opt(summary.stability.gm_db, |v| format!("{v:.1} dB")),
+            false,
+        ),
+        (
+            "f3dB",
+            fmt_opt(summary.stability.f3db, |v| fmt_si(v, "Hz", 1)),
+            false,
+        ),
+        (
+            "f180",
+            fmt_opt(summary.stability.f180, |v| fmt_si(v, "Hz", 1)),
+            false,
+        ),
+    ];
+    let t = Tokens::get(ui.ctx());
+    for (name, value, highlight) in rows {
+        ui.horizontal(|ui| {
+            ui.add_space(8.0);
+            ui.label(
+                egui::RichText::new(name)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_dim),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(value)
+                        .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                        .color(if highlight {
+                            t.color.accent
+                        } else {
+                            t.color.text
+                        }),
+                );
+            });
+        });
+    }
+}
+
+fn fmt_opt(value: Option<f64>, f: impl FnOnce(f64) -> String) -> String {
+    value.map(f).unwrap_or_else(|| "-".to_string())
+}
+
+pub(crate) fn scan_assignments_for_baseline(line: &str) -> Option<Vec<(String, usize, usize)>> {
+    scan_assignments(line)
+}
+
 /// All `.param` rows in the buffer.
 fn scan_params(buffer: &str) -> Vec<ParamRow> {
     let mut rows = Vec::new();
+    let mut named_ranges: HashMap<String, (f64, f64)> = HashMap::new();
+    let mut pending_next_range: Option<(f64, f64)> = None;
+
     for (idx, line) in buffer.lines().enumerate() {
+        if let Some((name, range)) = parse_tune_comment(line) {
+            if let Some(name) = name {
+                named_ranges.insert(name, range);
+            } else {
+                pending_next_range = Some(range);
+            }
+            continue;
+        }
+
         let Some(assignments) = scan_assignments(line) else {
             continue;
         };
@@ -230,15 +415,37 @@ fn scan_params(buffer: &str) -> Vec<ParamRow> {
             } else {
                 parse_engineering_value(&raw).ok()
             };
+            let key = name.to_ascii_lowercase();
+            let range = named_ranges
+                .remove(&key)
+                .or_else(|| pending_next_range.take());
             rows.push(ParamRow {
                 name,
                 line: idx,
                 value,
                 raw,
+                range,
+                baseline: None,
             });
         }
     }
     rows
+}
+
+fn parse_tune_comment(line: &str) -> Option<(Option<String>, (f64, f64))> {
+    let text = line.trim_start().strip_prefix('*')?.trim();
+    let tail = text.strip_prefix("@tune")?.trim();
+    let mut parts = tail.split_whitespace();
+    let first = parts.next()?;
+    let (name, range_text) = if first.contains("..") {
+        (None, first)
+    } else {
+        (Some(first.to_ascii_lowercase()), parts.next()?)
+    };
+    let (lo, hi) = range_text.split_once("..")?;
+    let lo = parse_engineering_value(lo).ok()?;
+    let hi = parse_engineering_value(hi).ok()?;
+    (hi > lo).then_some((name, (lo, hi)))
 }
 
 /// Parse a `.param` line into `(name, value_start, value_end)` triples
@@ -344,5 +551,31 @@ mod tests {
         let line = ".param a=1 b=2";
         let span = value_span(line, "B").expect("case-insensitive match");
         assert_eq!(&line[span.0..span.1], "2");
+    }
+
+    #[test]
+    fn tune_annotation_by_name_sets_exact_range() {
+        let rows = scan_params("* @tune itail 5u..60u\n.param itail=20u\n");
+        assert_range_close(rows[0].range, (5e-6, 60e-6));
+    }
+
+    #[test]
+    fn tune_annotation_before_param_targets_next_assignment() {
+        let rows = scan_params("* @tune 0.5p..8p\n.param cl=2p\n");
+        assert_range_close(rows[0].range, (0.5e-12, 8e-12));
+    }
+
+    #[test]
+    fn reset_payload_uses_last_run_values_only_for_numeric_params() {
+        let rows = scan_params(".param a=2 b={expr}\n");
+        let mut baseline = std::collections::HashMap::new();
+        baseline.insert("a".to_string(), 1.0);
+        assert_eq!(reset_values(&rows, &baseline), vec![("a".to_string(), 1.0)]);
+    }
+
+    fn assert_range_close(actual: Option<(f64, f64)>, expected: (f64, f64)) {
+        let actual = actual.expect("range");
+        assert!((actual.0 - expected.0).abs() <= expected.0.abs() * 1e-12);
+        assert!((actual.1 - expected.1).abs() <= expected.1.abs() * 1e-12);
     }
 }
