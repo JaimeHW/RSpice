@@ -3,9 +3,17 @@
 
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_TEST_DIR: AtomicUsize = AtomicUsize::new(0);
 
 fn test_dir() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("rspice_multi_analysis_{}", std::process::id()));
+    let id = NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!(
+        "rspice_multi_analysis_{}_{}",
+        std::process::id(),
+        id
+    ));
     std::fs::create_dir_all(&dir).expect("create test dir");
     dir
 }
