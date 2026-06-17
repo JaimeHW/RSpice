@@ -33,4 +33,5 @@ Thumbs.db
 /diagnostics/
 design/tools/marks_out.txt
 .agent/
+.worktrees/
 /_site
