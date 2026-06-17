@@ -5,15 +5,15 @@
 //! resolver the runner uses; the squiggle (underline), the gutter pip,
 //! and the bottom strip all read that single vector.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 
-use egui::Ui;
+use egui::{Color32, Ui};
 
 use crate::common::AppState;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 
-use super::{Diagnostic, completion, highlight};
+use super::{Diagnostic, DiagnosticSeverity, baseline, completion, diagnostics, highlight};
 
 /// Editor body font size (gutter follows it).
 const FONT_SIZE: f32 = 12.5;
@@ -52,14 +52,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let editor_h = (ui.available_height() - strip_h).max(60.0);
 
     let font = theme::mono(FONT_SIZE, FontWeight::Regular);
-    let error_lines: HashSet<usize> = state
-        .shell
-        .netlist
-        .diagnostics
+    let diagnostics = state.shell.netlist.diagnostics.clone();
+    let diagnostic_lines: HashMap<usize, DiagnosticSeverity> = diagnostics
         .iter()
-        .filter_map(|d| d.line)
-        .collect();
-    let edited_lines = state.shell.netlist.edited_lines.clone();
+        .filter_map(|d| d.line.map(|line| (line, d.severity)))
+        .fold(HashMap::new(), |mut acc, (line, severity)| {
+            acc.entry(line)
+                .and_modify(|current| *current = (*current).max(severity))
+                .or_insert(severity);
+            acc
+        });
+    let edited_lines = if state.shell.netlist.last_run_buffer.is_some() {
+        baseline::changed_lines_since_baseline(
+            &state.simulation.netlist_content,
+            state.shell.netlist.last_run_buffer.as_deref(),
+        )
+    } else {
+        state.shell.netlist.edited_lines.clone()
+    };
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
@@ -67,7 +77,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let layouter_font = font.clone();
     let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
-        let job = highlight::layout_job(text, layouter_font.clone(), &c, &error_lines);
+        let job = highlight::layout_job(text, layouter_font.clone(), &c, &diagnostics);
         ui.fonts(|fonts| fonts.layout_job(job))
     };
 
@@ -111,8 +121,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     if !ui.clip_rect().y_range().contains(y) {
                         continue;
                     }
-                    let color = if error_lines.contains(&idx) {
-                        c.err
+                    let severity = diagnostic_lines.get(&idx).copied();
+                    let color = if let Some(severity) = severity {
+                        severity_color(&c, severity)
                     } else if idx == cursor_line {
                         c.text_dim
                     } else {
@@ -125,8 +136,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                         gutter_font.clone(),
                         color,
                     );
-                    if error_lines.contains(&idx) {
-                        painter.circle_filled(egui::pos2(origin.x - 12.0, y), 2.5, c.err);
+                    if let Some(severity) = severity {
+                        painter.circle_filled(
+                            egui::pos2(origin.x - 12.0, y),
+                            2.5,
+                            severity_color(&c, severity),
+                        );
                     } else if edited_lines.contains(&idx) {
                         painter.circle_filled(egui::pos2(origin.x - 12.0, y), 2.5, c.accent);
                     }
@@ -200,19 +215,32 @@ fn diagnostics_strip(ui: &mut Ui, state: &AppState, rows: usize) {
         .enumerate()
     {
         let y = rect.top() + 5.0 + idx as f32 * 22.0 + 11.0;
+        let sev_color = severity_color(&c, diagnostic.severity);
         ui.painter()
-            .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, c.err);
+            .circle_filled(egui::pos2(rect.left() + 14.0, y), 2.5, sev_color);
         let location = diagnostic
             .line
-            .map(|line| format!("line {} · ", line + 1))
+            .map(|line| match diagnostic.column {
+                Some(column) => format!("line {}:{} · ", line + 1, column + 1),
+                None => format!("line {} · ", line + 1),
+            })
             .unwrap_or_default();
         ui.painter().text(
             egui::pos2(rect.left() + 26.0, y),
             egui::Align2::LEFT_CENTER,
             format!("{location}{}", diagnostic.message),
             theme::mono(tokens::FS_0, FontWeight::Regular),
-            c.err,
+            sev_color,
         );
+        if let Some(fix) = &diagnostic.fix {
+            ui.painter().text(
+                egui::pos2(rect.right() - 16.0, y),
+                egui::Align2::RIGHT_CENTER,
+                fix.label.as_str(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                c.accent,
+            );
+        }
     }
 }
 
@@ -253,22 +281,41 @@ fn refresh_diagnostics(ui: &Ui, state: &mut AppState) {
 /// IO; errors inside included files still surface at run time.
 fn parse_buffer(buffer: &str) -> (Vec<Diagnostic>, Option<Vec<completion::SymbolEntry>>) {
     match rspice_core::Netlist::parse(buffer) {
-        Ok(netlist) => (Vec::new(), Some(harvest_symbols(&netlist))),
+        Ok(netlist) => (
+            diagnostics::unknown_reference_diagnostics(buffer),
+            Some(harvest_symbols(&netlist)),
+        ),
         Err(rspice_core::netlist::ParseError::Syntax { line, message }) => (
             vec![Diagnostic {
                 // Parser lines are 1-based; `line == 0` means "unlocated".
+                severity: DiagnosticSeverity::Error,
+                span: None,
                 line: line.checked_sub(1),
+                column: None,
                 message,
+                fix: None,
             }],
             None,
         ),
         Err(other) => (
             vec![Diagnostic {
+                severity: DiagnosticSeverity::Error,
+                span: None,
                 line: None,
+                column: None,
                 message: other.to_string(),
+                fix: None,
             }],
             None,
         ),
+    }
+}
+
+fn severity_color(c: &crate::ui::palette::Palette, severity: DiagnosticSeverity) -> Color32 {
+    match severity {
+        DiagnosticSeverity::Error => c.err,
+        DiagnosticSeverity::Warning => c.warn,
+        DiagnosticSeverity::Info => c.text_dim,
     }
 }
 

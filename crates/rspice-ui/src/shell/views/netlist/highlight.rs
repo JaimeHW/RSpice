@@ -6,49 +6,40 @@
 //! green. Lines carrying a parse diagnostic are underlined in the error
 //! color — same source of truth as the gutter pip and the bottom strip.
 
-use std::collections::HashSet;
-
 use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Stroke};
 
 use crate::ui::palette::Palette;
 
+use super::{Diagnostic, DiagnosticSeverity};
+
 /// Build the highlighted layout job for the whole buffer. The job's text
 /// must equal `text` exactly — `TextEdit` maps cursor positions onto it.
-pub fn layout_job(
-    text: &str,
-    font: FontId,
-    c: &Palette,
-    error_lines: &HashSet<usize>,
-) -> LayoutJob {
+pub fn layout_job(text: &str, font: FontId, c: &Palette, diagnostics: &[Diagnostic]) -> LayoutJob {
     let mut job = LayoutJob {
         break_on_newline: true,
         ..Default::default()
     };
     job.wrap.max_width = f32::INFINITY;
 
+    let line_starts = line_start_offsets(text);
     let segments: Vec<&str> = text.split('\n').collect();
     let last = segments.len().saturating_sub(1);
     for (line_idx, line) in segments.iter().enumerate() {
-        let underline = if error_lines.contains(&line_idx) {
-            Stroke::new(1.0, c.err)
-        } else {
-            Stroke::NONE
-        };
+        let line_ranges = diagnostic_ranges_for_line(
+            line_idx,
+            line.len(),
+            line_starts.get(line_idx).copied().unwrap_or(0),
+            diagnostics,
+            c,
+        );
+        let mut col = 0usize;
         let mut push = |job: &mut LayoutJob, span: &str, color: Color32| {
             if span.is_empty() {
                 return;
             }
-            job.append(
-                span,
-                0.0,
-                TextFormat {
-                    font_id: font.clone(),
-                    color,
-                    underline,
-                    ..Default::default()
-                },
-            );
+            append_with_diagnostic_underlines(job, span, col, &line_ranges, font.clone(), color);
+            col += span.len();
         };
         highlight_line(&mut job, line, c, &mut push);
         if line_idx != last {
@@ -65,6 +56,126 @@ pub fn layout_job(
         }
     }
     job
+}
+
+#[derive(Clone)]
+struct DiagnosticLineRange {
+    range: std::ops::Range<usize>,
+    color: Color32,
+}
+
+fn diagnostic_ranges_for_line(
+    line_idx: usize,
+    line_len: usize,
+    line_start: usize,
+    diagnostics: &[Diagnostic],
+    c: &Palette,
+) -> Vec<DiagnosticLineRange> {
+    diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.line == Some(line_idx))
+        .filter_map(|diagnostic| {
+            let color = severity_color(c, diagnostic.severity);
+            match &diagnostic.span {
+                Some(span) => {
+                    let start = span.start.saturating_sub(line_start).min(line_len);
+                    let end = span.end.saturating_sub(line_start).min(line_len);
+                    (start < end).then_some(DiagnosticLineRange {
+                        range: start..end,
+                        color,
+                    })
+                }
+                None => Some(DiagnosticLineRange {
+                    range: 0..line_len,
+                    color,
+                }),
+            }
+        })
+        .collect()
+}
+
+fn append_with_diagnostic_underlines(
+    job: &mut LayoutJob,
+    span: &str,
+    line_col: usize,
+    diagnostics: &[DiagnosticLineRange],
+    font: FontId,
+    color: Color32,
+) {
+    if diagnostics.is_empty() {
+        append_text(job, span, font, color, Stroke::NONE);
+        return;
+    }
+
+    let mut cuts = vec![0usize, span.len()];
+    for diagnostic in diagnostics {
+        let local_start = diagnostic
+            .range
+            .start
+            .saturating_sub(line_col)
+            .min(span.len());
+        let local_end = diagnostic
+            .range
+            .end
+            .saturating_sub(line_col)
+            .min(span.len());
+        if local_start < local_end {
+            if span.is_char_boundary(local_start) {
+                cuts.push(local_start);
+            }
+            if span.is_char_boundary(local_end) {
+                cuts.push(local_end);
+            }
+        }
+    }
+    cuts.sort_unstable();
+    cuts.dedup();
+
+    for pair in cuts.windows(2) {
+        let start = pair[0];
+        let end = pair[1];
+        if start == end {
+            continue;
+        }
+        let midpoint = line_col + start + (end - start) / 2;
+        let underline = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.range.contains(&midpoint))
+            .map(|diagnostic| Stroke::new(1.0, diagnostic.color))
+            .unwrap_or(Stroke::NONE);
+        append_text(job, &span[start..end], font.clone(), color, underline);
+    }
+}
+
+fn append_text(job: &mut LayoutJob, span: &str, font: FontId, color: Color32, underline: Stroke) {
+    job.append(
+        span,
+        0.0,
+        TextFormat {
+            font_id: font,
+            color,
+            underline,
+            ..Default::default()
+        },
+    );
+}
+
+fn line_start_offsets(text: &str) -> Vec<usize> {
+    let mut starts = vec![0usize];
+    for (idx, ch) in text.char_indices() {
+        if ch == '\n' {
+            starts.push(idx + ch.len_utf8());
+        }
+    }
+    starts
+}
+
+fn severity_color(c: &Palette, severity: DiagnosticSeverity) -> Color32 {
+    match severity {
+        DiagnosticSeverity::Error => c.err,
+        DiagnosticSeverity::Warning => c.warn,
+        DiagnosticSeverity::Info => c.text_dim,
+    }
 }
 
 /// Append one line's tokens to the job.
