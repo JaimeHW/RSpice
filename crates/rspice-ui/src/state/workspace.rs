@@ -122,6 +122,18 @@ impl OpenCellView {
     }
 }
 
+fn is_schematic_like(view_type: ViewType) -> bool {
+    matches!(view_type, ViewType::Schematic | ViewType::Testbench)
+}
+
+fn library_view_type(libraries: &LibraryManager, reference: &CellViewRef) -> Option<ViewType> {
+    libraries
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| view.view_type)
+}
+
 /// One specification bound for a `.MEAS` result — a row of the specs
 /// matrix. At least one of `min`/`max` is normally set; a spec with
 /// neither still pins the measurement as a tracked row (value-only).
@@ -218,25 +230,35 @@ impl ProjectWorkspace {
             self.active_view.view = DEFAULT_SCHEMATIC_VIEW.to_string();
         }
 
+        let active_view_type = self
+            .open_views
+            .iter()
+            .find(|open| open.reference == self.active_view)
+            .map(|open| open.view_type)
+            .or_else(|| library_view_type(libraries, &self.active_view))
+            .unwrap_or(ViewType::Schematic);
+
         ensure_cell_view(
             libraries,
             &self.active_view.library,
             &self.active_view.cell,
             &self.active_view.view,
-            ViewType::Schematic,
+            active_view_type,
         );
 
         if self.open_views.is_empty() {
             self.open_views.push(OpenCellView::new(
                 self.active_view.clone(),
-                ViewType::Schematic,
+                active_view_type,
             ));
         }
         if self.hierarchy_stack.is_empty() {
             self.hierarchy_stack.push(self.active_view.clone());
         }
 
-        self.ensure_active_buffer();
+        if is_schematic_like(active_view_type) {
+            self.ensure_active_buffer();
+        }
         libraries.select_view(
             &self.active_view.library,
             &self.active_view.cell,
@@ -269,7 +291,26 @@ impl ProjectWorkspace {
         self.schematic_buffers.get(&self.active_key())
     }
 
+    pub fn active_schematic_reference(&self) -> CellViewRef {
+        if self.active_view_type() == ViewType::Symbol {
+            return CellViewRef::new(
+                &self.active_view.library,
+                &self.active_view.cell,
+                DEFAULT_SCHEMATIC_VIEW,
+            );
+        }
+        self.active_view.clone()
+    }
+
+    pub fn active_context_schematic(&self) -> Option<&SchematicState> {
+        let reference = self.active_schematic_reference();
+        self.schematic_buffers.get(&reference.key())
+    }
+
     pub fn save_active_schematic(&mut self, schematic: &SchematicState) {
+        if !is_schematic_like(self.active_view_type()) {
+            return;
+        }
         let key = self.active_key();
         self.schematic_buffers.insert(key, schematic.clone());
         self.set_active_dirty(schematic.is_dirty);
@@ -302,7 +343,7 @@ impl ProjectWorkspace {
             self.open_views
                 .push(OpenCellView::new(reference.clone(), view_type));
         }
-        if matches!(view_type, ViewType::Schematic | ViewType::Testbench) {
+        if is_schematic_like(view_type) {
             self.schematic_buffers.entry(reference.key()).or_default();
         }
     }
@@ -468,6 +509,10 @@ mod tests {
         CellViewRef::new("work", cell, "schematic")
     }
 
+    fn symbol_reference(cell: &str) -> CellViewRef {
+        CellViewRef::new("work", cell, "symbol")
+    }
+
     #[test]
     fn descend_records_the_instance_names() {
         let mut workspace = ProjectWorkspace::default();
@@ -504,5 +549,56 @@ mod tests {
         // Simulate an older save: stack grew without instance labels.
         workspace.hierarchy_stack.push(reference("ota_5t"));
         assert_eq!(workspace.occurrence_labels(), ["tb_ota", "ota_5t"]);
+    }
+
+    #[test]
+    fn symbol_active_view_does_not_allocate_schematic_buffer() {
+        let reference = symbol_reference("ota_5t");
+        let mut workspace = ProjectWorkspace {
+            active_view: reference.clone(),
+            open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
+            hierarchy_stack: vec![reference.clone()],
+            schematic_buffers: HashMap::new(),
+            ..ProjectWorkspace::default()
+        };
+        let mut libraries = LibraryManager::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("ota_5t");
+        cell.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        workspace.ensure_library_model(&mut libraries);
+
+        assert_eq!(workspace.active_view_type(), ViewType::Symbol);
+        assert!(
+            !workspace.schematic_buffers.contains_key(&reference.key()),
+            "symbol views must not be backed by stale schematic buffers"
+        );
+        let symbol_view = libraries
+            .get_library("work")
+            .and_then(|library| library.get_cell("ota_5t"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("symbol view still exists");
+        assert_eq!(symbol_view.view_type, ViewType::Symbol);
+    }
+
+    #[test]
+    fn saving_while_symbol_active_does_not_create_symbol_schematic_buffer() {
+        let reference = symbol_reference("ota_5t");
+        let mut workspace = ProjectWorkspace {
+            active_view: reference.clone(),
+            open_views: vec![OpenCellView::new(reference.clone(), ViewType::Symbol)],
+            hierarchy_stack: vec![reference.clone()],
+            schematic_buffers: HashMap::new(),
+            ..ProjectWorkspace::default()
+        };
+
+        workspace.save_active_schematic(&SchematicState::default());
+
+        assert!(
+            !workspace.schematic_buffers.contains_key(&reference.key()),
+            "session restore/save paths must not persist default schematics under symbol views"
+        );
     }
 }

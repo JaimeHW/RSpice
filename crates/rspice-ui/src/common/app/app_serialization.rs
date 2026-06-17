@@ -44,7 +44,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         let mut project_workspace = de.project_workspace;
         project_workspace.ensure_library_model(&mut library_manager);
         let schematic = project_workspace
-            .active_schematic()
+            .active_context_schematic()
             .cloned()
             .unwrap_or_default();
         // Re-verify the stored key; the grant itself is never trusted from disk.

@@ -175,12 +175,21 @@ impl RSpiceApp {
                 "Created cell '{}' in library '{}'",
                 name, library
             )));
-            if self.state.dialogs.new_cell_create_schematic {
+            let view_to_open = if self.state.dialogs.new_cell_create_schematic {
+                Some("schematic")
+            } else if self.state.dialogs.new_cell_create_symbol {
+                Some("symbol")
+            } else if self.state.dialogs.new_cell_create_testbench {
+                Some("testbench")
+            } else {
+                None
+            };
+            if let Some(view) = view_to_open {
                 self.state
                     .open_workspace_view(crate::state::CellViewRef::new(
                         library.clone(),
                         name.clone(),
-                        "schematic",
+                        view,
                     ));
             }
             self.state.dialogs.new_cell_error = None;

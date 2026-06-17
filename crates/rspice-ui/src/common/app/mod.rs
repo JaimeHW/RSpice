@@ -367,9 +367,14 @@ impl RSpiceApp {
 
         self.handle_shortcuts(ctx);
         self.simulation_controller.update(&mut self.state);
-        self.state
-            .workspace
-            .set_active_dirty(self.state.schematic.is_dirty);
+        if matches!(
+            self.state.workspace.active_view_type(),
+            crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+        ) {
+            self.state
+                .workspace
+                .set_active_dirty(self.state.schematic.is_dirty);
+        }
         self.sync_window_title(ctx);
         self.handle_image_export(ctx);
     }
@@ -377,7 +382,7 @@ impl RSpiceApp {
     /// Keep the OS window title (or browser tab title) in sync with the
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
-        let dirty = if self.state.schematic.is_dirty {
+        let dirty = if self.state.schematic.is_dirty || self.state.workspace.any_dirty() {
             "*"
         } else {
             ""

@@ -161,6 +161,9 @@ impl RSpiceApp {
     }
 
     pub(super) fn action_file_save(&mut self) -> bool {
+        if self.state.should_save_project_for_active_document() {
+            return crate::common::project_workflow::save_project(&mut self.state);
+        }
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
         crate::common::file_actions::action_file_save_with_io(state, io)
     }

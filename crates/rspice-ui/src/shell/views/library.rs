@@ -107,14 +107,22 @@ fn visible_views(state: &AppState) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Open a view in the workspace if it carries schematic content.
+/// Whether a Library/Cell/View document opens in the Schematic-family editor.
+fn is_workspace_openable(view_type: ViewType) -> bool {
+    matches!(
+        view_type,
+        ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
+    )
+}
+
+/// Open a view in the workspace if it carries design-editor content.
 fn open_view_if_editable(state: &mut AppState, library: &str, cell: &str, view: &str) {
     let openable = state
         .library_manager
         .get_library(library)
         .and_then(|lib| lib.get_cell(cell))
         .and_then(|c| c.views_sorted().iter().find(|v| v.name == view).copied())
-        .is_some_and(|v| matches!(v.view_type, ViewType::Schematic | ViewType::Testbench));
+        .is_some_and(|v| is_workspace_openable(v.view_type));
     if openable {
         state.open_workspace_view(CellViewRef {
             library: library.to_owned(),
@@ -127,6 +135,21 @@ fn open_view_if_editable(state: &mut AppState, library: &str, cell: &str, view: 
 
 /// Keyboard navigation: ↑↓ move within the focused column, ←→ hop columns,
 /// Enter opens. Inert while any text field (the filter) has focus.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn symbol_views_are_schematic_family_openable() {
+        assert!(is_workspace_openable(ViewType::Schematic));
+        assert!(is_workspace_openable(ViewType::Testbench));
+        assert!(is_workspace_openable(ViewType::Symbol));
+        assert!(!is_workspace_openable(ViewType::Layout));
+        assert!(!is_workspace_openable(ViewType::VerilogA));
+        assert!(!is_workspace_openable(ViewType::Spice));
+    }
+}
+
 fn handle_keyboard_nav(ui: &Ui, state: &mut AppState) {
     if ui.ctx().wants_keyboard_input() {
         return;
@@ -461,8 +484,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                             state.library_manager.selected_view.as_deref() == Some(name.as_str());
                         // Schematic-content views open in the editor; the rest
                         // say so instead of staying silent.
-                        let openable =
-                            matches!(view_type, ViewType::Schematic | ViewType::Testbench);
+                        let openable = is_workspace_openable(view_type);
                         let meta = if openable {
                             "double-click to open"
                         } else {

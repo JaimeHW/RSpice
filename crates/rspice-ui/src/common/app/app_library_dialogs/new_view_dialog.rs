@@ -151,7 +151,9 @@ impl RSpiceApp {
                 )));
                 if matches!(
                     view_type,
-                    crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
+                    crate::state::ViewType::Schematic
+                        | crate::state::ViewType::Testbench
+                        | crate::state::ViewType::Symbol
                 ) {
                     self.state
                         .open_workspace_view(crate::state::CellViewRef::new(
