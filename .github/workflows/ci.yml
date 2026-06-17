@@ -23,6 +23,10 @@ jobs:
     name: Build & test (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,6 +35,8 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --workspace --exclude rspice-python --exclude rspice-wasm
+      - name: Clear check artifacts before tests
+        run: cargo clean
       - name: Test (fast tier)
         # Skip only the vendored conformance suites (their test names start
         # with test_ngspice_ / test_full_ngspice). A bare "ngspice" filter
