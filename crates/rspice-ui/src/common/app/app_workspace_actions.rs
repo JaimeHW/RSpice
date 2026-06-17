@@ -165,14 +165,19 @@ fn log_severity_from_drc(severity: DrcSeverity) -> LogSeverity {
     }
 }
 
-fn symbol_snapshot_from_view(view: &View, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
+fn symbol_snapshot_from_view(
+    view: &View,
+    fallback: &SymbolDocument,
+    preserve_missing_metadata: bool,
+) -> SymbolDocumentSnapshot {
+    let symbol_document_metadata = match view.metadata.get(SYMBOL_DOCUMENT_METADATA_KEY) {
+        Some(encoded) => Some(encoded.clone()),
+        None if preserve_missing_metadata => None,
+        None => serde_json::to_string(fallback).ok(),
+    };
     SymbolDocumentSnapshot {
         document: fallback.clone(),
-        symbol_document_metadata: view
-            .metadata
-            .get(SYMBOL_DOCUMENT_METADATA_KEY)
-            .cloned()
-            .or_else(|| serde_json::to_string(fallback).ok()),
+        symbol_document_metadata,
         generated_metadata: view.metadata.get("generated").cloned(),
         ports_metadata: view.metadata.get("ports").cloned(),
     }
@@ -277,11 +282,19 @@ impl AppState {
 
     fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
         let reference = &self.workspace.active_view;
+        let current_document = self.load_active_symbol_document().ok();
         self.library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
-            .map(|view| symbol_snapshot_from_view(view, fallback))
+            .map(|view| {
+                let preserve_missing_metadata =
+                    !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+                        && current_document
+                            .as_ref()
+                            .is_some_and(|document| document == fallback);
+                symbol_snapshot_from_view(view, fallback, preserve_missing_metadata)
+            })
             .unwrap_or_else(|| SymbolDocumentSnapshot::from_document(fallback))
     }
 
@@ -1385,6 +1398,79 @@ mod tests {
             "undo should apply"
         );
 
+        let view = state
+            .library_manager
+            .get_library("work")
+            .and_then(|library| library.get_cell("amp"))
+            .and_then(|cell| cell.get_view("symbol"))
+            .expect("symbol view exists");
+        assert!(
+            !view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY),
+            "undo must restore the missing authored metadata state"
+        );
+        let resolver =
+            SymbolResolver::new(&state.library_manager, &state.workspace.schematic_buffers);
+        let resolved = resolver
+            .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
+            .expect("symbol resolves after undo");
+        assert!(matches!(resolved.source(), ResolvedSymbolSource::Generated));
+    }
+
+    #[test]
+    fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
+        let mut state = AppState::default();
+
+        let mut library = Library::new("work");
+        let mut amp = Cell::new("amp");
+        amp.add_view(View::new("schematic", ViewType::Schematic));
+        amp.add_view(View::new("symbol", ViewType::Symbol));
+        library.add_cell(amp);
+        state.library_manager.add_library(library);
+
+        let mut schematic = SchematicState::default();
+        let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
+        schematic
+            .components
+            .iter_mut()
+            .find(|component| component.id == port_id)
+            .expect("port exists")
+            .value = "IN".to_owned();
+        state.workspace.schematic_buffers.insert(
+            CellViewRef::new("work", "amp", "schematic").key(),
+            schematic,
+        );
+        state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+
+        let before = state
+            .load_active_symbol_document()
+            .expect("pre-edit fallback document loads");
+        assert!(
+            !state
+                .library_manager
+                .get_library("work")
+                .and_then(|library| library.get_cell("amp"))
+                .and_then(|cell| cell.get_view("symbol"))
+                .expect("symbol view exists")
+                .metadata
+                .contains_key(SYMBOL_DOCUMENT_METADATA_KEY)
+        );
+
+        state.record_symbol_edit(&before);
+        state
+            .store_active_symbol_document(&SymbolDocument {
+                body: vec![crate::state::SymbolShape::Dot {
+                    center: Point::origin(),
+                    radius: 3,
+                }],
+                ..before.clone()
+            })
+            .expect("first manual edit stores authored metadata");
+
+        assert!(
+            state
+                .undo_active_symbol_document()
+                .expect("undo first manual edit")
+        );
         let view = state
             .library_manager
             .get_library("work")
