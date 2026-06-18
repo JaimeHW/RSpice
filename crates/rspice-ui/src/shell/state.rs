@@ -536,6 +536,8 @@ pub struct ShellState {
     pub rail_tab: RailTab,
     /// Navigator kind segment: instances, nets or ports.
     pub nav_mode: NavMode,
+    /// Whether the root sheet row in the instance navigator is collapsed.
+    pub nav_sheet_collapsed: bool,
     /// Find-in-design query (filters instances, nets and ports together).
     pub nav_search: String,
     /// Instance rows expanded to peek into their masters (component ids).

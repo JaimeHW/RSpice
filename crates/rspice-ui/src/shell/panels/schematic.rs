@@ -740,6 +740,14 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
 
 /// Instance rows — selection-synced; cell instances peek on the twist and
 /// descend on double-click (the canvas gesture) or Shift+E.
+fn nav_sheet_instances_visible(state: &AppState, query: Option<&str>) -> bool {
+    query.is_some() || !state.shell.nav_sheet_collapsed
+}
+
+fn toggle_nav_sheet_collapsed(state: &mut AppState) {
+    state.shell.nav_sheet_collapsed = !state.shell.nav_sheet_collapsed;
+}
+
 fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -758,7 +766,16 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         }
     } else {
         let cell = state.workspace.active_view.cell.clone();
-        TreeRow::new(&cell).twist(true).meta("sheet 1/1").show(ui);
+        let sheet = TreeRow::new(&cell)
+            .twist(nav_sheet_instances_visible(state, query))
+            .meta("sheet 1/1")
+            .show(ui);
+        if sheet.response.clicked() {
+            toggle_nav_sheet_collapsed(state);
+        }
+        if !nav_sheet_instances_visible(state, query) {
+            return;
+        }
     }
 
     let mut clicked: Option<u64> = None;
