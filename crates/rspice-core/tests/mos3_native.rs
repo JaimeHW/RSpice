@@ -1,0 +1,249 @@
+//! RED oracle coverage for native Berkeley MOS3 (`LEVEL=3`) support.
+//!
+//! NGSpice 46 is the oracle. These tests intentionally exercise RSpice's
+//! parser-builder-solver path while MOS3 still routes through the old
+//! simplified short-channel fallback.
+
+use rspice_core::circuit::DeviceOpEntry;
+use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::netlist::Netlist;
+
+#[derive(Clone, Copy, Debug)]
+struct Mos3Oracle {
+    id: f64,
+    gm: f64,
+    gds: f64,
+    gmb: f64,
+    von: f64,
+    vdsat: f64,
+}
+
+// Source: ngspice 46 (`Spice64/bin/ngspice_con.exe -b`) with
+// `set numdgt=15`, `op`, and `wrdata ... @m1[cd] @m1[gm] @m1[gds]
+// @m1[gmbs] @m1[von] @m1[vdsat]` on the decks below.
+const NMOS_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 5.998_923_772_554_548e-4,
+    gm: 3.338_795_280_444_773e-4,
+    gds: 2.774_136_992_435_784e-5,
+    gmb: 8.255_266_123_075_666e-5,
+    von: 7.589_955_991_238_436e-1,
+    vdsat: 1.021_205_861_719_642,
+};
+
+const PMOS_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 2.425_515_462_863_035e-4,
+    gm: 2.238_898_944_121_671e-4,
+    gds: 5.790_721_317_550_307e-6,
+    gmb: 5.479_340_588_755_883e-5,
+    von: -8.859_415_882_320_186e-1,
+    vdsat: -8.895_065_062_528_498e-1,
+};
+
+const INVERSE_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: -3.769_762_713_788_676e-4,
+    gm: 2.713_347_600_497_562e-4,
+    gds: 3.513_830_768_749_185e-5,
+    gmb: 6.209_544_186_333_239e-5,
+    von: 5.823_279_980_055_280e-1,
+    vdsat: 7.111_305_398_000_489e-1,
+};
+
+const SHORT_VMAX_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 7.725_876_408_583_034e-4,
+    gm: 2.402_917_688_369_275e-4,
+    gds: 1.597_228_290_845_190e-4,
+    gmb: 6.283_097_653_109_673e-5,
+    von: -6.068_900_683_665_898e-1,
+    vdsat: 5.678_467_038_549_644e-1,
+};
+
+const SHORT_NO_VMAX_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 3.856_903_433_455_451e-3,
+    gm: 1.709_681_471_589_484e-3,
+    gds: 1.787_720_666_681_520e-3,
+    gmb: 3.443_365_047_746_089e-4,
+    von: -6.068_900_683_665_898e-1,
+    vdsat: 2.850_196_216_579_879,
+};
+
+const NMOS_DECK: &str = r#"
+* mos3_nmos_op
+M1 d g s b MOD W=12U L=1.2U
+VDS d 0 2.5
+VGS g 0 3.0
+VBS b 0 -0.6
+VS  s 0 0
+.MODEL MOD NMOS LEVEL=3 VTO=0.72 KP=55U GAMMA=0.62 PHI=0.68
++ TOX=22N LD=0.08U ETA=0.18 THETA=0.05 KAPPA=0.35
++ NFS=8E11 VMAX=8E4 XJ=0.18U DELTA=0.22
+.OP
+.END
+"#;
+
+const PMOS_DECK: &str = r#"
+* mos3_pmos_op
+M1 d g s b MOD W=18U L=1.5U
+VSD s 0 3.0
+VSG g 0 0.6
+VSB b 0 3.3
+VD  d 0 0.2
+.MODEL MOD PMOS LEVEL=3 VTO=-0.82 KP=32U GAMMA=0.55 PHI=0.7
++ TOX=24N LD=0.06U ETA=0.12 THETA=0.04 KAPPA=0.28
++ NFS=5E11 VMAX=7E4 XJ=0.2U DELTA=0.18
+.OP
+.END
+"#;
+
+const INVERSE_DECK: &str = r#"
+* mos3_inverse_mode
+M1 d g s b MOD W=10U L=1.0U
+VD d 0 0.15
+VG g 0 2.4
+VS s 0 1.8
+VB b 0 -0.2
+.MODEL MOD NMOS LEVEL=3 VTO=0.65 KP=70U GAMMA=0.5 PHI=0.65
++ TOX=20N LD=0.05U ETA=0.2 THETA=0.08 KAPPA=0.4
++ NFS=6E11 VMAX=6E4 XJ=0.15U DELTA=0.25
+.OP
+.END
+"#;
+
+const SHORT_VMAX_DECK: &str = r#"
+* mos3_short_channel_vmax
+M1 d g s b MOD W=8U L=0.6U
+VD d 0 2.2
+VG g 0 2.6
+VS s 0 0
+VB b 0 -0.4
+.MODEL MOD NMOS LEVEL=3 VTO=0.68 KP=70U GAMMA=0.58 PHI=0.68
++ TOX=18N LD=0.04U ETA=0.22 THETA=0.07 KAPPA=0.42
++ NFS=7E11 VMAX=6E4 XJ=0.12U DELTA=0.24
+.OP
+.END
+"#;
+
+const SHORT_NO_VMAX_DECK: &str = r#"
+* mos3_short_channel_no_vmax
+M1 d g s b MOD W=8U L=0.6U
+VD d 0 2.2
+VG g 0 2.6
+VS s 0 0
+VB b 0 -0.4
+.MODEL MOD NMOS LEVEL=3 VTO=0.68 KP=70U GAMMA=0.58 PHI=0.68
++ TOX=18N LD=0.04U ETA=0.22 THETA=0.07 KAPPA=0.42
++ NFS=7E11 VMAX=0 XJ=0.12U DELTA=0.24
+.OP
+.END
+"#;
+
+fn engine() -> Engine {
+    Engine::new(SimulationConfig::default())
+}
+
+fn assert_close(what: &str, actual: f64, expected: f64, rel: f64, abs: f64) {
+    let diff = (actual - expected).abs();
+    let tol = abs.max(rel * expected.abs().max(actual.abs()));
+    assert!(
+        diff <= tol,
+        "{what}: actual={actual:.12e} expected={expected:.12e} diff={diff:.12e} tol={tol:.12e}"
+    );
+}
+
+fn m1_op_entry(deck: &str) -> DeviceOpEntry {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let (_, report) = engine()
+        .run_dc_op_with_report(&netlist)
+        .expect("op converges");
+    report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .unwrap_or_else(|| panic!("missing m1 OP entry in {:?}", report.entries))
+        .clone()
+}
+
+fn op_param(entry: &DeviceOpEntry, key: &str) -> f64 {
+    entry
+        .params
+        .iter()
+        .find(|(name, _)| *name == key)
+        .map(|(_, value)| *value)
+        .unwrap_or_else(|| panic!("{key} missing from MOS3 OP entry: {:?}", entry.params))
+}
+
+fn assert_op_matches_ngspice46(entry: &DeviceOpEntry, oracle: Mos3Oracle) {
+    assert_close("id", op_param(entry, "id"), oracle.id, 2.0e-3, 1.0e-10);
+    assert_close("gm", op_param(entry, "gm"), oracle.gm, 2.0e-3, 1.0e-10);
+    assert_close("gds", op_param(entry, "gds"), oracle.gds, 2.0e-3, 1.0e-10);
+    assert_close("gmb", op_param(entry, "gmb"), oracle.gmb, 2.0e-3, 1.0e-10);
+    assert_close("vth/von", op_param(entry, "vth"), oracle.von, 2.0e-3, 1.0e-8);
+    assert_close(
+        "vdsat",
+        op_param(entry, "vdsat"),
+        oracle.vdsat,
+        2.0e-3,
+        1.0e-8,
+    );
+}
+
+#[test]
+fn mos3_nmos_op_matches_ngspice46() {
+    let entry = m1_op_entry(NMOS_DECK);
+    assert_op_matches_ngspice46(&entry, NMOS_ORACLE);
+}
+
+#[test]
+fn mos3_pmos_op_matches_ngspice46() {
+    let entry = m1_op_entry(PMOS_DECK);
+    assert_op_matches_ngspice46(&entry, PMOS_ORACLE);
+}
+
+#[test]
+fn mos3_inverse_mode_matches_ngspice46() {
+    let entry = m1_op_entry(INVERSE_DECK);
+    assert_op_matches_ngspice46(&entry, INVERSE_ORACLE);
+}
+
+#[test]
+fn mos3_short_channel_vmax_changes_current() {
+    let with_vmax = m1_op_entry(SHORT_VMAX_DECK);
+    let without_vmax = m1_op_entry(SHORT_NO_VMAX_DECK);
+
+    assert_op_matches_ngspice46(&with_vmax, SHORT_VMAX_ORACLE);
+    assert_op_matches_ngspice46(&without_vmax, SHORT_NO_VMAX_ORACLE);
+
+    let with_id = op_param(&with_vmax, "id");
+    let without_id = op_param(&without_vmax, "id");
+    assert!(
+        (with_id - without_id).abs() > 0.25 * without_id.abs(),
+        "MOS3 VMAX must materially change short-channel current: \
+         VMAX id={with_id:.12e}, VMAX=0 id={without_id:.12e}"
+    );
+}
+
+#[test]
+fn mos3_model_space_onset_and_saturation_are_not_simplified_fallbacks() {
+    let entry = m1_op_entry(NMOS_DECK);
+
+    // `vth` is the only generic MOSFET OP-report value currently exposing the
+    // model-space onset used by limiting and capacitance paths.
+    assert_close(
+        "vth/von",
+        op_param(&entry, "vth"),
+        NMOS_ORACLE.von,
+        2.0e-3,
+        1.0e-8,
+    );
+
+    // Native MOS3 also needs to surface `vdsat` for AC/transient-facing oracle
+    // coverage. The current generic MOSFET report omits it, so this is the
+    // strongest RED assertion available through the public OP report today.
+    let vdsat = op_param(&entry, "vdsat");
+    assert_close("vdsat", vdsat, NMOS_ORACLE.vdsat, 2.0e-3, 1.0e-8);
+
+    let old_fallback_vdsat = 3.0 - NMOS_ORACLE.von;
+    assert!(
+        (NMOS_ORACLE.vdsat - old_fallback_vdsat).abs() > 0.5,
+        "oracle sanity check: MOS3 vdsat should differ from old Vgs-von fallback"
+    );
+}
