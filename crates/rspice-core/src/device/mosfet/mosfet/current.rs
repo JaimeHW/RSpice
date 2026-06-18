@@ -111,6 +111,10 @@ impl Mosfet {
             return (eval.id, eval.region);
         }
 
+        if self.level == 3 {
+            return self.calculate_id_mos3(vgs, vds, vbs);
+        }
+
         // Superimpose forward and reverse-oriented channel currents to preserve
         // source/drain symmetry while maintaining smooth behavior around Vds = 0.
         let (id_forward, region_forward) = self.calculate_id_forward(vgs, vds, vbs);
@@ -447,9 +451,10 @@ impl Mosfet {
     /// channel contributions for source/drain symmetry.
     ///
     /// Levels 1/2/6 and the legacy BSIM ports use their closed-form
-    /// linearizations. The simplified short-channel fallthrough (LEVEL >= 3)
-    /// differentiates the exact composed current the residual stamps, so its
-    /// Jacobian is consistent with `calculate_id` by construction.
+    /// linearizations. Until Task 4 adds a native MOS3 linearization, LEVEL=3
+    /// and unsupported simplified levels such as LEVEL=7 differentiate the
+    /// exact composed current the residual stamps, so their Jacobian is
+    /// consistent with `calculate_id` by construction.
     pub(in crate::device::mosfet::mosfet) fn small_signal(
         &self,
         vgs: Value,
@@ -476,13 +481,13 @@ impl Mosfet {
             return (gm, gds, gmb);
         }
 
-        // Simplified short-channel fallthrough (LEVEL >= 3): differentiate
-        // the exact composed current the residual stamps so the Jacobian is
-        // consistent with `calculate_id` by construction. The closed-form
-        // expressions previously used here were Level-1 formulas that ignored
-        // mobility degradation, velocity saturation, CLM, and subthreshold
-        // conduction, so Newton iterated against wrong slopes and AC
-        // linearization was wrong. `calculate_id` is C1-smooth with blending
+        // Temporary MOS3 shim and unsupported simplified fallthroughs:
+        // differentiate the exact composed current the residual stamps so the
+        // Jacobian is consistent with `calculate_id` by construction. The
+        // closed-form expressions previously used here were Level-1 formulas
+        // that ignored mobility degradation, velocity saturation, CLM, and
+        // subthreshold conduction, so Newton iterated against wrong slopes and
+        // AC linearization was wrong. `calculate_id` is C1-smooth with blending
         // widths >= 0.01 V, so a 1 uV central difference sits well inside the
         // smooth regions.
         const FD_STEP: Value = 1.0e-6;
@@ -511,8 +516,45 @@ mod tests {
         params.insert("PHI".to_string(), 0.7);
         params.insert("LAMBDA".to_string(), 0.02);
         Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
+            .with_level(7)
+            .with_params(&params)
+    }
+
+    fn level3_nmos() -> Mosfet {
+        let mut params = std::collections::HashMap::new();
+        params.insert("VTO".to_string(), 0.6);
+        params.insert("KP".to_string(), 120e-6);
+        params.insert("GAMMA".to_string(), 0.4);
+        params.insert("PHI".to_string(), 0.7);
+        params.insert("LAMBDA".to_string(), 0.02);
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
             .with_level(3)
             .with_params(&params)
+    }
+
+    #[test]
+    fn level3_temporary_shim_preserves_symmetric_fallback_inverse_bias() {
+        let m = level3_nmos();
+        let (vgs, vds, vbs) = (0.9, -0.7, -0.2);
+        let (id_forward, region_forward) = m.calculate_id_bsim3(vgs, vds, vbs);
+        let (vgs_rev, vds_rev, vbs_rev) = Mosfet::reverse_voltages(vgs, vds, vbs);
+        let (id_reverse_fwd, region_reverse) =
+            m.calculate_id_bsim3(vgs_rev, vds_rev, vbs_rev);
+        let expected_id = id_forward - id_reverse_fwd;
+        let expected_region = if id_forward.abs() >= id_reverse_fwd.abs() {
+            region_forward
+        } else {
+            region_reverse
+        };
+
+        let (actual_id, actual_region) = m.calculate_id(vgs, vds, vbs);
+
+        assert_eq!(actual_region, expected_region);
+        assert!(
+            (actual_id - expected_id).abs() <= 1.0e-18,
+            "LEVEL=3 shim must preserve old symmetric fallback: actual={actual_id:.12e} \
+             expected={expected_id:.12e}"
+        );
     }
 
     /// The simplified short-channel path must report derivatives consistent

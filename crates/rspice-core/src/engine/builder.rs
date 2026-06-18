@@ -121,11 +121,11 @@ fn is_magnetic_core_model_type(model_type: &str) -> bool {
 }
 
 /// MOS model levels with a native bulk-MOSFET implementation: Berkeley
-/// MOS1/MOS2/MOS6 (1/2/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
+/// MOS1/MOS2/MOS3/MOS6 (1/2/3/6) and the legacy BSIM1/BSIM2 ports (4/5). Levels
 /// 8/49 (BSIM3v3.3), 14/54 (BSIM4 v4.8) and 55-57 (BSIM3-SOI) are routed
 /// to dedicated devices before this check applies.
 fn native_bulk_mos_level(level: i32) -> bool {
-    matches!(level, 1 | 2 | 4 | 5 | 6)
+    matches!(level, 1 | 2 | 3 | 4 | 5 | 6)
 }
 
 /// Warn about nodes with no conductive path to ground: the unconditional
@@ -937,24 +937,12 @@ impl Engine {
                     // through to the simplified short-channel approximation
                     // silently: a BSIM3/BSIM4 card evaluated with ~15 honored
                     // parameters yields plausible-looking but wrong currents,
-                    // which is strictly worse than an error. LEVEL=3 remains
-                    // runnable with a warning — the approximation is of the
-                    // same empirical family and the vendored ngspice MOS3
-                    // oracle deck passes within suite tolerance — while
-                    // BSIM-class levels require an explicit
-                    // `.options allow_simplified_mos=1` opt-in.
+                    // which is strictly worse than an error. Unsupported
+                    // levels require an explicit `.options allow_simplified_mos=1`
+                    // opt-in.
                     if !native_bulk_mos_level(level) {
                         let descriptor = mos_level_descriptor(level);
-                        if level == 3 {
-                            if simplified_mos_warned.insert(model.clone()) {
-                                log::warn!(
-                                    "MOSFET model '{model}' (LEVEL=3): no native MOS3 \
-                                     implementation; using a simplified short-channel \
-                                     approximation. MOS3-specific parameters (THETA, ETA, \
-                                     KAPPA, NFS, VMAX, XJ, DELTA) are not honored."
-                                );
-                            }
-                        } else if netlist.options.allow_simplified_mos == Some(true) {
+                        if netlist.options.allow_simplified_mos == Some(true) {
                             if simplified_mos_warned.insert(model.clone()) {
                                 log::warn!(
                                     "MOSFET model '{model}' ({descriptor}): not implemented \
@@ -966,8 +954,8 @@ impl Engine {
                         } else {
                             return Err(SimulationError::Circuit(format!(
                                 "MOSFET '{}': model '{}' requests {} which has no native \
-                                 implementation. Supported levels: 1, 2, 6 (Berkeley \
-                                 MOS1/MOS2/MOS6), 4/5 (legacy BSIM1/BSIM2), 8/49 \
+                                 implementation. Supported levels: 1, 2, 3, 6 (Berkeley \
+                                 MOS1/MOS2/MOS3/MOS6), 4/5 (legacy BSIM1/BSIM2), 8/49 \
                                  (BSIM3v3.3), 14/54 (BSIM4 v4.8), 55-57 (BSIM3-SOI \
                                  FD/DD/PD). To knowingly run a simplified ~15-parameter \
                                  approximation instead, set \
