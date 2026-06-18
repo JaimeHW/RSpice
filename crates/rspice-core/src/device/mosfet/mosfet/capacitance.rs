@@ -1,10 +1,10 @@
 use super::*;
 
 impl Mosfet {
-    /// Calculate effective threshold voltage with body effect and short-channel effects
+    /// Calculate effective threshold voltage with body effect and fallback short-channel effects.
     ///
-    /// For Level 1: Standard body effect formula
-    /// For Level 3+: Includes BSIM4 short-channel Vth roll-off
+    /// For Level 1 and MOS6: standard body effect formula.
+    /// For opt-in simplified fallback levels: approximate short-channel Vth roll-off.
     pub(in crate::device::mosfet::mosfet) fn vth(&self, vbs: Value) -> Value {
         if let Some(legacy) = &self.legacy_bsim_sized {
             return legacy.threshold(0.0, self.polarity() * vbs);
@@ -26,7 +26,7 @@ impl Mosfet {
             return vth_base;
         }
 
-        // BSIM4 short-channel Vth roll-off
+        // Simplified fallback short-channel Vth roll-off
         // Delta_Vth = -DVT0 * L_eff / Ldrawn * (1 + DVT2 * Vbs)
         // where L_eff adjustment factor uses DVT1
         let l_ratio = 1e-6 / self.l.max(1e-9); // Normalize to 1um
@@ -40,7 +40,7 @@ impl Mosfet {
         let vth_k1k2 = vto_eff + self.k1 * phi_vbs.sqrt() + self.k2 * (self.phi - vbs_eff);
 
         // Blend between GAMMA-based and K1/K2-based body effect based on model level
-        // Use K1/K2 formulation for short channels (level 3+)
+        // Use K1/K2 formulation for the simplified short-channel fallback.
         vth_k1k2 + dvth_sce + dvth_bias
     }
 

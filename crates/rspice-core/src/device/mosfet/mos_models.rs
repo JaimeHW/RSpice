@@ -1,9 +1,9 @@
-//! MOSFET model calculations for Level 1 and BSIM3-like models
+//! MOSFET model calculations for Level 1 and simplified fallback models.
 //!
 //! This module contains drain current calculations and transconductance
 //! functions for different MOSFET model levels:
 //! - Level 1: Shichman-Hodges model (simple, widely used)
-//! - Level 3+: BSIM3-like model with short-channel effects
+//! - Simplified fallback: short-channel effects for opt-in non-native levels
 //!
 //! All calculations use C1-continuous smooth transition functions from
 //! the `smooth` module to ensure Newton-Raphson convergence.
@@ -169,10 +169,10 @@ pub fn calculate_id_level1(
 }
 
 //=============================================================================
-// BSIM3-like Model
+// Simplified fallback model
 //=============================================================================
 
-/// BSIM3-like drain current with short-channel effects and C1 continuous transitions
+/// Simplified short-channel drain current with C1 continuous transitions.
 ///
 /// Includes:
 /// - Mobility degradation due to vertical electric field
@@ -355,10 +355,10 @@ pub fn calculate_gmb(params: &MosParams, vgs: Value, vds: Value, vbs: Value, vth
 // Threshold Voltage Calculation
 //=============================================================================
 
-/// Calculate effective threshold voltage with body effect and short-channel effects
+/// Calculate effective threshold voltage with body effect and fallback short-channel effects.
 ///
-/// For Level 1: Standard body effect formula
-/// For Level 3+: Includes BSIM4 short-channel Vth roll-off
+/// For Level 1: standard body effect formula.
+/// For simplified fallback levels: approximate short-channel Vth roll-off.
 #[inline]
 pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
     let p = params.polarity;
@@ -377,7 +377,7 @@ pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
         return vth_base;
     }
 
-    // BSIM4 short-channel Vth roll-off
+    // Simplified fallback short-channel Vth roll-off
     // Delta_Vth = -DVT0 * L_eff / Ldrawn * (1 + DVT2 * Vbs)
     // where L_eff adjustment factor uses DVT1
     let l_ratio = 1e-6 / params.l.max(1e-9); // Normalize to 1um
@@ -391,6 +391,6 @@ pub fn calculate_vth(params: &MosParams, vbs: Value) -> Value {
     let vth_k1k2 = vto_eff + params.k1 * phi_vbs.sqrt() + params.k2 * (params.phi - vbs_eff);
 
     // Blend between GAMMA-based and K1/K2-based body effect based on model level
-    // Use K1/K2 formulation for short channels (level 3+)
+    // Use K1/K2 formulation for the simplified short-channel fallback.
     vth_k1k2 + dvth_sce + dvth_bias
 }

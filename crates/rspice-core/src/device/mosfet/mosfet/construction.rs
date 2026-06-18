@@ -71,7 +71,7 @@ impl Mosfet {
             junction_gmin: 0.0,
             vt: VT_REFERENCE,
 
-            // BSIM3-like parameters
+            // Shared MOS defaults
             level: 1, // Default to Level 1
             legacy_bsim_model: None,
             legacy_bsim_sized: None,
@@ -1019,7 +1019,7 @@ impl Mosfet {
         self
     }
 
-    /// Set model level (1 = Level 1, 3 = BSIM3-like)
+    /// Set SPICE MOS model level.
     pub fn with_level(mut self, level: i32) -> Self {
         if level == 3 {
             self = self.with_mos3_defaults();

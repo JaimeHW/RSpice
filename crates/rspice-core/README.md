@@ -81,7 +81,8 @@ path exercised by `tests/vbic_excess_phase_oracle.rs`).
 
 **MOSFETs and FET-family models** (`mosfet/`) —
 
-- Classic MOS levels 1–3 (`mosfet.rs`, `mos_models.rs`, `legacy_bsim.rs`)
+- Classic Berkeley MOS1/MOS2/MOS3/MOS6 (`mosfet.rs`, `mos_models.rs`)
+- Legacy BSIM1/BSIM2 levels 4/5 (`legacy_bsim.rs`)
 - BSIM3v3 (`bsim3.rs`, `bsim3v3/` — params/temp/eval split)
 - BSIM4 v4.8 (`bsim4.rs`)
 - EKV (`ekv.rs`)

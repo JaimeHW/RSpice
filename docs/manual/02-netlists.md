@@ -46,7 +46,8 @@ forms; `FREQ` is recognized and rejected as unsupported. Current-controlled
 
 MOS model routing is explicit. Native production paths cover BSIM4 v4.8
 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`), BSIM3-SOI
-FD/DD/PD (`LEVEL=55/56/57`), Berkeley MOS1/MOS2/MOS6, legacy BSIM1/BSIM2,
+FD/DD/PD (`LEVEL=55/56/57`), Berkeley MOS1/MOS2/MOS3/MOS6,
+legacy BSIM1/BSIM2,
 EKV, and VDMOS. Unsupported BSIM4 mode selectors such as external
 source/drain resistance networks, gate/body resistance networks, NQS,
 non-default charge paths, gate tunneling, WPE/stress, and unsupported

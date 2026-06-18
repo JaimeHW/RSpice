@@ -88,7 +88,7 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`, `CAPMOD=3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
+| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`, `CAPMOD=3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
 | Bipolar | Gummel–Poon BJT, with a VBIC charge model including excess phase |
 | Junction | Diode, JFET level 1, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |

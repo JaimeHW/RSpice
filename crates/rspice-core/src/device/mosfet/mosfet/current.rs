@@ -276,14 +276,14 @@ impl Mosfet {
         (id, region)
     }
 
-    /// BSIM3-like drain current with short-channel effects
+    /// Simplified short-channel fallback current.
     /// Includes:
     /// - Mobility degradation due to vertical electric field
     /// - Velocity saturation
     /// - Drain-Induced Barrier Lowering (DIBL)
     /// - Channel length modulation
     ///
-    /// BSIM3-like drain current with C1 continuous transitions
+    /// Simplified short-channel fallback current with C1 continuous transitions.
     pub(in crate::device::mosfet::mosfet) fn calculate_id_bsim3(
         &self,
         vgs: Value,

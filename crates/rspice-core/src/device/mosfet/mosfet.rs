@@ -57,7 +57,7 @@ pub struct MosfetIndices {
     pub sb: Option<CscIndex>,
 }
 
-/// MOSFET device supporting Level 1 (Shichman-Hodges) and Level 3 (BSIM3-like) models
+/// MOSFET device supporting native Berkeley MOS levels and related model paths.
 ///
 /// Terminal connections:
 /// - Drain (D)
@@ -130,8 +130,8 @@ pub struct Mosfet {
     /// Set by `set_temperature`; defaults to the 27C reference value.
     pub vt: Value,
 
-    // BSIM3-like parameters for short-channel effects
-    /// Model level (1 = Level 1, 3 = BSIM3-like)
+    // Shared MOS model parameters and level routing.
+    /// SPICE MOS model level.
     pub level: i32,
     /// Legacy BSIM1/BSIM2 model card for SPICE levels 4 and 5.
     legacy_bsim_model: Option<LegacyBsimModel>,
