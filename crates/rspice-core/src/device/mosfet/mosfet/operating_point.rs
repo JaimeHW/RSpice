@@ -30,13 +30,18 @@ impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
     pub fn op_values(&self) -> MosfetOpValues {
         let (vth, vdsat, gm, gds, gmb) = self.model_space_op_values();
+        let id = if self.level == 3 {
+            self.polarity() * self.id
+        } else {
+            self.id
+        };
         MosfetOpValues {
             region: match self.region {
                 MosRegion::Cutoff => "cutoff",
                 MosRegion::Linear => "linear",
                 MosRegion::Saturation => "saturation",
             },
-            id: self.id,
+            id,
             vgs: self.vgs,
             vds: self.vds,
             vbs: self.vbs,

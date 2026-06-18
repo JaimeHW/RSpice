@@ -62,7 +62,16 @@ impl Mosfet {
 
     #[inline]
     pub(in crate::device::mosfet::mosfet) fn oxide_capacitance_total(&self) -> Value {
-        self.cox * self.w * self.classic_meyer_effective_length()
+        self.cox * self.classic_meyer_effective_width() * self.classic_meyer_effective_length()
+    }
+
+    #[inline]
+    pub(in crate::device::mosfet::mosfet) fn classic_meyer_effective_width(&self) -> Value {
+        if self.level == 3 {
+            self.mos3_effective_width()
+        } else {
+            self.w
+        }
     }
 
     #[inline]
@@ -198,10 +207,11 @@ impl Mosfet {
     /// Calculate overlap capacitances for AC analysis
     /// Returns (Cgs_overlap, Cgd_overlap, Cgb_overlap)
     pub fn overlap_capacitances(&self) -> (Value, Value, Value) {
+        let width = self.classic_meyer_effective_width();
         // Cgs_overlap = CGSO * W
-        let cgs = self.cgso * self.w;
+        let cgs = self.cgso * width;
         // Cgd_overlap = CGDO * W
-        let cgd = self.cgdo * self.w;
+        let cgd = self.cgdo * width;
         let cgb_length = self.classic_meyer_effective_length();
         let cgb = self.cgbo * cgb_length;
 
@@ -339,6 +349,8 @@ mod tests {
         mos.mos3_max_drift_velocity = 8.0e4;
         mos.mos3_junction_depth = 0.18e-6;
         mos.mos3_length_adjust = 0.03e-6;
+        mos.mos3_width_narrow = 0.4e-6;
+        mos.mos3_width_adjust = 0.1e-6;
 
         let epssil = 11.7 * EPS0;
         mos.mos3_narrow_factor = mos.mos3_delta * 0.5 * std::f64::consts::PI * epssil / mos.cox;
@@ -360,7 +372,7 @@ mod tests {
         let state = mos.mos3_state(vgs, vds, vbs);
         let von = p * state.von;
         let vdsat = p * state.vdsat;
-        let oxide_cap = mos.cox * mos.w * mos.mos3_effective_length();
+        let oxide_cap = mos.cox * mos.mos3_effective_width() * mos.mos3_effective_length();
         let phi = mos.phi.max(1.0e-12);
 
         if vds_m >= 0.0 {
@@ -381,9 +393,10 @@ mod tests {
     ) -> (Value, Value, Value) {
         let (cgs_int, cgd_int, cgb_int) = expected_mos3_intrinsic_caps(mos, vgs, vds, vbs);
         let leff = mos.mos3_effective_length();
+        let weff = mos.mos3_effective_width();
         (
-            2.0 * cgs_int + mos.cgso * mos.w,
-            2.0 * cgd_int + mos.cgdo * mos.w,
+            2.0 * cgs_int + mos.cgso * weff,
+            2.0 * cgd_int + mos.cgdo * weff,
             2.0 * cgb_int + mos.cgbo * leff,
         )
     }
@@ -407,6 +420,7 @@ mod tests {
     fn level3_meyer_capacitance_uses_mos3_effective_length() {
         let mos = mos3_capacitance_fixture();
         let leff = mos.l - 2.0 * mos.ld + mos.mos3_length_adjust;
+        let weff = mos.w - 2.0 * mos.mos3_width_narrow + mos.mos3_width_adjust;
 
         assert_close(
             "classic Meyer Leff",
@@ -416,9 +430,30 @@ mod tests {
             1.0e-30,
         );
         assert_close(
+            "classic Meyer Weff",
+            mos.classic_meyer_effective_width(),
+            weff,
+            0.0,
+            1.0e-30,
+        );
+        assert_close(
             "oxide cap",
             mos.oxide_capacitance_total(),
-            mos.cox * mos.w * leff,
+            mos.cox * weff * leff,
+            0.0,
+            1.0e-30,
+        );
+        assert_close(
+            "gate-source overlap",
+            mos.overlap_capacitances().0,
+            mos.cgso * weff,
+            0.0,
+            1.0e-30,
+        );
+        assert_close(
+            "gate-drain overlap",
+            mos.overlap_capacitances().1,
+            mos.cgdo * weff,
             0.0,
             1.0e-30,
         );

@@ -612,13 +612,9 @@ mod tests {
         let p = m.polarity();
         let vds_m = p * vds;
         let expected = if vds_m >= 0.0 {
-            (p * state.gm, p * state.gds, p * state.gmb)
+            (state.gm, state.gds, state.gmb)
         } else {
-            (
-                -p * state.gm,
-                p * (state.gm + state.gds + state.gmb),
-                -p * state.gmb,
-            )
+            (-state.gm, state.gm + state.gds + state.gmb, -state.gmb)
         };
         let (gm, gds, gmb) = m.small_signal(vgs, vds, vbs);
         let values = [

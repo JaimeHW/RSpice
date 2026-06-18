@@ -59,7 +59,7 @@ impl Mosfet {
         vbs: Value,
     ) -> (Value, MosRegion) {
         let state = self.mos3_state(vgs, vds, vbs);
-        (state.ids, state.region)
+        (self.polarity() * state.ids, state.region)
     }
 
     pub(in crate::device::mosfet::mosfet) fn mos3_state(
@@ -81,13 +81,9 @@ impl Mosfet {
         let p = self.polarity();
         let vds_m = p * vds;
         let (gm, gds, gmb) = if vds_m >= 0.0 {
-            (p * state.gm, p * state.gds, p * state.gmb)
+            (state.gm, state.gds, state.gmb)
         } else {
-            (
-                -p * state.gm,
-                p * (state.gm + state.gds + state.gmb),
-                -p * state.gmb,
-            )
+            (-state.gm, state.gm + state.gds + state.gmb, -state.gmb)
         };
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
         (sanitize(gm), sanitize(gds), sanitize(gmb))
