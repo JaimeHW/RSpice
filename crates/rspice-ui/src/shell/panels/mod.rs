@@ -1,6 +1,6 @@
 //! Contextual side panels.
 //!
-//! The left (264 px) and right (304 px) panels change content with the active
+//! The contextual side panels change content with the active
 //! workspace view: schematic editing gets hierarchy/components + inspector,
 //! simulation gets run history + analysis detail, results get the signal
 //! browser + cursors/measurements. Library and netlist views are full-bleed.
@@ -18,11 +18,32 @@ pub(in crate::shell) mod simulate_forms;
 
 /// Left panel default width.
 const LEFT_WIDTH: f32 = 264.0;
+/// Premium schematic navigator default width.
+const SCHEMATIC_LEFT_WIDTH: f32 = 318.0;
 /// Right panel default width.
 const RIGHT_WIDTH: f32 = 304.0;
 /// Resize bounds — narrow enough to tuck away, wide enough for ultrawides.
 const PANEL_MIN: f32 = 200.0;
 const PANEL_MAX: f32 = 520.0;
+
+fn left_default_width(view: WorkspaceView) -> f32 {
+    match view {
+        WorkspaceView::Schematic => SCHEMATIC_LEFT_WIDTH,
+        _ => LEFT_WIDTH,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schematic_left_panel_defaults_to_premium_rail_width() {
+        assert_eq!(left_default_width(WorkspaceView::Schematic), 318.0);
+        assert_eq!(left_default_width(WorkspaceView::Simulate), LEFT_WIDTH);
+        assert_eq!(left_default_width(WorkspaceView::Results), LEFT_WIDTH);
+    }
+}
 
 /// Render both contextual side panels for the active view.
 pub fn show(
@@ -43,7 +64,7 @@ pub fn show(
 
     if state.shell.view.has_left_panel() {
         SidePanel::left("volta.left")
-            .default_width(LEFT_WIDTH)
+            .default_width(left_default_width(state.shell.view))
             .width_range(PANEL_MIN..=PANEL_MAX)
             .resizable(true)
             .frame(Frame::none().fill(c.bg_panel))

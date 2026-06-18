@@ -15,8 +15,11 @@ use std::rc::Rc;
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::shell::state::{NavMode, RailTab};
-use crate::state::{CellViewRef, ComponentType, PortSpec, Tool};
+use crate::shell::{
+    WorkspaceView,
+    state::{NavMode, RailTab},
+};
+use crate::state::{CellViewRef, ComponentType, NavColumn, PortSpec, Tool};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
@@ -73,8 +76,16 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 30.0), egui::Sense::hover());
-    let half = width / 2.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 35.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, theme::mix(c.bg_panel, c.bg_inset, 0.18));
+
+    let tabs_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 6.0, rect.top() + 6.0),
+        egui::pos2(rect.right() - 6.0, rect.bottom()),
+    );
+    painter.rect_filled(tabs_rect, t.radius, c.bg_inset);
+    let half = tabs_rect.width() / 2.0;
 
     for (index, (tab, label)) in [
         (RailTab::Navigator, "NAVIGATOR"),
@@ -84,8 +95,8 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
     .enumerate()
     {
         let tab_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + half * index as f32, rect.top()),
-            egui::vec2(half, 30.0),
+            egui::pos2(tabs_rect.left() + half * index as f32, tabs_rect.top()),
+            egui::vec2(half, tabs_rect.height()),
         );
         let response = ui.interact(
             tab_rect,
@@ -96,7 +107,12 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
         let hover =
             ui.ctx()
                 .animate_bool_with_time(response.id, response.hovered() && !active, 0.16);
-        let painter = ui.painter();
+        let fill = if active {
+            c.bg_panel
+        } else {
+            theme::mix(c.bg_inset, c.bg_panel, 0.38)
+        };
+        painter.rect_filled(tab_rect, 0.0, fill);
         if hover > 0.0 {
             painter.rect_filled(
                 tab_rect,
@@ -113,8 +129,8 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
         );
         if active {
             painter.hline(
-                tab_rect.x_range().shrink(18.0),
-                tab_rect.bottom() - 1.0,
+                tab_rect.x_range().shrink(1.0),
+                tab_rect.top() + 1.0,
                 egui::Stroke::new(2.0, c.accent),
             );
         }
@@ -122,7 +138,12 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
             state.shell.rail_tab = tab;
         }
     }
-    let painter = ui.painter();
+    painter.vline(
+        tabs_rect.center().x,
+        tabs_rect.y_range(),
+        egui::Stroke::new(1.0, c.border),
+    );
+    painter.rect_stroke(tabs_rect, t.radius, egui::Stroke::new(1.0, c.border));
     painter.hline(
         rect.x_range(),
         rect.bottom(),
@@ -135,66 +156,184 @@ fn rail_tabs(ui: &mut Ui, state: &mut AppState) {
 // ---------------------------------------------------------------------------
 
 fn navigator(ui: &mut Ui, state: &mut AppState) {
-    nameplate(ui, state);
+    premium_nameplate(ui, state);
     pathbar(ui, state);
 
     // Find in design.
     ui.add_space(8.0);
-    ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h),
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            ui.add_space(12.0);
-            let width = ui.available_width() - 12.0;
-            let response = mono_input(ui, &mut state.shell.nav_search, width.max(60.0));
-            if state.shell.focus_nav_search {
-                response.request_focus();
-                state.shell.focus_nav_search = false;
-            }
-            response.on_hover_text("Find instances, nets and ports (/)");
-        },
-    );
+    let response = rail_search_input(ui, &mut state.shell.nav_search, "find object", "/");
+    if state.shell.focus_nav_search {
+        response.request_focus();
+        state.shell.focus_nav_search = false;
+    }
+    response.on_hover_text("Find instances, nets and ports (/)");
 
     nav_segments(ui, state);
 
-    egui::ScrollArea::vertical()
-        .id_salt("volta.rail.tree")
-        .auto_shrink([false, false])
+    let c = Tokens::get(ui.ctx()).color;
+    egui::Frame::none()
+        .inner_margin(egui::Margin {
+            left: 10.0,
+            right: 10.0,
+            top: 0.0,
+            bottom: 0.0,
+        })
         .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            let query = state.shell.nav_search.trim().to_ascii_lowercase();
-            if query.is_empty() {
-                match state.shell.nav_mode {
-                    NavMode::Instances => instance_rows(ui, state, None),
-                    NavMode::Nets => net_rows(ui, state, None),
-                    NavMode::Ports => port_rows(ui, state, None),
-                }
-            } else {
-                // One query, all three kinds, grouped — click stays live.
-                let counts = navigator_search_counts(state, &query);
-                if counts.is_empty() {
-                    nav_no_match(ui, state, &query);
-                } else {
-                    if counts.instances > 0 {
-                        instance_rows(ui, state, Some(&query));
-                    }
-                    if counts.nets > 0 {
-                        net_rows(ui, state, Some(&query));
-                    }
-                    if counts.ports > 0 {
-                        port_rows(ui, state, Some(&query));
-                    }
-                }
-            }
-            ui.add_space(8.0);
+            egui::Frame::none()
+                .fill(c.bg_inset)
+                .stroke(egui::Stroke::new(1.0, c.border))
+                .inner_margin(egui::Margin {
+                    left: 4.0,
+                    right: 4.0,
+                    top: 5.0,
+                    bottom: 5.0,
+                })
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("volta.rail.tree")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            let query = state.shell.nav_search.trim().to_ascii_lowercase();
+                            if query.is_empty() {
+                                match state.shell.nav_mode {
+                                    NavMode::Instances => instance_rows(ui, state, None),
+                                    NavMode::Nets => net_rows(ui, state, None),
+                                    NavMode::Ports => port_rows(ui, state, None),
+                                }
+                            } else {
+                                // One query, all three kinds, grouped — click stays live.
+                                let counts = navigator_search_counts(state, &query);
+                                if counts.is_empty() {
+                                    nav_no_match(ui, state, &query);
+                                } else {
+                                    if counts.instances > 0 {
+                                        instance_rows(ui, state, Some(&query));
+                                    }
+                                    if counts.nets > 0 {
+                                        net_rows(ui, state, Some(&query));
+                                    }
+                                    if counts.ports > 0 {
+                                        port_rows(ui, state, Some(&query));
+                                    }
+                                }
+                            }
+                            ui.add_space(8.0);
+                        });
+                });
         });
 }
 
-/// Lib / cell ‹view› identity plus live design counts. The counts derive
-/// from the same model as the tree below — they can never disagree.
-fn nameplate(ui: &mut Ui, state: &mut AppState) {
+fn rail_search_input(
+    ui: &mut Ui,
+    value: &mut String,
+    hint: &'static str,
+    shortcut: &str,
+) -> egui::Response {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
+    let width = ui.available_width();
+    let (outer_rect, _) = ui.allocate_exact_size(egui::vec2(width, 27.0), egui::Sense::hover());
+    let rect = egui::Rect::from_min_max(
+        egui::pos2(outer_rect.left() + 10.0, outer_rect.top()),
+        egui::pos2(outer_rect.right() - 10.0, outer_rect.bottom()),
+    );
+    let field_response = ui.interact(rect, ui.id().with("premium.search"), egui::Sense::click());
+    let painter = ui.painter();
+    let hovered = field_response.hovered();
+    painter.rect(
+        rect,
+        t.radius,
+        c.bg_inset,
+        egui::Stroke::new(1.0, if hovered { c.border_strong } else { c.border }),
+    );
+
+    let icon_center = egui::pos2(rect.left() + 14.0, rect.center().y - 1.0);
+    let icon_stroke = egui::Stroke::new(1.5, c.text_faint);
+    painter.circle_stroke(icon_center, 4.2, icon_stroke);
+    painter.line_segment(
+        [
+            egui::pos2(icon_center.x + 3.2, icon_center.y + 3.2),
+            egui::pos2(icon_center.x + 6.2, icon_center.y + 6.2),
+        ],
+        icon_stroke,
+    );
+
+    let key_font = theme::mono(10.0, FontWeight::Medium);
+    let key_width = text_width(ui, shortcut, &key_font) + 9.0;
+    let key_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - key_width - 6.0, rect.center().y - 8.0),
+        egui::vec2(key_width, 16.0),
+    );
+    painter.rect(
+        key_rect,
+        2.0,
+        theme::mix(c.bg_panel, c.bg_inset, 0.55),
+        egui::Stroke::new(1.0, c.border),
+    );
+    painter.text(
+        key_rect.center(),
+        egui::Align2::CENTER_CENTER,
+        shortcut,
+        key_font,
+        c.text_faint,
+    );
+
+    let input_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 26.0, rect.top() + 1.0),
+        egui::pos2(
+            (key_rect.left() - 6.0).max(rect.left() + 54.0),
+            rect.bottom() - 1.0,
+        ),
+    );
+    let mut input_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(input_rect)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    let response = input_ui.add_sized(
+        input_rect.size(),
+        egui::TextEdit::singleline(value)
+            .font(egui::TextStyle::Monospace)
+            .hint_text(hint)
+            .frame(false)
+            .margin(egui::Margin::symmetric(0.0, 4.0)),
+    );
+    if field_response.clicked() {
+        response.request_focus();
+    }
+    response
+}
+
+// Premium project capsule: library/cell identity, view affordance, and
+// canonical counts for the active schematic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PremiumProjectMetric {
+    value: String,
+    label: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PremiumProjectCapsule {
+    library: String,
+    cell: String,
+    view: String,
+    metrics: [PremiumProjectMetric; 4],
+}
+
+#[cfg(test)]
+impl PremiumProjectCapsule {
+    fn metric_labels(&self) -> [&'static str; 4] {
+        [
+            self.metrics[0].label,
+            self.metrics[1].label,
+            self.metrics[2].label,
+            self.metrics[3].label,
+        ]
+    }
+}
+
+fn premium_project_capsule(state: &AppState) -> PremiumProjectCapsule {
     let reference = state.workspace.active_view.clone();
     let instances = state
         .schematic
@@ -205,88 +344,212 @@ fn nameplate(ui: &mut Ui, state: &mut AppState) {
     let nets = design_nets_cached(state).len();
     let ports = state.schematic.interface_ports().len();
 
-    egui::Frame::none()
-        .inner_margin(egui::Margin {
-            left: 12.0,
-            right: 12.0,
-            top: 9.0,
-            bottom: 7.0,
-        })
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                // Budgeted: prefix + cell + chip must fit the row — labels
-                // in horizontal layouts extend, and overflow ratchets the
-                // panel wider (see fit_text).
-                let lib_font = theme::mono(tokens::FS_0, FontWeight::Regular);
-                let cell_font = theme::mono(tokens::FS_2, FontWeight::Medium);
-                let chip_width =
-                    text_width(ui, &reference.view, &theme::mono(10.0, FontWeight::Regular)) + 10.0;
-                let budget = (ui.available_width() - chip_width - 18.0).max(50.0);
-                let lib_text = fit_text(
-                    ui,
-                    &format!("{} /", reference.library),
-                    &lib_font,
-                    budget * 0.4,
-                );
-                let cell_budget = budget - text_width(ui, &lib_text, &lib_font);
-                let cell_text = fit_text(ui, &reference.cell, &cell_font, cell_budget);
-                ui.label(
-                    egui::RichText::new(lib_text)
-                        .font(lib_font)
-                        .color(c.text_faint),
-                );
-                ui.label(egui::RichText::new(cell_text).font(cell_font).color(c.text));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    view_chip(ui, &reference.view);
-                });
-            });
-            ui.add_space(3.0);
-            ui.label(
-                egui::RichText::new(format!(
-                    "{instances} inst · {nets} nets · {ports} ports · sheet 1/1"
-                ))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(c.text_faint),
-            );
-        });
-    let rect = ui.max_rect();
-    ui.painter().hline(
-        rect.x_range(),
-        ui.cursor().top(),
-        egui::Stroke::new(1.0, c.border),
-    );
+    PremiumProjectCapsule {
+        library: reference.library,
+        cell: reference.cell,
+        view: reference.view,
+        metrics: [
+            PremiumProjectMetric {
+                value: instances.to_string(),
+                label: "inst",
+            },
+            PremiumProjectMetric {
+                value: nets.to_string(),
+                label: "nets",
+            },
+            PremiumProjectMetric {
+                value: ports.to_string(),
+                label: "ports",
+            },
+            PremiumProjectMetric {
+                value: "1".to_string(),
+                label: "sheet",
+            },
+        ],
+    }
 }
 
-/// Small bordered view tag ("schematic").
-fn view_chip(ui: &mut Ui, text: &str) {
+fn premium_nav_filter_labels() -> [&'static str; 3] {
+    ["Inst", "Nets", "Ports"]
+}
+
+fn premium_nameplate(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let galley = ui.fonts(|f| {
-        f.layout_no_wrap(
-            text.to_owned(),
-            theme::mono(10.0, FontWeight::Regular),
-            c.text_faint,
-        )
-    });
-    let (rect, _) = ui.allocate_exact_size(
-        egui::vec2(galley.size().x + 10.0, 16.0),
-        egui::Sense::hover(),
+    let capsule = premium_project_capsule(state);
+    let width = ui.available_width();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 88.0), egui::Sense::hover());
+    let painter = ui.painter();
+
+    let card_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + 10.0, rect.top() + 8.0),
+        egui::pos2(rect.right() - 10.0, rect.bottom() - 8.0),
     );
-    ui.painter().rect(
-        rect,
-        t.radius,
-        egui::Color32::TRANSPARENT,
+    let header_rect = egui::Rect::from_min_max(
+        card_rect.min,
+        egui::pos2(card_rect.right(), card_rect.top() + 40.0),
+    );
+    let metrics_rect = egui::Rect::from_min_max(
+        egui::pos2(card_rect.left(), header_rect.bottom()),
+        card_rect.max,
+    );
+    let header_fill = theme::mix(c.bg_panel, c.bg_hover, 0.38);
+
+    painter.rect_filled(rect, 0.0, c.bg_panel);
+    painter.rect_filled(card_rect, t.radius_lg, c.bg_inset);
+    painter.rect_filled(header_rect, t.radius_lg, header_fill);
+    painter.rect_filled(
+        egui::Rect::from_min_max(
+            egui::pos2(header_rect.left(), header_rect.bottom() - t.radius_lg),
+            header_rect.right_bottom(),
+        ),
+        0.0,
+        header_fill,
+    );
+    painter.hline(
+        header_rect.x_range(),
+        header_rect.bottom() - 0.5,
         egui::Stroke::new(1.0, c.border),
     );
-    ui.painter().galley(
-        egui::pos2(rect.left() + 5.0, rect.center().y - galley.size().y * 0.5),
-        galley,
+    painter.rect_stroke(
+        card_rect,
+        t.radius_lg,
+        egui::Stroke::new(1.0, c.border_strong),
+    );
+
+    let lib_font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let cell_font = theme::mono(tokens::FS_2, FontWeight::SemiBold);
+    let chip_font = theme::mono(10.0, FontWeight::Medium);
+    let chip_width = text_width(ui, &capsule.view, &chip_font) + 18.0;
+    let chip_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            header_rect.right() - chip_width - 7.0,
+            header_rect.top() + 11.0,
+        ),
+        egui::vec2(chip_width, 18.0),
+    );
+    let text_right = (chip_rect.left() - 8.0).max(header_rect.left() + 36.0);
+    let text_budget = (text_right - header_rect.left() - 8.0).max(24.0);
+    let library = fit_text(ui, &capsule.library, &lib_font, text_budget);
+    let cell = fit_text(ui, &capsule.cell, &cell_font, text_budget);
+
+    painter.text(
+        egui::pos2(header_rect.left() + 8.0, header_rect.top() + 7.0),
+        egui::Align2::LEFT_TOP,
+        library,
+        lib_font,
         c.text_faint,
+    );
+    painter.text(
+        egui::pos2(header_rect.left() + 8.0, header_rect.top() + 22.0),
+        egui::Align2::LEFT_TOP,
+        cell,
+        cell_font,
+        c.text,
+    );
+
+    let chip_response = ui
+        .interact(
+            chip_rect,
+            ui.id().with(("premium.view.chip", &capsule.view)),
+            egui::Sense::click(),
+        )
+        .on_hover_text("Open this view in Library");
+    paint_premium_view_chip(
+        ui,
+        chip_rect,
+        &capsule.view,
+        chip_response.hovered(),
+        chip_response.is_pointer_button_down_on(),
+    );
+    if chip_response.clicked() {
+        focus_active_project_view_in_library(state, &capsule);
+    }
+
+    let metric_width = metrics_rect.width() / capsule.metrics.len() as f32;
+    let value_font = theme::mono(tokens::FS_1, FontWeight::SemiBold);
+    let label_font = theme::mono(10.0, FontWeight::Regular);
+    for (index, metric) in capsule.metrics.iter().enumerate() {
+        let left = metrics_rect.left() + metric_width * index as f32;
+        let metric_rect = egui::Rect::from_min_size(
+            egui::pos2(left, metrics_rect.top()),
+            egui::vec2(metric_width, metrics_rect.height()),
+        );
+        if index > 0 {
+            painter.vline(
+                metric_rect.left(),
+                metric_rect.y_range().shrink(5.0),
+                egui::Stroke::new(1.0, c.border),
+            );
+        }
+        let value = fit_text(ui, &metric.value, &value_font, metric_width - 10.0);
+        painter.text(
+            egui::pos2(metric_rect.left() + 6.0, metric_rect.top() + 5.0),
+            egui::Align2::LEFT_TOP,
+            value,
+            value_font.clone(),
+            c.text,
+        );
+        painter.text(
+            egui::pos2(metric_rect.left() + 6.0, metric_rect.top() + 18.0),
+            egui::Align2::LEFT_TOP,
+            metric.label,
+            label_font.clone(),
+            c.text_faint,
+        );
+    }
+
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, c.border),
     );
 }
 
-/// Occurrence path — the one stateful, accent-washed surface. Appears only
+fn focus_active_project_view_in_library(state: &mut AppState, capsule: &PremiumProjectCapsule) {
+    if state
+        .library_manager
+        .get_library(&capsule.library)
+        .is_some()
+    {
+        state.library_manager.select_library(&capsule.library);
+        state
+            .library_manager
+            .select_cell(&capsule.library, &capsule.cell);
+        state
+            .library_manager
+            .select_view(&capsule.library, &capsule.cell, &capsule.view);
+        state.library_manager.nav_column = NavColumn::View;
+    }
+    state.shell.view = WorkspaceView::Library;
+}
+
+fn paint_premium_view_chip(ui: &Ui, rect: egui::Rect, text: &str, hovered: bool, pressed: bool) {
+    let t = Tokens::get(ui.ctx());
+    let c = t.color;
+    let fill = if pressed {
+        theme::mix(c.bg_inset, c.accent_dim, 0.75)
+    } else if hovered {
+        theme::mix(c.bg_inset, c.bg_hover, 0.75)
+    } else {
+        c.bg_inset
+    };
+    let stroke = if hovered {
+        egui::Stroke::new(1.0, c.accent)
+    } else {
+        egui::Stroke::new(1.0, c.border_strong)
+    };
+    ui.painter().rect(rect, t.radius, fill, stroke);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        theme::mono(10.0, FontWeight::Medium),
+        if hovered { c.text } else { c.text_faint },
+    );
+}
+
+/// Occurrence path: the one stateful, accent-washed surface. Appears only
 /// when descended; crumbs jump, the trailing action ascends one level (U).
 fn pathbar(ui: &mut Ui, state: &mut AppState) {
     if state.workspace.hierarchy_stack.len() <= 1 {
@@ -313,7 +576,7 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
                 // tooltip carries them) so the row always fits — an
                 // overflowing row would ratchet the panel wider.
                 let sep_w = text_width(ui, "▸", &font) + 8.0;
-                let ascend_w = text_width(ui, "↑ ascend", &font) + 12.0;
+                let ascend_w = text_width(ui, "ascend U", &font) + 12.0;
                 let avail = (ui.available_width() - ascend_w).max(40.0);
 
                 let mut visible: Vec<(String, usize)> = labels
@@ -393,7 +656,7 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
                         .link(
-                            egui::RichText::new("↑ ascend")
+                            egui::RichText::new("ascend U")
                                 .font(font.clone())
                                 .color(c.accent),
                         )
@@ -424,34 +687,25 @@ fn pathbar(ui: &mut Ui, state: &mut AppState) {
 fn nav_segments(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
-    let counts = (
-        state
-            .schematic
-            .components
-            .iter()
-            .filter(|component| component.kind != ComponentType::Port)
-            .count(),
-        design_nets_cached(state).len(),
-        state.schematic.interface_ports().len(),
-    );
+    let labels = premium_nav_filter_labels();
 
-    ui.add_space(7.0);
+    ui.add_space(6.0);
     ui.allocate_ui_with_layout(
-        egui::vec2(ui.available_width(), 21.0),
+        egui::vec2(ui.available_width(), 24.0),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             // The three segments plus the layout's inter-item gaps must
             // total exactly the row — overflow ratchets the panel wider.
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add_space(12.0);
-            let third = (ui.available_width() - 12.0 - 2.0 * 2.0) / 3.0;
-            for (mode, label, count) in [
-                (NavMode::Instances, "INSTANCES", counts.0),
-                (NavMode::Nets, "NETS", counts.1),
-                (NavMode::Ports, "PORTS", counts.2),
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.add_space(10.0);
+            let third = (ui.available_width() - 10.0 - 4.0 * 2.0) / 3.0;
+            for (mode, label) in [
+                (NavMode::Instances, labels[0]),
+                (NavMode::Nets, labels[1]),
+                (NavMode::Ports, labels[2]),
             ] {
                 let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(third, 21.0), egui::Sense::click());
+                    ui.allocate_exact_size(egui::vec2(third, 24.0), egui::Sense::click());
                 let active = state.shell.nav_mode == mode;
                 let hover = ui.ctx().animate_bool_with_time(
                     response.id,
@@ -471,8 +725,8 @@ fn nav_segments(ui: &mut Ui, state: &mut AppState) {
                 painter.text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    format!("{label} {count}"),
-                    theme::mono(10.0, FontWeight::Regular),
+                    label.to_ascii_uppercase(),
+                    theme::mono(10.0, FontWeight::SemiBold),
                     if active { c.text } else { c.text_faint },
                 );
                 if response.clicked() {
