@@ -58,6 +58,7 @@ impl CircuitData {
                     ("vds", op.vds),
                     ("vbs", op.vbs),
                     ("vth", op.vth),
+                    ("vdsat", op.vdsat),
                     ("gm", op.gm),
                     ("gds", op.gds),
                     ("gmb", op.gmb),

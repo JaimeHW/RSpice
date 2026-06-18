@@ -16,6 +16,8 @@ pub struct MosfetOpValues {
     pub vbs: Value,
     /// Threshold voltage at the operating back-bias (V).
     pub vth: Value,
+    /// Drain saturation voltage (V).
+    pub vdsat: Value,
     /// Transconductance dId/dVgs (S).
     pub gm: Value,
     /// Output conductance dId/dVds (S).
@@ -27,6 +29,7 @@ pub struct MosfetOpValues {
 impl Mosfet {
     /// Cached operating-point values from the last accepted Newton solution.
     pub fn op_values(&self) -> MosfetOpValues {
+        let (vth, vdsat, gm, gds, gmb) = self.model_space_op_values();
         MosfetOpValues {
             region: match self.region {
                 MosRegion::Cutoff => "cutoff",
@@ -37,11 +40,39 @@ impl Mosfet {
             vgs: self.vgs,
             vds: self.vds,
             vbs: self.vbs,
-            vth: self.vth(self.vbs),
-            gm: self.gm,
-            gds: self.gds,
-            gmb: self.gmb,
+            vth,
+            vdsat,
+            gm,
+            gds,
+            gmb,
         }
+    }
+
+    fn model_space_op_values(&self) -> (Value, Value, Value, Value, Value) {
+        if self.level == 3 {
+            let state = self.mos3_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
+            return (state.von, state.vdsat, state.gm, state.gds, state.gmb);
+        }
+
+        if self.level == 2 {
+            let eval = self.level2_evaluate(self.eval_vgs, self.eval_vds, self.eval_vbs);
+            return (eval.von, eval.vdsat, self.gm, self.gds, self.gmb);
+        }
+
+        if self.level == 6 {
+            let (_, von, vdsat) =
+                self.level6_meyer_state(self.eval_vgs, self.eval_vds, self.eval_vbs);
+            return (von, vdsat, self.gm, self.gds, self.gmb);
+        }
+
+        let p = self.polarity();
+        let vgs_m = p * self.eval_vgs;
+        let vds_m = p * self.eval_vds;
+        let vgd_m = vgs_m - vds_m;
+        let mode = if vds_m >= 0.0 { 1.0 } else { -1.0 };
+        let vg_active = if mode > 0.0 { vgs_m } else { vgd_m };
+        let vth = self.vth(self.eval_vbs);
+        (vth, (vg_active - vth).max(0.0), self.gm, self.gds, self.gmb)
     }
 }
 

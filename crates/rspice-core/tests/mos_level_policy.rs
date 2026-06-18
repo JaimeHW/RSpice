@@ -12,8 +12,8 @@ use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Mutex, Once,
+    atomic::{AtomicBool, Ordering},
 };
 
 static LOG_INIT: Once = Once::new();
@@ -167,15 +167,17 @@ fn level3_runs_without_fallback_warning() {
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
         .expect("m1 op entry");
-    assert!(!entry.device_kind.is_empty(), "m1 op entry has a device kind");
+    assert!(
+        !entry.device_kind.is_empty(),
+        "m1 op entry has a device kind"
+    );
     let warnings = CAPTURED_WARNINGS
         .lock()
         .expect("warning log capture lock")
         .clone();
     assert!(
         !warnings.iter().any(|message| {
-            message.contains("no native MOS3")
-                || message.contains("MOS3-specific parameters")
+            message.contains("no native MOS3") || message.contains("MOS3-specific parameters")
         }),
         "LEVEL=3 must not emit the old simplified fallback warning; warnings={warnings:?}"
     );

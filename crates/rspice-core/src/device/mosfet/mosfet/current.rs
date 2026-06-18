@@ -450,11 +450,10 @@ impl Mosfet {
     /// Calculate (gm, gds, gmb) including both forward and reverse-oriented
     /// channel contributions for source/drain symmetry.
     ///
-    /// Levels 1/2/6 and the legacy BSIM ports use their closed-form
-    /// linearizations. Until Task 4 adds a native MOS3 linearization, LEVEL=3
-    /// and unsupported simplified levels such as LEVEL=7 differentiate the
-    /// exact composed current the residual stamps, so their Jacobian is
-    /// consistent with `calculate_id` by construction.
+    /// Levels 1/2/3/6 and the legacy BSIM ports use their model-specific
+    /// linearizations. Unsupported simplified levels such as LEVEL=7
+    /// differentiate the exact composed current the residual stamps, so their
+    /// Jacobian is consistent with `calculate_id` by construction.
     pub(in crate::device::mosfet::mosfet) fn small_signal(
         &self,
         vgs: Value,
@@ -476,20 +475,23 @@ impl Mosfet {
             return (gm, gds, gmb);
         }
 
+        if self.level == 3 {
+            return self.mos3_terminal_small_signal(vgs, vds, vbs);
+        }
+
         if self.level == 1 {
             let (_, _, gm, gds, gmb) = self.level1_operating_point(vgs, vds, vbs);
             return (gm, gds, gmb);
         }
 
-        // Temporary MOS3 shim and unsupported simplified fallthroughs:
-        // differentiate the exact composed current the residual stamps so the
-        // Jacobian is consistent with `calculate_id` by construction. The
-        // closed-form expressions previously used here were Level-1 formulas
-        // that ignored mobility degradation, velocity saturation, CLM, and
-        // subthreshold conduction, so Newton iterated against wrong slopes and
-        // AC linearization was wrong. `calculate_id` is C1-smooth with blending
-        // widths >= 0.01 V, so a 1 uV central difference sits well inside the
-        // smooth regions.
+        // Unsupported simplified fallthroughs: differentiate the exact
+        // composed current the residual stamps so the Jacobian is consistent
+        // with `calculate_id` by construction. The closed-form expressions
+        // previously used here were Level-1 formulas that ignored mobility
+        // degradation, velocity saturation, CLM, and subthreshold conduction,
+        // so Newton iterated against wrong slopes and AC linearization was
+        // wrong. `calculate_id` is C1-smooth with blending widths >= 0.01 V,
+        // so a 1 uV central difference sits well inside the smooth regions.
         const FD_STEP: Value = 1.0e-6;
         let id_at = |vgs: Value, vds: Value, vbs: Value| self.calculate_id(vgs, vds, vbs).0;
         let half = 0.5 / FD_STEP;
@@ -507,9 +509,10 @@ impl Mosfet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn simplified_nmos() -> Mosfet {
-        let mut params = std::collections::HashMap::new();
+        let mut params = HashMap::new();
         params.insert("VTO".to_string(), 0.6);
         params.insert("KP".to_string(), 120e-6);
         params.insert("GAMMA".to_string(), 0.4);
@@ -521,7 +524,7 @@ mod tests {
     }
 
     fn level3_nmos() -> Mosfet {
-        let mut params = std::collections::HashMap::new();
+        let mut params = HashMap::new();
         params.insert("VTO".to_string(), 0.6);
         params.insert("KP".to_string(), 120e-6);
         params.insert("GAMMA".to_string(), 0.4);
@@ -532,29 +535,140 @@ mod tests {
             .with_params(&params)
     }
 
+    fn mos3_oracle_nmos() -> Mosfet {
+        let mut params = HashMap::new();
+        params.insert("W".to_string(), 12.0e-6);
+        params.insert("L".to_string(), 1.2e-6);
+        params.insert("VTO".to_string(), 0.72);
+        params.insert("KP".to_string(), 55.0e-6);
+        params.insert("GAMMA".to_string(), 0.62);
+        params.insert("PHI".to_string(), 0.68);
+        params.insert("TOX".to_string(), 22.0e-9);
+        params.insert("LD".to_string(), 0.08e-6);
+        params.insert("ETA".to_string(), 0.18);
+        params.insert("THETA".to_string(), 0.05);
+        params.insert("KAPPA".to_string(), 0.35);
+        params.insert("NFS".to_string(), 8.0e11);
+        params.insert("VMAX".to_string(), 8.0e4);
+        params.insert("XJ".to_string(), 0.18e-6);
+        params.insert("DELTA".to_string(), 0.22);
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
+            .with_level(3)
+            .with_params(&params)
+    }
+
+    fn mos3_oracle_pmos() -> Mosfet {
+        let mut params = HashMap::new();
+        params.insert("W".to_string(), 18.0e-6);
+        params.insert("L".to_string(), 1.5e-6);
+        params.insert("VTO".to_string(), -0.82);
+        params.insert("KP".to_string(), 32.0e-6);
+        params.insert("GAMMA".to_string(), 0.55);
+        params.insert("PHI".to_string(), 0.7);
+        params.insert("TOX".to_string(), 24.0e-9);
+        params.insert("LD".to_string(), 0.06e-6);
+        params.insert("ETA".to_string(), 0.12);
+        params.insert("THETA".to_string(), 0.04);
+        params.insert("KAPPA".to_string(), 0.28);
+        params.insert("NFS".to_string(), 5.0e11);
+        params.insert("VMAX".to_string(), 7.0e4);
+        params.insert("XJ".to_string(), 0.2e-6);
+        params.insert("DELTA".to_string(), 0.18);
+        Mosfet::new_pmos("m1".to_string(), 1, 2, 3, 0)
+            .with_level(3)
+            .with_params(&params)
+    }
+
+    fn mos3_alpha_nmos() -> Mosfet {
+        let mut params = HashMap::new();
+        params.insert("W".to_string(), 8.0e-6);
+        params.insert("L".to_string(), 0.6e-6);
+        params.insert("VTO".to_string(), 0.68);
+        params.insert("KP".to_string(), 70.0e-6);
+        params.insert("GAMMA".to_string(), 0.58);
+        params.insert("PHI".to_string(), 0.68);
+        params.insert("TOX".to_string(), 18.0e-9);
+        params.insert("NSUB".to_string(), 1.0e16);
+        params.insert("LD".to_string(), 0.04e-6);
+        params.insert("ETA".to_string(), 0.22);
+        params.insert("THETA".to_string(), 0.07);
+        params.insert("KAPPA".to_string(), 0.42);
+        params.insert("NFS".to_string(), 7.0e11);
+        params.insert("VMAX".to_string(), 0.0);
+        params.insert("XJ".to_string(), 0.12e-6);
+        params.insert("DELTA".to_string(), 0.24);
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 0)
+            .with_level(3)
+            .with_params(&params)
+    }
+
+    fn assert_small_signal_matches_state_transform(
+        m: &Mosfet,
+        bias: (Value, Value, Value),
+        label: &str,
+    ) {
+        let (vgs, vds, vbs) = bias;
+        let state = m.mos3_state(vgs, vds, vbs);
+        let p = m.polarity();
+        let vds_m = p * vds;
+        let expected = if vds_m >= 0.0 {
+            (p * state.gm, p * state.gds, p * state.gmb)
+        } else {
+            (
+                -p * state.gm,
+                p * (state.gm + state.gds + state.gmb),
+                -p * state.gmb,
+            )
+        };
+        let (gm, gds, gmb) = m.small_signal(vgs, vds, vbs);
+        let values = [
+            ("gm", gm, expected.0),
+            ("gds", gds, expected.1),
+            ("gmb", gmb, expected.2),
+        ];
+        for (name, got, want) in values {
+            let tol = 1.0e-14 * want.abs().max(got.abs()).max(1.0);
+            assert!(
+                (got - want).abs() <= tol,
+                "{label} {name} terminal transform mismatch: \
+                 got={got:.12e} expected={want:.12e} tol={tol:.12e}"
+            );
+        }
+    }
+
     #[test]
-    fn level3_temporary_shim_preserves_symmetric_fallback_inverse_bias() {
+    fn level3_native_current_uses_mos3_state_for_inverse_bias() {
         let m = level3_nmos();
         let (vgs, vds, vbs) = (0.9, -0.7, -0.2);
-        let (id_forward, region_forward) = m.calculate_id_bsim3(vgs, vds, vbs);
-        let (vgs_rev, vds_rev, vbs_rev) = Mosfet::reverse_voltages(vgs, vds, vbs);
-        let (id_reverse_fwd, region_reverse) =
-            m.calculate_id_bsim3(vgs_rev, vds_rev, vbs_rev);
-        let expected_id = id_forward - id_reverse_fwd;
-        let expected_region = if id_forward.abs() >= id_reverse_fwd.abs() {
-            region_forward
-        } else {
-            region_reverse
-        };
+        let state = m.mos3_state(vgs, vds, vbs);
 
         let (actual_id, actual_region) = m.calculate_id(vgs, vds, vbs);
 
-        assert_eq!(actual_region, expected_region);
+        assert_eq!(actual_region, state.region);
         assert!(
-            (actual_id - expected_id).abs() <= 1.0e-18,
-            "LEVEL=3 shim must preserve old symmetric fallback: actual={actual_id:.12e} \
-             expected={expected_id:.12e}"
+            (actual_id - state.ids).abs() <= 1.0e-18,
+            "LEVEL=3 current must come from native MOS3 state: actual={actual_id:.12e} \
+             state={:.12e}",
+            state.ids
         );
+        assert!(
+            actual_id <= 0.0,
+            "inverse-mode NMOS current should be negative"
+        );
+    }
+
+    #[test]
+    fn level3_small_signal_uses_terminal_state_transform() {
+        let cases = [
+            ("nmos normal", mos3_oracle_nmos(), (3.0, 2.5, -0.6)),
+            ("pmos normal", mos3_oracle_pmos(), (-2.4, -2.8, 0.3)),
+            ("nmos inverse", mos3_oracle_nmos(), (0.9, -0.7, -0.2)),
+            ("weak alpha clm", mos3_alpha_nmos(), (-0.9, 2.2, -0.4)),
+        ];
+
+        for (label, mos, bias) in cases {
+            assert_small_signal_matches_state_transform(&mos, bias, label);
+        }
     }
 
     /// The simplified short-channel path must report derivatives consistent

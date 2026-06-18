@@ -1,8 +1,8 @@
-//! RED oracle coverage for native Berkeley MOS3 (`LEVEL=3`) support.
+//! Oracle coverage for native Berkeley MOS3 (`LEVEL=3`) support.
 //!
-//! NGSpice 46 is the oracle. These tests intentionally exercise RSpice's
-//! parser-builder-solver path while MOS3 still routes through the old
-//! simplified short-channel fallback.
+//! NGSpice 46 is the oracle. These tests exercise RSpice's parser-builder-
+//! solver path and verify that MOS3 routes through the native Berkeley model
+//! rather than the simplified short-channel fallback.
 
 use rspice_core::circuit::DeviceOpEntry;
 use rspice_core::engine::{Engine, SimulationConfig};
@@ -64,6 +64,33 @@ const SHORT_NO_VMAX_ORACLE: Mos3Oracle = Mos3Oracle {
     gmb: 3.443_365_047_746_089e-4,
     von: -6.068_900_683_665_898e-1,
     vdsat: 2.850_196_216_579_879,
+};
+
+const SHORT_NO_VMAX_ALPHA_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 4.610_419_090_077_125e-3,
+    gm: 1.241_393_616_561_123e-3,
+    gds: 2.395_189_143_014_649e-3,
+    gmb: 1.291_805_120_948_991e-4,
+    von: -8.160_847_184_245_068e-1,
+    vdsat: 3.163_758_574_237_703,
+};
+
+const WEAK_SAT_ALPHA_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 4.328_493_660_338_096e-7,
+    gm: 9.367_426_614_041_116e-6,
+    gds: 6.387_371_464_232_800e-6,
+    gmb: 1.267_349_992_252_157e-6,
+    von: -8.160_847_184_245_068e-1,
+    vdsat: 4.182_071_076_322_277e-2,
+};
+
+const WEAK_ZERO_VDS_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 4.099_963_655_925_660e-13,
+    gm: 0.0,
+    gds: 1.038_718_005_194_965e-19,
+    gmb: 0.0,
+    von: 6.462_634_331_029_411e-1,
+    vdsat: 4.182_071_076_322_277e-2,
 };
 
 const NMOS_DECK: &str = r#"
@@ -136,6 +163,48 @@ VB b 0 -0.4
 .END
 "#;
 
+const SHORT_NO_VMAX_ALPHA_DECK: &str = r#"
+* mos3_short_channel_no_vmax_alpha
+M1 d g s b MOD W=8U L=0.6U
+VD d 0 2.2
+VG g 0 2.6
+VS s 0 0
+VB b 0 -0.4
+.MODEL MOD NMOS LEVEL=3 VTO=0.68 KP=70U GAMMA=0.58 PHI=0.68
++ TOX=18N NSUB=1E16 LD=0.04U ETA=0.22 THETA=0.07 KAPPA=0.42
++ NFS=7E11 VMAX=0 XJ=0.12U DELTA=0.24
+.OP
+.END
+"#;
+
+const WEAK_SAT_ALPHA_DECK: &str = r#"
+* mos3_weak_sat_alpha
+M1 d g s b MOD W=8U L=0.6U
+VD d 0 2.2
+VG g 0 -0.9
+VS s 0 0
+VB b 0 -0.4
+.MODEL MOD NMOS LEVEL=3 VTO=0.68 KP=70U GAMMA=0.58 PHI=0.68
++ TOX=18N NSUB=1E16 LD=0.04U ETA=0.22 THETA=0.07 KAPPA=0.42
++ NFS=7E11 VMAX=0 XJ=0.12U DELTA=0.24
+.OP
+.END
+"#;
+
+const WEAK_ZERO_VDS_DECK: &str = r#"
+* mos3_weak_zero_vds
+M1 d g s b MOD W=8U L=0.6U
+VD d 0 0
+VG g 0 -0.9
+VS s 0 0
+VB b 0 -0.4
+.MODEL MOD NMOS LEVEL=3 VTO=0.68 KP=70U GAMMA=0.58 PHI=0.68
++ TOX=18N NSUB=1E16 LD=0.04U ETA=0.22 THETA=0.07 KAPPA=0.42
++ NFS=7E11 VMAX=0 XJ=0.12U DELTA=0.24
+.OP
+.END
+"#;
+
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
@@ -176,7 +245,13 @@ fn assert_op_matches_ngspice46(entry: &DeviceOpEntry, oracle: Mos3Oracle) {
     assert_close("gm", op_param(entry, "gm"), oracle.gm, 2.0e-3, 1.0e-10);
     assert_close("gds", op_param(entry, "gds"), oracle.gds, 2.0e-3, 1.0e-10);
     assert_close("gmb", op_param(entry, "gmb"), oracle.gmb, 2.0e-3, 1.0e-10);
-    assert_close("vth/von", op_param(entry, "vth"), oracle.von, 2.0e-3, 1.0e-8);
+    assert_close(
+        "vth/von",
+        op_param(entry, "vth"),
+        oracle.von,
+        2.0e-3,
+        1.0e-8,
+    );
     assert_close(
         "vdsat",
         op_param(entry, "vdsat"),
@@ -219,6 +294,24 @@ fn mos3_short_channel_vmax_changes_current() {
         "MOS3 VMAX must materially change short-channel current: \
          VMAX id={with_id:.12e}, VMAX=0 id={without_id:.12e}"
     );
+}
+
+#[test]
+fn mos3_short_channel_no_vmax_alpha_derivatives_match_ngspice46() {
+    let entry = m1_op_entry(SHORT_NO_VMAX_ALPHA_DECK);
+    assert_op_matches_ngspice46(&entry, SHORT_NO_VMAX_ALPHA_ORACLE);
+}
+
+#[test]
+fn mos3_weak_inversion_alpha_clm_matches_ngspice46() {
+    let entry = m1_op_entry(WEAK_SAT_ALPHA_DECK);
+    assert_op_matches_ngspice46(&entry, WEAK_SAT_ALPHA_ORACLE);
+}
+
+#[test]
+fn mos3_weak_zero_vds_conductance_matches_ngspice46() {
+    let entry = m1_op_entry(WEAK_ZERO_VDS_DECK);
+    assert_op_matches_ngspice46(&entry, WEAK_ZERO_VDS_ORACLE);
 }
 
 #[test]
