@@ -19,6 +19,7 @@ mod construction;
 mod current;
 mod junctions;
 mod mos2;
+mod mos3;
 mod nonlinear;
 mod operating_point;
 mod stamping;
@@ -176,6 +177,30 @@ pub struct Mosfet {
     pub mos2_channel_charge: Value,
     /// Fast surface state density (NFS) in cm^-2.
     pub mos2_fast_surface_state_density: Value,
+
+    // Berkeley MOS3 parameters
+    /// Drain-induced barrier lowering coefficient (ETA).
+    pub mos3_eta: Value,
+    /// Mobility degradation coefficient (THETA).
+    pub mos3_theta: Value,
+    /// Saturation-field coefficient (KAPPA).
+    pub mos3_kappa: Value,
+    /// Narrow-channel threshold coefficient (DELTA).
+    pub mos3_delta: Value,
+    /// Fast surface state density (NFS) in cm^-2.
+    pub mos3_fast_surface_state_density: Value,
+    /// Maximum carrier drift velocity (VMAX).
+    pub mos3_max_drift_velocity: Value,
+    /// Junction depth (XJ) in meters.
+    pub mos3_junction_depth: Value,
+    /// Preprocessed narrow-channel factor from DELTA and oxide capacitance.
+    pub mos3_narrow_factor: Value,
+    /// Model length adjustment (XL) in meters.
+    pub mos3_length_adjust: Value,
+    /// Model width adjustment (XW) in meters.
+    pub mos3_width_adjust: Value,
+    /// Width narrowing term (WD) in meters.
+    pub mos3_width_narrow: Value,
 
     // BSIM4-specific parameters for enhanced short-channel modeling
     /// Short-channel Vth roll-off coefficient 0 (DVT0)

@@ -96,6 +96,19 @@ impl Mosfet {
             mos2_channel_charge: 1.0,
             mos2_fast_surface_state_density: 0.0,
 
+            // Berkeley MOS3 defaults from ngspice mos3set.c/mos3temp.c
+            mos3_eta: 0.0,
+            mos3_theta: 0.0,
+            mos3_kappa: 0.2,
+            mos3_delta: 0.0,
+            mos3_fast_surface_state_density: 0.0,
+            mos3_max_drift_velocity: 0.0,
+            mos3_junction_depth: 0.0,
+            mos3_narrow_factor: 0.0,
+            mos3_length_adjust: 0.0,
+            mos3_width_adjust: 0.0,
+            mos3_width_narrow: 0.0,
+
             // BSIM4 parameters
             dvt0: 2.2,    // Short-channel Vth roll-off
             dvt1: 0.53,   // First-order roll-off
@@ -167,6 +180,32 @@ impl Mosfet {
         self.l = l;
         self.refresh_legacy_bsim_size_params();
         self
+    }
+
+    fn with_mos3_defaults(mut self) -> Self {
+        self.level = 3;
+        self.mos3_eta = 0.0;
+        self.mos3_theta = 0.0;
+        self.mos3_kappa = 0.2;
+        self.mos3_delta = 0.0;
+        self.mos3_fast_surface_state_density = 0.0;
+        self.mos3_max_drift_velocity = 0.0;
+        self.mos3_junction_depth = 0.0;
+        self.mos3_narrow_factor = 0.0;
+        self.mos3_length_adjust = 0.0;
+        self.mos3_width_adjust = 0.0;
+        self.mos3_width_narrow = 0.0;
+        self
+    }
+
+    fn refresh_mos3_narrow_factor(&mut self) {
+        const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
+
+        self.mos3_narrow_factor = if self.cox.is_finite() && self.cox > 0.0 {
+            self.mos3_delta * 0.5 * std::f64::consts::PI * EPSSIL / self.cox
+        } else {
+            0.0
+        };
     }
 
     pub(in crate::device::mosfet::mosfet) fn refresh_legacy_bsim_size_params(&mut self) {
@@ -470,6 +509,9 @@ impl Mosfet {
             self.level = level;
         }
 
+        if self.level == 3 {
+            self = self.with_mos3_defaults();
+        }
         if self.level == 2 {
             // Berkeley MOS2 has distinct model-card defaults from the generic
             // level-1 constructor; explicit parameters below still override.
@@ -812,6 +854,39 @@ impl Mosfet {
         {
             self.mos2_fast_surface_state_density = v;
         }
+        if self.level == 3 {
+            if let Some(v) = params.get("ETA").copied().filter(|v| v.is_finite()) {
+                self.mos3_eta = v;
+            }
+            if let Some(v) = params.get("THETA").copied().filter(|v| v.is_finite()) {
+                self.mos3_theta = v;
+            }
+            if let Some(v) = params.get("KAPPA").copied().filter(|v| v.is_finite()) {
+                self.mos3_kappa = v;
+            }
+            if let Some(v) = params.get("DELTA").copied().filter(|v| v.is_finite()) {
+                self.mos3_delta = v;
+            }
+            if let Some(v) = params.get("NFS").copied().filter(|v| v.is_finite()) {
+                self.mos3_fast_surface_state_density = v;
+            }
+            if let Some(v) = params.get("VMAX").copied().filter(|v| v.is_finite()) {
+                self.mos3_max_drift_velocity = v;
+            }
+            if let Some(v) = params.get("XJ").copied().filter(|v| v.is_finite()) {
+                self.mos3_junction_depth = v;
+            }
+            if let Some(v) = params.get("XL").copied().filter(|v| v.is_finite()) {
+                self.mos3_length_adjust = v;
+            }
+            if let Some(v) = params.get("XW").copied().filter(|v| v.is_finite()) {
+                self.mos3_width_adjust = v;
+            }
+            if let Some(v) = params.get("WD").copied().filter(|v| v.is_finite()) {
+                self.mos3_width_narrow = v;
+            }
+            self.refresh_mos3_narrow_factor();
+        }
         // BSIM4 parameters
         if let Some(&v) = params.get("DVT0") {
             self.dvt0 = v;
@@ -944,7 +1019,11 @@ impl Mosfet {
 
     /// Set model level (1 = Level 1, 3 = BSIM3-like)
     pub fn with_level(mut self, level: i32) -> Self {
-        self.level = level;
+        if level == 3 {
+            self = self.with_mos3_defaults();
+        } else {
+            self.level = level;
+        }
         if level != 4 && level != 5 {
             self.legacy_bsim_model = None;
             self.legacy_bsim_sized = None;
@@ -1235,6 +1314,65 @@ mod tests {
         assert_eq!(mos.kp, 2.0e-5);
         assert_eq!(mos.phi, 0.7);
         assert_eq!(mos.cgso, 1.5e-9);
+    }
+
+    #[test]
+    fn level3_model_defaults_match_berkeley_mos3_baseline() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 3.0);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        assert_eq!(mos.level, 3);
+        assert_eq!(mos.mos3_eta, 0.0);
+        assert_eq!(mos.mos3_theta, 0.0);
+        assert_eq!(mos.mos3_kappa, 0.2);
+        assert_eq!(mos.mos3_delta, 0.0);
+        assert_eq!(mos.mos3_fast_surface_state_density, 0.0);
+        assert_eq!(mos.mos3_max_drift_velocity, 0.0);
+        assert_eq!(mos.mos3_junction_depth, 0.0);
+        assert_eq!(mos.mos3_narrow_factor, 0.0);
+        assert_eq!(mos.mos3_length_adjust, 0.0);
+        assert_eq!(mos.mos3_width_adjust, 0.0);
+        assert_eq!(mos.mos3_width_narrow, 0.0);
+    }
+
+    #[test]
+    fn level3_mos3_model_params_parse_and_preprocess_narrow_factor() {
+        let tox = 22.0e-9;
+        let delta = 0.22;
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 3.0);
+        params.insert("TOX".to_string(), tox);
+        params.insert("ETA".to_string(), 0.18);
+        params.insert("THETA".to_string(), 0.05);
+        params.insert("KAPPA".to_string(), 0.35);
+        params.insert("DELTA".to_string(), delta);
+        params.insert("NFS".to_string(), 8.0e11);
+        params.insert("VMAX".to_string(), 8.0e4);
+        params.insert("XJ".to_string(), 0.18e-6);
+        params.insert("XL".to_string(), 0.02e-6);
+        params.insert("XW".to_string(), 0.03e-6);
+        params.insert("WD".to_string(), 0.04e-6);
+
+        let mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+
+        let cox = 3.9 * 8.854_214_871e-12 / tox;
+        let epssil = 11.7 * 8.854_214_871e-12;
+        let expected_narrow = delta * 0.5 * std::f64::consts::PI * epssil / cox;
+        assert_eq!(mos.level, 3);
+        assert_eq!(mos.mos3_eta, 0.18);
+        assert_eq!(mos.mos3_theta, 0.05);
+        assert_eq!(mos.mos3_kappa, 0.35);
+        assert_eq!(mos.mos3_delta, delta);
+        assert_eq!(mos.mos3_fast_surface_state_density, 8.0e11);
+        assert_eq!(mos.mos3_max_drift_velocity, 8.0e4);
+        assert_eq!(mos.mos3_junction_depth, 0.18e-6);
+        assert_eq!(mos.mos3_length_adjust, 0.02e-6);
+        assert_eq!(mos.mos3_width_adjust, 0.03e-6);
+        assert_eq!(mos.mos3_width_narrow, 0.04e-6);
+        assert!((mos.cox - cox).abs() <= cox * 1.0e-12);
+        assert!((mos.mos3_narrow_factor - expected_narrow).abs() <= expected_narrow * 1.0e-12);
     }
 
     #[test]
