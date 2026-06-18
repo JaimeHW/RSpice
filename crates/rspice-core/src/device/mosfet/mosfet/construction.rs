@@ -266,6 +266,8 @@ impl Mosfet {
             self.level6_meyer_state(vgs, vds, vbs).1
         } else if self.level == 2 {
             self.level2_model_space_onset_voltage(vgs, vds, vbs)
+        } else if self.level == 3 {
+            self.polarity() * self.mos3_state(vgs, vds, vbs).von
         } else {
             self.vth(vbs)
         }
