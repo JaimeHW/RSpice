@@ -2293,6 +2293,63 @@ mod tests {
     }
 
     #[test]
+    fn premium_capsule_keeps_library_cell_and_view_distinct() {
+        let mut state = AppState::default();
+        state.workspace.active_view.library = "work_amp".to_string();
+        state.workspace.active_view.cell = "tb_ota".to_string();
+        state.workspace.active_view.view = "schematic".to_string();
+
+        let capsule = premium_project_capsule(&state);
+
+        assert_eq!(capsule.library, "work_amp");
+        assert_eq!(capsule.cell, "tb_ota");
+        assert_eq!(capsule.view, "schematic");
+        assert!(!capsule.library.contains(&capsule.view));
+        assert_eq!(capsule.metric_labels(), ["inst", "nets", "ports", "sheet"]);
+    }
+
+    #[test]
+    fn navigator_filter_labels_do_not_duplicate_capsule_counts() {
+        let labels = premium_nav_filter_labels();
+
+        assert_eq!(labels, ["Inst", "Nets", "Ports"]);
+        assert!(
+            labels
+                .iter()
+                .all(|label| !label.chars().any(|ch| ch.is_ascii_digit()))
+        );
+    }
+
+    #[test]
+    fn root_sheet_twist_controls_unfiltered_instance_visibility() {
+        let mut state = AppState::default();
+
+        assert!(nav_sheet_instances_visible(&state, None));
+
+        toggle_nav_sheet_collapsed(&mut state);
+        assert!(state.shell.nav_sheet_collapsed);
+        assert!(!nav_sheet_instances_visible(&state, None));
+
+        assert!(nav_sheet_instances_visible(&state, Some("r")));
+
+        toggle_nav_sheet_collapsed(&mut state);
+        assert!(!state.shell.nav_sheet_collapsed);
+        assert!(nav_sheet_instances_visible(&state, None));
+    }
+
+    #[test]
+    fn unnamed_ground_has_a_visible_navigator_label() {
+        let ground =
+            crate::state::Component::new(7, ComponentType::Ground, crate::state::Point::origin());
+
+        let row = navigator_component_row_text(&ground);
+
+        assert_eq!(row.label, "GND");
+        assert_eq!(row.meta.as_deref(), Some("Ground"));
+        assert!(row_matches(&ground, "gnd"));
+    }
+
+    #[test]
     fn navigator_search_counts_all_visible_groups() {
         let mut state = AppState::default();
         state.schematic.components.clear();
