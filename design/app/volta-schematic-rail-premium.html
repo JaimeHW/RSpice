@@ -1,0 +1,662 @@
+<!doctype html>
+<!--
+  RSpice / VOLTA - schematic rail visual option B
+  Direction: Noticeably More Premium.
+
+  Intent:
+  - Stay compatible with VOLTA tokens and EDA density.
+  - Make the left project area feel like a commercial workstation surface:
+    stronger nameplate, recessed content wells, clearer hierarchy rows, and
+    more intentional visual grouping.
+  - Disposable standalone mockup. It does not replace volta-schematic-rail.html.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOLTA - Schematic Rail Premium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --fs-0: 11px;
+  --fs-1: 12px;
+  --fs-2: 13px;
+  --fs-3: 14px;
+  --font-ui: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --radius: 4px;
+  --bg-app: #101519;
+  --chrome: #141a1e;
+  --panel: #191f23;
+  --panel-2: #1f272c;
+  --well: #0b1014;
+  --well-2: #10171b;
+  --row: #202a30;
+  --row-2: #182126;
+  --hover: #2a353c;
+  --border: #2b343a;
+  --border-strong: #4b565d;
+  --text: #dce0e3;
+  --text-dim: #9ba4aa;
+  --text-faint: #667078;
+  --accent: #f2b824;
+  --accent-ink: #17181a;
+  --accent-soft: rgba(242, 184, 36, 0.12);
+  --ok: #65d68a;
+  --warn: #ea9344;
+  --err: #e06c5a;
+  --blue: #7cb8e8;
+  --canvas: #070c10;
+  --grid: #1c2327;
+  --wire: #7fbf95;
+  --symbol: #c9d2d8;
+  --net: #dcb155;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--bg-app); color: var(--text); }
+body { font: 400 var(--fs-2)/1.45 var(--font-ui); padding: 36px; }
+button, input, select { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.page { max-width: 1260px; margin: 0 auto; }
+.topline {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.eyebrow {
+  color: var(--accent);
+  font: 600 10px/1 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+h1 { margin: 0; font-size: 21px; font-weight: 600; }
+.note { max-width: 73ch; margin: 7px 0 0; color: var(--text-dim); font-size: var(--fs-1); }
+.badge {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font: 500 var(--fs-0)/1 var(--font-mono);
+  white-space: nowrap;
+}
+.frame {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.docbar {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--chrome);
+}
+.crumb { font: 500 var(--fs-1)/1 var(--font-mono); color: var(--text-dim); }
+.crumb b { color: var(--text); font-weight: 600; }
+.grow { flex: 1; }
+.ctl {
+  height: 25px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #171e23;
+  color: var(--text-dim);
+  font: 500 var(--fs-0)/1 var(--font-mono);
+}
+.ctl:hover { background: var(--hover); color: var(--text); border-color: var(--border-strong); }
+.workspace { height: 660px; display: grid; grid-template-columns: 318px minmax(0, 1fr); }
+.rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, #1a2126 0%, #171d21 100%);
+}
+.rail-top {
+  padding: 6px 6px 0;
+  border-bottom: 1px solid var(--border);
+  background: #151b1f;
+}
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  overflow: hidden;
+}
+.tab {
+  height: 28px;
+  color: var(--text-faint);
+  background: #171e22;
+  font: 600 10px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+.tab + .tab { border-left: 1px solid var(--border); }
+.tab:hover { color: var(--text-dim); background: var(--hover); }
+.tab[aria-selected="true"] {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.panel { display: none; flex: 1; min-height: 0; overflow: hidden; flex-direction: column; }
+.panel.active { display: flex; }
+.project {
+  padding: 8px 10px;
+  background: #171d21;
+  border-bottom: 1px solid var(--border);
+}
+.project-card {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: #10171b;
+  overflow: hidden;
+}
+.project-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: 8px 9px 7px;
+  border-bottom: 1px solid var(--border);
+  background: #1d252a;
+}
+.proj-lib { color: var(--text-faint); font: 500 var(--fs-0)/1 var(--font-mono); }
+.proj-cell {
+  margin-top: 3px;
+  color: var(--text);
+  font: 600 var(--fs-2)/1 var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.view-state {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  background: #171e23;
+  font: 600 10px/1 var(--font-mono);
+}
+.view-state:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); }
+.project-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+.project-stats span {
+  min-width: 0;
+  padding: 5px 6px;
+  background: #12191d;
+  color: var(--text-faint);
+  font: 500 10px/1 var(--font-mono);
+}
+.project-stats b {
+  display: block;
+  color: var(--text);
+  font: 600 var(--fs-1)/1 var(--font-mono);
+  margin-bottom: 2px;
+}
+.path {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: #1f2118;
+  color: var(--accent);
+  font: 500 var(--fs-0)/1 var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.path button {
+  color: var(--accent);
+  height: 20px;
+  padding: 0 5px;
+  border-radius: var(--radius);
+}
+.path button:hover { background: rgba(242, 184, 36, 0.1); }
+.path .ascend { margin-left: auto; border: 1px solid rgba(242, 184, 36, 0.36); }
+.toolshelf {
+  padding: 8px 10px 7px;
+  display: grid;
+  gap: 6px;
+}
+.search {
+  height: 27px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.search svg { width: 13px; height: 13px; stroke: var(--text-faint); stroke-width: 1.8; fill: none; }
+.search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 var(--fs-1)/1 var(--font-mono);
+}
+.search input::placeholder { color: var(--text-faint); }
+.kbd {
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-bottom-color: var(--border-strong);
+  border-radius: 2px;
+  color: var(--text-faint);
+  font: 500 10px/1 var(--font-mono);
+}
+.segbar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.seg {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-faint);
+  background: #171f24;
+  font: 600 10px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.seg[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--well);
+  border-color: var(--border-strong);
+}
+.tree-area {
+  flex: 1;
+  min-height: 0;
+  padding: 0 10px 10px;
+}
+.tree {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.section-label {
+  height: 23px;
+  display: flex;
+  align-items: center;
+  padding: 0 9px;
+  border-bottom: 1px solid #20292f;
+  color: var(--text-faint);
+  font: 600 10px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.tree-row {
+  min-width: 0;
+  width: calc(100% - 12px);
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px;
+  gap: 7px;
+  align-items: center;
+  margin: 4px 5px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--row);
+  color: var(--text-dim);
+  text-align: left;
+  font: 500 var(--fs-1)/1 var(--font-mono);
+}
+.tree-row:hover { background: var(--hover); color: var(--text); border-color: var(--border); }
+.tree-row.current {
+  background: #272516;
+  border-color: rgba(242, 184, 36, 0.55);
+  color: var(--text);
+}
+.obj {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.obj-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.meta { color: var(--text-faint); font-size: 10px; text-align: right; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.subrow {
+  margin-left: 20px;
+  width: calc(100% - 30px);
+  background: var(--row-2);
+  color: var(--text-faint);
+}
+.library {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px 10px;
+}
+.lib-row {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 26px;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--row);
+  color: var(--text-dim);
+  text-align: left;
+  font: 500 var(--fs-1)/1 var(--font-mono);
+}
+.thumb {
+  width: 34px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.thumb svg { width: 28px; height: 18px; stroke: var(--symbol); stroke-width: 1.2; fill: none; }
+.preview {
+  flex: none;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  background: #151b1f;
+}
+.preview-stage {
+  height: 66px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--canvas);
+}
+.preview-stage svg { width: 120px; height: 46px; stroke: var(--symbol); stroke-width: 1.2; fill: none; }
+.place {
+  flex: none;
+  padding: 9px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--chrome);
+}
+.place-title {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  color: var(--text-faint);
+  font: 600 10px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+}
+.place-title .kbd { margin-left: auto; }
+.cmd {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+.beam { width: 6px; height: 15px; background: var(--accent); }
+.cmd input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: 500 var(--fs-1)/1 var(--font-mono);
+}
+.cmd input::placeholder { color: var(--text-faint); }
+.chips { display: flex; gap: 5px; margin-top: 8px; overflow: hidden; }
+.chip {
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font: 500 var(--fs-0)/1 var(--font-mono);
+}
+.chip.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.canvas {
+  position: relative;
+  min-width: 0;
+  background: var(--canvas);
+}
+.canvas svg { width: 100%; height: 100%; display: block; }
+.gridfill { fill: url(#dotgridPremium); }
+.wire { stroke: var(--wire); stroke-width: 1.25; fill: none; stroke-linecap: round; }
+.symbol { stroke: var(--symbol); stroke-width: 1.4; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.inst { fill: var(--text-dim); font: 500 11px/1 var(--font-mono); }
+.netlabel { fill: var(--net); font: 500 12px/1 var(--font-mono); }
+.canvas-status {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  height: 27px;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(7, 12, 16, 0.88);
+  color: var(--text-faint);
+  font: 500 var(--fs-0)/1 var(--font-mono);
+}
+.canvas-status b { color: var(--text-dim); }
+@media (max-width: 940px) {
+  body { padding: 18px; }
+  .workspace { grid-template-columns: 1fr; height: auto; }
+  .rail { min-height: 660px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .canvas { height: 420px; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+  <div class="topline">
+    <div>
+      <div class="eyebrow">Option B - Noticeably More Premium</div>
+      <h1>A workstation-grade project rail with stronger structure</h1>
+      <p class="note">This keeps the same rail behavior but makes the project navigator feel more finished: a stronger project capsule, tighter scan rows, recessed tree area, and stable library preview.</p>
+    </div>
+    <span class="badge">disposable mockup</span>
+  </div>
+
+  <section class="frame" aria-label="Premium schematic rail mockup">
+    <div class="docbar">
+      <span class="crumb">work_amp &rsaquo; <b>tb_ota</b> &lsaquo;schematic&rsaquo;</span>
+      <span class="grow"></span>
+      <button class="ctl" type="button">-</button>
+      <button class="ctl" type="button">+</button>
+      <button class="ctl" type="button">fit</button>
+      <button class="ctl" type="button">ERC clean</button>
+    </div>
+    <div class="workspace">
+      <aside class="rail" aria-label="Premium schematic rail">
+        <div class="rail-top">
+          <div class="tabs" role="tablist">
+            <button class="tab" type="button" data-tab="nav" aria-selected="true">Navigator</button>
+            <button class="tab" type="button" data-tab="lib" aria-selected="false">Library</button>
+          </div>
+        </div>
+
+        <div class="panel active" id="panel-nav">
+          <div class="project">
+            <div class="project-card">
+              <div class="project-head">
+                <div>
+                  <div class="proj-lib">work_amp</div>
+                  <div class="proj-cell">tb_ota</div>
+                </div>
+                <button class="view-state" type="button" aria-label="Cell view: schematic">schematic</button>
+              </div>
+              <div class="project-stats">
+                <span><b>4</b>inst</span>
+                <span><b>4</b>nets</span>
+                <span><b>0</b>ports</span>
+                <span><b>1</b>sheet</span>
+              </div>
+            </div>
+          </div>
+          <div class="path"><button type="button">TOP</button><span>/</span><strong>X1</strong><span>/</span><span>ota_5t</span><button class="ascend" type="button">ascend U</button></div>
+          <div class="toolshelf">
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 21 21"></path></svg>
+              <input type="text" placeholder="find instance, net, or port" aria-label="Find instance, net, or port">
+              <span class="kbd">/</span>
+            </label>
+            <div class="segbar" role="group" aria-label="Navigator filter">
+              <button class="seg" type="button" aria-pressed="true">Inst</button>
+              <button class="seg" type="button" aria-pressed="false">Nets</button>
+              <button class="seg" type="button" aria-pressed="false">Ports</button>
+            </div>
+          </div>
+          <div class="tree-area">
+            <div class="tree">
+              <div class="section-label">Open cell</div>
+              <button class="tree-row current" type="button"><span class="obj"><span>&rsaquo;</span><span class="dot ok"></span><span class="obj-name">X1</span></span><span class="meta">ota_5t</span></button>
+              <button class="tree-row subrow" type="button"><span class="obj"><span></span><span class="obj-name">M1</span></span><span class="meta">W 24u</span></button>
+              <button class="tree-row subrow" type="button"><span class="obj"><span></span><span class="obj-name">M2</span></span><span class="meta">W 24u</span></button>
+              <button class="tree-row subrow" type="button"><span class="obj"><span></span><span class="obj-name">XB</span></span><span class="meta">bias_2t</span></button>
+              <div class="section-label">Stimulus and load</div>
+              <button class="tree-row" type="button"><span class="obj"><span></span><span class="dot"></span><span class="obj-name">CL</span></span><span class="meta">2p</span></button>
+              <button class="tree-row" type="button"><span class="obj"><span></span><span class="dot warn"></span><span class="obj-name">VIN</span></span><span class="meta">sine</span></button>
+              <button class="tree-row" type="button"><span class="obj"><span></span><span class="dot ok"></span><span class="obj-name">VDD</span></span><span class="meta">1.8 V</span></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" id="panel-lib">
+          <div class="toolshelf">
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 21 21"></path></svg>
+              <input type="text" placeholder="search components and cells" aria-label="Search components and cells">
+            </label>
+          </div>
+          <div class="library">
+            <div class="section-label">Pinned</div>
+            <button class="lib-row" type="button"><span class="thumb"><svg viewBox="0 0 40 24"><path d="M2 12h6l3-5 6 10 6-10 6 10 3-5h6"></path></svg></span><span>Resistor</span><span class="meta">R</span></button>
+            <button class="lib-row" type="button"><span class="thumb"><svg viewBox="0 0 40 24"><path d="M20 2v8M9 10h22M9 15h22M20 15v7"></path></svg></span><span>Capacitor</span><span class="meta">C</span></button>
+            <button class="lib-row" type="button"><span class="thumb"><svg viewBox="0 0 40 24"><path d="M2 12h13M25 12h13M15 4v16M25 4v16"></path></svg></span><span>NMOS</span><span class="meta">M</span></button>
+            <div class="section-label">work_amp</div>
+            <button class="lib-row" type="button"><span class="thumb"><svg viewBox="0 0 40 24"><rect x="10" y="4" width="20" height="16"></rect><path d="M2 8h8M2 16h8M30 12h8"></path></svg></span><span>ota_5t</span><span class="meta">X</span></button>
+          </div>
+          <div class="preview">
+            <div class="preview-stage"><svg viewBox="0 0 120 52"><rect x="34" y="8" width="52" height="36"></rect><path d="M8 18h26M8 34h26M86 26h26M60 0v8M60 44v8"></path></svg></div>
+          </div>
+        </div>
+
+        <div class="place">
+          <div class="place-title">Place <span class="kbd">i</span></div>
+          <label class="cmd">
+            <span class="beam"></span>
+            <input type="text" placeholder="type to place - r, nmos, ota..." aria-label="Type to place">
+          </label>
+          <div class="chips">
+            <button class="chip" type="button">Resistor</button>
+            <button class="chip" type="button">Capacitor</button>
+            <button class="chip active" type="button">NMOS</button>
+            <button class="chip" type="button">Ground</button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="canvas" aria-label="Schematic canvas preview">
+        <svg viewBox="0 0 760 520" role="img" aria-label="Common testbench schematic">
+          <defs>
+            <pattern id="dotgridPremium" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="0.8" fill="var(--grid)"></circle></pattern>
+          </defs>
+          <rect class="gridfill" x="0" y="0" width="760" height="520"></rect>
+          <path class="wire" d="M150 110h260v70M410 180h110M150 170v50h170M500 180v90h-120M235 320h260"></path>
+          <path class="wire" d="M150 110v-40M150 170v60M500 270v58"></path>
+          <rect class="symbol" x="320" y="140" width="90" height="90"></rect>
+          <path class="symbol" d="M270 165h50M270 205h50M410 180h55M365 95v45M365 230v65"></path>
+          <text class="inst" x="365" y="182" text-anchor="middle">X1</text>
+          <text class="inst" x="365" y="199" text-anchor="middle">ota_5t</text>
+          <circle class="symbol" cx="150" cy="110" r="24"></circle>
+          <path class="symbol" d="M145 104h10M150 99v10M144 118h12"></path>
+          <text class="inst" x="112" y="114">VDD</text>
+          <circle class="symbol" cx="150" cy="250" r="24"></circle>
+          <path class="symbol" d="M139 250c6-12 12-12 16 0s10 12 16 0"></path>
+          <text class="inst" x="112" y="254">VIN</text>
+          <path class="symbol" d="M500 270v32M486 302h28M491 310h18M497 318h6"></path>
+          <path class="symbol" d="M500 328v35M482 363h36M482 372h36M500 372v40"></path>
+          <text class="inst" x="516" y="346">CL</text>
+          <text class="netlabel" x="226" y="98">vdd</text>
+          <text class="netlabel" x="222" y="209">vin</text>
+          <text class="netlabel" x="522" y="174">vout</text>
+        </svg>
+        <div class="canvas-status">cross-probe <b>X1</b> selected from project rail</div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+document.querySelectorAll(".tab").forEach(function (tab) {
+  tab.addEventListener("click", function () {
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.setAttribute("aria-selected", String(t === tab));
+    });
+    document.querySelectorAll(".panel").forEach(function (panel) {
+      panel.classList.toggle("active", panel.id === "panel-" + tab.dataset.tab);
+    });
+  });
+});
+</script>
+</body>
+</html>
