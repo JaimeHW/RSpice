@@ -748,6 +748,40 @@ fn toggle_nav_sheet_collapsed(state: &mut AppState) {
     state.shell.nav_sheet_collapsed = !state.shell.nav_sheet_collapsed;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NavigatorComponentRowText {
+    label: String,
+    meta: Option<String>,
+}
+
+fn navigator_component_row_text(component: &crate::state::Component) -> NavigatorComponentRowText {
+    let explicit_name = component.name.trim();
+    let type_name = component.kind.display_name();
+    let label = if explicit_name.is_empty() {
+        navigator_component_fallback_label(component)
+    } else {
+        explicit_name.to_owned()
+    };
+
+    let value = component.value.trim();
+    let meta = if !value.is_empty() {
+        Some(value.to_owned())
+    } else if label != type_name {
+        Some(type_name.to_owned())
+    } else {
+        None
+    };
+
+    NavigatorComponentRowText { label, meta }
+}
+
+fn navigator_component_fallback_label(component: &crate::state::Component) -> String {
+    match component.kind {
+        ComponentType::Ground => "GND".to_owned(),
+        _ => component.kind.display_name().to_owned(),
+    }
+}
+
 fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -795,11 +829,7 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
             continue;
         }
 
-        let meta = if component.value.is_empty() {
-            component.kind.display_name().to_owned()
-        } else {
-            component.value.clone()
-        };
+        let row_text = navigator_component_row_text(component);
         let hierarchical =
             component.kind == ComponentType::CellInstance && component.library_cell.is_some();
         let status = component
@@ -809,12 +839,14 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
         let peeked = state.shell.nav_peek.contains(&component.id);
         let selected = state.schematic.selection.has_component(component.id);
 
-        let mut row = TreeRow::new(&component.name)
-            .meta(&meta)
+        let mut row = TreeRow::new(&row_text.label)
             .indent(1)
             .mono()
             .selected(selected)
             .highlight_query(query);
+        if let Some(meta) = row_text.meta.as_deref() {
+            row = row.meta(meta);
+        }
         if hierarchical {
             row = row.twist(peeked);
         }
@@ -864,17 +896,12 @@ fn instance_rows(ui: &mut Ui, state: &mut AppState, query: Option<&str>) {
                         if child.kind == ComponentType::Port {
                             continue;
                         }
-                        let child_meta = if child.value.is_empty() {
-                            child.kind.display_name().to_owned()
-                        } else {
-                            child.value.clone()
-                        };
-                        TreeRow::new(&child.name)
-                            .meta(&child_meta)
-                            .indent(2)
-                            .mono()
-                            .dim()
-                            .show(ui);
+                        let child_text = navigator_component_row_text(child);
+                        let mut child_row = TreeRow::new(&child_text.label).indent(2).mono().dim();
+                        if let Some(meta) = child_text.meta.as_deref() {
+                            child_row = child_row.meta(meta);
+                        }
+                        child_row.show(ui);
                     }
                     let extra = master
                         .components
@@ -1209,13 +1236,14 @@ fn navigator_search_counts(state: &AppState, query: &str) -> NavigatorSearchCoun
 }
 
 fn row_matches(component: &crate::state::Component, query: &str) -> bool {
-    component.name.to_ascii_lowercase().contains(query)
+    let row_text = navigator_component_row_text(component);
+    row_text.label.to_ascii_lowercase().contains(query)
+        || row_text
+            .meta
+            .as_deref()
+            .is_some_and(|meta| meta.to_ascii_lowercase().contains(query))
+        || component.name.to_ascii_lowercase().contains(query)
         || component.value.to_ascii_lowercase().contains(query)
-        || component
-            .kind
-            .display_name()
-            .to_ascii_lowercase()
-            .contains(query)
 }
 
 /// Live design nets, cached per (cell, topology) — recomputed only when
