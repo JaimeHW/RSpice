@@ -507,4 +507,57 @@ mod tests {
             SourceSpec::DcAcTransient { dc_value, .. } if *dc_value == 0.0
         ));
     }
+
+    #[test]
+    fn source_specs_reject_nonfinite_explicit_parameters() {
+        for source in [
+            "SIN(0 1 1e309)",
+            "PULSE(0 1 0 1n 1n 5n 1e309)",
+            "SFFM(0 1 1e309)",
+            "AM(0 0 1 1 1e309)",
+            "EXP(0 1 0 1e309)",
+        ] {
+            let deck = format!(
+                "bad source\n\
+                 V1 1 0 {source}\n\
+                 R1 1 0 1k\n\
+                 .end\n"
+            );
+            let message = Netlist::parse(&deck)
+                .expect_err("non-finite explicit source value must be rejected")
+                .to_string();
+
+            assert!(
+                message.contains("finite"),
+                "{source} should report a finite-value error, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn pwl_file_specs_reject_invalid_scaling_parameters() {
+        for option in [
+            "TSCALE=0",
+            "TSCALE=1e309",
+            "VSCALE=1e309",
+            "TOFFSET=1e309",
+            "VOFFSET=1e309",
+        ] {
+            let deck = format!(
+                "bad pwl file\n\
+                 V1 1 0 PWL FILE=\"wave.csv\" {option}\n\
+                 R1 1 0 1k\n\
+                 .end\n"
+            );
+            let message = Netlist::parse(&deck)
+                .expect_err("invalid PWL FILE scaling must be rejected")
+                .to_string();
+
+            assert!(
+                message.contains("PWL") && message.contains("finite")
+                    || message.contains("positive"),
+                "{option} should report an invalid PWL scaling error, got: {message}"
+            );
+        }
+    }
 }

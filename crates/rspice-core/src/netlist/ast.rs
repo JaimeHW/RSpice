@@ -226,6 +226,10 @@ pub enum ElementKind {
     Mosfet {
         model: String,
         mos_type: MosType,
+        /// Parsed from compact `Mname D G S model` syntax. This is accepted
+        /// only for VDMOS-compatible models; ordinary MOS devices require an
+        /// explicit bulk node even when it is tied to source.
+        compact_syntax: bool,
         /// Instance parameters (e.g. `W`, `L`, `M`, `NF`).
         instance_params: Vec<(String, Value)>,
         /// Instance parameters captured as expressions inside subcircuit

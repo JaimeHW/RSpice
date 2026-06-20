@@ -700,11 +700,13 @@ impl<'a> Flattener<'a> {
             ElementKind::Mosfet {
                 model,
                 mos_type,
+                compact_syntax,
                 instance_params,
                 deferred_params,
             } => ElementKind::Mosfet {
                 model: model.clone(),
                 mos_type: *mos_type,
+                compact_syntax: *compact_syntax,
                 instance_params: self.merge_deferred_params(
                     instance_params,
                     deferred_params,

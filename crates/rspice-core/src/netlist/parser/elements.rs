@@ -813,7 +813,7 @@ pub(super) fn parse_mosfet(
     let drain = expect_node(stream, line_num)?;
     let gate = expect_node(stream, line_num)?;
     let source = expect_node(stream, line_num)?;
-    let bulk = expect_node(stream, line_num)?;
+    let bulk_or_model = expect_node(stream, line_num)?;
 
     // SPICE MOS syntax variants:
     // - 4-node bulk MOS: Mname D G S B model ...
@@ -836,10 +836,13 @@ pub(super) fn parse_mosfet(
         break;
     }
 
-    let model = tail_tokens.pop().ok_or_else(|| ParseError::Syntax {
-        line: line_num,
-        message: "Expected MOSFET model name".to_string(),
-    })?;
+    let (bulk, model, compact_syntax) = if let Some(model) = tail_tokens.pop() {
+        (bulk_or_model, model, false)
+    } else {
+        // ngspice VDMOS uses the compact three-terminal MOS form
+        // `Mname D G S model`; source is the implicit body reference.
+        (source.clone(), bulk_or_model, true)
+    };
 
     let mut nodes = vec![drain, gate, source, bulk];
     nodes.extend(tail_tokens);
@@ -890,6 +893,7 @@ pub(super) fn parse_mosfet(
         kind: ElementKind::Mosfet {
             model,
             mos_type: super::MosType::Nmos, // Will be set from model
+            compact_syntax,
             instance_params,
             deferred_params,
         },

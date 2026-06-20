@@ -142,6 +142,55 @@ fn parse_transient_source_spec_keyword(
     }
 }
 
+fn source_value_error(line_num: usize, source: &str, field: &str, requirement: &str) -> ParseError {
+    ParseError::InvalidValue(format!(
+        "line {line_num}: {source} {field} must be {requirement}"
+    ))
+}
+
+fn require_finite(
+    line_num: usize,
+    source: &str,
+    field: &str,
+    value: Value,
+) -> Result<(), ParseError> {
+    if value.is_finite() {
+        Ok(())
+    } else {
+        Err(source_value_error(line_num, source, field, "finite"))
+    }
+}
+
+fn require_optional_finite(
+    line_num: usize,
+    source: &str,
+    field: &str,
+    value: Option<Value>,
+) -> Result<(), ParseError> {
+    match value {
+        Some(value) => require_finite(line_num, source, field, value),
+        None => Ok(()),
+    }
+}
+
+fn require_positive_finite(
+    line_num: usize,
+    source: &str,
+    field: &str,
+    value: Value,
+) -> Result<(), ParseError> {
+    if value.is_finite() && value > 0.0 {
+        Ok(())
+    } else {
+        Err(source_value_error(
+            line_num,
+            source,
+            field,
+            "positive and finite",
+        ))
+    }
+}
+
 /// Parse TRNOISE(NA NT NALPHA NAMP [RTSAM RTSCAPT RTSEMT]).
 ///
 /// White (`NA`/`NT`) and 1/f (`NALPHA`/`NAMP`) terms are supported; the RTS
@@ -163,6 +212,12 @@ fn parse_trnoise_spec(
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "TRNOISE", "NA", na)?;
+    require_finite(line_num, "TRNOISE", "NT", nt)?;
+    require_finite(line_num, "TRNOISE", "NALPHA", nalpha)?;
+    require_finite(line_num, "TRNOISE", "NAMP", namp)?;
+    require_optional_finite(line_num, "TRNOISE", "RTSAM", rts)?;
 
     if rts.is_some_and(|v| v != 0.0) {
         return Err(ParseError::Syntax {
@@ -205,9 +260,9 @@ fn parse_sffm_spec(
 
     let offset = expect_value_default(stream, params, 0.0);
     let amplitude = expect_value_default(stream, params, 1.0);
-    let carrier_freq = try_value(stream, params).unwrap_or(Value::NAN);
-    let modulation_index = try_value(stream, params).unwrap_or(Value::NAN);
-    let signal_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let carrier_freq = try_value(stream, params);
+    let modulation_index = try_value(stream, params);
+    let signal_freq = try_value(stream, params);
     let delay = expect_value_default(stream, params, 0.0);
     // SFFM/AM phases stay in degrees: the runtime converts exactly like
     // ngspice's vsrcload.c so the stored spec mirrors the netlist text.
@@ -217,6 +272,19 @@ fn parse_sffm_spec(
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "SFFM", "VO", offset)?;
+    require_finite(line_num, "SFFM", "VA", amplitude)?;
+    require_finite(line_num, "SFFM", "TD", delay)?;
+    require_finite(line_num, "SFFM", "PHASEM", phase_modulation)?;
+    require_finite(line_num, "SFFM", "PHASEC", phase_carrier)?;
+    require_optional_finite(line_num, "SFFM", "FC", carrier_freq)?;
+    require_optional_finite(line_num, "SFFM", "MDI", modulation_index)?;
+    require_optional_finite(line_num, "SFFM", "FM", signal_freq)?;
+
+    let carrier_freq = carrier_freq.unwrap_or(Value::NAN);
+    let modulation_index = modulation_index.unwrap_or(Value::NAN);
+    let signal_freq = signal_freq.unwrap_or(Value::NAN);
 
     if carrier_freq.is_finite()
         && signal_freq.is_finite()
@@ -247,7 +315,7 @@ fn parse_sffm_spec(
 /// NaN so the transient runtime can resolve ngspice's tstop-based defaults.
 fn parse_am_spec(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
@@ -255,8 +323,8 @@ fn parse_am_spec(
     let offset = expect_value_default(stream, params, 0.0);
     let modulation_offset = expect_value_default(stream, params, 0.0);
     let modulation_amplitude = expect_value_default(stream, params, 1.0);
-    let modulating_freq = try_value(stream, params).unwrap_or(Value::NAN);
-    let carrier_freq = try_value(stream, params).unwrap_or(Value::NAN);
+    let modulating_freq = try_value(stream, params);
+    let carrier_freq = try_value(stream, params);
     let delay = expect_value_default(stream, params, 0.0);
     let phase_modulation = expect_value_default(stream, params, 0.0);
     let phase_carrier = expect_value_default(stream, params, 0.0);
@@ -264,6 +332,18 @@ fn parse_am_spec(
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "AM", "VO", offset)?;
+    require_finite(line_num, "AM", "VMO", modulation_offset)?;
+    require_finite(line_num, "AM", "VMA", modulation_amplitude)?;
+    require_finite(line_num, "AM", "TD", delay)?;
+    require_finite(line_num, "AM", "PHASEM", phase_modulation)?;
+    require_finite(line_num, "AM", "PHASEC", phase_carrier)?;
+    require_optional_finite(line_num, "AM", "FM", modulating_freq)?;
+    require_optional_finite(line_num, "AM", "FC", carrier_freq)?;
+
+    let modulating_freq = modulating_freq.unwrap_or(Value::NAN);
+    let carrier_freq = carrier_freq.unwrap_or(Value::NAN);
 
     Ok(SourceSpec::Am {
         offset,
@@ -279,7 +359,7 @@ fn parse_am_spec(
 
 fn parse_pulse_spec(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     // Consume opening paren if present
@@ -294,11 +374,21 @@ fn parse_pulse_spec(
     let fall = try_value(stream, params);
     let width = try_value(stream, params);
     let width_defaults_to_zero = rise.is_some() && fall.is_some() && width.is_none();
-    let period = try_value(stream, params).unwrap_or(Value::NAN);
+    let period = try_value(stream, params);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "PULSE", "V1", v1)?;
+    require_finite(line_num, "PULSE", "V2", v2)?;
+    require_finite(line_num, "PULSE", "TD", delay)?;
+    require_optional_finite(line_num, "PULSE", "TR", rise)?;
+    require_optional_finite(line_num, "PULSE", "TF", fall)?;
+    require_optional_finite(line_num, "PULSE", "PW", width)?;
+    require_optional_finite(line_num, "PULSE", "PER", period)?;
+
+    let period = period.unwrap_or(Value::NAN);
 
     Ok(SourceSpec::Pulse {
         v1,
@@ -314,14 +404,14 @@ fn parse_pulse_spec(
 
 fn parse_sin_spec(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
     let offset = expect_value_default(stream, params, 0.0);
     let amplitude = expect_value_default(stream, params, 1.0);
-    let frequency = try_value(stream, params).unwrap_or(Value::NAN);
+    let frequency = try_value(stream, params);
     let delay = expect_value_default(stream, params, 0.0);
     let damping = expect_value_default(stream, params, 0.0);
     // SPICE SIN phase is specified in degrees; store radians internally.
@@ -330,6 +420,15 @@ fn parse_sin_spec(
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "SIN", "VO", offset)?;
+    require_finite(line_num, "SIN", "VA", amplitude)?;
+    require_optional_finite(line_num, "SIN", "FREQ", frequency)?;
+    require_finite(line_num, "SIN", "TD", delay)?;
+    require_finite(line_num, "SIN", "THETA", damping)?;
+    require_finite(line_num, "SIN", "PHASE", phase)?;
+
+    let frequency = frequency.unwrap_or(Value::NAN);
 
     Ok(SourceSpec::Sin {
         offset,
@@ -394,6 +493,11 @@ fn parse_pwl_spec(
             }
         }
 
+        require_positive_finite(line_num, "PWL FILE", "TSCALE", time_scale)?;
+        require_finite(line_num, "PWL FILE", "VSCALE", value_scale)?;
+        require_finite(line_num, "PWL FILE", "TOFFSET", time_offset)?;
+        require_finite(line_num, "PWL FILE", "VOFFSET", value_offset)?;
+
         if has_paren {
             stream.consume(&TokenKind::RParen);
         }
@@ -420,6 +524,8 @@ fn parse_pwl_spec(
 
         if let Some(time) = try_value(stream, params) {
             if let Some(value) = try_value(stream, params) {
+                require_finite(line_num, "PWL", "time", time)?;
+                require_finite(line_num, "PWL", "value", value)?;
                 points.push((time, value));
             } else {
                 break;
@@ -445,21 +551,33 @@ fn parse_pwl_spec(
 /// (TD1/TAU1/TAU2 default to TSTEP, TD2 to TD1+TSTEP).
 fn parse_exp_spec(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
     let v1 = expect_value_default(stream, params, 0.0);
     let v2 = expect_value_default(stream, params, 1.0);
-    let td1 = try_value(stream, params).unwrap_or(Value::NAN);
-    let tau1 = try_value(stream, params).unwrap_or(Value::NAN);
-    let td2 = try_value(stream, params).unwrap_or(Value::NAN);
-    let tau2 = try_value(stream, params).unwrap_or(Value::NAN);
+    let td1 = try_value(stream, params);
+    let tau1 = try_value(stream, params);
+    let td2 = try_value(stream, params);
+    let tau2 = try_value(stream, params);
 
     if has_paren {
         stream.consume(&TokenKind::RParen);
     }
+
+    require_finite(line_num, "EXP", "V1", v1)?;
+    require_finite(line_num, "EXP", "V2", v2)?;
+    require_optional_finite(line_num, "EXP", "TD1", td1)?;
+    require_optional_finite(line_num, "EXP", "TAU1", tau1)?;
+    require_optional_finite(line_num, "EXP", "TD2", td2)?;
+    require_optional_finite(line_num, "EXP", "TAU2", tau2)?;
+
+    let td1 = td1.unwrap_or(Value::NAN);
+    let tau1 = tau1.unwrap_or(Value::NAN);
+    let td2 = td2.unwrap_or(Value::NAN);
+    let tau2 = tau2.unwrap_or(Value::NAN);
 
     Ok(SourceSpec::Exp {
         v1,
