@@ -31,9 +31,9 @@ impl Binned {
 /// Full BSIM3v3.3 `.model` card (one per model statement, shared by instances).
 ///
 /// Field order follows the `sBSIM3model` struct in `bsim3def.h`. The SOA
-/// voltage limits (`vgsMax` family) and the noise-model card (`noia`/`noib`/
-/// `noic`/`em`/`ef`/`af`/`kf`/`lintnoi`) are accepted but only stored; neither
-/// the DC load nor the charge model reads them.
+/// voltage limits (`vgsMax` family) are accepted but not enforced here; the
+/// noise-model card (`noia`/`noib`/`noic`/`em`/`ef`/`af`/`kf`/`lintnoi`) is
+/// consumed by the engine's `.NOISE` source collector.
 #[derive(Debug, Clone)]
 pub struct Bsim3v3Model {
     /// +1.0 for NMOS, -1.0 for PMOS (ngspice `BSIM3type`).

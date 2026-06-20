@@ -1,4 +1,4 @@
-//! Engine-facing BSIM3v3.3 device (MOS levels 8/49).
+//! Engine-facing BSIM3v3.3 device (MOS levels 8/9/49).
 //!
 //! Wraps the model math of this module ([`Bsim3v3`]) in a
 //! [`NonlinearDevice`] the engine can iterate and stamp, transcribing the
@@ -26,7 +26,9 @@
 use super::eval::{Bsim3v3Bias, Bsim3v3Charge, Bsim3v3Op};
 use super::{Bsim3v3, eval};
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
-use crate::{Value, circuit::NodeId};
+use crate::{Complex64, Value, circuit::NodeId};
+
+const TRNQS_SCALING: Value = 1.0e-9;
 
 /// Mode-assembled charge-companion conductance matrix: the `gc**` of
 /// b3ld.c:2560-2596 (mode > 0) / 2676-2711 (mode < 0) *before* the `ag0`
@@ -58,6 +60,8 @@ pub struct Bsim3v3Device {
     /// Source prime (the internal node when an RSH*NRS resistor exists).
     pub node_source: NodeId,
     pub node_bulk: NodeId,
+    /// Hidden charge-deficit state node for `NQSMOD=1`.
+    pub node_charge_deficit: NodeId,
     /// Parallel multiplier `M` (ngspice `here->BSIM3m`, applied at stamp time).
     pub multiplier: Value,
 
@@ -88,6 +92,7 @@ impl Bsim3v3Device {
         node_gate: NodeId,
         node_source: NodeId,
         node_bulk: NodeId,
+        node_charge_deficit: NodeId,
         multiplier: Value,
         core: Bsim3v3,
     ) -> Self {
@@ -97,6 +102,7 @@ impl Bsim3v3Device {
             node_gate,
             node_source,
             node_bulk,
+            node_charge_deficit,
             multiplier: if multiplier > 0.0 { multiplier } else { 1.0 },
             core,
             gmin: 1e-12,
@@ -133,17 +139,21 @@ impl Bsim3v3Device {
     /// (b3ld.c:248-256: `mtype` folded, source-referenced). The solution is
     /// 0-indexed (node 1 -> `v[0]`); ground reads as 0.
     fn raw_branch_voltages(&self, v: &[Value]) -> Bsim3v3Bias {
-        let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
-        let vd = node(self.node_drain);
-        let vg = node(self.node_gate);
-        let vs = node(self.node_source);
-        let vb = node(self.node_bulk);
+        let vd = Self::node_voltage(v, self.node_drain);
+        let vg = Self::node_voltage(v, self.node_gate);
+        let vs = Self::node_voltage(v, self.node_source);
+        let vb = Self::node_voltage(v, self.node_bulk);
         let mt = self.core.mtype;
         Bsim3v3Bias {
             vds: mt * (vd - vs),
             vgs: mt * (vg - vs),
             vbs: mt * (vb - vs),
         }
+    }
+
+    #[inline]
+    fn node_voltage(v: &[Value], n: NodeId) -> Value {
+        if n == 0 { 0.0 } else { v[n - 1] }
     }
 
     /// The b3ld.c limiting sequence against the previous accepted iterate;
@@ -220,6 +230,50 @@ impl Bsim3v3Device {
         )
     }
 
+    pub fn uses_ac_nqs(&self) -> bool {
+        self.core.model.acnqs_mod != 0
+    }
+
+    pub fn uses_trnqs(&self) -> bool {
+        self.core.model.nqs_mod != 0
+    }
+
+    pub fn trnqs_qdef(&self, voltages: &[Value]) -> Value {
+        self.core.mtype * Self::node_voltage(voltages, self.node_charge_deficit)
+    }
+
+    pub fn trnqs_qcdump_state(&self, voltages: &[Value]) -> Value {
+        self.trnqs_qdef(voltages) * TRNQS_SCALING
+    }
+
+    pub fn trnqs_state_charges(&self, charge: &Bsim3v3Charge) -> (Value, Value, Value) {
+        (charge.qg_state(), charge.qb_state(), charge.qd_state())
+    }
+
+    /// Operating-point snapshot consumed by the noise analysis. The wrapper
+    /// owns the cached `b3ld.c` quantities, while the engine constructs the
+    /// equivalent current-noise sources so the device math stays decoupled
+    /// from the analysis layer.
+    pub fn noise_operating_point(&self) -> (&Bsim3v3Op, Bsim3v3Bias) {
+        (&self.op, self.bias)
+    }
+
+    /// Operating-point snapshot with supported CAPMOD charge bookkeeping enabled.
+    /// BSIM3 `noiMod=2/4` channel thermal noise consumes `BSIM3qinv`, which
+    /// the DC-only path deliberately leaves at zero.
+    pub fn noise_operating_point_with_charge(&self) -> (Bsim3v3Op, Bsim3v3Bias) {
+        match self.core.eval(self.bias, self.gmin, true) {
+            Ok(op) => (op, self.bias),
+            Err(err) => {
+                log::warn!(
+                    "BSIM3 '{}': noise qinv evaluation failed ({err}); using cached DC snapshot",
+                    self.name
+                );
+                (self.op.clone(), self.bias)
+            }
+        }
+    }
+
     /// Assemble the mode-dependent charge-companion capacitance matrix
     /// (b3ld.c:2560-2596 / 2676-2711 with `ag0 = 1`).
     pub fn charge_matrix(charge: &Bsim3v3Charge, mode: i32) -> Bsim3v3ChargeMatrix {
@@ -291,6 +345,227 @@ impl Bsim3v3Device {
         stamp(matrix, sp, sp, f * gc.gcssb);
     }
 
+    /// AC-only charge-deficit NQS correction of ngspice-46 `b3acld.c`.
+    /// The AC engine has already stamped the QS real Jacobian and QS
+    /// `j*omega*C`; this adds the delta that converts the intrinsic
+    /// channel/charge rows to `ACNQSMOD=1`.
+    pub fn stamp_ac_nqs_correction(
+        &self,
+        charge: &Bsim3v3Charge,
+        mode: i32,
+        omega: Value,
+        mut stamp: impl FnMut(NodeId, NodeId, Complex64),
+    ) {
+        if !self.uses_ac_nqs()
+            || omega == 0.0
+            || !omega.is_finite()
+            || charge.taunet <= 0.0
+            || !charge.taunet.is_finite()
+        {
+            return;
+        }
+
+        let t0 = omega * charge.taunet;
+        let t2 = 1.0 / (1.0 + t0 * t0);
+        let t3 = t0 * t2;
+        let nodes = (
+            self.node_drain,
+            self.node_gate,
+            self.node_source,
+            self.node_bulk,
+        );
+        let m = self.multiplier;
+
+        Self::stamp_ac_nqs_channel_delta(
+            mode,
+            nodes,
+            self.op.gm * (t2 - 1.0),
+            self.op.gmbs * (t2 - 1.0),
+            self.op.gds * (t2 - 1.0),
+            Complex64::new(m, 0.0),
+            &mut stamp,
+        );
+        Self::stamp_ac_nqs_channel_delta(
+            mode,
+            nodes,
+            -self.op.gm * t3,
+            -self.op.gmbs * t3,
+            -self.op.gds * t3,
+            Complex64::new(0.0, m),
+            &mut stamp,
+        );
+
+        let c = charge;
+        let csd = -(c.cddb + c.cgdb + c.cbdb);
+        let csg = -(c.cdgb + c.cggb + c.cbgb);
+        let css = -(c.cdsb + c.cgsb + c.cbsb);
+
+        let cddr = c.cddb * t2;
+        let cdgr = c.cdgb * t2;
+        let cdsr = c.cdsb * t2;
+        let cddi = c.cddb * t3 * omega;
+        let cdgi = c.cdgb * t3 * omega;
+        let cdsi = c.cdsb * t3 * omega;
+        let cdbi = -(cddi + cdgi + cdsi);
+
+        let csdr = csd * t2;
+        let csgr = csg * t2;
+        let cssr = css * t2;
+        let csdi = csd * t3 * omega;
+        let csgi = csg * t3 * omega;
+        let cssi = css * t3 * omega;
+        let csbi = -(csdi + csgi + cssi);
+
+        let cgdr = -(cddr + csdr + c.cbdb);
+        let cggr = -(cdgr + csgr + c.cbgb);
+        let cgsr = -(cdsr + cssr + c.cbsb);
+        let cgdi = -(cddi + csdi);
+        let cggi = -(cdgi + csgi);
+        let cgsi = -(cdsi + cssi);
+        let cgbi = -(cgdi + cggi + cgsi);
+
+        let (
+            xcggbr,
+            xcgdbr,
+            xcgsbr,
+            xcgbbr,
+            xcdgbr,
+            xcddbr,
+            xcdsbr,
+            xcdbbr,
+            xcsgbr,
+            xcsdbr,
+            xcssbr,
+            xcsbbr,
+            xcbgb,
+            xcbdb,
+            xcbsb,
+            xcbbb,
+            xcggbi,
+            xcgdbi,
+            xcgsbi,
+            xcgbbi,
+            xcdgbi,
+            xcddbi,
+            xcdsbi,
+            xcdbbi,
+            xcsgbi,
+            xcsdbi,
+            xcssbi,
+            xcsbbi,
+        ) = if mode >= 0 {
+            let xcggbr = (cggr + c.cgdo + c.cgso + c.cgbo) * omega;
+            let xcgdbr = (cgdr - c.cgdo) * omega;
+            let xcgsbr = (cgsr - c.cgso) * omega;
+            let xcgbbr = -(xcggbr + xcgdbr + xcgsbr);
+            let xcdgbr = (cdgr - c.cgdo) * omega;
+            let xcddbr = (cddr + c.capbd + c.cgdo) * omega;
+            let xcdsbr = cdsr * omega;
+            let xcdbbr = -(xcdgbr + xcddbr + xcdsbr);
+            let xcsgbr = (csgr - c.cgso) * omega;
+            let xcsdbr = csdr * omega;
+            let xcssbr = (c.capbs + c.cgso + cssr) * omega;
+            let xcsbbr = -(xcsgbr + xcsdbr + xcssbr);
+            let xcbgb = (c.cbgb - c.cgbo) * omega;
+            let xcbdb = (c.cbdb - c.capbd) * omega;
+            let xcbsb = (c.cbsb - c.capbs) * omega;
+            let xcbbb = -(xcbgb + xcbdb + xcbsb);
+            (
+                xcggbr, xcgdbr, xcgsbr, xcgbbr, xcdgbr, xcddbr, xcdsbr, xcdbbr, xcsgbr, xcsdbr,
+                xcssbr, xcsbbr, xcbgb, xcbdb, xcbsb, xcbbb, cggi, cgdi, cgsi, cgbi, cdgi, cddi,
+                cdsi, cdbi, csgi, csdi, cssi, csbi,
+            )
+        } else {
+            let xcggbr = (cggr + c.cgdo + c.cgso + c.cgbo) * omega;
+            let xcgdbr = (cgsr - c.cgdo) * omega;
+            let xcgsbr = (cgdr - c.cgso) * omega;
+            let xcgbbr = -(xcggbr + xcgdbr + xcgsbr);
+            let xcdgbr = (csgr - c.cgdo) * omega;
+            let xcddbr = (c.capbd + c.cgdo + cssr) * omega;
+            let xcdsbr = csdr * omega;
+            let xcdbbr = -(xcdgbr + xcddbr + xcdsbr);
+            let xcsgbr = (cdgr - c.cgso) * omega;
+            let xcsdbr = cdsr * omega;
+            let xcssbr = (cddr + c.capbs + c.cgso) * omega;
+            let xcsbbr = -(xcsgbr + xcsdbr + xcssbr);
+            let xcbgb = (c.cbgb - c.cgbo) * omega;
+            let xcbdb = (c.cbsb - c.capbd) * omega;
+            let xcbsb = (c.cbdb - c.capbs) * omega;
+            let xcbbb = -(xcbgb + xcbdb + xcbsb);
+            (
+                xcggbr, xcgdbr, xcgsbr, xcgbbr, xcdgbr, xcddbr, xcdsbr, xcdbbr, xcsgbr, xcsdbr,
+                xcssbr, xcsbbr, xcbgb, xcbdb, xcbsb, xcbbb, cggi, cgsi, cgdi, cgbi, csgi, cssi,
+                csdi, csbi, cdgi, cdsi, cddi, cdbi,
+            )
+        };
+
+        let qs = Self::charge_matrix(charge, mode);
+        let qs_gp_bp = -(qs.gcggb + qs.gcgdb + qs.gcgsb) * omega;
+        let qs_dp_bp = -(qs.gcdgb + qs.gcddb + qs.gcdsb) * omega;
+        let qs_sp_bp = -(qs.gcsgb + qs.gcsdb + qs.gcssb) * omega;
+        let qs_bp_bp = -(qs.gcbgb + qs.gcbdb + qs.gcbsb) * omega;
+        let mut add_cap_delta =
+            |row: NodeId, col: NodeId, real: Value, nqs_imag: Value, qs_imag: Value| {
+                let value = Complex64::new(m * real, m * (nqs_imag - qs_imag));
+                if value.re != 0.0 || value.im != 0.0 {
+                    stamp(row, col, value);
+                }
+            };
+        let (dp, g, sp, b) = nodes;
+        add_cap_delta(g, g, xcggbi, xcggbr, qs.gcggb * omega);
+        add_cap_delta(g, dp, xcgdbi, xcgdbr, qs.gcgdb * omega);
+        add_cap_delta(g, sp, xcgsbi, xcgsbr, qs.gcgsb * omega);
+        add_cap_delta(g, b, xcgbbi, xcgbbr, qs_gp_bp);
+
+        add_cap_delta(dp, g, xcdgbi, xcdgbr, qs.gcdgb * omega);
+        add_cap_delta(dp, dp, xcddbi, xcddbr, qs.gcddb * omega);
+        add_cap_delta(dp, sp, xcdsbi, xcdsbr, qs.gcdsb * omega);
+        add_cap_delta(dp, b, xcdbbi, xcdbbr, qs_dp_bp);
+
+        add_cap_delta(sp, g, xcsgbi, xcsgbr, qs.gcsgb * omega);
+        add_cap_delta(sp, dp, xcsdbi, xcsdbr, qs.gcsdb * omega);
+        add_cap_delta(sp, sp, xcssbi, xcssbr, qs.gcssb * omega);
+        add_cap_delta(sp, b, xcsbbi, xcsbbr, qs_sp_bp);
+
+        add_cap_delta(b, g, 0.0, xcbgb, qs.gcbgb * omega);
+        add_cap_delta(b, dp, 0.0, xcbdb, qs.gcbdb * omega);
+        add_cap_delta(b, sp, 0.0, xcbsb, qs.gcbsb * omega);
+        add_cap_delta(b, b, 0.0, xcbbb, qs_bp_bp);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn stamp_ac_nqs_channel_delta(
+        mode: i32,
+        nodes: (NodeId, NodeId, NodeId, NodeId),
+        gm_in: Value,
+        gmb_in: Value,
+        gds_in: Value,
+        scale: Complex64,
+        stamp: &mut impl FnMut(NodeId, NodeId, Complex64),
+    ) {
+        let (dp, g, sp, b) = nodes;
+        let (gm, gmb, fwd_sum, rev_sum) = if mode >= 0 {
+            (gm_in, gmb_in, gm_in + gmb_in, 0.0)
+        } else {
+            let gm = -gm_in;
+            let gmb = -gmb_in;
+            (gm, gmb, 0.0, -(gm + gmb))
+        };
+        let mut add = |row: NodeId, col: NodeId, value: Value| {
+            if value != 0.0 {
+                stamp(row, col, Complex64::new(value * scale.re, value * scale.im));
+            }
+        };
+        add(dp, dp, gds_in + rev_sum);
+        add(dp, g, gm);
+        add(dp, sp, -(gds_in + fwd_sum));
+        add(dp, b, gmb);
+        add(sp, dp, -(gds_in + rev_sum));
+        add(sp, g, -gm);
+        add(sp, sp, gds_in + fwd_sum);
+        add(sp, b, -gmb);
+    }
+
     /// Stamp the transient charge companion: `gc**·ag0` plus the equivalent
     /// charge currents `ceqq*` (b3ld.c:2860-2880, RHS rows of line900). The
     /// `cq*` are the integrated charge currents of the composite states
@@ -334,6 +609,296 @@ impl Bsim3v3Device {
         stamp_rhs(matrix, self.node_source, m * (ceqqg + ceqqb + ceqqd));
 
         self.stamp_charge_matrix(&gc, ag0, matrix);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn stamp_trnqs_charge_companion(
+        &self,
+        charge: &Bsim3v3Charge,
+        mode: i32,
+        ag0: Value,
+        cqg: Value,
+        cqb: Value,
+        cqd: Value,
+        cqcheq: Value,
+        cqcdump: Value,
+        voltages: &[Value],
+        matrix: &mut impl MatrixStamper,
+    ) {
+        let cox_wl = charge.cox_wl;
+        if !(cox_wl > 0.0 && cox_wl.is_finite()) {
+            return;
+        }
+        let gtau = charge.gtau;
+        if !(gtau.is_finite() && gtau >= 0.0) {
+            return;
+        }
+
+        let (bias, _) = self.limited_branch_voltages(voltages);
+        let vgb = bias.vgs - bias.vbs;
+        let vbd = bias.vbs - bias.vds;
+        let vbs = bias.vbs;
+        let qdef = self.trnqs_qdef(voltages);
+        let t0 = if charge.qcheq > 0.0 {
+            self.core.inst.tconst * qdef * TRNQS_SCALING
+        } else {
+            -self.core.inst.tconst * qdef * TRNQS_SCALING
+        };
+
+        let (
+            ggtg,
+            ggtd,
+            ggts,
+            ggtb,
+            gcqgb,
+            gcqdb,
+            gcqsb,
+            gcqbb,
+            dxpart,
+            sxpart,
+            ddxpart_dvd,
+            ddxpart_dvg,
+            ddxpart_dvs,
+            ddxpart_dvb,
+            dsxpart_dvd,
+            dsxpart_dvg,
+            dsxpart_dvs,
+            dsxpart_dvb,
+        ) = if mode > 0 {
+            let ggtg = t0 * charge.cqgb;
+            let ggtd = t0 * charge.cqdb;
+            let ggts = t0 * charge.cqsb;
+            let ggtb = t0 * charge.cqbb;
+            let gcqgb = charge.cqgb * ag0;
+            let gcqdb = charge.cqdb * ag0;
+            let gcqsb = charge.cqsb * ag0;
+            let gcqbb = charge.cqbb * ag0;
+            let (dxpart, ddxpart_dvd, ddxpart_dvg, ddxpart_dvs, ddxpart_dvb) =
+                if charge.qcheq.abs() <= 1.0e-5 * cox_wl {
+                    let dxpart = if self.core.model.xpart < 0.5 {
+                        0.4
+                    } else if self.core.model.xpart > 0.5 {
+                        0.0
+                    } else {
+                        0.5
+                    };
+                    (dxpart, 0.0, 0.0, 0.0, 0.0)
+                } else {
+                    let dxpart = charge.qdrn_channel / charge.qcheq;
+                    let cdd = charge.cddb;
+                    let csd = -(charge.cgdb + charge.cddb + charge.cbdb);
+                    let ddxpart_dvd = (cdd - dxpart * (cdd + csd)) / charge.qcheq;
+                    let cdg = charge.cdgb;
+                    let csg = -(charge.cggb + charge.cdgb + charge.cbgb);
+                    let ddxpart_dvg = (cdg - dxpart * (cdg + csg)) / charge.qcheq;
+                    let cds = charge.cdsb;
+                    let css = -(charge.cgsb + charge.cdsb + charge.cbsb);
+                    let ddxpart_dvs = (cds - dxpart * (cds + css)) / charge.qcheq;
+                    let ddxpart_dvb = -(ddxpart_dvd + ddxpart_dvg + ddxpart_dvs);
+                    (dxpart, ddxpart_dvd, ddxpart_dvg, ddxpart_dvs, ddxpart_dvb)
+                };
+            let sxpart = 1.0 - dxpart;
+            let dsxpart_dvd = -ddxpart_dvd;
+            let dsxpart_dvg = -ddxpart_dvg;
+            let dsxpart_dvs = -ddxpart_dvs;
+            let dsxpart_dvb = -(dsxpart_dvd + dsxpart_dvg + dsxpart_dvs);
+            (
+                ggtg,
+                ggtd,
+                ggts,
+                ggtb,
+                gcqgb,
+                gcqdb,
+                gcqsb,
+                gcqbb,
+                dxpart,
+                sxpart,
+                ddxpart_dvd,
+                ddxpart_dvg,
+                ddxpart_dvs,
+                ddxpart_dvb,
+                dsxpart_dvd,
+                dsxpart_dvg,
+                dsxpart_dvs,
+                dsxpart_dvb,
+            )
+        } else {
+            let ggtg = t0 * charge.cqgb;
+            let ggts = t0 * charge.cqdb;
+            let ggtd = t0 * charge.cqsb;
+            let ggtb = t0 * charge.cqbb;
+            let gcqgb = charge.cqgb * ag0;
+            let gcqdb = charge.cqsb * ag0;
+            let gcqsb = charge.cqdb * ag0;
+            let gcqbb = charge.cqbb * ag0;
+            let (sxpart, dsxpart_dvd, dsxpart_dvg, dsxpart_dvs, dsxpart_dvb) =
+                if charge.qcheq.abs() <= 1.0e-5 * cox_wl {
+                    let sxpart = if self.core.model.xpart < 0.5 {
+                        0.4
+                    } else if self.core.model.xpart > 0.5 {
+                        0.0
+                    } else {
+                        0.5
+                    };
+                    (sxpart, 0.0, 0.0, 0.0, 0.0)
+                } else {
+                    let sxpart = charge.qdrn_channel / charge.qcheq;
+                    let css = charge.cddb;
+                    let cds = -(charge.cgdb + charge.cddb + charge.cbdb);
+                    let dsxpart_dvs = (css - sxpart * (css + cds)) / charge.qcheq;
+                    let csg = charge.cdgb;
+                    let cdg = -(charge.cggb + charge.cdgb + charge.cbgb);
+                    let dsxpart_dvg = (csg - sxpart * (csg + cdg)) / charge.qcheq;
+                    let csd = charge.cdsb;
+                    let cdd = -(charge.cgsb + charge.cdsb + charge.cbsb);
+                    let dsxpart_dvd = (csd - sxpart * (csd + cdd)) / charge.qcheq;
+                    let dsxpart_dvb = -(dsxpart_dvd + dsxpart_dvg + dsxpart_dvs);
+                    (sxpart, dsxpart_dvd, dsxpart_dvg, dsxpart_dvs, dsxpart_dvb)
+                };
+            let dxpart = 1.0 - sxpart;
+            let ddxpart_dvd = -dsxpart_dvd;
+            let ddxpart_dvg = -dsxpart_dvg;
+            let ddxpart_dvs = -dsxpart_dvs;
+            let ddxpart_dvb = -(ddxpart_dvd + ddxpart_dvg + ddxpart_dvs);
+            (
+                ggtg,
+                ggtd,
+                ggts,
+                ggtb,
+                gcqgb,
+                gcqdb,
+                gcqsb,
+                gcqbb,
+                dxpart,
+                sxpart,
+                ddxpart_dvd,
+                ddxpart_dvg,
+                ddxpart_dvs,
+                ddxpart_dvb,
+                dsxpart_dvd,
+                dsxpart_dvg,
+                dsxpart_dvs,
+                dsxpart_dvb,
+            )
+        };
+
+        let gcggb = (charge.cgdo + charge.cgso + charge.cgbo) * ag0;
+        let gcgdb = -charge.cgdo * ag0;
+        let gcgsb = -charge.cgso * ag0;
+        let gcgbb = -(gcggb + gcgdb + gcgsb);
+        let gcdgb = gcgdb;
+        let gcddb = (charge.capbd + charge.cgdo) * ag0;
+        let gcdsb = 0.0;
+        let gcdbb = -(gcdgb + gcddb + gcdsb);
+        let gcsgb = gcgsb;
+        let gcsdb = 0.0;
+        let gcssb = (charge.capbs + charge.cgso) * ag0;
+        let gcsbb = -(gcsgb + gcsdb + gcssb);
+        let gcbgb = -charge.cgbo * ag0;
+        let gcbdb = -charge.capbd * ag0;
+        let gcbsb = -charge.capbs * ag0;
+        let gcbbb = -(gcbgb + gcbdb + gcbsb);
+
+        let nqs_terminal = ggtg * vgb - ggtd * vbd - ggts * vbs;
+        let t1 = qdef * gtau;
+        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs + nqs_terminal;
+        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs
+            - dxpart * nqs_terminal
+            - t1 * (ddxpart_dvg * vgb - ddxpart_dvd * vbd - ddxpart_dvs * vbs);
+        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs;
+        let gqdef = TRNQS_SCALING * ag0;
+        let mut cqdef = cqcdump - gqdef * qdef;
+        let mut cqcheq_eq = cqcheq - (gcqgb * vgb - gcqdb * vbd - gcqsb * vbs) + nqs_terminal;
+        if self.core.mtype < 0.0 {
+            ceqqg = -ceqqg;
+            ceqqd = -ceqqd;
+            ceqqb = -ceqqb;
+            cqdef = -cqdef;
+            cqcheq_eq = -cqcheq_eq;
+        }
+
+        let m = self.multiplier;
+        let (dp, g, sp, b, q) = (
+            self.node_drain,
+            self.node_gate,
+            self.node_source,
+            self.node_bulk,
+            self.node_charge_deficit,
+        );
+        stamp_rhs(matrix, g, -m * ceqqg);
+        stamp_rhs(matrix, b, -m * ceqqb);
+        stamp_rhs(matrix, dp, -m * ceqqd);
+        stamp_rhs(matrix, sp, m * (ceqqg + ceqqb + ceqqd));
+        stamp_rhs(matrix, q, m * (cqcheq_eq - cqdef));
+
+        stamp(matrix, g, g, m * (gcggb - ggtg));
+        stamp(matrix, g, b, m * (gcgbb - ggtb));
+        stamp(matrix, g, dp, m * (gcgdb - ggtd));
+        stamp(matrix, g, sp, m * (gcgsb - ggts));
+
+        stamp(matrix, b, g, m * gcbgb);
+        stamp(matrix, b, b, m * gcbbb);
+        stamp(matrix, b, dp, m * gcbdb);
+        stamp(matrix, b, sp, m * gcbsb);
+
+        stamp(
+            matrix,
+            dp,
+            g,
+            m * (gcdgb + dxpart * ggtg + t1 * ddxpart_dvg),
+        );
+        stamp(
+            matrix,
+            dp,
+            b,
+            m * (gcdbb + dxpart * ggtb + t1 * ddxpart_dvb),
+        );
+        stamp(
+            matrix,
+            dp,
+            dp,
+            m * (gcddb + dxpart * ggtd + t1 * ddxpart_dvd),
+        );
+        stamp(
+            matrix,
+            dp,
+            sp,
+            m * (gcdsb + dxpart * ggts + t1 * ddxpart_dvs),
+        );
+
+        stamp(
+            matrix,
+            sp,
+            g,
+            m * (gcsgb + sxpart * ggtg + t1 * dsxpart_dvg),
+        );
+        stamp(
+            matrix,
+            sp,
+            b,
+            m * (gcsbb + sxpart * ggtb + t1 * dsxpart_dvb),
+        );
+        stamp(
+            matrix,
+            sp,
+            dp,
+            m * (gcsdb + sxpart * ggtd + t1 * dsxpart_dvd),
+        );
+        stamp(
+            matrix,
+            sp,
+            sp,
+            m * (gcssb + sxpart * ggts + t1 * dsxpart_dvs),
+        );
+
+        stamp(matrix, q, q, m * (gqdef + gtau));
+        stamp(matrix, q, g, m * (ggtg - gcqgb));
+        stamp(matrix, q, dp, m * (ggtd - gcqdb));
+        stamp(matrix, q, sp, m * (ggts - gcqsb));
+        stamp(matrix, q, b, m * (ggtb - gcqbb));
+        stamp(matrix, dp, q, m * (dxpart * gtau));
+        stamp(matrix, sp, q, m * (sxpart * gtau));
+        stamp(matrix, g, q, -m * gtau);
     }
 
     /// Stamp the linearized DC operating point: matrix/RHS load of

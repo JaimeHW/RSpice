@@ -9,7 +9,7 @@
 //! `here->B3SOIFD*` conductance/current fields and then stamps.
 //!
 //! Scope / provenance:
-//! - Tested decks all use MOBMOD=0, CAPMOD=3, SHMOD=0 and either a floating
+//! - Supported charge decks use MOBMOD=0, CAPMOD=2/3, SHMOD=0 and either a floating
 //!   body (`bodyMod=0`) or an ideal body tie (`bodyMod=2`). Accordingly:
 //!   * Self-heating (`selfheat`) is **0** throughout; every `if (selfheat)`
 //!     branch in the C reduces to the `else` (derivative = 0) and the temp
@@ -20,7 +20,7 @@
 //!   * Body-resistor current `Ibp` (b3soifdld.c:2480-2540) is zero for
 //!     `bodyMod` 0/2 and is therefore omitted here; the body tie is handled by
 //!     the device stamping (the external body node is the body node directly).
-//! - The **charge model** (CAPMOD=3, b3soifdld.c:2640-3400) and the matrix
+//! - The **charge models** (CAPMOD=2/3, b3soifdld.c:2260-3400) and the matrix
 //!   **stamping** (b3soifdld.c:3400-4460) are handled in [`super`]; this file
 //!   stops at the `here->B3SOIFD*` operating-point assignment block
 //!   (b3soifdld.c:2556-2640).
@@ -32,8 +32,8 @@
 //! re-expressed on the drain/source primes.
 
 // `abulk0`/`dabulk0_dvb`/`exp_vgst` are computed in the DC path but only read
-// by the (not-yet-ported) CAPMOD=3 charge model; ngspice keeps them here, so we
-// retain the assignments for a faithful seam rather than dropping them.
+// by the CAPMOD=2/3 charge models; ngspice keeps them here, so we retain the
+// assignments for a faithful load-equation port rather than dropping them.
 #![allow(unused_assignments)]
 
 use super::super::common::{
@@ -73,6 +73,19 @@ pub struct B3SoiFdOp {
     pub gmbs: Value,
     pub gme: Value,
 
+    // Self-heating electrical temperature derivatives.
+    pub gm_t: Value,
+    pub gjd_t: Value,
+    pub gjs_t: Value,
+
+    // Self-heating thermal row (`B3SOIFDgtemp*`, `B3SOIFDcth`).
+    pub gtemp_g: Value,
+    pub gtemp_b: Value,
+    pub gtemp_e: Value,
+    pub gtemp_d: Value,
+    pub gtemp_t: Value,
+    pub thermal_eq_current: Value,
+
     // Drain-side body junction current linearization (B3SOIFDgjd*, B3SOIFDcjd).
     pub gjdb: Value,
     pub gjdd: Value,
@@ -97,11 +110,11 @@ pub struct B3SoiFdOp {
     /// Inversion charge proxy used by noise (`B3SOIFDqinv`).
     pub qinv: Value,
 
-    /// CAPMOD=3 charge state (set only when [`eval`] is asked to compute it).
+    /// Configured CAPMOD charge state (set only when [`eval`] is asked to compute it).
     pub charge: Option<B3SoiFdCharge>,
 }
 
-/// CAPMOD=3 charge-model output for one B3SOIFD instance.
+/// Charge-model output for one B3SOIFD instance.
 ///
 /// Mirrors the `here->B3SOIFDq*` node charges and the `here->B3SOIFDc*` intrinsic
 /// capacitance matrix that ngspice fills at the end of `B3SOIFDload`
@@ -124,6 +137,7 @@ pub struct B3SoiFdCharge {
     pub qb: Value,
     pub qd: Value,
     pub qe: Value,
+    pub qth: Value,
 
     // Intrinsic + overlap capacitance matrix (the `gc**`/ag0 coefficients).
     // Row = charge node, col = controlling node. Drain/source are the *primes*
@@ -149,6 +163,12 @@ pub struct B3SoiFdCharge {
     pub gcedb: Value,
     pub gcesb: Value,
     pub gceeb: Value,
+
+    // Self-heating charge derivatives with respect to the temperature-rise node.
+    pub gcg_t: Value,
+    pub gcb_t: Value,
+    pub gcd_t: Value,
+    pub gce_t: Value,
 }
 
 /// Input branch voltages for the DC eval, already in device polarity
@@ -163,6 +183,7 @@ pub struct B3SoiFdBias {
     pub vds: Value,
     pub ves: Value,
     pub vps: Value,
+    pub del_temp: Value,
 }
 
 /// Evaluate the B3SOIFD DC operating point.
@@ -176,12 +197,12 @@ pub fn eval_dc(p: &B3SoiFdSized, m: &ModelConsts, bias: B3SoiFdBias, mtype: Valu
     eval(p, m, bias, mtype, false)
 }
 
-/// Evaluate the B3SOIFD operating point, optionally including the CAPMOD=3
+/// Evaluate the B3SOIFD operating point, optionally including the configured
 /// charge model (`compute_charges == true`, the `ChargeComputationNeeded` path).
 ///
 /// The DC current path is identical to [`eval_dc`]; when `compute_charges` is set
 /// the resulting [`B3SoiFdOp::charge`] carries the intrinsic + extrinsic charge
-/// state (b3soifdld.c:2637-3784, capMod==3, selfheat==0).
+/// state (b3soifdld.c:2260-3784, capMod==2/3, selfheat==0).
 #[allow(clippy::too_many_lines)]
 pub fn eval(
     p: &B3SoiFdSized,
@@ -1215,14 +1236,6 @@ pub fn eval(
     let (gjsb, gjsd) = (0.0, 0.0);
     let (gjdb, gjdd) = (0.0, 0.0);
 
-    // Device-frame Vbd and the (disabled) junction diode currents the CAPMOD=3
-    // charge model is shaped to receive. FD forces the junction stored charge
-    // `qjs = qjd = 0` (b3soifdld.c:2598), so the diffusion diode currents that DD
-    // feeds into Qjs/Qjd are zero here.
-    let vbd = vbs - vds;
-    let (ibs1, dibs1_dvb) = (0.0, 0.0);
-    let (ibd1, dibd1_dvb, dibd1_dvd) = (0.0, 0.0, 0.0);
-
     // bodyMod 0/2: Ibp == 0.
     let min_isub = p.min_isub;
 
@@ -1262,89 +1275,94 @@ pub fn eval(
     op.cbody = iii + idgidl + isgidl - ibs - ibd + min_isub
         - (op.gbbs * vbs + op.gbgs * vgs + op.gbds * vds + op.gbes * ves);
 
+    // Thermal power row. ngspice intentionally omits the bipolar-current power
+    // term here for convergence (b3soifdld.c operating-point assignment).
+    op.gtemp_g = -gm * vds;
+    op.gtemp_b = -gmb * vds;
+    op.gtemp_e = -gme * vds;
+    op.gtemp_d = -gds * vds - ids;
+    op.gtemp_t = 0.0;
+    op.thermal_eq_current = -ids * vds
+        - mtype * (op.gtemp_g * vgs + op.gtemp_b * vbs + op.gtemp_e * ves + op.gtemp_d * vds)
+        - op.gtemp_t * bias.del_temp;
+
     // qinv for noise.
     let t1q = vgsteff * (1.0 - 0.5 * abeff * vdseff / vgst2vtm);
     op.qinv = -m.cox * p.weff * leff * t1q;
 
     if compute_charges {
-        op.charge = Some(eval_charges_capmod3(
-            p,
-            m,
-            mtype,
-            mode,
-            &ChargeInputs {
-                phi,
-                k1,
-                cbox,
-                vgs_eff,
-                dvgs_eff_dvg,
-                vth,
-                dvth_dvb,
-                dvth_dvd,
-                vgst,
-                vgsteff,
-                dvgsteff_dvg,
-                dvgsteff_dvd,
-                dvgsteff_dvb,
-                dvgsteff_dve,
-                vgst_n_vt,
-                exp_vgst,
-                n,
-                dn_dvb,
-                dn_dvd,
-                vbseff,
-                dvbseff_dvg,
-                dvbseff_dvd,
-                dvbseff_dvb,
-                dvbseff_dve,
-                phis,
-                sqrt_phis,
-                dsqrt_phis_dvb,
-                vdsat,
-                dvdsat_dvg,
-                dvdsat_dvd,
-                dvdsat_dvb,
-                dvdsat_dvc,
-                vdseff,
-                dvdseff_dvg,
-                dvdseff_dvd,
-                dvdseff_dvb,
-                dvdseff_dvc,
-                abulk0,
-                dabulk0_dvb,
-                vbs0t,
-                vbs0,
-                dvbs0_dve,
-                vbs0mos,
-                dvbs0mos_dve,
-                vbs0eff,
-                dvbs0eff_dvg,
-                dvbs0eff_dvd,
-                dvbs0eff_dve,
-                vbsdio,
-                dvbsdio_dvg,
-                dvbsdio_dvd,
-                dvbsdio_dve,
-                dvbsdio_dvb,
-                vcs,
-                dvcs_dvg,
-                dvcs_dvd,
-                dvcs_dvb,
-                dvcs_dve,
-                vbs,
-                vbd,
-                ibs1,
-                dibs1_dvb,
-                ibd1,
-                dibd1_dvb,
-                dibd1_dvd,
-                vgs_raw: bias.vgs,
-                vgd_raw: bias.vgs - bias.vds,
-                vge_raw: bias.vgs - bias.ves,
-                vds_raw: bias.vds,
-                ves_raw: bias.ves,
-            },
-        ));
+        let inputs = ChargeInputs {
+            phi,
+            k1,
+            cbox,
+            vgs_eff,
+            dvgs_eff_dvg,
+            vth,
+            dvth_dvb,
+            dvth_dvd,
+            vgst,
+            vgsteff,
+            dvgsteff_dvg,
+            dvgsteff_dvd,
+            dvgsteff_dvb,
+            dvgsteff_dve,
+            vgst_n_vt,
+            exp_vgst,
+            n,
+            dn_dvb,
+            dn_dvd,
+            vbseff,
+            dvbseff_dvg,
+            dvbseff_dvd,
+            dvbseff_dvb,
+            dvbseff_dve,
+            vesfb,
+            phis,
+            sqrt_phis,
+            dsqrt_phis_dvb,
+            vdsat,
+            dvdsat_dvg,
+            dvdsat_dvd,
+            dvdsat_dvb,
+            dvdsat_dvc,
+            vdseff,
+            dvdseff_dvg,
+            dvdseff_dvd,
+            dvdseff_dvb,
+            dvdseff_dvc,
+            abulk0,
+            dabulk0_dvb,
+            vbs0t,
+            vbs0,
+            dvbs0_dve,
+            vbs0mos,
+            dvbs0mos_dve,
+            vbs0eff,
+            dvbs0eff_dvg,
+            dvbs0eff_dvd,
+            dvbs0eff_dve,
+            vbsdio,
+            dvbsdio_dvg,
+            dvbsdio_dvd,
+            dvbsdio_dve,
+            dvbsdio_dvb,
+            vcs,
+            dvcs_dvg,
+            dvcs_dvd,
+            dvcs_dvb,
+            dvcs_dve,
+            vbs,
+            vgs_raw: bias.vgs,
+            vgd_raw: bias.vgs - bias.vds,
+            vge_raw: bias.vgs - bias.ves,
+            vds_raw: bias.vds,
+            ves_raw: bias.ves,
+        };
+        op.charge = Some(if m.cap_mod == 2 {
+            eval_charges_capmod2(p, m, mtype, mode, &inputs)
+        } else {
+            eval_charges_capmod3(p, m, mtype, mode, &inputs)
+        });
     }
 
     op
@@ -1353,6 +1371,7 @@ pub fn eval(
 /// Model-card scalars referenced directly in the load (not size-dependent).
 #[derive(Debug, Clone, Copy)]
 pub struct ModelConsts {
+    pub cap_mod: i32,
     pub cox: Value,
     pub cbox: Value,
     pub csi: Value,
@@ -1366,19 +1385,11 @@ pub struct ModelConsts {
     pub charge_q: Value,
     pub mob_mod: i32,
 
-    // CAPMOD=3 charge-model model-card scalars (b3soifdld.c CV block).
+    // B3SOIFD charge-model model-card scalars (b3soifdld.c CV block).
     /// Buried-oxide series capacitance per area `cboxt = cbox*csi/(cbox+csi)`.
     pub cboxt: Value,
     /// Charge partition selector (`B3SOIFDxpart`): >0.5 0/100, <0.5 40/60, else 50/50.
     pub xpart: Value,
-    /// Transit time `TT` for the body junction stored charge.
-    pub tt: Value,
-    /// Body junction gate-side grading coefficient `MJSWG`.
-    pub mjswg: Value,
-    /// Body junction gate-side potential `PhiBSWG` (clamped >= 0.1 by the caller).
-    pub phibswg: Value,
-    /// Unit-length gate-sidewall junction capacitance `CJSWG`.
-    pub cjswg: Value,
     /// Device polarity (`+1` NMOS / `-1` PMOS) for the extrinsic charge sign.
     pub mtype: Value,
 }
@@ -1413,7 +1424,7 @@ fn smooth_etab(eta0: Value, etab: Value, vb: Value) -> (Value, Value) {
     }
 }
 
-/// Intermediates from the DC path that the CAPMOD=3 charge model consumes.
+/// Intermediates from the DC path that the CAPMOD=2/3 charge models consume.
 ///
 /// Every field maps 1:1 to the like-named ngspice local at the point the charge
 /// block runs (`raw` suffixes are the pre-mode-swap node-frame voltages ngspice
@@ -1445,6 +1456,7 @@ struct ChargeInputs {
     dvbseff_dvd: Value,
     dvbseff_dvb: Value,
     dvbseff_dve: Value,
+    vesfb: Value,
     phis: Value,
     sqrt_phis: Value,
     dsqrt_phis_dvb: Value,
@@ -1480,17 +1492,270 @@ struct ChargeInputs {
     dvcs_dvb: Value,
     dvcs_dve: Value,
     vbs: Value,
-    vbd: Value,
-    ibs1: Value,
-    dibs1_dvb: Value,
-    ibd1: Value,
-    dibd1_dvb: Value,
-    dibd1_dvd: Value,
     vgs_raw: Value,
     vgd_raw: Value,
     vge_raw: Value,
     vds_raw: Value,
     ves_raw: Value,
+}
+
+/// CAPMOD=2 charge model + extrinsic/overlap charges (b3soifdld.c:2260-3784).
+///
+/// This is the ngspice B3SOIFD default C-V path for `selfheat == 0`: the
+/// accumulation/depletion charge terms, the capMod=2 VdseffCV inversion-charge
+/// partition, the FD back-gate charge, and the same overlap/extrinsic S/D
+/// substrate charge assembly used by the CAPMOD=3 path. FD has no body-node
+/// junction stored charge in this branch (`qjs/qjd == 0` in ngspice).
+#[allow(clippy::too_many_lines)]
+fn eval_charges_capmod2(
+    p: &B3SoiFdSized,
+    m: &ModelConsts,
+    _mtype: Value,
+    mode: i32,
+    i: &ChargeInputs,
+) -> B3SoiFdCharge {
+    use super::super::common::{DELTA_1, DELTA_4};
+
+    let cbox = i.cbox;
+    let cox_wl = m.cox * p.weff_cv * p.leff_cv;
+
+    let (mut vgsteff, mut dvgsteff_dvg, mut dvgsteff_dvd, mut dvgsteff_dvb, mut dvgsteff_dve) = (
+        i.vgsteff,
+        i.dvgsteff_dvg,
+        i.dvgsteff_dvd,
+        i.dvgsteff_dvb,
+        i.dvgsteff_dve,
+    );
+    if i.vgst_n_vt > -EXP_THRESHOLD && i.vgst_n_vt < EXP_THRESHOLD {
+        let exp_vgst = i.exp_vgst * i.exp_vgst;
+        vgsteff = i.n * p.vtm * (1.0 + exp_vgst).ln();
+        let t0 = exp_vgst / (1.0 + exp_vgst);
+        let t1 = -t0 * (i.dvth_dvb + i.vgst / i.n * i.dn_dvb) + vgsteff / i.n * i.dn_dvb;
+        dvgsteff_dvd = -t0 * (i.dvth_dvd + i.vgst / i.n * i.dn_dvd)
+            + vgsteff / i.n * i.dn_dvd
+            + t1 * i.dvbseff_dvd;
+        dvgsteff_dvg = t0 * i.dvgs_eff_dvg + t1 * i.dvbseff_dvg;
+        dvgsteff_dvb = t1 * i.dvbseff_dvb;
+        dvgsteff_dve = t1 * i.dvbseff_dve;
+    }
+
+    vgsteff += 1.0e-4;
+
+    let abulk_cv = i.abulk0 * p.abulk_cv_factor;
+    let dabulk_cv_dvb = p.abulk_cv_factor * i.dabulk0_dvb;
+
+    let mut vdsat_cv = vgsteff / abulk_cv;
+    vdsat_cv += 1.0e-5;
+    let vds_mode = if mode > 0 { i.vds_raw } else { -i.vds_raw };
+    let v4 = vdsat_cv - vds_mode - DELTA_4;
+    let t0v = (v4 * v4 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+    let vdseff_cv = vdsat_cv - 0.5 * (v4 + t0v);
+    let t1v = 0.5 * (1.0 + v4 / t0v);
+    let t2v = DELTA_4 / t0v;
+    let t3v = (1.0 - t1v - t2v) / abulk_cv;
+    let dvdseff_cv_dvg = t3v;
+    let dvdseff_cv_dvd = t1v;
+    let dvdseff_cv_dvb = -t3v * vdsat_cv * dabulk_cv_dvb;
+
+    let vds_cv = vdseff_cv;
+    let dvds_cv_dvg = dvdseff_cv_dvg;
+    let dvds_cv_dvd = dvdseff_cv_dvd;
+    let dvds_cv_dvb = dvdseff_cv_dvb;
+
+    let cbox_wl = p.kb3 * cbox * p.weff_cv * p.leff_cv;
+    let qe1_scale = -0.5 * m.cboxt * p.weff_cv * p.leff_cv;
+    let qe1 = qe1_scale * vds_cv - cbox_wl * (i.vbs0eff - i.vesfb);
+    let ce1g = qe1_scale * (dvds_cv_dvg * dvgsteff_dvg + dvds_cv_dvb * i.dvbseff_dvg)
+        - cbox_wl * i.dvbs0eff_dvg;
+    let ce1d = qe1_scale * (dvds_cv_dvg * dvgsteff_dvd + dvds_cv_dvb * i.dvbseff_dvd + dvds_cv_dvd)
+        - cbox_wl * i.dvbs0eff_dvd;
+    let ce1b = 0.0;
+    let ce1e = qe1_scale * (dvds_cv_dvg * dvgsteff_dve + dvds_cv_dvb * i.dvbseff_dve)
+        - cbox_wl * (i.dvbs0eff_dve - 1.0);
+
+    let t0 = abulk_cv * vdseff_cv;
+    let t1 = 12.0 * (vgsteff - 0.5 * t0 + 1.0e-20);
+    let t2 = vdseff_cv / t1;
+    let t3 = t0 * t2;
+    let t4 = 1.0 - 12.0 * t2 * t2 * abulk_cv;
+    let t5 = 6.0 * t0 * (4.0 * vgsteff - t0) / (t1 * t1) - 0.5;
+    let t6 = 12.0 * t2 * t2 * vgsteff;
+
+    let qinv = cox_wl * (vgsteff - 0.5 * vdseff_cv + t3);
+    let cgg1 = cox_wl * (t4 + t5 * dvdseff_cv_dvg);
+    let cgd1 = cox_wl * t5 * dvdseff_cv_dvd;
+    let cgb1 = cox_wl * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb);
+
+    let (qsrc, csg1, csd1, csb1);
+    if m.xpart > 0.5 {
+        let t1p = t1 + t1;
+        qsrc = -cox_wl * (0.5 * vgsteff + 0.25 * t0 - t0 * t0 / t1p);
+        let t7 = (4.0 * vgsteff - t0) / (t1p * t1p);
+        let t4p = -(0.5 + 24.0 * t0 * t0 / (t1p * t1p));
+        let t5p = -(0.25 * abulk_cv - 12.0 * abulk_cv * t0 * t7);
+        let t6p = -(0.25 * vdseff_cv - 12.0 * t0 * vdseff_cv * t7);
+        csg1 = cox_wl * (t4p + t5p * dvdseff_cv_dvg);
+        csd1 = cox_wl * t5p * dvdseff_cv_dvd;
+        csb1 = cox_wl * (t5p * dvdseff_cv_dvb + t6p * dabulk_cv_dvb);
+    } else if m.xpart < 0.5 {
+        let t1p = t1 / 12.0;
+        let t2p = 0.5 * cox_wl / (t1p * t1p);
+        let t3p = vgsteff * (2.0 * t0 * t0 / 3.0 + vgsteff * (vgsteff - 4.0 * t0 / 3.0))
+            - 2.0 * t0 * t0 * t0 / 15.0;
+        qsrc = -t2p * t3p;
+        let t7 = 4.0 / 3.0 * vgsteff * (vgsteff - t0) + 0.4 * t0 * t0;
+        let t4p = -2.0 * qsrc / t1p
+            - t2p * (vgsteff * (3.0 * vgsteff - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
+        let t5p = (qsrc / t1p + t2p * t7) * abulk_cv;
+        let t6p = qsrc / t1p * vdseff_cv + t2p * t7 * vdseff_cv;
+        csg1 = t4p + t5p * dvdseff_cv_dvg;
+        csd1 = t5p * dvdseff_cv_dvd;
+        csb1 = t5p * dvdseff_cv_dvb + t6p * dabulk_cv_dvb;
+    } else {
+        qsrc = -0.5 * qinv;
+        csg1 = -0.5 * cgg1;
+        csb1 = -0.5 * cgb1;
+        csd1 = -0.5 * cgd1;
+    }
+
+    let csg = csg1 * dvgsteff_dvg + csb1 * i.dvbseff_dvg;
+    let csd = csd1 + csg1 * dvgsteff_dvd + csb1 * i.dvbseff_dvd;
+    let csb = csg1 * dvgsteff_dvb + csb1 * i.dvbseff_dvb;
+    let cse = csg1 * dvgsteff_dve + csb1 * i.dvbseff_dve;
+
+    let mut qgate = qinv;
+    let qbody = -qe1;
+    let mut qsub = qe1;
+    let mut qdrn = -(qinv + qsrc);
+
+    let cgg = cgg1 * dvgsteff_dvg + cgb1 * i.dvbseff_dvg;
+    let cgd = cgd1 + cgg1 * dvgsteff_dvd + cgb1 * i.dvbseff_dvd;
+    let cgb = cgb1 * i.dvbseff_dvb + cgg1 * dvgsteff_dvb;
+    let cge = cgg1 * dvgsteff_dve + cgb1 * i.dvbseff_dve;
+
+    let cggb = cgg;
+    let cgsb = -(cgg + cgd + cgb + cge);
+    let cgdb = cgd;
+    let cgeb = cge;
+
+    let cbgb = -ce1g;
+    let cbsb = ce1g + ce1d + ce1b + ce1e;
+    let cbdb = -ce1d;
+    let cbeb = -ce1e;
+
+    let cegb = ce1g;
+    let cesb = -(ce1g + ce1d + ce1b + ce1e);
+    let cedb = ce1d;
+    let ceeb = ce1e;
+
+    let cdgb = -(cgg + csg);
+    let cddb = -(cgd + csd);
+    let cdeb = -(cge + cse);
+    let cdsb = cgg + cgd + cgb + cge + csg + csd + csb + cse;
+
+    let nsub_pos_type = (p.nsub > 0.0 && m.mtype > 0.0) || (p.nsub < 0.0 && m.mtype < 0.0);
+    let t10 = -m.mtype * i.ves_raw;
+    let (mut qse, gcse) = extrinsic_sd_charge(p, t10, nsub_pos_type, true);
+    let t11 = m.mtype * (i.vds_raw - i.ves_raw);
+    let (mut qde, gcde) = extrinsic_sd_charge(p, t11, nsub_pos_type, false);
+
+    qse += p.csesw * t10;
+    let gcse = gcse + p.csesw;
+    qde += p.cdesw * t11;
+    let gcde = gcde + p.cdesw;
+
+    let qse = m.mtype * qse;
+    let qde = m.mtype * qde;
+
+    let t0 = i.vgd_raw + DELTA_1;
+    let t1 = (t0 * t0 + 4.0 * DELTA_1).sqrt();
+    let t2 = 0.5 * (t0 - t1);
+    let t3v = p.weff_cv * p.cgdl;
+    let t4v = (1.0 - 4.0 * t2 / p.ckappa).sqrt();
+    let cgdo = p.cgdo + t3v - t3v * (1.0 - 1.0 / t4v) * (0.5 - 0.5 * t0 / t1);
+    let qgdo = (p.cgdo + t3v) * i.vgd_raw - t3v * (t2 + 0.5 * p.ckappa * (t4v - 1.0));
+
+    let t0 = i.vgs_raw + DELTA_1;
+    let t1 = (t0 * t0 + 4.0 * DELTA_1).sqrt();
+    let t2 = 0.5 * (t0 - t1);
+    let t3v = p.weff_cv * p.cgsl;
+    let t4v = (1.0 - 4.0 * t2 / p.ckappa).sqrt();
+    let cgso = p.cgso + t3v - t3v * (1.0 - 1.0 / t4v) * (0.5 - 0.5 * t0 / t1);
+    let qgso = (p.cgso + t3v) * i.vgs_raw - t3v * (t2 + 0.5 * p.ckappa * (t4v - 1.0));
+
+    let cgeo = p.cgeo;
+    let qge = cgeo * i.vge_raw;
+    let qgd = qgdo;
+    let qgs = qgso;
+
+    if mode > 0 {
+        qgate += qgd + qgs + qge;
+        qdrn += qde - qgd;
+        qsub -= qge + qse + qde;
+
+        B3SoiFdCharge {
+            mode,
+            qg: qgate,
+            qb: qbody,
+            qd: qdrn,
+            qe: qsub,
+            gcdgb: cdgb - cgdo,
+            gcddb: cddb + cgdo + gcde,
+            gcdsb: cdsb,
+            gcdeb: cdeb - gcde,
+            gcsgb: -(cggb + cbgb + cdgb + cegb + cgso),
+            gcsdb: -(cgdb + cbdb + cddb + cedb),
+            gcssb: cgso + gcse - (cgsb + cbsb + cdsb + cesb),
+            gcseb: -(gcse + cgeb + cbeb + cdeb + ceeb),
+            gcggb: cggb + cgdo + cgso + cgeo,
+            gcgdb: cgdb - cgdo,
+            gcgsb: cgsb - cgso,
+            gcgeb: cgeb - cgeo,
+            gcbgb: cbgb,
+            gcbdb: cbdb,
+            gcbsb: cbsb,
+            gcbeb: cbeb,
+            gcegb: cegb - cgeo,
+            gcedb: cedb - gcde,
+            gcesb: cesb - gcse,
+            gceeb: gcse + gcde + ceeb + cgeo,
+            ..Default::default()
+        }
+    } else {
+        qgate += qgd + qgs + qge;
+        let qsrc = qdrn - qgs + qse;
+        qsub -= qge + qse + qde;
+        qdrn = -(qgate + qbody + qsrc + qsub);
+
+        B3SoiFdCharge {
+            mode,
+            qg: qgate,
+            qb: qbody,
+            qd: qdrn,
+            qe: qsub,
+            gcsgb: cdgb - cgso,
+            gcssb: cddb + cgso + gcse,
+            gcsdb: cdsb,
+            gcseb: cdeb - gcse,
+            gcdgb: -(cggb + cbgb + cdgb + cegb + cgdo),
+            gcdsb: -(cgdb + cbdb + cddb + cedb),
+            gcddb: cgdo + gcde - (cgsb + cbsb + cdsb + cesb),
+            gcdeb: -(gcde + cgeb + cbeb + cdeb + ceeb),
+            gcggb: cggb + cgdo + cgso + cgeo,
+            gcgsb: cgdb - cgso,
+            gcgdb: cgsb - cgdo,
+            gcgeb: cgeb - cgeo,
+            gcbgb: cbgb,
+            gcbsb: cbdb,
+            gcbdb: cbsb,
+            gcbeb: cbeb,
+            gcegb: cegb - cgeo,
+            gcesb: cedb - gcse,
+            gcedb: cesb - gcde,
+            gceeb: ceeb + cgeo + gcse + gcde,
+            ..Default::default()
+        }
+    }
 }
 
 /// CAPMOD=3 charge model + extrinsic/overlap charges (b3soifdld.c:2646-3784).
@@ -1972,7 +2237,7 @@ fn eval_charges_capmod3(
 
     // Node charges (intrinsic, b3soifdld.c:3387-3390).
     let mut qgate = qinv - (qbf + qe2);
-    let mut qbody = qbf - qe1 + qex;
+    let qbody = qbf - qe1 + qex;
     let mut qsub = qe1 + qe2 - qex;
     let mut qdrn = -(qinv + qsrc);
 
@@ -1989,9 +2254,9 @@ fn eval_charges_capmod3(
     let cgeb = cge - ce2e;
 
     let cbgb = cbg - ce1g + dqex_dvg;
-    let mut cbsb = -(cbg + cbd + cbb + cbe) + (ce1g + ce1d + ce1b + ce1e)
+    let cbsb = -(cbg + cbd + cbb + cbe) + (ce1g + ce1d + ce1b + ce1e)
         - (dqex_dvg + dqex_dvd + dqex_dvb + dqex_dve);
-    let mut cbdb = cbd - ce1d + dqex_dvd;
+    let cbdb = cbd - ce1d + dqex_dvd;
     let cbeb = cbe - ce1e + dqex_dve;
 
     let cegb = ce1g + ce2g - dqex_dvg;
@@ -2001,58 +2266,13 @@ fn eval_charges_capmod3(
     let ceeb = ce1e + ce2e - dqex_dve;
 
     let cdgb = -(cgg + cbg + csg);
-    let mut cddb = -(cgd + cbd + csd);
+    let cddb = -(cgd + cbd + csd);
     let cdeb = -(cge + cbe + cse);
-    let mut cdsb = cgg + cgd + cgb + cge + cbg + cbd + cbb + cbe + csg + csd + csb + cse;
+    let cdsb = cgg + cgd + cgb + cge + cbg + cbd + cbb + cbe + csg + csd + csb + cse;
 
-    // --- Intrinsic S/D junction charge (b3soifdld.c:3438-3494) ---
-    let phi_bswg = m.phibswg;
-    let mjswg = m.mjswg;
-    let cjsbs = m.cjswg * p.weff * m.tsi / 1e-7;
-
-    let (t3, dt3_dvb_s);
-    if i.vbs < 0.0 {
-        let arg = 1.0 - i.vbs / phi_bswg;
-        let d = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        t3 = (1.0 - arg * d) * phi_bswg / (1.0 - mjswg);
-        dt3_dvb_s = d;
-    } else {
-        t3 = i.vbs * (1.0 + 0.5 * mjswg * i.vbs / phi_bswg);
-        dt3_dvb_s = 1.0 + mjswg * i.vbs / phi_bswg;
-    }
-    let qjs = cjsbs * t3 + m.tt * i.ibs1;
-    let gcjsbs = cjsbs * dt3_dvb_s + m.tt * i.dibs1_dvb;
-
-    let (t3, dt3_dvb_d);
-    if i.vbd < 0.0 {
-        let arg = 1.0 - i.vbd / phi_bswg;
-        let d = if mjswg == 0.5 {
-            1.0 / arg.sqrt()
-        } else {
-            (-mjswg * arg.ln()).exp()
-        };
-        t3 = (1.0 - arg * d) * phi_bswg / (1.0 - mjswg);
-        dt3_dvb_d = d;
-    } else {
-        t3 = i.vbd * (1.0 + 0.5 * mjswg * i.vbd / phi_bswg);
-        dt3_dvb_d = 1.0 + mjswg * i.vbd / phi_bswg;
-    }
-    let dt3_dvd_d = -dt3_dvb_d;
-    let qjd = cjsbs * t3 + m.tt * i.ibd1;
-    let gcjdbs = cjsbs * dt3_dvb_d + m.tt * i.dibd1_dvb;
-    let gcjdds = cjsbs * dt3_dvd_d + m.tt * i.dibd1_dvd;
-
-    qdrn -= qjd;
-    qbody += qjs + qjd;
-
-    cddb -= gcjdds;
-    cdsb += gcjdds + gcjdbs;
-    cbdb += gcjdds;
-    cbsb -= gcjdds + gcjdbs + gcjsbs;
+    // FD explicitly zeroes intrinsic source/drain junction stored charge here
+    // (b3soifdld.c finished block: qjs=qjd=0, gcjs*=gcjd*=0). Only the
+    // extrinsic bottom S/D-to-substrate charge below remains.
 
     // --- Extrinsic bottom S/D-to-substrate charge (b3soifdld.c:3496-3609) ---
     let nsub_pos_type = (p.nsub > 0.0 && m.mtype > 0.0) || (p.nsub < 0.0 && m.mtype < 0.0);
@@ -2129,6 +2349,7 @@ fn eval_charges_capmod3(
             gcedb: cedb - gcde,
             gcesb: cesb - gcse,
             gceeb: gcse + gcde + ceeb + cgeo,
+            ..Default::default()
         }
     } else {
         // Inverse mode (b3soifdld.c:3732-3781): D/S roles swap in the matrix.
@@ -2163,6 +2384,7 @@ fn eval_charges_capmod3(
             gcesb: cedb - gcse,
             gcedb: cesb - gcde,
             gceeb: ceeb + cgeo + gcse + gcde,
+            ..Default::default()
         }
     }
 }

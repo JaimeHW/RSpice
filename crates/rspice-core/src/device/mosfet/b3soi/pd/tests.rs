@@ -143,11 +143,13 @@ fn geom() -> B3SoiPdGeometry {
         body_squares: 0.0,
         rth0: 0.005,
         cth0: 0.0,
+        nseg: 1.0,
     }
 }
 
 fn model_consts(m: &B3SoiPdModel) -> ModelConsts {
     ModelConsts {
+        cap_mod: m.cap_mod,
         cox: m.cox,
         cbox: m.cbox,
         csi: m.csi,
@@ -156,6 +158,7 @@ fn model_consts(m: &B3SoiPdModel) -> ModelConsts {
         qsieff: m.qsieff,
         adice: m.adice,
         tox: m.tox,
+        dtoxcv: m.dtoxcv,
         tsi: m.tsi,
         xj: m.xj,
         charge_q: crate::device::mosfet::b3soi::common::CHARGE_Q,
@@ -193,6 +196,7 @@ fn eval_dc_strong_inversion_is_sane() {
         vds: 0.05,
         ves: 0.0,
         vps: 0.0,
+        ..Default::default()
     };
     let op = eval::eval_dc(&sized, &mc, bias, 1.0);
     assert!(op.ids.is_finite() && op.ids > 0.0, "ids={}", op.ids);
@@ -217,6 +221,7 @@ fn eval_dc_monotonic_in_vg() {
                 vds: 0.05,
                 ves: 0.0,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
         )
@@ -244,6 +249,7 @@ fn eval_dc_no_nan_across_sweep() {
                     vds: 0.1 * vd_i as Value,
                     ves: 0.0,
                     vps: 0.0,
+                    ..Default::default()
                 };
                 let op = eval::eval_dc(&sized, &mc, bias, 1.0);
                 assert!(op.ids.is_finite(), "ids NaN at {bias:?}");
@@ -268,6 +274,7 @@ fn forward_bias_has_body_coupling() {
         vds: 0.5,
         ves: 0.0,
         vps: 0.0,
+        ..Default::default()
     };
     let op = eval::eval_dc(&sized, &mc, bias, 1.0);
     assert!(op.cbody.is_finite());
@@ -292,6 +299,7 @@ fn charge_matrix_is_consistent_with_charges() {
                 vds: vd,
                 ves: ve,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
             true,
@@ -335,6 +343,7 @@ fn body_current_jacobian_matches_conductances() {
                 vds: vd,
                 ves: ve,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
             false,
@@ -408,6 +417,7 @@ fn charge_matrix_matches_charge_jacobian() {
                 vds: vd,
                 ves: ve,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
             true,

@@ -4,7 +4,7 @@
 //! [`B3SoiPdSized`] is computed per (W, L, rth0, cth0) combination; RSpice
 //! computes one per device instance and shares it behind an `Arc`.
 
-use super::super::common::{CHARGE_Q, EPSOX, EPSSI, KB_OVER_Q};
+use super::super::common::{CHARGE_Q, EPSOX, EPSSI, EXPL_THRESHOLD, KB_OVER_Q, MIN_EXPL};
 use super::params::B3SoiPdModel;
 use crate::Value;
 
@@ -48,6 +48,7 @@ pub struct B3SoiPdSized {
     pub k3b: Value,
     pub vbsa: Value,
     pub delp: Value,
+    pub delvt: Value,
     pub kb1: Value,
     pub kb3: Value,
     pub dvbd0: Value,
@@ -171,6 +172,8 @@ pub struct B3SoiPdSized {
     pub cf: Value,
     pub clc: Value,
     pub cle: Value,
+    pub acde: Value,
+    pub moin: Value,
 
     // Temperature-adjusted quantities.
     pub uatemp: Value,
@@ -207,6 +210,8 @@ pub struct B3SoiPdSized {
     pub cdep0: Value,
     pub vbsc: Value,
     pub vfb: Value,
+    pub vfbzb: Value,
+    pub ldeb: Value,
     pub theta0vb0: Value,
     pub theta_rout: Value,
 
@@ -243,6 +248,7 @@ pub struct B3SoiPdGeometry {
     pub body_squares: Value,
     pub rth0: Value,
     pub cth0: Value,
+    pub nseg: Value,
 }
 
 impl B3SoiPdSized {
@@ -285,12 +291,18 @@ impl B3SoiPdSized {
         let t1 = wdrn.powf(m.lwn);
         let tmp1 = m.ll / t0 + m.lw / t1 + m.lwl / (t0 * t1);
         let dl = m.lint + tmp1;
+        let tmp1 = m.llc / t0 + m.lwc / t1 + m.lwlc / (t0 * t1);
         let dlc = m.dlc + tmp1;
         let t2 = ldrn.powf(m.wln);
         let t3 = wdrn.powf(m.wwn);
         let tmp2 = m.wl / t2 + m.ww / t3 + m.wwl / (t2 * t3);
         let dw = m.wint + tmp2;
+        let tmp2 = m.wlc / t2 + m.wwc / t3 + m.wwlc / (t2 * t3);
         let dwc = m.dwc + tmp2;
+
+        if m.tox - m.dtoxcv <= 0.0 {
+            return Err("B3SOIPD: TOX - DTOXCV must be positive".to_string());
+        }
 
         p.leff = geom.l - 2.0 * dl;
         if p.leff <= 0.0 {
@@ -347,7 +359,7 @@ impl B3SoiPdSized {
         p.cf = m.cf;
         p.clc = m.clc;
         p.cle = m.cle;
-        p.abulk_cv_factor = (1.0 + p.clc / p.leff).powf(p.cle);
+        p.abulk_cv_factor = 1.0 + (p.clc / p.leff).powf(p.cle);
 
         // --- Binned parameters (lines 199-527) ---
         let (inv_l, inv_w, inv_lw) = if m.bin_unit == 1 {
@@ -374,6 +386,7 @@ impl B3SoiPdSized {
         bin!(k3b);
         bin!(vbsa);
         bin!(delp);
+        bin!(delvt);
         bin!(kb1);
         bin!(kb3);
         bin!(dvbd0);
@@ -459,6 +472,8 @@ impl B3SoiPdSized {
         bin!(kbjt1);
         bin!(vsdfb);
         bin!(vsdth);
+        bin!(acde);
+        bin!(moin);
 
         // --- Temperature adjustment (lines 530-552) ---
         let t0 = tratio - 1.0;
@@ -466,8 +481,10 @@ impl B3SoiPdSized {
         p.ubtemp = p.ub;
         p.uctemp = p.uc;
         p.rds0denom = (p.weff * 1e6).powf(p.wr);
-        p.rth = geom.rth0 * (m.tbox / m.tsi).sqrt() / p.weff;
-        p.cth = geom.cth0 * m.tsi;
+        let nseg = geom.nseg.max(1.0e-30);
+        let thermal_width = (p.weff + m.wth0).max(1.0e-30);
+        p.rth = geom.rth0 / thermal_width * nseg;
+        p.cth = geom.cth0 * thermal_width / nseg;
         p.rbody = m.rbody * p.weff / p.leff;
         p.ua += p.ua1 * t0;
         p.ub += p.ub1 * t0;
@@ -636,6 +653,41 @@ impl B3SoiPdSized {
         let t0 = (-0.5 * p.drout * p.leff / t1).exp();
         let t2 = t0 + 2.0 * t0 * t0;
         p.theta_rout = p.pdibl1 * t2 + p.pdibl2;
+
+        // CAPMOD=3 vfbzb/charge-thickness pre-computation (b3soipdtemp.c:944-989).
+        let tmp = p.xdep0.sqrt();
+        let tmp1 = p.vbi - p.phi;
+        let tmp2 = p.factor1 * tmp;
+
+        let t0 = -0.5 * p.dvt1w * p.weff * p.leff / tmp2;
+        let t2 = if t0 > -EXPL_THRESHOLD {
+            let t1 = t0.exp();
+            t1 * (1.0 + 2.0 * t1)
+        } else {
+            let t1 = MIN_EXPL;
+            t1 * (1.0 + 2.0 * t1)
+        };
+        let t2 = p.dvt0w * t2 * tmp1;
+
+        let t0 = -0.5 * p.dvt1 * p.leff / tmp2;
+        let t3 = if t0 > -EXPL_THRESHOLD {
+            let t1 = t0.exp();
+            t1 * (1.0 + 2.0 * t1)
+        } else {
+            let t1 = MIN_EXPL;
+            t1 * (1.0 + 2.0 * t1)
+        };
+        let t3 = p.dvt0 * t3 * tmp1;
+
+        let t4 = (m.tox - m.dtoxcv) * p.phi / (p.weff + p.w0);
+        let t0 = (1.0 + p.nlx / p.leff).sqrt();
+        let t5 = p.k1eff * (t0 - 1.0) * p.sqrt_phi + (p.kt1 + p.kt1l / p.leff) * (tratio - 1.0);
+        let tmp3 = m.mtype * p.vth0 - t2 - t3 + p.k3 * t4 + t5;
+        p.vfbzb = tmp3 - p.phi - p.k1eff * p.sqrt_phi;
+
+        let vtm0 = KB_OVER_Q * tnom;
+        p.ldeb = (EPSSI * vtm0 / (CHARGE_Q * p.npeak * 1.0e6)).sqrt() / 3.0;
+        p.acde *= (p.npeak / 2.0e16).powf(-0.25);
 
         p.min_isub = 5.0e-2 * p.weff * m.tsi * p.isdif.max(p.isrec);
 

@@ -39,6 +39,7 @@ pub struct B3SoiPdModel {
     pub param_chk: i32,
     pub version: Value,
     pub tox: Value,
+    pub dtoxcv: Value,
 
     // Binned families (defaults per b3soipdset.c).
     pub npeak: Binned,
@@ -186,6 +187,7 @@ pub struct B3SoiPdModel {
     pub rbsh: Value,
     pub rth0: Value,
     pub cth0: Value,
+    pub wth0: Value,
     pub xbjt: Value,
     pub xdif: Value,
     pub xrec: Value,
@@ -217,6 +219,9 @@ pub struct B3SoiPdModel {
     pub cgdo: Value,
     pub cgeo: Value,
     pub xpart: Value,
+    pub acde: Binned,
+    pub moin: Binned,
+    pub delvt: Binned,
 
     pub tnom: Value,
     pub sheet_resistance: Value,
@@ -228,16 +233,22 @@ pub struct B3SoiPdModel {
     // Geometry scaling.
     pub lint: Value,
     pub ll: Value,
+    pub llc: Value,
     pub lln: Value,
     pub lw: Value,
+    pub lwc: Value,
     pub lwn: Value,
     pub lwl: Value,
+    pub lwlc: Value,
     pub wint: Value,
     pub wl: Value,
+    pub wlc: Value,
     pub wln: Value,
     pub ww: Value,
+    pub wwc: Value,
     pub wwn: Value,
     pub wwl: Value,
+    pub wwlc: Value,
 
     // Derived constants (computed in `finish_setup`, ngspice b3soipdset.c
     // lines 970-997).
@@ -297,6 +308,7 @@ impl B3SoiPdModel {
 
         let mob_mod = val(p, "MOBMOD", 1.0) as i32;
         let tox = val(p, "TOX", 100.0e-10);
+        let dtoxcv = val(p, "DTOXCV", 0.0);
         let cox = 3.453133e-11 / tox;
 
         let drout = binned(p, "DROUT", 0.56, 0.0, 0.0, 0.0);
@@ -326,11 +338,8 @@ impl B3SoiPdModel {
             0.6 * xj * cox
         });
 
-        // NOTE (faithful to ngspice): the IF-parameter table maps "xdif" onto
-        // the XBJT slot (`IOPR("xdif", B3SOIPD_MOD_XBJT, ...)` in b3soipd.c),
-        // so a model card XDIF actually overwrites xbjt and the internal xdif
-        // keeps its default of 2.0.
-        let xbjt = get(p, "XDIF").or_else(|| get(p, "XBJT")).unwrap_or(2.0);
+        let xbjt = val(p, "XBJT", 1.0);
+        let xdif = get(p, "XDIF").unwrap_or(xbjt);
 
         // TNOM on the card is Celsius; CKTnomTemp is Kelvin.
         let tnom = get(p, "TNOM").map(|t| t + 273.15).unwrap_or(nominal_temp_k);
@@ -344,6 +353,7 @@ impl B3SoiPdModel {
             param_chk: val(p, "PARAMCHK", 0.0) as i32,
             version: val(p, "VERSION", 2.0),
             tox,
+            dtoxcv,
 
             npeak: binned(p, "NCH", 1.7e17, 0.0, 0.0, 0.0),
             npeak_given: get(p, "NCH").is_some(),
@@ -522,9 +532,10 @@ impl B3SoiPdModel {
             rbsh: val(p, "RBSH", 0.0),
             rth0: val(p, "RTH0", 0.0),
             cth0: val(p, "CTH0", 0.0),
+            wth0: val(p, "WTH0", 0.0),
             xbjt,
-            xdif: 2.0,
-            xrec: val(p, "XREC", 20.0),
+            xdif,
+            xrec: val(p, "XREC", 1.0),
             xtun: val(p, "XTUN", 0.0),
             tt: val(p, "TT", 1e-12),
             asd: val(p, "ASD", 0.3),
@@ -547,6 +558,9 @@ impl B3SoiPdModel {
             cgdo,
             cgeo: val(p, "CGEO", 0.0),
             xpart: val(p, "XPART", 0.0),
+            acde: binned(p, "ACDE", 1.0, 0.0, 0.0, 0.0),
+            moin: binned(p, "MOIN", 15.0, 0.0, 0.0, 0.0),
+            delvt: binned(p, "DELVT", 0.0, 0.0, 0.0, 0.0),
 
             tnom,
             sheet_resistance: val(p, "RSH", 0.0),
@@ -557,16 +571,22 @@ impl B3SoiPdModel {
 
             lint,
             ll: val(p, "LL", 0.0),
+            llc: val(p, "LLC", 0.0),
             lln: val(p, "LLN", 1.0),
             lw: val(p, "LW", 0.0),
+            lwc: val(p, "LWC", 0.0),
             lwn: val(p, "LWN", 1.0),
             lwl: val(p, "LWL", 0.0),
+            lwlc: val(p, "LWLC", 0.0),
             wint,
             wl: val(p, "WL", 0.0),
+            wlc: val(p, "WLC", 0.0),
             wln: val(p, "WLN", 1.0),
             ww: val(p, "WW", 0.0),
+            wwc: val(p, "WWC", 0.0),
             wwn: val(p, "WWN", 1.0),
             wwl: val(p, "WWL", 0.0),
+            wwlc: val(p, "WWLC", 0.0),
 
             cox,
             cbox: 0.0,

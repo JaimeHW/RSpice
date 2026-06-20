@@ -34,7 +34,8 @@
 //!   source/drain diodes + parasitic BJT — i.e. every `here->B3SOIDD*`
 //!   conductance/current the DC solve needs.
 //! - The **DC matrix/RHS stamping** for `bodyMod` 0 (floating) and 2 (ideal
-//!   tie), no series R, no temp node ([`dd::B3SoiDd`] `stamp_op`).
+//!   tie), with drain/source series R externalized by the builder and no temp
+//!   node ([`dd::B3SoiDd`] `stamp_op`).
 //!
 //! Done since: the **CAPMOD=3 charge model** (b3soiddld.c:2646-3784) with its
 //! transient companion stamping + charge-history/LTE integration, the back-gate
@@ -46,8 +47,7 @@
 //! - **Self-heating** (SHMOD=1) and the temperature node — SHMOD=0 in every
 //!   supported deck; the parameter is recognized and (per spec) errors if RTH0
 //!   makes it active rather than being silently ignored.
-//! - **Body resistor** (`rbody`/`rbsh` > 0, `bodyMod==1`) and internal
-//!   drain/source primes (series R) — absent in the supported decks.
+//! - **Body resistor** (`rbody`/`rbsh` > 0, `bodyMod==1`).
 //! - **Fast-edge floating-body transient amplitude** (`RampVg2`) and the
 //!   **ring-oscillator DC startup** (`ring51`) need further calibration of the
 //!   body LTE / continuation against ngspice.

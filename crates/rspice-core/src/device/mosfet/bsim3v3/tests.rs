@@ -1,4 +1,4 @@
-//! Unit tests for the BSIM3v3.3 (level 8/49) model module.
+//! Unit tests for the BSIM3v3.3 (level 8/9/49) model module.
 //!
 //! Two layers:
 //! - analytic/self-consistency tests that run everywhere: temperature-setup
@@ -138,6 +138,34 @@ fn device(l: Value, w: Value) -> Bsim3v3 {
         ..Bsim3v3Geometry::default()
     };
     Bsim3v3::new("m1".to_string(), model, geom, T300).expect("device")
+}
+
+fn device_with_card(card: HashMap<String, Value>, l: Value, w: Value) -> Bsim3v3 {
+    let model = Arc::new(Bsim3v3Model::from_params(&card, false, T300));
+    let geom = Bsim3v3Geometry {
+        l,
+        w,
+        drain_area: w * 0.42e-6,
+        source_area: w * 0.42e-6,
+        drain_perimeter: 2.0 * (w + 0.42e-6),
+        source_perimeter: 2.0 * (w + 0.42e-6),
+        ..Bsim3v3Geometry::default()
+    };
+    Bsim3v3::new("m1".to_string(), model, geom, T300).expect("device")
+}
+
+fn construct_device_with_card(card: HashMap<String, Value>) -> Result<Bsim3v3, String> {
+    let model = Arc::new(Bsim3v3Model::from_params(&card, false, T300));
+    let geom = Bsim3v3Geometry {
+        l: 0.18e-6,
+        w: 10e-6,
+        drain_area: 4.2e-12,
+        source_area: 4.2e-12,
+        drain_perimeter: 20.84e-6,
+        source_perimeter: 20.84e-6,
+        ..Bsim3v3Geometry::default()
+    };
+    Bsim3v3::new("m1".to_string(), model, geom, T300)
 }
 
 fn op_at(dev: &Bsim3v3, vds: Value, vgs: Value, vbs: Value) -> Bsim3v3Op {
@@ -495,45 +523,409 @@ fn charge_model_capmod3_jacobian_consistency() {
 }
 
 #[test]
-fn capmod_below_3_charge_request_is_typed_error() {
+fn ngspice_pinned_nmos_charges_capmod2() {
     let mut card = nmos018();
     card.insert("CAPMOD".to_string(), 2.0);
-    let model = Arc::new(Bsim3v3Model::from_params(&card, false, T300));
-    let dev = Bsim3v3::new(
-        "m1".to_string(),
-        model,
-        Bsim3v3Geometry {
-            l: 0.18e-6,
-            w: 10e-6,
-            ..Bsim3v3Geometry::default()
-        },
-        T300,
-    )
-    .expect("device");
-    // DC is fine.
-    let op = dev.eval(
+    let dev = device_with_card(card, 0.18e-6, 10e-6);
+    let charge_at = |vds: Value, vgs: Value| {
+        dev.eval(Bsim3v3Bias { vds, vgs, vbs: 0.0 }, GMIN, true)
+            .expect("CAPMOD=2 charge eval")
+            .charge
+            .expect("charges")
+    };
+
+    // ngspice-46, nmos_oracle.sp with models018.lib capmod=2, `ngspice_con.exe -b`.
+    let c = charge_at(0.05, 0.9);
+    assert_rel(c.qg_state(), 2.553329460e-14, "capmod2 qg(0.9)");
+    assert_rel(c.qb_state(), -7.575462320e-15, "capmod2 qb(0.9)");
+    assert_rel(c.qd_state(), -8.536083460e-15, "capmod2 qd(0.9)");
+    assert_rel(c.cggb, 1.252411080e-14, "capmod2 cgg(0.9)");
+    assert_rel(c.cgdb, -4.709989470e-15, "capmod2 cgd(0.9)");
+    assert_rel(c.cgsb, -7.248269520e-15, "capmod2 cgs(0.9)");
+    assert_rel(c.cdgb, -6.149079910e-15, "capmod2 cdg(0.9)");
+    assert_rel(c.cddb, 5.439817160e-15, "capmod2 cdd(0.9)");
+    assert_rel(c.cdsb, 2.336574110e-15, "capmod2 cds(0.9)");
+    assert_rel(c.cbgb, -2.259509250e-16, "capmod2 cbg(0.9)");
+    assert_rel(c.cbdb, -6.169644860e-15, "capmod2 cbd(0.9)");
+    assert_rel(c.cbsb, 2.575121300e-15, "capmod2 cbs(0.9)");
+    assert_rel(c.capbd, 9.753509820e-15, "capmod2 capbd(0.9)");
+    assert_rel(c.capbs, 9.890700000e-15, "capmod2 capbs(0.9)");
+
+    let c = charge_at(1.2, 1.0);
+    assert_rel(c.qg_state(), 1.868390600e-14, "capmod2 qg(vd=1.2 vg=1.0)");
+    assert_rel(c.qb_state(), -1.851946500e-14, "capmod2 qb(vd=1.2 vg=1.0)");
+    assert_rel(c.qd_state(), 9.929873520e-15, "capmod2 qd(vd=1.2 vg=1.0)");
+    assert_rel(c.cggb, 1.083387950e-14, "capmod2 cgg(vd=1.2 vg=1.0)");
+    assert_rel(c.cgdb, 5.280069540e-17, "capmod2 cgd(vd=1.2 vg=1.0)");
+    assert_rel(c.cgsb, -9.973132910e-15, "capmod2 cgs(vd=1.2 vg=1.0)");
+    assert_rel(c.cdgb, -4.207864430e-15, "capmod2 cdg(vd=1.2 vg=1.0)");
+    assert_rel(c.cddb, -2.787440400e-17, "capmod2 cdd(vd=1.2 vg=1.0)");
+    assert_rel(c.cdsb, 5.369810250e-15, "capmod2 cds(vd=1.2 vg=1.0)");
+    assert_rel(c.cbgb, -2.418150640e-15, "capmod2 cbg(vd=1.2 vg=1.0)");
+    assert_rel(c.cbdb, 2.948112450e-18, "capmod2 cbd(vd=1.2 vg=1.0)");
+    assert_rel(c.cbsb, -7.664875970e-16, "capmod2 cbs(vd=1.2 vg=1.0)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod0() {
+    let mut card = nmos018();
+    card.insert("CAPMOD".to_string(), 0.0);
+    let dev = device_with_card(card, 0.18e-6, 10e-6);
+    let charge_at = |vds: Value, vgs: Value| {
+        dev.eval(Bsim3v3Bias { vds, vgs, vbs: 0.0 }, GMIN, true)
+            .expect("CAPMOD=0 charge eval")
+            .charge
+            .expect("charges")
+    };
+
+    // ngspice-46, models018.lib with capmod=0, `ngspice_con.exe -b`.
+    let c = charge_at(0.05, 0.9);
+    assert_rel(c.qg_state(), 2.66511147e-14, "capmod0 qg(0.9)");
+    assert_rel(c.qb_state(), -7.78252513e-15, "capmod0 qb(0.9)");
+    assert_rel(c.qd_state(), -8.99146211e-15, "capmod0 qd(0.9)");
+    assert_rel(c.cggb, 1.25891850e-14, "capmod0 cgg(0.9)");
+    assert_rel(c.cgdb, -5.72168893e-15, "capmod0 cgd(0.9)");
+    assert_rel(c.cgsb, -6.85937461e-15, "capmod0 cgs(0.9)");
+    assert_rel(c.cdgb, -6.27411899e-15, "capmod0 cdg(0.9)");
+    assert_rel(c.cddb, 6.56848067e-15, "capmod0 cdd(0.9)");
+    assert_rel(c.cdsb, 1.66223474e-15, "capmod0 cds(0.9)");
+    assert_rel(c.cbgb, -4.09469770e-17, "capmod0 cbg(0.9)");
+    assert_rel(c.cbdb, -7.41527240e-15, "capmod0 cbd(0.9)");
+    assert_rel(c.cbsb, 3.53490512e-15, "capmod0 cbs(0.9)");
+    assert_rel(c.capbd, 9.75350982e-15, "capmod0 capbd(0.9)");
+    assert_rel(c.capbs, 9.89070000e-15, "capmod0 capbs(0.9)");
+
+    let c = charge_at(1.2, 1.0);
+    assert_rel(c.qg_state(), 1.96280929e-14, "capmod0 qg(vd=1.2 vg=1.0)");
+    assert_rel(c.qb_state(), -1.88658981e-14, "capmod0 qb(vd=1.2 vg=1.0)");
+    assert_rel(c.qd_state(), 9.63099659e-15, "capmod0 qd(vd=1.2 vg=1.0)");
+    assert_rel(c.cggb, 1.07884898e-14, "capmod0 cgg(vd=1.2 vg=1.0)");
+    assert_rel(c.cgdb, 0.0, "capmod0 cgd(vd=1.2 vg=1.0)");
+    assert_rel(c.cgsb, -1.03402151e-14, "capmod0 cgs(vd=1.2 vg=1.0)");
+    assert_rel(c.cdgb, -4.20692667e-15, "capmod0 cdg(vd=1.2 vg=1.0)");
+    assert_rel(c.cddb, 0.0, "capmod0 cdd(vd=1.2 vg=1.0)");
+    assert_rel(c.cdsb, 5.54615958e-15, "capmod0 cds(vd=1.2 vg=1.0)");
+    assert_rel(c.cbgb, -2.37463645e-15, "capmod0 cbg(vd=1.2 vg=1.0)");
+    assert_rel(c.cbdb, 0.0, "capmod0 cbd(vd=1.2 vg=1.0)");
+    assert_rel(c.cbsb, -7.52104044e-16, "capmod0 cbs(vd=1.2 vg=1.0)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod1() {
+    let mut card = nmos018();
+    card.insert("CAPMOD".to_string(), 1.0);
+    let dev = device_with_card(card, 0.18e-6, 10e-6);
+    let charge_at = |vds: Value, vgs: Value| {
+        dev.eval(Bsim3v3Bias { vds, vgs, vbs: 0.0 }, GMIN, true)
+            .expect("CAPMOD=1 charge eval")
+            .charge
+            .expect("charges")
+    };
+
+    // ngspice-46, models018.lib with capmod=1, `ngspice_con.exe -b`.
+    let c = charge_at(0.05, 0.9);
+    assert_rel(c.qg_state(), 2.55914642e-14, "capmod1 qg(0.9)");
+    assert_rel(c.qb_state(), -7.71596505e-15, "capmod1 qb(0.9)");
+    assert_rel(c.qd_state(), -8.49491691e-15, "capmod1 qd(0.9)");
+    assert_rel(c.cggb, 1.25566096e-14, "capmod1 cgg(0.9)");
+    assert_rel(c.cgdb, -5.51479743e-15, "capmod1 cgd(0.9)");
+    assert_rel(c.cgsb, -6.53236098e-15, "capmod1 cgs(0.9)");
+    assert_rel(c.cdgb, -6.24506572e-15, "capmod1 cdg(0.9)");
+    assert_rel(c.cddb, 6.36365191e-15, "capmod1 cdd(0.9)");
+    assert_rel(c.cdsb, 1.52453868e-15, "capmod1 cds(0.9)");
+    assert_rel(c.cbgb, -6.64781661e-17, "capmod1 cbg(0.9)");
+    assert_rel(c.cbdb, -7.21250638e-15, "capmod1 cbd(0.9)");
+    assert_rel(c.cbsb, 3.48328362e-15, "capmod1 cbs(0.9)");
+    assert_rel(c.capbd, 9.75350982e-15, "capmod1 capbd(0.9)");
+    assert_rel(c.capbs, 9.89070000e-15, "capmod1 capbs(0.9)");
+
+    let c = charge_at(1.2, 1.0);
+    assert_rel(c.qg_state(), 1.87722498e-14, "capmod1 qg(vd=1.2 vg=1.0)");
+    assert_rel(c.qb_state(), -1.86095468e-14, "capmod1 qb(vd=1.2 vg=1.0)");
+    assert_rel(c.qd_state(), 9.93074251e-15, "capmod1 qd(vd=1.2 vg=1.0)");
+    assert_rel(c.cggb, 1.07858214e-14, "capmod1 cgg(vd=1.2 vg=1.0)");
+    assert_rel(c.cgdb, 5.42146046e-17, "capmod1 cgd(vd=1.2 vg=1.0)");
+    assert_rel(c.cgsb, -9.95964875e-15, "capmod1 cgs(vd=1.2 vg=1.0)");
+    assert_rel(c.cdgb, -4.20547097e-15, "capmod1 cdg(vd=1.2 vg=1.0)");
+    assert_rel(c.cddb, -2.95763327e-17, "capmod1 cdd(vd=1.2 vg=1.0)");
+    assert_rel(c.cdsb, 5.36852121e-15, "capmod1 cds(vd=1.2 vg=1.0)");
+    assert_rel(c.cbgb, -2.37487949e-15, "capmod1 cbg(vd=1.2 vg=1.0)");
+    assert_rel(c.cbdb, 4.93806074e-18, "capmod1 cbd(vd=1.2 vg=1.0)");
+    assert_rel(c.cbsb, -7.77393676e-16, "capmod1 cbs(vd=1.2 vg=1.0)");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod0_and_1_xpart_branches() {
+    let cases = [
+        // ngspice-46, models018.lib with CAPMOD/XPART rewritten, high-precision `print`.
+        (
+            0.0,
+            0.4,
+            0.05,
+            0.9,
+            -8.87114004339493e-15,
+            -6.27221382721914e-15,
+            8.956079350300603e-15,
+            -7.42672104956259e-16,
+        ),
+        (
+            0.0,
+            0.4,
+            1.2,
+            1.0,
+            1.013121487698900e-14,
+            -3.36554133365854e-15,
+            0.0,
+            4.436927660965850e-15,
+        ),
+        (
+            0.0,
+            1.0,
+            0.05,
+            0.9,
+            -8.29874074912211e-15,
+            -6.20157696773521e-15,
+            1.970544200405465e-14,
+            -1.16517744987191e-14,
+        ),
+        (0.0, 1.0, 1.2, 1.0, 1.213208802179343e-14, 0.0, 0.0, 0.0),
+        (
+            1.0,
+            0.4,
+            0.05,
+            0.9,
+            -8.37479965952086e-15,
+            -6.24160029899201e-15,
+            8.737187674974698e-15,
+            -8.68105048316137e-16,
+        ),
+        (
+            1.0,
+            0.4,
+            1.2,
+            1.0,
+            1.037101161427719e-14,
+            -3.36437677781087e-15,
+            -2.36610661359743e-17,
+            4.294816968590364e-15,
+        ),
+        (
+            1.0,
+            1.0,
+            0.05,
+            0.9,
+            -7.80921688428095e-15,
+            -6.13703529477321e-15,
+            1.917955636119728e-14,
+            -1.15079225667818e-14,
+        ),
+        (
+            1.0,
+            1.0,
+            1.2,
+            1.0,
+            1.213208802179343e-14,
+            1.577721810442024e-30,
+            0.0,
+            0.0,
+        ),
+    ];
+
+    for &(capmod, xpart, vds, vgs, qd, cdg, cdd, cds) in &cases {
+        let mut card = nmos018();
+        card.insert("CAPMOD".to_string(), capmod);
+        card.insert("XPART".to_string(), xpart);
+        let dev = device_with_card(card, 0.18e-6, 10e-6);
+        let c = dev
+            .eval(Bsim3v3Bias { vds, vgs, vbs: 0.0 }, GMIN, true)
+            .unwrap_or_else(|err| panic!("CAPMOD={capmod} XPART={xpart} charge eval: {err}"))
+            .charge
+            .expect("charges");
+
+        let label = format!("capmod{capmod} xpart{xpart} vd={vds} vg={vgs}");
+        assert_rel(c.qd_state(), qd, &format!("{label} qd"));
+        assert_rel(c.cdgb, cdg, &format!("{label} cdg"));
+        assert_rel(c.cddb, cdd, &format!("{label} cdd"));
+        assert_rel(c.cdsb, cds, &format!("{label} cds"));
+    }
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod0_and_1_inverse_mode() {
+    let cases = [
+        // ngspice-46, models018.lib with CAPMOD rewritten, vds=-50 mV.
+        (
+            0.0,
+            2.806964788877441e-14,
+            -6.60470996619538e-15,
+            -1.11788227823833e-14,
+            1.259669744494825e-14,
+            -5.79877434198245e-15,
+            -6.79235222922769e-15,
+            -6.28257161661318e-15,
+            6.698314312556863e-15,
+            1.431273465992502e-15,
+            -3.15542117218833e-17,
+            -7.59785428313127e-15,
+            3.929805297242683e-15,
+            1.003340568750000e-14,
+            9.890700000000001e-15,
+        ),
+        (
+            1.0,
+            2.698652390448081e-14,
+            -6.54742778743705e-15,
+            -1.06659018796156e-14,
+            1.257955746655105e-14,
+            -5.62640505875731e-15,
+            -6.55313424221581e-15,
+            -6.26615196756301e-15,
+            6.531908261996990e-15,
+            1.282972424884014e-15,
+            -4.72535314250278e-17,
+            -7.43741146523667e-15,
+            3.987189392447785e-15,
+            1.003340568750000e-14,
+            9.890700000000001e-15,
+        ),
+    ];
+
+    for &(capmod, qg, qb, qd, cgg, cgd, cgs, cdg, cdd, cds, cbg, cbd, cbs, capbd, capbs) in &cases {
+        let mut card = nmos018();
+        card.insert("CAPMOD".to_string(), capmod);
+        let dev = device_with_card(card, 0.18e-6, 10e-6);
+        let c = dev
+            .eval(
+                Bsim3v3Bias {
+                    vds: -0.05,
+                    vgs: 0.9,
+                    vbs: 0.0,
+                },
+                GMIN,
+                true,
+            )
+            .unwrap_or_else(|err| panic!("CAPMOD={capmod} inverse charge eval: {err}"))
+            .charge
+            .expect("charges");
+
+        let label = format!("capmod{capmod} inverse");
+        assert_rel(c.qg_state(), qg, &format!("{label} qg"));
+        assert_rel(c.qb_state(), qb, &format!("{label} qb"));
+        assert_rel(c.qd_state(), qd, &format!("{label} qd"));
+        assert_rel(c.cggb, cgg, &format!("{label} cgg"));
+        assert_rel(c.cgdb, cgd, &format!("{label} cgd"));
+        assert_rel(c.cgsb, cgs, &format!("{label} cgs"));
+        assert_rel(c.cdgb, cdg, &format!("{label} cdg"));
+        assert_rel(c.cddb, cdd, &format!("{label} cdd"));
+        assert_rel(c.cdsb, cds, &format!("{label} cds"));
+        assert_rel(c.cbgb, cbg, &format!("{label} cbg"));
+        assert_rel(c.cbdb, cbd, &format!("{label} cbd"));
+        assert_rel(c.cbsb, cbs, &format!("{label} cbs"));
+        assert_rel(c.capbd, capbd, &format!("{label} capbd"));
+        assert_rel(c.capbs, capbs, &format!("{label} capbs"));
+    }
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_xpart_negative_suppresses_intrinsic_charge() {
+    for capmod in [0.0, 1.0] {
+        let mut card = nmos018();
+        card.insert("CAPMOD".to_string(), capmod);
+        card.insert("XPART".to_string(), -1.0);
+        let dev = device_with_card(card, 0.18e-6, 10e-6);
+        let c = dev
+            .eval(
+                Bsim3v3Bias {
+                    vds: 0.05,
+                    vgs: 0.9,
+                    vbs: 0.0,
+                },
+                GMIN,
+                true,
+            )
+            .unwrap_or_else(|err| panic!("CAPMOD={capmod} XPART<0 charge eval: {err}"))
+            .charge
+            .expect("charges");
+
+        let label = format!("capmod{capmod} xpart<0");
+        assert_rel(c.qg_state(), 1.381131000000000e-14, &format!("{label} qg"));
+        assert_rel(c.qb_state(), -4.91195350563735e-16, &format!("{label} qb"));
+        assert_rel(c.qd_state(), -6.21722464943626e-15, &format!("{label} qd"));
+        assert_rel(c.cggb, 0.0, &format!("{label} cgg"));
+        assert_rel(c.cgdb, 0.0, &format!("{label} cgd"));
+        assert_rel(c.cgsb, 0.0, &format!("{label} cgs"));
+        assert_rel(c.cdgb, 0.0, &format!("{label} cdg"));
+        assert_rel(c.cddb, 0.0, &format!("{label} cdd"));
+        assert_rel(c.cdsb, 0.0, &format!("{label} cds"));
+        assert_rel(c.cbgb, 0.0, &format!("{label} cbg"));
+        assert_rel(c.cbdb, 0.0, &format!("{label} cbd"));
+        assert_rel(c.cbsb, 0.0, &format!("{label} cbs"));
+        assert_rel(c.capbd, 9.753509824241641e-15, &format!("{label} capbd"));
+        assert_rel(c.capbs, 9.890700000000001e-15, &format!("{label} capbs"));
+    }
+}
+
+#[test]
+fn eval_rejects_invalid_capmod_even_when_xpart_suppresses_intrinsic_charge() {
+    let mut card = nmos018();
+    card.insert("CAPMOD".to_string(), 99.0);
+    card.insert("XPART".to_string(), -1.0);
+    let model = Bsim3v3Model::from_params(&card, false, T300);
+    let mt = Bsim3v3ModelTemp::new(&model, T300);
+    let size = Bsim3v3SizeDep::new(&model, &mt, 0.18e-6, 10e-6).expect("size");
+    let geom = Bsim3v3Geometry {
+        l: 0.18e-6,
+        w: 10e-6,
+        drain_area: 4.2e-12,
+        source_area: 4.2e-12,
+        drain_perimeter: 20.84e-6,
+        source_perimeter: 20.84e-6,
+        ..Bsim3v3Geometry::default()
+    };
+    let inst = Bsim3v3InstTemp::new(&model, &mt, &size, &geom);
+    let err = eval::eval(
+        &model,
+        &mt,
+        &size,
+        &inst,
         Bsim3v3Bias {
-            vds: 0.1,
-            vgs: 1.0,
+            vds: 0.05,
+            vgs: 0.9,
             vbs: 0.0,
         },
         GMIN,
-        false,
+        true,
+    )
+    .expect_err("invalid CAPMOD must be rejected before xpart suppression");
+    assert!(
+        err.contains("CAPMOD=99") && err.contains("invalid"),
+        "unexpected invalid CAPMOD error: {err}"
     );
-    assert!(op.is_ok());
-    // Charges are a typed error.
-    let err = dev
-        .eval(
-            Bsim3v3Bias {
-                vds: 0.1,
-                vgs: 1.0,
-                vbs: 0.0,
-            },
-            GMIN,
-            true,
-        )
-        .unwrap_err();
-    assert!(err.contains("CAPMOD=2"), "unexpected error: {err}");
+}
+
+#[test]
+fn acnqsmod_and_transient_nqs_construct_but_invalid_selectors_reject() {
+    let mut ac_card = nmos018();
+    ac_card.insert("ACNQSMOD".to_string(), 1.0);
+    let ac_dev = construct_device_with_card(ac_card)
+        .unwrap_or_else(|err| panic!("ACNQSMOD=1 should construct natively: {err}"));
+    assert_eq!(ac_dev.model.acnqs_mod, 1);
+    assert_eq!(ac_dev.model.nqs_mod, 0);
+
+    let mut transient_card = nmos018();
+    transient_card.insert("NQSMOD".to_string(), 1.0);
+    let transient_dev = construct_device_with_card(transient_card)
+        .unwrap_or_else(|err| panic!("NQSMOD=1 should construct natively: {err}"));
+    assert_eq!(transient_dev.model.nqs_mod, 1);
+
+    let mut invalid_card = nmos018();
+    invalid_card.insert("NQSMOD".to_string(), 2.0);
+    let err =
+        construct_device_with_card(invalid_card).expect_err("invalid NQSMOD selector must reject");
+    assert!(
+        err.contains("NQSMOD=2") && err.contains("invalid"),
+        "typed rejection should name invalid NQSMOD selector: {err}"
+    );
 }
 
 #[test]

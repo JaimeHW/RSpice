@@ -1,4 +1,4 @@
-//! Engine-level validation of the native BSIM3v3.3 (MOS LEVEL=8/49) wiring.
+//! Engine-level validation of the native BSIM3v3.3 (MOS LEVEL=8/9/49) wiring.
 //!
 //! The model module (`device/mosfet/bsim3v3`) is pinned against ngspice-46
 //! standalone; these tests prove the *engine* reproduces those values
@@ -9,7 +9,7 @@
 //!   ngspice-46 run of the same deck;
 //! - a 3-stage ring oscillator `.tran` must oscillate with the period
 //!   ngspice produces for the same deck (5% tolerance);
-//! - a LEVEL=49 card builds and runs natively, without the
+//! - LEVEL=49 and Xyce-compatible LEVEL=9 cards build and run natively, without the
 //!   `allow_simplified_mos` escape hatch.
 
 use rspice_core::engine::{Engine, SimulationConfig};
@@ -22,6 +22,31 @@ fn models018() -> String {
         "/src/device/mosfet/bsim3v3/testdata/models018.lib"
     );
     std::fs::read_to_string(path).expect("read models018.lib")
+}
+
+fn models018_capmod2(xpart: f64) -> String {
+    models018()
+        .replace("capmod=3", "capmod=2")
+        .replace("xpart=0.5", &format!("xpart={xpart}"))
+}
+
+fn models018_capmod(capmod: i32) -> String {
+    models018().replace("capmod=3", &format!("capmod={capmod}"))
+}
+
+fn models018_acnqsmod1() -> String {
+    models018().replace("capmod=3 xpart=0.5", "capmod=3 xpart=0.5 acnqsmod=1")
+}
+
+fn models018_nqsmod(nqs_mod: i32) -> String {
+    models018().replace(
+        "capmod=3 xpart=0.5",
+        &format!("capmod=3 xpart=0.5 nqsmod={nqs_mod} acnqsmod=0"),
+    )
+}
+
+fn models018_level9_acnqsmod1() -> String {
+    models018_acnqsmod1().replace("level=49", "level=9 version=3.2.2")
 }
 
 fn engine() -> Engine {
@@ -85,12 +110,70 @@ fn single_nmos_op_matches_module_oracle() {
     assert_rel("vdsat", get("vdsat"), 3.733014340e-01);
 }
 
+#[test]
+fn level9_default_bsim3_current_matches_xyce710() {
+    // Xyce 7.10 registers MOSFET_B3 as LEVEL=9/49 and defaults VERSION to
+    // 3.2.2. This one-point deck pins the LEVEL=9 compatibility front against
+    // Xyce's DC current while still using RSpice's native BSIM3 evaluator.
+    let deck = "* bsim3 level9 xyce oracle\n\
+                vd d 0 dc 1.2\n\
+                vg g 0 dc 1.2\n\
+                m1 d g 0 0 n9 w=10u l=0.18u ad=4.2p as=4.2p pd=20.84u ps=20.84u nrd=0 nrs=0\n\
+                .model n9 nmos level=9 version=3.2.2 tox=4.1n nch=2.35e17 vth0=0.5 capmod=3\n\
+                .op\n\
+                .end\n";
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let (_, report) = engine()
+        .run_dc_op_with_report(&netlist)
+        .expect("LEVEL=9 deck runs natively");
+    let entry = report
+        .entries
+        .iter()
+        .find(|entry| entry.name.eq_ignore_ascii_case("m1"))
+        .expect("m1 op entry");
+    assert_eq!(
+        entry.device_kind, "BSIM3",
+        "LEVEL=9 must use the native BSIM3 port, not a simplified fallback"
+    );
+    let id = entry
+        .params
+        .iter()
+        .find(|(key, _)| *key == "id")
+        .map(|(_, value)| *value)
+        .expect("BSIM3 op id");
+
+    // XyceNF 7.10.0, same deck with `.print dc I(Vd)`: I(Vd) =
+    // -1.29424026e-03 A, so drain current into the MOSFET is positive.
+    let reference = 1.29424026e-03;
+    let rel = (id - reference).abs() / reference;
+    assert!(
+        rel < 1e-6,
+        "LEVEL=9 id: RSpice={id:.9e} Xyce7.10={reference:.9e} rel={rel:.2e}"
+    );
+}
+
 /// The inverter used by the VTC and ring tests: 2u/0.18u PMOS over
 /// 1u/0.18u NMOS on a 1.8 V rail, junction geometry spelled out.
 fn inverter_pair(name: &str, input: &str, output: &str) -> String {
     format!(
         "mp{name} {output} {input} vdd vdd p018 w=2u l=0.18u ad=0.84p as=0.84p pd=4.84u ps=4.84u nrd=0 nrs=0\n\
          mn{name} {output} {input} 0 0 n018 w=1u l=0.18u ad=0.42p as=0.42p pd=2.84u ps=2.84u nrd=0 nrs=0\n"
+    )
+}
+
+fn nqsmod_common_source_deck(nqs_mod: i32) -> String {
+    format!(
+        "* bsim3 nqsmod={nqs_mod} common source transient\n\
+         .option reltol=1e-7 abstol=1e-15 vntol=1e-9 chgtol=1e-16 gmin=1e-12 method=gear maxord=2\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 pulse(0.3 1.2 20p 2p 2p 80p 200p)\n\
+         vb b 0 dc 0\n\
+         rd vdd out 4k\n\
+         m1 out in 0 b n018 w=1u l=0.18u ad=0.42p as=0.42p pd=2.84u ps=2.84u nrd=0 nrs=0\n\
+         {}\n\
+         .tran 0.1p 80p\n\
+         .end\n",
+        models018_nqsmod(nqs_mod)
     )
 }
 
@@ -168,6 +251,20 @@ fn rising_crossings(time: &[f64], wave: &[f64], threshold: f64) -> Vec<f64> {
     crossings
 }
 
+fn interp_waveform(time: &[f64], wave: &[f64], target: f64) -> f64 {
+    assert_eq!(time.len(), wave.len(), "time/waveform length mismatch");
+    if target <= time[0] {
+        return wave[0];
+    }
+    for i in 1..time.len() {
+        if time[i] >= target {
+            let f = (target - time[i - 1]) / (time[i] - time[i - 1]);
+            return wave[i - 1] + f * (wave[i] - wave[i - 1]);
+        }
+    }
+    *wave.last().expect("nonempty waveform")
+}
+
 #[test]
 fn ring_oscillator_period_matches_ngspice() {
     // 3-stage ring, CAPMOD=3 intrinsic + overlap + junction charges as the
@@ -220,6 +317,67 @@ fn ring_oscillator_period_matches_ngspice() {
 }
 
 #[test]
+fn nqsmod1_common_source_transient_matches_ngspice46() {
+    // ngspice-46 console reference for the BSIM3 charge-deficit transient NQS
+    // topology (`NQSMOD=1`, `ACNQSMOD=0`). Xyce 7.10's regression tree has
+    // BSIM3 ACNQS coverage, but no matching transient NQS oracle; its local
+    // BSIM3 source also keeps "nqsMod=1 is not ready yet" guards in several
+    // transient paths, so ngspice is the physics oracle for this selector.
+    let deck = nqsmod_common_source_deck(1);
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = engine()
+        .run_tran(&netlist, 80.0e-12, 0.1e-12)
+        .expect("NQSMOD=1 transient runs natively");
+    let vout = result
+        .try_voltage_waveform_named("out")
+        .expect("out waveform");
+
+    let qs_deck = nqsmod_common_source_deck(0);
+    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
+    let qs_result = engine()
+        .run_tran(&qs_netlist, 80.0e-12, 0.1e-12)
+        .expect("NQSMOD=0 transient runs");
+    let qs_vout = qs_result
+        .try_voltage_waveform_named("out")
+        .expect("QS out waveform");
+
+    let reference: &[(f64, f64, f64)] = &[
+        (20.5e-12, 1.900_800_684_161, -1.279_221_177_014e-2),
+        (21.0e-12, 1.993_415_522_894, -4.593_396_012_749e-2),
+        (21.5e-12, 2.065_573_906_354, -7.473_266_985_363e-2),
+        (22.0e-12, 2.111_525_790_000, -9.529_635_000_000e-2),
+        (22.5e-12, 2.038_683_686_375, -6.452_367_015_376e-2),
+        (23.0e-12, 1.966_591_681_099, -4.135_735_948_028e-2),
+        (24.0e-12, 1.828_490_009_922, -1.127_009_894_238e-2),
+        (25.0e-12, 1.702_111_376_065, 4.805_536_592_500e-3),
+        (30.0e-12, 1.264_027_054_269, 1.498_800_548_199e-2),
+        (40.0e-12, 9.593_658_667_354e-1, 3.610_276_377_525e-3),
+    ];
+    let mut max_qs_delta: f64 = 0.0;
+    for &(time, expected, expected_delta_vs_qs) in reference {
+        let got = interp_waveform(&result.time, vout, time);
+        let abs_err = (got - expected).abs();
+        assert!(
+            abs_err < 1.0e-3,
+            "NQSMOD=1 BSIM3 v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
+        );
+
+        let qs = interp_waveform(&qs_result.time, qs_vout, time);
+        let qs_delta = got - qs;
+        max_qs_delta = max_qs_delta.max(qs_delta.abs());
+        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
+        assert!(
+            delta_err < 1.5e-3,
+            "NQSMOD=1 BSIM3 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
+        );
+    }
+    assert!(
+        max_qs_delta > 1.0e-2,
+        "NQSMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
+    );
+}
+
+#[test]
 fn inverter_ac_response_matches_ngspice() {
     // Small-signal check of the AC path: DC linearization (gm/gds/gmbs +
     // junction conductances) on the real axis, the mode-assembled BSIM3
@@ -267,6 +425,259 @@ fn inverter_ac_response_matches_ngspice() {
         assert!(
             (ph - ph_ref).abs() < 1e-3,
             "AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
+        );
+    }
+}
+
+#[test]
+fn inverter_ac_response_with_capmod2_matches_ngspice_and_xpart04() {
+    // Same inverter as the CAPMOD=3 AC oracle, but using the BSIM3 CAPMOD=2
+    // Meyer-inspired charge branch and XPART=0.4 to exercise the 40/60
+    // partition path used by Xyce's BSIM3 regression decks.
+    let deck = format!(
+        "* bsim3 capmod2 inverter ac\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 dc 0.9 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+        models018_capmod2(0.4)
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    // ngspice-46 reference: same deck with `.option reltol=1e-6`,
+    // `ngspice_con.exe -b`, `ac dec 1 1e6 1e11` (vdb(out), ph(out)).
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, 2.46215429e+01, 3.13944439e+00),
+        (1.000000e7, 2.46196062e+01, 3.12011321e+00),
+        (1.000000e8, 2.44301714e+01, 2.92987138e+00),
+        (1.000000e9, 1.72158867e+01, 1.98555971e+00),
+        (1.000000e10, -1.65277947e+00, 1.36829769e+00),
+        (1.000000e11, -1.31679139e+01, 3.78589518e-01),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let db = 20.0 * v.norm().log10();
+        let ph = v.arg();
+        assert!(
+            (db - db_ref).abs() < 1e-3,
+            "CAPMOD=2 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
+        );
+        assert!(
+            (ph - ph_ref).abs() < 1e-3,
+            "CAPMOD=2 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
+        );
+    }
+}
+
+#[test]
+fn inverter_ac_response_with_capmod0_and_1_runs_natively() {
+    for capmod in [0, 1] {
+        let deck = format!(
+            "* bsim3 capmod{capmod} inverter ac\n\
+             vdd vdd 0 dc 1.8\n\
+             vin in 0 dc 0.9 ac 1\n\
+             {}\
+             cl out 0 10f\n\
+             {}\n\
+             .end\n",
+            inverter_pair("1", "in", "out"),
+            models018_capmod(capmod)
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let results = engine()
+            .run_ac(&netlist, &[1.0e6, 1.0e9, 1.0e11])
+            .unwrap_or_else(|err| panic!("CAPMOD={capmod} AC should run natively: {err}"));
+        for result in &results {
+            let idx = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("out"))
+                .expect("out in ac result");
+            let v = result.voltages[idx];
+            assert!(
+                v.re.is_finite() && v.im.is_finite(),
+                "CAPMOD={capmod} finite v(out), got {v:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn inverter_ac_response_with_acnqsmod1_matches_ngspice46() {
+    // BSIM3 ACNQSMOD=1 is implemented in ngspice's b3acld.c and b3ld.c.
+    // Xyce 7.10 accepts ACNQSMOD on BSIM3 LEVEL=9 decks but produces the
+    // same AC output with ACNQSMOD on and off for this circuit, so it is
+    // coverage-only here rather than a matching AC-NQS physics oracle.
+    let deck = format!(
+        "* bsim3 acnqs inverter ac\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 dc 0.9 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+        models018_acnqsmod1()
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    // ngspice-46 reference: same deck with `.option reltol=1e-6`,
+    // `.ac dec 1 1e6 1e11`, and `wrdata v(out)`.
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, -1.70245705e+01, 3.65615895e-02),
+        (1.000000e7, -1.70169605e+01, 3.65455847e-01),
+        (1.000000e8, -1.62881907e+01, 3.50128856e+00),
+        (1.000000e9, -2.84420288e+00, 6.73825002e+00),
+        (1.000000e10, 3.13948842e-01, 7.83344665e-01),
+        (1.000000e11, 1.92673406e-01, -6.65831480e-03),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, real_ref, imag_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let real_err = (v.re - real_ref).abs();
+        let imag_err = (v.im - imag_ref).abs();
+        println!(
+            "ACNQSMOD=1 BSIM3 f={freq:.3e}: rspice=({:.9e}, {:.9e}) ngspice=({real_ref:.9e}, {imag_ref:.9e})",
+            v.re, v.im
+        );
+        assert!(
+            real_err <= 5e-10 + 3e-3 * real_ref.abs(),
+            "ACNQSMOD=1 BSIM3 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
+            v.re
+        );
+        assert!(
+            imag_err <= 5e-10 + 3e-3 * imag_ref.abs(),
+            "ACNQSMOD=1 BSIM3 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
+            v.im
+        );
+    }
+}
+
+#[test]
+fn level9_acnqsmod1_deck_runs_natively_for_xyce_compatibility() {
+    // Xyce regression modelcards in RINGS/INIT_CONDS/IC_AND_NODESET contain
+    // LEVEL=9 BSIM3 with `Acnqsmod=1 elm=3`. Xyce 7.10 ignores the AC delta
+    // for this parameter, but RSpice must still accept and run these decks
+    // natively instead of falling back to a simplified or Verilog model.
+    let deck = format!(
+        "* bsim3 level9 acnqs xyce-compat ac\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 dc 0.9 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+        models018_level9_acnqsmod1()
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let results = engine()
+        .run_ac(&netlist, &[1.0e6, 1.0e9, 1.0e11])
+        .expect("LEVEL=9 ACNQSMOD=1 deck runs natively");
+    for result in &results {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        assert!(
+            v.re.is_finite() && v.im.is_finite(),
+            "LEVEL=9 ACNQSMOD=1 finite v(out), got {v:?}"
+        );
+    }
+}
+
+#[test]
+fn acnqsmod1_is_rejected_for_pole_zero_until_charge_deficit_state_exists() {
+    let deck = format!(
+        "* bsim3 acnqs pz rejection\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 dc 0.9 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+        models018_acnqsmod1()
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let circuit = engine().build_circuit(&netlist).expect("circuit builds");
+    let input = circuit.get_node_by_name("in").expect("input node");
+    let output = circuit.get_node_by_name("out").expect("output node");
+    let err = engine()
+        .run_pz(&netlist, input, output)
+        .expect_err("ACNQSMOD=1 is rational and must not use G+sC PZ extraction");
+    let message = err.to_string();
+    assert!(
+        message.contains("Pole-zero")
+            && message.contains("BSIM3")
+            && message.contains("ACNQSMOD=1")
+            && message.contains("charge-deficit"),
+        "typed PZ rejection should name BSIM3 ACNQSMOD=1 and the missing state: {message}"
+    );
+}
+
+#[test]
+fn inverter_ac_response_with_capmod2_matches_xyce710() {
+    // Xyce 7.10 LEVEL=9 BSIM3 uses CAPMOD=2 in several regression decks
+    // (for example TR_TRAN/tr.cir). This pins RSpice's native evaluator
+    // against the same circuit-level AC behavior while keeping ngspice as the
+    // intrinsic-charge oracle above.
+    let models = models018_capmod2(0.4).replace("level=49", "level=9 version=3.2.2");
+    let deck = format!(
+        "* bsim3 capmod2 inverter ac xyce\n\
+         vdd vdd 0 dc 1.8\n\
+         vin in 0 dc 0.9 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    // XyceNF 7.10.0 reference, same deck with `.print ac vm(out) vp(out)`.
+    let reference: &[(f64, f64, f64)] = &[
+        (1.000000e6, 1.70246141e+01, 1.79876914e+02),
+        (1.000000e7, 1.70208185e+01, 1.78769318e+02),
+        (1.000000e8, 1.66536216e+01, 1.67869260e+02),
+        (1.000000e9, 7.25762182e+00, 1.13764183e+02),
+        (1.000000e10, 8.26724866e-01, 7.83976809e+01),
+        (1.000000e11, 2.19585824e-01, 2.16915803e+01),
+    ];
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let mag = v.norm();
+        let phase_deg = v.arg().to_degrees();
+        let mag_rel = (mag - mag_ref).abs() / mag_ref;
+        assert!(
+            mag_rel < 1e-3,
+            "CAPMOD=2 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
+        );
+        assert!(
+            (phase_deg - phase_deg_ref).abs() < 5e-2,
+            "CAPMOD=2 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
         );
     }
 }

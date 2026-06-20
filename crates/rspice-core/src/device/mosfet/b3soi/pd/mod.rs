@@ -1,6 +1,6 @@
-//! B3SOIPD (BSIMSOI dynamic-depletion, MOS level 56) device.
+//! B3SOIPD (BSIMSOI partially-depleted, MOS level 57) device.
 //!
-//! Ported from ngspice-46 `src/spicelib/devices/bsim3soi_dd/`. This module ties
+//! Ported from ngspice-46 `src/spicelib/devices/bsim3soi_pd/`. This module ties
 //! the model card ([`params`]), the size/temperature setup ([`temp`]), and the
 //! DC load equations ([`eval`]) into a [`NonlinearDevice`] that RSpice can stamp.
 //!
@@ -8,33 +8,35 @@
 //!
 //! External terminals are drain `d`, gate `g`, source `s`, back-gate/substrate
 //! `e` (substrate under the buried oxide), and an optional body contact `p`.
-//! The device additionally owns an internal body node `B` and (in the full
-//! model) optional drain/source primes and a self-heating temperature node.
+//! The device additionally owns an internal body node `B`, optional
+//! drain/source primes for fixed `RSH * NRD/NRS` series resistance, and (in the
+//! full model) a self-heating temperature node.
 //!
-//! For the supported decks (`rbody = rbsh = 0`, `shmod = 0`, no series R):
+//! For the supported decks (`rbody = rbsh = 0`, `shmod = 0`):
 //! - **Floating body** (`d g s e`): ngspice creates an internal `Body` node,
 //!   sets `bodyMod = 0`, `float = 1`. RSpice allocates one internal node.
 //! - **Ideal body tie** (`d g s e p`): ngspice sets `bodyMod = 2` and the
 //!   external `p` node *is* the body node; no internal node is created.
 //!
-//! The drain/source primes coincide with the external drain/source (no series
-//! resistance in the supported decks), and the temperature node does not exist
-//! (`shmod = 0`).
+//! When `RSH * NRD/NRS` is positive, the builder lowers the fixed
+//! drain/source series resistance to ordinary linear resistors and passes the
+//! prime nodes here as the device drain/source. The temperature node does not
+//! exist (`shmod = 0`).
 //!
 //! # Status
 //!
 //! - **DC current path** ([`eval::eval_dc`]): faithful transcription of the
 //!   `B3SOIPDload` DC block, including the back-gate (E) coupling columns.
-//! - **CAPMOD=3 charge model** ([`eval::eval`] with `compute_charges`): the
+//! - **CAPMOD=2/3 charge models** ([`eval::eval`] with `compute_charges`): the
 //!   intrinsic + extrinsic + overlap charges and the coupled capacitance matrix
-//!   (b3soipdld.c:2646-3784). Stamped as a transient companion by the engine's
+//!   (b3soipdld.c:2756-3784). Stamped as a transient companion by the engine's
 //!   dedicated B3SOI pass; the four node charges (incl. the floating body) feed
 //!   the local-truncation-error step control.
 //! - **Convergence aids**: `B3SOIPDlimit` (per-iterate 0.2 V body-voltage cap)
 //!   and `B3SOIPDSmartVbs` (DC floating-body `Vbs >= 0` clamp), applied each
 //!   Newton iterate; SmartVbs is disabled during transient time-stepping.
-//! - **Builder dispatch** is live for LEVEL=56 NMOS/PMOS (see `engine/builder.rs`
-//!   `build_b3soi_dd`); levels 55/57 still fall through to the generic MOSFET.
+//! - **Builder dispatch** is live for LEVEL=57 NMOS/PMOS and LEVEL=10
+//!   `SOIMOD=0` through the native BSIMSOI routing in `engine/builder.rs`.
 //!
 //! Verified: the DC sweeps (`t3`/`t4`/`t5`/`inv2`) match the checked-in ngspice
 //! references; the `RampVg2` floating-body `@m1[vbs]` trace matches at the DC
@@ -52,6 +54,7 @@ pub mod temp;
 use crate::device::traits::{MatrixStamper, NonlinearConvergenceCriteria, NonlinearDevice};
 use crate::{Value, circuit::NodeId};
 use eval::{B3SoiPdBias, B3SoiPdOp, ModelConsts};
+use std::borrow::Cow;
 use std::sync::Arc;
 use temp::{B3SoiPdGeometry, B3SoiPdSized};
 
@@ -75,7 +78,8 @@ pub struct B3SoiPd {
     /// +1 NMOS / -1 PMOS (model `mtype`).
     pub mtype: Value,
 
-    // External / internal nodes (already resolved to NodeId by the builder).
+    // Device terminal nodes (already resolved to NodeId by the builder).
+    // Drain/source are intrinsic primes when fixed RSH series resistors exist.
     pub node_drain: NodeId,
     pub node_gate: NodeId,
     pub node_source: NodeId,
@@ -85,6 +89,8 @@ pub struct B3SoiPd {
     pub node_body: NodeId,
     /// Body-contact node `P` (== `node_body` when tied; unused when floating).
     pub node_p: NodeId,
+    /// Self-heating temperature-rise node (`Temp`), or 0 when disabled.
+    pub node_temp: NodeId,
 
     pub body_mode: BodyMode,
 
@@ -92,6 +98,10 @@ pub struct B3SoiPd {
     pub model: Arc<B3SoiPdModel>,
     /// Size/temperature-resolved parameters (one per instance geometry).
     pub sized: Arc<B3SoiPdSized>,
+    /// Instance geometry retained for self-heating re-evaluation at
+    /// `CKTtemp + delTemp`.
+    geometry: B3SoiPdGeometry,
+    base_temp_k: Value,
     /// Model scalars needed inside the load.
     consts: ModelConsts,
 
@@ -105,6 +115,9 @@ pub struct B3SoiPd {
     /// for `B3SOIPDlimit`/`B3SOIPDSmartVbs` on the next Newton iterate.
     vbs_limit_anchor: Value,
     vbd_limit_anchor: Value,
+    /// Last accepted/limited self-heating temperature rise used by
+    /// `B3SOIPDlimit(delTemp, oldDelTemp, 5.0)`.
+    del_temp_limit_anchor: Value,
     /// DC/operating-point mode: enables the `B3SOIPDSmartVbs` floating-body
     /// clamp (Vbs >= 0). Cleared during transient where the body may go
     /// negative. Set by the engine before each analysis phase.
@@ -112,6 +125,10 @@ pub struct B3SoiPd {
     /// Whether the limiter anchor has been seeded (first iterate uses the raw
     /// node solution).
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// The first DC load uses the MODEINITJCT bias directly. Without this guard
+    /// `stamp_nonlinear` would immediately re-evaluate from the raw node seed
+    /// and discard the startup branch that ngspice loads.
+    startup_seed_pending: std::cell::Cell<bool>,
     /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
     /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
     /// disables bypass (DC operating point never bypasses).
@@ -145,29 +162,22 @@ impl B3SoiPd {
         node_e: NodeId,
         node_body: NodeId,
         node_p: NodeId,
+        node_temp: NodeId,
         body_mode: BodyMode,
         model: Arc<B3SoiPdModel>,
         geom: B3SoiPdGeometry,
         temp_k: Value,
     ) -> Result<Self, String> {
-        // Self-heating is not yet implemented; per spec it must be a hard error
-        // when enabled rather than silently ignored (SHMOD=0 in supported decks).
-        if model.sh_mod == 1 && geom.rth0 != 0.0 {
+        if model.sh_mod == 1 && geom.rth0 != 0.0 && node_temp == 0 {
             return Err(format!(
-                "B3SOIPD '{name}': self-heating (SHMOD=1 with RTH0!=0) is not yet implemented"
+                "B3SOIPD '{name}': self-heating (SHMOD=1 with RTH0!=0) requires a temperature node"
             ));
         }
-        // The charge model implements CAPMOD=2 (the B3SOIPD default); the
-        // CAPMOD=3 charge-thickness model is not ported. Reject rather than
-        // silently simulating with the wrong charges.
-        if model.cap_mod != 2 {
-            return Err(format!(
-                "B3SOIPD '{name}': CAPMOD={} is not implemented (only CAPMOD=2)",
-                model.cap_mod
-            ));
-        }
+        // DC evaluation is capmod-independent. Charge-based analyses are
+        // guarded by the engine for unsupported CAPMOD values.
         let sized = Arc::new(B3SoiPdSized::new(&model, &geom, temp_k)?);
         let consts = ModelConsts {
+            cap_mod: model.cap_mod,
             cox: model.cox,
             cbox: model.cbox,
             csi: model.csi,
@@ -176,6 +186,7 @@ impl B3SoiPd {
             qsieff: model.qsieff,
             adice: model.adice,
             tox: model.tox,
+            dtoxcv: model.dtoxcv,
             tsi: model.tsi,
             xj: model.xj,
             charge_q: super::common::CHARGE_Q,
@@ -198,30 +209,23 @@ impl B3SoiPd {
             node_e,
             node_body,
             node_p,
+            node_temp,
             body_mode,
             model,
             sized,
+            geometry: geom,
+            base_temp_k: temp_k,
             consts,
             op: B3SoiPdOp::default(),
-            bias: B3SoiPdBias {
-                vbs: 0.0,
-                vgs: 0.0,
-                vds: 0.0,
-                ves: 0.0,
-                vps: 0.0,
-            },
-            converged_ref: B3SoiPdBias {
-                vbs: 0.0,
-                vgs: 0.0,
-                vds: 0.0,
-                ves: 0.0,
-                vps: 0.0,
-            },
+            bias: B3SoiPdBias::default(),
+            converged_ref: B3SoiPdBias::default(),
             has_history: false,
             vbs_limit_anchor: 0.0,
             vbd_limit_anchor: 0.0,
+            del_temp_limit_anchor: 0.0,
             dc_mode: std::cell::Cell::new(true),
             limit_anchor_valid: std::cell::Cell::new(false),
+            startup_seed_pending: std::cell::Cell::new(false),
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
             force_full_eval: std::cell::Cell::new(true),
@@ -269,6 +273,18 @@ impl B3SoiPd {
         self.charges_suppressed
     }
 
+    pub fn self_heating_active(&self) -> bool {
+        self.node_temp != 0 && self.sized.rth.is_finite() && self.sized.rth > 0.0
+    }
+
+    pub fn thermal_capacitance(&self) -> Value {
+        if self.self_heating_active() {
+            self.sized.cth.max(0.0)
+        } else {
+            0.0
+        }
+    }
+
     /// Mark the start of a new timestep attempt (ngspice `MODEINITPRED`): the
     /// next `update` must fully re-evaluate so bypass deltas are always
     /// measured against a state from the current timestep.
@@ -290,6 +306,7 @@ impl B3SoiPd {
         let delvgs = raw.vgs - old.vgs;
         let delves = raw.ves - old.ves;
         let delvps = raw.vps - old.vps;
+        let deldel_temp = raw.del_temp - old.del_temp;
         let vbd_new = raw.vbs - raw.vds;
         let vbd_old = old.vbs - old.vds;
         let delvbd = vbd_new - vbd_old;
@@ -298,6 +315,7 @@ impl B3SoiPd {
             || delvgs.abs() >= vtol(raw.vgs, old.vgs)
             || delves.abs() >= vtol(raw.ves, old.ves)
             || delvds.abs() >= vtol(raw.vds, old.vds)
+            || (self.self_heating_active() && deldel_temp.abs() >= vtol(raw.del_temp, old.del_temp))
         {
             return false;
         }
@@ -310,13 +328,19 @@ impl B3SoiPd {
                 + (op.gm - op.gjdg) * delvgs
                 + (op.gds - op.gjdd) * delvds
                 + (op.gmbs - op.gjdb) * delvbs
+                + (op.gm_t - op.gjd_t) * deldel_temp
         } else {
             let delvgd = (raw.vgs - raw.vds) - (old.vgs - old.vds);
             op.cd + (op.gm - op.gjdg) * delvgd - (op.gds - op.gjdd) * delvds
                 + (op.gmbs - op.gjdb) * delvbd
+                + (op.gm_t - op.gjd_t) * deldel_temp
         };
-        let cbhat =
-            op.cb + op.gbgs * delvgs + op.gbbs * delvbs + op.gbds * delvds + op.gbps * delvps;
+        let cbhat = op.cb
+            + op.gbgs * delvgs
+            + op.gbbs * delvbs
+            + op.gbds * delvds
+            + op.gbps * delvps
+            + op.gb_t * deldel_temp;
         (cdhat - op.cd).abs() < reltol * cdhat.abs().max(op.cd.abs()) + abstol
             && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
@@ -337,7 +361,7 @@ impl B3SoiPd {
         )
     }
 
-    /// Evaluate the CAPMOD=3 charge state at the given solution vector.
+    /// Evaluate the selected CAPMOD charge state at the given solution vector.
     ///
     /// Returns the four node charges and the intrinsic+overlap capacitance
     /// matrix (pre-`ag0`). Used by the engine's transient charge companion.
@@ -360,9 +384,164 @@ impl B3SoiPd {
         // A bypassed iterate freezes the whole evaluation, charges included
         // (ngspice reuses the CKTstate charges verbatim under ByPass).
         let bias = self.charge_bias(voltages);
-        eval::eval(&self.sized, &self.consts, bias, self.mtype, true)
+        let sized = self.sized_for_bias(bias);
+        let mut charge = eval::eval(&sized, &self.consts, bias, self.mtype, true)
             .charge
-            .expect("compute_charges=true yields a charge state")
+            .expect("compute_charges=true yields a charge state");
+        if self.self_heating_active() {
+            self.fill_charge_thermal_derivatives(&mut charge, bias);
+        }
+        charge.qth = self.thermal_capacitance() * bias.del_temp;
+        charge
+    }
+
+    fn sized_for_bias(&self, bias: B3SoiPdBias) -> Cow<'_, B3SoiPdSized> {
+        if !self.self_heating_active() {
+            return Cow::Borrowed(self.sized.as_ref());
+        }
+
+        let temp = self.base_temp_k + bias.del_temp;
+        if (temp - self.sized.temp).abs() <= f64::EPSILON * self.sized.temp.abs().max(1.0) {
+            return Cow::Borrowed(self.sized.as_ref());
+        }
+
+        Cow::Owned(
+            B3SoiPdSized::new(&self.model, &self.geometry, temp)
+                .expect("self-heated B3SOIPD temperature evaluation"),
+        )
+    }
+
+    fn eval_op_for_bias(&self, bias: B3SoiPdBias) -> B3SoiPdOp {
+        let sized = self.sized_for_bias(bias);
+        let mut op = eval::eval_dc(&sized, &self.consts, bias, self.mtype);
+        if self.self_heating_active() {
+            self.fill_electrothermal_derivatives(&mut op, bias);
+        }
+        op
+    }
+
+    fn fill_electrothermal_derivatives(&self, op: &mut B3SoiPdOp, bias: B3SoiPdBias) {
+        let temp = self.base_temp_k + bias.del_temp;
+        let h = (temp.abs().max(1.0) * 1.0e-5).clamp(1.0e-3, 5.0e-2);
+        let lower_h = if temp - h > 1.0 { h } else { 0.0 };
+
+        let sample = |del_temp: Value| {
+            let sample_bias = B3SoiPdBias { del_temp, ..bias };
+            let sized = B3SoiPdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
+                .expect("self-heated B3SOIPD derivative temperature evaluation");
+            let sample_op = eval::eval_dc(&sized, &self.consts, sample_bias, self.mtype);
+            let drain_junction = sample_op.cjd
+                + sample_op.gjdb * sample_bias.vbs
+                + sample_op.gjdd * sample_bias.vds
+                + sample_op.gjdg * sample_bias.vgs
+                + sample_op.gjde * sample_bias.ves;
+            let source_junction = sample_op.cjs
+                + sample_op.gjsb * sample_bias.vbs
+                + sample_op.gjsd * sample_bias.vds
+                + sample_op.gjsg * sample_bias.vgs;
+            let body_current = sample_op.cbody
+                + sample_op.gbbs * sample_bias.vbs
+                + sample_op.gbgs * sample_bias.vgs
+                + sample_op.gbds * sample_bias.vds
+                + sample_op.gbes * sample_bias.ves
+                + sample_op.gbps * sample_bias.vps;
+            (
+                sample_op.cdrain,
+                drain_junction,
+                source_junction,
+                body_current,
+                sample_op.ids,
+            )
+        };
+
+        let center = sample(bias.del_temp);
+        let plus = sample(bias.del_temp + h);
+        let minus = if lower_h > 0.0 {
+            sample(bias.del_temp - lower_h)
+        } else {
+            center
+        };
+        let denom = h + lower_h;
+        op.gm_t = (plus.0 - minus.0) / denom;
+        op.gjd_t = (plus.1 - minus.1) / denom;
+        op.gjs_t = (plus.2 - minus.2) / denom;
+        op.gb_t = (plus.3 - minus.3) / denom;
+        let ids_t = (plus.4 - minus.4) / denom;
+        let (vds, vgs, vbs) = if op.mode >= 0 {
+            (bias.vds, bias.vgs, bias.vbs)
+        } else {
+            (-bias.vds, bias.vgs - bias.vds, bias.vbs - bias.vds)
+        };
+        op.gtemp_g = -op.gm * vds;
+        op.gtemp_b = -op.gmbs * vds;
+        op.gtemp_d = -op.gds * vds - op.ids;
+        op.gtemp_t = -ids_t * vds;
+        op.thermal_eq_current = -op.ids * vds
+            - self.mtype * (op.gtemp_g * vgs + op.gtemp_b * vbs + op.gtemp_d * vds)
+            - op.gtemp_t * bias.del_temp;
+    }
+
+    fn fill_charge_thermal_derivatives(&self, charge: &mut eval::B3SoiPdCharge, bias: B3SoiPdBias) {
+        let temp = self.base_temp_k + bias.del_temp;
+        let h = (temp.abs().max(1.0) * 1.0e-5).clamp(1.0e-3, 5.0e-2);
+        let lower_h = if temp - h > 1.0 { h } else { 0.0 };
+
+        let sample = |del_temp: Value| {
+            let sample_bias = B3SoiPdBias { del_temp, ..bias };
+            let sized = B3SoiPdSized::new(&self.model, &self.geometry, self.base_temp_k + del_temp)
+                .expect("self-heated B3SOIPD charge derivative temperature evaluation");
+            eval::eval(&sized, &self.consts, sample_bias, self.mtype, true)
+                .charge
+                .expect("compute_charges=true yields a charge state")
+        };
+
+        let center = sample(bias.del_temp);
+        let plus = sample(bias.del_temp + h);
+        let minus = if lower_h > 0.0 {
+            sample(bias.del_temp - lower_h)
+        } else {
+            center
+        };
+        let denom = h + lower_h;
+        charge.gcg_t = (plus.qg - minus.qg) / denom;
+        charge.gcb_t = (plus.qb - minus.qb) / denom;
+        charge.gcd_t = (plus.qd - minus.qd) / denom;
+        charge.gce_t = (plus.qe - minus.qe) / denom;
+    }
+
+    /// Operating-point snapshot for the OP report: `(id, vgs, vds, vbs, vth,
+    /// vdsat, gm, gds, gmbs, region)`, in device polarity.
+    pub fn op_values(
+        &self,
+    ) -> (
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        &'static str,
+    ) {
+        let op = &self.op;
+        let bias = self.bias;
+        let (vgs_mode, vds_mode) = if op.mode >= 0 {
+            (bias.vgs, bias.vds)
+        } else {
+            (bias.vgs - bias.vds, -bias.vds)
+        };
+        let region = if vgs_mode < op.von {
+            "subthreshold"
+        } else if vds_mode > op.vdsat {
+            "saturation"
+        } else {
+            "linear"
+        };
+        (
+            op.ids, bias.vgs, bias.vds, bias.vbs, op.von, op.vdsat, op.gm, op.gds, op.gmbs, region,
+        )
     }
 
     /// Stamp the transient charge companion into the matrix and RHS.
@@ -370,9 +549,11 @@ impl B3SoiPd {
     /// `ag0` is the integration coefficient (`d/dt` operator gain), and the
     /// `cq*` are the integrated charge-current histories from the engine
     /// (`cq = ag0*q + history`). This mirrors the charge portion of
-    /// `B3SOIPDload` (b3soipdld.c:3679-3868, 4083-4128) for `bodyMod` 0/2, no
-    /// temp node, no series R. The gate-overlap and extrinsic-substrate
-    /// derivatives are already folded into `charge`'s `gc**` matrix.
+    /// `B3SOIPDload` (b3soipdld.c:3679-3868, 4083-4128) for `bodyMod` 0/2 and no
+    /// temp node. Fixed drain/source series resistance is handled outside this
+    /// device by builder-owned prime-node resistors. The gate-overlap and
+    /// extrinsic-substrate derivatives are already folded into `charge`'s
+    /// `gc**` matrix.
     pub fn stamp_charge_companion(
         &self,
         charge: &eval::B3SoiPdCharge,
@@ -381,6 +562,7 @@ impl B3SoiPd {
         cqb: Value,
         cqd: Value,
         cqe: Value,
+        cqth: Value,
         voltages: &[Value],
         matrix: &mut impl MatrixStamper,
     ) {
@@ -420,18 +602,29 @@ impl B3SoiPd {
         let gcedb = c.gcedb * ag0;
         let gcesb = c.gcesb * ag0;
         let gceeb = c.gceeb * ag0;
+        let gcg_t = c.gcg_t * ag0;
+        let gcb_t = c.gcb_t * ag0;
+        let gcd_t = c.gcd_t * ag0;
+        let gce_t = c.gce_t * ag0;
+        let gcs_t = -(gcg_t + gcb_t + gcd_t + gce_t);
 
         // Equivalent charge currents (b3soipdld.c:3860-3867). type<0 flips sign.
-        let mut ceqqg = cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb;
-        let mut ceqqb = cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb;
-        let mut ceqqd = cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb;
-        let mut ceqqe = cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb;
+        let mut ceqqg =
+            cqg - gcggb * vgb + gcgdb * vbd + gcgsb * vbs - gcgeb * veb - gcg_t * bias.del_temp;
+        let mut ceqqb =
+            cqb - gcbgb * vgb + gcbdb * vbd + gcbsb * vbs - gcbeb * veb - gcb_t * bias.del_temp;
+        let mut ceqqd =
+            cqd - gcdgb * vgb + gcddb * vbd + gcdsb * vbs - gcdeb * veb - gcd_t * bias.del_temp;
+        let mut ceqqe =
+            cqe - gcegb * vgb + gcedb * vbd + gcesb * vbs - gceeb * veb - gce_t * bias.del_temp;
         if self.mtype < 0.0 {
             ceqqg = -ceqqg;
             ceqqb = -ceqqb;
             ceqqd = -ceqqd;
             ceqqe = -ceqqe;
         }
+        let gc_tt = self.thermal_capacitance() * ag0;
+        let ceqqth = cqth - gc_tt * bias.del_temp;
 
         // RHS (b3soipdld.c:4011-4017, charge parts).
         stamp_rhs(matrix, b, -ceqqb);
@@ -439,38 +632,46 @@ impl B3SoiPd {
         stamp_rhs(matrix, dp, -ceqqd);
         stamp_rhs(matrix, sp, ceqqg + ceqqb + ceqqd + ceqqe);
         stamp_rhs(matrix, e, -ceqqe);
+        stamp_rhs(matrix, self.node_temp, -ceqqth);
 
         // Matrix charge entries (b3soipdld.c:4083-4128, gc** parts only).
+        // Thermal row.
+        stamp(matrix, self.node_temp, self.node_temp, gc_tt);
         // E row.
         stamp(matrix, e, g, gcegb);
         stamp(matrix, e, dp, gcedb);
         stamp(matrix, e, sp, gcesb);
         stamp(matrix, e, b, -(gcegb + gcedb + gcesb + gceeb));
         stamp(matrix, e, e, gceeb);
+        stamp(matrix, e, self.node_temp, gce_t);
         // G row.
         stamp(matrix, g, e, gcgeb);
         stamp(matrix, g, b, -(gcggb + gcgdb + gcgsb + gcgeb));
         stamp(matrix, g, g, gcggb);
         stamp(matrix, g, dp, gcgdb);
         stamp(matrix, g, sp, gcgsb);
+        stamp(matrix, g, self.node_temp, gcg_t);
         // DP row.
         stamp(matrix, dp, e, gcdeb);
         stamp(matrix, dp, b, -(gcdgb + gcddb + gcdeb + gcdsb));
         stamp(matrix, dp, g, gcdgb);
         stamp(matrix, dp, dp, gcddb);
         stamp(matrix, dp, sp, gcdsb);
+        stamp(matrix, dp, self.node_temp, gcd_t);
         // SP row.
         stamp(matrix, sp, e, gcseb);
         stamp(matrix, sp, b, -(gcsgb + gcsdb + gcseb + gcssb));
         stamp(matrix, sp, g, gcsgb);
         stamp(matrix, sp, dp, gcsdb);
         stamp(matrix, sp, sp, gcssb);
+        stamp(matrix, sp, self.node_temp, gcs_t);
         // B row.
         stamp(matrix, b, e, gcbeb);
         stamp(matrix, b, g, gcbgb);
         stamp(matrix, b, dp, gcbdb);
         stamp(matrix, b, sp, gcbsb);
         stamp(matrix, b, b, -(gcbgb + gcbdb + gcbsb + gcbeb));
+        stamp(matrix, b, self.node_temp, gcb_t);
     }
 
     /// Extract device-polarity branch voltages from the solution vector
@@ -486,19 +687,52 @@ impl B3SoiPd {
         let ve = node(self.node_e);
         let vb = node(self.node_body);
         let vp = node(self.node_p);
+        let vt = node(self.node_temp);
         B3SoiPdBias {
             vbs: self.mtype * (vb - vs),
             vgs: self.mtype * (vg - vs),
             vds: self.mtype * (vd - vs),
             ves: self.mtype * (ve - vs),
             vps: self.mtype * (vp - vs),
+            del_temp: vt,
         }
     }
 
     fn branch_voltages(&self, v: &[Value]) -> B3SoiPdBias {
         let mut bias = self.raw_branch_voltages(v);
+        let _ = self.apply_branch_limiting(&mut bias);
         let _ = self.apply_body_limiting(&mut bias);
         bias
+    }
+
+    /// ngspice limits the absolute gate/drain/source/body-contact/e-node
+    /// voltages to 3 V per Newton step before forming most branch voltages.
+    /// RSpice stores source-referenced branch voltages at the intrinsic
+    /// drain/source nodes, so this is the equivalent limiter whether those nodes
+    /// are external terminals or builder-owned series-resistance primes.
+    fn apply_branch_limiting(&self, bias: &mut B3SoiPdBias) -> bool {
+        if !self.limit_anchor_valid.get() {
+            return false;
+        }
+        let mut check = false;
+        bias.vgs = common::soi_limit(bias.vgs, self.bias.vgs, 3.0, &mut check);
+        bias.vds = common::soi_limit(bias.vds, self.bias.vds, 3.0, &mut check);
+        bias.ves = common::soi_limit(bias.ves, self.bias.ves, 3.0, &mut check);
+        bias.vps = common::soi_limit(bias.vps, self.bias.vps, 3.0, &mut check);
+        check
+    }
+
+    /// MODEINITJCT startup bias used by ngspice for an uninitialized B3SOIPD
+    /// operating-point solve with no explicit instance ICs.
+    fn junction_init_bias(&self) -> B3SoiPdBias {
+        B3SoiPdBias {
+            vbs: 0.0,
+            vgs: self.mtype * 0.1 + self.sized.vth0,
+            vds: 0.0,
+            ves: 0.0,
+            vps: 0.0,
+            del_temp: 0.0,
+        }
     }
 
     /// Floating-body convergence aids `B3SOIPDlimit` + `B3SOIPDSmartVbs`
@@ -547,6 +781,10 @@ impl B3SoiPd {
             }
             bias.vbs = vbd + bias.vds;
         }
+        if self.self_heating_active() {
+            bias.del_temp =
+                common::soi_limit(bias.del_temp, self.del_temp_limit_anchor, 5.0, &mut check);
+        }
         check
     }
 }
@@ -554,6 +792,24 @@ impl B3SoiPd {
 impl NonlinearDevice for B3SoiPd {
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
+        if self.startup_seed_pending.get() && self.dc_mode.get() {
+            return;
+        }
+        if !self.has_history && self.dc_mode.get() {
+            let bias = self.junction_init_bias();
+            self.bias = bias;
+            self.op = self.eval_op_for_bias(bias);
+            self.has_history = true;
+            self.vbs_limit_anchor = bias.vbs;
+            self.vbd_limit_anchor = bias.vbs - bias.vds;
+            self.del_temp_limit_anchor = bias.del_temp;
+            self.limit_anchor_valid.set(true);
+            self.startup_seed_pending.set(true);
+            self.bypass_active.set(false);
+            self.force_full_eval.set(false);
+            self.last_limited.set(false);
+            return;
+        }
         // ngspice transient bypass (b3soipdld.c:509-560): when the previous
         // iterate evaluated without limiting and the new branch voltages plus
         // predicted currents are stationary within tolerances, freeze the
@@ -573,21 +829,23 @@ impl NonlinearDevice for B3SoiPd {
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
         let mut bias = self.raw_branch_voltages(voltages);
-        let limited = self.apply_body_limiting(&mut bias);
+        let limited = self.apply_branch_limiting(&mut bias) || self.apply_body_limiting(&mut bias);
         self.last_limited.set(limited);
+        self.startup_seed_pending.set(false);
         self.bias = bias;
-        self.op = eval::eval_dc(&self.sized, &self.consts, bias, self.mtype);
+        self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
         // Anchor the per-iteration limiter at this (limited) iterate, in the
         // mode-selected frame, for the next Newton step.
         self.vbs_limit_anchor = bias.vbs;
         self.vbd_limit_anchor = bias.vbs - bias.vds;
+        self.del_temp_limit_anchor = bias.del_temp;
         self.limit_anchor_valid.set(true);
     }
 
     fn stamp_nonlinear(
         &self,
-        voltages: &[Value],
+        _voltages: &[Value],
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
     ) {
@@ -596,19 +854,20 @@ impl NonlinearDevice for B3SoiPd {
             self.stamp_op(&self.op, self.bias, matrix);
             return;
         }
-        let bias = self.branch_voltages(voltages);
-        let op = if biases_match(bias, self.bias) {
-            self.op.clone()
-        } else {
-            eval::eval_dc(&self.sized, &self.consts, bias, self.mtype)
-        };
-        // `cdreq`/`ceq*` must be formed from the *same* bias that produced `op`,
-        // not the (possibly stale) `self.bias` cached at the last `update`.
+        if self.startup_seed_pending.replace(false) {
+            self.stamp_op(&self.op, self.bias, matrix);
+            return;
+        }
+        let bias = self.bias;
+        let op = self.op.clone();
+        // `cdreq`/`ceq*` must be formed from the same limited bias that produced
+        // `op`; recomputing from the raw node vector bypasses the local
+        // B3SOIPDlimit/SmartVbs path that ngspice stamps.
         self.stamp_op(&op, bias, matrix);
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        if !self.has_history {
+        if !self.has_history || self.last_limited.get() {
             return false;
         }
         let reltol = criteria.relative_tolerance();
@@ -620,6 +879,7 @@ impl NonlinearDevice for B3SoiPd {
             && cmp(self.bias.vds, self.converged_ref.vds)
             && cmp(self.bias.ves, self.converged_ref.ves)
             && cmp(self.bias.vps, self.converged_ref.vps)
+            && (!self.self_heating_active() || cmp(self.bias.del_temp, self.converged_ref.del_temp))
     }
 }
 
@@ -627,15 +887,16 @@ impl B3SoiPd {
     /// Stamp the linearized DC operating point.
     ///
     /// Faithful transcription of the DC portion of the B3SOIPD matrix/RHS load
-    /// (b3soipdld.c:3886-4150) for `bodyMod` 0/2, no temp node, no series R, and
+    /// (b3soipdld.c:3886-4150) for `bodyMod` 0/2, no temp node, and
     /// `ChargeComputationNeeded == 0` (so all `gc*`/`ceqq*` charge terms vanish).
     /// `m` (multiplier) is 1. CKTgmin terms are omitted: the RSpice solver adds
     /// its own diagonal gmin, so replicating ngspice's per-device gmin would
     /// double-count it.
     ///
-    /// In DC `dNodePrime == dNode`, `sNodePrime == sNode`, `bNode` is the body
-    /// node (internal floating or external tie), and `pNode`/`tempNode` are
-    /// absent.
+    /// In DC the builder supplies `dNodePrime`/`sNodePrime` as this device's
+    /// drain/source when fixed series resistance is present; otherwise they
+    /// coincide with the external terminals. `bNode` is the body node (internal
+    /// floating or external tie), and `tempNode` is absent.
     fn stamp_op(&self, op: &B3SoiPdOp, bias: B3SoiPdBias, matrix: &mut impl MatrixStamper) {
         let (dp, g, sp, e, b) = (
             self.node_drain,
@@ -652,6 +913,7 @@ impl B3SoiPd {
 
         // ----- conductance groups (b3soipdld.c:3888-3944) -----
         let (gm, gmbs, gme, fwd_sum, rev_sum, cdreq, ceqbs, ceqbd);
+        let (gm_t, gddp_t, gssp_t, gbb_t);
         let (gbbg, gbbdp, gbbb, gbbe, gbbsp);
         let (gddpg, gddpdp, gddpb, gddpe, gddpsp);
         let (gsspg, gsspdp, gsspb, gsspe, gsspsp);
@@ -659,6 +921,7 @@ impl B3SoiPd {
             gm = op.gm;
             gmbs = op.gmbs;
             gme = op.gme;
+            gm_t = mt * op.gm_t;
             fwd_sum = gm + gmbs + gme;
             rev_sum = 0.0;
             cdreq = mt
@@ -666,32 +929,37 @@ impl B3SoiPd {
                     - op.gds * bias.vds
                     - gm * bias.vgs
                     - gmbs * bias.vbs
-                    - gme * bias.ves);
-            ceqbs = op.cjs;
-            ceqbd = op.cjd;
+                    - gme * bias.ves)
+                - gm_t * bias.del_temp;
+            ceqbs = op.cjs - op.gjs_t * bias.del_temp;
+            ceqbd = op.cjd - op.gjd_t * bias.del_temp;
 
             gbbg = -op.gbgs;
             gbbdp = -op.gbds;
             gbbb = -op.gbbs;
             gbbe = -op.gbes;
             let gbbp = -op.gbps;
+            gbb_t = -mt * op.gb_t;
             gbbsp = -(gbbg + gbbdp + gbbb + gbbe + gbbp);
 
             gddpg = -op.gjdg;
             gddpdp = -op.gjdd;
             gddpb = -op.gjdb;
             gddpe = -op.gjde;
+            gddp_t = -mt * op.gjd_t;
             gddpsp = -(gddpg + gddpdp + gddpb + gddpe);
 
             gsspg = -op.gjsg;
             gsspdp = -op.gjsd;
             gsspb = -op.gjsb;
             gsspe = 0.0;
+            gssp_t = -mt * op.gjs_t;
             gsspsp = -(gsspg + gsspdp + gsspb + gsspe);
         } else {
             gm = -op.gm;
             gmbs = -op.gmbs;
             gme = -op.gme;
+            gm_t = -mt * op.gm_t;
             fwd_sum = 0.0;
             rev_sum = -(gm + gmbs + gme);
             let vgd = bias.vgs - bias.vds;
@@ -701,14 +969,16 @@ impl B3SoiPd {
                     + op.gds * bias.vds
                     + gm * vgd
                     + gmbs * vbd
-                    + gme * (bias.ves - bias.vds));
-            ceqbs = op.cjd;
-            ceqbd = op.cjs;
+                    + gme * (bias.ves - bias.vds))
+                + gm_t * bias.del_temp;
+            ceqbs = op.cjd - op.gjd_t * bias.del_temp;
+            ceqbd = op.cjs - op.gjs_t * bias.del_temp;
 
             gbbg = -op.gbgs;
             gbbb = -op.gbbs;
             gbbe = -op.gbes;
             let gbbp = -op.gbps;
+            gbb_t = -mt * op.gb_t;
             gbbsp = -op.gbds;
             gbbdp = -(gbbg + gbbsp + gbbb + gbbe + gbbp);
 
@@ -716,17 +986,19 @@ impl B3SoiPd {
             gddpsp = -op.gjsd;
             gddpb = -op.gjsb;
             gddpe = 0.0;
+            gddp_t = -mt * op.gjs_t;
             gddpdp = -(gddpg + gddpsp + gddpb + gddpe);
 
             gsspg = -op.gjdg;
             gsspdp = -op.gjdd;
             gsspb = -op.gjdb;
             gsspe = -op.gjde;
+            gssp_t = -mt * op.gjd_t;
             gsspsp = -(gsspg + gsspdp + gsspb + gsspe);
         }
 
         // type<0: flip junction/body equivalent currents (b3soipdld.c:3997)
-        let ceqbody = -op.cbody;
+        let ceqbody = -(op.cbody - op.gb_t * bias.del_temp);
         let (ceqbs, ceqbd, ceqbody) = if mt < 0.0 {
             (-ceqbs, -ceqbd, -ceqbody)
         } else {
@@ -739,6 +1011,7 @@ impl B3SoiPd {
         stamp_rhs(matrix, b, -ceqbody);
         stamp_rhs(matrix, dp, ceqbd - cdreq);
         stamp_rhs(matrix, sp, cdreq + ceqbs);
+        self.stamp_thermal_rhs(op, matrix);
 
         // ----- matrix (b3soipdld.c:4090-4128, DC: gc*=0) -----
         // E row: only EePtr (gceeb==0) -> nothing in DC.
@@ -768,6 +1041,13 @@ impl B3SoiPd {
         // (b3soipdld.c:4087-4088, DC: gc*=0). `gme` carries the mode sign.
         stamp(matrix, dp, e, gme + gddpe);
         stamp(matrix, sp, e, gsspe - gme);
+        if self.self_heating_active() {
+            let t = self.node_temp;
+            stamp(matrix, dp, t, gm_t + gddp_t);
+            stamp(matrix, sp, t, -gm_t + gssp_t);
+            stamp(matrix, b, t, gbb_t);
+        }
+        self.stamp_thermal_matrix(op, matrix);
 
         // Body-tie resistor (bodyMod 1): a linear conductance between the
         // internal body node `b` and the external contact `p` carrying
@@ -788,6 +1068,35 @@ impl B3SoiPd {
             stamp(matrix, p, p, gbp);
         }
     }
+
+    fn stamp_thermal_rhs(&self, op: &B3SoiPdOp, matrix: &mut impl MatrixStamper) {
+        if self.self_heating_active() {
+            stamp_rhs(matrix, self.node_temp, -op.thermal_eq_current);
+        }
+    }
+
+    fn stamp_thermal_matrix(&self, op: &B3SoiPdOp, matrix: &mut impl MatrixStamper) {
+        if !self.self_heating_active() {
+            return;
+        }
+
+        let t = self.node_temp;
+        let (dp, sp) = (self.node_drain, self.node_source);
+        let g = self.node_gate;
+        let b = self.node_body;
+
+        let (gtemp_dp, gtemp_sp) = if op.mode >= 0 {
+            (op.gtemp_d, -(op.gtemp_g + op.gtemp_b + op.gtemp_d))
+        } else {
+            (-(op.gtemp_g + op.gtemp_b + op.gtemp_d), op.gtemp_d)
+        };
+
+        stamp(matrix, t, t, op.gtemp_t + 1.0 / self.sized.rth);
+        stamp(matrix, t, g, op.gtemp_g);
+        stamp(matrix, t, b, op.gtemp_b);
+        stamp(matrix, t, dp, gtemp_dp);
+        stamp(matrix, t, sp, gtemp_sp);
+    }
 }
 
 #[inline]
@@ -802,11 +1111,6 @@ fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
     if node != 0 && value != 0.0 {
         matrix.stamp_rhs(node, value);
     }
-}
-
-#[inline]
-fn biases_match(a: B3SoiPdBias, b: B3SoiPdBias) -> bool {
-    a.vbs == b.vbs && a.vgs == b.vgs && a.vds == b.vds && a.ves == b.ves && a.vps == b.vps
 }
 
 #[cfg(test)]

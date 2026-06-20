@@ -12,10 +12,10 @@
 //!   `mulu0`, series conductances, and the `ijth` diode-limiting anchors
 //!   (`vjsm`/`IsEvjsm`).
 //!
-//! The NQS Elmore constant `tconst` is intentionally not ported: it feeds only
-//! the NQS charge-deficit network (nqsMod=1, rejected at construction), and
-//! its C computation reads a stale loop temporary when the size knot is
-//! reused (b3temp.c:803-804), so there is no well-defined value to mirror.
+//! The instance-adjusted NQS Elmore constant `tconst` is ported for AC-only
+//! charge-deficit (`ACNQSMOD=1`) and transient charge-deficit (`NQSMOD=1`)
+//! support. It mirrors the actual ngspice-46 instance-tail denominator at
+//! b3temp.c:803-804 for compatibility.
 
 use super::common::{
     CHARGE_Q, CONST_ROOT2, CONST_VT0, EPSOX, EPSSI, EXP_THRESHOLD, KB_OVER_Q, MIN_EXP,
@@ -761,6 +761,8 @@ pub struct Bsim3v3InstTemp {
     pub vfbzb: Value,
     /// `pParam->u0temp * mulu0` (`here->BSIM3u0temp`).
     pub u0temp: Value,
+    /// Instance-adjusted Elmore constant (`here->BSIM3tconst`).
+    pub tconst: Value,
     /// `1 / (rsh * nrd)` or 0 (`here->BSIM3drainConductance`).
     pub drain_conductance: Value,
     /// `1 / (rsh * nrs)` or 0 (`here->BSIM3sourceConductance`).
@@ -794,6 +796,10 @@ impl Bsim3v3InstTemp {
         let vfb = size.vfb + m.mtype * geom.delvto;
         let vfbzb = size.vfbzb + m.mtype * geom.delvto;
         let u0temp = size.u0temp * geom.mulu0;
+        // b3temp.c:803-804 reuses the final size-knot `T0`, which is
+        // sqrt(1 + nlx / leff) from the vfbzb calculation, not leffCV^2.
+        let nqs_tail_t0 = (1.0 + size.nlx / size.leff).sqrt();
+        let tconst = u0temp * size.elm / (m.cox * size.weff_cv * size.leff_cv * nqs_tail_t0);
 
         // Series resistance, acmMod = 0 (b3temp.c:811-851).
         let drain_resistance = m.sheet_resistance * geom.drain_squares;
@@ -842,6 +848,7 @@ impl Bsim3v3InstTemp {
             vfb,
             vfbzb,
             u0temp,
+            tconst,
             drain_conductance,
             source_conductance,
             source_sat_current,

@@ -7,10 +7,13 @@
 //! reduces to the `minIsub` leakage.
 
 use super::*;
+use crate::circuit::NodeId;
 use crate::device::mosfet::b3soi::fd::params::B3SoiFdModel;
 use crate::device::mosfet::b3soi::fd::temp::{B3SoiFdGeometry, B3SoiFdSized};
+use crate::device::traits::MatrixStamper;
 use eval::B3SoiFdBias;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// The `N1` NMOS card from `tests/bsim3soifd/nmosfd.mod` (BSIMFD2.0).
 fn n1_params() -> HashMap<String, Value> {
@@ -139,8 +142,75 @@ fn geom() -> B3SoiFdGeometry {
     }
 }
 
+#[derive(Default)]
+struct RecordingStamper {
+    rhs: HashMap<NodeId, Value>,
+    matrix: HashMap<(NodeId, NodeId), Value>,
+}
+
+impl RecordingStamper {
+    fn rhs_at(&self, node: NodeId) -> Value {
+        self.rhs.get(&node).copied().unwrap_or(0.0)
+    }
+
+    fn matrix_at(&self, row: NodeId, col: NodeId) -> Value {
+        self.matrix.get(&(row, col)).copied().unwrap_or(0.0)
+    }
+}
+
+impl MatrixStamper for RecordingStamper {
+    fn stamp(&mut self, row: NodeId, col: NodeId, value: Value) {
+        *self.matrix.entry((row, col)).or_insert(0.0) += value;
+    }
+
+    fn stamp_rhs(&mut self, index: NodeId, value: Value) {
+        *self.rhs.entry(index).or_insert(0.0) += value;
+    }
+}
+
+fn device_for_stamp_test(is_pmos: bool) -> B3SoiFd {
+    let model = Arc::new(B3SoiFdModel::from_params(&n1_params(), is_pmos, 300.15));
+    B3SoiFd::new(
+        "m1".to_string(),
+        1,
+        2,
+        3,
+        4,
+        0,
+        0,
+        BodyMode::Floating,
+        model,
+        geom(),
+        300.15,
+    )
+    .expect("fd device")
+}
+
+fn self_heating_device_for_stamp_test() -> B3SoiFd {
+    let mut params = n1_params();
+    params.insert("SHMOD".to_string(), 1.0);
+    let model = Arc::new(B3SoiFdModel::from_params(&params, false, 300.15));
+    let mut geometry = geom();
+    geometry.cth0 = 2.0;
+    B3SoiFd::new(
+        "m1".to_string(),
+        1,
+        2,
+        3,
+        4,
+        5,
+        0,
+        BodyMode::Floating,
+        model,
+        geometry,
+        300.15,
+    )
+    .expect("self-heating FD device builds with a temp node")
+}
+
 fn model_consts(m: &B3SoiFdModel) -> ModelConsts {
     ModelConsts {
+        cap_mod: m.cap_mod,
         cox: m.cox,
         cbox: m.cbox,
         csi: m.csi,
@@ -155,12 +225,164 @@ fn model_consts(m: &B3SoiFdModel) -> ModelConsts {
         mob_mod: m.mob_mod,
         cboxt: m.cboxt,
         xpart: m.xpart,
-        tt: m.tt,
-        mjswg: m.body_jct_gate_side_grading_coeff,
-        phibswg: m.gate_sidewall_jct_potential.max(0.1),
-        cjswg: m.unit_length_gate_sidewall_jct_cap,
         mtype: m.mtype,
     }
+}
+
+#[test]
+fn charge_companion_folds_body_charge_linearization_into_source_rhs() {
+    let charge = eval::B3SoiFdCharge {
+        gcbgb: 3.0,
+        gcbdb: 5.0,
+        gcbsb: 7.0,
+        gcbeb: 11.0,
+        ..Default::default()
+    };
+    let ag0 = 2.0;
+    let cqb = 11.0;
+    let voltages = [0.8, 1.2, 0.0, -0.4];
+
+    for is_pmos in [false, true] {
+        let dev = device_for_stamp_test(is_pmos);
+        let mut stamper = RecordingStamper::default();
+        dev.stamp_charge_companion(
+            &charge,
+            ag0,
+            0.0,
+            cqb,
+            0.0,
+            0.0,
+            0.0,
+            &voltages,
+            &mut stamper,
+        );
+
+        let mt = if is_pmos { -1.0 } else { 1.0 };
+        let vbs = mt * (0.0 - voltages[2]);
+        let vgs = mt * (voltages[1] - voltages[2]);
+        let vds = mt * (voltages[0] - voltages[2]);
+        let ves = mt * (voltages[3] - voltages[2]);
+        let vgb = vgs - vbs;
+        let vbd = vbs - vds;
+        let veb = ves - vbs;
+        let mut ceqqb =
+            cqb - charge.gcbgb * ag0 * vgb + charge.gcbdb * ag0 * vbd + charge.gcbsb * ag0 * vbs
+                - charge.gcbeb * ag0 * veb;
+        if is_pmos {
+            ceqqb = -ceqqb;
+        }
+
+        assert!(
+            (stamper.rhs_at(3) - ceqqb).abs() <= 1e-12,
+            "source RHS should include full ceqqb for is_pmos={is_pmos}: got {}, expected {ceqqb}",
+            stamper.rhs_at(3)
+        );
+        assert_eq!(stamper.rhs_at(0), 0.0, "FD must not stamp a body-node RHS");
+    }
+}
+
+#[test]
+fn self_heating_charge_companion_stamps_qth_capacitance() {
+    let dev = self_heating_device_for_stamp_test();
+    let cth = dev.thermal_capacitance();
+    assert!(cth > 0.0, "cth={cth:.6e}");
+
+    let ag0 = 7.0;
+    let del_temp = 0.25;
+    let voltages = [0.5, 1.2, 0.0, 0.0, del_temp];
+    let mut stamper = RecordingStamper::default();
+
+    dev.stamp_charge_companion(
+        &eval::B3SoiFdCharge::default(),
+        ag0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        &voltages,
+        &mut stamper,
+    );
+
+    let expected_gc_tt = ag0 * cth;
+    let expected_rhs = expected_gc_tt * del_temp;
+    assert!(
+        (stamper.matrix_at(5, 5) - expected_gc_tt).abs() <= 1e-15,
+        "temp-node companion conductance {:.6e} vs {expected_gc_tt:.6e}",
+        stamper.matrix_at(5, 5)
+    );
+    assert!(
+        (stamper.rhs_at(5) - expected_rhs).abs() <= 1e-15,
+        "temp-node companion RHS {:.6e} vs {expected_rhs:.6e}",
+        stamper.rhs_at(5)
+    );
+}
+
+#[test]
+fn self_heating_update_limits_del_temp_step_like_ngspice() {
+    let mut dev = self_heating_device_for_stamp_test();
+
+    dev.update(&[0.5, 1.2, 0.0, 0.0, 0.0]);
+    dev.update(&[0.5, 1.2, 0.0, 0.0, 100.0]);
+
+    assert!(
+        (dev.bias.del_temp - 5.0).abs() <= 1e-12,
+        "FD self-heating delTemp should be limited to a 5 K step, got {:.9e}",
+        dev.bias.del_temp
+    );
+}
+
+#[test]
+fn capmod3_fd_dynamic_charges_ignore_intrinsic_source_drain_junction_storage() {
+    let mut no_junction = n1_params();
+    no_junction.insert("CAPMOD".to_string(), 3.0);
+    no_junction.insert("CJSWG".to_string(), 0.0);
+    no_junction.insert("TT".to_string(), 0.0);
+    let model_no_junction = B3SoiFdModel::from_params(&no_junction, false, 300.15);
+    let sized_no_junction = B3SoiFdSized::new(&model_no_junction, &geom(), 300.15).expect("sized");
+    let mc_no_junction = model_consts(&model_no_junction);
+
+    let mut stressed_junction = no_junction;
+    stressed_junction.insert("CJSWG".to_string(), 5e-6);
+    stressed_junction.insert("TT".to_string(), 3e-7);
+    let model_stressed_junction = B3SoiFdModel::from_params(&stressed_junction, false, 300.15);
+    let sized_stressed_junction =
+        B3SoiFdSized::new(&model_stressed_junction, &geom(), 300.15).expect("sized");
+    let mc_stressed_junction = model_consts(&model_stressed_junction);
+
+    let bias = B3SoiFdBias {
+        vbs: 0.0,
+        vgs: 1.2,
+        vds: 0.8,
+        ves: 0.0,
+        vps: 0.0,
+        ..Default::default()
+    };
+    let baseline = eval::eval(&sized_no_junction, &mc_no_junction, bias, 1.0, true)
+        .charge
+        .expect("charge");
+    let stressed = eval::eval(
+        &sized_stressed_junction,
+        &mc_stressed_junction,
+        bias,
+        1.0,
+        true,
+    )
+    .charge
+    .expect("charge");
+
+    let same = |label: &str, lhs: Value, rhs: Value| {
+        assert!(
+            (lhs - rhs).abs() <= 1e-24,
+            "{label} changed through FD intrinsic junction storage: baseline={lhs:.12e}, stressed={rhs:.12e}"
+        );
+    };
+    same("qb", baseline.qb, stressed.qb);
+    same("qd", baseline.qd, stressed.qd);
+    same("gcddb", baseline.gcddb, stressed.gcddb);
+    same("gcdsb", baseline.gcdsb, stressed.gcdsb);
+    same("gcbdb", baseline.gcbdb, stressed.gcbdb);
+    same("gcbsb", baseline.gcbsb, stressed.gcbsb);
 }
 
 #[test]
@@ -186,6 +408,7 @@ fn eval_dc_strong_inversion_is_sane() {
         vds: 0.05,
         ves: 0.0,
         vps: 0.0,
+        ..Default::default()
     };
     let op = eval::eval_dc(&sized, &mc, bias, 1.0);
     assert!(op.ids.is_finite() && op.ids > 0.0, "ids={}", op.ids);
@@ -212,6 +435,7 @@ fn fd_body_currents_are_zero() {
                 vds: 0.1 * vd_i as Value,
                 ves: 0.0,
                 vps: 0.0,
+                ..Default::default()
             };
             let op = eval::eval_dc(&sized, &mc, bias, 1.0);
             // No impact ionization / GIDL / diode body conductances.
@@ -243,6 +467,7 @@ fn eval_dc_monotonic_in_vg() {
                 vds: 0.05,
                 ves: 0.0,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
         )
@@ -270,6 +495,7 @@ fn eval_dc_no_nan_across_sweep() {
                     vds: 0.1 * vd_i as Value,
                     ves: ve_i as Value,
                     vps: 0.0,
+                    ..Default::default()
                 };
                 let op = eval::eval_dc(&sized, &mc, bias, 1.0);
                 assert!(op.ids.is_finite(), "ids NaN at {bias:?}");
@@ -281,9 +507,10 @@ fn eval_dc_no_nan_across_sweep() {
     }
 }
 
-#[test]
-fn charge_matrix_is_consistent_with_charges() {
-    let model = B3SoiFdModel::from_params(&n1_params(), false, 300.15);
+fn assert_charge_matrix_is_consistent_with_charges_for_capmod(cap_mod: i32) {
+    let mut params = n1_params();
+    params.insert("CAPMOD".to_string(), cap_mod as Value);
+    let model = B3SoiFdModel::from_params(&params, false, 300.15);
     let sized = B3SoiFdSized::new(&model, &geom(), 300.15).expect("sized");
     let mc = model_consts(&model);
     let charge = |vg: Value, vd: Value, ve: Value| {
@@ -296,6 +523,7 @@ fn charge_matrix_is_consistent_with_charges() {
                 vds: vd,
                 ves: ve,
                 vps: 0.0,
+                ..Default::default()
             },
             1.0,
             true,
@@ -315,4 +543,14 @@ fn charge_matrix_is_consistent_with_charges() {
     assert!(ok(c0.gcggb, dqg_dvg), "cggb {} vs FD {}", c0.gcggb, dqg_dvg);
     let total = c0.qg + c0.qb + c0.qd + c0.qe;
     assert!(total.is_finite(), "charge sum not finite: {total}");
+}
+
+#[test]
+fn capmod3_charge_matrix_is_consistent_with_charges() {
+    assert_charge_matrix_is_consistent_with_charges_for_capmod(3);
+}
+
+#[test]
+fn capmod2_charge_matrix_is_consistent_with_charges() {
+    assert_charge_matrix_is_consistent_with_charges_for_capmod(2);
 }
