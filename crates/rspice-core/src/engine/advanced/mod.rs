@@ -12,7 +12,10 @@ use super::{Engine, SimulationError};
 use crate::analysis::monte_carlo::{
     Distribution, MonteCarloResult, VariableStatistics, Xorshift128Plus,
 };
-use crate::analysis::noise::{NoiseContribution, NoiseResult, NoiseSource};
+use crate::analysis::noise::{
+    Bsim3FlickerNoise, Bsim4FlickerNoise, CorrelatedNoisePair, NoiseContribution, NoisePort,
+    NoiseResult, NoiseSource,
+};
 use crate::analysis::pole_zero::{Matrix, PoleZeroAnalyzer, PoleZeroConfig, PoleZeroResult};
 use crate::analysis::sensitivity::{ElementDesc, SensitivityAnalyzer, SensitivityResult};
 use crate::device::semiconductor::{

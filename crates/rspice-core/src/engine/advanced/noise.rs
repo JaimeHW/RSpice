@@ -14,12 +14,12 @@ impl Engine {
     }
 
     #[inline]
-    pub(in crate::engine::advanced) fn differential_noise_output(
+    pub(in crate::engine::advanced) fn differential_noise_output_complex(
         solution: &[Complex64],
         output_pos: usize,
         output_neg: Option<usize>,
         num_nodes: usize,
-    ) -> Value {
+    ) -> Complex64 {
         let v_pos = if output_pos > 0 && output_pos <= num_nodes {
             solution[output_pos - 1]
         } else {
@@ -29,38 +29,562 @@ impl Engine {
             Some(node) if node > 0 && node <= num_nodes => solution[node - 1],
             _ => Complex64::new(0.0, 0.0),
         };
-        (v_pos - v_neg).norm()
+        v_pos - v_neg
+    }
+
+    #[inline]
+    pub(in crate::engine::advanced) fn differential_noise_output(
+        solution: &[Complex64],
+        output_pos: usize,
+        output_neg: Option<usize>,
+        num_nodes: usize,
+    ) -> Value {
+        Self::differential_noise_output_complex(solution, output_pos, output_neg, num_nodes).norm()
+    }
+
+    #[inline]
+    fn stamp_unit_noise_current_rhs(
+        rhs: &mut [Complex64],
+        node_pos: usize,
+        node_neg: usize,
+        num_nodes: usize,
+    ) {
+        if node_pos > 0 && node_pos <= num_nodes {
+            rhs[node_pos - 1] += Complex64::new(1.0, 0.0);
+        }
+        if node_neg > 0 && node_neg <= num_nodes {
+            rhs[node_neg - 1] -= Complex64::new(1.0, 0.0);
+        }
+    }
+
+    fn collect_bsim3v3_noise_sources(
+        device: &crate::device::mosfet::bsim3v3::Bsim3v3Device,
+    ) -> Vec<NoiseSource> {
+        let mut sources = Vec::new();
+        let (op, bias) = device.noise_operating_point();
+        let core = &device.core;
+        let model = &core.model;
+        let size = &core.size;
+        let mult = device.multiplier.max(0.0);
+        if mult <= 0.0 {
+            return sources;
+        }
+        let charged_op = if matches!(model.noi_mod, 2 | 4) {
+            Some(device.noise_operating_point_with_charge().0)
+        } else {
+            None
+        };
+        let op = charged_op.as_ref().unwrap_or(op);
+
+        let gm_sum = op.gm + op.gds + op.gmbs;
+        let channel_thermal_conductance = match model.noi_mod {
+            1 | 3 => Some((2.0 / 3.0) * gm_sum.abs() * mult),
+            2 | 4 => {
+                let qinv = op.qinv.abs();
+                let denom = size.leff * size.leff + op.ueff * qinv * op.rds;
+                if op.ueff > 0.0 && qinv > 0.0 && denom > 0.0 {
+                    Some(mult * op.ueff * qinv / denom)
+                } else {
+                    None
+                }
+            }
+            5 | 6 => {
+                if op.vdsat != 0.0 {
+                    let vds = bias.vds.min(op.vdsat);
+                    Some(((3.0 - vds / op.vdsat) / 3.0) * gm_sum.abs() * mult)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(conductance) = channel_thermal_conductance {
+            if conductance.is_finite() && conductance > 1e-30 {
+                sources.push(NoiseSource::thermal(
+                    format!("{}:id", device.name),
+                    device.node_drain,
+                    device.node_source,
+                    1.0 / conductance,
+                ));
+            }
+        }
+
+        match model.noi_mod {
+            1 | 4 | 5 => {
+                let denom = size.leff * size.leff * model.cox;
+                if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
+                    sources.push(NoiseSource::flicker_with_frequency_exponent(
+                        format!("{}:flicker", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        mult * model.kf / denom,
+                        model.af,
+                        model.ef,
+                        op.cd,
+                    ));
+                }
+            }
+            2 | 3 | 6 => {
+                let leff_noise = size.leff - 2.0 * model.lintnoi;
+                if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
+                    sources.push(NoiseSource::bsim3_flicker(
+                        format!("{}:flicker", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        Bsim3FlickerNoise {
+                            multiplier: mult,
+                            cd: op.cd,
+                            vds: bias.vds,
+                            vdseff: op.vdseff,
+                            vsattemp: size.vsattemp,
+                            ueff: op.ueff,
+                            abulk: op.abulk,
+                            ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
+                            vgsteff: op.vgsteff,
+                            leff: size.leff,
+                            leff_noise,
+                            litl: size.litl,
+                            weff: size.weff,
+                            cox: model.cox,
+                            oxide_trap_density_a: model.oxide_trap_density_a,
+                            oxide_trap_density_b: model.oxide_trap_density_b,
+                            oxide_trap_density_c: model.oxide_trap_density_c,
+                            em: model.em,
+                            ef: model.ef,
+                        },
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        sources
+    }
+
+    fn collect_bsim4v8_noise_sources(
+        device: &crate::device::mosfet::bsim4v8::Bsim4v8Device,
+    ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
+        let mut sources = Vec::new();
+        let mut correlated_sources = Vec::new();
+        let (op, bias) = device.noise_operating_point();
+        let core = &device.core;
+        let model = &core.model;
+        let size = &core.size;
+        let inst = &core.inst;
+        let mult = device.multiplier.max(0.0);
+        if mult <= 0.0 {
+            return (sources, correlated_sources);
+        }
+
+        if model.rbody_mod != 0 {
+            let mut push_rbody =
+                |suffix: &str, node_pos: usize, node_neg: usize, conductance: Value| {
+                    let effective_g = conductance * mult;
+                    if effective_g.is_finite() && effective_g > 1.0e-30 {
+                        sources.push(NoiseSource::thermal(
+                            format!("{}.{}", device.name, suffix),
+                            node_pos,
+                            node_neg,
+                            1.0 / effective_g,
+                        ));
+                    }
+                };
+
+            if inst.body_resistance_mode == 3 || inst.body_resistance_mode == 5 {
+                push_rbody(
+                    "rbps",
+                    device.node_bulk,
+                    device.node_source_body,
+                    inst.body_prime_source_conductance,
+                );
+                push_rbody(
+                    "rbpd",
+                    device.node_bulk,
+                    device.node_drain_body,
+                    inst.body_prime_drain_conductance,
+                );
+            }
+            push_rbody(
+                "rbpb",
+                device.node_bulk,
+                device.node_bulk_external,
+                inst.body_prime_bulk_conductance,
+            );
+            if inst.body_resistance_mode == 5 {
+                push_rbody(
+                    "rbsb",
+                    device.node_bulk_external,
+                    device.node_source_body,
+                    inst.body_source_bulk_conductance,
+                );
+                push_rbody(
+                    "rbdb",
+                    device.node_bulk_external,
+                    device.node_drain_body,
+                    inst.body_drain_bulk_conductance,
+                );
+            }
+        }
+
+        if model.rgate_mod == 2 && op.gcrg.is_finite() && op.gcrg > 1.0e-30 {
+            // b4noi.c: for RGATEMOD=2 the electrode gate resistance noise is
+            // attenuated by the bias-dependent channel gate-resistance branch.
+            let t0 = 1.0 + inst.gate_conductance / op.gcrg;
+            let effective_g = inst.gate_conductance * mult / (t0 * t0);
+            if effective_g.is_finite() && effective_g > 1.0e-30 {
+                sources.push(NoiseSource::thermal(
+                    format!("{}.rg", device.name),
+                    device.node_gate,
+                    device.node_gate_external,
+                    1.0 / effective_g,
+                ));
+            }
+        }
+
+        let channel_thermal_conductance = match model.tnoi_mod {
+            0 => {
+                let rds_noise = if op.grdsw > 0.0 { 1.0 / op.grdsw } else { 0.0 };
+                let t0 = op.ueff * op.qinv.abs();
+                let denom = t0 * rds_noise + size.leff * size.leff;
+                if t0 > 0.0 && denom > 0.0 {
+                    Some((t0 / denom) * model.ntnoi * mult)
+                } else {
+                    None
+                }
+            }
+            1 => {
+                if op.idovvds > 0.0 && op.esat_l != 0.0 {
+                    let vgsteff_over_esat_l = op.vgsteff / op.esat_l;
+                    let shape = vgsteff_over_esat_l * vgsteff_over_esat_l;
+                    let npart_beta = model.rnoia * (1.0 + shape * model.tnoia * size.leff);
+                    let mut npart_theta = model.rnoib * (1.0 + shape * model.tnoib * size.leff);
+                    if npart_theta > 0.9 {
+                        npart_theta = 0.9;
+                    }
+                    if npart_theta > 0.9 * npart_beta {
+                        npart_theta = 0.9 * npart_beta;
+                    }
+
+                    let gm_sum = op.gm + op.gmbs + op.gds;
+                    let igsquare = npart_theta * npart_theta * gm_sum * gm_sum / op.idovvds;
+                    let weighted = npart_beta * (op.gm + op.gmbs) + op.gds;
+                    let conductance = (weighted * weighted / op.idovvds) - igsquare;
+                    Some(conductance * mult)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(conductance) = channel_thermal_conductance {
+            if conductance.is_finite() && conductance > 1e-30 {
+                sources.push(NoiseSource::thermal(
+                    format!("{}:id", device.name),
+                    device.node_drain,
+                    device.node_source,
+                    1.0 / conductance,
+                ));
+            }
+        }
+
+        if model.tnoi_mod == 2
+            && op.noi_gd0 > 0.0
+            && op.vgsteff > 0.0
+            && op.esat_l != 0.0
+            && size.leff > 0.0
+        {
+            let eta = 1.0 - op.vdseff * op.ab_ov_vgst2vtm;
+            let t0 = 1.0 - eta;
+            let t1 = 1.0 + eta;
+            let t2 = t1 + 2.0 * op.abulk * core.model_temp.vtm / op.vgsteff;
+            let lvsat = size.leff * (1.0 + op.vdseff / op.esat_l);
+            if t2 != 0.0 && lvsat != 0.0 {
+                let t6 = size.leff / lvsat;
+                if t6 != 0.0 {
+                    let mut gamma = t6 * (0.5 * t1 + t0 * t0 / (6.0 * t2));
+                    let t3 = t2 * t2;
+                    let t4 = t0 * t0;
+                    let t5 = t3 * t3;
+                    if t3 != 0.0 && t5 != 0.0 {
+                        let mut delta = (t1 / t3 - (5.0 * t1 + t2) * t4 / (15.0 * t5)
+                            + t4 * t4 / (9.0 * t5 * t2))
+                            / (6.0 * t6 * t6 * t6);
+                        let t7 = t0 / t2;
+                        let epsilon = (t7 - t7 * t7 * t7 / 3.0) / (6.0 * t6);
+                        let t8 = {
+                            let ratio = op.vgsteff / op.esat_l;
+                            ratio * ratio
+                        };
+
+                        let npart_c = model.rnoic * (1.0 + t8 * model.tnoic * size.leff);
+                        let mut ctnoi = if gamma * delta > 0.0 {
+                            epsilon / (gamma * delta).sqrt() * (2.5316 * npart_c)
+                        } else {
+                            1.0
+                        };
+                        ctnoi = ctnoi.clamp(0.0, 1.0);
+
+                        let npart_beta = model.rnoia * (1.0 + t8 * model.tnoia * size.leff);
+                        let npart_theta = model.rnoib * (1.0 + t8 * model.tnoib * size.leff);
+                        gamma *= 3.0 * npart_beta * npart_beta;
+                        delta *= 3.75 * npart_theta * npart_theta;
+
+                        let gamma_gd0 = gamma * op.noi_gd0;
+                        let c0 = op.coxeff * size.weff_cv * inst.nf * size.leff_cv;
+                        let sigrat = if gamma > 0.0 && delta > 0.0 && op.noi_gd0 > 0.0 {
+                            c0 / op.noi_gd0 * (delta / gamma).sqrt()
+                        } else {
+                            0.0
+                        };
+
+                        if gamma_gd0.is_finite() && gamma_gd0 > 0.0 {
+                            let ctnoi_sq = ctnoi * ctnoi;
+                            let uncorrelated_g = gamma_gd0 * (1.0 - ctnoi_sq) * mult;
+                            if uncorrelated_g.is_finite() && uncorrelated_g > 1.0e-30 {
+                                sources.push(NoiseSource::thermal(
+                                    format!("{}:id", device.name),
+                                    device.node_drain,
+                                    device.node_source,
+                                    1.0 / uncorrelated_g,
+                                ));
+                            }
+
+                            let (first, second) = if op.mode >= 0 {
+                                (
+                                    NoisePort {
+                                        node_pos: device.node_drain,
+                                        node_neg: device.node_source,
+                                    },
+                                    NoisePort {
+                                        node_pos: device.node_gate,
+                                        node_neg: device.node_source,
+                                    },
+                                )
+                            } else {
+                                (
+                                    NoisePort {
+                                        node_pos: device.node_source,
+                                        node_neg: device.node_drain,
+                                    },
+                                    NoisePort {
+                                        node_pos: device.node_gate,
+                                        node_neg: device.node_drain,
+                                    },
+                                )
+                            };
+                            correlated_sources.push(CorrelatedNoisePair::bsim4_tnoi2(
+                                format!("{}:corl", device.name),
+                                first,
+                                second,
+                                gamma_gd0,
+                                ctnoi,
+                                sigrat,
+                                mult,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        match model.fnoi_mod {
+            0 => {
+                let coxe = model.coxe();
+                let denom = size.leff * size.leff * coxe;
+                if model.kf > 0.0 && denom > 0.0 && op.cd.abs() > 1e-18 {
+                    sources.push(NoiseSource::flicker_with_frequency_exponent(
+                        format!("{}:flicker", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        mult * model.kf / denom,
+                        model.af,
+                        model.ef,
+                        op.cd,
+                    ));
+                }
+            }
+            1 => {
+                let leff_noise = size.leff - 2.0 * model.lintnoi;
+                if leff_noise > 0.0 && op.cd.abs() > 1e-18 {
+                    sources.push(NoiseSource::bsim4_flicker(
+                        format!("{}:flicker", device.name),
+                        device.node_drain,
+                        device.node_source,
+                        Bsim4FlickerNoise {
+                            multiplier: mult,
+                            cd: op.cd,
+                            vds: bias.vds,
+                            vdseff: op.vdseff,
+                            vsattemp: inst.vsattemp,
+                            ueff: op.ueff,
+                            abulk: op.abulk,
+                            ab_ov_vgst2vtm: op.ab_ov_vgst2vtm,
+                            vgsteff: op.vgsteff,
+                            nstar: op.nstar,
+                            leff: size.leff,
+                            leff_noise,
+                            litl: size.litl,
+                            weff: size.weff,
+                            nf: inst.nf,
+                            coxe: model.coxe(),
+                            oxide_trap_density_a: model.oxide_trap_density_a,
+                            oxide_trap_density_b: model.oxide_trap_density_b,
+                            oxide_trap_density_c: model.oxide_trap_density_c,
+                            em: model.em,
+                            ef: model.ef,
+                        },
+                    ));
+                }
+            }
+            _ => {}
+        }
+
+        let (igs_current, igd_current) = if op.mode >= 0 {
+            (op.igs + op.igcs, op.igd + op.igcd)
+        } else {
+            (op.igs + op.igcd, op.igd + op.igcs)
+        };
+        if igs_current.abs() > 1e-18 {
+            sources.push(NoiseSource::shot(
+                format!("{}:igs", device.name),
+                device.node_gate,
+                device.node_source,
+                mult * igs_current,
+            ));
+        }
+        if igd_current.abs() > 1e-18 {
+            sources.push(NoiseSource::shot(
+                format!("{}:igd", device.name),
+                device.node_gate,
+                device.node_drain,
+                mult * igd_current,
+            ));
+        }
+        if op.igb.abs() > 1e-18 {
+            sources.push(NoiseSource::shot(
+                format!("{}:igb", device.name),
+                device.node_gate,
+                device.node_bulk,
+                mult * op.igb,
+            ));
+        }
+
+        (sources, correlated_sources)
     }
 
     pub(in crate::engine::advanced) fn collect_noise_sources(
         circuit: &CircuitData,
         dc_solution: &[Value],
-    ) -> Vec<NoiseSource> {
+    ) -> (Vec<NoiseSource>, Vec<CorrelatedNoisePair>) {
         let mut noise_sources = Vec::new();
+        let mut correlated_noise_sources = Vec::new();
+        let mut bsim4_series_noise_conductances: HashMap<String, Value> = HashMap::new();
 
-        // The native BSIM3 port carries the b3noi.c parameters but its
-        // noise sources (SPICE2/BSIM3 channel thermal + flicker) are not
-        // yet generated; warn rather than silently under-reporting the
-        // spectrum of a MOS-dominated deck.
-        if !circuit.bsim3v3.is_empty() {
-            log::warn!(
-                "noise analysis: {} BSIM3 (LEVEL=8/49) device(s) contribute no noise \
-                 sources yet (series-resistance thermal noise is included; channel \
-                 thermal and flicker noise are not)",
-                circuit.bsim3v3.len()
-            );
+        for bsim3 in &circuit.bsim3v3.devices {
+            noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3));
         }
 
-        // Same status for the native BSIM4 port: the fnoiMod/tnoiMod
-        // selectors are parsed and stored, but no b4noi.c sources are
-        // generated yet.
-        if !circuit.bsim4v8.is_empty() {
-            log::warn!(
-                "noise analysis: {} BSIM4 (LEVEL=14/54) device(s) contribute no noise \
-                 sources yet (series-resistance thermal noise is included; channel \
-                 thermal and flicker noise are not)",
-                circuit.bsim4v8.len()
-            );
+        for bsim4 in &circuit.bsim4v8.devices {
+            let (bsim4_sources, bsim4_correlated) = Self::collect_bsim4v8_noise_sources(bsim4);
+            noise_sources.extend(bsim4_sources);
+            correlated_noise_sources.extend(bsim4_correlated);
+
+            if bsim4.core.model.rds_mod == 1 {
+                let (op, bias) = bsim4.noise_operating_point();
+                if let Some((mut drain_g, mut source_g)) =
+                    bsim4.external_rds_conductances(dc_solution)
+                {
+                    if bsim4.core.model.tnoi_mod == 1 && op.idovvds > 0.0 && op.esat_l != 0.0 {
+                        let model = &bsim4.core.model;
+                        let size = &bsim4.core.size;
+                        let shape = (op.vgsteff / op.esat_l).powi(2);
+                        let npart_beta = model.rnoia * (1.0 + shape * model.tnoia * size.leff);
+                        let mut npart_theta = model.rnoib * (1.0 + shape * model.tnoib * size.leff);
+                        if npart_theta > 0.9 {
+                            npart_theta = 0.9;
+                        }
+                        if npart_theta > 0.9 * npart_beta {
+                            npart_theta = 0.9 * npart_beta;
+                        }
+
+                        let adjusted = |g: Value| {
+                            if g > 0.0 && g.is_finite() {
+                                g * (1.0 + npart_theta * npart_theta * g / op.idovvds)
+                            } else {
+                                g
+                            }
+                        };
+                        if bias.vds >= 0.0 {
+                            source_g = adjusted(source_g);
+                        } else {
+                            drain_g = adjusted(drain_g);
+                        }
+                    }
+
+                    let mult = bsim4.multiplier.max(0.0);
+                    if drain_g > 0.0 && drain_g.is_finite() && mult > 0.0 {
+                        noise_sources.push(NoiseSource::thermal(
+                            format!("{}.__rd", bsim4.name),
+                            bsim4.node_drain,
+                            bsim4.node_drain_external,
+                            1.0 / (drain_g * mult),
+                        ));
+                    }
+                    if source_g > 0.0 && source_g.is_finite() && mult > 0.0 {
+                        noise_sources.push(NoiseSource::thermal(
+                            format!("{}.__rs", bsim4.name),
+                            bsim4.node_source,
+                            bsim4.node_source_external,
+                            1.0 / (source_g * mult),
+                        ));
+                    }
+                }
+            } else if bsim4.core.model.tnoi_mod == 1 {
+                let (op, bias) = bsim4.noise_operating_point();
+                if op.idovvds > 0.0 && op.esat_l != 0.0 {
+                    let model = &bsim4.core.model;
+                    let size = &bsim4.core.size;
+                    let inst = &bsim4.core.inst;
+                    let shape = (op.vgsteff / op.esat_l).powi(2);
+                    let npart_beta = model.rnoia * (1.0 + shape * model.tnoia * size.leff);
+                    let mut npart_theta = model.rnoib * (1.0 + shape * model.tnoib * size.leff);
+                    if npart_theta > 0.9 {
+                        npart_theta = 0.9;
+                    }
+                    if npart_theta > 0.9 * npart_beta {
+                        npart_theta = 0.9 * npart_beta;
+                    }
+
+                    let adjusted = |g: Value| {
+                        if g > 0.0 && g.is_finite() {
+                            g * (1.0 + npart_theta * npart_theta * g / op.idovvds)
+                        } else {
+                            g
+                        }
+                    };
+                    let drain_g = if bias.vds < 0.0 {
+                        adjusted(inst.drain_conductance)
+                    } else {
+                        inst.drain_conductance
+                    };
+                    let source_g = if bias.vds >= 0.0 {
+                        adjusted(inst.source_conductance)
+                    } else {
+                        inst.source_conductance
+                    };
+                    let mult = bsim4.multiplier.max(0.0);
+                    if drain_g > 0.0 && mult > 0.0 {
+                        bsim4_series_noise_conductances
+                            .insert(format!("{}.__rd", bsim4.name), drain_g * mult);
+                    }
+                    if source_g > 0.0 && mult > 0.0 {
+                        bsim4_series_noise_conductances
+                            .insert(format!("{}.__rs", bsim4.name), source_g * mult);
+                    }
+                }
+            }
         }
 
         // Verilog-A white_noise()/flicker_noise() sources, with PSDs
@@ -102,7 +626,16 @@ impl Engine {
             if !circuit.resistors.noisy.get(i).copied().unwrap_or(true) {
                 continue;
             }
-            let conductance = circuit.resistors.small_signal_conductance(i);
+            let name = circuit
+                .resistors
+                .names
+                .get(i)
+                .cloned()
+                .unwrap_or_else(|| format!("R{}", i + 1));
+            let conductance = bsim4_series_noise_conductances
+                .get(&name)
+                .copied()
+                .unwrap_or_else(|| circuit.resistors.small_signal_conductance(i));
             let resistance = if conductance.abs() > 0.0 {
                 1.0 / conductance
             } else {
@@ -112,12 +645,6 @@ impl Engine {
                 continue;
             }
 
-            let name = circuit
-                .resistors
-                .names
-                .get(i)
-                .cloned()
-                .unwrap_or_else(|| format!("R{}", i + 1));
             let mut source =
                 NoiseSource::thermal(name.clone(), stamp.pp.row, stamp.nn.row, resistance);
             source.temperature_offset = circuit.resistors.noise_temperature_offset(i);
@@ -383,7 +910,7 @@ impl Engine {
             }
         }
 
-        noise_sources
+        (noise_sources, correlated_noise_sources)
     }
 
     /// Run noise analysis
@@ -461,6 +988,7 @@ impl Engine {
 
         let engine = self.resolved_for_netlist(netlist);
         let mut circuit = engine.build_circuit(netlist)?;
+        Self::ensure_supported_dynamic_charges(&circuit, "Noise")?;
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -471,7 +999,8 @@ impl Engine {
             circuit.update_nonlinear(&dc_solution);
         }
         circuit.prepare_behavioral_small_signal(&dc_solution);
-        let noise_sources = Self::collect_noise_sources(&circuit, &dc_solution);
+        let (noise_sources, correlated_noise_sources) =
+            Self::collect_noise_sources(&circuit, &dc_solution);
 
         // Compute noise at each frequency
         let num_nodes = circuit.num_nodes();
@@ -589,18 +1118,75 @@ impl Engine {
                     }
 
                     rhs.fill(Complex64::new(0.0, 0.0));
-                    if source.node_pos > 0 && source.node_pos <= num_nodes {
-                        rhs[source.node_pos - 1] += Complex64::new(1.0, 0.0);
-                    }
-                    if source.node_neg > 0 && source.node_neg <= num_nodes {
-                        rhs[source.node_neg - 1] -= Complex64::new(1.0, 0.0);
-                    }
+                    Self::stamp_unit_noise_current_rhs(
+                        &mut rhs,
+                        source.node_pos,
+                        source.node_neg,
+                        num_nodes,
+                    );
 
                     let solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
                     let v_out = Self::differential_noise_output(
                         &solution, output_pos, output_neg, num_nodes,
                     );
                     let output_v2 = si * v_out * v_out;
+                    if output_v2.is_finite() && output_v2 > 0.0 {
+                        total_noise_v2_hz += output_v2;
+                        contributions.push(NoiseContribution {
+                            device_name: source.device_name.clone(),
+                            noise_type: source.noise_type,
+                            output_contribution: output_v2,
+                            percentage: 0.0,
+                        });
+                    }
+                }
+
+                for source in &correlated_noise_sources {
+                    let Some(densities) = source.spectral_densities(freq, temperature) else {
+                        continue;
+                    };
+                    if !densities.first_psd.is_finite()
+                        || !densities.second_psd.is_finite()
+                        || densities.first_psd < 0.0
+                        || densities.second_psd < 0.0
+                    {
+                        continue;
+                    }
+
+                    rhs.fill(Complex64::new(0.0, 0.0));
+                    Self::stamp_unit_noise_current_rhs(
+                        &mut rhs,
+                        source.first.node_pos,
+                        source.first.node_neg,
+                        num_nodes,
+                    );
+                    let first_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                    let first_gain = Self::differential_noise_output_complex(
+                        &first_solution,
+                        output_pos,
+                        output_neg,
+                        num_nodes,
+                    );
+
+                    rhs.fill(Complex64::new(0.0, 0.0));
+                    Self::stamp_unit_noise_current_rhs(
+                        &mut rhs,
+                        source.second.node_pos,
+                        source.second.node_neg,
+                        num_nodes,
+                    );
+                    let second_solution = ac_matrix.solve(&rhs).map_err(SimulationError::Solver)?;
+                    let second_gain = Self::differential_noise_output_complex(
+                        &second_solution,
+                        output_pos,
+                        output_neg,
+                        num_nodes,
+                    );
+
+                    let first_amp = first_gain * densities.first_psd.sqrt();
+                    let second_amp = second_gain
+                        * Complex64::from_polar(densities.second_psd.sqrt(), densities.phase_rad);
+                    let output_v2 = (first_amp + second_amp).norm_sqr();
                     if output_v2.is_finite() && output_v2 > 0.0 {
                         total_noise_v2_hz += output_v2;
                         contributions.push(NoiseContribution {
@@ -1235,6 +1821,14 @@ Q1 C B 0 QN
             .collect();
         assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
         for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
+            let tolerance = 1e-6 * freq_ref.abs().max(1.0);
+            assert!(
+                (result.frequency - freq_ref).abs() <= tolerance,
+                "{label}: frequency grid diverged from the oracle at {:e} Hz: ours {:.8e} vs oracle {:.8e}",
+                freq_ref,
+                result.frequency,
+                freq_ref,
+            );
             let onoise = result.output_noise_rms();
             let relative = (onoise - onoise_ref).abs() / onoise_ref;
             assert!(
@@ -1246,6 +1840,396 @@ Q1 C B 0 QN
                 relative,
             );
         }
+    }
+
+    const BSIM4_MODELS45: &str =
+        include_str!("../../../src/device/mosfet/bsim4v8/testdata/models45.lib");
+    const BSIM4_FNOI1_TNOI0_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_fnoi1_tnoi0_noise_ngspice46.dat");
+    const BSIM4_FNOI0_TNOI0_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_fnoi0_tnoi0_noise_ngspice46.dat");
+    const BSIM4_TNOI2_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_tnoi2_noise_ngspice46.dat");
+    const BSIM4_TNOI1_SERIES_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_tnoi1_series_noise_ngspice46.dat");
+    const BSIM4_RDSMOD1_TNOI1_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_rdsmod1_tnoi1_noise_ngspice46.dat");
+    const BSIM4_RBODYMOD1_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim4_rbodymod1_noise_ngspice46.dat");
+    const BSIM3_MODELS018: &str =
+        include_str!("../../../src/device/mosfet/bsim3v3/testdata/models018.lib");
+    const BSIM3_NOIMOD1_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim3_noimod1_noise_ngspice46.dat");
+    const BSIM3_NOIMOD2_ORACLE: &str =
+        include_str!("../../../tests/testdata/bsim3_noimod2_noise_ngspice46.dat");
+
+    fn bsim3_noise_deck(model_header_suffix: &str) -> String {
+        let models = if model_header_suffix.is_empty() {
+            BSIM3_MODELS018.to_string()
+        } else {
+            BSIM3_MODELS018.replace(
+                ".model n018 nmos level=49",
+                &format!(".model n018 nmos level=49 {model_header_suffix}"),
+            )
+        };
+        format!(
+            "BSIM3 noise oracle deck\n\n\
+             VDD VDD 0 1.8\n\
+             VIN IN 0 DC 0.9 AC 1\n\
+             RD VDD OUT 3k\n\
+             M1 OUT IN 0 0 n018 W=1u L=0.18u AD=0.2p AS=0.2p PD=2.4u PS=2.4u NRD=0 NRS=0\n\n\
+             .OPTIONS NOACCT RELTOL=1e-6\n\
+             .NOISE v(out) VIN DEC 5 10 100Meg\n\n\
+             {models}\n\n\
+             .END\n"
+        )
+    }
+
+    fn bsim4_noise_deck(model_header_suffix: &str) -> String {
+        let models = if model_header_suffix.is_empty() {
+            BSIM4_MODELS45.to_string()
+        } else {
+            BSIM4_MODELS45.replace(
+                ".model n45 nmos level=54 version=4.8",
+                &format!(".model n45 nmos level=54 version=4.8 {model_header_suffix}"),
+            )
+        };
+        format!(
+            "BSIM4 noise oracle deck\n\n\
+             VDD VDD 0 1.1\n\
+             VIN IN 0 DC 0.75 AC 1\n\
+             RD VDD OUT 3k\n\
+             M1 OUT IN 0 0 n45 W=1u L=45n AD=0.1p AS=0.1p PD=2.2u PS=2.2u NRD=0 NRS=0\n\n\
+             .OPTIONS NOACCT RELTOL=1e-6\n\
+             .NOISE v(out) VIN DEC 5 10 100Meg\n\n\
+             {models}\n\n\
+             .END\n"
+        )
+    }
+
+    fn bsim4_noise_deck_with_load_and_instance(
+        model_header_suffix: &str,
+        load_resistance: f64,
+        instance_suffix: &str,
+    ) -> String {
+        let models = if model_header_suffix.is_empty() {
+            BSIM4_MODELS45.to_string()
+        } else {
+            BSIM4_MODELS45.replace(
+                ".model n45 nmos level=54 version=4.8",
+                &format!(".model n45 nmos level=54 version=4.8 {model_header_suffix}"),
+            )
+        };
+        format!(
+            "BSIM4 noise oracle deck\n\n\
+             VDD VDD 0 1.1\n\
+             VIN IN 0 DC 0.75 AC 1\n\
+             RD VDD OUT {load_resistance}\n\
+             M1 OUT IN 0 0 n45 W=1u L=45n AD=0.1p AS=0.1p PD=2.2u PS=2.2u {instance_suffix}\n\n\
+             .OPTIONS NOACCT RELTOL=1e-6\n\
+             .NOISE v(out) VIN DEC 5 10 100Meg\n\n\
+             {models}\n\n\
+             .END\n"
+        )
+    }
+
+    #[test]
+    fn bsim4_default_flicker_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck("");
+        assert_onoise_matches(
+            &deck,
+            BSIM4_FNOI1_TNOI0_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim4-fnoi1-tnoi0",
+        );
+    }
+
+    #[test]
+    fn bsim4_legacy_flicker_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck("FNOIMOD=0 TNOIMOD=0 KF=2e-24 AF=1.3 EF=0.8");
+        assert_onoise_matches(
+            &deck,
+            BSIM4_FNOI0_TNOI0_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim4-fnoi0-tnoi0",
+        );
+    }
+
+    #[test]
+    fn bsim4_tnoi2_correlated_thermal_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck("FNOIMOD=0 TNOIMOD=2 KF=0");
+        assert_onoise_matches(
+            &deck,
+            BSIM4_TNOI2_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim4-tnoi2",
+        );
+    }
+
+    #[test]
+    fn bsim4_tnoi1_series_noise_adjustment_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck_with_load_and_instance(
+            "FNOIMOD=0 TNOIMOD=1 KF=0",
+            150.0,
+            "NRD=80 NRS=80",
+        );
+        assert_onoise_matches(
+            &deck,
+            BSIM4_TNOI1_SERIES_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-4,
+            "bsim4-tnoi1-series",
+        );
+    }
+
+    #[test]
+    fn bsim4_rdsmod1_tnoi1_external_series_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck_with_load_and_instance(
+            "FNOIMOD=0 TNOIMOD=1 KF=0 RDSMOD=1 RDW=300 RSW=280 RDWMIN=20 RSWMIN=18",
+            150.0,
+            "NRD=80 NRS=80",
+        );
+        assert_onoise_matches(
+            &deck,
+            BSIM4_RDSMOD1_TNOI1_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-4,
+            "bsim4-rdsmod1-tnoi1",
+        );
+    }
+
+    #[test]
+    fn bsim4_rbodymod1_substrate_resistor_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim4_noise_deck(
+            "RBODYMOD=1 RBPB=5 RBPD=15 RBPS=15 RBDB=15 RBSB=15 GBMIN=1e-10 \
+             FNOIMOD=0 TNOIMOD=0 KF=0",
+        );
+        assert_onoise_matches(
+            &deck,
+            BSIM4_RBODYMOD1_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-4,
+            "bsim4-rbodymod1",
+        );
+    }
+
+    #[test]
+    fn bsim4_rbodymod1_collects_all_substrate_resistor_noise_sources() {
+        let deck = bsim4_noise_deck(
+            "RBODYMOD=1 RBPB=5 RBPD=15 RBPS=15 RBDB=15 RBSB=15 GBMIN=1e-10 \
+             FNOIMOD=0 TNOIMOD=0 KF=0",
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        circuit.update_nonlinear(&solution);
+
+        let device = &circuit.bsim4v8.devices[0];
+        let expected = [
+            (
+                "m1.rbps",
+                device.node_bulk,
+                device.node_source_body,
+                device.core.inst.body_prime_source_conductance,
+            ),
+            (
+                "m1.rbpd",
+                device.node_bulk,
+                device.node_drain_body,
+                device.core.inst.body_prime_drain_conductance,
+            ),
+            (
+                "m1.rbpb",
+                device.node_bulk,
+                device.node_bulk_external,
+                device.core.inst.body_prime_bulk_conductance,
+            ),
+            (
+                "m1.rbsb",
+                device.node_bulk_external,
+                device.node_source_body,
+                device.core.inst.body_source_bulk_conductance,
+            ),
+            (
+                "m1.rbdb",
+                device.node_bulk_external,
+                device.node_drain_body,
+                device.core.inst.body_drain_bulk_conductance,
+            ),
+        ];
+
+        let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
+        for (name, node_pos, node_neg, conductance) in expected {
+            let source = sources
+                .iter()
+                .find(|source| source.device_name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| {
+                    panic!("{name} thermal noise missing; sources={sources:#?}");
+                });
+            assert_eq!(source.noise_type.label(), "thermal");
+            assert_eq!(source.node_pos, node_pos, "{name} positive node");
+            assert_eq!(source.node_neg, node_neg, "{name} negative node");
+            let expected_resistance = 1.0 / (conductance * device.multiplier.max(0.0));
+            let rel = (source.parameter - expected_resistance).abs() / expected_resistance;
+            assert!(
+                rel <= 1e-12,
+                "{name} resistance: got {:.12e}, expected {:.12e}, rel {:.3e}",
+                source.parameter,
+                expected_resistance,
+                rel,
+            );
+        }
+    }
+
+    #[test]
+    fn bsim4_rbodymod2_bodymode1_collects_only_body_prime_bulk_noise_source() {
+        let deck = bsim4_noise_deck(
+            "RBODYMOD=2 RBPB=5 RBPD=15 RBPS=15 RBDB=15 RBSB=15 GBMIN=1e-10 \
+             FNOIMOD=0 TNOIMOD=0 KF=0",
+        );
+        let netlist = Netlist::parse(&deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        circuit.update_nonlinear(&solution);
+
+        let device = &circuit.bsim4v8.devices[0];
+        assert_eq!(device.core.inst.body_resistance_mode, 1);
+
+        let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
+        let mut rbody_names = sources
+            .iter()
+            .map(|source| source.device_name.to_ascii_lowercase())
+            .filter(|name| {
+                matches!(
+                    name.as_str(),
+                    "m1.rbps" | "m1.rbpd" | "m1.rbpb" | "m1.rbsb" | "m1.rbdb"
+                )
+            })
+            .collect::<Vec<_>>();
+        rbody_names.sort();
+        assert_eq!(
+            rbody_names,
+            vec!["m1.rbpb".to_string()],
+            "RBODYMOD=2 bodymode=1 should only expose rbpb thermal noise; sources={sources:#?}",
+        );
+
+        let rbpb = sources
+            .iter()
+            .find(|source| source.device_name.eq_ignore_ascii_case("m1.rbpb"))
+            .expect("m1.rbpb thermal noise source");
+        assert_eq!(rbpb.node_pos, device.node_bulk);
+        assert_eq!(rbpb.node_neg, device.node_bulk_external);
+        let expected_resistance =
+            1.0 / (device.core.inst.body_prime_bulk_conductance * device.multiplier.max(0.0));
+        let rel = (rbpb.parameter - expected_resistance).abs() / expected_resistance;
+        assert!(
+            rel <= 1e-12,
+            "m1.rbpb resistance: got {:.12e}, expected {:.12e}, rel {:.3e}",
+            rbpb.parameter,
+            expected_resistance,
+            rel,
+        );
+    }
+
+    #[test]
+    fn bsim3_noimod1_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim3_noise_deck("NOIMOD=1 KF=2e-24 AF=1.2 EF=0.9");
+        assert_onoise_matches(
+            &deck,
+            BSIM3_NOIMOD1_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim3-noimod1",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "frequency grid diverged")]
+    fn bsim_noise_oracle_helper_rejects_shifted_frequency_grid() {
+        let shifted_oracle = BSIM3_NOIMOD1_ORACLE
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with('#') || line.trim().is_empty() {
+                    return line.to_string();
+                }
+
+                let mut fields = line.split_whitespace();
+                let freq: f64 = fields.next().unwrap().parse().unwrap();
+                let onoise: f64 = fields.next().unwrap().parse().unwrap();
+                format!("{:.8e} {:.8e}", freq * 1.01, onoise)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let deck = bsim3_noise_deck("NOIMOD=1 KF=2e-24 AF=1.2 EF=0.9");
+
+        assert_onoise_matches(
+            &deck,
+            &shifted_oracle,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim3-shifted-grid",
+        );
+    }
+
+    #[test]
+    fn bsim3_noimod2_noise_matches_the_ngspice46_oracle() {
+        let deck = bsim3_noise_deck("NOIMOD=2");
+        assert_onoise_matches(
+            &deck,
+            BSIM3_NOIMOD2_ORACLE,
+            "out",
+            "VIN",
+            5,
+            10.0,
+            1e8,
+            5e-2,
+            "bsim3-noimod2",
+        );
     }
 
     /// Instance DTEMP must heat the VBIC internal-resistance thermal model
@@ -1594,7 +2578,7 @@ Q1 C B E 0 N1 M=3
             .expect("operating point converges");
         circuit.update_nonlinear(&solution);
 
-        let sources = Engine::collect_noise_sources(&circuit, &solution);
+        let (sources, _) = Engine::collect_noise_sources(&circuit, &solution);
         let flicker = sources
             .iter()
             .find(|source| source.device_name.ends_with(":flicker"))

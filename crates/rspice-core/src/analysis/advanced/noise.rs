@@ -34,9 +34,338 @@ pub const Q_ELECTRON: Value = 1.602176634e-19;
 /// Default temperature (K): 27°C = 300.15K (SPICE convention, ngspice REFTEMP)
 pub const T_NOMINAL: Value = 300.15;
 
+const BSIM4_MIN_LOG_ARG: Value = 1.0e-38;
+const BSIM3_MIN_LOG_ARG: Value = 1.0e-38;
+const BSIM3_K_OVER_Q: Value = 8.62e-5;
+
 //=============================================================================
 // Noise Source Types
 //=============================================================================
+
+/// Bias snapshot for the BSIM4 physical 1/f noise model (`fnoiMod=1`).
+#[derive(Debug, Clone)]
+pub struct Bsim4FlickerNoise {
+    pub multiplier: Value,
+    pub cd: Value,
+    pub vds: Value,
+    pub vdseff: Value,
+    pub vsattemp: Value,
+    pub ueff: Value,
+    pub abulk: Value,
+    pub ab_ov_vgst2vtm: Value,
+    pub vgsteff: Value,
+    pub nstar: Value,
+    pub leff: Value,
+    pub leff_noise: Value,
+    pub litl: Value,
+    pub weff: Value,
+    pub nf: Value,
+    pub coxe: Value,
+    pub oxide_trap_density_a: Value,
+    pub oxide_trap_density_b: Value,
+    pub oxide_trap_density_c: Value,
+    pub em: Value,
+    pub ef: Value,
+}
+
+impl Bsim4FlickerNoise {
+    /// Evaluate b4noi.c's physical BSIM4 1/f channel-current PSD.
+    pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
+        if frequency <= 0.0
+            || self.cd == 0.0
+            || self.leff <= 0.0
+            || self.leff_noise <= 0.0
+            || self.weff <= 0.0
+            || self.nf <= 0.0
+            || self.coxe <= 0.0
+            || self.ueff <= 0.0
+            || self.abulk <= 0.0
+            || self.nstar == 0.0
+        {
+            return 0.0;
+        }
+
+        let cd = self.cd.abs();
+        let leff_sq = self.leff_noise * self.leff_noise;
+        let esat = 2.0 * self.vsattemp / self.ueff;
+        let del_clm = if self.em <= 0.0 || self.litl <= 0.0 || esat <= 0.0 {
+            0.0
+        } else {
+            let arg = ((((self.vds.abs() - self.vdseff) / self.litl) + self.em) / esat)
+                .max(BSIM4_MIN_LOG_ARG);
+            (self.litl * arg.ln()).max(0.0)
+        };
+        let eff_freq = frequency.powf(self.ef);
+        if eff_freq <= 0.0 || !eff_freq.is_finite() {
+            return 0.0;
+        }
+
+        let n0 = self.coxe * self.vgsteff / Q_ELECTRON;
+        let nl = self.coxe * self.vgsteff * (1.0 - self.ab_ov_vgst2vtm * self.vdseff) / Q_ELECTRON;
+        let n0_star = (n0 + self.nstar).max(BSIM4_MIN_LOG_ARG);
+        let nl_star = (nl + self.nstar).max(BSIM4_MIN_LOG_ARG);
+        let t3 = self.oxide_trap_density_a * (n0_star / nl_star).max(BSIM4_MIN_LOG_ARG).ln();
+        let t4 = self.oxide_trap_density_b * (n0 - nl);
+        let t5 = self.oxide_trap_density_c * 0.5 * (n0 * n0 - nl * nl);
+
+        let denom_ssi = 1.0e10 * eff_freq * self.abulk * self.coxe * leff_sq;
+        let term_ssi = if denom_ssi > 0.0 {
+            Q_ELECTRON * Q_ELECTRON * K_BOLTZMANN * cd * temperature * self.ueff / denom_ssi
+                * (t3 + t4 + t5)
+        } else {
+            0.0
+        };
+
+        let t8 = self.oxide_trap_density_a
+            + self.oxide_trap_density_b * nl
+            + self.oxide_trap_density_c * nl * nl;
+        let t9 = nl_star * nl_star;
+        let denom_clm = 1.0e10 * eff_freq * leff_sq * self.weff * self.nf;
+        let clm = if denom_clm > 0.0 && t9 > 0.0 {
+            K_BOLTZMANN * temperature * cd * cd / denom_clm * del_clm * t8 / t9
+        } else {
+            0.0
+        };
+        let ssi = term_ssi + clm;
+
+        let denom_swi =
+            self.weff * self.nf * self.leff * eff_freq * 1.0e10 * self.nstar * self.nstar;
+        let swi = if denom_swi > 0.0 {
+            self.oxide_trap_density_a * K_BOLTZMANN * temperature / denom_swi * cd * cd
+        } else {
+            0.0
+        };
+
+        let total = ssi + swi;
+        if total > 0.0 && total.is_finite() {
+            (self.multiplier * (ssi * swi) / total).max(0.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Bias snapshot for the BSIM3 physical 1/f noise model (`noiMod=2/3/6`).
+#[derive(Debug, Clone)]
+pub struct Bsim3FlickerNoise {
+    pub multiplier: Value,
+    pub cd: Value,
+    pub vds: Value,
+    pub vdseff: Value,
+    pub vsattemp: Value,
+    pub ueff: Value,
+    pub abulk: Value,
+    pub ab_ov_vgst2vtm: Value,
+    pub vgsteff: Value,
+    pub leff: Value,
+    pub leff_noise: Value,
+    pub litl: Value,
+    pub weff: Value,
+    pub cox: Value,
+    pub oxide_trap_density_a: Value,
+    pub oxide_trap_density_b: Value,
+    pub oxide_trap_density_c: Value,
+    pub em: Value,
+    pub ef: Value,
+}
+
+impl Bsim3FlickerNoise {
+    /// Evaluate b3noi.c's strong-inversion BSIM3 1/f channel-current PSD.
+    pub fn spectral_density(&self, frequency: Value, temperature: Value) -> Value {
+        if frequency <= 0.0
+            || self.cd == 0.0
+            || self.leff <= 0.0
+            || self.leff_noise <= 0.0
+            || self.weff <= 0.0
+            || self.cox <= 0.0
+            || self.ueff <= 0.0
+            || self.abulk <= 0.0
+        {
+            return 0.0;
+        }
+
+        let cd = self.cd.abs();
+        let leff_sq = self.leff_noise * self.leff_noise;
+        let esat = 2.0 * self.vsattemp / self.ueff;
+        let del_clm = if self.em <= 0.0 || self.litl <= 0.0 || esat <= 0.0 {
+            0.0
+        } else {
+            let arg = ((((self.vds.abs() - self.vdseff) / self.litl) + self.em) / esat)
+                .max(BSIM3_MIN_LOG_ARG);
+            (self.litl * arg.ln()).max(0.0)
+        };
+        let eff_freq = frequency.powf(self.ef);
+        if eff_freq <= 0.0 || !eff_freq.is_finite() {
+            return 0.0;
+        }
+
+        let n0 = self.cox * self.vgsteff / Q_ELECTRON;
+        let nl = self.cox * self.vgsteff * (1.0 - self.ab_ov_vgst2vtm * self.vdseff) / Q_ELECTRON;
+        let n0_star = n0 + 2.0e14;
+        let nl_star = nl + 2.0e14;
+        let ratio = if nl_star != 0.0 {
+            (n0_star / nl_star).max(BSIM3_MIN_LOG_ARG)
+        } else {
+            BSIM3_MIN_LOG_ARG
+        };
+        let t3 = self.oxide_trap_density_a * ratio.ln();
+        let t4 = self.oxide_trap_density_b * (n0 - nl);
+        let t5 = self.oxide_trap_density_c * 0.5 * (n0 * n0 - nl * nl);
+
+        let denom_ssi = 1.0e8 * eff_freq * self.abulk * self.cox * leff_sq;
+        let term_ssi = if denom_ssi > 0.0 {
+            Q_ELECTRON * Q_ELECTRON * BSIM3_K_OVER_Q * cd * temperature * self.ueff / denom_ssi
+                * (t3 + t4 + t5)
+        } else {
+            0.0
+        };
+
+        let t8 = self.oxide_trap_density_a
+            + self.oxide_trap_density_b * nl
+            + self.oxide_trap_density_c * nl * nl;
+        let t9 = nl_star * nl_star;
+        let denom_clm = 1.0e8 * eff_freq * leff_sq * self.weff;
+        let clm = if denom_clm > 0.0 && t9 > 0.0 {
+            BSIM3_K_OVER_Q * temperature * cd * cd / denom_clm * del_clm * t8 / t9
+        } else {
+            0.0
+        };
+        let ssi = term_ssi + clm;
+
+        let denom_swi = self.weff * self.leff * eff_freq * 4.0e36;
+        let swi = if denom_swi > 0.0 {
+            self.oxide_trap_density_a * BSIM3_K_OVER_Q * temperature / denom_swi * cd * cd
+        } else {
+            0.0
+        };
+
+        let total = ssi + swi;
+        if total > 0.0 && total.is_finite() {
+            (self.multiplier * (ssi * swi) / total).max(0.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// One current-injection port used by a correlated noise source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoisePort {
+    pub node_pos: usize,
+    pub node_neg: usize,
+}
+
+/// Per-frequency spectral-density amplitudes for two fully correlated
+/// current-noise ports.
+#[derive(Debug, Clone, Copy)]
+pub struct CorrelatedNoiseDensities {
+    pub first_psd: Value,
+    pub second_psd: Value,
+    pub phase_rad: Value,
+}
+
+#[derive(Debug, Clone)]
+enum CorrelatedNoisePairModel {
+    Bsim4Tnoi2 {
+        gamma_gd0: Value,
+        ctnoi: Value,
+        sigrat: Value,
+        multiplier: Value,
+    },
+}
+
+/// Two fully correlated current-noise ports evaluated as a single
+/// covariance contribution.
+#[derive(Debug, Clone)]
+pub struct CorrelatedNoisePair {
+    /// Name of the device/mechanism generating this pair.
+    pub device_name: String,
+    /// Summary-table mechanism label.
+    pub noise_type: NoiseSourceType,
+    /// First injection port.
+    pub first: NoisePort,
+    /// Second injection port.
+    pub second: NoisePort,
+    /// Thermal-noise temperature offset in kelvin.
+    pub temperature_offset: Value,
+    model: CorrelatedNoisePairModel,
+}
+
+impl CorrelatedNoisePair {
+    /// Create a BSIM4 `tnoiMod=2` correlated channel/gate thermal source.
+    pub fn bsim4_tnoi2(
+        device_name: String,
+        first: NoisePort,
+        second: NoisePort,
+        gamma_gd0: Value,
+        ctnoi: Value,
+        sigrat: Value,
+        multiplier: Value,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Bsim4CorrelatedThermal,
+            first,
+            second,
+            temperature_offset: 0.0,
+            model: CorrelatedNoisePairModel::Bsim4Tnoi2 {
+                gamma_gd0,
+                ctnoi,
+                sigrat,
+                multiplier,
+            },
+        }
+    }
+
+    /// Current-noise PSDs (A²/Hz) and relative phase at `frequency`.
+    pub fn spectral_densities(
+        &self,
+        frequency: Value,
+        temperature: Value,
+    ) -> Option<CorrelatedNoiseDensities> {
+        match self.model {
+            CorrelatedNoisePairModel::Bsim4Tnoi2 {
+                gamma_gd0,
+                ctnoi,
+                sigrat,
+                multiplier,
+            } => {
+                if frequency < 0.0
+                    || gamma_gd0 <= 0.0
+                    || multiplier <= 0.0
+                    || !gamma_gd0.is_finite()
+                    || !ctnoi.is_finite()
+                    || !sigrat.is_finite()
+                    || !multiplier.is_finite()
+                {
+                    return None;
+                }
+
+                let ctnoi_sq = (ctnoi.clamp(0.0, 1.0)).powi(2);
+                let omega_sigrat = 2.0 * std::f64::consts::PI * frequency * sigrat;
+                let gate_fraction = if omega_sigrat.is_finite() {
+                    let shaped = omega_sigrat * omega_sigrat;
+                    shaped / (1.0 + shaped)
+                } else {
+                    1.0
+                };
+                let first_g = gamma_gd0 * ctnoi_sq * multiplier;
+                let second_g = gamma_gd0 * gate_fraction * multiplier;
+                let scale = 4.0 * K_BOLTZMANN * (temperature + self.temperature_offset);
+                let first_psd = (scale * first_g).max(0.0);
+                let second_psd = (scale * second_g).max(0.0);
+                if first_psd <= 0.0 && second_psd <= 0.0 {
+                    return None;
+                }
+                Some(CorrelatedNoiseDensities {
+                    first_psd,
+                    second_psd,
+                    phase_rad: std::f64::consts::FRAC_PI_2,
+                })
+            }
+        }
+    }
+}
 
 /// Types of noise sources in the circuit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +385,12 @@ pub enum NoiseSourceType {
     /// Frequency-interpolated spectral density (Verilog-A `noise_table` /
     /// `noise_table_log`)
     Table,
+    /// BSIM4 physical channel flicker (`fnoiMod=1`).
+    Bsim4Flicker,
+    /// BSIM3 physical channel flicker (`noiMod=2/3/6`).
+    Bsim3Flicker,
+    /// BSIM4 correlated channel/gate thermal noise (`tnoiMod=2`).
+    Bsim4CorrelatedThermal,
 }
 
 /// A noise source in the circuit
@@ -86,6 +421,10 @@ pub struct NoiseSource {
     /// Tabulated PSD for [`NoiseSourceType::Table`]: sorted (f, p) points
     /// and the log-log interpolation flag, scaled by `parameter`
     pub table: Option<std::sync::Arc<(Vec<(Value, Value)>, bool)>>,
+    /// BSIM4 `fnoiMod=1` physical flicker-noise state.
+    pub bsim4_flicker: Option<std::sync::Arc<Bsim4FlickerNoise>>,
+    /// BSIM3 `noiMod=2/3/6` physical flicker-noise state.
+    pub bsim3_flicker: Option<std::sync::Arc<Bsim3FlickerNoise>>,
 }
 
 impl NoiseSource {
@@ -108,6 +447,8 @@ impl NoiseSource {
             corner_freq: 1.0,
             temperature_offset: 0.0,
             table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: None,
         }
     }
 
@@ -125,6 +466,8 @@ impl NoiseSource {
             corner_freq: 1.0,
             temperature_offset: 0.0,
             table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: None,
         }
     }
 
@@ -162,6 +505,8 @@ impl NoiseSource {
             corner_freq: 1.0,
             temperature_offset: 0.0,
             table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: None,
         }
     }
 
@@ -180,6 +525,8 @@ impl NoiseSource {
             corner_freq: 1.0,
             temperature_offset: 0.0,
             table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: None,
         }
     }
 
@@ -217,6 +564,56 @@ impl NoiseSource {
             corner_freq: 1.0,
             temperature_offset: 0.0,
             table: Some(std::sync::Arc::new((points, log_interp))),
+            bsim4_flicker: None,
+            bsim3_flicker: None,
+        }
+    }
+
+    /// Create a BSIM4 physical channel flicker source (`fnoiMod=1`).
+    pub fn bsim4_flicker(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        model: Bsim4FlickerNoise,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Bsim4Flicker,
+            node_pos,
+            node_neg,
+            parameter: 0.0,
+            af: 1.0,
+            ef: model.ef,
+            current: model.cd,
+            corner_freq: 1.0,
+            temperature_offset: 0.0,
+            table: None,
+            bsim4_flicker: Some(std::sync::Arc::new(model)),
+            bsim3_flicker: None,
+        }
+    }
+
+    /// Create a BSIM3 physical channel flicker source (`noiMod=2/3/6`).
+    pub fn bsim3_flicker(
+        device_name: String,
+        node_pos: usize,
+        node_neg: usize,
+        model: Bsim3FlickerNoise,
+    ) -> Self {
+        Self {
+            device_name,
+            noise_type: NoiseSourceType::Bsim3Flicker,
+            node_pos,
+            node_neg,
+            parameter: 0.0,
+            af: 1.0,
+            ef: model.ef,
+            current: model.cd,
+            corner_freq: 1.0,
+            temperature_offset: 0.0,
+            table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: Some(std::sync::Arc::new(model)),
         }
     }
 
@@ -246,6 +643,8 @@ impl NoiseSource {
             corner_freq,
             temperature_offset: 0.0,
             table: None,
+            bsim4_flicker: None,
+            bsim3_flicker: None,
         }
     }
 
@@ -292,6 +691,17 @@ impl NoiseSource {
                 let (points, log_interp) = (&table.0, table.1);
                 (self.parameter * Self::interpolate_table(points, log_interp, frequency)).max(0.0)
             }
+            NoiseSourceType::Bsim4Flicker => self
+                .bsim4_flicker
+                .as_ref()
+                .map(|model| model.spectral_density(frequency, temperature))
+                .unwrap_or(0.0),
+            NoiseSourceType::Bsim3Flicker => self
+                .bsim3_flicker
+                .as_ref()
+                .map(|model| model.spectral_density(frequency, temperature))
+                .unwrap_or(0.0),
+            NoiseSourceType::Bsim4CorrelatedThermal => 0.0,
         }
     }
 
@@ -465,6 +875,9 @@ impl NoiseSourceType {
             NoiseSourceType::Burst => "burst",
             NoiseSourceType::White => "white",
             NoiseSourceType::Table => "table",
+            NoiseSourceType::Bsim4Flicker => "bsim4-flicker",
+            NoiseSourceType::Bsim3Flicker => "bsim3-flicker",
+            NoiseSourceType::Bsim4CorrelatedThermal => "bsim4-correlated-thermal",
         }
     }
 }
