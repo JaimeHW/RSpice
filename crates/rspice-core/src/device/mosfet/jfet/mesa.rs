@@ -973,6 +973,16 @@ impl Jfet {
         let (temp_common, temp_source, _) = self.resolved_temperatures(temp);
         match self.params.channel_model {
             JfetChannelModel::ShichmanHodges => self.calculate_shichman_hodges(vgs, vds),
+            JfetChannelModel::XyceModifiedShockley => {
+                let vgd = vgs - vds;
+                let terms = self.xyce_jfet2_operating_terms(vgs, vds, vgd, temp_common);
+                (terms.ids, terms.gm, terms.gds)
+            }
+            JfetChannelModel::ParkerSkellern => {
+                let vgd = vgs - vds;
+                let terms = self.jfet2_operating_terms(vgs, vds, vgd, temp_common);
+                (terms.ids, terms.gm, terms.gds)
+            }
             JfetChannelModel::LegacyMesfet => self.calculate_legacy_mesfet(vgs, vds),
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2 => self.calculate_mesa_level(vgs, vds, temp_source, 2, false),

@@ -16,6 +16,23 @@ impl Jfet {
     }
 
     #[inline]
+    pub(crate) fn set_analysis_temperature(&mut self, temp: Value) {
+        if temp.is_finite() && temp > 0.0 {
+            self.analysis_temp = temp;
+            self.eval_valid = false;
+        }
+    }
+
+    #[inline]
+    pub(crate) fn analysis_temperature(&self) -> Value {
+        if self.analysis_temp.is_finite() && self.analysis_temp > 0.0 {
+            self.analysis_temp
+        } else {
+            self.params.tnom.max(1.0)
+        }
+    }
+
+    #[inline]
     pub(super) fn resolved_temperatures(&self, ambient: Value) -> (Value, Value, Value) {
         let mut base = if ambient.is_finite() && ambient > 0.0 {
             ambient
@@ -520,7 +537,7 @@ impl Jfet {
             return (seed, seed);
         }
 
-        let temp_k = self.params.tnom.max(1.0);
+        let temp_k = self.analysis_temperature().max(1.0);
         let nvt = (self.params.n.max(1e-12) * self.thermal_voltage(temp_k)).max(1e-12);
         let vcrit = self.classic_gate_vcrit(nvt);
 
@@ -633,6 +650,14 @@ impl Jfet {
         (vgs, vds, vgd)
     }
 
+    #[inline]
+    pub(super) fn external_terminal_voltages(&self, voltages: &[Value]) -> (Value, Value) {
+        (
+            Self::node_voltage(voltages, self.external_drain),
+            Self::node_voltage(voltages, self.external_source),
+        )
+    }
+
     /// HFET branch-voltage limiting and startup seed.
     ///
     /// Returns `(vgs, vgd)` in external terminal orientation.
@@ -684,6 +709,55 @@ impl Jfet {
         Value,
         Value,
     ) {
+        self.compute_operating_terms_with_terminals(vgs, vds, vgd, vds, 0.0)
+    }
+
+    #[inline]
+    #[allow(clippy::type_complexity)]
+    pub(super) fn compute_operating_terms_with_terminals(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vgd: Value,
+        external_vd: Value,
+        external_vs: Value,
+    ) -> (
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+        Value,
+    ) {
+        if matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
+            let terms = self.jfet2_operating_terms(vgs, vds, vgd, self.analysis_temperature());
+            return (
+                terms.ids, terms.gm, terms.gds, terms.igs, terms.igd, terms.ggs, terms.ggd, vds,
+                0.0, 0.0,
+            );
+        }
+        if matches!(
+            self.params.channel_model,
+            JfetChannelModel::XyceModifiedShockley
+        ) {
+            let terms = self.xyce_jfet2_operating_terms_with_terminals(
+                vgs,
+                vds,
+                vgd,
+                self.analysis_temperature(),
+                external_vd,
+                external_vs,
+            );
+            return (
+                terms.ids, terms.gm, terms.gds, terms.igs, terms.igd, terms.ggs, terms.ggd, vds,
+                0.0, 0.0,
+            );
+        }
+
         // GATEMOD=1 evaluates channel and gate together: the gate-drain
         // branch has no vgd conductance; its sensitivities are gmg/gmd
         // and the A1/A2 corrections are already in the channel terms.
@@ -691,7 +765,7 @@ impl Jfet {
             && self.params.hfet_gatemod
             && self.params.hfet_level >= 5
         {
-            let (temp_common, _, _) = self.resolved_temperatures(self.params.tnom);
+            let (temp_common, _, _) = self.resolved_temperatures(self.analysis_temperature());
             let (ids, gm, gds, gate) = self.calculate_hfet1_gatemod(vgs, vds, temp_common);
             let pol = self.jfet_type.polarity();
             let (igs, igd, ggs, gmg, gmd) = match gate {
@@ -703,14 +777,15 @@ impl Jfet {
         }
 
         let mut vds_linear = vds;
-        let (mut ids, mut gm, mut gds_raw) = self.calculate(vgs, vds, self.params.tnom);
+        let analysis_temp = self.analysis_temperature();
+        let (mut ids, mut gm, mut gds_raw) = self.calculate(vgs, vds, analysis_temp);
         if self.hfet_legacy_inverse_active
             && matches!(self.params.channel_model, JfetChannelModel::Hfet1)
             && vds >= 0.0
         {
             match self.params.hfet_level {
                 2..=4 => {
-                    let (_, temp_source, _) = self.resolved_temperatures(self.params.tnom);
+                    let (_, temp_source, _) = self.resolved_temperatures(analysis_temp);
                     let (ids_legacy, gm_legacy, gds_legacy) = self.calculate_mesa_level(
                         vgs,
                         vds,
@@ -724,7 +799,7 @@ impl Jfet {
                 }
                 5.. => {
                     let (ids_forward, gm_forward, gds_forward) =
-                        self.calculate(vgs, vds.abs(), self.params.tnom);
+                        self.calculate(vgs, vds.abs(), analysis_temp);
                     ids = -ids_forward;
                     gm = gm_forward;
                     gds_raw = gds_forward;
@@ -733,7 +808,7 @@ impl Jfet {
                 _ => {}
             }
         }
-        let (igs, igd, ggs, ggd) = self.gate_junctions(vgs, vgd, self.params.tnom);
+        let (igs, igd, ggs, ggd) = self.gate_junctions(vgs, vgd, analysis_temp);
         let gds = if gds_raw.is_finite() { gds_raw } else { 0.0 };
         (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, 0.0, 0.0)
     }

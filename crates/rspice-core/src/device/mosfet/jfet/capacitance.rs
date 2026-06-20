@@ -308,6 +308,16 @@ impl Jfet {
         let vgs_int = pol * vgs;
         let vgd_int = pol * vgd;
 
+        if matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
+            return self.jfet2_gate_junctions(vgs, vgd, temp_common);
+        }
+        if matches!(
+            self.params.channel_model,
+            JfetChannelModel::XyceModifiedShockley
+        ) {
+            return self.xyce_jfet2_gate_junctions(vgs, vgd, temp_common);
+        }
+
         if matches!(self.params.channel_model, JfetChannelModel::Hfet1) {
             // GATEMOD=1 gate currents are produced by the channel
             // evaluation (calculate_hfet1_core) and never reach this
@@ -492,6 +502,11 @@ impl Jfet {
                 let pol = self.jfet_type.polarity();
                 self.capacitances(pol * vgs, pol * vgd)
             }
+            JfetChannelModel::XyceModifiedShockley => {
+                let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp_common);
+                (charge.cgs, charge.cgd)
+            }
+            JfetChannelModel::ParkerSkellern => self.jfet2_capacitances(vgs, vgd, temp_common),
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2..=4 => {
                     let pol = self.jfet_type.polarity();
@@ -551,6 +566,14 @@ impl Jfet {
                 let (cgs, cgd) = self.capacitances(pol * vgs, pol * vgd);
                 (cgs, cgd, cds)
             }
+            JfetChannelModel::XyceModifiedShockley => {
+                let charge = self.xyce_jfet2_charge_state(vgs, vgd, temp);
+                (charge.cgs, charge.cgd, cds)
+            }
+            JfetChannelModel::ParkerSkellern => {
+                let (cgs, cgd) = self.jfet2_capacitances(vgs, vgd, temp);
+                (cgs, cgd, self.jfet2_drain_source_capacitance())
+            }
             JfetChannelModel::Hfet1 => {
                 let (cgs, cgd) = self.transient_capacitances(vgs, vgd, temp);
                 (cgs, cgd, cds)
@@ -563,28 +586,43 @@ impl Jfet {
             && self.params.hfet_level >= 5
         {
             self.params.hfet_cds.max(0.0)
+        } else if matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
+            self.jfet2_drain_source_capacitance()
         } else {
             0.0
         }
     }
 
-    pub(super) fn ac_real_terms_at_frequency(
+    pub(super) fn ac_real_terms_at_frequency_with_terminals(
         &self,
         vgs: Value,
         vds: Value,
         vgd: Value,
         frequency_hz: Value,
+        external_vd: Value,
+        external_vs: Value,
     ) -> (Value, Value, Value, Value) {
-        let (temp_common, temp_source, _) = self.resolved_temperatures(self.params.tnom);
+        let (temp_common, temp_source, _) = self.resolved_temperatures(self.analysis_temperature());
         // GATEMOD=1's gmg/gmd are deliberately not part of the AC stamp:
         // ngspice's hfetacl.c omits them too (only ggd/ggs/gm/gds appear),
         // so dropping them here is reference-exact.
         let (_, gm_base, gds_base, _, _, ggs, ggd, _, _gmg, _gmd) =
-            self.compute_operating_terms(vgs, vds, vgd);
+            self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs);
 
         let (gm, gds) = match self.params.channel_model {
-            JfetChannelModel::ShichmanHodges | JfetChannelModel::LegacyMesfet => {
-                (gm_base, gds_base)
+            JfetChannelModel::ShichmanHodges
+            | JfetChannelModel::XyceModifiedShockley
+            | JfetChannelModel::LegacyMesfet => (gm_base, gds_base),
+            JfetChannelModel::ParkerSkellern => {
+                let (gm, _, gds, _) = self.jfet2_ac_feedback_terms(
+                    vgs,
+                    vds,
+                    self.eval_ids,
+                    frequency_hz,
+                    gm_base,
+                    gds_base,
+                );
+                (gm, gds)
             }
             JfetChannelModel::Hfet1 => match self.params.hfet_level {
                 2..=4 => {
@@ -638,6 +676,23 @@ impl Jfet {
         (gm, gds, ggs, ggd)
     }
 
+    pub(crate) fn ac_imag_feedback_terms_at_frequency(
+        &self,
+        voltages: &[Value],
+        frequency_hz: Value,
+    ) -> Option<(Value, Value)> {
+        if !matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
+            return None;
+        }
+
+        let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
+        let (_, gm_base, gds_base, _, _, _, _, _, _, _) =
+            self.compute_operating_terms(vgs, vds, vgd);
+        let (_, xgm, _, xgds) =
+            self.jfet2_ac_feedback_terms(vgs, vds, self.eval_ids, frequency_hz, gm_base, gds_base);
+        Some((xgm, xgds))
+    }
+
     pub(crate) fn stamp_small_signal_ac(
         &self,
         voltages: &[Value],
@@ -645,7 +700,15 @@ impl Jfet {
         matrix: &mut impl MatrixStamper,
     ) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
-        let (gm, gds, ggs, ggd) = self.ac_real_terms_at_frequency(vgs, vds, vgd, frequency_hz);
+        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
+        let (gm, gds, ggs, ggd) = self.ac_real_terms_at_frequency_with_terminals(
+            vgs,
+            vds,
+            vgd,
+            frequency_hz,
+            external_vd,
+            external_vs,
+        );
 
         matrix.stamp(self.drain, self.drain, gds + ggd);
         matrix.stamp(self.drain, self.gate, gm - ggd);

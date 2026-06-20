@@ -28,10 +28,12 @@ impl Jfet {
         vgs: Value,
         vds: Value,
         vgd: Value,
+        external_vd: Value,
+        external_vs: Value,
         regularize_gate_conductance: bool,
     ) {
         let (ids, gm, gds, igs, igd, mut ggs, mut ggd, vds_linear, gmg, gmd) =
-            self.compute_operating_terms(vgs, vds, vgd);
+            self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs);
         if regularize_gate_conductance
             && self.has_gate_generation_branch()
             && !(self.params.hfet_gatemod && self.params.hfet_level >= 5)
@@ -66,6 +68,7 @@ impl Jfet {
         let vd = Self::node_voltage(voltages, self.drain);
         let vg = Self::node_voltage(voltages, self.gate);
         let vs = Self::node_voltage(voltages, self.source);
+        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
         let vgs = vg - vs;
         let vgd = vg - vd;
         let vds = vgs - vgd;
@@ -81,7 +84,7 @@ impl Jfet {
         self.last_raw_vgd_prev = self.last_raw_vgd;
         self.last_raw_vgs = vgs;
         self.last_raw_vgd = vgd;
-        self.cache_operating_terms_at(vgs, vds, vgd, false);
+        self.cache_operating_terms_at(vgs, vds, vgd, external_vd, external_vs, false);
     }
 
     /// Link this device to a StaticMatrix for O(1) direct stamping.
@@ -124,6 +127,7 @@ impl Jfet {
     /// Stamp using O(1) direct indexing (call after `link`).
     pub fn stamp_direct(&self, matrix: &mut StaticMatrix, rhs: &mut [Value], voltages: &[Value]) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
+        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
 
         let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, gmg, gmd) = if self.eval_valid {
             (
@@ -139,7 +143,7 @@ impl Jfet {
                 self.eval_gmd,
             )
         } else {
-            self.compute_operating_terms(vgs, vds, vgd)
+            self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs)
         };
         let ids_eq = ids - gm * vgs - gds * vds_linear;
         let igs_eq = igs - ggs * vgs;
@@ -197,9 +201,14 @@ impl NonlinearDevice for Jfet {
         let vd = Self::node_voltage(voltages, self.drain);
         let vg = Self::node_voltage(voltages, self.gate);
         let vs = Self::node_voltage(voltages, self.source);
+        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
         let vgs_raw = vg - vs;
         let vgd_raw = vg - vd;
-        if self.matches_last_raw_branch_input(vgs_raw, vgd_raw) {
+        if !matches!(
+            self.params.channel_model,
+            JfetChannelModel::XyceModifiedShockley
+        ) && self.matches_last_raw_branch_input(vgs_raw, vgd_raw)
+        {
             if self.vgs.is_finite() && self.vds.is_finite() {
                 self.vgs_prev = self.vgs;
                 self.vds_prev = self.vds;
@@ -231,7 +240,8 @@ impl NonlinearDevice for Jfet {
                 && vgs_prev.is_finite()
                 && vgd_prev.is_finite()
             {
-                let (_, temp_source, temp_drain) = self.resolved_temperatures(self.params.tnom);
+                let (_, temp_source, temp_drain) =
+                    self.resolved_temperatures(self.analysis_temperature());
                 let n = self.params.n.max(1e-12);
                 let vtes = (n * self.thermal_voltage(temp_source)).max(1e-12);
                 let vted = (n * self.thermal_voltage(temp_drain)).max(1e-12);
@@ -249,6 +259,21 @@ impl NonlinearDevice for Jfet {
             limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
             vgs = vgs_limited;
             vgd = vgd_limited;
+        } else if matches!(self.params.channel_model, JfetChannelModel::ParkerSkellern) {
+            let (vgs_limited, vgd_limited) = self.jfet2_limited_branch_voltages(vgs, vgd);
+            limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
+            limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
+            vgs = vgs_limited;
+            vgd = vgd_limited;
+        } else if matches!(
+            self.params.channel_model,
+            JfetChannelModel::XyceModifiedShockley
+        ) {
+            let (vgs_limited, vgd_limited) = self.xyce_jfet2_limited_branch_voltages(vgs, vgd);
+            limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
+            limiter_applied |= (vgd_limited - vgd).abs() > 0.0;
+            vgs = vgs_limited;
+            vgd = vgd_limited;
         } else if matches!(self.params.channel_model, JfetChannelModel::ShichmanHodges) {
             let (vgs_limited, vgd_limited) = self.classic_limited_branch_voltages(vgs, vgd);
             limiter_applied |= (vgs_limited - vgs).abs() > 0.0;
@@ -258,8 +283,12 @@ impl NonlinearDevice for Jfet {
         }
 
         let mut bypassed = false;
-        let can_use_static_bypass = !(matches!(self.params.channel_model, JfetChannelModel::Hfet1)
-            && self.params.hfet_level >= 5);
+        let can_use_static_bypass =
+            !matches!(
+                self.params.channel_model,
+                JfetChannelModel::XyceModifiedShockley
+            ) && !(matches!(self.params.channel_model, JfetChannelModel::Hfet1)
+                && self.params.hfet_level >= 5);
         if can_use_static_bypass && self.eval_valid && vgs_prev.is_finite() && vgd_prev.is_finite()
         {
             const RELTOL: Value = 1e-3;
@@ -304,7 +333,7 @@ impl NonlinearDevice for Jfet {
         self.last_raw_vgd = vgd_raw;
 
         if !bypassed {
-            self.cache_operating_terms_at(vgs, vds, vgd, true);
+            self.cache_operating_terms_at(vgs, vds, vgd, external_vd, external_vs, true);
         }
     }
 
@@ -315,6 +344,7 @@ impl NonlinearDevice for Jfet {
         _rhs: &mut [Value],
     ) {
         let (vgs, vds, vgd) = self.state_or_raw_branch_voltages(voltages);
+        let (external_vd, external_vs) = self.external_terminal_voltages(voltages);
 
         let (ids, gm, gds, igs, igd, ggs, ggd, vds_linear, gmg, gmd) = if self.eval_valid {
             (
@@ -330,7 +360,7 @@ impl NonlinearDevice for Jfet {
                 self.eval_gmd,
             )
         } else {
-            self.compute_operating_terms(vgs, vds, vgd)
+            self.compute_operating_terms_with_terminals(vgs, vds, vgd, external_vd, external_vs)
         };
         let ids_eq = ids - gm * vgs - gds * vds_linear;
         let igs_eq = igs - ggs * vgs;

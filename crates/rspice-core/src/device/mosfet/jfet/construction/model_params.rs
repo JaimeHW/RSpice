@@ -80,6 +80,7 @@ impl Jfet {
         }
         if let Some(v) = params
             .get("PB")
+            .or_else(|| params.get("VBI"))
             .copied()
             .filter(|v| v.is_finite() && *v > 0.0)
         {
@@ -163,7 +164,11 @@ impl Jfet {
             p.eta = v;
         }
         if let Some(v) = params.get("THETA").copied().filter(|v| v.is_finite()) {
-            p.mesa_theta = v;
+            if matches!(p.channel_model, JfetChannelModel::XyceModifiedShockley) {
+                p.jfet2_theta = v;
+            } else {
+                p.mesa_theta = v;
+            }
         }
         if let Some(v) = params.get("ALPHA").copied().filter(|v| v.is_finite()) {
             p.mesa_alpha = v;
@@ -220,6 +225,63 @@ impl Jfet {
         {
             p.ef = v;
         }
+
+        macro_rules! set_jfet2_nonnegative {
+            ($name:literal, $field:ident) => {
+                if let Some(v) = params
+                    .get($name)
+                    .copied()
+                    .filter(|v| v.is_finite() && *v >= 0.0)
+                {
+                    p.$field = v;
+                }
+            };
+        }
+        macro_rules! set_jfet2_positive {
+            ($name:literal, $field:ident) => {
+                if let Some(v) = params
+                    .get($name)
+                    .copied()
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                {
+                    p.$field = v;
+                }
+            };
+        }
+        macro_rules! set_jfet2_finite {
+            ($name:literal, $field:ident) => {
+                if let Some(v) = params.get($name).copied().filter(|v| v.is_finite()) {
+                    p.$field = v;
+                }
+            };
+        }
+
+        set_jfet2_finite!("ACGAM", jfet2_acgam);
+        set_jfet2_nonnegative!("CDS", jfet2_capds);
+        set_jfet2_finite!("DELTA", jfet2_delta);
+        set_jfet2_finite!("THETA", jfet2_theta);
+        set_jfet2_finite!("HFETA", jfet2_hfeta);
+        set_jfet2_finite!("HFE1", jfet2_hfe1);
+        set_jfet2_finite!("HFE2", jfet2_hfe2);
+        set_jfet2_finite!("HFG1", jfet2_hfg1);
+        set_jfet2_finite!("HFG2", jfet2_hfg2);
+        set_jfet2_finite!("MVST", jfet2_mvst);
+        set_jfet2_finite!("MXI", jfet2_mxi);
+        set_jfet2_nonnegative!("IBD", jfet2_ibd);
+        set_jfet2_finite!("LFGAM", jfet2_lfgam);
+        set_jfet2_finite!("LFG1", jfet2_lfg1);
+        set_jfet2_finite!("LFG2", jfet2_lfg2);
+        set_jfet2_positive!("P", jfet2_p);
+        set_jfet2_positive!("Q", jfet2_q);
+        set_jfet2_nonnegative!("TAUD", jfet2_taud);
+        set_jfet2_nonnegative!("TAUG", jfet2_taug);
+        set_jfet2_positive!("VBD", jfet2_vbd);
+        set_jfet2_finite!("VER", jfet2_ver);
+        set_jfet2_finite!("VST", jfet2_vst);
+        set_jfet2_finite!("XC", jfet2_xc);
+        set_jfet2_positive!("XI", jfet2_xi);
+        set_jfet2_nonnegative!("Z", jfet2_z);
+        set_jfet2_finite!("HFGAM", jfet2_hfgam);
 
         if let Some(v) = params
             .get("MC")
@@ -570,7 +632,7 @@ impl Jfet {
             .copied()
             .filter(|v| v.is_finite() && *v > 0.0)
         {
-            p.tnom = v;
+            p.tnom = if v > 200.0 { v } else { v + 273.15 };
         }
         self.params = p;
         self

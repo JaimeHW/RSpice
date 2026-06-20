@@ -1,6 +1,8 @@
 //! JFET (Junction Field-Effect Transistor) Device Model
 //!
-//! Implements the Shichman-Hodges model for N-channel and P-channel JFETs.
+//! Implements native JFET-family models for N-channel and P-channel devices,
+//! including Shichman-Hodges level 1, ngspice Parker-Skellern JFET2, Xyce
+//! modified-Shockley JFET2, and the MESFET/HFET-compatible variants.
 //!
 //! # Model Equations
 //!
@@ -39,6 +41,7 @@ use crate::solver::{CscIndex, StaticMatrix};
 mod bias;
 mod capacitance;
 mod construction;
+mod jfet2;
 mod mesa;
 mod params;
 mod stamping;
@@ -71,6 +74,10 @@ impl JfetType {
 pub enum JfetChannelModel {
     /// Classic Shichman-Hodges JFET equations.
     ShichmanHodges,
+    /// ngspice JFET2 Parker-Skellern short-channel JFET/MESFET equations.
+    ParkerSkellern,
+    /// Xyce JFET level-2 modified-Shockley equations.
+    XyceModifiedShockley,
     /// Berkeley SPICE level-1 MESFET equations (`mes` device).
     LegacyMesfet,
     /// HFET1-compatible MESFET channel equations (ngspice-derived).
@@ -125,6 +132,14 @@ impl MesaLevel2Linearization {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Jfet2ChargeState {
+    pub qgs: Value,
+    pub qgd: Value,
+    pub cgs: Value,
+    pub cgd: Value,
+}
+
 //=============================================================================
 // JFET Parameters
 //=============================================================================
@@ -170,6 +185,58 @@ pub struct JfetParams {
     pub tnom: Value,
     /// Channel model to evaluate.
     pub channel_model: JfetChannelModel,
+    /// JFET2 drain-source zero-bias capacitance `CDS`.
+    pub jfet2_capds: Value,
+    /// JFET2 AC capacitance Vds modulation `ACGAM`.
+    pub jfet2_acgam: Value,
+    /// JFET2 thermal drain-current reduction coefficient `DELTA`.
+    pub jfet2_delta: Value,
+    /// Xyce JFET2 mobility-modulation coefficient `THETA`.
+    pub jfet2_theta: Value,
+    /// JFET2 high-frequency source feedback `HFETA`.
+    pub jfet2_hfeta: Value,
+    /// JFET2 source-feedback Vgd modulation `HFE1`.
+    pub jfet2_hfe1: Value,
+    /// JFET2 source-feedback Vgs modulation `HFE2`.
+    pub jfet2_hfe2: Value,
+    /// JFET2 high-frequency drain-feedback Vgs modulation `HFG1`.
+    pub jfet2_hfg1: Value,
+    /// JFET2 high-frequency drain-feedback Vgd modulation `HFG2`.
+    pub jfet2_hfg2: Value,
+    /// JFET2 subthreshold Vds modulation `MVST`.
+    pub jfet2_mvst: Value,
+    /// JFET2 saturation index Vgs modulation `MXI`.
+    pub jfet2_mxi: Value,
+    /// JFET2 reverse-breakdown saturation current `IBD`.
+    pub jfet2_ibd: Value,
+    /// JFET2 low-frequency drain feedback `LFGAM`.
+    pub jfet2_lfgam: Value,
+    /// JFET2 low-frequency drain-feedback Vgs modulation `LFG1`.
+    pub jfet2_lfg1: Value,
+    /// JFET2 low-frequency drain-feedback Vgd modulation `LFG2`.
+    pub jfet2_lfg2: Value,
+    /// JFET2 power law in controlled resistance `P`.
+    pub jfet2_p: Value,
+    /// JFET2 power law in saturated branch `Q`.
+    pub jfet2_q: Value,
+    /// JFET2 thermal relaxation time `TAUD`.
+    pub jfet2_taud: Value,
+    /// JFET2 drain-feedback relaxation time `TAUG`.
+    pub jfet2_taug: Value,
+    /// JFET2 reverse breakdown voltage `VBD`.
+    pub jfet2_vbd: Value,
+    /// JFET2 model version marker `VER`.
+    pub jfet2_ver: Value,
+    /// JFET2 subthreshold exponential coefficient `VST`.
+    pub jfet2_vst: Value,
+    /// JFET2 capacitance reduction at pinch-off `XC`.
+    pub jfet2_xc: Value,
+    /// JFET2 velocity saturation index `XI`.
+    pub jfet2_xi: Value,
+    /// JFET2 saturation knee curvature `Z`.
+    pub jfet2_z: Value,
+    /// JFET2 high-frequency drain feedback `HFGAM`; NaN means default to `LFGAM`.
+    pub jfet2_hfgam: Value,
     /// MESFET/HFET level selector from model card.
     /// - `<=1`: HFET1-style Schottky leak model
     /// - `2..=4`: MESA-style gate branches
@@ -344,6 +411,10 @@ pub struct Jfet {
     pub gate: NodeId,
     /// Source node index
     pub source: NodeId,
+    /// Original external drain node before model RD externalization.
+    pub(crate) external_drain: NodeId,
+    /// Original external source node before model RS externalization.
+    pub(crate) external_source: NodeId,
     /// Model parameters
     pub params: JfetParams,
     /// Device multiplier
@@ -358,6 +429,8 @@ pub struct Jfet {
     instance_temp: Option<Value>,
     /// Optional instance DTEMP offset added when TEMP is not given.
     instance_dtemp: Value,
+    /// Circuit analysis temperature in Kelvin, before instance TEMP/DTEMP.
+    analysis_temp: Value,
     /// Builder-resolved thermal-noise temperature offset in kelvin
     /// (jfetnoi.c `dtemp` semantics).
     pub noise_dtemp: Value,

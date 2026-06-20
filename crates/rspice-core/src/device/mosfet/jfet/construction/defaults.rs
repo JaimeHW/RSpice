@@ -9,6 +9,8 @@ impl Jfet {
             drain,
             gate,
             source,
+            external_drain: drain,
+            external_source: source,
             params: JfetParams::default(),
             m: 1.0,
             area: 1.0,
@@ -16,6 +18,7 @@ impl Jfet {
             length: 1e-6,
             instance_temp: None,
             instance_dtemp: 0.0,
+            analysis_temp: 300.15,
             noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
@@ -62,6 +65,8 @@ impl Jfet {
             drain,
             gate,
             source,
+            external_drain: drain,
+            external_source: source,
             params: JfetParams::default(),
             m: 1.0,
             area: 1.0,
@@ -69,6 +74,7 @@ impl Jfet {
             length: 1e-6,
             instance_temp: None,
             instance_dtemp: 0.0,
+            analysis_temp: 300.15,
             noise_dtemp: 0.0,
             instance_ts: None,
             instance_td: None,
@@ -122,6 +128,81 @@ impl Jfet {
     /// Set area factor
     pub fn with_area(mut self, area: Value) -> Self {
         self.area = area;
+        self
+    }
+
+    /// Enable ngspice JFET2 Parker-Skellern defaults (`NJF`/`PJF LEVEL=2`).
+    pub fn enable_jfet2_model(mut self) -> Self {
+        self.params.channel_model = JfetChannelModel::ParkerSkellern;
+        self.hfet_legacy_inverse_mode = false;
+        self.hfet_legacy_inverse_active = false;
+        self.params.hfet_level = 2;
+        self.params.vto = -2.0;
+        self.params.beta = 1.0e-4;
+        self.params.lambda = 0.0;
+        self.params.is = 1.0e-14;
+        self.params.pb = 1.0;
+        self.params.fc = 0.5;
+        self.params.n = 1.0;
+        self.params.jfet2_capds = 0.0;
+        self.params.jfet2_acgam = 0.0;
+        self.params.jfet2_delta = 0.0;
+        self.params.jfet2_theta = 0.0;
+        self.params.jfet2_hfeta = 0.0;
+        self.params.jfet2_hfe1 = 0.0;
+        self.params.jfet2_hfe2 = 0.0;
+        self.params.jfet2_hfg1 = 0.0;
+        self.params.jfet2_hfg2 = 0.0;
+        self.params.jfet2_mvst = 0.0;
+        self.params.jfet2_mxi = 0.0;
+        self.params.jfet2_ibd = 0.0;
+        self.params.jfet2_lfgam = 0.0;
+        self.params.jfet2_lfg1 = 0.0;
+        self.params.jfet2_lfg2 = 0.0;
+        self.params.jfet2_p = 2.0;
+        self.params.jfet2_q = 2.0;
+        self.params.jfet2_taud = 0.0;
+        self.params.jfet2_taug = 0.0;
+        self.params.jfet2_vbd = 1.0;
+        self.params.jfet2_ver = 0.0;
+        self.params.jfet2_vst = 0.0;
+        self.params.jfet2_xc = 0.0;
+        self.params.jfet2_xi = 1000.0;
+        self.params.jfet2_z = 1.0;
+        self.params.jfet2_hfgam = Value::NAN;
+        self.vgs = Value::NAN;
+        self.vds = Value::NAN;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.eval_valid = false;
+        self.limiter_applied = false;
+        self
+    }
+
+    /// Enable Xyce-compatible modified-Shockley JFET2 defaults.
+    pub fn enable_xyce_jfet2_model(mut self) -> Self {
+        self.params.channel_model = JfetChannelModel::XyceModifiedShockley;
+        self.hfet_legacy_inverse_mode = false;
+        self.hfet_legacy_inverse_active = false;
+        self.params.hfet_level = 2;
+        self.params.vto = -2.0;
+        self.params.beta = 1.0e-4;
+        self.params.lambda = 0.0;
+        self.params.is = 1.0e-14;
+        self.params.pb = 1.0;
+        self.params.fc = 0.5;
+        self.params.n = 1.0;
+        self.params.jfet2_delta = 0.0;
+        self.params.jfet2_theta = 0.0;
+        self.params.jfet2_capds = 0.0;
+        self.params.jfet2_acgam = 0.0;
+        self.params.jfet2_hfgam = Value::NAN;
+        self.vgs = Value::NAN;
+        self.vds = Value::NAN;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.eval_valid = false;
+        self.limiter_applied = false;
         self
     }
 
