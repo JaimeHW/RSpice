@@ -3,7 +3,7 @@ use super::shared::{NodeResolver, map_hdf5_output_error};
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::run_signals::{
     dc_operating_point_current_signals, dc_operating_point_signals,
-    dc_operating_point_voltage_signals, transient_voltage_signals,
+    dc_operating_point_voltage_signals, dc_sweep_signals, transient_signals,
 };
 use crate::hdf5::{Hdf5SimulationData, Hdf5WaveformSection, write_hdf5};
 use std::path::Path;
@@ -343,7 +343,7 @@ pub(super) fn run_dc_sweep(
             if let Some(ref output_path) = ctx.output_path_for("dc") {
                 let sweep_vals: Vec<f64> = results.iter().map(|(v, _)| *v).collect();
                 let signals = crate::commands::run_signals::apply_save_set(
-                    crate::commands::run_signals::dc_sweep_voltage_signals(&results),
+                    dc_sweep_signals(&results),
                     &ctx.netlist.saves,
                 );
                 match ctx.format {
@@ -360,27 +360,11 @@ pub(super) fn run_dc_sweep(
                         write_hdf5(output_path, &data)
                             .map_err(|err| map_hdf5_output_error(output_path, err))?;
                     }
-                    OutputFormat::Raw | OutputFormat::RawAscii => {
-                        let node_names: Vec<String> = signals
-                            .iter()
-                            .map(|signal| signal.raw_name.clone())
-                            .collect();
-                        let node_waveforms: Vec<Vec<f64>> =
-                            signals.iter().map(|signal| signal.values.clone()).collect();
-                        rspice_core::analysis::export_dc_sweep(
-                            output_path,
-                            &sweep_vals,
-                            source,
-                            &node_names,
-                            &node_waveforms,
-                            raw_export_format(ctx.format),
-                        )
-                        .map_err(|e| CliError::OutputError {
-                            path: output_path.clone(),
-                            source: e,
-                        })?;
-                    }
-                    OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Json => {
+                    OutputFormat::Raw
+                    | OutputFormat::RawAscii
+                    | OutputFormat::Csv
+                    | OutputFormat::Tsv
+                    | OutputFormat::Json => {
                         super::export::scalar_table(
                             "dc_sweep",
                             "DC transfer characteristic",
@@ -578,7 +562,7 @@ pub(super) fn run_transient(
 
             if let Some(ref output_path) = ctx.output_path_for("tran") {
                 let signals = crate::commands::run_signals::apply_save_set(
-                    transient_voltage_signals(&result),
+                    transient_signals(&result),
                     &ctx.netlist.saves,
                 );
                 match ctx.format {
@@ -596,26 +580,11 @@ pub(super) fn run_transient(
                         write_hdf5(output_path, &data)
                             .map_err(|err| map_hdf5_output_error(output_path, err))?;
                     }
-                    OutputFormat::Raw | OutputFormat::RawAscii => {
-                        let node_names: Vec<String> = signals
-                            .iter()
-                            .map(|signal| signal.raw_name.clone())
-                            .collect();
-                        let waveforms: Vec<Vec<f64>> =
-                            signals.iter().map(|signal| signal.values.clone()).collect();
-                        rspice_core::analysis::export_transient(
-                            output_path,
-                            &result.time,
-                            &node_names,
-                            &waveforms,
-                            raw_export_format(ctx.format),
-                        )
-                        .map_err(|e| CliError::OutputError {
-                            path: output_path.clone(),
-                            source: e,
-                        })?;
-                    }
-                    OutputFormat::Csv | OutputFormat::Tsv | OutputFormat::Json => {
+                    OutputFormat::Raw
+                    | OutputFormat::RawAscii
+                    | OutputFormat::Csv
+                    | OutputFormat::Tsv
+                    | OutputFormat::Json => {
                         super::export::scalar_table(
                             "transient",
                             "Transient Analysis",
@@ -968,13 +937,6 @@ pub(super) fn run_temp(ctx: &RunContext<'_>, temperatures: &[f64]) -> Result<(),
     }
 
     Ok(())
-}
-
-fn raw_export_format(format: OutputFormat) -> rspice_core::analysis::RawFormat {
-    match format {
-        OutputFormat::RawAscii => rspice_core::analysis::RawFormat::Ascii,
-        _ => rspice_core::analysis::RawFormat::Binary,
-    }
 }
 
 fn resolve_transient_max_step(

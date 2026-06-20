@@ -165,6 +165,65 @@ fn monte_carlo_exports_samples_and_is_seed_deterministic() {
 }
 
 #[test]
+fn monte_carlo_zero_spread_exports_nominal_samples() {
+    let dir = test_dir("mc_zero");
+    let deck = write_deck(
+        &dir,
+        "mc_zero.sp",
+        "* deterministic MC plumbing check\n\
+         V1 in 0 5\n\
+         R1 in out {rtop}\n\
+         R2 out 0 1k\n\
+         .param rtop=1k\n\
+         .op\n\
+         .end\n",
+    );
+    let json_out = dir.join("mc_zero.json");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "--monte-carlo",
+        "4",
+        "--mc-spread",
+        "0",
+        "-o",
+        json_out.to_str().unwrap(),
+        "-f",
+        "json",
+    ]);
+    assert!(
+        output.status.success(),
+        "zero spread should mean deterministic nominal samples; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&json_out).expect("mc json")).expect("parse");
+    let variables = json["variables"].as_array().expect("variables array");
+    let vout = variables
+        .iter()
+        .find(|v| {
+            v["name"]
+                .as_str()
+                .unwrap_or("")
+                .eq_ignore_ascii_case("V(OUT)")
+        })
+        .expect("V(OUT) variable");
+    assert_eq!(vout["std_dev"].as_f64().unwrap(), 0.0);
+    let samples = vout["samples"].as_array().unwrap();
+    assert_eq!(samples.len(), 4);
+    assert!(
+        samples
+            .iter()
+            .all(|sample| (sample.as_f64().unwrap() - 2.5).abs() < 1e-9)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn transfer_function_exports_scalars() {
     let dir = test_dir("tf");
     let deck = write_deck(

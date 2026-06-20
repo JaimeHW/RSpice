@@ -139,6 +139,27 @@ pub(crate) fn transient_voltage_signals(result: &TransientResult) -> Vec<ScalarS
         .collect()
 }
 
+pub(crate) fn transient_current_signals(result: &TransientResult) -> Vec<ScalarSignal> {
+    result
+        .branch_currents
+        .iter()
+        .enumerate()
+        .map(|(index, waveform)| {
+            let raw_name = result.branch_names.get(index).map_or_else(
+                || (index + 1).to_string(),
+                |name| current_raw_name(name, index + 1),
+            );
+            current_signal(raw_name, waveform.clone())
+        })
+        .collect()
+}
+
+pub(crate) fn transient_signals(result: &TransientResult) -> Vec<ScalarSignal> {
+    let mut signals = transient_voltage_signals(result);
+    signals.extend(transient_current_signals(result));
+    signals
+}
+
 pub(crate) fn dc_operating_point_voltage_signals(result: &SimulationResult) -> Vec<ScalarSignal> {
     (1..result.node_voltages.len())
         .map(|node_id| {
@@ -190,6 +211,41 @@ pub(crate) fn dc_sweep_voltage_signals(results: &[(Value, SimulationResult)]) ->
             voltage_signal(raw_name, values)
         })
         .collect()
+}
+
+pub(crate) fn dc_sweep_current_signals(results: &[(Value, SimulationResult)]) -> Vec<ScalarSignal> {
+    let Some((_, first_result)) = results.first() else {
+        return Vec::new();
+    };
+
+    first_result
+        .branch_currents
+        .iter()
+        .enumerate()
+        .map(|(branch_idx, _)| {
+            let raw_name = first_result.branch_names.get(branch_idx).map_or_else(
+                || (branch_idx + 1).to_string(),
+                |name| current_raw_name(name, branch_idx + 1),
+            );
+            let values = results
+                .iter()
+                .map(|(_, result)| {
+                    result
+                        .branch_currents
+                        .get(branch_idx)
+                        .copied()
+                        .unwrap_or_default()
+                })
+                .collect();
+            current_signal(raw_name, values)
+        })
+        .collect()
+}
+
+pub(crate) fn dc_sweep_signals(results: &[(Value, SimulationResult)]) -> Vec<ScalarSignal> {
+    let mut signals = dc_sweep_voltage_signals(results);
+    signals.extend(dc_sweep_current_signals(results));
+    signals
 }
 
 fn split_complex(values: impl Iterator<Item = Complex64>) -> (Vec<Value>, Vec<Value>) {

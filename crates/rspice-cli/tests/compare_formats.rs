@@ -199,6 +199,80 @@ fn missing_golden_variable_fails() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// SPICE signal names are case-insensitive. `--ignore-missing` must not
+/// turn a case-only spelling mismatch into a pass that compares only time.
+#[test]
+fn compare_matches_variables_case_insensitively_before_ignoring_missing() {
+    let dir = test_dir("case_var");
+    std::fs::write(dir.join("golden.csv"), "time,v(out)\n0,1.0\n1e-6,2.0\n").unwrap();
+    std::fs::write(dir.join("result.csv"), "time,V(OUT)\n0,1.0\n1e-6,9.0\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--ignore-missing",
+        ])
+        .output()
+        .expect("run rspice");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "case-only variable differences must still compare the signal; stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("V(OUT)") || stdout.contains("v(out)"),
+        "output should identify the compared signal: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compare_variable_filter_accepts_bare_voltage_node_name() {
+    let dir = test_dir("bare_var");
+    std::fs::write(
+        dir.join("golden.csv"),
+        "time,V(OUT),V(IN)\n0,1.0,5.0\n1e-6,2.0,5.0\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("result.csv"),
+        "time,V(OUT),V(IN)\n0,1.0,5.0\n1e-6,9.0,5.0\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--variables",
+            "out",
+        ])
+        .output()
+        .expect("run rspice");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "bare node filter should select V(OUT) and catch the drift; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("V(OUT)"),
+        "output should name the selected voltage signal: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// --bless bootstraps a missing golden and accepts drift on demand.
 #[test]
 fn bless_updates_the_golden_file() {

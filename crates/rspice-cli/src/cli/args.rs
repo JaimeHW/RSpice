@@ -246,8 +246,9 @@ pub struct RunArgs {
     )]
     pub mc_distribution: Option<String>,
 
-    /// Monte Carlo relative spread: sigma for gaussian, tolerance for
-    /// uniform/worst-case (default: 0.01 = 1%)
+    /// Monte Carlo relative spread: non-negative sigma for gaussian,
+    /// tolerance for uniform/worst-case (0 = deterministic nominal samples;
+    /// default: 0.01 = 1%)
     #[arg(long, value_name = "SPREAD", requires = "monte_carlo", value_parser = spice_value)]
     pub mc_spread: Option<f64>,
 

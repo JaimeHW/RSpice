@@ -193,6 +193,39 @@ struct WaveformData {
     values: Vec<Vec<f64>>,
 }
 
+fn variable_name_matches(left: &str, right: &str) -> bool {
+    let left = left.trim();
+    let right = right.trim();
+    left.eq_ignore_ascii_case(right)
+        || voltage_node_alias(left)
+            .zip(voltage_node_alias(right))
+            .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right))
+        || voltage_node_alias(left).is_some_and(|left| left.eq_ignore_ascii_case(right))
+        || voltage_node_alias(right).is_some_and(|right| right.eq_ignore_ascii_case(left))
+}
+
+fn voltage_node_alias(name: &str) -> Option<&str> {
+    let trimmed = name.trim();
+    let inner = trimmed
+        .strip_prefix(['V', 'v'])
+        .and_then(|tail| tail.strip_prefix('('))
+        .and_then(|tail| tail.strip_suffix(')'))?
+        .trim();
+    (!inner.is_empty() && !inner.contains(',')).then_some(inner)
+}
+
+fn contains_variable(variables: &[String], requested: &str) -> bool {
+    variables
+        .iter()
+        .any(|candidate| variable_name_matches(candidate, requested))
+}
+
+fn find_variable_index(variables: &[String], requested: &str) -> Option<usize> {
+    variables
+        .iter()
+        .position(|candidate| variable_name_matches(candidate, requested))
+}
+
 /// Load waveform data from a result file in any supported format.
 ///
 /// The scale becomes the first compared series; complex signals expand to
@@ -304,7 +337,7 @@ fn compare_waveforms(
     if args.variables.is_empty() {
         if !args.ignore_missing {
             for var in &golden.variables {
-                if !result.variables.contains(var) {
+                if !contains_variable(&result.variables, var) {
                     cmp_result
                         .problems
                         .push(format!("variable '{var}' is missing from the result"));
@@ -313,12 +346,12 @@ fn compare_waveforms(
         }
     } else {
         for var in &args.variables {
-            if !result.variables.contains(var) {
+            if !contains_variable(&result.variables, var) {
                 cmp_result
                     .problems
                     .push(format!("variable '{var}' is missing from the result"));
             }
-            if !golden.variables.contains(var) {
+            if !contains_variable(&golden.variables, var) {
                 cmp_result
                     .problems
                     .push(format!("variable '{var}' is missing from the golden file"));
@@ -329,12 +362,12 @@ fn compare_waveforms(
     // Find matching variables
     for (var_idx, var_name) in result.variables.iter().enumerate() {
         // Skip if not in filter list (if filter is specified)
-        if !args.variables.is_empty() && !args.variables.contains(var_name) {
+        if !args.variables.is_empty() && !contains_variable(&args.variables, var_name) {
             continue;
         }
 
         // Find matching variable in golden
-        let golden_idx = match golden.variables.iter().position(|v| v == var_name) {
+        let golden_idx = match find_variable_index(&golden.variables, var_name) {
             Some(idx) => idx,
             None => continue, // Variable not in golden
         };

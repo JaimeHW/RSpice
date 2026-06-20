@@ -28,11 +28,29 @@ r2 out 0 1k
 .end
 ";
 
+const DC_CURRENT_PRINT_DECK: &str = "* dc current print export test
+v1 in 0 dc 5
+r1 in out 1k
+r2 out 0 1k
+.dc v1 0 5 1
+.print dc v(out) i(v1)
+.end
+";
+
 const TRAN_DECK: &str = "* transient export test
 v1 in 0 sin(0 1 1k)
 r1 in out 1k
 c1 out 0 1u
 .tran 10u 200u
+.end
+";
+
+const TRAN_CURRENT_PRINT_DECK: &str = "* transient current print export test
+v1 in 0 pulse(0 5 0 1n 1n 50u 100u)
+r1 in out 1k
+c1 out 0 1u
+.tran 10u 200u
+.print tran v(out) i(v1)
 .end
 ";
 
@@ -233,6 +251,51 @@ fn transient_csv_is_text_not_binary() {
     assert!(
         !text.contains("Binary:"),
         "csv output contains rawfile binary marker"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn current_column_index(header: &str, name: &str) -> usize {
+    header
+        .split(',')
+        .position(|column| column.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("{name} column missing from header: {header:?}"))
+}
+
+#[test]
+fn dc_sweep_print_exports_branch_current() {
+    let dir = test_dir("dc_current_print");
+    let path = run_export(&dir, "dc_current_print", DC_CURRENT_PRINT_DECK, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let header = text.lines().next().expect("csv header");
+    let current_column = current_column_index(header, "I(v1)");
+    assert!(
+        text.lines().skip(1).any(|line| {
+            line.split(',')
+                .nth(current_column)
+                .and_then(|field| field.parse::<f64>().ok())
+                .is_some_and(|value| value.abs() > 0.0)
+        }),
+        "dc branch current column should contain non-zero source current: {text}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn transient_print_exports_branch_current() {
+    let dir = test_dir("tran_current_print");
+    let path = run_export(&dir, "tran_current_print", TRAN_CURRENT_PRINT_DECK, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let header = text.lines().next().expect("csv header");
+    let current_column = current_column_index(header, "I(v1)");
+    assert!(
+        text.lines().skip(1).any(|line| {
+            line.split(',')
+                .nth(current_column)
+                .and_then(|field| field.parse::<f64>().ok())
+                .is_some_and(|value| value.abs() > 0.0)
+        }),
+        "tran branch current column should contain non-zero source current: {text}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

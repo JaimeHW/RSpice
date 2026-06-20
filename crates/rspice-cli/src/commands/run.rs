@@ -1046,6 +1046,8 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
         charge_abstol: args.charge_abstol,
         residual_reltol: args.residual_reltol,
         gmin_initial: args.gmin,
+        spice_dialect: None,
+        jfet_level2_model: None,
     };
 
     resolve_simulation_config(&base, Some(&netlist.options), &overrides)
@@ -1054,10 +1056,12 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
 fn run_requested_mode(ctx: &RunContext<'_>, _config: &Config) -> Result<bool, CliError> {
     if let Some(num_runs) = ctx.args.monte_carlo {
         let spread = ctx.args.mc_spread.unwrap_or(0.01);
-        if !spread.is_finite() || spread <= 0.0 {
+        if !spread.is_finite() || spread < 0.0 {
             return Err(CliError::InvalidArgument {
-                message: format!("--mc-spread must be a positive value, got {spread}"),
-                suggestion: Some("e.g. --mc-spread 0.05 for 5% variation".to_string()),
+                message: format!("--mc-spread must be a non-negative finite value, got {spread}"),
+                suggestion: Some(
+                    "use 0 for deterministic nominal samples, or 0.05 for 5% variation".to_string(),
+                ),
             });
         }
         let distribution = match ctx.args.mc_distribution.as_deref() {
