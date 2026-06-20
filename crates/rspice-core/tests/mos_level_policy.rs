@@ -5,7 +5,7 @@
 //! short-channel approximation, which honors only a handful of parameters
 //! and produces plausible-looking but wrong currents. The
 //! `.options allow_simplified_mos` opt-in downgrades the rejection to a
-//! warning; LEVEL=3 routes natively as Berkeley MOS3; LEVEL=8/49 route to
+//! warning; LEVEL=3 routes natively as Berkeley MOS3; LEVEL=8/9/49 route to
 //! the native BSIM3v3.3 port and LEVEL=14/54 to the native BSIM4 v4.8 port.
 
 use rspice_core::circuit::DeviceOpReport;
@@ -81,6 +81,38 @@ fn run(deck: &str) -> Result<(), String> {
 }
 
 #[test]
+fn compact_three_terminal_mos_rejects_non_vdmos_model() {
+    let deck = "* compact mos syntax policy\n\
+                vdd d 0 dc 1.8\n\
+                vg g 0 dc 1.0\n\
+                m1 d g 0 nmod w=1u l=0.1u\n\
+                .model nmod NMOS (LEVEL=1 VTO=0.6 KP=100u)\n\
+                .op\n\
+                .end\n";
+    let message = run(deck).expect_err("ordinary MOS must keep an explicit bulk node");
+    assert!(
+        message.contains("bulk") || message.contains("four-node") || message.contains("VDMOS"),
+        "error should explain compact MOS syntax is VDMOS-only, got: {message}"
+    );
+}
+
+#[test]
+fn fractional_mos_level_is_rejected_instead_of_truncated() {
+    for level in [14.9, 18.5] {
+        let deck = op_deck(
+            &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOXE=1.4n NDEP=3e18)"),
+            "",
+        );
+        let message = run(&deck).expect_err("fractional MOS LEVEL must be rejected");
+
+        assert!(
+            message.contains(&format!("LEVEL={level}")) && message.contains("integer"),
+            "error should explain the invalid fractional level, got: {message}"
+        );
+    }
+}
+
+#[test]
 fn bsim_level_without_native_model_is_rejected() {
     // LEVEL=53 (BSIM3v3.2-class) has no native port; the rejection must
     // name the family, list the natively supported BSIM levels, and offer
@@ -103,9 +135,10 @@ fn bsim_level_without_native_model_is_rejected() {
 
 #[test]
 fn bsim3_levels_run_natively() {
-    // LEVEL=49 and LEVEL=8 route to the native BSIM3v3.3 port — no
-    // allow_simplified_mos opt-in, no rejection.
-    for level in [49, 8] {
+    // LEVEL=49/8 are ngspice-compatible BSIM3 aliases; LEVEL=9 is Xyce's
+    // BSIM3 front. All route to the native port: no allow_simplified_mos
+    // opt-in, no rejection.
+    for level in [49, 8, 9] {
         let deck = op_deck(
             &format!(".model nmod NMOS (LEVEL={level} VTH0=0.5 TOX=4.1n NCH=2.35e17)"),
             "",

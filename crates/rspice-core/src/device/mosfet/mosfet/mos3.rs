@@ -4,7 +4,6 @@ use crate::Value;
 const EPSSIL: Value = 11.7 * 8.854_214_871e-12;
 const CHARGE: Value = 1.602_176_634e-19;
 
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Mos3State {
     pub ids: f64,
@@ -14,12 +13,6 @@ pub(super) struct Mos3State {
     pub von: f64,
     pub vdsat: f64,
     pub region: MosRegion,
-    pub qgs: f64,
-    pub qgd: f64,
-    pub qgb: f64,
-    pub cgs: f64,
-    pub cgd: f64,
-    pub cgb: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -503,12 +496,6 @@ impl Default for Mos3State {
             von: 0.0,
             vdsat: 0.0,
             region: MosRegion::Cutoff,
-            qgs: 0.0,
-            qgd: 0.0,
-            qgb: 0.0,
-            cgs: 0.0,
-            cgd: 0.0,
-            cgb: 0.0,
         }
     }
 }

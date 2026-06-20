@@ -6,7 +6,7 @@
 
 use rspice_core::circuit::DeviceOpEntry;
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::netlist::Netlist;
+use rspice_core::netlist::{AnalysisCommand, Netlist};
 
 #[derive(Clone, Copy, Debug)]
 struct Mos3Oracle {
@@ -93,6 +93,15 @@ const WEAK_ZERO_VDS_ORACLE: Mos3Oracle = Mos3Oracle {
     vdsat: 4.182_071_076_322_277e-2,
 };
 
+const TEMP_85C_ORACLE: Mos3Oracle = Mos3Oracle {
+    id: 5.541_628_539_284_347e-4,
+    gm: 3.121_931_640_043_636e-4,
+    gds: 2.593_949_410_802_763e-5,
+    gmb: 7.818_157_419_068_965e-5,
+    von: 6.866_171_421_819_509e-1,
+    vdsat: 1.200_143_774_482_931,
+};
+
 const NMOS_DECK: &str = r#"
 * mos3_nmos_op
 M1 d g s b MOD W=12U L=1.2U
@@ -103,6 +112,69 @@ VS  s 0 0
 .MODEL MOD NMOS LEVEL=3 VTO=0.72 KP=55U GAMMA=0.62 PHI=0.68
 + TOX=22N LD=0.08U ETA=0.18 THETA=0.05 KAPPA=0.35
 + NFS=8E11 VMAX=8E4 XJ=0.18U DELTA=0.22
+.OP
+.END
+"#;
+
+const TEMP_85C_DECK: &str = r#"
+* mos3_temp_op
+.options reltol=1e-7 temp=85
+M1 d g s b MOD W=12U L=1.2U
+VD d 0 2.5
+VG g 0 3.0
+VS s 0 0
+VB b 0 -0.6
+.MODEL MOD NMOS LEVEL=3 VTO=0.72 KP=55U GAMMA=0.62 PHI=0.68 TNOM=27
++ TOX=22N LD=0.08U ETA=0.18 THETA=0.05 KAPPA=0.35
++ NFS=8E11 VMAX=8E4 XJ=0.18U DELTA=0.22
+.OP
+.END
+"#;
+
+const SERIES_MULTIPLIER_DECK: &str = r#"
+* mos3_series_m_op
+.options reltol=1e-7
+VDD supply 0 3.3
+VMON supply d 0
+VG g 0 2.4
+VS s 0 0
+VB b 0 -0.4
+M1 d g s b MOD W=10U L=1.0U M=2.5
+.MODEL MOD NMOS LEVEL=3 VTO=0.66 KP=80U GAMMA=0.55 PHI=0.67
++ TOX=20N LD=0.05U ETA=0.16 THETA=0.06 KAPPA=0.38
++ NFS=6E11 VMAX=7E4 XJ=0.16U DELTA=0.21 RD=18 RS=24
+.OP
+.END
+"#;
+
+const SERIES_MULTIPLIER_NO_RS_DECK: &str = r#"
+* mos3_series_m_nors_op
+.options reltol=1e-7
+VDD supply 0 3.3
+VMON supply d 0
+VG g 0 2.4
+VS s 0 0
+VB b 0 -0.4
+M1 d g s b MOD W=10U L=1.0U M=2.5
+.MODEL MOD NMOS LEVEL=3 VTO=0.66 KP=80U GAMMA=0.55 PHI=0.67
++ TOX=20N LD=0.05U ETA=0.16 THETA=0.06 KAPPA=0.38
++ NFS=6E11 VMAX=7E4 XJ=0.16U DELTA=0.21 RD=0 RS=0
+.OP
+.END
+"#;
+
+const BODY_JUNCTION_DECK: &str = r#"
+* mos3_body_junction_op
+.options reltol=1e-9 abstol=1e-15
+VD d 0 0
+VG g 0 0
+VS s 0 0
+VB b 0 0.62
+M1 d g s b MOD W=8U L=1U AD=12P AS=10P PD=18U PS=16U
+.MODEL MOD NMOS LEVEL=3 VTO=0.72 KP=55U GAMMA=0.62 PHI=0.68
++ TOX=22N LD=0.08U ETA=0.18 THETA=0.05 KAPPA=0.35
++ NFS=0 VMAX=0 XJ=0.18U DELTA=0.22 IS=1E-14 JS=2E-8
++ PB=0.8 CJ=2E-4 CJSW=1E-10
 .OP
 .END
 "#;
@@ -249,6 +321,56 @@ M1 out g 0 0 MOD W=10U L=1.0U
 .END
 "#;
 
+const XYCE_NMOS3_DC_DECK: &str = r#"
+* Xyce 7.10 NMOS3_DC/mos3_dc.cir
+VDS 4 0 0V
+VGS 1 0 0V
+VMON 4 3 0V
+M1 3 1 0 0 NFET L=2.0U W=2.0U
+.MODEL NFET NMOS
++ LEVEL=3 UO=966.5 L=2.0U W=2.0U VTO=1.043
++ NFS=1.009E+11 TOX=1E-07 NSUB=1.379E+16 VMAX=4.096E+05
++ RSH=0 RS=0 RD=0 IS=1E-14
++ XJ=5.378E-06 LD=0 DELTA=0 NSS=1E10
++ THETA=0.0582 ETA=0.095 KAPPA=2.93 CGDO=1PF
++ CGSO=1PF CGBO=1PF CBD=1PF CBS=1PF
+.DC VDS 0 6 0.01 VGS 1 4 1
+.PRINT DC V(4) V(1) I(VMON)
+.END
+"#;
+
+const XYCE_PMOS3_POINT_DECK: &str = r#"
+* Xyce 7.10 MOS3 PMOS polarity point
+VSD s 0 3.0
+VSG g 0 0.6
+VSB b 0 3.3
+VD0 d0 0 0.2
+VMON d0 d 0
+M1 d g s b MOD W=18U L=1.5U
+.MODEL MOD PMOS LEVEL=3 VTO=-0.82 KP=32U GAMMA=0.55 PHI=0.7
++ TOX=24N LD=0.06U ETA=0.12 THETA=0.04 KAPPA=0.28
++ NFS=5E11 VMAX=7E4 XJ=0.2U DELTA=0.18
+.DC VD0 0.2 0.2 1
+.PRINT DC I(VMON) V(d) V(s) V(g) V(b)
+.END
+"#;
+
+const XYCE_NMOS3_INVERSE_POINT_DECK: &str = r#"
+* Xyce 7.10 MOS3 inverse-mode point
+VD0 d0 0 0.15
+VMON d0 d 0
+VG g 0 2.4
+VS s 0 1.8
+VB b 0 -0.2
+M1 d g s b MOD W=10U L=1.0U
+.MODEL MOD NMOS LEVEL=3 VTO=0.65 KP=70U GAMMA=0.5 PHI=0.65
++ TOX=20N LD=0.05U ETA=0.2 THETA=0.08 KAPPA=0.4
++ NFS=6E11 VMAX=6E4 XJ=0.15U DELTA=0.25
+.DC VD0 0.15 0.15 1
+.PRINT DC I(VMON) V(d) V(s) V(g) V(b)
+.END
+"#;
+
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
@@ -312,6 +434,39 @@ fn dc_node_voltage(deck: &str, node_name: &str) -> f64 {
         .node_index_named(node_name)
         .unwrap_or_else(|| panic!("missing node {node_name}"));
     result.voltage(node)
+}
+
+fn dc_branch_current(deck: &str, branch_name: &str) -> f64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = engine().run_dc_op(&netlist).expect("op converges");
+    let branch = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(branch_name))
+        .unwrap_or_else(|| panic!("missing {branch_name} branch in {:?}", result.branch_names));
+    result.branch_currents[branch]
+}
+
+fn dc_sweep_branch_current(
+    deck: &str,
+    source_name: &str,
+    start: f64,
+    stop: f64,
+    step: f64,
+    branch_name: &str,
+) -> f64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let mut results = engine()
+        .run_dc_sweep(&netlist, source_name, start, stop, step)
+        .expect("dc sweep converges");
+    assert_eq!(results.len(), 1, "single-point sweep expected");
+    let (_, result) = results.pop().expect("one dc point");
+    let branch = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(branch_name))
+        .unwrap_or_else(|| panic!("missing {branch_name} branch in {:?}", result.branch_names));
+    result.branch_currents[branch]
 }
 
 fn ac_node_voltage(deck: &str, node_name: &str, freq: f64) -> num_complex::Complex64 {
@@ -382,6 +537,49 @@ fn mos3_pmos_loaded_dc_matches_ngspice46() {
     // sign mistakes that a standalone `@m1[cd]` OP comparison can hide.
     let vout = dc_node_voltage(PMOS_LOADED_DECK, "out");
     assert_close("loaded pmos v(out)", vout, 2.580_036_51, 2.0e-3, 1.0e-5);
+}
+
+#[test]
+fn mos3_temperature_matches_ngspice46() {
+    let entry = m1_op_entry(TEMP_85C_DECK);
+    assert_op_matches_ngspice46(&entry, TEMP_85C_ORACLE);
+}
+
+#[test]
+fn mos3_series_resistance_and_multiplier_match_ngspice46() {
+    // ngspice-46 references on the same deck:
+    // with RD=18 RS=24 and M=2.5, i(vmon)=1.412774112778570e-03.
+    // With RD=RS=0, the same biased deck gives 1.431951424595751e-03,
+    // so this rejects a MOS3 path that silently bypasses series resistance.
+    let id = dc_branch_current(SERIES_MULTIPLIER_DECK, "vmon");
+    assert_close(
+        "series-resistance M-scaled i(vmon)",
+        id,
+        1.412_774_112_778_570e-3,
+        3.0e-3,
+        2.0e-7,
+    );
+
+    let no_series_id = dc_branch_current(SERIES_MULTIPLIER_NO_RS_DECK, "vmon");
+    assert!(
+        (no_series_id - id).abs() > 0.01 * no_series_id.abs(),
+        "MOS3 RD/RS must materially affect current: RD/RS id={id:.12e}, \
+         no-RD/RS id={no_series_id:.12e}"
+    );
+}
+
+#[test]
+fn mos3_body_junction_current_matches_ngspice46() {
+    // ngspice-46 reference on the same deck:
+    // i(vb)=-1.13198377223539e-08 at v(b)=0.62 V.
+    let ib = dc_branch_current(BODY_JUNCTION_DECK, "vb");
+    assert_close(
+        "body-junction i(vb)",
+        ib,
+        -1.131_983_772_235_39e-8,
+        5.0e-2,
+        2.0e-10,
+    );
 }
 
 #[test]
@@ -513,5 +711,92 @@ fn mos3_model_space_onset_and_saturation_are_not_simplified_fallbacks() {
     assert!(
         (NMOS_ORACLE.vdsat - old_fallback_vdsat).abs() > 0.5,
         "oracle sanity check: MOS3 vdsat should differ from old Vgs-von fallback"
+    );
+}
+
+#[test]
+fn mos3_matches_xyce_710_nmos3_dc_subset() {
+    let netlist = Netlist::parse(XYCE_NMOS3_DC_DECK).expect("deck parses");
+    let sweep2 = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            AnalysisCommand::Dc { sweep2, .. } => sweep2.clone(),
+            _ => None,
+        })
+        .expect("second sweep captured");
+    let results = engine()
+        .run_dc_sweep2_with_abort(
+            &netlist,
+            "vds",
+            0.0,
+            6.0,
+            0.01,
+            Some(&sweep2),
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .expect("Xyce NMOS3 sweep solves");
+    let vmon_branch = results[0]
+        .1
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vmon"))
+        .unwrap_or_else(|| panic!("missing vmon branch in {:?}", results[0].1.branch_names));
+
+    // Xyce 7.10 regression `NMOS3_DC/mos3_dc.cir.prn`, representative rows.
+    let reference = [
+        (0, -1.960_784_31e-38),
+        (100, 2.110_557_86e-6),
+        (600, 3.710_058_04e-6),
+        (651, 1.559_137_79e-5),
+        (801, 2.112_993_32e-5),
+        (1302, 4.570_722_08e-5),
+        (1802, 6.137_162_32e-5),
+        (1823, 1.786_673_43e-5),
+        (2103, 9.814_379_35e-5),
+        (2403, 1.076_422_85e-4),
+    ];
+
+    assert_eq!(results.len(), 2404, "Xyce NMOS3 sweep grid size");
+    for &(idx, expected) in &reference {
+        let got = results[idx].1.branch_currents[vmon_branch];
+        assert_close(
+            &format!("Xyce NMOS3 row {idx} I(VMON)"),
+            got,
+            expected,
+            2.0e-2,
+            5.0e-8,
+        );
+    }
+}
+
+#[test]
+fn mos3_matches_xyce_710_pmos_and_inverse_dc_points() {
+    // Live XyceNF 7.10.0 references from the exact decks above:
+    // PMOS point:    I(VMON)=-2.42551547e-04.
+    // inverse point: I(VMON)=-3.76976271e-04.
+    let pmos_current = dc_sweep_branch_current(XYCE_PMOS3_POINT_DECK, "vd0", 0.2, 0.2, 1.0, "vmon");
+    assert_close(
+        "Xyce PMOS3 point I(VMON)",
+        pmos_current,
+        -2.425_515_47e-4,
+        2.0e-2,
+        5.0e-8,
+    );
+
+    let inverse_current = dc_sweep_branch_current(
+        XYCE_NMOS3_INVERSE_POINT_DECK,
+        "vd0",
+        0.15,
+        0.15,
+        1.0,
+        "vmon",
+    );
+    assert_close(
+        "Xyce inverse NMOS3 point I(VMON)",
+        inverse_current,
+        -3.769_762_71e-4,
+        2.0e-2,
+        5.0e-8,
     );
 }
