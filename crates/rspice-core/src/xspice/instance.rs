@@ -3,6 +3,7 @@
 //! Represents an instantiated code model in a circuit.
 //! Handles port connections, parameter binding, and matrix stamping.
 
+use super::context::PendingDigitalEvent;
 use super::{
     AnalysisType, CallType, CmContext, CmError, CmResult, CodeModel, DigitalValue, EventQueue,
     PortSpec, PortType,
@@ -142,6 +143,17 @@ impl XspiceInstance {
             context.set_string_param(name, value);
         }
 
+        for (port, connection) in ports.iter().zip(connections.iter()) {
+            let width = match connection {
+                PortConnection::AnalogVector(nodes) | PortConnection::DigitalVector(nodes) => {
+                    nodes.len()
+                }
+                PortConnection::Null => 0,
+                _ => 1,
+            };
+            context.set_port_width(&port.name, width);
+        }
+
         // Initialize output ports in context
         for port in ports {
             if port.direction == super::PortDirection::Out
@@ -222,6 +234,7 @@ impl XspiceInstance {
         &mut self,
         voltages: &[Value],
         digital_values: &HashMap<usize, DigitalValue>,
+        digital_event_times: &HashMap<usize, Value>,
     ) {
         let ports = self.model.ports();
 
@@ -257,6 +270,9 @@ impl XspiceInstance {
                 PortConnection::Digital(node) => {
                     let val = digital_values.get(node).copied().unwrap_or_default();
                     self.context.set_input_digital(&port.name, val);
+                    if let Some(time) = digital_event_times.get(node).copied() {
+                        self.context.set_input_digital_event_time(&port.name, time);
+                    }
                 }
                 PortConnection::AnalogVector(nodes) => {
                     let values: Vec<Value> = nodes
@@ -384,28 +400,53 @@ impl XspiceInstance {
     }
 
     /// Get pending digital events
-    pub fn take_pending_events(&mut self) -> Vec<(String, DigitalValue, Value)> {
+    pub(crate) fn take_pending_events(&mut self) -> Vec<PendingDigitalEvent> {
         self.context.take_pending_events()
     }
 
     /// Process digital events scheduled by this instance
     pub fn schedule_events(&mut self, event_queue: &mut EventQueue, current_time: Value) {
-        let _ports = self.model.ports(); // Reserved for future port validation
         let events = self.context.take_pending_events();
 
-        for (port_name, value, delay) in events {
-            // Find the node for this port
-            if let Some(&port_idx) = self.port_indices.get(&port_name)
-                && let Some(PortConnection::Digital(node)) = self.connections.get(port_idx)
-            {
-                event_queue.schedule_delayed(
-                    current_time,
-                    delay,
-                    *node,
-                    &port_name,
-                    &self.name,
-                    value,
-                );
+        for PendingDigitalEvent {
+            port_name,
+            values,
+            delay,
+        } in events
+        {
+            let Some(&port_idx) = self.port_indices.get(&port_name) else {
+                continue;
+            };
+            let Some(connection) = self.connections.get(port_idx) else {
+                continue;
+            };
+
+            match connection {
+                PortConnection::Digital(node) => {
+                    if let Some(value) = values.first().copied() {
+                        event_queue.schedule_delayed(
+                            current_time,
+                            delay,
+                            *node,
+                            &port_name,
+                            &self.name,
+                            value,
+                        );
+                    }
+                }
+                PortConnection::DigitalVector(nodes) => {
+                    for (node, value) in nodes.iter().zip(values.into_iter()) {
+                        event_queue.schedule_delayed(
+                            current_time,
+                            delay,
+                            *node,
+                            &port_name,
+                            &self.name,
+                            value,
+                        );
+                    }
+                }
+                _ => {}
             }
         }
     }

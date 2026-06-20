@@ -9,6 +9,7 @@
 //! - **mult** - Analog multiplier  
 //! - **divider** - Analog divider
 //! - **limit** - Limiter with clipping
+//! - **climit** - Controlled limiter
 //! - **integrator** - Continuous-time integrator
 //! - **differentiator** - Continuous-time differentiator
 //! - **aswitch** - Analog switch
@@ -50,8 +51,8 @@ mod digital;
 
 // Re-export all models
 pub use analog::{
-    AnalogSwitch, Differentiator, Divider, Gain, Integrator, Limiter, Multiplier, SampleHold,
-    Summer,
+    AnalogSwitch, ControlledLimiter, Differentiator, Divider, Gain, Integrator, Limiter,
+    Multiplier, SampleHold, Summer,
 };
 
 pub use bridges::{AdcBridge, DacBridge};

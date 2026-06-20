@@ -85,7 +85,7 @@ impl Ord for Event {
 ///
 /// Events are scheduled with a future time and processed in chronological order.
 /// The queue automatically handles cancellation and replacement of events.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct EventQueue {
     /// Pending events (min-heap by time)
     events: BinaryHeap<Event>,

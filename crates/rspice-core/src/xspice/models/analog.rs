@@ -401,6 +401,191 @@ impl CodeModel for Limiter {
     }
 }
 
+//=============================================================================
+// Controlled Limiter
+//=============================================================================
+
+/// Controlled limiter: out = clamp(gain * (in + in_offset), lower, upper)
+///
+/// The lower and upper limits are controlled by analog input ports, matching
+/// ngspice's XSPICE `climit` code model.
+#[derive(Debug, Default)]
+pub struct ControlledLimiter;
+
+impl CodeModel for ControlledLimiter {
+    fn name(&self) -> &str {
+        "climit"
+    }
+
+    fn description(&self) -> &str {
+        "Controlled limiter block with analog upper and lower limit inputs"
+    }
+
+    fn ports(&self) -> &[PortSpec] {
+        use std::sync::OnceLock;
+        static PORTS: OnceLock<Vec<PortSpec>> = OnceLock::new();
+        PORTS.get_or_init(|| {
+            vec![
+                PortSpec::input("in", PortType::Voltage).with_description("Analog input"),
+                PortSpec::input("cntl_upper", PortType::Voltage)
+                    .with_description("Upper limit control input"),
+                PortSpec::input("cntl_lower", PortType::Voltage)
+                    .with_description("Lower limit control input"),
+                PortSpec::output("out", PortType::Voltage)
+                    .with_description("Controlled limited output"),
+            ]
+        })
+    }
+
+    fn parameters(&self) -> &[ParamSpec] {
+        use std::sync::OnceLock;
+        static PARAMS: OnceLock<Vec<ParamSpec>> = OnceLock::new();
+        PARAMS.get_or_init(|| {
+            vec![
+                ParamSpec::real("in_offset", 0.0).with_description("Input offset voltage"),
+                ParamSpec::real("gain", 1.0).with_description("Linear-region gain"),
+                ParamSpec::real("upper_delta", 0.0)
+                    .with_description("Delta subtracted from the upper control input"),
+                ParamSpec::real("lower_delta", 0.0)
+                    .with_description("Delta added to the lower control input"),
+                ParamSpec::real("limit_range", 1.0e-6)
+                    .with_description("Smoothing range near the controlled limits"),
+                ParamSpec::boolean("fraction", false)
+                    .with_description("Treat limit_range as a fraction of the limit span"),
+            ]
+        })
+    }
+
+    fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+        Ok(())
+    }
+
+    fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+        let (out, pout_pin, _pout_pcntl_lower, _pout_pcntl_upper) = climit_transfer(
+            ctx.input("in"),
+            ctx.param("in_offset"),
+            ctx.input("cntl_upper"),
+            ctx.input("cntl_lower"),
+            ctx.param("lower_delta"),
+            ctx.param("upper_delta"),
+            ctx.param("limit_range"),
+            ctx.param("gain"),
+            ctx.param("fraction") > 0.5,
+        );
+
+        ctx.set_output_with_partial("out", out, pout_pin);
+        Ok(())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn climit_transfer(
+    input: Value,
+    in_offset: Value,
+    cntl_upper: Value,
+    cntl_lower: Value,
+    lower_delta: Value,
+    upper_delta: Value,
+    mut limit_range: Value,
+    gain: Value,
+    fraction: bool,
+) -> (Value, Value, Value, Value) {
+    let out_lower_limit = cntl_lower + lower_delta;
+    let out_upper_limit = cntl_upper - upper_delta;
+
+    if fraction {
+        limit_range *= out_upper_limit - out_lower_limit;
+    }
+    if !limit_range.is_finite() {
+        limit_range = 0.0;
+    }
+
+    let threshold_upper = out_upper_limit - limit_range;
+    let threshold_lower = out_lower_limit + limit_range;
+    if threshold_upper < threshold_lower {
+        return (0.0, 0.0, 0.0, 0.0);
+    }
+
+    let raw = gain * (in_offset + input);
+    if raw < threshold_lower {
+        if raw > out_lower_limit - limit_range && limit_range > 0.0 {
+            let (limited_out, mut pout_pin) =
+                smooth_corner(raw, out_lower_limit, out_lower_limit, limit_range, 0.0, 1.0);
+            pout_pin *= gain;
+            let (pout_pcntl_lower, _) =
+                smooth_discontinuity(raw, out_lower_limit, 1.0, threshold_lower, 0.0);
+            (limited_out, pout_pin, pout_pcntl_lower, 0.0)
+        } else {
+            (out_lower_limit, 0.0, 1.0, 0.0)
+        }
+    } else if raw > threshold_upper {
+        if raw < out_upper_limit + limit_range && limit_range > 0.0 {
+            let (limited_out, mut pout_pin) =
+                smooth_corner(raw, out_upper_limit, out_upper_limit, limit_range, 1.0, 0.0);
+            pout_pin *= gain;
+            let (pout_pcntl_upper, _) =
+                smooth_discontinuity(raw, threshold_upper, 0.0, out_upper_limit, 1.0);
+            (limited_out, pout_pin, 0.0, pout_pcntl_upper)
+        } else {
+            (out_upper_limit, 0.0, 0.0, 1.0)
+        }
+    } else {
+        (raw, gain, 0.0, 0.0)
+    }
+}
+
+fn smooth_corner(
+    x_input: Value,
+    x_center: Value,
+    y_center: Value,
+    domain: Value,
+    lower_slope: Value,
+    upper_slope: Value,
+) -> (Value, Value) {
+    let x_upper = x_center + domain;
+    let y_upper = y_center + upper_slope * domain;
+    let a = ((upper_slope - lower_slope) / 4.0) / domain;
+    let b = upper_slope - 2.0 * a * x_upper;
+    let c = y_upper - a * x_upper * x_upper - b * x_upper;
+    let y_output = a * x_input * x_input + b * x_input + c;
+    let dy_dx = 2.0 * a * x_input + b;
+    (y_output, dy_dx)
+}
+
+fn smooth_discontinuity(
+    x_input: Value,
+    x_lower: Value,
+    y_lower: Value,
+    x_upper: Value,
+    y_upper: Value,
+) -> (Value, Value) {
+    let x_center = (x_upper + x_lower) / 2.0;
+    let y_center = (y_upper + y_lower) / 2.0;
+    let center_slope = 2.0 * (y_upper - y_lower) / (x_upper - x_lower);
+
+    if x_input < x_lower {
+        (y_lower, 0.0)
+    } else if x_input < x_center {
+        let a = center_slope / (x_upper - x_lower);
+        let b = center_slope - 2.0 * a * x_center;
+        let c = y_center - a * x_center * x_center - b * x_center;
+        (
+            a * x_input * x_input + b * x_input + c,
+            2.0 * a * x_input + b,
+        )
+    } else if x_input < x_upper {
+        let a = -center_slope / (x_upper - x_lower);
+        let b = -2.0 * a * x_upper;
+        let c = y_upper - a * x_upper * x_upper - b * x_upper;
+        (
+            a * x_input * x_input + b * x_input + c,
+            2.0 * a * x_input + b,
+        )
+    } else {
+        (y_upper, 0.0)
+    }
+}
+
 /// Soft clamp function for smooth limiting
 fn soft_clamp(x: f64, lower: f64, upper: f64, range: f64) -> f64 {
     let mid = (lower + upper) / 2.0;

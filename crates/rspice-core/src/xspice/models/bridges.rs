@@ -1,5 +1,6 @@
 //! A/D and D/A Bridge Code Models
 
+use crate::Value;
 use crate::xspice::{CmContext, CmResult, CodeModel, DigitalValue, ParamSpec, PortSpec, PortType};
 
 /// Analog to digital converter bridge
@@ -85,6 +86,32 @@ impl CodeModel for AdcBridge {
 #[derive(Debug, Default)]
 pub struct DacBridge;
 
+fn dac_bridge_ramp_value(
+    time: Value,
+    start_time: Value,
+    start_value: Value,
+    target: Value,
+    t_rise: Value,
+    t_fall: Value,
+) -> Value {
+    let elapsed = (time - start_time).max(0.0);
+    if (target - start_value).abs() < 1e-12 {
+        target
+    } else if target > start_value {
+        if t_rise <= 0.0 {
+            target
+        } else {
+            let fraction = (elapsed / t_rise).clamp(0.0, 1.0);
+            start_value + (target - start_value) * fraction
+        }
+    } else if t_fall <= 0.0 {
+        target
+    } else {
+        let fraction = (elapsed / t_fall).clamp(0.0, 1.0);
+        start_value - (start_value - target) * fraction
+    }
+}
+
 impl CodeModel for DacBridge {
     fn name(&self) -> &str {
         "dac_bridge"
@@ -120,10 +147,12 @@ impl CodeModel for DacBridge {
     }
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
-        ctx.allocate_states(2);
+        ctx.allocate_states(4);
         let undef = ctx.param("out_undef");
-        ctx.set_state(0, undef);
-        ctx.set_state(1, undef);
+        ctx.set_initial_state(0, undef);
+        ctx.set_initial_state(1, undef);
+        ctx.set_initial_state(2, 0.0);
+        ctx.set_initial_state(3, undef);
         Ok(())
     }
 
@@ -143,21 +172,59 @@ impl CodeModel for DacBridge {
             out_undef
         };
 
-        let v_prev = ctx.state(0);
-        let dt = ctx.timestep;
+        if !ctx.is_transient() {
+            ctx.set_state(0, v_target);
+            ctx.set_state(1, v_target);
+            ctx.set_state(2, ctx.time);
+            ctx.set_state(3, v_target);
+            ctx.set_output("out", v_target);
+            return Ok(());
+        }
 
-        let v_out = if (v_target - v_prev).abs() < 1e-12 {
+        let accepted_output = ctx.state_prev(0);
+        let accepted_target = ctx.state_prev(1);
+        let accepted_start_time = ctx.state_prev(2);
+        let accepted_start_value = ctx.state_prev(3);
+        let first_transient_point = ctx.time <= ctx.timestep.max(0.0) + 1e-18
+            && (accepted_output - out_undef).abs() <= 1e-12;
+
+        let (transition_target, transition_start_time, transition_start_value) =
+            if first_transient_point {
+                (v_target, ctx.time, v_target)
+            } else if (v_target - accepted_target).abs() > 1e-12 {
+                let event_time = ctx.input_digital_event_time("in").unwrap_or(ctx.time);
+                let start_value = dac_bridge_ramp_value(
+                    event_time,
+                    accepted_start_time,
+                    accepted_start_value,
+                    accepted_target,
+                    t_rise,
+                    t_fall,
+                );
+                (v_target, event_time, start_value)
+            } else {
+                (accepted_target, accepted_start_time, accepted_start_value)
+            };
+
+        let v_out = dac_bridge_ramp_value(
+            ctx.time,
+            transition_start_time,
+            transition_start_value,
+            transition_target,
+            t_rise,
+            t_fall,
+        );
+
+        let v_out = if first_transient_point {
             v_target
-        } else if v_target > v_prev {
-            let rate = (out_high - out_low) / t_rise.max(1e-15);
-            (v_prev + rate * dt).min(v_target)
         } else {
-            let rate = (out_high - out_low) / t_fall.max(1e-15);
-            (v_prev - rate * dt).max(v_target)
+            v_out
         };
 
         ctx.set_state(0, v_out);
-        ctx.set_state(1, v_target);
+        ctx.set_state(1, transition_target);
+        ctx.set_state(2, transition_start_time);
+        ctx.set_state(3, transition_start_value);
         ctx.set_output("out", v_out);
         Ok(())
     }

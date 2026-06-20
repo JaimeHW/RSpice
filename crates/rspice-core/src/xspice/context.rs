@@ -141,6 +141,17 @@ pub enum OutputValue {
     DigitalVector(Vec<DigitalValue>),
 }
 
+/// Digital event emitted by a code model output port.
+#[derive(Debug, Clone)]
+pub(crate) struct PendingDigitalEvent {
+    /// Output port name as declared by the code model.
+    pub port_name: String,
+    /// One or more values emitted by the port.
+    pub values: Vec<DigitalValue>,
+    /// Delay relative to the current evaluation time.
+    pub delay: Value,
+}
+
 impl Default for OutputValue {
     fn default() -> Self {
         OutputValue::Analog(AnalogValue::default())
@@ -216,10 +227,14 @@ pub struct CmContext {
     //-------------------------------------------------------------------------
     /// Input port values by name
     inputs: HashMap<String, InputValue>,
+    /// Last event time for scalar digital input ports.
+    input_event_times: HashMap<String, Value>,
     /// Output port values by name
     outputs: HashMap<String, OutputValue>,
     /// Connected analog node index per scalar analog port (0 = ground).
     port_nodes: HashMap<String, usize>,
+    /// Connected width per port. Scalar ports have width 1.
+    port_widths: HashMap<String, usize>,
 
     //-------------------------------------------------------------------------
     // Parameters
@@ -242,8 +257,8 @@ pub struct CmContext {
     //-------------------------------------------------------------------------
     // Event Scheduling
     //-------------------------------------------------------------------------
-    /// Scheduled output events (port_name, value, delay)
-    pending_events: Vec<(String, DigitalValue, Value)>,
+    /// Scheduled output events.
+    pending_events: Vec<PendingDigitalEvent>,
 
     //-------------------------------------------------------------------------
     // Matrix Stamping
@@ -277,8 +292,10 @@ impl CmContext {
             call_type: CallType::Init,
             iteration: 0,
             inputs: HashMap::new(),
+            input_event_times: HashMap::new(),
             outputs: HashMap::new(),
             port_nodes: HashMap::new(),
+            port_widths: HashMap::new(),
             params: HashMap::new(),
             string_params: HashMap::new(),
             state: Vec::new(),
@@ -313,6 +330,11 @@ impl CmContext {
             InputValue::Digital(d) => Some(*d),
             _ => None,
         })
+    }
+
+    /// Get the last event time for a scalar digital input.
+    pub fn input_digital_event_time(&self, name: &str) -> Option<Value> {
+        self.input_event_times.get(name).copied()
     }
 
     /// Get analog input vector
@@ -354,6 +376,11 @@ impl CmContext {
     pub fn set_input_digital(&mut self, name: &str, value: DigitalValue) {
         self.inputs
             .insert(name.to_string(), InputValue::Digital(value));
+    }
+
+    /// Set last event time for a scalar digital input.
+    pub fn set_input_digital_event_time(&mut self, name: &str, time: Value) {
+        self.input_event_times.insert(name.to_string(), time);
     }
 
     //-------------------------------------------------------------------------
@@ -425,7 +452,29 @@ impl CmContext {
 
     /// Set digital output value (schedules event)
     pub fn set_output_digital(&mut self, name: &str, value: DigitalValue, delay: Value) {
-        self.pending_events.push((name.to_string(), value, delay));
+        self.outputs
+            .insert(name.to_string(), OutputValue::Digital(value));
+        self.pending_events.push(PendingDigitalEvent {
+            port_name: name.to_string(),
+            values: vec![value],
+            delay,
+        });
+    }
+
+    /// Set digital vector output value (schedules one event per connected bit).
+    pub fn set_output_digital_vector(
+        &mut self,
+        name: &str,
+        values: Vec<DigitalValue>,
+        delay: Value,
+    ) {
+        self.outputs
+            .insert(name.to_string(), OutputValue::DigitalVector(values.clone()));
+        self.pending_events.push(PendingDigitalEvent {
+            port_name: name.to_string(),
+            values,
+            delay,
+        });
     }
 
     /// Initialize output ports
@@ -452,13 +501,23 @@ impl CmContext {
         self.port_nodes.get(name).copied()
     }
 
+    /// Register connected width for a port.
+    pub fn set_port_width(&mut self, name: &str, width: usize) {
+        self.port_widths.insert(name.to_string(), width);
+    }
+
+    /// Get connected width for a port, defaulting to scalar.
+    pub fn port_width(&self, name: &str) -> usize {
+        self.port_widths.get(name).copied().unwrap_or(1)
+    }
+
     /// Clear port-node mapping for current evaluation pass.
     pub fn clear_port_nodes(&mut self) {
         self.port_nodes.clear();
     }
 
     /// Get all pending events and clear the queue
-    pub fn take_pending_events(&mut self) -> Vec<(String, DigitalValue, Value)> {
+    pub(crate) fn take_pending_events(&mut self) -> Vec<PendingDigitalEvent> {
         std::mem::take(&mut self.pending_events)
     }
 
@@ -532,6 +591,16 @@ impl CmContext {
         }
     }
 
+    /// Set both current and accepted state during model initialization.
+    pub fn set_initial_state(&mut self, index: usize, value: Value) {
+        if index < self.state.len() {
+            self.state[index] = value;
+        }
+        if index < self.state_prev.len() {
+            self.state_prev[index] = value;
+        }
+    }
+
     /// Get integer state variable
     pub fn int_state(&self, index: usize) -> i64 {
         self.int_state.get(index).copied().unwrap_or(0)
@@ -547,6 +616,11 @@ impl CmContext {
     /// Advance state for new timestep
     pub fn advance_state(&mut self) {
         self.state_prev.clone_from(&self.state);
+        for output in self.outputs.values_mut() {
+            if let OutputValue::Analog(value) = output {
+                value.prev_value = value.value;
+            }
+        }
         self.time_prev = self.time;
     }
 
