@@ -479,6 +479,10 @@ fn all_discoverable_suite_dirs() -> Vec<String> {
 }
 
 fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
+    if let Some(message) = broad_ngspice_suite_debug_block_message(subdir) {
+        panic!("{message}");
+    }
+
     let results = runner.run_suite(subdir);
     if !results.is_empty() {
         TestRunner::print_summary(&results);
@@ -516,6 +520,16 @@ fn run_and_report(runner: &TestRunner, subdir: &str) -> TestStatistics {
     );
 
     stats
+}
+
+fn broad_ngspice_suite_debug_block_message(subdir: &str) -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+
+    Some(format!(
+        "Refusing broad ngspice suite '{subdir}' in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture` for the full suite, or add `--release` to this exact suite command."
+    ))
 }
 
 /// Skips other than the debug-build watchdog class, which is the only skip
@@ -862,6 +876,23 @@ fn test_full_suite_timeout_is_bounded_by_default() {
 fn test_focused_general_config_uses_diagnostic_timeout() {
     let cfg = suite_config_with_timeout("general", FOCUSED_GENERAL_MAX_TIME_PER_TEST_MS);
     assert_eq!(cfg.max_time_per_test_ms, 30_000);
+}
+
+#[test]
+fn test_broad_ngspice_suite_runner_is_profile_gated() {
+    let skip_message = broad_ngspice_suite_debug_block_message("general");
+
+    if cfg!(debug_assertions) {
+        let skip_message = skip_message.expect("debug broad suites must be blocked");
+        assert!(skip_message.contains("general"));
+        assert!(skip_message.contains("Refusing broad ngspice suite"));
+        assert!(skip_message.contains("cargo test --release"));
+    } else {
+        assert!(
+            skip_message.is_none(),
+            "release broad suites must execute normally"
+        );
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1312,6 +1343,12 @@ fn test_ngspice_mesa_suite() {
 
 #[test]
 fn test_full_ngspice_suite_summary() {
+    if cfg!(debug_assertions) {
+        panic!(
+            "Refusing full ngspice suite in debug mode; run `cargo test --release -p rspice-core --test ngspice_regression test_full_ngspice_suite_summary -- --nocapture`."
+        );
+    }
+
     let suites = all_discoverable_suite_dirs();
     let full_suite_start = Instant::now();
     let full_suite_timeout_ms = full_suite_timeout_ms(&suites);

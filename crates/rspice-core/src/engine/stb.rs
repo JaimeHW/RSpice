@@ -81,6 +81,7 @@ impl Engine {
         if circuit.num_nodes() == 0 {
             return Err(SimulationError::Circuit("Circuit has no nodes".to_string()));
         }
+        Self::ensure_supported_dynamic_charges(&circuit, "STB")?;
 
         let probe_idx = circuit
             .voltage_sources

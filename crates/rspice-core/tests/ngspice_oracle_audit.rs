@@ -134,7 +134,11 @@ fn audit_config_from_env() -> Option<AuditConfig> {
         }
         (Some(_), None) => panic!("NGSPICE_SOURCE_ROOT is set but NGSPICE_EXE is missing"),
         (None, Some(_)) => panic!("NGSPICE_EXE is set but NGSPICE_SOURCE_ROOT is missing"),
-        (Some(source_root), Some(ngspice_exe)) => (source_root, ngspice_exe),
+        (Some(source_root), Some(ngspice_exe)) => {
+            let ngspice_exe = prefer_windows_console_ngspice_exe(ngspice_exe)
+                .unwrap_or_else(|err| panic!("{err}"));
+            (source_root, ngspice_exe)
+        }
     };
 
     assert!(
@@ -172,6 +176,27 @@ fn path_env(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.as_os_str().is_empty())
         .map(PathBuf::from)
+}
+
+fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let is_windows_gui_binary = ngspice_exe
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("ngspice.exe"));
+        if is_windows_gui_binary {
+            let console_exe = ngspice_exe.with_file_name("ngspice_con.exe");
+            if console_exe.is_file() {
+                return Ok(console_exe);
+            }
+            return Err(format!(
+                "NGSPICE_EXE points to Windows GUI ngspice.exe '{}', but sibling console binary '{}' is missing; set NGSPICE_EXE to ngspice_con.exe to avoid GUI popup dialogs",
+                ngspice_exe.display(),
+                console_exe.display()
+            ));
+        }
+    }
+    Ok(ngspice_exe)
 }
 
 fn workspace_tests_dir() -> PathBuf {
@@ -804,6 +829,46 @@ fn truncate(value: &str, max_chars: usize) -> String {
     } else {
         truncated
     }
+}
+
+#[test]
+#[cfg(windows)]
+fn audit_windows_gui_ngspice_exe_prefers_sibling_console_binary() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("rspice_ngspice_audit_console_pick_{unique}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let gui = dir.join("ngspice.exe");
+    let console = dir.join("ngspice_con.exe");
+    fs::write(&gui, b"gui").expect("write gui marker");
+    fs::write(&console, b"console").expect("write console marker");
+
+    let resolved = prefer_windows_console_ngspice_exe(gui.clone()).expect("console exists");
+
+    let _ = fs::remove_dir_all(&dir);
+    assert_eq!(resolved, console);
+}
+
+#[test]
+#[cfg(windows)]
+fn audit_windows_gui_ngspice_exe_without_sibling_console_is_rejected() {
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time before unix epoch")
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("rspice_ngspice_audit_console_missing_{unique}"));
+    fs::create_dir_all(&dir).expect("create temp dir");
+    let gui = dir.join("ngspice.exe");
+    fs::write(&gui, b"gui").expect("write gui marker");
+
+    let err = prefer_windows_console_ngspice_exe(gui.clone())
+        .expect_err("GUI ngspice.exe must not be used without ngspice_con.exe");
+
+    let _ = fs::remove_dir_all(&dir);
+    assert!(err.contains("ngspice_con.exe"), "{err}");
+    assert!(err.contains(&gui.display().to_string()), "{err}");
 }
 
 #[test]

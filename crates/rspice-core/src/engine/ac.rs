@@ -497,6 +497,15 @@ impl Engine {
         circuit
             .mosfets
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        circuit
+            .b3soi
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        circuit
+            .b3soi_fd
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        circuit
+            .b3soi_pd
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         // BSIM3: the DC linearization at the operating point is the real
         // part of the small-signal admittance (b3acld.c stamps the same
         // gm/gds/gmbs/gbd/gbs/substrate-current groups as the DC load).
@@ -507,6 +516,9 @@ impl Engine {
         // conductance groups, GIDL/GISL included, on the real axis).
         circuit
             .bsim4v8
+            .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
+        circuit
+            .vdmoses
             .stamp_all(&mut stamper, &mut rhs_dummy, op_voltages);
         for jfet in &circuit.jfets {
             jfet.stamp_small_signal_ac(op_voltages, frequency_hz, &mut stamper);
@@ -601,7 +613,8 @@ impl Engine {
             let vd = Self::ac_node_voltage(op_voltages, jfet.drain);
             let vg = Self::ac_node_voltage(op_voltages, jfet.gate);
             let vs = Self::ac_node_voltage(op_voltages, jfet.source);
-            let (cgs, cgd, cds) = jfet.ac_capacitances(vg - vs, vg - vd, jfet.params.tnom);
+            let (cgs, cgd, cds) =
+                jfet.ac_capacitances(vg - vs, vg - vd, jfet.analysis_temperature());
 
             if cgs.is_finite() && cgs > 0.0 {
                 Self::stamp_imag_two_terminal(matrix, jfet.gate, jfet.source, omega * cgs);
@@ -612,6 +625,142 @@ impl Engine {
             if cds.is_finite() && cds > 0.0 {
                 Self::stamp_imag_two_terminal(matrix, jfet.drain, jfet.source, omega * cds);
             }
+        }
+
+        // VDMOS gate, drain-source, and body-junction capacitances at the operating point.
+        for vdmos in &circuit.vdmoses.devices {
+            if vdmos.xyce_level18 {
+                continue;
+            }
+            let drain = vdmos.drain_int.unwrap_or(vdmos.drain);
+            let source = vdmos.source_int.unwrap_or(vdmos.source);
+            let vd = Self::ac_node_voltage(op_voltages, drain);
+            let vg = Self::ac_node_voltage(op_voltages, vdmos.gate);
+            let vs = Self::ac_node_voltage(op_voltages, source);
+            let (cgs, cgd, cds) = vdmos.capacitances(vg - vs, vd - vs);
+            let cgb = vdmos.gate_bulk_capacitance();
+            let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(op_voltages);
+            let (_, cbs) = vdmos.body_source_charge_and_capacitance_at(vbs);
+            let (_, cbd) = vdmos.body_drain_charge_and_capacitance_at(vbd);
+            let d1_vds = vdmos.d1_charge_branch_voltage_at(op_voltages);
+            let (_, cd1) = vdmos.d1_charge_and_capacitance_at(d1_vds);
+
+            if cgs.is_finite() && cgs > 0.0 {
+                Self::stamp_imag_two_terminal(matrix, vdmos.gate, source, omega * cgs);
+            }
+            if cgd.is_finite() && cgd > 0.0 {
+                Self::stamp_imag_two_terminal(matrix, vdmos.gate, drain, omega * cgd);
+            }
+            if cgb.is_finite() && cgb > 0.0 {
+                Self::stamp_imag_two_terminal(matrix, vdmos.gate, vdmos.bulk, omega * cgb);
+            }
+            if cds.is_finite() && cds > 0.0 {
+                Self::stamp_imag_two_terminal(matrix, drain, source, omega * cds);
+            }
+            if cbs.is_finite() && cbs > 0.0 {
+                let (pos, neg) = vdmos.body_source_charge_nodes();
+                Self::stamp_imag_two_terminal(matrix, pos, neg, omega * cbs);
+            }
+            if cbd.is_finite() && cbd > 0.0 {
+                let (pos, neg) = vdmos.body_drain_charge_nodes();
+                Self::stamp_imag_two_terminal(matrix, pos, neg, omega * cbd);
+            }
+            if cd1.is_finite() && cd1 > 0.0 {
+                let (pos, neg) = vdmos.d1_charge_nodes();
+                Self::stamp_imag_two_terminal(matrix, pos, neg, omega * cd1);
+            }
+        }
+    }
+
+    #[inline]
+    fn stamp_bsim3_ac_nqs_corrections(
+        matrix: &mut ComplexMatrix,
+        circuit: &CircuitData,
+        op_voltages: &[Value],
+        omega: Value,
+    ) {
+        if omega == 0.0 || circuit.bsim3v3.is_empty() {
+            return;
+        }
+        for dev in &circuit.bsim3v3.devices {
+            if !dev.uses_ac_nqs() {
+                continue;
+            }
+            let (charge, mode) = dev.charge_at(op_voltages);
+            dev.stamp_ac_nqs_correction(&charge, mode, omega, |row, col, value| {
+                if row > 0 && col > 0 {
+                    matrix.add(row - 1, col - 1, value);
+                }
+            });
+        }
+    }
+
+    #[inline]
+    fn stamp_bsim4_ac_nqs_corrections(
+        matrix: &mut ComplexMatrix,
+        circuit: &CircuitData,
+        op_voltages: &[Value],
+        omega: Value,
+    ) {
+        if omega == 0.0 || circuit.bsim4v8.is_empty() {
+            return;
+        }
+        for dev in &circuit.bsim4v8.devices {
+            if !dev.uses_ac_nqs() {
+                continue;
+            }
+            let (charge, mode) = dev.charge_at(op_voltages);
+            dev.stamp_ac_nqs_correction(&charge, mode, omega, |row, col, value| {
+                if row > 0 && col > 0 {
+                    matrix.add(row - 1, col - 1, value);
+                }
+            });
+        }
+    }
+
+    #[inline]
+    fn stamp_bsim4_trnqs_ac_charge_node_anchors(matrix: &mut ComplexMatrix, circuit: &CircuitData) {
+        if circuit.bsim4v8.is_empty() {
+            return;
+        }
+        for dev in &circuit.bsim4v8.devices {
+            dev.stamp_trnqs_ac_charge_node_anchor_delta(|row, col, value| {
+                if row > 0 && col > 0 {
+                    matrix.add(row - 1, col - 1, value);
+                }
+            });
+        }
+    }
+
+    #[inline]
+    fn stamp_imag_matrix_entry(matrix: &mut ComplexMatrix, row: NodeId, col: NodeId, value: Value) {
+        if row > 0 && col > 0 {
+            matrix.add_imag(row - 1, col - 1, value);
+        }
+    }
+
+    #[inline]
+    fn stamp_jfet_ac_imag_feedback(
+        matrix: &mut ComplexMatrix,
+        circuit: &CircuitData,
+        op_voltages: &[Value],
+        frequency_hz: Value,
+    ) {
+        for jfet in &circuit.jfets {
+            let Some((xgm, xgds)) =
+                jfet.ac_imag_feedback_terms_at_frequency(op_voltages, frequency_hz)
+            else {
+                continue;
+            };
+            let xgm = if xgm.is_finite() { xgm } else { 0.0 };
+            let xgds = if xgds.is_finite() { xgds } else { 0.0 };
+
+            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.drain, xgds);
+            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.gate, xgm);
+            Self::stamp_imag_matrix_entry(matrix, jfet.drain, jfet.source, -xgds - xgm);
+            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.drain, -xgds);
+            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.gate, -xgm);
+            Self::stamp_imag_matrix_entry(matrix, jfet.source, jfet.source, xgds + xgm);
         }
     }
 
@@ -629,6 +778,7 @@ impl Engine {
     ) {
         let has_nonlinear = circuit.has_nonlinear_devices();
         let size = circuit.matrix_size();
+        let frequency_hz = omega / (2.0 * PI);
         ac_matrix.clear_values();
 
         // Stamp resistors (real conductance)
@@ -668,12 +818,7 @@ impl Engine {
 
         // Nonlinear device Jacobian (real part) evaluated at DC operating point.
         if has_nonlinear {
-            Self::stamp_nonlinear_small_signal_real(
-                ac_matrix,
-                circuit,
-                op_voltages,
-                omega / (2.0 * PI),
-            );
+            Self::stamp_nonlinear_small_signal_real(ac_matrix, circuit, op_voltages, frequency_hz);
             if include_vbic_dynamic_stamp {
                 for bjt in &circuit.bjts.devices {
                     Self::stamp_vbic_bjt_dynamic_ac(
@@ -714,6 +859,7 @@ impl Engine {
         // Nonlinear semiconductor junction capacitances at the operating point.
         if has_nonlinear {
             Self::stamp_nonlinear_capacitances(ac_matrix, circuit, op_voltages, omega);
+            Self::stamp_jfet_ac_imag_feedback(ac_matrix, circuit, op_voltages, frequency_hz);
         }
 
         // Stamp MOSFET capacitances: jωCgs, jωCgd, jωCgb (Meyer model)
@@ -767,11 +913,16 @@ impl Engine {
             }
         }
 
-        // BSIM3/BSIM4 coupled capacitance matrices: the mode-assembled gc**
-        // blocks of b3ld.c/b4ld.c evaluated at the operating point, times
-        // jw — exactly the xc*** entries of b3acld.c:356-369 / b4acld.c
-        // (nqsMod = 0).
-        if !circuit.bsim3v3.is_empty() || !circuit.bsim4v8.is_empty() {
+        // B3SOI/BSIM3/BSIM4 coupled capacitance matrices: the mode-assembled
+        // gc** blocks evaluated at the operating point, times jw — exactly the
+        // xc*** entries of each model's AC load path (nqsMod = 0 for BSIM4).
+        if omega != 0.0
+            && (!circuit.b3soi.is_empty()
+                || !circuit.b3soi_fd.is_empty()
+                || !circuit.b3soi_pd.is_empty()
+                || !circuit.bsim3v3.is_empty()
+                || !circuit.bsim4v8.is_empty())
+        {
             struct AcImagStamper<'a> {
                 matrix: &'a mut ComplexMatrix,
             }
@@ -788,6 +939,57 @@ impl Engine {
                 }
             }
             let mut stamper = AcImagStamper { matrix: ac_matrix };
+            for dev in &circuit.b3soi.devices {
+                if dev.charges_suppressed() {
+                    continue;
+                }
+                let charge = dev.charge_at(op_voltages);
+                dev.stamp_charge_companion(
+                    &charge,
+                    omega,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    op_voltages,
+                    &mut stamper,
+                );
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                if dev.charges_suppressed() {
+                    continue;
+                }
+                let charge = dev.charge_at(op_voltages);
+                dev.stamp_charge_companion(
+                    &charge,
+                    omega,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    op_voltages,
+                    &mut stamper,
+                );
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                if dev.charges_suppressed() {
+                    continue;
+                }
+                let charge = dev.charge_at(op_voltages);
+                dev.stamp_charge_companion(
+                    &charge,
+                    omega,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    op_voltages,
+                    &mut stamper,
+                );
+            }
             for dev in &circuit.bsim3v3.devices {
                 let (charge, mode) = dev.charge_at(op_voltages);
                 let gc = crate::device::Bsim3v3Device::charge_matrix(&charge, mode);
@@ -795,10 +997,12 @@ impl Engine {
             }
             for dev in &circuit.bsim4v8.devices {
                 let (charge, mode) = dev.charge_at(op_voltages);
-                let gc = crate::device::Bsim4v8Device::charge_matrix(&charge, mode);
-                dev.stamp_charge_matrix(&gc, omega, &mut stamper);
+                dev.stamp_ac_charge_matrix(&charge, mode, omega, &mut stamper);
             }
         }
+        Self::stamp_bsim3_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
+        Self::stamp_bsim4_ac_nqs_corrections(ac_matrix, circuit, op_voltages, omega);
+        Self::stamp_bsim4_trnqs_ac_charge_node_anchors(ac_matrix, circuit);
 
         // Voltage sources for AC (MNA branch equations)
         for i in 0..circuit.voltage_sources.len() {
@@ -1104,6 +1308,9 @@ impl Engine {
                     .to_string(),
             ));
         }
+        if frequencies.iter().any(|&frequency| frequency != 0.0) {
+            Self::ensure_supported_dynamic_charges(&circuit, "AC")?;
+        }
         let mut matrix = engine.build_matrix(&circuit)?;
         circuit.link_indices(&matrix);
 
@@ -1114,6 +1321,15 @@ impl Engine {
         if has_nonlinear {
             // Align stateful nonlinear models (limited junction voltages, operating region)
             // with the final converged operating-point solution before AC linearization.
+            for dev in &circuit.b3soi.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_fd.devices {
+                dev.begin_timestep_iteration();
+            }
+            for dev in &circuit.b3soi_pd.devices {
+                dev.begin_timestep_iteration();
+            }
             circuit.update_nonlinear(&dc_solution);
         }
         // Cache behavioral-source partials at the operating point so the

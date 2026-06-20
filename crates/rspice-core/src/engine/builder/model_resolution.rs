@@ -208,6 +208,39 @@ pub(super) fn resolve_mos_type_from_model(model_type: &str) -> Option<crate::net
     }
 }
 
+pub(super) fn is_vdmos_model_type(model_type: &str) -> bool {
+    model_type.eq_ignore_ascii_case("VDMOS")
+        || model_type.eq_ignore_ascii_case("NVDMOS")
+        || model_type.eq_ignore_ascii_case("PVDMOS")
+}
+
+pub(super) fn resolve_vdmos_type_from_model(
+    model_type: &str,
+    params: &HashMap<String, f64>,
+) -> Option<crate::netlist::MosType> {
+    if model_type.eq_ignore_ascii_case("NVDMOS") {
+        return Some(crate::netlist::MosType::Nmos);
+    }
+    if model_type.eq_ignore_ascii_case("PVDMOS") {
+        return Some(crate::netlist::MosType::Pmos);
+    }
+    if !model_type.eq_ignore_ascii_case("VDMOS") {
+        return None;
+    }
+
+    let flag_set = |names: &[&str]| {
+        names
+            .iter()
+            .any(|name| params.get(*name).copied().is_some_and(|value| value != 0.0))
+    };
+
+    if flag_set(&["PCHAN", "PCHANNEL", "PMOS"]) {
+        Some(crate::netlist::MosType::Pmos)
+    } else {
+        Some(crate::netlist::MosType::Nmos)
+    }
+}
+
 pub(super) fn resolve_jfet_type_from_model(model_type: &str) -> Option<crate::netlist::JfetType> {
     if model_type.eq_ignore_ascii_case("NJF") {
         Some(crate::netlist::JfetType::Njf)

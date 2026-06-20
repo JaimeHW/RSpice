@@ -5,7 +5,7 @@
 //! 2. netlist `.OPTIONS`
 //! 3. explicit runtime overrides (CLI/UI/Python/etc.)
 
-use super::{ConvergenceConfig, SimulationConfig};
+use super::{ConvergenceConfig, JfetLevel2Model, SimulationConfig, SpiceDialect};
 use crate::Value;
 use crate::analysis::IntegrationMethod;
 use crate::netlist::SimulationOptions as NetlistSimulationOptions;
@@ -62,6 +62,8 @@ pub struct SimulationConfigOverrides {
     pub charge_abstol: Option<Value>,
     pub residual_reltol: Option<Value>,
     pub gmin_initial: Option<Value>,
+    pub spice_dialect: Option<SpiceDialect>,
+    pub jfet_level2_model: Option<JfetLevel2Model>,
 }
 
 /// Resolve the final simulation config from layered sources.
@@ -174,6 +176,12 @@ pub fn resolve_simulation_config(
     }
     if let Some(gmin) = overrides.gmin_initial {
         gmin_initial = gmin;
+    }
+    if let Some(dialect) = overrides.spice_dialect {
+        resolved = resolved.with_spice_dialect(dialect);
+    }
+    if let Some(model) = overrides.jfet_level2_model {
+        resolved.jfet_level2_model = model;
     }
 
     if let Some(preset) = overrides.convergence_preset {
@@ -293,5 +301,94 @@ mod tests {
         let resolved = resolve_simulation_config(&base, Some(&options), &overrides);
 
         assert_eq!(resolved.transient_trtol, 4.5);
+    }
+
+    #[test]
+    fn explicit_jfet_level2_model_override_wins_over_base() {
+        let base = SimulationConfig::default();
+        assert_eq!(
+            base.resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::ParkerSkellern
+        );
+
+        let overrides = SimulationConfigOverrides {
+            jfet_level2_model: Some(crate::engine::JfetLevel2Model::XyceModifiedShockley),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, None, &overrides);
+
+        assert_eq!(
+            resolved.jfet_level2_model,
+            crate::engine::JfetLevel2Model::XyceModifiedShockley
+        );
+        assert_eq!(
+            resolved.resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::XyceModifiedShockley
+        );
+    }
+
+    #[test]
+    fn explicit_spice_dialect_selects_ngspice_jfet_level2_model() {
+        let base = SimulationConfig::default();
+        let overrides = SimulationConfigOverrides {
+            spice_dialect: Some(crate::engine::SpiceDialect::Ngspice),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, None, &overrides);
+
+        assert_eq!(resolved.spice_dialect, crate::engine::SpiceDialect::Ngspice);
+        assert_eq!(
+            resolved.jfet_level2_model,
+            crate::engine::JfetLevel2Model::DialectDefault
+        );
+        assert_eq!(
+            resolved.resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::ParkerSkellern
+        );
+    }
+
+    #[test]
+    fn explicit_spice_dialect_selects_xyce_jfet_level2_model() {
+        let base = SimulationConfig::default();
+        let overrides = SimulationConfigOverrides {
+            spice_dialect: Some(crate::engine::SpiceDialect::Xyce),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, None, &overrides);
+
+        assert_eq!(resolved.spice_dialect, crate::engine::SpiceDialect::Xyce);
+        assert_eq!(
+            resolved.jfet_level2_model,
+            crate::engine::JfetLevel2Model::DialectDefault
+        );
+        assert_eq!(
+            resolved.resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::XyceModifiedShockley
+        );
+    }
+
+    #[test]
+    fn explicit_jfet_level2_model_override_wins_over_spice_dialect() {
+        let base = SimulationConfig::default();
+        let overrides = SimulationConfigOverrides {
+            spice_dialect: Some(crate::engine::SpiceDialect::Xyce),
+            jfet_level2_model: Some(crate::engine::JfetLevel2Model::ParkerSkellern),
+            ..Default::default()
+        };
+
+        let resolved = resolve_simulation_config(&base, None, &overrides);
+
+        assert_eq!(resolved.spice_dialect, crate::engine::SpiceDialect::Xyce);
+        assert_eq!(
+            resolved.jfet_level2_model,
+            crate::engine::JfetLevel2Model::ParkerSkellern
+        );
+        assert_eq!(
+            resolved.resolved_jfet_level2_model(),
+            crate::engine::JfetLevel2Model::ParkerSkellern
+        );
     }
 }

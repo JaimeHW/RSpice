@@ -48,7 +48,10 @@ pub use builder::{
     register_precompiled_veriloga_model_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats,
 };
-pub use config::{BypassConfig, ConvergenceConfig, DampingStrategy, SimulationConfig};
+pub use config::{
+    BypassConfig, ConvergenceConfig, DampingStrategy, JfetLevel2Model, SimulationConfig,
+    SpiceDialect,
+};
 pub use config_resolver::{
     ConvergencePreset, SimulationConfigOverrides, resolve_simulation_config,
 };

@@ -59,6 +59,7 @@ impl TestRunner {
             .ok_or_else(|| format!("{LIVE_REFERENCES_ENV}=1 requires {NGSPICE_EXE_ENV}"))?
             .canonicalize()
             .map_err(|err| format!("failed to resolve {NGSPICE_EXE_ENV}: {err}"))?;
+        let ngspice_exe = prefer_windows_console_ngspice_exe(ngspice_exe)?;
 
         if !source_root.join("tests").is_dir() {
             return Err(format!(
@@ -975,6 +976,46 @@ fn read_raw_f32(content: &[u8], pos: &mut usize) -> Result<f32, String> {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_gui_ngspice_exe_prefers_sibling_console_binary() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rspice_ngspice_console_pick_{unique}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let gui = dir.join("ngspice.exe");
+        let console = dir.join("ngspice_con.exe");
+        fs::write(&gui, b"gui").expect("write gui marker");
+        fs::write(&console, b"console").expect("write console marker");
+
+        let resolved = prefer_windows_console_ngspice_exe(gui.clone()).expect("console exists");
+
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(resolved, console);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_gui_ngspice_exe_without_sibling_console_is_rejected() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rspice_ngspice_console_missing_{unique}"));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let gui = dir.join("ngspice.exe");
+        fs::write(&gui, b"gui").expect("write gui marker");
+
+        let err = prefer_windows_console_ngspice_exe(gui.clone())
+            .expect_err("GUI ngspice.exe must not be used without ngspice_con.exe");
+
+        let _ = fs::remove_dir_all(&dir);
+        assert!(err.contains("ngspice_con.exe"), "{err}");
+        assert!(err.contains(&gui.display().to_string()), "{err}");
+    }
+
     #[test]
     fn rawfile_fallback_builds_tables_from_printed_variables_only() {
         let mut raw = Vec::new();
@@ -1083,6 +1124,32 @@ fn tail(content: &str) -> String {
         .collect::<Vec<_>>()
         .join(" | ");
     truncate(lines.trim(), 240)
+}
+
+fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        let is_windows_gui_binary = ngspice_exe
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("ngspice.exe"));
+        if is_windows_gui_binary {
+            let console_exe = ngspice_exe.with_file_name("ngspice_con.exe");
+            if console_exe.is_file() {
+                log::warn!(
+                    "Using Windows console ngspice '{}' instead of GUI binary '{}'",
+                    console_exe.display(),
+                    ngspice_exe.display()
+                );
+                return Ok(console_exe);
+            }
+            return Err(format!(
+                "{NGSPICE_EXE_ENV} points to Windows GUI ngspice.exe '{}', but sibling console binary '{}' is missing; set {NGSPICE_EXE_ENV} to ngspice_con.exe to avoid GUI popup dialogs",
+                ngspice_exe.display(),
+                console_exe.display()
+            ));
+        }
+    }
+    Ok(ngspice_exe)
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {

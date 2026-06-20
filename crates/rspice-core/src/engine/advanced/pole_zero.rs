@@ -22,6 +22,32 @@ impl Engine {
         }
     }
 
+    fn ensure_supported_bsim_ac_nqs_pz_models(
+        circuit: &CircuitData,
+    ) -> Result<(), SimulationError> {
+        for dev in &circuit.bsim3v3.devices {
+            if dev.core.model.acnqs_mod != 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Pole-zero analysis does not yet support BSIM3 '{}' with ACNQSMOD=1; \
+                     AC-NQS is a rational charge-deficit effect and needs a hidden \
+                     charge-deficit state instead of G+sC descriptor extraction",
+                    dev.name
+                )));
+            }
+        }
+        for dev in &circuit.bsim4v8.devices {
+            if dev.core.model.acnqs_mod != 0 {
+                return Err(SimulationError::Circuit(format!(
+                    "Pole-zero analysis does not yet support BSIM4 '{}' with ACNQSMOD=1; \
+                     AC-NQS is a rational charge-deficit effect and needs a hidden \
+                     charge-deficit state instead of G+sC descriptor extraction",
+                    dev.name
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(in crate::engine::advanced) fn descriptor_expand_square(
         g_matrix: &mut Matrix,
         c_matrix: &mut Matrix,
@@ -231,6 +257,8 @@ impl Engine {
         compute_zeros: bool,
     ) -> Result<PoleZeroResult, SimulationError> {
         let mut circuit = self.build_circuit(netlist)?;
+        Self::ensure_supported_dynamic_charges(&circuit, "Pole-zero")?;
+        Self::ensure_supported_bsim_ac_nqs_pz_models(&circuit)?;
         let num_nodes = circuit.num_nodes();
 
         let validate_node = |node: usize, label: &str| -> Result<(), SimulationError> {

@@ -1,6 +1,41 @@
 //! Engine configuration types.
 
 use crate::Value;
+
+/// Broad SPICE compatibility policy for internal device-model selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpiceDialect {
+    /// Prefer RSpice's most accurate available evaluator per device.
+    #[default]
+    BestAvailable,
+    /// Prefer ngspice-compatible evaluators where RSpice carries variants.
+    Ngspice,
+    /// Prefer Xyce-compatible evaluators where RSpice carries variants.
+    Xyce,
+}
+
+impl SpiceDialect {
+    /// Default evaluator for `NJF`/`PJF LEVEL=2` under this dialect.
+    pub fn default_jfet_level2_model(self) -> JfetLevel2Model {
+        match self {
+            Self::BestAvailable | Self::Ngspice => JfetLevel2Model::ParkerSkellern,
+            Self::Xyce => JfetLevel2Model::XyceModifiedShockley,
+        }
+    }
+}
+
+/// Internal evaluator selection used for `NJF`/`PJF LEVEL=2` model cards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JfetLevel2Model {
+    /// Defer the concrete evaluator to [`SpiceDialect`].
+    #[default]
+    DialectDefault,
+    /// ngspice JFET2 Parker-Skellern short-channel model.
+    ParkerSkellern,
+    /// Xyce modified-Shockley level-2 JFET model.
+    XyceModifiedShockley,
+}
+
 /// Simulation configuration
 #[derive(Debug, Clone)]
 pub struct SimulationConfig {
@@ -24,6 +59,10 @@ pub struct SimulationConfig {
     pub temperature: Value,
     /// Integration method for transient analysis
     pub integration_method: crate::analysis::IntegrationMethod,
+    /// Broad SPICE compatibility policy used by config resolution.
+    pub spice_dialect: SpiceDialect,
+    /// Internal evaluator used for `NJF`/`PJF LEVEL=2`.
+    pub jfet_level2_model: JfetLevel2Model,
     /// Transient truncation tolerance factor for charge-state timestep control.
     pub transient_trtol: Value,
     /// Largest nonlinear-device terminal-voltage change allowed per accepted
@@ -45,6 +84,28 @@ pub struct SimulationConfig {
     /// validated. Built for oracle comparison: replaying a reference's
     /// recorded grid isolates physics parity from step-control parity.
     pub locked_time_grid: Option<std::sync::Arc<Vec<Value>>>,
+}
+
+impl SimulationConfig {
+    /// Select a broad compatibility dialect and use its device defaults.
+    pub fn with_spice_dialect(mut self, dialect: SpiceDialect) -> Self {
+        self.spice_dialect = dialect;
+        self.apply_spice_dialect();
+        self
+    }
+
+    /// Reset dialect-controlled device selections to follow the current dialect.
+    pub fn apply_spice_dialect(&mut self) {
+        self.jfet_level2_model = JfetLevel2Model::DialectDefault;
+    }
+
+    /// Resolve the concrete evaluator for `NJF`/`PJF LEVEL=2`.
+    pub fn resolved_jfet_level2_model(&self) -> JfetLevel2Model {
+        match self.jfet_level2_model {
+            JfetLevel2Model::DialectDefault => self.spice_dialect.default_jfet_level2_model(),
+            model => model,
+        }
+    }
 }
 
 /// Configuration for DC convergence algorithms
@@ -239,6 +300,8 @@ impl Default for SimulationConfig {
             max_timestep: crate::constants::MAX_TIMESTEP,
             temperature: crate::constants::TEMP_REFERENCE,
             integration_method: crate::analysis::IntegrationMethod::TrapGear,
+            spice_dialect: SpiceDialect::BestAvailable,
+            jfet_level2_model: JfetLevel2Model::DialectDefault,
             transient_trtol: crate::constants::TRTOL,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,
             bypass_config: BypassConfig::default(),
