@@ -113,6 +113,16 @@ def free_port():
         return s.getsockname()[1]
 
 
+def dump_dom(chrome, url, timeout=90):
+    try:
+        return subprocess.run(
+            [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
+             "--virtual-time-budget=20000", "--dump-dom", url],
+            capture_output=True, text=True, timeout=timeout).stdout
+    except subprocess.TimeoutExpired as e:
+        return e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+
+
 def headless_solve_gate(out):
     chrome = find_chrome()
     if not chrome:
@@ -127,14 +137,7 @@ def headless_solve_gate(out):
         time.sleep(1)
         # play/index.html runs a transient on load; a healthy bundle yields
         # the "engine ready" badge and a "solved in" log line in the DOM.
-        try:
-            dom = subprocess.run(
-                [chrome, "--headless=new", "--disable-gpu", "--no-sandbox",
-                 "--virtual-time-budget=20000", "--dump-dom",
-                 "http://127.0.0.1:%d/play/" % port],
-                capture_output=True, text=True, timeout=90).stdout
-        except subprocess.TimeoutExpired as e:
-            dom = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
+        dom = dump_dom(chrome, "http://127.0.0.1:%d/play/" % port)
     finally:
         server.terminate()
         try:
@@ -155,10 +158,40 @@ def headless_solve_gate(out):
     print("ok: headless solve — engine ready, transient completed")
 
 
+def headless_ide_gate(out):
+    chrome = find_chrome()
+    if not chrome:
+        fail("no Chrome found for the IDE headless gate "
+             "(set CHROME or pass --skip-headless)")
+
+    port = free_port()
+    server = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(port), "--directory", str(out)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(1)
+        dom = dump_dom(chrome, "http://127.0.0.1:%d/ide/" % port)
+    finally:
+        server.terminate()
+        try:
+            server.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()
+
+    if "failed to load the RSpice module" in dom or "RSpice failed to start" in dom:
+        m = re.search(r"(failed to load the RSpice module|RSpice failed to start)[^<]*", dom)
+        if m:
+            print(m.group(0), file=sys.stderr)
+        fail("browser IDE reported a startup failure")
+    if "id=\"rspice_loading\"" in dom:
+        fail("browser IDE loaded but did not clear the loading overlay")
+    print("ok: headless IDE boot - loading overlay cleared")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Build, verify, and assemble _site/.")
     ap.add_argument("--skip-headless", action="store_true",
-                    help="skip the headless playground solve gate (no local Chrome)")
+                    help="skip the headless playground and IDE gates (no local Chrome)")
     ap.add_argument("--out", default="_site", help="output directory (default: _site)")
     args = ap.parse_args()
 
@@ -206,9 +239,10 @@ def main():
 
     # ── 5 · headless solve gate ─────────────────────────────────────────
     if args.skip_headless:
-        print("skipped: headless solve gate (--skip-headless)")
+        print("skipped: headless browser gates (--skip-headless)")
     else:
         headless_solve_gate(out)
+        headless_ide_gate(out)
 
     print("site assembled at %s (source %s)" % (out, sha))
 

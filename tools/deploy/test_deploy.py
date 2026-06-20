@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "tools" / "deploy" / "deploy.py"
+PUBLISH = ROOT / "tools" / "deploy" / "publish.py"
 
 
 def git(cwd, *args, check=True):
@@ -83,6 +84,67 @@ class DeployScriptTest(unittest.TestCase):
         self.assertIn("site/new-page.html", result.stderr.replace("\\", "/"))
         tag = git(self.remote, "rev-parse", "--verify", "refs/tags/site-v1000", check=False)
         self.assertNotEqual(tag.returncode, 0)
+
+
+class PublishScriptTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name)
+        self.remote = self.base / "publish.git"
+        self.site = self.base / "_site"
+
+        subprocess.run(["git", "init", "--bare", str(self.remote)], check=True)
+        write_file(self.site, "index.html", "first\n")
+        write_file(self.site, "assets/app.js", "console.log('first')\n")
+
+    def publish(self, *args):
+        env = os.environ.copy()
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        return subprocess.run(
+            [sys.executable, str(PUBLISH), *args],
+            cwd=self.base,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_publish_force_pushes_single_orphan_commit(self):
+        result = self.publish(
+            "--branch",
+            "cf-pages-test",
+            "--dir",
+            str(self.site),
+            "--remote",
+            str(self.remote),
+            "--message",
+            "deploy first",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.site / ".git").exists(), "throwaway .git must be cleaned")
+        first_count = git(self.remote, "rev-list", "--count", "cf-pages-test").stdout.strip()
+        self.assertEqual(first_count, "1")
+        first_html = git(self.remote, "show", "cf-pages-test:index.html").stdout
+        self.assertEqual(first_html, "first\n")
+
+        write_file(self.site, "index.html", "second\n")
+        result = self.publish(
+            "--branch",
+            "cf-pages-test",
+            "--dir",
+            str(self.site),
+            "--remote",
+            str(self.remote),
+            "--message",
+            "deploy second",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        second_count = git(self.remote, "rev-list", "--count", "cf-pages-test").stdout.strip()
+        self.assertEqual(second_count, "1", "publish branch must remain single-commit")
+        second_html = git(self.remote, "show", "cf-pages-test:index.html").stdout
+        self.assertEqual(second_html, "second\n")
 
 
 if __name__ == "__main__":
