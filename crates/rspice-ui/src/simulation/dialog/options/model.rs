@@ -176,6 +176,8 @@ impl SimulationOptions {
             charge_abstol: Some(self.chgtol),
             residual_reltol: Some(self.residual_reltol),
             gmin_initial: Some(self.gmin),
+            spice_dialect: None,
+            jfet_level2_model: None,
         }
     }
 

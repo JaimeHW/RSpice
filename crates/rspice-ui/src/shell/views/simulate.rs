@@ -91,6 +91,39 @@ fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
         });
 }
 
+fn draw_progress_track(ui: &mut Ui, progress: f64, width: f32) {
+    let c = Tokens::get(ui.ctx()).color;
+    let (track_rect, _) =
+        ui.allocate_exact_size(egui::vec2(width.max(0.0), 5.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(track_rect, 3.0, c.bg_inset);
+    let progress = progress.clamp(0.0, 1.0) as f32;
+    if progress > 0.0 {
+        let fill_rect = egui::Rect::from_min_size(
+            track_rect.min,
+            egui::vec2(track_rect.width() * progress, track_rect.height()),
+        );
+        painter.rect_filled(fill_rect, 3.0, c.accent);
+    }
+}
+
+fn simulation_status_text(state: &AppState) -> String {
+    if state.simulation.is_running {
+        state.simulation.status.clone()
+    } else if state.sim_setup.enabled.is_empty() {
+        "idle - nothing in the run set".to_owned()
+    } else if let Some(run) = state.simulation.active_run() {
+        format!(
+            "idle - {} in run set; last run #{} {}",
+            state.sim_setup.enabled.len(),
+            run.id,
+            if run.success { "ok" } else { "failed" }
+        )
+    } else {
+        format!("idle - {} in run set", state.sim_setup.enabled.len())
+    }
+}
+
 /// Card header strip with title, sub-label and optional action.
 fn card_header(
     ui: &mut Ui,
@@ -822,6 +855,42 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
         .rounding(t.radius_lg)
         .inner_margin(egui::Margin::symmetric(14.0, 12.0))
         .show(ui, |ui| {
+            if ui.available_width() < 430.0 {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+
+                    let can_run = state.can_run_simulation();
+                    if Button::new("Run")
+                        .icon(Icon::Run)
+                        .accent()
+                        .enabled(can_run)
+                        .show(ui)
+                        .clicked()
+                    {
+                        state.request_run_set_simulation();
+                    }
+                    if Button::new("Stop")
+                        .icon(Icon::Stop)
+                        .enabled(state.simulation.is_running)
+                        .show(ui)
+                        .clicked()
+                    {
+                        state.simulation.trigger_abort = true;
+                    }
+                });
+                ui.add_space(8.0);
+                draw_progress_track(ui, state.simulation.progress, ui.available_width());
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(simulation_status_text(state))
+                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                            .color(c.text_dim),
+                    )
+                    .truncate(),
+                );
+                return;
+            }
+
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 12.0;
 
@@ -844,21 +913,10 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
                     state.simulation.trigger_abort = true;
                 }
 
-                // Progress track.
-                let status_width = 200.0;
-                let track_width = (ui.available_width() - status_width - 12.0).max(60.0);
-                let (track_rect, _) =
-                    ui.allocate_exact_size(egui::vec2(track_width, 5.0), egui::Sense::hover());
-                let painter = ui.painter();
-                painter.rect_filled(track_rect, 3.0, c.bg_inset);
-                let progress = state.simulation.progress.clamp(0.0, 1.0) as f32;
-                if progress > 0.0 {
-                    let fill_rect = egui::Rect::from_min_size(
-                        track_rect.min,
-                        egui::vec2(track_rect.width() * progress, track_rect.height()),
-                    );
-                    painter.rect_filled(fill_rect, 3.0, c.accent);
-                }
+                let remaining = ui.available_width();
+                let status_width = (remaining * 0.42).clamp(140.0, 220.0);
+                let track_width = (remaining - status_width - 12.0).max(80.0);
+                draw_progress_track(ui, state.simulation.progress, track_width);
 
                 // Status readout.
                 let status = if state.simulation.is_running {
@@ -876,12 +934,57 @@ fn run_bar(ui: &mut Ui, state: &mut AppState) {
                     format!("idle — {} in run set", state.sim_setup.enabled.len())
                 };
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(status)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_dim),
+                    ui.add_sized(
+                        [status_width, 18.0],
+                        egui::Label::new(
+                            egui::RichText::new(status)
+                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                .color(c.text_dim),
+                        )
+                        .truncate(),
                     );
                 });
             });
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_bar_never_overflows_narrow_widths() {
+        let ctx = egui::Context::default();
+        crate::ui::fonts::install(&ctx);
+
+        let mut state = AppState::default();
+        state.sim_setup.enabled.insert(TAB_TRANSIENT);
+        state.simulation.is_running = true;
+        state.simulation.progress = 0.42;
+        state.simulation.status =
+            "Analysis 12/24: very long transient operating point recovery status".to_string();
+
+        for width in [300.0, 420.0, 520.0] {
+            let mut content_width = 0.0;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let rect =
+                        egui::Rect::from_min_size(ui.max_rect().min, egui::vec2(width, 120.0));
+                    let mut child = ui.new_child(
+                        egui::UiBuilder::new()
+                            .max_rect(rect)
+                            .layout(egui::Layout::top_down(egui::Align::Min)),
+                    );
+                    child.set_width(width);
+                    run_bar(&mut child, &mut state);
+                    content_width = child.min_rect().width();
+                });
+            });
+
+            assert!(
+                content_width <= width + 0.5,
+                "run bar content claims {content_width}px in a {width}px container"
+            );
+        }
+    }
 }

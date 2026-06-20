@@ -142,6 +142,7 @@ fn show_docbar(ui: &mut Ui, state: &mut AppState) {
             };
             if Button::new(regen_label).show(ui).clicked() {
                 state.workspace.netlist_source = None;
+                state.workspace.netlist_source_path = None;
                 regenerate(state);
                 let netlist = &mut state.shell.netlist;
                 netlist.edited_lines.clear();
@@ -325,6 +326,7 @@ fn flush_queued_run(state: &mut AppState) {
 
 /// Regenerate the buffer from the schematic (generated mode).
 fn regenerate(state: &mut AppState) {
+    state.workspace.netlist_source_path = None;
     let hierarchy = crate::simulation::netlist_gen::HierarchySource::from_workspace(
         &state.library_manager,
         &state.workspace.schematic_buffers,

@@ -186,6 +186,10 @@ pub struct ProjectWorkspace {
     /// `None` means the netlist view shows the generated artifact.
     #[serde(default)]
     pub netlist_source: Option<String>,
+    /// Original file for `netlist_source`, when the manual deck was opened
+    /// from disk. Relative `.include`/`.lib` paths resolve from here.
+    #[serde(default)]
+    pub netlist_source_path: Option<PathBuf>,
 }
 
 impl Default for ProjectWorkspace {
@@ -203,6 +207,7 @@ impl Default for ProjectWorkspace {
             schematic_buffers,
             specs: Vec::new(),
             netlist_source: None,
+            netlist_source_path: None,
         }
     }
 }

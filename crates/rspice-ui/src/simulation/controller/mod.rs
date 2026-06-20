@@ -87,6 +87,9 @@ pub struct SimulationController {
     total_analyses: usize,
     /// Cached netlist for multi-analysis runs (avoids regeneration)
     cached_netlist: Option<String>,
+    /// Source path associated with `cached_netlist`, used for resolving
+    /// relative `.include` and `.lib` directives during every queued run.
+    cached_source_path: Option<PathBuf>,
     /// Runtime coordinator for transient-derived viewer data (eye/FFT).
     transient_post: transient_post::TransientPostCoordinator,
 }
@@ -109,6 +112,7 @@ impl SimulationController {
             current_analysis_idx: 0,
             total_analyses: 0,
             cached_netlist: None,
+            cached_source_path: None,
             transient_post: transient_post::TransientPostCoordinator::default(),
         }
     }
@@ -135,6 +139,7 @@ impl SimulationController {
             // Clear pending analyses since we're stopping
             self.pending_analyses.clear();
             self.cached_netlist = None;
+            self.cached_source_path = None;
             self.current_config = None;
             self.current_spec = None;
             state.shell.netlist.pending_run_id = None;
@@ -180,6 +185,9 @@ impl SimulationController {
         let manual_source = (run_intent == SimulationRunIntent::ManualDeck)
             .then(|| state.workspace.netlist_source.clone())
             .flatten();
+        let manual_source_path = (run_intent == SimulationRunIntent::ManualDeck)
+            .then(|| state.workspace.netlist_source_path.clone())
+            .flatten();
         let manual_source_snapshot = manual_source.clone();
         if run_intent == SimulationRunIntent::ManualDeck && manual_source.is_none() {
             state.push_sim_message(ConsoleMessage::error(
@@ -201,7 +209,7 @@ impl SimulationController {
         let queued = if let Some(source) = &manual_source {
             match Self::build_manual_analysis_queue_from_source(
                 source,
-                state.schematic.current_file.as_deref(),
+                manual_source_path.as_deref(),
             ) {
                 Ok(queue) => queue,
                 Err(errors) => {
@@ -313,6 +321,11 @@ impl SimulationController {
 
         self.pending_analyses = queued.into_iter().collect();
         self.cached_netlist = Some(netlist);
+        self.cached_source_path = if manual_source_snapshot.is_some() {
+            manual_source_path
+        } else {
+            state.schematic.current_file.clone()
+        };
 
         let queued_names: Vec<&'static str> = self
             .pending_analyses
@@ -417,17 +430,18 @@ impl SimulationController {
             state.simulation.status = "Error".to_string();
             return;
         };
+        let source_path = self.cached_source_path.clone();
 
         // Start the simulation
         let start_result = if let Some(cfg) = config {
             self.runner
-                .start_with_source_path(cfg, netlist, state.schematic.current_file.clone())
+                .start_with_source_path(cfg, netlist, source_path)
         } else {
             self.runner.start_spec_with_options_with_source_path(
                 spec,
                 netlist,
                 spec_options,
-                state.schematic.current_file.clone(),
+                source_path,
             )
         };
         match start_result {
@@ -482,6 +496,7 @@ impl SimulationController {
 
         // Clear cached netlist
         self.cached_netlist = None;
+        self.cached_source_path = None;
         self.current_config = None;
         self.current_spec = None;
         self.current_analysis_idx = 0;
@@ -813,6 +828,45 @@ mod tests {
         assert!(cached.contains("Vmanual"));
         assert!(cached.contains(".op"));
         controller.abort();
+    }
+
+    #[test]
+    fn manual_deck_intent_resolves_includes_from_netlist_source_path() {
+        let root = std::env::temp_dir().join(format!(
+            "rspice_ui_manual_source_path_{}",
+            std::process::id()
+        ));
+        let deck_dir = root.join("deck");
+        let schematic_dir = root.join("schematic");
+        std::fs::create_dir_all(&deck_dir).expect("deck dir");
+        std::fs::create_dir_all(&schematic_dir).expect("schematic dir");
+        std::fs::write(deck_dir.join("load.inc"), "R1 in 0 1k\n").expect("deck include");
+        std::fs::write(schematic_dir.join("load.inc"), "broken include\n").expect("wrong include");
+
+        let deck_path = deck_dir.join("main.cir");
+        let source = "manual include\nVmanual in 0 1\n.include \"load.inc\"\n.op\n.end\n";
+
+        let mut state = AppState::default();
+        state.schematic.current_file = Some(schematic_dir.join("design.rspice"));
+        state.workspace.netlist_source = Some(source.to_owned());
+        state.workspace.netlist_source_path = Some(deck_path.clone());
+
+        let mut controller = SimulationController::new();
+        state.simulation.request_manual_deck();
+        controller.update(&mut state);
+
+        assert_eq!(
+            controller.cached_source_path.as_deref(),
+            Some(deck_path.as_path())
+        );
+        assert!(
+            controller.cached_netlist.is_some(),
+            "manual deck should parse through include next to the source path; status={}",
+            state.simulation.status
+        );
+
+        controller.abort();
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -768,6 +768,7 @@ fn build_hierarchical_rc_project(app: &mut crate::common::app::AppState) {
     app.workspace.hierarchy_stack = vec![top_ref.clone()];
     app.workspace.hierarchy_instances.clear();
     app.workspace.netlist_source = None;
+    app.workspace.netlist_source_path = None;
     app.workspace
         .schematic_buffers
         .insert(top_ref.key(), top.clone());

@@ -42,14 +42,39 @@ impl SensitivityConfig {
         if self.output_var.is_empty() {
             errors.push("Output variable is required".to_string());
         }
-        if self.ac_mode && self.frequency.is_some() && self.frequency.unwrap() <= 0.0 {
-            errors.push("Frequency must be positive for AC sensitivity".to_string());
+        if self.ac_mode
+            && self
+                .frequency
+                .is_some_and(|frequency| !frequency.is_finite() || frequency <= 0.0)
+        {
+            errors.push("Frequency must be finite and positive for AC sensitivity".to_string());
         }
 
         if errors.is_empty() {
             Ok(())
         } else {
             Err(errors)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_nonfinite_ac_frequency() {
+        for frequency in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let config = SensitivityConfig {
+                ac_mode: true,
+                frequency: Some(frequency),
+                ..SensitivityConfig::default()
+            };
+
+            assert!(
+                config.validate().is_err(),
+                "expected {frequency:?} to be rejected"
+            );
         }
     }
 }

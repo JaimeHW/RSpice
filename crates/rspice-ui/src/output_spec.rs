@@ -109,8 +109,8 @@ pub(crate) fn resolve_sensitivity_ac_frequency(
 ) -> Result<Option<Value>, String> {
     if ac_mode {
         let freq = frequency.unwrap_or(1.0);
-        if freq <= 0.0 {
-            return Err("Sensitivity AC frequency must be > 0".to_string());
+        if !freq.is_finite() || freq <= 0.0 {
+            return Err("Sensitivity AC frequency must be finite and > 0".to_string());
         }
         Ok(Some(freq))
     } else if frequency.is_some() {
@@ -373,4 +373,19 @@ pub(crate) fn run_dc_output_sensitivity(
     };
 
     Ok(pos_sensitivity - neg_sensitivity)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_sensitivity_ac_frequency_rejects_nonfinite_values() {
+        for frequency in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
+            let err = resolve_sensitivity_ac_frequency(true, Some(frequency))
+                .expect_err("non-finite AC sensitivity frequency must be rejected");
+
+            assert!(err.contains("frequency"));
+        }
+    }
 }
