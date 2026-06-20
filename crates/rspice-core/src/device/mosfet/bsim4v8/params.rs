@@ -13,28 +13,43 @@
 //! whose physics is not ported. Honoring the card while ignoring the
 //! selector would silently change results, so:
 //!
-//! - `rdsMod=1` (external bias-dependent S/D resistance): not ported.
-//! - `rbodyMod=1/2` (distributed substrate network): not ported.
-//! - `rgateMod=1/2/3` (gate resistance network): not ported.
-//! - `trnqsMod=1`/`acnqsMod=1` (charge-deficit NQS): not ported.
-//! - `mobMod=3/4/5/6` (high-k / Synopsys variants): not ported; 0/1/2 are.
-//! - `capMod=0/1` charge models: not ported, rejected at construction;
-//!   `capMod=2` (the default charge-thickness model) is. `cvchargeMod=1`
-//!   errors on charge requests (DC is charge-model independent).
-//! - `igcMod`/`igbMod != 0` (gate tunneling currents): not ported.
-//! - `dioMod=0/2` (resistance-free / breakdown diode): not ported; the
-//!   default `dioMod=1` (ijth-linearized) is.
-//! - `mtrlMod=1` (non-silicon substrate), `wpemod=1` (well proximity) and
-//!   the stress model (instance `sa>0 && sb>0`): not ported.
+//! - `rdsMod=0/1` internal and external bias-dependent S/D resistance are ported.
+//! - `rbodyMod=1/2` distributed substrate networks are ported; `rbodyMod=2`
+//!   follows the ngspice geometry-scaled bodymode logic.
+//! - `rgateMod=1` constant gate-electrode resistance is ported through a
+//!   builder-lowered external gate resistor. `rgateMod=2` is ported as the
+//!   native bias-dependent gate-resistance branch. `rgateMod=3` is ported as
+//!   the native middle-gate resistance network.
+//! - `acnqsMod=1` is ported for AC with `rbodyMod = 0/1/2`,
+//!   `rdsMod = 0/1`, and `rgateMod = 0/1/2/3`. `trnqsMod=1`
+//!   transient charge-deficit NQS is native for the supported body,
+//!   source/drain, and gate-resistance topologies, and may coexist with
+//!   `acnqsMod=1`.
+//! - `mobMod=0..6` mobility selectors are ported, including the high-k /
+//!   Synopsys variants.
+//! - `capMod=0/1/2` charge models are ported; `capMod=2` remains the
+//!   default charge-thickness model, with `cvchargeMod=0/1` supported.
+//!   DC is charge-model independent.
+//! - `dioMod=0/1/2` source/drain junction diode selectors are ported.
+//! - `wpemod=1` well-proximity is ported for `SC` and explicit
+//!   `SCA`/`SCB`/`SCC` instance inputs.
+//! - The BSIM4 stress layout correction is ported for active `SA`/`SB`
+//!   layouts, including the multi-finger `SD` path.
+//! - `mtrlMod=1` material constants are ported for both compatibility modes;
+//!   `mtrlCompatMod=0` computes instance-local EOT-derived TOXP/COXP.
 //! - `tempMod=0/1/2/3` are all ported (they only redirect a handful of
 //!   temperature formulas).
-//! - `geoMod>0` with missing AD/AS/PD/PS: only the `geoMod=0` variant of
-//!   `BSIM4PAeffGeo` is ported; other geometries require explicit areas.
+//! - `geoMod=0..10` implicit `BSIM4PAeffGeo` diffusion geometries are
+//!   ported; `rgeoMod=1..8` S/D resistance geometry is ported for omitted
+//!   `NRD`/`NRS`, including Xyce-style model-card defaults.
 //!
 //! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits (`vgsMax`
 //! family) are accepted and stored — they do not affect the DC/charge load.
-//! `tnoiMod=1` would create internal S/D nodes only when a noise analysis is
-//! requested; that wiring is the engine's concern, not the load's.
+//! `tnoiMod=1` adjusts source/drain series-resistance noise during noise
+//! analysis; the load stores the selector and operating point, while the
+//! engine applies that noise-only adjustment.
+//! The engine currently emits native `tnoiMod=0/1/2`, `fnoiMod=0/1`, and
+//! gate shot-noise sources for the supported `rdsMod=0/1` topologies.
 
 use super::common::{EPS0, PI};
 use crate::Value;
@@ -78,6 +93,7 @@ pub struct Bsim4v8Model {
     pub rgate_mod: i32,
     pub per_mod: i32,
     pub geo_mod: i32,
+    pub rgeo_mod: i32,
     pub fnoi_mod: i32,
     pub tnoi_mod: i32,
     pub mtrl_mod: i32,
@@ -100,11 +116,13 @@ pub struct Bsim4v8Model {
     pub toxp: Value,
     pub toxp_given: bool,
     pub toxm: Value,
+    pub toxm_given: bool,
     pub toxref: Value,
     pub dtox: Value,
     pub dtox_given: bool,
     pub epsrox: Value,
     pub eot: Value,
+    pub eot_given: bool,
     pub vddeot: Value,
     pub tempeot: Value,
     pub leffeot: Value,
@@ -112,8 +130,9 @@ pub struct Bsim4v8Model {
     pub ados: Value,
     pub bdos: Value,
 
-    // Material card (mtrlMod=1 only; stored, construction rejects mtrlMod=1).
+    // Material card (mtrlMod=1).
     pub phig: Value,
+    pub phig_given: bool,
     pub epsrgate: Value,
     pub easub: Value,
     pub epsrsub: Value,
@@ -295,7 +314,7 @@ pub struct Bsim4v8Model {
     pub noff: Binned,
     pub voffcv: Binned,
 
-    // Well-proximity binned families (wpemod=1 only; stored).
+    // Well-proximity binned families (wpemod=1).
     pub kvth0we: Binned,
     pub k2we: Binned,
     pub ku0we: Binned,
@@ -402,13 +421,45 @@ pub struct Bsim4v8Model {
     pub rshg: Value,
     pub ngcon: Value,
 
-    // Body-resistance network card (rbodyMod>0 only; stored).
+    // Body-resistance network card.
     pub gbmin: Value,
     pub rbdb: Value,
     pub rbpb: Value,
     pub rbsb: Value,
     pub rbps: Value,
     pub rbpd: Value,
+    pub rbps0: Value,
+    pub rbps0_given: bool,
+    pub rbpsl: Value,
+    pub rbpsw: Value,
+    pub rbpsnf: Value,
+    pub rbpd0: Value,
+    pub rbpd0_given: bool,
+    pub rbpdl: Value,
+    pub rbpdw: Value,
+    pub rbpdnf: Value,
+    pub rbpbx0: Value,
+    pub rbpbxl: Value,
+    pub rbpbxw: Value,
+    pub rbpbxnf: Value,
+    pub rbpby0: Value,
+    pub rbpbyl: Value,
+    pub rbpbyw: Value,
+    pub rbpbynf: Value,
+    pub rbsbx0: Value,
+    pub rbsbx0_given: bool,
+    pub rbsby0: Value,
+    pub rbsby0_given: bool,
+    pub rbdbx0: Value,
+    pub rbdbx0_given: bool,
+    pub rbdby0: Value,
+    pub rbdby0_given: bool,
+    pub rbsdbxl: Value,
+    pub rbsdbxw: Value,
+    pub rbsdbxnf: Value,
+    pub rbsdbyl: Value,
+    pub rbsdbyw: Value,
+    pub rbsdbynf: Value,
 
     /// TNOM in Kelvin (card value is Celsius, transformed on entry).
     pub tnom: Value,
@@ -452,8 +503,7 @@ pub struct Bsim4v8Model {
     pub xl: Value,
     pub xw: Value,
 
-    // Stress-effect card (instance sa/sb>0 only; stored, construction
-    // rejects active stress).
+    // Stress-effect card (instance SA/SB/SD consumes these in temp.rs).
     pub saref: Value,
     pub sbref: Value,
     pub wlod: Value,
@@ -476,7 +526,7 @@ pub struct Bsim4v8Model {
     pub steta0: Value,
     pub lodeta0: Value,
 
-    // Well-proximity scalar card (wpemod=1 only; stored).
+    // Well-proximity scalar card (wpemod=1).
     pub web: Value,
     pub wec: Value,
     pub scref: Value,
@@ -572,18 +622,24 @@ impl Bsim4v8Model {
         let nmos = !is_pmos;
 
         let mob_mod = selector(p, "MOBMOD", 0, &[0, 1, 2, 3, 4, 5, 6]);
+        let mtrl_mod = selector(p, "MTRLMOD", 0, &[0, 1]);
+        let mtrl_compat_mod = selector(p, "MTRLCOMPATMOD", 0, &[0, 1]);
 
-        // Oxide stack with the toxe/toxp/dtox resolution of b4temp.c
-        // (mtrlMod=0 path; mtrlMod=1 is rejected at construction).
+        // Oxide stack with the toxe/toxp/dtox or eot/toxp/dtox resolution
+        // of b4temp.c:123-160. The mtrlCompatMod=0 TOXP iteration is
+        // instance-local and stays out of the immutable card.
         let toxe_given = get(p, "TOXE").is_some();
         let toxp_given = get(p, "TOXP").is_some();
+        let toxm_given = get(p, "TOXM").is_some();
         let dtox_given = get(p, "DTOX").is_some();
+        let eot_given = get(p, "EOT").is_some();
         let mut toxe = val(p, "TOXE", 30.0e-10);
         let dtox = val(p, "DTOX", 0.0);
         let mut toxp = val(p, "TOXP", toxe);
         let mut toxm_default = toxe;
-        {
-            // b4temp.c:123-142 (executed every BSIM4temp; idempotent).
+        let epsrox = val(p, "EPSROX", 3.9);
+        let mut eot = val(p, "EOT", 15.0e-10);
+        if mtrl_mod == 0 {
             let chktol = toxe.abs().max(toxp.abs()).max(dtox.abs()) * 1e-14;
             if toxe_given && toxp_given && dtox_given && (toxe - (toxp + dtox)).abs() > chktol {
                 log::warn!(
@@ -595,10 +651,23 @@ impl Bsim4v8Model {
                 toxe = toxp + dtox;
                 toxm_default = toxe;
             }
+        } else if mtrl_compat_mod != 0 {
+            let t0 = epsrox / 3.9;
+            if eot_given && toxp_given && dtox_given && (eot * t0 - (toxp + dtox)).abs() > 1.0e-20 {
+                log::warn!(
+                    "BSIM4: eot, toxp and dtox all given and eot * EPSROX / 3.9 != toxp + dtox; dtox ignored"
+                );
+            } else if eot_given && !toxp_given {
+                toxp = t0 * eot - dtox;
+            } else if !eot_given && toxp_given {
+                eot = (toxp + dtox) / t0;
+                toxm_default = eot;
+            }
         }
         let toxm = val(p, "TOXM", toxm_default);
-        let epsrox = val(p, "EPSROX", 3.9);
-        let coxe = epsrox * EPS0 / toxe;
+        let material_epsrox = if mtrl_mod != 0 { 3.9 } else { epsrox };
+        let material_toxe = if mtrl_mod != 0 { eot } else { toxe };
+        let coxe = material_epsrox * EPS0 / material_toxe;
 
         // Binned families with cross-defaults.
         let keta = binned(p, "KETA", -0.047);
@@ -677,12 +746,12 @@ impl Bsim4v8Model {
             lint
         });
 
-        // cf default is computed in b4temp.c from toxe; with mtrlMod=0 the
-        // formula only needs card values, so it is resolved here.
+        // cf/cg defaults are computed in b4temp.c from effective toxe/coxe.
         let cf_given = get(p, "CF").is_some();
         let cf = Binned {
-            v: get(p, "CF")
-                .unwrap_or_else(|| 2.0 * epsrox * EPS0 / PI * (1.0 + 0.4e-6 / toxe).ln()),
+            v: get(p, "CF").unwrap_or_else(|| {
+                2.0 * material_epsrox * EPS0 / PI * (1.0 + 0.4e-6 / material_toxe).ln()
+            }),
             l: val(p, "LCF", 0.0),
             w: val(p, "WCF", 0.0),
             p: val(p, "PCF", 0.0),
@@ -760,10 +829,11 @@ impl Bsim4v8Model {
             rgate_mod: selector(p, "RGATEMOD", 0, &[0, 1, 2, 3]),
             per_mod: selector(p, "PERMOD", 1, &[0, 1]),
             geo_mod: val(p, "GEOMOD", 0.0) as i32,
+            rgeo_mod: selector(p, "RGEOMOD", 0, &[0, 1, 2, 3, 4, 5, 6, 7, 8]),
             fnoi_mod: selector(p, "FNOIMOD", 1, &[0, 1]),
             tnoi_mod: selector(p, "TNOIMOD", 0, &[0, 1, 2]),
-            mtrl_mod: selector(p, "MTRLMOD", 0, &[0, 1]),
-            mtrl_compat_mod: selector(p, "MTRLCOMPATMOD", 0, &[0, 1]),
+            mtrl_mod,
+            mtrl_compat_mod,
             igc_mod: selector(p, "IGCMOD", 0, &[0, 1, 2]),
             igb_mod: selector(p, "IGBMOD", 0, &[0, 1]),
             temp_mod: selector(p, "TEMPMOD", 0, &[0, 1, 2, 3]),
@@ -780,11 +850,13 @@ impl Bsim4v8Model {
             toxp,
             toxp_given,
             toxm,
+            toxm_given,
             toxref: val(p, "TOXREF", 30.0e-10),
             dtox,
             dtox_given,
             epsrox,
-            eot: val(p, "EOT", 15.0e-10),
+            eot,
+            eot_given,
             vddeot: val(p, "VDDEOT", if nmos { 1.5 } else { -1.5 }),
             tempeot: val(p, "TEMPEOT", 300.15),
             leffeot: val(p, "LEFFEOT", 1.0),
@@ -793,6 +865,7 @@ impl Bsim4v8Model {
             bdos: val(p, "BDOS", 1.0),
 
             phig: val(p, "PHIG", 4.05),
+            phig_given: get(p, "PHIG").is_some(),
             epsrgate: val(p, "EPSRGATE", 11.7),
             easub: val(p, "EASUB", 4.05),
             epsrsub: val(p, "EPSRSUB", 11.7),
@@ -1128,6 +1201,38 @@ impl Bsim4v8Model {
             rbsb: val(p, "RBSB", 50.0),
             rbps: val(p, "RBPS", 50.0),
             rbpd: val(p, "RBPD", 50.0),
+            rbps0: val(p, "RBPS0", 50.0),
+            rbps0_given: p.contains_key("RBPS0"),
+            rbpsl: val(p, "RBPSL", 0.0),
+            rbpsw: val(p, "RBPSW", 0.0),
+            rbpsnf: val(p, "RBPSNF", 0.0),
+            rbpd0: val(p, "RBPD0", 50.0),
+            rbpd0_given: p.contains_key("RBPD0"),
+            rbpdl: val(p, "RBPDL", 0.0),
+            rbpdw: val(p, "RBPDW", 0.0),
+            rbpdnf: val(p, "RBPDNF", 0.0),
+            rbpbx0: val(p, "RBPBX0", 100.0),
+            rbpbxl: val(p, "RBPBXL", 0.0),
+            rbpbxw: val(p, "RBPBXW", 0.0),
+            rbpbxnf: val(p, "RBPBXNF", 0.0),
+            rbpby0: val(p, "RBPBY0", 100.0),
+            rbpbyl: val(p, "RBPBYL", 0.0),
+            rbpbyw: val(p, "RBPBYW", 0.0),
+            rbpbynf: val(p, "RBPBYNF", 0.0),
+            rbsbx0: val(p, "RBSBX0", 100.0),
+            rbsbx0_given: p.contains_key("RBSBX0"),
+            rbsby0: val(p, "RBSBY0", 100.0),
+            rbsby0_given: p.contains_key("RBSBY0"),
+            rbdbx0: val(p, "RBDBX0", 100.0),
+            rbdbx0_given: p.contains_key("RBDBX0"),
+            rbdby0: val(p, "RBDBY0", 100.0),
+            rbdby0_given: p.contains_key("RBDBY0"),
+            rbsdbxl: val(p, "RBSDBXL", 0.0),
+            rbsdbxw: val(p, "RBSDBXW", 0.0),
+            rbsdbxnf: val(p, "RBSDBXNF", 0.0),
+            rbsdbyl: val(p, "RBSDBYL", 0.0),
+            rbsdbyw: val(p, "RBSDBYW", 0.0),
+            rbsdbynf: val(p, "RBSDBYNF", 0.0),
 
             tnom,
             cgso,
@@ -1225,15 +1330,35 @@ impl Bsim4v8Model {
         }
     }
 
-    /// `epsrox * EPS0 / toxe` (`BSIM4coxe`, mtrlMod=0).
+    /// Effective oxide relative permittivity used by `BSIM4coxe`.
     #[inline]
-    pub fn coxe(&self) -> Value {
-        self.epsrox * EPS0 / self.toxe
+    pub fn effective_epsrox(&self) -> Value {
+        if self.mtrl_mod != 0 { 3.9 } else { self.epsrox }
     }
 
-    /// `epsrox * EPS0 / toxp` (`BSIM4coxp`, mtrlMod=0).
+    /// Effective oxide thickness used by `BSIM4coxe`.
+    #[inline]
+    pub fn effective_toxe(&self) -> Value {
+        if self.mtrl_mod != 0 {
+            self.eot
+        } else {
+            self.toxe
+        }
+    }
+
+    /// `epsrox * EPS0 / toxe` (`BSIM4coxe`, material-aware).
+    #[inline]
+    pub fn coxe(&self) -> Value {
+        self.effective_epsrox() * EPS0 / self.effective_toxe()
+    }
+
+    /// `epsrox * EPS0 / toxp` (`BSIM4coxp`) when model-level TOXP is used.
     #[inline]
     pub fn coxp(&self) -> Value {
-        self.epsrox * EPS0 / self.toxp
+        if self.mtrl_mod == 0 || self.mtrl_compat_mod != 0 {
+            self.epsrox * EPS0 / self.toxp
+        } else {
+            self.coxe()
+        }
     }
 }

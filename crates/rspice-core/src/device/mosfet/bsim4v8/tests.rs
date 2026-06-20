@@ -318,6 +318,35 @@ fn nmos_device(w: Value, l: Value, nf: Value, temp_k: Value) -> Bsim4v8 {
     Bsim4v8::new("m1".to_string(), model, geom(w, l, nf), temp_k).expect("nmos device")
 }
 
+fn nmos_mobmod_device(mob_mod: i32, temp_k: Value) -> Bsim4v8 {
+    let mut card = nmos45();
+    card.insert("MOBMOD".to_string(), mob_mod as Value);
+    // Keep the high-k Coulombic branch in a numerically useful range; the
+    // default n45 UD value was tuned for the legacy mobility branches.
+    card.insert("UD".to_string(), 1.0e-3);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), temp_k).expect("mobMod device")
+}
+
+fn nmos_geomod_device(geo_mod: i32, nf: Value, min_sd: i32) -> Bsim4v8 {
+    let mut card = nmos45();
+    card.insert("GEOMOD".to_string(), geo_mod as Value);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    Bsim4v8::new(
+        "m1".to_string(),
+        model,
+        Bsim4v8Geometry {
+            l: 45e-9,
+            w: 1e-6,
+            nf,
+            min_sd,
+            ..Bsim4v8Geometry::default()
+        },
+        T300,
+    )
+    .expect("geoMod device")
+}
+
 fn pmos_device(w: Value, l: Value, temp_k: Value) -> Bsim4v8 {
     let model = Arc::new(Bsim4v8Model::from_params(&pmos90(), true, T300));
     Bsim4v8::new("m1".to_string(), model, geom(w, l, 1.0), temp_k).expect("pmos device")
@@ -363,51 +392,653 @@ fn size_cache_reuses_knots() {
 }
 
 #[test]
-fn unported_mode_knobs_are_rejected() {
-    let reject = |key: &str, val: Value, what: &str| {
+fn transient_nqs_mode_combinations_are_scoped() {
+    let mut trnqs_card = nmos45();
+    trnqs_card.insert("TRNQSMOD".to_string(), 1.0);
+    trnqs_card.insert("ACNQSMOD".to_string(), 0.0);
+    trnqs_card.insert("RGATEMOD".to_string(), 0.0);
+    trnqs_card.insert("RBODYMOD".to_string(), 0.0);
+    trnqs_card.insert("RDSMOD".to_string(), 0.0);
+    let trnqs_model = Arc::new(Bsim4v8Model::from_params(&trnqs_card, false, T300));
+    let trnqs = Bsim4v8::new("m1".to_string(), trnqs_model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("TRNQSMOD=1 canonical transient topology constructs natively");
+    assert_eq!(trnqs.model.trnqs_mod, 1);
+
+    let mut trnqs_acnqs_card = trnqs_card.clone();
+    trnqs_acnqs_card.insert("ACNQSMOD".to_string(), 1.0);
+    let trnqs_acnqs_model = Arc::new(Bsim4v8Model::from_params(&trnqs_acnqs_card, false, T300));
+    let trnqs_acnqs = Bsim4v8::new(
+        "m1".to_string(),
+        trnqs_acnqs_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("TRNQSMOD=1 with ACNQSMOD=1 constructs natively");
+    assert_eq!(trnqs_acnqs.model.trnqs_mod, 1);
+    assert_eq!(trnqs_acnqs.model.acnqs_mod, 1);
+
+    let mut trnqs_rgatemod1_card = trnqs_card.clone();
+    trnqs_rgatemod1_card.insert("RGATEMOD".to_string(), 1.0);
+    let trnqs_rgatemod1_model = Arc::new(Bsim4v8Model::from_params(
+        &trnqs_rgatemod1_card,
+        false,
+        T300,
+    ));
+    let trnqs_rgatemod1 = Bsim4v8::new(
+        "m1".to_string(),
+        trnqs_rgatemod1_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("TRNQSMOD=1 with RGATEMOD=1 constructs natively");
+    assert_eq!(trnqs_rgatemod1.model.trnqs_mod, 1);
+    assert_eq!(trnqs_rgatemod1.model.rgate_mod, 1);
+
+    let mut trnqs_rgatemod2_card = trnqs_card.clone();
+    trnqs_rgatemod2_card.insert("RGATEMOD".to_string(), 2.0);
+    let trnqs_rgatemod2_model = Arc::new(Bsim4v8Model::from_params(
+        &trnqs_rgatemod2_card,
+        false,
+        T300,
+    ));
+    let trnqs_rgatemod2 = Bsim4v8::new(
+        "m1".to_string(),
+        trnqs_rgatemod2_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("TRNQSMOD=1 with RGATEMOD=2 constructs natively");
+    assert_eq!(trnqs_rgatemod2.model.trnqs_mod, 1);
+    assert_eq!(trnqs_rgatemod2.model.rgate_mod, 2);
+
+    let mut trnqs_rgatemod3_card = trnqs_card.clone();
+    trnqs_rgatemod3_card.insert("RGATEMOD".to_string(), 3.0);
+    let trnqs_rgatemod3_model = Arc::new(Bsim4v8Model::from_params(
+        &trnqs_rgatemod3_card,
+        false,
+        T300,
+    ));
+    let trnqs_rgatemod3 = Bsim4v8::new(
+        "m1".to_string(),
+        trnqs_rgatemod3_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("TRNQSMOD=1 with RGATEMOD=3 constructs natively");
+    assert_eq!(trnqs_rgatemod3.model.trnqs_mod, 1);
+    assert_eq!(trnqs_rgatemod3.model.rgate_mod, 3);
+
+    let mut trnqs_rdsmod1_card = trnqs_card.clone();
+    trnqs_rdsmod1_card.insert("RDSMOD".to_string(), 1.0);
+    let trnqs_rdsmod1_model = Arc::new(Bsim4v8Model::from_params(&trnqs_rdsmod1_card, false, T300));
+    let trnqs_rdsmod1 = Bsim4v8::new(
+        "m1".to_string(),
+        trnqs_rdsmod1_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("TRNQSMOD=1 with RDSMOD=1 constructs natively");
+    assert_eq!(trnqs_rdsmod1.model.trnqs_mod, 1);
+    assert_eq!(trnqs_rdsmod1.model.rds_mod, 1);
+
+    for rbody_mod in [1.0, 2.0] {
+        let mut card = trnqs_card.clone();
+        card.insert("RBODYMOD".to_string(), rbody_mod);
+        let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+        let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .expect("TRNQSMOD=1 with RBODYMOD=1/2 constructs natively");
+        assert_eq!(dev.model.trnqs_mod, 1);
+        assert_eq!(dev.model.rbody_mod as Value, rbody_mod);
+    }
+
+    let mut acnqs_card = nmos45();
+    acnqs_card.insert("ACNQSMOD".to_string(), 1.0);
+    acnqs_card.insert("TRNQSMOD".to_string(), 0.0);
+    acnqs_card.insert("RGATEMOD".to_string(), 0.0);
+    acnqs_card.insert("RBODYMOD".to_string(), 0.0);
+    acnqs_card.insert("RDSMOD".to_string(), 0.0);
+    let acnqs_model = Arc::new(Bsim4v8Model::from_params(&acnqs_card, false, T300));
+    let acnqs = Bsim4v8::new("m1".to_string(), acnqs_model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("ACNQSMOD=1 canonical AC topology constructs natively");
+    assert_eq!(acnqs.model.acnqs_mod, 1);
+
+    let mut acnqs_rgate2_card = nmos45();
+    acnqs_rgate2_card.insert("ACNQSMOD".to_string(), 1.0);
+    acnqs_rgate2_card.insert("TRNQSMOD".to_string(), 0.0);
+    acnqs_rgate2_card.insert("RGATEMOD".to_string(), 2.0);
+    acnqs_rgate2_card.insert("RBODYMOD".to_string(), 0.0);
+    acnqs_rgate2_card.insert("RDSMOD".to_string(), 0.0);
+    let acnqs_rgate2_model = Arc::new(Bsim4v8Model::from_params(&acnqs_rgate2_card, false, T300));
+    let acnqs_rgate2 = Bsim4v8::new(
+        "m1".to_string(),
+        acnqs_rgate2_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("ACNQSMOD=1 with RGATEMOD=2 constructs natively");
+    assert_eq!(acnqs_rgate2.model.acnqs_mod, 1);
+    assert_eq!(acnqs_rgate2.model.rgate_mod, 2);
+
+    let mut acnqs_rgate1_card = nmos45();
+    acnqs_rgate1_card.insert("ACNQSMOD".to_string(), 1.0);
+    acnqs_rgate1_card.insert("TRNQSMOD".to_string(), 0.0);
+    acnqs_rgate1_card.insert("RGATEMOD".to_string(), 1.0);
+    acnqs_rgate1_card.insert("RBODYMOD".to_string(), 0.0);
+    acnqs_rgate1_card.insert("RDSMOD".to_string(), 0.0);
+    let acnqs_rgate1_model = Arc::new(Bsim4v8Model::from_params(&acnqs_rgate1_card, false, T300));
+    let acnqs_rgate1 = Bsim4v8::new(
+        "m1".to_string(),
+        acnqs_rgate1_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("ACNQSMOD=1 with RGATEMOD=1 constructs natively");
+    assert_eq!(acnqs_rgate1.model.acnqs_mod, 1);
+    assert_eq!(acnqs_rgate1.model.rgate_mod, 1);
+
+    let mut acnqs_rgate3_card = nmos45();
+    acnqs_rgate3_card.insert("ACNQSMOD".to_string(), 1.0);
+    acnqs_rgate3_card.insert("TRNQSMOD".to_string(), 0.0);
+    acnqs_rgate3_card.insert("RGATEMOD".to_string(), 3.0);
+    acnqs_rgate3_card.insert("RBODYMOD".to_string(), 0.0);
+    acnqs_rgate3_card.insert("RDSMOD".to_string(), 0.0);
+    let acnqs_rgate3_model = Arc::new(Bsim4v8Model::from_params(&acnqs_rgate3_card, false, T300));
+    let acnqs_rgate3 = Bsim4v8::new(
+        "m1".to_string(),
+        acnqs_rgate3_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("ACNQSMOD=1 with RGATEMOD=3 constructs natively");
+    assert_eq!(acnqs_rgate3.model.acnqs_mod, 1);
+    assert_eq!(acnqs_rgate3.model.rgate_mod, 3);
+
+    let mut acnqs_rdsmod1_card = nmos45();
+    acnqs_rdsmod1_card.insert("ACNQSMOD".to_string(), 1.0);
+    acnqs_rdsmod1_card.insert("TRNQSMOD".to_string(), 0.0);
+    acnqs_rdsmod1_card.insert("RGATEMOD".to_string(), 0.0);
+    acnqs_rdsmod1_card.insert("RBODYMOD".to_string(), 0.0);
+    acnqs_rdsmod1_card.insert("RDSMOD".to_string(), 1.0);
+    let acnqs_rdsmod1_model = Arc::new(Bsim4v8Model::from_params(&acnqs_rdsmod1_card, false, T300));
+    let acnqs_rdsmod1 = Bsim4v8::new(
+        "m1".to_string(),
+        acnqs_rdsmod1_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("ACNQSMOD=1 with RDSMOD=1 constructs natively");
+    assert_eq!(acnqs_rdsmod1.model.acnqs_mod, 1);
+    assert_eq!(acnqs_rdsmod1.model.rds_mod, 1);
+
+    for rbody_mod in [1.0, 2.0] {
+        let mut card = nmos45();
+        card.insert("ACNQSMOD".to_string(), 1.0);
+        card.insert("TRNQSMOD".to_string(), 0.0);
+        card.insert("RGATEMOD".to_string(), 0.0);
+        card.insert("RBODYMOD".to_string(), rbody_mod);
+        card.insert("RDSMOD".to_string(), 0.0);
+        let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+        let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .expect("ACNQSMOD=1 with RBODYMOD=1/2 constructs natively");
+        assert_eq!(dev.model.acnqs_mod, 1);
+        assert_eq!(dev.model.rbody_mod as Value, rbody_mod);
+    }
+
+    let mut rgate3_card = nmos45();
+    rgate3_card.insert("RGATEMOD".to_string(), 3.0);
+    let rgate3_model = Arc::new(Bsim4v8Model::from_params(&rgate3_card, false, T300));
+    let rgate3 = Bsim4v8::new("m1".to_string(), rgate3_model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("RGATEMOD=3 constructs natively");
+    assert_eq!(rgate3.model.rgate_mod, 3);
+
+    let mut mtrl_card = nmos45();
+    mtrl_card.insert("MTRLMOD".to_string(), 1.0);
+    let mtrl_model = Arc::new(Bsim4v8Model::from_params(&mtrl_card, false, T300));
+    let mtrl = Bsim4v8::new("m1".to_string(), mtrl_model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("MTRLMOD=1/MTRLCOMPATMOD=0 EOT iteration constructs natively");
+    assert_eq!(mtrl.model.mtrl_mod, 1);
+    assert_eq!(mtrl.model.mtrl_compat_mod, 0);
+
+    let mut rdsmod_card = nmos45();
+    rdsmod_card.insert("RDSMOD".to_string(), 1.0);
+    let rdsmod_model = Arc::new(Bsim4v8Model::from_params(&rdsmod_card, false, T300));
+    let rdsmod = Bsim4v8::new("m1".to_string(), rdsmod_model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("RDSMOD=1 external source/drain resistance constructs natively");
+    assert_eq!(rdsmod.model.rds_mod, 1);
+
+    let mut rbodymod_card = nmos45();
+    rbodymod_card.insert("RBODYMOD".to_string(), 1.0);
+    let rbodymod_model = Arc::new(Bsim4v8Model::from_params(&rbodymod_card, false, T300));
+    let rbodymod = Bsim4v8::new(
+        "m1".to_string(),
+        rbodymod_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("RBODYMOD=1 substrate resistance network constructs natively");
+    assert_eq!(rbodymod.model.rbody_mod, 1);
+
+    let mut rbodymod2_card = nmos45();
+    rbodymod2_card.insert("RBODYMOD".to_string(), 2.0);
+    let rbodymod2_model = Arc::new(Bsim4v8Model::from_params(&rbodymod2_card, false, T300));
+    let rbodymod2 = Bsim4v8::new(
+        "m1".to_string(),
+        rbodymod2_model,
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("RBODYMOD=2 geometry-scaled substrate resistance network constructs natively");
+    assert_eq!(rbodymod2.model.rbody_mod, 2);
+
+    let assert_dc_only_charge_error = |key: &str, val: Value, what: &str| {
         let mut card = nmos45();
         card.insert(key.to_string(), val);
         let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
-        let err = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
-            .expect_err(&format!("{what} should be rejected"));
+        let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .unwrap_or_else(|err| panic!("{what} should construct for DC: {err}"));
+        let bias = Bsim4v8Bias {
+            vds: 0.5,
+            vgs: 0.8,
+            vbs: 0.0,
+        };
+        assert!(dev.eval(bias, GMIN, false).is_ok());
+        let err = dev.eval(bias, GMIN, true).unwrap_err();
         assert!(err.contains(what), "{what}: unexpected error text: {err}");
     };
-    reject("RDSMOD", 1.0, "RDSMOD");
-    reject("RGATEMOD", 2.0, "RGATEMOD");
-    reject("RBODYMOD", 1.0, "RBODYMOD");
-    reject("TRNQSMOD", 1.0, "TRNQSMOD");
-    reject("MOBMOD", 3.0, "MOBMOD");
-    reject("DIOMOD", 2.0, "DIOMOD");
-    reject("IGCMOD", 1.0, "IGCMOD");
-    reject("IGBMOD", 1.0, "IGBMOD");
-    reject("CAPMOD", 0.0, "CAPMOD");
-    reject("MTRLMOD", 1.0, "MTRLMOD");
-    reject("WPEMOD", 1.0, "WPEMOD");
+    assert_dc_only_charge_error("CVCHARGEMOD", 2.0, "CVCHARGEMOD");
 
-    // Stress model: SA/SB on the instance.
-    let model = Arc::new(Bsim4v8Model::from_params(&nmos45(), false, T300));
-    let g = Bsim4v8Geometry {
-        sa: 1.0e-6,
-        sb: 1.0e-6,
-        ..geom(1e-6, 45e-9, 1.0)
-    };
-    let err = Bsim4v8::new("m1".to_string(), model, g, T300).expect_err("stress");
-    assert!(err.contains("stress"), "unexpected error text: {err}");
-
-    // cvchargeMod=1: DC fine, charges a typed error.
     let mut card = nmos45();
-    card.insert("CVCHARGEMOD".to_string(), 1.0);
+    card.insert("CAPMOD".to_string(), 0.0);
+    card.insert("XPART".to_string(), -1.0);
     let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
     let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
-        .expect("cvchargeMod=1 constructs");
+        .expect("XPART<0 CAPMOD=0 constructs for DC");
     let bias = Bsim4v8Bias {
         vds: 0.5,
         vgs: 0.8,
         vbs: 0.0,
     };
     assert!(dev.eval(bias, GMIN, false).is_ok());
-    let err = dev.eval(bias, GMIN, true).unwrap_err();
-    assert!(err.contains("CVCHARGEMOD"), "unexpected error text: {err}");
+    let charge = dev
+        .eval(bias, GMIN, true)
+        .expect("XPART<0 CAPMOD=0 charge request uses native overlap/junction path")
+        .charge
+        .expect("charges");
+    assert_eq!(charge.qgate, 0.0);
+    assert_eq!(charge.qbulk, 0.0);
+    assert_eq!(charge.qdrn, 0.0);
+    assert_eq!(charge.qsrc, 0.0);
+}
+
+#[test]
+fn stress_geometry_adjusts_instance_temperature_tail() {
+    let mut card = nmos45();
+    card.insert("SAREF".to_string(), 1.0e-6);
+    card.insert("SBREF".to_string(), 1.0e-6);
+    card.insert("KU0".to_string(), 2.0e-8);
+    card.insert("KVSAT".to_string(), 0.25);
+    card.insert("KVTH0".to_string(), 1.5e-9);
+    card.insert("STK2".to_string(), 2.0e-9);
+    card.insert("STETA0".to_string(), 2.0e-10);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+
+    let baseline = Bsim4v8::new(
+        "m_base".to_string(),
+        Arc::clone(&model),
+        geom(1e-6, 45e-9, 1.0),
+        T300,
+    )
+    .expect("baseline BSIM4 device");
+    let stressed = Bsim4v8::new(
+        "m_stress".to_string(),
+        model,
+        Bsim4v8Geometry {
+            sa: 0.2e-6,
+            sb: 0.4e-6,
+            ..geom(1e-6, 45e-9, 1.0)
+        },
+        T300,
+    )
+    .expect("stress-enabled BSIM4 device");
+
+    assert_ne!(stressed.inst.u0temp, baseline.inst.u0temp);
+    assert_ne!(stressed.inst.vsattemp, baseline.inst.vsattemp);
+    assert_ne!(stressed.inst.vth0, baseline.inst.vth0);
+    assert_ne!(stressed.inst.eta0, baseline.inst.eta0);
+    assert_ne!(stressed.inst.k2, baseline.inst.k2);
+}
+
+#[test]
+fn geomod1_implicit_diffusions_follow_bsim4_paeffgeo() {
+    // Berkeley BSIM4PAeffGeo case 1: source keeps isolated end diffusion,
+    // drain uses shared diffusion for end+internal fingers.
+    let dev = nmos_geomod_device(1, 3.0, 0);
+    let dmcg_eff = dev.model.dmcg - dev.model.dmcgt;
+    let dmci_eff = dev.model.dmci;
+    let t0 = dmcg_eff + dmci_eff;
+    let p_iso = t0 + t0 + dev.size.weff_cj;
+    let p_sha = dmcg_eff + dmcg_eff;
+    let a_iso = t0 * dev.size.weff_cj;
+    let a_sha = dmcg_eff * dev.size.weff_cj;
+
+    assert_rel(dev.inst.pseff, p_iso + 2.0 * p_sha, "geomod1 pseff");
+    assert_rel(dev.inst.pdeff, 3.0 * p_sha, "geomod1 pdeff");
+    assert_rel(dev.inst.aseff, a_iso + 2.0 * a_sha, "geomod1 aseff");
+    assert_rel(dev.inst.adeff, 3.0 * a_sha, "geomod1 adeff");
+
+    let geo0 = nmos_geomod_device(0, 3.0, 0);
+    assert!(
+        (geo0.inst.pdeff - dev.inst.pdeff).abs() > 1.0e-9,
+        "fixture must distinguish GEOMOD=1 from GEOMOD=0"
+    );
+}
+
+#[test]
+fn rgeomod1_implicit_resistance_uses_bsim4_rdseffgeo() {
+    let mut card = nmos45();
+    card.insert("GEOMOD".to_string(), 4.0);
+    card.insert("DMDG".to_string(), 8.0e-8);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new(
+        "m_rgeo".to_string(),
+        model,
+        Bsim4v8Geometry {
+            l: 45e-9,
+            w: 1e-6,
+            nf: 3.0,
+            rgeo_mod: 1,
+            ..Bsim4v8Geometry::default()
+        },
+        T300,
+    )
+    .expect("rgeoMod device");
+
+    let weff_cj = dev.size.weff_cj;
+    let rsh = dev.model.sheet_resistance;
+    let dmcg = dev.model.dmcg - dev.model.dmcgt;
+    let dmdg = dev.model.dmdg - dev.model.dmcgt;
+    let rint = rsh * dmcg / (weff_cj * 2.0);
+    let source_rend = rsh * dmcg / weff_cj;
+    let drain_rend = rsh * dmdg / weff_cj;
+    let source_r = rint * source_rend / (rint + source_rend);
+    let drain_r = rint * drain_rend / (rint + drain_rend);
+
+    assert_rel(
+        dev.inst.source_conductance,
+        1.0 / source_r,
+        "rgeomod1 source conductance",
+    );
+    assert_rel(
+        dev.inst.drain_conductance,
+        1.0 / drain_r,
+        "rgeomod1 drain conductance",
+    );
+    assert!(
+        (dev.inst.source_conductance - dev.inst.drain_conductance).abs()
+            > 0.1 * dev.inst.source_conductance.abs(),
+        "fixture must distinguish source and drain rgeo paths"
+    );
+}
+
+#[test]
+fn rgeomod_selectors_1_to_8_are_supported() {
+    let base = {
+        let mut card = nmos45();
+        card.insert("GEOMOD".to_string(), 0.0);
+        Arc::new(Bsim4v8Model::from_params(&card, false, T300))
+    };
+
+    for rgeo_mod in 1..=8 {
+        let dev = Bsim4v8::new(
+            format!("m_rgeo{rgeo_mod}"),
+            Arc::clone(&base),
+            Bsim4v8Geometry {
+                l: 45e-9,
+                w: 1e-6,
+                nf: 3.0,
+                rgeo_mod,
+                ..Bsim4v8Geometry::default()
+            },
+            T300,
+        )
+        .unwrap_or_else(|err| panic!("RGEOMOD={rgeo_mod} should construct: {err}"));
+
+        assert!(
+            dev.inst.source_conductance.is_finite() && dev.inst.source_conductance > 0.0,
+            "RGEOMOD={rgeo_mod} source conductance={}",
+            dev.inst.source_conductance
+        );
+        assert!(
+            dev.inst.drain_conductance.is_finite() && dev.inst.drain_conductance > 0.0,
+            "RGEOMOD={rgeo_mod} drain conductance={}",
+            dev.inst.drain_conductance
+        );
+    }
+}
+
+#[test]
+fn rgeomod_zero_end_diffusion_matches_ngspice_conductance_fallbacks() {
+    let mut card = nmos45();
+    card.insert("GEOMOD".to_string(), 5.0);
+    card.insert("DMDG".to_string(), 8.0e-8);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let geom = Bsim4v8Geometry {
+        l: 45e-9,
+        w: 1e-6,
+        nf: 4.0,
+        min_sd: 0,
+        rgeo_mod: 1,
+        ..Bsim4v8Geometry::default()
+    };
+    let rdsmod0 = Bsim4v8::new("m_rgeo_edge0".to_string(), Arc::clone(&model), geom, T300)
+        .expect("RDSMOD=0 edge device");
+    assert!(
+        rdsmod0.inst.source_conductance.is_finite() && rdsmod0.inst.source_conductance > 0.0,
+        "source side should still have positive geometry conductance"
+    );
+    assert_eq!(
+        rdsmod0.inst.drain_conductance, 0.0,
+        "ngspice setup does not lower a fixed resistor when RdseffGeo is non-positive/NaN"
+    );
+
+    let mut rdsmod1_card = nmos45();
+    rdsmod1_card.insert("GEOMOD".to_string(), 5.0);
+    rdsmod1_card.insert("DMDG".to_string(), 8.0e-8);
+    rdsmod1_card.insert("RDSMOD".to_string(), 1.0);
+    let rdsmod1_model = Arc::new(Bsim4v8Model::from_params(&rdsmod1_card, false, T300));
+    let rdsmod1 = Bsim4v8::new("m_rgeo_edge1".to_string(), rdsmod1_model, geom, T300)
+        .expect("RDSMOD=1 edge device");
+    assert!(
+        rdsmod1.inst.source_conductance.is_finite() && rdsmod1.inst.source_conductance > 0.0,
+        "source side should still have positive geometry conductance"
+    );
+    assert_eq!(
+        rdsmod1.inst.drain_conductance, 1.0e3,
+        "RDSMOD=1 forced prime node uses ngspice's 1000 mho fallback"
+    );
+}
+
+#[test]
+fn ngspice_pinned_nmos_mobmod3_to_6() {
+    // Same n45 geometry as the default DC oracle, but with UD reduced so the
+    // high-k Coulombic term is observable without swamping the branch. The
+    // references come from ngspice-46 `ngspice_con.exe -b` with @m1[id/gm/
+    // gds/gmbs/vth/vdsat] at three bias points.
+    #[derive(Clone, Copy)]
+    struct Ref {
+        mob_mod: i32,
+        vds: Value,
+        vgs: Value,
+        vbs: Value,
+        id: Value,
+        gm: Value,
+        gds: Value,
+        gmbs: Value,
+        vth: Value,
+        vdsat: Value,
+    }
+
+    let refs: &[Ref] = &[
+        Ref {
+            mob_mod: 3,
+            vds: 0.05,
+            vgs: 0.9,
+            vbs: 0.0,
+            id: 2.51773358e-4,
+            gm: 2.01537138e-4,
+            gds: 4.58712168e-3,
+            gmbs: 2.01972523e-5,
+            vth: 3.96082238e-1,
+            vdsat: 2.41702085e-1,
+        },
+        Ref {
+            mob_mod: 3,
+            vds: 1.1,
+            vgs: 0.6,
+            vbs: 0.0,
+            id: 5.27286296e-4,
+            gm: 2.12945681e-3,
+            gds: 2.42527664e-4,
+            gmbs: -1.69926892e-3,
+            vth: 3.16523792e-1,
+            vdsat: 1.54738832e-1,
+        },
+        Ref {
+            mob_mod: 3,
+            vds: 1.1,
+            vgs: 1.1,
+            vbs: -0.45,
+            id: 2.34321512e-3,
+            gm: 2.18386352e-3,
+            gds: 1.23250984e-3,
+            gmbs: -1.83230034e-3,
+            vth: -4.43531872e-2,
+            vdsat: 4.56395979e-1,
+        },
+        Ref {
+            mob_mod: 4,
+            vds: 0.05,
+            vgs: 0.9,
+            vbs: 0.0,
+            id: 1.90989193e-4,
+            gm: 1.59461868e-4,
+            gds: 3.52498649e-3,
+            gmbs: 1.62889383e-5,
+            vth: 3.96082238e-1,
+            vdsat: 2.86094941e-1,
+        },
+        Ref {
+            mob_mod: 4,
+            vds: 1.1,
+            vgs: 0.6,
+            vbs: 0.0,
+            id: 4.36989042e-4,
+            gm: 1.90881105e-3,
+            gds: 2.15053371e-4,
+            gmbs: -1.52594975e-3,
+            vth: 3.16523792e-1,
+            vdsat: 1.81614627e-1,
+        },
+        Ref {
+            mob_mod: 4,
+            vds: 1.1,
+            vgs: 1.1,
+            vbs: -0.45,
+            id: 2.04318359e-3,
+            gm: 1.86328104e-3,
+            gds: 1.08503394e-3,
+            gmbs: -1.56837552e-3,
+            vth: -4.43531872e-2,
+            vdsat: 5.63081965e-1,
+        },
+        Ref {
+            mob_mod: 5,
+            vds: 0.05,
+            vgs: 0.9,
+            vbs: 0.0,
+            id: 1.90989193e-4,
+            gm: 1.59461868e-4,
+            gds: 3.52498649e-3,
+            gmbs: 1.83144516e-5,
+            vth: 3.96082238e-1,
+            vdsat: 2.86094941e-1,
+        },
+        Ref {
+            mob_mod: 5,
+            vds: 1.1,
+            vgs: 0.6,
+            vbs: 0.0,
+            id: 4.36989042e-4,
+            gm: 1.90881105e-3,
+            gds: 2.15053371e-4,
+            gmbs: -1.52203080e-3,
+            vth: 3.16523792e-1,
+            vdsat: 1.81614627e-1,
+        },
+        Ref {
+            mob_mod: 5,
+            vds: 1.1,
+            vgs: 1.1,
+            vbs: -0.45,
+            id: 2.03878177e-3,
+            gm: 1.86022711e-3,
+            gds: 1.08353708e-3,
+            gmbs: -1.55591925e-3,
+            vth: -4.43531872e-2,
+            vdsat: 5.64435086e-1,
+        },
+        Ref {
+            mob_mod: 6,
+            vds: 0.05,
+            vgs: 0.9,
+            vbs: 0.0,
+            id: 2.62997083e-9,
+            gm: 2.63641627e-9,
+            gds: 4.99534542e-8,
+            gmbs: -1.56265107e-11,
+            vth: 3.96082238e-1,
+            vdsat: 4.96289162e-1,
+        },
+        Ref {
+            mob_mod: 6,
+            vds: 1.1,
+            vgs: 0.6,
+            vbs: 0.0,
+            id: 6.68275633e-9,
+            gm: 3.69329106e-8,
+            gds: 3.78483378e-9,
+            gmbs: -3.04686000e-8,
+            vth: 3.16523792e-1,
+            vdsat: 2.90364309e-1,
+        },
+        Ref {
+            mob_mod: 6,
+            vds: 1.1,
+            vgs: 1.1,
+            vbs: -0.45,
+            id: 4.12411377e-8,
+            gm: 3.41102986e-8,
+            gds: 2.13074349e-8,
+            gmbs: -3.49502071e-8,
+            vth: -4.43531872e-2,
+            vdsat: 1.08302467,
+        },
+    ];
+
+    for r in refs {
+        let dev = nmos_mobmod_device(r.mob_mod, T300);
+        let op = op_at(&dev, r.vds, r.vgs, r.vbs);
+        let label = format!(
+            "mobMod={} vds={} vgs={} vbs={}",
+            r.mob_mod, r.vds, r.vgs, r.vbs
+        );
+        assert_rel(op.cd, r.id, &format!("{label} id"));
+        assert_rel(op.gm, r.gm, &format!("{label} gm"));
+        assert_rel(op.gds, r.gds, &format!("{label} gds"));
+        assert_rel(op.gmbs, r.gmbs, &format!("{label} gmbs"));
+        assert_rel(op.von, r.vth, &format!("{label} vth"));
+        assert_rel(op.vdsat, r.vdsat, &format!("{label} vdsat"));
+    }
 }
 
 #[test]
@@ -628,6 +1259,42 @@ fn junction_diode_matches_ijth_linearization() {
         (d1 - d2).abs() < 1e-9 * d1.abs(),
         "post-ijth current not linear: {d1:.6e} vs {d2:.6e}"
     );
+}
+
+#[test]
+fn nondefault_diode_models_match_ngspice46_reverse_breakdown() {
+    let device = |dio_mod: Value| {
+        let mut card = nmos45();
+        card.insert("DIOMOD".to_string(), dio_mod);
+        let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+        Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+            .expect("non-default diode model constructs")
+    };
+    let cases = [
+        // ngspice-46 reference, `models45.lib` n45 with `diomod=0`, `as=0.1p`,
+        // `ps=2.2u`, `ad=pd=0`, and Vbs = -12 V:
+        // @m1[ibs] = -3.39274e+13 A, @m1[gbs] = 1.249287e+15 S.
+        (0.0, -3.39274e13, 1.249287e15),
+        // Same deck with `diomod=2`, exercising the reverse-breakdown
+        // linearization that keeps the current finite:
+        // @m1[ibs] = -7.21345e-01 A, @m1[gbs] = 7.364476e-01 S.
+        (2.0, -7.21345e-1, 7.364476e-1),
+    ];
+    for (mode, ibs_ref, gbs_ref) in cases {
+        let dev = device(mode);
+        let op = op_at(&dev, 0.0, 0.0, -12.0);
+        let close = |a: Value, b: Value| (a - b).abs() <= 2e-5 * a.abs().max(b.abs()).max(1.0);
+        assert!(
+            close(op.cbs, ibs_ref),
+            "dioMod={mode}: ibs/cbs rspice={:.8e} ngspice={ibs_ref:.8e}",
+            op.cbs
+        );
+        assert!(
+            close(op.gbs, gbs_ref),
+            "dioMod={mode}: gbs rspice={:.8e} ngspice={gbs_ref:.8e}",
+            op.gbs
+        );
+    }
 }
 
 #[test]
@@ -1131,6 +1798,128 @@ fn ngspice_pinned_nmos_charges_capmod2() {
     assert_rel(c.cggb, 5.92253961e-16, "vd550m cgg");
     assert_rel(c.cddb, -1.24783324e-17, "vd550m cdd");
     assert_rel(c.capbd, 3.33456107e-16, "vd550m capbd");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_cvchargemod1() {
+    // Same saturation bias and geometry as the CAPMOD=2 oracle above, with
+    // only CVCHARGEMOD=1 added to the n45 model card. Reference generated
+    // from local ngspice-46 (`ngspice_con.exe -b`) using `@m1[q*]` and
+    // `@m1[c**]` probes.
+    let mut card = nmos45();
+    card.insert("CVCHARGEMOD".to_string(), 1.0);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("cvchargeMod=1 constructs");
+    let charge = dev
+        .eval(
+            Bsim4v8Bias {
+                vds: 1.1,
+                vgs: 1.1,
+                vbs: 0.0,
+            },
+            GMIN,
+            true,
+        )
+        .expect("cvchargeMod=1 charge eval")
+        .charge
+        .expect("charges");
+
+    assert_rel(charge.qgate, 7.23241861e-16, "cv1 qg");
+    assert_rel(charge.qbulk, -3.86973253e-16, "cv1 qb");
+    assert_rel(charge.qdrn, -1.34572090e-16, "cv1 qd");
+    assert_rel(charge.qsrc, -2.01696518e-16, "cv1 qs");
+    assert_rel(charge.cggb, 6.22177426e-16, "cv1 cgg");
+    assert_rel(charge.cgdb, 3.70873112e-17, "cv1 cgd");
+    assert_rel(charge.cgsb, -1.46331544e-16, "cv1 cgs");
+    assert_rel(charge.cdgb, -1.85825441e-16, "cv1 cdg");
+    assert_rel(charge.cddb, -1.37924792e-17, "cv1 cdd");
+    assert_rel(charge.cdsb, 5.43320145e-17, "cv1 cds");
+    assert_rel(charge.cbgb, -1.57943823e-16, "cv1 cbg");
+    assert_rel(charge.cbdb, -2.27867934e-18, "cv1 cbd");
+    assert_rel(charge.cbsb, 1.02431828e-17, "cv1 cbs");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod1() {
+    // Same saturation bias and geometry as the CAPMOD=2 oracle above, with
+    // CAPMOD=1 selecting BSIM4's Meyer-like intrinsic charge model.
+    // Reference generated from local ngspice-46 (`ngspice_con.exe -b`) using
+    // `@m1[q*]` and `@m1[c**]` probes.
+    let mut card = nmos45();
+    card.insert("CAPMOD".to_string(), 1.0);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("CAPMOD=1 constructs");
+    let charge = dev
+        .eval(
+            Bsim4v8Bias {
+                vds: 1.1,
+                vgs: 1.1,
+                vbs: 0.0,
+            },
+            GMIN,
+            true,
+        )
+        .expect("CAPMOD=1 charge eval")
+        .charge
+        .expect("charges");
+
+    assert_rel(charge.qgate, 6.15439443e-16, "cap1 qg");
+    assert_rel(charge.qbulk, -3.43898072e-16, "cap1 qb");
+    assert_rel(charge.qdrn, -1.08669721e-16, "cap1 qd");
+    assert_rel(charge.qsrc, -1.62871649e-16, "cap1 qs");
+    assert_rel(charge.cggb, 4.97332878e-16, "cap1 cgg");
+    assert_rel(charge.cgdb, 2.87802524e-17, "cap1 cgd");
+    assert_rel(charge.cgsb, -1.14027307e-16, "cap1 cgs");
+    assert_rel(charge.cdgb, -1.48217285e-16, "cap1 cdg");
+    assert_rel(charge.cddb, -1.09920562e-17, "cap1 cdd");
+    assert_rel(charge.cdsb, 4.34748979e-17, "cap1 cds");
+    assert_rel(charge.cbgb, -1.27063074e-16, "cap1 cbg");
+    assert_rel(charge.cbdb, -1.02835896e-18, "cap1 cbd");
+    assert_rel(charge.cbsb, 5.12574604e-18, "cap1 cbs");
+}
+
+#[test]
+fn ngspice_pinned_nmos_charges_capmod0() {
+    // Same saturation bias and geometry as the CAPMOD=1/2 oracles above,
+    // with CAPMOD=0 selecting BSIM4's older Meyer-like charge model and
+    // linear overlap capacitances. Reference generated from local ngspice-46
+    // (`ngspice_con.exe -b`) using `@m1[q*]` and `@m1[c**]` probes.
+    let mut card = nmos45();
+    card.insert("CAPMOD".to_string(), 0.0);
+    let model = Arc::new(Bsim4v8Model::from_params(&card, false, T300));
+    let dev = Bsim4v8::new("m1".to_string(), model, geom(1e-6, 45e-9, 1.0), T300)
+        .expect("CAPMOD=0 constructs");
+    let charge = dev
+        .eval(
+            Bsim4v8Bias {
+                vds: 1.1,
+                vgs: 1.1,
+                vbs: 0.0,
+            },
+            GMIN,
+            true,
+        )
+        .expect("CAPMOD=0 charge eval")
+        .charge
+        .expect("charges");
+
+    assert_rel(charge.qgate, 6.24533876e-16, "cap0 qg");
+    assert_rel(charge.qbulk, -3.50291923e-16, "cap0 qb");
+    assert_rel(charge.qdrn, -1.09696781e-16, "cap0 qd");
+    assert_rel(charge.qsrc, -1.64545172e-16, "cap0 qs");
+    assert_rel(charge.cggb, 4.95309698e-16, "cap0 cgg");
+    assert_rel(charge.cgdb, 0.0, "cap0 cgd");
+    assert_rel(charge.cgsb, -4.81495299e-16, "cap0 cgs");
+    assert_rel(charge.cdgb, -1.47997141e-16, "cap0 cdg");
+    assert_rel(charge.cddb, 0.0, "cap0 cdd");
+    assert_rel(charge.cdsb, 1.86287800e-16, "cap0 cds");
+    assert_rel(charge.cbgb, -1.25316847e-16, "cap0 cbg");
+    assert_rel(charge.cbdb, 0.0, "cap0 cbd");
+    assert_rel(charge.cbsb, 1.57757996e-17, "cap0 cbs");
+    assert_rel(charge.capbd, 2.95502205e-16, "cap0 capbd");
+    assert_rel(charge.capbs, 4.01240000e-16, "cap0 capbs");
 }
 
 #[test]

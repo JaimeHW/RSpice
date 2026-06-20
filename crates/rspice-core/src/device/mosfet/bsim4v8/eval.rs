@@ -1,9 +1,9 @@
 //! BSIM4 v4.8 load equations (faithful port of ngspice-46 `b4ld.c`).
 //!
 //! This module transcribes the evaluation core of `BSIM4load` for the
-//! canonical mode set (`rdsMod = rgateMod = rbodyMod = trnqsMod = 0`,
-//! `dioMod = 1`, `mobMod` 0/1/2, `capMod = 2`, `igcMod = igbMod = 0`,
-//! `cvchargeMod = 0`):
+//! canonical mode set plus caller-supplied source/drain junction body biases
+//! used by the `rbodyMod=1/2` DC substrate network (`dioMod` 0/1/2, `mobMod`
+//! 0 through 6, `capMod = 0/1/2`, `cvchargeMod = 0/1`):
 //!
 //! - the source/drain junction diode DC model with the `ijth` linearization
 //!   (b4ld.c:700-890) and the reverse-bias trap-assisted tunneling current
@@ -13,26 +13,25 @@
 //!   (DVT/DSUB charge sharing, `K1ox`/`K2ox`, narrow width, pocket-implant
 //!   DITS incl. the v4.7 `DITS_SFT2`), subthreshold `n`, poly-gate
 //!   depletion, the `Vgsteff` smoothing, effective W and `Rds(V)`, `Abulk`
-//!   (with the separate `ketac` C-V copy), MOBMOD 0/1/2 mobility, `Vdsat`
+//!   (with the separate `ketac` C-V copy), MOBMOD 0 through 6 mobility,
+//!   `Vdsat`
 //!   (incl. the velocity-overshoot `lambda` and source-end velocity-limit
 //!   `vtl` options), `Vdseff`, the Early stack (`Vasat`/`VACLM`/`VADIBL`/
 //!   `VADITS`/`VASCBE`), `Ids` with analytic `Gm`/`Gds`/`Gmb`, the
 //!   substrate current, and both GIDL/GISL models (`gidlMod` 0 and the
 //!   v4.7 `gidlMod = 1`) (1021-2520),
-//! - the CAPMOD=2 charge-thickness intrinsic charge model with the full
-//!   capacitance matrix (3632-3920), the junction depletion charges
-//!   (3978-4065), the smoothed overlap charges (4138-4175), and the
-//!   mode-dependent node-charge assembly for `trnqsMod = 0` (4188-4665).
+//! - the CAPMOD=0/1/2 intrinsic charge models with the full capacitance
+//!   matrix (3026-3920), the junction depletion charges (3978-4065),
+//!   CAPMOD=0 linear overlap and CAPMOD=1/2 smoothed overlap charges
+//!   (4138-4175), and the mode-dependent node-charge assembly for
+//!   `trnqsMod = 0` (4188-4665).
 //!
 //! All derivatives are the analytic expressions of the C source,
 //! transcribed with the same temporary structure (`t0`..`t14`, `tmp*`) so
 //! the Rust can be diffed against `b4ld.c` line by line.
 //!
 //! Scope notes:
-//! - Gate tunneling currents (`igcMod`/`igbMod` != 0) are not ported; the
-//!   selectors are rejected at device construction, so every `Ig*` branch
-//!   here is the zero arm.
-//! - `capMod` 0/1 and `cvchargeMod = 1` charge models are not ported;
+//! - unknown `cvchargeMod` charge selectors are not ported;
 //!   requesting charges under them is a typed error (the DC path is
 //!   capMod-independent).
 //! - `gmin` is an explicit argument (ngspice `CKTgmin`): the diode currents
@@ -44,7 +43,7 @@
 //!   that behavior.
 
 use super::common::{
-    CHARGE_Q, CONST_CHARGE, DELTA_1, DELTA_3, DELTA_4, EPSSI, EXP_THRESHOLD, EXPL_THRESHOLD,
+    CHARGE_Q, CONST_CHARGE, DELTA_1, DELTA_3, DELTA_4, EPS0, EPSSI, EXP_THRESHOLD, EXPL_THRESHOLD,
     MAX_EXP, MAX_EXPL, MIN_EXP, MIN_EXPL, MM, dexp,
 };
 use super::params::Bsim4v8Model;
@@ -59,6 +58,18 @@ pub struct Bsim4v8Bias {
     pub vds: Value,
     pub vgs: Value,
     pub vbs: Value,
+}
+
+/// Source/drain junction body biases for `rbodyMod > 0`.
+///
+/// `vbs` is the source-body diode voltage (`sbNode - sNodePrime`) and `vbd`
+/// is the drain-body diode voltage (`dbNode - dNodePrime`), both already in
+/// device polarity. The channel equations still use [`Bsim4v8Bias::vbs`],
+/// which is the body-prime to source-prime voltage.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bsim4v8JunctionBias {
+    pub vbs: Value,
+    pub vbd: Value,
 }
 
 /// Linearized operating point of one BSIM4 v4.8 instance.
@@ -106,6 +117,29 @@ pub struct Bsim4v8Op {
     pub ggislb: Value,
     pub ggisld: Value,
 
+    // Gate tunneling currents and linearization (`BSIM4Ig*`/`gIg*`).
+    pub igcs: Value,
+    pub gigcsg: Value,
+    pub gigcsd: Value,
+    pub gigcss: Value,
+    pub gigcsb: Value,
+    pub igcd: Value,
+    pub gigcdg: Value,
+    pub gigcdd: Value,
+    pub gigcds: Value,
+    pub gigcdb: Value,
+    pub igs: Value,
+    pub gigsg: Value,
+    pub gigss: Value,
+    pub igd: Value,
+    pub gigdg: Value,
+    pub gigdd: Value,
+    pub igb: Value,
+    pub gigbg: Value,
+    pub gigbd: Value,
+    pub gigbs: Value,
+    pub gigbb: Value,
+
     /// Threshold voltage at the operating point (`BSIM4von`).
     pub von: Value,
     /// Saturation voltage (`BSIM4vdsat`).
@@ -136,12 +170,23 @@ pub struct Bsim4v8Op {
     pub nstar: Value,
     /// Inversion-charge proxy for noise (`BSIM4qinv`, tnoiMod = 0).
     pub qinv: Value,
+    /// Zero-bias channel conductance for correlated thermal noise
+    /// (`BSIM4noiGd0`, tnoiMod = 2).
+    pub noi_gd0: Value,
+
+    /// Bias-dependent gate-resistance branch for `RGATEMOD=2`
+    /// (`BSIM4gcrg` and derivatives).
+    pub gcrg: Value,
+    pub gcrgg: Value,
+    pub gcrgd: Value,
+    pub gcrgs: Value,
+    pub gcrgb: Value,
 
     /// Charge state (set only when [`eval`] is asked to compute it).
     pub charge: Option<Bsim4v8Charge>,
 }
 
-/// Charge-model output for one BSIM4 v4.8 instance (capMod = 2).
+/// Charge-model output for one BSIM4 v4.8 instance (capMod = 0/1/2).
 ///
 /// `qgate`/`qbulk`/`qdrn`/`qsrc` are the **intrinsic** charges exactly as
 /// stored in `here->BSIM4qgate`/... (what `@m[qg]` and friends report);
@@ -158,6 +203,14 @@ pub struct Bsim4v8Charge {
     pub qbulk: Value,
     pub qdrn: Value,
     pub qsrc: Value,
+    pub qchqs: Value,
+    pub cox_wl: Value,
+    pub taunet: Value,
+    pub gcrg: Value,
+    pub gcrgg: Value,
+    pub gcrgd: Value,
+    pub gcrgs: Value,
+    pub gcrgb: Value,
 
     /// Source/drain junction depletion charges (`CKTstate qbs`/`qbd`).
     pub qbs: Value,
@@ -196,6 +249,7 @@ pub struct Bsim4v8Charge {
     /// (b4ld.c:4190-4427), i.e. the local `qgate`/`qdrn`/`qsrc`/`qbulk`
     /// right before the CKTstate composition.
     pub qg_node: Value,
+    pub qgmid_node: Value,
     pub qd_node: Value,
     pub qs_node: Value,
     pub qb_node: Value,
@@ -205,6 +259,11 @@ impl Bsim4v8Charge {
     /// State-vector gate charge (`CKTstate0 qg`).
     pub fn qg_state(&self) -> Value {
         self.qg_node
+    }
+    /// State-vector middle-gate overlap charge (`CKTstate0 qgmid`) for
+    /// `rgateMod=3`.
+    pub fn qgmid_state(&self) -> Value {
+        self.qgmid_node
     }
     /// State-vector drain charge (`CKTstate0 qd = qdrn - qbd`).
     pub fn qd_state(&self) -> Value {
@@ -217,6 +276,16 @@ impl Bsim4v8Charge {
     /// State-vector bulk charge (`CKTstate0 qb = qbulk + qbd + qbs`).
     pub fn qb_state(&self) -> Value {
         self.qb_node + self.qbd + self.qbs
+    }
+    /// State-vector bulk charge for the active body topology. With
+    /// `rbodyMod>0`, ngspice integrates `qb = qbulk` and keeps `qbs`/`qbd`
+    /// as separate states.
+    pub fn qb_state_for_rbody(&self, rbody_enabled: bool) -> Value {
+        if rbody_enabled {
+            self.qb_node
+        } else {
+            self.qb_state()
+        }
     }
 }
 
@@ -250,7 +319,7 @@ fn poly_depletion(
 /// path of b4ld.c).
 ///
 /// Errors only when charges are requested with an unported charge model
-/// (`capMod` 0/1 or `cvchargeMod = 1`).
+/// (`capMod` 0 or an unknown `cvchargeMod` selector).
 #[allow(clippy::too_many_lines)]
 pub fn eval(
     model: &Bsim4v8Model,
@@ -258,19 +327,21 @@ pub fn eval(
     p: &Bsim4v8SizeDep,
     inst: &Bsim4v8InstTemp,
     bias: Bsim4v8Bias,
+    junction_bias: Option<Bsim4v8JunctionBias>,
+    gate_mid_vgs: Option<Value>,
     gmin: Value,
     compute_charges: bool,
 ) -> Result<Bsim4v8Op, String> {
-    if compute_charges && model.xpart >= 0.0 {
-        if model.cap_mod != 2 {
+    if compute_charges {
+        if !(0..=2).contains(&model.cap_mod) {
             return Err(format!(
-                "BSIM4: CAPMOD={} charge model is not implemented (only CAPMOD=2)",
+                "BSIM4: CAPMOD={} charge model is not implemented (only CAPMOD=0, 1, or 2)",
                 model.cap_mod
             ));
         }
-        if model.cvcharge_mod != 0 {
+        if !(0..=1).contains(&model.cvcharge_mod) {
             return Err(format!(
-                "BSIM4: CVCHARGEMOD={} charge model is not implemented (only 0)",
+                "BSIM4: CVCHARGEMOD={} charge model is not implemented (only 0 or 1)",
                 model.cvcharge_mod
             ));
         }
@@ -285,36 +356,90 @@ pub fn eval(
     let vbd = vbs - vds;
     let vgd = vgs - vds;
     let vgb = vgs - vbs;
+    let vgms = gate_mid_vgs.unwrap_or(vgs);
+    let vgmd = vgms - vds;
+    let vgmb = vgms - vbs;
 
-    // rbodyMod = 0: the junction bias is the channel-side body bias.
-    let vbs_jct = vbs;
-    let vbd_jct = vbd;
+    // rbodyMod = 0 uses the channel-side body bias; rbodyMod > 0 supplies
+    // separate source/drain body-node biases from the device wrapper.
+    let (vbs_jct, vbd_jct) = junction_bias.map(|j| (j.vbs, j.vbd)).unwrap_or((vbs, vbd));
 
-    // --- Source/drain junction diode DC model (b4ld.c:700-890, dioMod=1) ---
+    // --- Source/drain junction diode DC model (b4ld.c:700-890) ---
     let nvtms = mt.vtm * mt.njs;
     let source_sat_current = inst.source_sat_current;
     if source_sat_current <= 0.0 {
         op.gbs = gmin;
         op.cbs = op.gbs * vbs_jct;
     } else {
-        let t2 = vbs_jct / nvtms;
-        if t2 < -EXP_THRESHOLD {
-            op.gbs = gmin;
-            op.cbs = source_sat_current * (MIN_EXP - 1.0) + gmin * vbs_jct;
-        } else {
-            let (vjsm_fwd, i_vjsm_fwd) = inst
-                .vjsm_fwd
-                .expect("dioMod=1 anchors exist when SourceSatCurrent > 0");
-            if vbs_jct <= vjsm_fwd {
-                let evbs = t2.exp();
-                op.gbs = source_sat_current * evbs / nvtms + gmin;
-                op.cbs = source_sat_current * (evbs - 1.0) + gmin * vbs_jct;
-            } else {
-                let t0 = i_vjsm_fwd / nvtms;
-                op.gbs = t0 + gmin;
-                op.cbs =
-                    i_vjsm_fwd - source_sat_current + t0 * (vbs_jct - vjsm_fwd) + gmin * vbs_jct;
+        match model.dio_mod {
+            0 => {
+                let evbs = (vbs_jct / nvtms).exp();
+                let t1 = model.xjbvs * (-(mt.bvs + vbs_jct) / nvtms).exp();
+                op.gbs = source_sat_current * (evbs + t1) / nvtms + gmin;
+                op.cbs = source_sat_current * (evbs + inst.xexp_bvs - t1 - 1.0) + gmin * vbs_jct;
             }
+            1 => {
+                let t2 = vbs_jct / nvtms;
+                if t2 < -EXP_THRESHOLD {
+                    op.gbs = gmin;
+                    op.cbs = source_sat_current * (MIN_EXP - 1.0) + gmin * vbs_jct;
+                } else {
+                    let (vjsm_fwd, i_vjsm_fwd) = inst
+                        .vjsm_fwd
+                        .expect("dioMod=1 anchors exist when SourceSatCurrent > 0");
+                    if vbs_jct <= vjsm_fwd {
+                        let evbs = t2.exp();
+                        op.gbs = source_sat_current * evbs / nvtms + gmin;
+                        op.cbs = source_sat_current * (evbs - 1.0) + gmin * vbs_jct;
+                    } else {
+                        let t0 = i_vjsm_fwd / nvtms;
+                        op.gbs = t0 + gmin;
+                        op.cbs = i_vjsm_fwd - source_sat_current
+                            + t0 * (vbs_jct - vjsm_fwd)
+                            + gmin * vbs_jct;
+                    }
+                }
+            }
+            2 => {
+                let (vjsm_fwd, i_vjsm_fwd) = inst
+                    .vjsm_fwd
+                    .expect("dioMod=2 anchors exist when SourceSatCurrent > 0");
+                if vbs_jct < inst.vjsm_rev {
+                    let t0 = vbs_jct / nvtms;
+                    let (evbs, devbs_dvb) = if t0 < -EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let evbs = t0.exp();
+                        (evbs, evbs / nvtms)
+                    };
+                    let t1 = evbs - 1.0;
+                    let t2 = inst.s_iv_rev + inst.s_slp_rev * (vbs_jct - inst.vjsm_rev);
+                    op.gbs = devbs_dvb * t2 + t1 * inst.s_slp_rev + gmin;
+                    op.cbs = t1 * t2 + gmin * vbs_jct;
+                } else if vbs_jct <= vjsm_fwd {
+                    let t0 = vbs_jct / nvtms;
+                    let (evbs, devbs_dvb) = if t0 < -EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let evbs = t0.exp();
+                        (evbs, evbs / nvtms)
+                    };
+                    let t1 = (mt.bvs + vbs_jct) / nvtms;
+                    let (t2, t3) = if t1 > EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let t2 = (-t1).exp();
+                        (t2, -t2 / nvtms)
+                    };
+                    op.gbs = source_sat_current * (devbs_dvb - model.xjbvs * t3) + gmin;
+                    op.cbs = source_sat_current * (evbs + inst.xexp_bvs - 1.0 - model.xjbvs * t2)
+                        + gmin * vbs_jct;
+                } else {
+                    op.gbs = inst.s_slp_fwd + gmin;
+                    op.cbs = i_vjsm_fwd + inst.s_slp_fwd * (vbs_jct - vjsm_fwd) + gmin * vbs_jct;
+                }
+            }
+            _ => unreachable!("validated BSIM4 dioMod selector"),
         }
     }
 
@@ -324,24 +449,75 @@ pub fn eval(
         op.gbd = gmin;
         op.cbd = op.gbd * vbd_jct;
     } else {
-        let t2 = vbd_jct / nvtmd;
-        if t2 < -EXP_THRESHOLD {
-            op.gbd = gmin;
-            op.cbd = drain_sat_current * (MIN_EXP - 1.0) + gmin * vbd_jct;
-        } else {
-            let (vjdm_fwd, i_vjdm_fwd) = inst
-                .vjdm_fwd
-                .expect("dioMod=1 anchors exist when DrainSatCurrent > 0");
-            if vbd_jct <= vjdm_fwd {
-                let evbd = t2.exp();
-                op.gbd = drain_sat_current * evbd / nvtmd + gmin;
-                op.cbd = drain_sat_current * (evbd - 1.0) + gmin * vbd_jct;
-            } else {
-                let t0 = i_vjdm_fwd / nvtmd;
-                op.gbd = t0 + gmin;
-                op.cbd =
-                    i_vjdm_fwd - drain_sat_current + t0 * (vbd_jct - vjdm_fwd) + gmin * vbd_jct;
+        match model.dio_mod {
+            0 => {
+                let evbd = (vbd_jct / nvtmd).exp();
+                let t1 = model.xjbvd * (-(mt.bvd + vbd_jct) / nvtmd).exp();
+                op.gbd = drain_sat_current * (evbd + t1) / nvtmd + gmin;
+                op.cbd = drain_sat_current * (evbd + inst.xexp_bvd - t1 - 1.0) + gmin * vbd_jct;
             }
+            1 => {
+                let t2 = vbd_jct / nvtmd;
+                if t2 < -EXP_THRESHOLD {
+                    op.gbd = gmin;
+                    op.cbd = drain_sat_current * (MIN_EXP - 1.0) + gmin * vbd_jct;
+                } else {
+                    let (vjdm_fwd, i_vjdm_fwd) = inst
+                        .vjdm_fwd
+                        .expect("dioMod=1 anchors exist when DrainSatCurrent > 0");
+                    if vbd_jct <= vjdm_fwd {
+                        let evbd = t2.exp();
+                        op.gbd = drain_sat_current * evbd / nvtmd + gmin;
+                        op.cbd = drain_sat_current * (evbd - 1.0) + gmin * vbd_jct;
+                    } else {
+                        let t0 = i_vjdm_fwd / nvtmd;
+                        op.gbd = t0 + gmin;
+                        op.cbd = i_vjdm_fwd - drain_sat_current
+                            + t0 * (vbd_jct - vjdm_fwd)
+                            + gmin * vbd_jct;
+                    }
+                }
+            }
+            2 => {
+                let (vjdm_fwd, i_vjdm_fwd) = inst
+                    .vjdm_fwd
+                    .expect("dioMod=2 anchors exist when DrainSatCurrent > 0");
+                if vbd_jct < inst.vjdm_rev {
+                    let t0 = vbd_jct / nvtmd;
+                    let (evbd, devbd_dvb) = if t0 < -EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let evbd = t0.exp();
+                        (evbd, evbd / nvtmd)
+                    };
+                    let t1 = evbd - 1.0;
+                    let t2 = inst.d_iv_rev + inst.d_slp_rev * (vbd_jct - inst.vjdm_rev);
+                    op.gbd = devbd_dvb * t2 + t1 * inst.d_slp_rev + gmin;
+                    op.cbd = t1 * t2 + gmin * vbd_jct;
+                } else if vbd_jct <= vjdm_fwd {
+                    let t0 = vbd_jct / nvtmd;
+                    let (evbd, devbd_dvb) = if t0 < -EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let evbd = t0.exp();
+                        (evbd, evbd / nvtmd)
+                    };
+                    let t1 = (mt.bvd + vbd_jct) / nvtmd;
+                    let (t2, t3) = if t1 > EXP_THRESHOLD {
+                        (MIN_EXP, 0.0)
+                    } else {
+                        let t2 = (-t1).exp();
+                        (t2, -t2 / nvtmd)
+                    };
+                    op.gbd = drain_sat_current * (devbd_dvb - model.xjbvd * t3) + gmin;
+                    op.cbd = drain_sat_current * (evbd + inst.xexp_bvd - 1.0 - model.xjbvd * t2)
+                        + gmin * vbd_jct;
+                } else {
+                    op.gbd = inst.d_slp_fwd + gmin;
+                    op.cbd = i_vjdm_fwd + inst.d_slp_fwd * (vbd_jct - vjdm_fwd) + gmin * vbd_jct;
+                }
+            }
+            _ => unreachable!("validated BSIM4 dioMod selector"),
         }
     }
 
@@ -394,22 +570,28 @@ pub fn eval(
     // The C's mode-swapped `Vgs` only feeds BSIM4polyDepletion, which reads
     // the raw vgs/vgd directly, so no swapped copy is kept here.
     let mode;
-    let (vds_c, vbs_c);
+    let (vds_c, vgs_c, vbs_c);
     if vds >= 0.0 {
         mode = 1;
         vds_c = vds;
+        vgs_c = vgs;
         vbs_c = vbs;
     } else {
         mode = -1;
         vds_c = -vds;
+        vgs_c = vgd;
         vbs_c = vbd;
     }
     op.mode = mode;
 
-    // mtrlMod = 0 constants (the "dunga" block); `epsrox` only enters the
-    // mtrlMod=1 GIDL form, so it is not bound here.
-    let toxe = model.toxe;
-    let epssub = EPSSI;
+    // b4ld.c "dunga" material constants.
+    let epsrox = model.effective_epsrox();
+    let toxe = model.effective_toxe();
+    let epssub = if model.mtrl_mod != 0 {
+        EPS0 * model.epsrsub
+    } else {
+        EPSSI
+    };
 
     // --- Vbseff (1035-1053) ---
     let t0 = vbs_c - inst.vbsc - 0.001;
@@ -599,7 +781,11 @@ pub fn eval(
 
     // --- Poly gate Si depletion effect (1245-1268) ---
     let t0 = inst.vfb + p.phi;
-    let t1 = EPSSI; // mtrlMod = 0
+    let t1 = if model.mtrl_mod == 0 {
+        EPSSI
+    } else {
+        model.epsrgate * EPS0
+    };
     let (vgs_eff_raw, dvgs_eff_dvg_raw) = poly_depletion(t0, p.ngate, t1, mt.coxe, vgs);
     let (vgd_eff_raw, dvgd_eff_dvg_raw) = poly_depletion(t0, p.ngate, t1, mt.coxe, vgd);
     let (vgs_eff, dvgs_eff_dvg) = if mode > 0 {
@@ -683,9 +869,17 @@ pub fn eval(
         dweff_dvb *= t0;
     }
 
-    // rdsMod = 0: internal Rds(V).
+    // rdsMod = 0 uses the internal Rds(V) path. rdsMod = 1 moves the
+    // bias-dependent resistance to external D/S branches stamped by the
+    // engine-facing wrapper.
     let (rds, drds_dvg, drds_dvb);
-    {
+    if model.rds_mod == 1 {
+        rds = 0.0;
+        drds_dvg = 0.0;
+        drds_dvb = 0.0;
+        op.grdsw = 0.0;
+        op.rds = 0.0;
+    } else {
         let t0 = 1.0 + p.prwg * vgsteff;
         let dt0_dvg = -p.prwg / t0 / t0;
         let t1 = p.prwb * t9;
@@ -783,7 +977,11 @@ pub fn eval(
     }
 
     // --- Mobility calculation (1450-1612) ---
-    let t14: Value = 0.0; // mtrlMod = 0
+    let t14: Value = if model.mtrl_mod != 0 && model.mtrl_compat_mod == 0 {
+        2.0 * model.mtype * (model.phig - model.easub - 0.5 * mt.eg0 + 0.45)
+    } else {
+        0.0
+    };
     let (t5m, mut ddenomi_dvg, mut ddenomi_dvd, mut ddenomi_dvb);
     match model.mob_mod {
         0 => {
@@ -841,8 +1039,68 @@ pub fn eval(
             ddenomi_dvd = t13 * dvth_dvd;
             ddenomi_dvb = t13 * dvth_dvb + t1 * p.uc;
         }
+        3 => {
+            let t0 = (vgsteff + inst.vtfbphi1) * 1.0e-8 / toxe / 6.0;
+            let t1 = (p.eu * t0.ln()).exp();
+            let dt1_dvg = t1 * p.eu * 1.0e-8 / t0 / toxe / 6.0;
+            let t2 = p.ua + p.uc * vbseff;
+            let t10_arg = 0.5 + 0.5 * vgsteff / p.vgsteff_vth;
+            let t10 = (p.ucs * t10_arg.ln()).exp();
+            let t11 = p.ud / t10;
+            let dt11_dvg = -0.5 * p.ucs * t11 / t10_arg / p.vgsteff_vth;
+            t5m = t1 * t2 + t11;
+            ddenomi_dvg = t2 * dt1_dvg + dt11_dvg;
+            ddenomi_dvd = 0.0;
+            ddenomi_dvb = t1 * p.uc;
+        }
+        4 => {
+            let t0 = vgsteff + inst.vtfbphi1 - t14;
+            let t2 = p.ua + p.uc * vbseff;
+            let t3 = t0 / toxe;
+            let t12 = (inst.vtfbphi1 * inst.vtfbphi1 + 0.0001).sqrt();
+            let t9 = 1.0 / (vgsteff + 2.0 * t12);
+            let t10 = t9 * toxe;
+            let t8 = p.ud * t10 * t10 * inst.vtfbphi1;
+            let t6 = t8 * inst.vtfbphi1;
+            t5m = t3 * (t2 + p.ub * t3) + t6;
+            let t7 = -2.0 * t6 * t9;
+            ddenomi_dvg = (t2 + 2.0 * p.ub * t3) / toxe + t7;
+            ddenomi_dvd = 0.0;
+            ddenomi_dvb = p.uc * t3;
+        }
+        5 => {
+            let t0 = vgsteff + inst.vtfbphi1 - t14;
+            let t2 = 1.0 + p.uc * vbseff;
+            let t3 = t0 / toxe;
+            let t4 = t3 * (p.ua + p.ub * t3);
+            let t12 = (inst.vtfbphi1 * inst.vtfbphi1 + 0.0001).sqrt();
+            let t9 = 1.0 / (vgsteff + 2.0 * t12);
+            let t10 = t9 * toxe;
+            let t8 = p.ud * t10 * t10 * inst.vtfbphi1;
+            let t6 = t8 * inst.vtfbphi1;
+            t5m = t4 * t2 + t6;
+            let t7 = -2.0 * t6 * t9;
+            ddenomi_dvg = (p.ua + 2.0 * p.ub * t3) * t2 / toxe + t7;
+            ddenomi_dvd = 0.0;
+            ddenomi_dvb = p.uc * t4;
+        }
+        6 => {
+            let t0 = (vgsteff + inst.vtfbphi1) / toxe;
+            let t1 = (p.eu * t0.ln()).exp();
+            let dt1_dvg = t1 * p.eu / t0 / toxe;
+            let t2 = p.ua + p.uc * vbseff;
+            let t12 = (inst.vtfbphi1 * inst.vtfbphi1 + 0.0001).sqrt();
+            let t9 = 1.0 / (vgsteff + 2.0 * t12);
+            let t10 = t9 * toxe;
+            let t8 = p.ud * t10 * t10 * inst.vtfbphi1;
+            let t6 = t8 * inst.vtfbphi1;
+            t5m = t1 * t2 + t6;
+            let t7 = -2.0 * t6 * t9;
+            ddenomi_dvg = t2 * dt1_dvg + t7;
+            ddenomi_dvd = 0.0;
+            ddenomi_dvb = t1 * p.uc;
+        }
         other => {
-            // mobMod 3-6 are rejected at construction.
             unreachable!("BSIM4: MOBMOD={other} reaches eval");
         }
     }
@@ -1436,16 +1694,60 @@ pub fn eval(
         ids
     };
 
-    // rgateMod <= 1 && trnqsMod == 0 && acnqsMod == 0: no Rg / NQS gcrg.
-    // rdsMod = 0: no external bias-dependent S/D resistance.
+    // Bias-dependent gate resistance (b4ld.c:2192-2225). This feeds native
+    // `RGATEMOD=2` and the AC-NQS time constant.
+    if model.rgate_mod > 1 || model.trnqs_mod != 0 || model.acnqs_mod != 0 {
+        let t9 = p.xrcrg2 * mt.vtm;
+        let t0 = t9 * beta;
+        let dt0_dvd = (dbeta_dvd + dbeta_dvg * dvgsteff_dvd) * t9;
+        let dt0_dvb = (dbeta_dvb + dbeta_dvg * dvgsteff_dvb) * t9;
+        let dt0_dvg = dbeta_dvg * t9;
+
+        op.gcrg = p.xrcrg1 * (t0 + ids);
+        op.gcrgd = p.xrcrg1 * (dt0_dvd + tmp1);
+        op.gcrgb = p.xrcrg1 * (dt0_dvb + tmp2) * dvbseff_dvb;
+        op.gcrgg = p.xrcrg1 * (dt0_dvg + tmp3) * dvgsteff_dvg;
+
+        if nf != 1.0 {
+            op.gcrg *= nf;
+            op.gcrgg *= nf;
+            op.gcrgd *= nf;
+            op.gcrgb *= nf;
+        }
+
+        if model.rgate_mod == 2 {
+            let denom = inst.gate_conductance + op.gcrg;
+            if denom != 0.0 {
+                let scale = inst.gate_conductance * inst.gate_conductance / (denom * denom);
+                op.gcrg = inst.gate_conductance * op.gcrg / denom;
+                op.gcrgg *= scale;
+                op.gcrgd *= scale;
+                op.gcrgb *= scale;
+            } else {
+                op.gcrg = 0.0;
+                op.gcrgg = 0.0;
+                op.gcrgd = 0.0;
+                op.gcrgb = 0.0;
+            }
+        }
+
+        op.gcrgs = -(op.gcrgg + op.gcrgd + op.gcrgb);
+    }
+
+    // rdsMod=1 external S/D resistance is stamped by Bsim4v8Device.
 
     // --- GIDL/GISL models (2308-2525) ---
-    let t0gidl = 3.0 * toxe; // mtrlMod = 0
+    let t0gidl = if model.mtrl_mod == 0 {
+        3.0 * toxe
+    } else {
+        model.epsrsub * toxe / epsrox
+    };
+    let vfbsd_gidl = if model.mtrl_mod == 0 { 0.0 } else { p.vfbsd };
     let (mut igidl, mut ggidld, mut ggidlg, ggidlb);
     let (mut igisl, mut ggisls, mut ggislg, ggislb);
     if model.gidl_mod == 0 {
         // GIDL.
-        let t1 = (vds - vgs_eff_raw - p.egidl) / t0gidl;
+        let t1 = (vds - vgs_eff_raw - p.egidl + vfbsd_gidl) / t0gidl;
         if p.agidl <= 0.0 || p.bgidl <= 0.0 || t1 <= 0.0 || p.cgidl <= 0.0 || vbd > 0.0 {
             igidl = 0.0;
             ggidld = 0.0;
@@ -1477,7 +1779,7 @@ pub fn eval(
             igidl *= t7;
         }
         // GISL.
-        let t1 = (-vds - vgd_eff_raw - p.egisl) / t0gidl;
+        let t1 = (-vds - vgd_eff_raw - p.egisl + vfbsd_gidl) / t0gidl;
         if p.agisl <= 0.0 || p.bgisl <= 0.0 || t1 <= 0.0 || p.cgisl <= 0.0 || vbs > 0.0 {
             igisl = 0.0;
             ggisls = 0.0;
@@ -1511,7 +1813,7 @@ pub fn eval(
     } else {
         // v4.7 new GIDL/GISL model (gidlMod = 1).
         // GISL.
-        let t1 = (-vds - p.rgisl * vgd_eff_raw - p.egisl) / t0gidl;
+        let t1 = (-vds - p.rgisl * vgd_eff_raw - p.egisl + vfbsd_gidl) / t0gidl;
         if p.agisl <= 0.0 || p.bgisl <= 0.0 || t1 <= 0.0 || p.cgisl < 0.0 {
             igisl = 0.0;
             ggisls = 0.0;
@@ -1555,7 +1857,7 @@ pub fn eval(
             igisl *= t6;
         }
         // GIDL.
-        let t1 = (vds - p.rgidl * vgs_eff_raw - p.egidl) / t0gidl;
+        let t1 = (vds - p.rgidl * vgs_eff_raw - p.egidl + vfbsd_gidl) / t0gidl;
         if p.agidl <= 0.0 || p.bgidl <= 0.0 || t1 <= 0.0 || p.cgidl < 0.0 {
             igidl = 0.0;
             ggidld = 0.0;
@@ -1607,7 +1909,354 @@ pub fn eval(
     op.ggislg = ggislg;
     op.ggislb = ggislb;
 
-    // igcMod = igbMod = 0: all gate tunneling currents are zero.
+    // --- Gate tunneling currents (2528-2919) ---
+    if model.igc_mod != 0 || model.igb_mod != 0 {
+        let vfb = inst.vfbzb;
+        let v3 = vfb - vgs_eff + vbseff - DELTA_3;
+        let t0 = if vfb <= 0.0 {
+            (v3 * v3 - 4.0 * DELTA_3 * vfb).sqrt()
+        } else {
+            (v3 * v3 + 4.0 * DELTA_3 * vfb).sqrt()
+        };
+        let t1 = 0.5 * (1.0 + v3 / t0);
+        let vfbeff = vfb - 0.5 * (v3 + t0);
+        let dvfbeff_dvg = t1 * dvgs_eff_dvg;
+        let dvfbeff_dvb = -t1;
+
+        let mut voxacc = vfb - vfbeff;
+        let mut dvoxacc_dvg = -dvfbeff_dvg;
+        let mut dvoxacc_dvb = -dvfbeff_dvb;
+        if voxacc < 0.0 {
+            voxacc = 0.0;
+            dvoxacc_dvg = 0.0;
+            dvoxacc_dvb = 0.0;
+        }
+
+        let (mut voxdepinv, mut dvoxdepinv_dvg, mut dvoxdepinv_dvd, mut dvoxdepinv_dvb);
+        let t0 = 0.5 * p.k1ox;
+        let t3 = vgs_eff - vfbeff - vbseff - vgsteff;
+        if p.k1ox == 0.0 {
+            voxdepinv = 0.0;
+            dvoxdepinv_dvg = 0.0;
+            dvoxdepinv_dvd = 0.0;
+            dvoxdepinv_dvb = 0.0;
+        } else if t3 < 0.0 {
+            voxdepinv = -t3;
+            dvoxdepinv_dvg = -dvgs_eff_dvg + dvfbeff_dvg + dvgsteff_dvg;
+            dvoxdepinv_dvd = dvgsteff_dvd;
+            dvoxdepinv_dvb = dvfbeff_dvb + 1.0 + dvgsteff_dvb;
+        } else {
+            let t1 = (t0 * t0 + t3).sqrt();
+            let t2 = t0 / t1;
+            voxdepinv = p.k1ox * (t1 - t0);
+            dvoxdepinv_dvg = t2 * (dvgs_eff_dvg - dvfbeff_dvg - dvgsteff_dvg);
+            dvoxdepinv_dvd = -t2 * dvgsteff_dvd;
+            dvoxdepinv_dvb = -t2 * (dvfbeff_dvb + 1.0 + dvgsteff_dvb);
+        }
+        voxdepinv += vgsteff;
+        dvoxdepinv_dvg += dvgsteff_dvg;
+        dvoxdepinv_dvd += dvgsteff_dvd;
+        dvoxdepinv_dvb += dvgsteff_dvb;
+
+        let tmp_vt = if model.temp_mod < 2 { vtm } else { vtm0 };
+
+        if model.igc_mod != 0 {
+            let t0 = tmp_vt * p.nigc;
+            let (vx_nvt, vbase, dvbase_dvg, dvbase_dvd, dvbase_dvb) = if model.igc_mod == 1 {
+                (
+                    (vgs_eff - model.mtype * inst.vth0) / t0,
+                    vgs_eff - model.mtype * inst.vth0,
+                    dvgs_eff_dvg,
+                    0.0,
+                    0.0,
+                )
+            } else {
+                (
+                    (vgs_eff - op.von) / t0,
+                    vgs_eff - op.von,
+                    dvgs_eff_dvg,
+                    -dvth_dvd,
+                    -dvth_dvb,
+                )
+            };
+            let (vaux, dvaux_dvg, dvaux_dvd, dvaux_dvb);
+            if vx_nvt > EXP_THRESHOLD {
+                vaux = vbase;
+                dvaux_dvg = dvbase_dvg;
+                dvaux_dvd = dvbase_dvd;
+                dvaux_dvb = dvbase_dvb;
+            } else if vx_nvt < -EXP_THRESHOLD {
+                vaux = t0 * (1.0 + MIN_EXP).ln();
+                dvaux_dvg = 0.0;
+                dvaux_dvd = 0.0;
+                dvaux_dvb = 0.0;
+            } else {
+                let exp_vx_nvt = vx_nvt.exp();
+                let frac = exp_vx_nvt / (1.0 + exp_vx_nvt);
+                vaux = t0 * (1.0 + exp_vx_nvt).ln();
+                dvaux_dvg = frac * dvbase_dvg;
+                dvaux_dvd = frac * dvbase_dvd;
+                dvaux_dvb = frac * dvbase_dvb;
+            }
+
+            let t2 = vgs_c * vaux;
+            let dt2_dvg = vaux + vgs_c * dvaux_dvg;
+            let dt2_dvd = vgs_c * dvaux_dvd;
+            let dt2_dvb = vgs_c * dvaux_dvb;
+
+            let t11 = p.aechvb;
+            let t12 = p.bechvb;
+            let t3 = p.aigc * p.cigc - p.bigc;
+            let t4 = p.bigc * p.cigc;
+            let t5 = t12 * (p.aigc + t3 * voxdepinv - t4 * voxdepinv * voxdepinv);
+            let (t6, dt6_dvg, dt6_dvd, dt6_dvb);
+            if t5 > EXP_THRESHOLD {
+                t6 = MAX_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvd = 0.0;
+                dt6_dvb = 0.0;
+            } else if t5 < -EXP_THRESHOLD {
+                t6 = MIN_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvd = 0.0;
+                dt6_dvb = 0.0;
+            } else {
+                t6 = t5.exp();
+                let dt6_dvox = t6 * t12 * (t3 - 2.0 * t4 * voxdepinv);
+                dt6_dvg = dt6_dvox * dvoxdepinv_dvg;
+                dt6_dvd = dt6_dvox * dvoxdepinv_dvd;
+                dt6_dvb = dt6_dvox * dvoxdepinv_dvb;
+            }
+            let igc = t11 * t2 * t6;
+            let digc_dvg = t11 * (t2 * dt6_dvg + t6 * dt2_dvg);
+            let digc_dvd = t11 * (t2 * dt6_dvd + t6 * dt2_dvd);
+            let digc_dvb = t11 * (t2 * dt6_dvb + t6 * dt2_dvb);
+
+            let (pigcd, dpigcd_dvg, dpigcd_dvd, dpigcd_dvb);
+            if model.pigcd_given {
+                pigcd = p.pigcd;
+                dpigcd_dvg = 0.0;
+                dpigcd_dvd = 0.0;
+                dpigcd_dvb = 0.0;
+            } else {
+                let t11 = -p.bechvb;
+                let t12 = vgsteff + 1.0e-20;
+                let t13 = t11 / t12 / t12;
+                let t14 = -t13 / t12;
+                pigcd = t13 * (1.0 - 0.5 * vdseff / t12);
+                dpigcd_dvg = t14 * (2.0 + 0.5 * (dvdseff_dvg - 3.0 * vdseff / t12));
+                dpigcd_dvd = 0.5 * t14 * dvdseff_dvd;
+                dpigcd_dvb = 0.5 * t14 * dvdseff_dvb;
+            }
+
+            let t7 = -pigcd * vdseff;
+            let mut dt7_dvg = -vdseff * dpigcd_dvg - pigcd * dvdseff_dvg;
+            let dt7_dvd = -vdseff * dpigcd_dvd - pigcd * dvdseff_dvd + dt7_dvg * dvgsteff_dvd;
+            let dt7_dvb = -vdseff * dpigcd_dvb - pigcd * dvdseff_dvb + dt7_dvg * dvgsteff_dvb;
+            dt7_dvg *= dvgsteff_dvg;
+
+            let t8 = t7 * t7 + 2.0e-4;
+            let dt8_dvg = 2.0 * t7 * dt7_dvg;
+            let dt8_dvd = 2.0 * t7 * dt7_dvd;
+            let dt8_dvb = 2.0 * t7 * dt7_dvb;
+
+            let (t9, dt9_dvg, dt9_dvd, dt9_dvb);
+            if t7 > EXP_THRESHOLD {
+                t9 = MAX_EXP;
+                dt9_dvg = 0.0;
+                dt9_dvd = 0.0;
+                dt9_dvb = 0.0;
+            } else if t7 < -EXP_THRESHOLD {
+                t9 = MIN_EXP;
+                dt9_dvg = 0.0;
+                dt9_dvd = 0.0;
+                dt9_dvb = 0.0;
+            } else {
+                t9 = t7.exp();
+                dt9_dvg = t9 * dt7_dvg;
+                dt9_dvd = t9 * dt7_dvd;
+                dt9_dvb = t9 * dt7_dvb;
+            }
+
+            let t1 = t9 - 1.0 + 1.0e-4;
+            let t10 = (t1 - t7) / t8;
+            let dt10_dvg = (dt9_dvg - dt7_dvg - t10 * dt8_dvg) / t8;
+            let dt10_dvd = (dt9_dvd - dt7_dvd - t10 * dt8_dvd) / t8;
+            let dt10_dvb = (dt9_dvb - dt7_dvb - t10 * dt8_dvb) / t8;
+            op.igcs = igc * t10;
+            op.gigcsg = digc_dvg * t10 + igc * dt10_dvg;
+            op.gigcsd = digc_dvd * t10 + igc * dt10_dvd;
+            op.gigcsb = (digc_dvb * t10 + igc * dt10_dvb) * dvbseff_dvb;
+
+            let t1 = t9 - 1.0 - 1.0e-4;
+            let t10 = (t7 * t9 - t1) / t8;
+            let dt10_dvg = (dt7_dvg * t9 + (t7 - 1.0) * dt9_dvg - t10 * dt8_dvg) / t8;
+            let dt10_dvd = (dt7_dvd * t9 + (t7 - 1.0) * dt9_dvd - t10 * dt8_dvd) / t8;
+            let dt10_dvb = (dt7_dvb * t9 + (t7 - 1.0) * dt9_dvb - t10 * dt8_dvb) / t8;
+            op.igcd = igc * t10;
+            op.gigcdg = digc_dvg * t10 + igc * dt10_dvg;
+            op.gigcdd = digc_dvd * t10 + igc * dt10_dvd;
+            op.gigcdb = (digc_dvb * t10 + igc * dt10_dvb) * dvbseff_dvb;
+
+            let t0 = vgs - (p.vfbsd + p.vfbsdoff);
+            let vgs_eff_edge = (t0 * t0 + 1.0e-4).sqrt();
+            let dvgs_eff_edge_dvg = t0 / vgs_eff_edge;
+            let t2 = vgs * vgs_eff_edge;
+            let dt2_dvg = vgs * dvgs_eff_edge_dvg + vgs_eff_edge;
+            let t11 = p.aechvb_edge_s;
+            let t12 = p.bechvb_edge;
+            let t3 = p.aigs * p.cigs - p.bigs;
+            let t4 = p.bigs * p.cigs;
+            let t5 = t12 * (p.aigs + t3 * vgs_eff_edge - t4 * vgs_eff_edge * vgs_eff_edge);
+            let (t6, dt6_dvg);
+            if t5 > EXP_THRESHOLD {
+                t6 = MAX_EXP;
+                dt6_dvg = 0.0;
+            } else if t5 < -EXP_THRESHOLD {
+                t6 = MIN_EXP;
+                dt6_dvg = 0.0;
+            } else {
+                t6 = t5.exp();
+                dt6_dvg = t6 * t12 * (t3 - 2.0 * t4 * vgs_eff_edge) * dvgs_eff_edge_dvg;
+            }
+            op.igs = t11 * t2 * t6;
+            op.gigsg = t11 * (t2 * dt6_dvg + t6 * dt2_dvg);
+            op.gigss = -op.gigsg;
+
+            let t0 = vgd - (p.vfbsd + p.vfbsdoff);
+            let vgd_eff_edge = (t0 * t0 + 1.0e-4).sqrt();
+            let dvgd_eff_edge_dvg = t0 / vgd_eff_edge;
+            let t2 = vgd * vgd_eff_edge;
+            let dt2_dvg = vgd * dvgd_eff_edge_dvg + vgd_eff_edge;
+            let t11 = p.aechvb_edge_d;
+            let t3 = p.aigd * p.cigd - p.bigd;
+            let t4 = p.bigd * p.cigd;
+            let t5 = t12 * (p.aigd + t3 * vgd_eff_edge - t4 * vgd_eff_edge * vgd_eff_edge);
+            let (t6, dt6_dvg);
+            if t5 > EXP_THRESHOLD {
+                t6 = MAX_EXP;
+                dt6_dvg = 0.0;
+            } else if t5 < -EXP_THRESHOLD {
+                t6 = MIN_EXP;
+                dt6_dvg = 0.0;
+            } else {
+                t6 = t5.exp();
+                dt6_dvg = t6 * t12 * (t3 - 2.0 * t4 * vgd_eff_edge) * dvgd_eff_edge_dvg;
+            }
+            op.igd = t11 * t2 * t6;
+            op.gigdg = t11 * (t2 * dt6_dvg + t6 * dt2_dvg);
+            op.gigdd = -op.gigdg;
+        }
+
+        if model.igb_mod != 0 {
+            let t0 = tmp_vt * p.nigbacc;
+            let t1 = -vgs_eff + vbseff + vfb;
+            let vx_nvt = t1 / t0;
+            let (vaux, dvaux_dvg, dvaux_dvb);
+            if vx_nvt > EXP_THRESHOLD {
+                vaux = t1;
+                dvaux_dvg = -dvgs_eff_dvg;
+                dvaux_dvb = 1.0;
+            } else if vx_nvt < -EXP_THRESHOLD {
+                vaux = t0 * (1.0 + MIN_EXP).ln();
+                dvaux_dvg = 0.0;
+                dvaux_dvb = 0.0;
+            } else {
+                let exp_vx_nvt = vx_nvt.exp();
+                let frac = exp_vx_nvt / (1.0 + exp_vx_nvt);
+                vaux = t0 * (1.0 + exp_vx_nvt).ln();
+                dvaux_dvb = frac;
+                dvaux_dvg = -frac * dvgs_eff_dvg;
+            }
+            let t2 = (vgs_c - vbs_c) * vaux;
+            let dt2_dvg = vaux + (vgs_c - vbs_c) * dvaux_dvg;
+            let dt2_dvb = -vaux + (vgs_c - vbs_c) * dvaux_dvb;
+
+            let mut t11 = 4.97232e-7 * p.weff * p.leff * p.tox_ratio;
+            let mut t12 = -7.45669e11 * toxe;
+            let t3 = p.aigbacc * p.cigbacc - p.bigbacc;
+            let t4 = p.bigbacc * p.cigbacc;
+            let t5 = t12 * (p.aigbacc + t3 * voxacc - t4 * voxacc * voxacc);
+            let (t6, dt6_dvg, dt6_dvb);
+            if t5 > EXP_THRESHOLD {
+                t6 = MAX_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvb = 0.0;
+            } else if t5 < -EXP_THRESHOLD {
+                t6 = MIN_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvb = 0.0;
+            } else {
+                t6 = t5.exp();
+                let dt6_dvox = t6 * t12 * (t3 - 2.0 * t4 * voxacc);
+                dt6_dvg = dt6_dvox * dvoxacc_dvg;
+                dt6_dvb = dt6_dvox * dvoxacc_dvb;
+            }
+            let igbacc = t11 * t2 * t6;
+            let digbacc_dvg = t11 * (t2 * dt6_dvg + t6 * dt2_dvg);
+            let digbacc_dvb = t11 * (t2 * dt6_dvb + t6 * dt2_dvb);
+
+            let t0 = tmp_vt * p.nigbinv;
+            let t1 = voxdepinv - p.eigbinv;
+            let vx_nvt = t1 / t0;
+            let (vaux, dvaux_dvg, dvaux_dvd, dvaux_dvb);
+            if vx_nvt > EXP_THRESHOLD {
+                vaux = t1;
+                dvaux_dvg = dvoxdepinv_dvg;
+                dvaux_dvd = dvoxdepinv_dvd;
+                dvaux_dvb = dvoxdepinv_dvb;
+            } else if vx_nvt < -EXP_THRESHOLD {
+                vaux = t0 * (1.0 + MIN_EXP).ln();
+                dvaux_dvg = 0.0;
+                dvaux_dvd = 0.0;
+                dvaux_dvb = 0.0;
+            } else {
+                let exp_vx_nvt = vx_nvt.exp();
+                let frac = exp_vx_nvt / (1.0 + exp_vx_nvt);
+                vaux = t0 * (1.0 + exp_vx_nvt).ln();
+                dvaux_dvg = frac * dvoxdepinv_dvg;
+                dvaux_dvd = frac * dvoxdepinv_dvd;
+                dvaux_dvb = frac * dvoxdepinv_dvb;
+            }
+            let t2 = (vgs_c - vbs_c) * vaux;
+            let dt2_dvg = vaux + (vgs_c - vbs_c) * dvaux_dvg;
+            let dt2_dvd = (vgs_c - vbs_c) * dvaux_dvd;
+            let dt2_dvb = -vaux + (vgs_c - vbs_c) * dvaux_dvb;
+
+            t11 *= 0.75610;
+            t12 *= 1.31724;
+            let t3 = p.aigbinv * p.cigbinv - p.bigbinv;
+            let t4 = p.bigbinv * p.cigbinv;
+            let t5 = t12 * (p.aigbinv + t3 * voxdepinv - t4 * voxdepinv * voxdepinv);
+            let (t6, dt6_dvg, dt6_dvd, dt6_dvb);
+            if t5 > EXP_THRESHOLD {
+                t6 = MAX_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvd = 0.0;
+                dt6_dvb = 0.0;
+            } else if t5 < -EXP_THRESHOLD {
+                t6 = MIN_EXP;
+                dt6_dvg = 0.0;
+                dt6_dvd = 0.0;
+                dt6_dvb = 0.0;
+            } else {
+                t6 = t5.exp();
+                let dt6_dvox = t6 * t12 * (t3 - 2.0 * t4 * voxdepinv);
+                dt6_dvg = dt6_dvox * dvoxdepinv_dvg;
+                dt6_dvd = dt6_dvox * dvoxdepinv_dvd;
+                dt6_dvb = dt6_dvox * dvoxdepinv_dvb;
+            }
+            let igbinv = t11 * t2 * t6;
+            let digbinv_dvg = t11 * (t2 * dt6_dvg + t6 * dt2_dvg);
+            let digbinv_dvd = t11 * (t2 * dt6_dvd + t6 * dt2_dvd);
+            let digbinv_dvb = t11 * (t2 * dt6_dvb + t6 * dt2_dvb);
+
+            op.igb = igbinv + igbacc;
+            op.gigbg = digbinv_dvg + digbacc_dvg;
+            op.gigbd = digbinv_dvd;
+            op.gigbb = (digbinv_dvb + digbacc_dvb) * dvbseff_dvb;
+        }
+    }
 
     // --- NF scaling (2921-2965) ---
     if nf != 1.0 {
@@ -1631,12 +2280,36 @@ pub fn eval(
         op.ggisls *= nf;
         op.ggislg *= nf;
         op.ggislb *= nf;
+
+        op.igcs *= nf;
+        op.gigcsg *= nf;
+        op.gigcsd *= nf;
+        op.gigcsb *= nf;
+        op.igcd *= nf;
+        op.gigcdg *= nf;
+        op.gigcdd *= nf;
+        op.gigcdb *= nf;
+
+        op.igs *= nf;
+        op.gigsg *= nf;
+        op.gigss *= nf;
+        op.igd *= nf;
+        op.gigdg *= nf;
+        op.gigdd *= nf;
+
+        op.igb *= nf;
+        op.gigbg *= nf;
+        op.gigbd *= nf;
+        op.gigbb *= nf;
     }
     op.ggidls = -(op.ggidld + op.ggidlg + op.ggidlb);
     op.ggisld = -(op.ggisls + op.ggislg + op.ggislb);
+    op.gigbs = -(op.gigbg + op.gigbd + op.gigbb);
+    op.gigcss = -(op.gigcsg + op.gigcsd + op.gigcsb);
+    op.gigcds = -(op.gigcdg + op.gigcdd + op.gigcdb);
     op.cd = cdrain;
 
-    // --- qinv for noise (tnoiMod = 0; b4ld.c:2980-3002) ---
+    // --- qinv/noiGd0 for noise (b4ld.c:2980-3006) ---
     if model.tnoi_mod == 0 {
         let abulk_n = abulk0_q * p.abulk_cv_factor;
         let vdsat_n = vgsteff / abulk_n;
@@ -1658,6 +2331,11 @@ pub fn eval(
         let t2 = vdseff_n / t1;
         let t3 = t0 * t2;
         op.qinv = coxeff * p.weff_cv * nf * p.leff_cv * (vgsteff - 0.5 * t0 + abulk_n * t3);
+    } else if model.tnoi_mod == 2 {
+        let denom = 1.0 + gche * rds;
+        if denom != 0.0 {
+            op.noi_gd0 = nf * beta * vgsteff / denom;
+        }
     }
 
     // ===================== BSIM4 C-V begins =====================
@@ -1669,13 +2347,280 @@ pub fn eval(
 
     let (qgate, qdrn, qbulk);
     if model.xpart < 0.0 {
-        // Intrinsic charge suppression (xpart < 0).
+        // Intrinsic charge suppression (xpart < 0). Overlap and junction
+        // charges below still use the selected CAPMOD overlap form.
         qgate = 0.0;
         qdrn = 0.0;
         qbulk = 0.0;
         // capacitance matrix stays zero.
+    } else if model.cap_mod == 0 {
+        // --- capMod = 0 intrinsic charge model (b4ld.c:3026-3334) ---
+        let (vbseff_cv, dvbseff_cv_dvb) = if vbseff < 0.0 {
+            (vbs_c, 1.0)
+        } else {
+            (p.phi - phis, dvbseff_dvb)
+        };
+
+        let vfb = p.vfbcv;
+        let vth_cv = vfb + p.phi + p.k1ox * sqrt_phis;
+        let vgst_cv = vgs_eff - vth_cv;
+        let dvth_cv_dvb = p.k1ox * dsqrt_phis_dvb * dvbseff_dvb;
+        let cox_wl = mt.coxe * p.weff_cv * p.leff_cv * nf;
+        let arg1 = vgs_eff - vbseff_cv - vfb;
+
+        let (qgate_l, qbulk_l, qdrn_l);
+        if arg1 <= 0.0 {
+            // Accumulation.
+            qgate_l = cox_wl * arg1;
+            qbulk_l = -qgate_l;
+            qdrn_l = 0.0;
+
+            ch.cggb = cox_wl * dvgs_eff_dvg;
+            ch.cgdb = 0.0;
+            ch.cgsb = cox_wl * (dvbseff_cv_dvb - dvgs_eff_dvg);
+
+            ch.cdgb = 0.0;
+            ch.cddb = 0.0;
+            ch.cdsb = 0.0;
+
+            ch.cbgb = -cox_wl * dvgs_eff_dvg;
+            ch.cbdb = 0.0;
+            ch.cbsb = -ch.cgsb;
+        } else if vgst_cv <= 0.0 {
+            // Depletion.
+            let t1 = 0.5 * p.k1ox;
+            let t2 = (t1 * t1 + arg1).sqrt();
+            qgate_l = cox_wl * p.k1ox * (t2 - t1);
+            qbulk_l = -qgate_l;
+            qdrn_l = 0.0;
+
+            let t0 = cox_wl * t1 / t2;
+            ch.cggb = t0 * dvgs_eff_dvg;
+            ch.cgdb = 0.0;
+            ch.cgsb = t0 * (dvbseff_cv_dvb - dvgs_eff_dvg);
+
+            ch.cdgb = 0.0;
+            ch.cddb = 0.0;
+            ch.cdsb = 0.0;
+
+            ch.cbgb = -ch.cggb;
+            ch.cbdb = 0.0;
+            ch.cbsb = -ch.cgsb;
+        } else {
+            // Inversion.
+            let one_third_cox_wl = cox_wl / 3.0;
+            let two_third_cox_wl = 2.0 * one_third_cox_wl;
+
+            let abulk_cv = abulk0_q * p.abulk_cv_factor;
+            let dabulk_cv_dvb = p.abulk_cv_factor * dabulk0_q_dvb * dvbseff_dvb;
+            let dvdsat_dvg = 1.0 / abulk_cv;
+            let vdsat = vgst_cv * dvdsat_dvg;
+            let dvdsat_dvb = -(vdsat * dabulk_cv_dvb + dvth_cv_dvb) * dvdsat_dvg;
+
+            if model.xpart > 0.5 {
+                // 0/100 partition.
+                if vdsat <= vds_c {
+                    // Saturation.
+                    let t1 = vdsat / 3.0;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - t1);
+                    let t2 = -two_third_cox_wl * vgst_cv;
+                    qbulk_l = -(qgate_l + t2);
+                    qdrn_l = 0.0;
+
+                    ch.cggb = one_third_cox_wl * (3.0 - dvdsat_dvg) * dvgs_eff_dvg;
+                    let t2 = -one_third_cox_wl * dvdsat_dvb;
+                    ch.cgsb = -(ch.cggb + t2);
+                    ch.cgdb = 0.0;
+
+                    ch.cdgb = 0.0;
+                    ch.cddb = 0.0;
+                    ch.cdsb = 0.0;
+
+                    ch.cbgb = -(ch.cggb - two_third_cox_wl * dvgs_eff_dvg);
+                    let t3 = -(t2 + two_third_cox_wl * dvth_cv_dvb);
+                    ch.cbsb = -(ch.cbgb + t3);
+                    ch.cbdb = 0.0;
+                } else {
+                    // Linear.
+                    let alphaz = vgst_cv / vdsat;
+                    let t1 = 2.0 * vdsat - vds_c;
+                    let t2 = vds_c / (3.0 * t1);
+                    let t3 = t2 * vds_c;
+                    let t9 = 0.25 * cox_wl;
+                    let t4 = t9 * alphaz;
+                    let t7 = 2.0 * vds_c - t1 - 3.0 * t3;
+                    let t8 = t3 - t1 - 2.0 * vds_c;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - 0.5 * (vds_c - t3));
+                    let t10_q = t4 * t8;
+                    qdrn_l = t4 * t7;
+                    qbulk_l = -(qgate_l + qdrn_l + t10_q);
+
+                    let t5 = t3 / t1;
+                    ch.cggb = cox_wl * (1.0 - t5 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let t11 = -cox_wl * t5 * dvdsat_dvb;
+                    ch.cgdb = cox_wl * (t2 - 0.5 + 0.5 * t5);
+                    ch.cgsb = -(ch.cggb + t11 + ch.cgdb);
+                    let t6 = 1.0 / vdsat;
+                    let dalphaz_dvg = t6 * (1.0 - alphaz * dvdsat_dvg);
+                    let dalphaz_dvb = -t6 * (dvth_cv_dvb + alphaz * dvdsat_dvb);
+                    let t7 = t9 * t7;
+                    let t8 = t9 * t8;
+                    let t9 = 2.0 * t4 * (1.0 - 3.0 * t5);
+                    ch.cdgb = (t7 * dalphaz_dvg - t9 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let t12 = t7 * dalphaz_dvb - t9 * dvdsat_dvb;
+                    ch.cddb = t4 * (3.0 - 6.0 * t2 - 3.0 * t5);
+                    ch.cdsb = -(ch.cdgb + t12 + ch.cddb);
+
+                    let t9 = 2.0 * t4 * (1.0 + t5);
+                    let t10 = (t8 * dalphaz_dvg - t9 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let t11 = t8 * dalphaz_dvb - t9 * dvdsat_dvb;
+                    let t12 = t4 * (2.0 * t2 + t5 - 1.0);
+                    let t0 = -(t10 + t11 + t12);
+
+                    ch.cbgb = -(ch.cggb + ch.cdgb + t10);
+                    ch.cbdb = -(ch.cgdb + ch.cddb + t12);
+                    ch.cbsb = -(ch.cgsb + ch.cdsb + t0);
+                }
+            } else if model.xpart < 0.5 {
+                // 40/60 partition.
+                if vds_c >= vdsat {
+                    // Saturation.
+                    let t1 = vdsat / 3.0;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - t1);
+                    let t2 = -two_third_cox_wl * vgst_cv;
+                    qbulk_l = -(qgate_l + t2);
+                    qdrn_l = 0.4 * t2;
+
+                    ch.cggb = one_third_cox_wl * (3.0 - dvdsat_dvg) * dvgs_eff_dvg;
+                    let t2 = -one_third_cox_wl * dvdsat_dvb;
+                    ch.cgsb = -(ch.cggb + t2);
+                    ch.cgdb = 0.0;
+
+                    let t3 = 0.4 * two_third_cox_wl;
+                    ch.cdgb = -t3 * dvgs_eff_dvg;
+                    ch.cddb = 0.0;
+                    let t4 = t3 * dvth_cv_dvb;
+                    ch.cdsb = -(t4 + ch.cdgb);
+
+                    ch.cbgb = -(ch.cggb - two_third_cox_wl * dvgs_eff_dvg);
+                    let t3 = -(t2 + two_third_cox_wl * dvth_cv_dvb);
+                    ch.cbsb = -(ch.cbgb + t3);
+                    ch.cbdb = 0.0;
+                } else {
+                    // Linear.
+                    let alphaz = vgst_cv / vdsat;
+                    let t1 = 2.0 * vdsat - vds_c;
+                    let t2 = vds_c / (3.0 * t1);
+                    let t3 = t2 * vds_c;
+                    let t9 = 0.25 * cox_wl;
+                    let t4 = t9 * alphaz;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - 0.5 * (vds_c - t3));
+
+                    let t5 = t3 / t1;
+                    ch.cggb = cox_wl * (1.0 - t5 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let tmp = -cox_wl * t5 * dvdsat_dvb;
+                    ch.cgdb = cox_wl * (t2 - 0.5 + 0.5 * t5);
+                    ch.cgsb = -(ch.cggb + ch.cgdb + tmp);
+
+                    let t6 = 1.0 / vdsat;
+                    let dalphaz_dvg = t6 * (1.0 - alphaz * dvdsat_dvg);
+                    let dalphaz_dvb = -t6 * (dvth_cv_dvb + alphaz * dvdsat_dvb);
+
+                    let t6 = 8.0 * vdsat * vdsat - 6.0 * vdsat * vds_c + 1.2 * vds_c * vds_c;
+                    let t8 = t2 / t1;
+                    let t7 = vds_c - t1 - t8 * t6;
+                    qdrn_l = t4 * t7;
+                    let t7 = t7 * t9;
+                    let tmp = t8 / t1;
+                    let tmp1 = t4 * (2.0 - 4.0 * tmp * t6 + t8 * (16.0 * vdsat - 6.0 * vds_c));
+
+                    ch.cdgb = (t7 * dalphaz_dvg - tmp1 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let t10 = t7 * dalphaz_dvb - tmp1 * dvdsat_dvb;
+                    ch.cddb = t4
+                        * (2.0 - (1.0 / (3.0 * t1 * t1) + 2.0 * tmp) * t6
+                            + t8 * (6.0 * vdsat - 2.4 * vds_c));
+                    ch.cdsb = -(ch.cdgb + t10 + ch.cddb);
+
+                    let t7 = 2.0 * (t1 + t3);
+                    qbulk_l = -(qgate_l - t4 * t7);
+                    let t7 = t7 * t9;
+                    let t0 = 4.0 * t4 * (1.0 - t5);
+                    let t12 = (-t7 * dalphaz_dvg - t0 * dvdsat_dvg) * dvgs_eff_dvg - ch.cdgb;
+                    let t11 = -t7 * dalphaz_dvb - t10 - t0 * dvdsat_dvb;
+                    let t10 = -4.0 * t4 * (t2 - 0.5 + 0.5 * t5) - ch.cddb;
+                    let tmp = -(t10 + t11 + t12);
+
+                    ch.cbgb = -(ch.cggb + ch.cdgb + t12);
+                    ch.cbdb = -(ch.cgdb + ch.cddb + t10);
+                    ch.cbsb = -(ch.cgsb + ch.cdsb + tmp);
+                }
+            } else {
+                // 50/50 partition.
+                if vds_c >= vdsat {
+                    // Saturation.
+                    let t1 = vdsat / 3.0;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - t1);
+                    let t2 = -two_third_cox_wl * vgst_cv;
+                    qbulk_l = -(qgate_l + t2);
+                    qdrn_l = 0.5 * t2;
+
+                    ch.cggb = one_third_cox_wl * (3.0 - dvdsat_dvg) * dvgs_eff_dvg;
+                    let t2 = -one_third_cox_wl * dvdsat_dvb;
+                    ch.cgsb = -(ch.cggb + t2);
+                    ch.cgdb = 0.0;
+
+                    ch.cdgb = -one_third_cox_wl * dvgs_eff_dvg;
+                    ch.cddb = 0.0;
+                    let t4 = one_third_cox_wl * dvth_cv_dvb;
+                    ch.cdsb = -(t4 + ch.cdgb);
+
+                    ch.cbgb = -(ch.cggb - two_third_cox_wl * dvgs_eff_dvg);
+                    let t3 = -(t2 + two_third_cox_wl * dvth_cv_dvb);
+                    ch.cbsb = -(ch.cbgb + t3);
+                    ch.cbdb = 0.0;
+                } else {
+                    // Linear.
+                    let alphaz = vgst_cv / vdsat;
+                    let t1 = 2.0 * vdsat - vds_c;
+                    let t2 = vds_c / (3.0 * t1);
+                    let t3 = t2 * vds_c;
+                    let t9 = 0.25 * cox_wl;
+                    let t4 = t9 * alphaz;
+                    qgate_l = cox_wl * (vgs_eff - vfb - p.phi - 0.5 * (vds_c - t3));
+
+                    let t5 = t3 / t1;
+                    ch.cggb = cox_wl * (1.0 - t5 * dvdsat_dvg) * dvgs_eff_dvg;
+                    let tmp = -cox_wl * t5 * dvdsat_dvb;
+                    ch.cgdb = cox_wl * (t2 - 0.5 + 0.5 * t5);
+                    ch.cgsb = -(ch.cggb + ch.cgdb + tmp);
+
+                    let t6 = 1.0 / vdsat;
+                    let dalphaz_dvg = t6 * (1.0 - alphaz * dvdsat_dvg);
+                    let dalphaz_dvb = -t6 * (dvth_cv_dvb + alphaz * dvdsat_dvb);
+
+                    let t7 = t1 + t3;
+                    qdrn_l = -t4 * t7;
+                    qbulk_l = -(qgate_l + qdrn_l + qdrn_l);
+                    let t7 = t7 * t9;
+                    let t0 = t4 * (2.0 * t5 - 2.0);
+
+                    ch.cdgb = (t0 * dvdsat_dvg - t7 * dalphaz_dvg) * dvgs_eff_dvg;
+                    let t12 = t0 * dvdsat_dvb - t7 * dalphaz_dvb;
+                    ch.cddb = t4 * (1.0 - 2.0 * t2 - t5);
+                    ch.cdsb = -(ch.cdgb + t12 + ch.cddb);
+
+                    ch.cbgb = -(ch.cggb + 2.0 * ch.cdgb);
+                    ch.cbdb = -(ch.cgdb + 2.0 * ch.cddb);
+                    ch.cbsb = -(ch.cgsb + 2.0 * ch.cdsb);
+                }
+            }
+        }
+
+        qgate = qgate_l;
+        qbulk = qbulk_l;
+        qdrn = qdrn_l;
     } else {
-        // capMod = 2 (the only ported charge model).
+        // capMod = 1/2 share the C-V prelude and smoothed overlap form.
         let (vbseff_cv, dvbseff_cv_dvb);
         if vbseff < 0.0 {
             vbseff_cv = vbseff;
@@ -1687,303 +2632,536 @@ pub fn eval(
 
         let cox_wl = mt.coxe * p.weff_cv * p.leff_cv * nf;
 
-        // VgsteffCV with noff and voffcv (cvchargeMod = 0; 3353-3387).
-        let noff = n * p.noff;
-        let dnoff_dvd = p.noff * dn_dvd;
-        let dnoff_dvb = p.noff * dn_dvb;
-        let t0 = vtm * noff;
-        let voffcv = p.voffcv;
-        let vgst_nvt = (vgst - voffcv) / t0;
+        let (vgsteff_cv, dvgsteff_cv_dvg, dvgsteff_cv_dvd, dvgsteff_cv_dvb) =
+            if model.cvcharge_mod == 0 {
+                // VgsteffCV with noff and voffcv (cvchargeMod = 0; 3353-3387).
+                let noff = n * p.noff;
+                let dnoff_dvd = p.noff * dn_dvd;
+                let dnoff_dvb = p.noff * dn_dvb;
+                let t0 = vtm * noff;
+                let voffcv = p.voffcv;
+                let vgst_nvt = (vgst - voffcv) / t0;
 
-        let (vgsteff_cv, dvgsteff_cv_dvg, dvgsteff_cv_dvd, dvgsteff_cv_dvb);
-        if vgst_nvt > EXP_THRESHOLD {
-            vgsteff_cv = vgst - voffcv;
-            dvgsteff_cv_dvg = dvgs_eff_dvg;
-            dvgsteff_cv_dvd = -dvth_dvd;
-            dvgsteff_cv_dvb = -dvth_dvb;
-        } else if vgst_nvt < -EXP_THRESHOLD {
-            vgsteff_cv = t0 * (1.0 + MIN_EXP).ln();
-            dvgsteff_cv_dvg = 0.0;
-            let d = vgsteff_cv / noff;
-            dvgsteff_cv_dvb = d * dnoff_dvb;
-            dvgsteff_cv_dvd = d * dnoff_dvd;
+                if vgst_nvt > EXP_THRESHOLD {
+                    (vgst - voffcv, dvgs_eff_dvg, -dvth_dvd, -dvth_dvb)
+                } else if vgst_nvt < -EXP_THRESHOLD {
+                    let vgsteff_cv = t0 * (1.0 + MIN_EXP).ln();
+                    let d = vgsteff_cv / noff;
+                    (vgsteff_cv, 0.0, d * dnoff_dvd, d * dnoff_dvb)
+                } else {
+                    let exp_vgst = vgst_nvt.exp();
+                    let vgsteff_cv = t0 * (1.0 + exp_vgst).ln();
+                    let dvg = exp_vgst / (1.0 + exp_vgst);
+                    let dvgsteff_cv_dvd = -dvg * (dvth_dvd + (vgst - voffcv) / noff * dnoff_dvd)
+                        + vgsteff_cv / noff * dnoff_dvd;
+                    let dvgsteff_cv_dvb = -dvg * (dvth_dvb + (vgst - voffcv) / noff * dnoff_dvb)
+                        + vgsteff_cv / noff * dnoff_dvb;
+                    (
+                        vgsteff_cv,
+                        dvg * dvgs_eff_dvg,
+                        dvgsteff_cv_dvd,
+                        dvgsteff_cv_dvb,
+                    )
+                }
+            } else {
+                // VgsteffCV for cvchargeMod = 1 (b4ld.c:3389-3456).
+                let t0 = n * vtm;
+                let t1 = p.mstarcv * vgst;
+                let t2 = t1 / t0;
+                let (t10, dt10_dvg, dt10_dvd, dt10_dvb);
+                if t2 > EXP_THRESHOLD {
+                    t10 = t1;
+                    dt10_dvg = p.mstarcv * dvgs_eff_dvg;
+                    dt10_dvd = -dvth_dvd * p.mstarcv;
+                    dt10_dvb = -dvth_dvb * p.mstarcv;
+                } else if t2 < -EXP_THRESHOLD {
+                    let t10p = vtm * (1.0 + MIN_EXP).ln();
+                    dt10_dvg = 0.0;
+                    dt10_dvd = t10p * dn_dvd;
+                    dt10_dvb = t10p * dn_dvb;
+                    t10 = t10p * n;
+                } else {
+                    let exp_vgst = t2.exp();
+                    let t3 = vtm * (1.0 + exp_vgst).ln();
+                    t10 = n * t3;
+                    let dt10g = p.mstarcv * exp_vgst / (1.0 + exp_vgst);
+                    dt10_dvb = t3 * dn_dvb - dt10g * (dvth_dvb + vgst * dn_dvb / n);
+                    dt10_dvd = t3 * dn_dvd - dt10g * (dvth_dvd + vgst * dn_dvd / n);
+                    dt10_dvg = dt10g * dvgs_eff_dvg;
+                }
+
+                let t1 = p.voffcbncv - (1.0 - p.mstarcv) * vgst;
+                let t2 = t1 / t0;
+                let (t9, dt9_dvg, dt9_dvd, dt9_dvb);
+                if t2 < -EXP_THRESHOLD {
+                    let t3 = mt.coxe * MIN_EXP / p.cdep0;
+                    t9 = p.mstarcv + t3 * n;
+                    dt9_dvg = 0.0;
+                    dt9_dvd = dn_dvd * t3;
+                    dt9_dvb = dn_dvb * t3;
+                } else if t2 > EXP_THRESHOLD {
+                    let t3 = mt.coxe * MAX_EXP / p.cdep0;
+                    t9 = p.mstarcv + t3 * n;
+                    dt9_dvg = 0.0;
+                    dt9_dvd = dn_dvd * t3;
+                    dt9_dvb = dn_dvb * t3;
+                } else {
+                    let exp_vgst = t2.exp();
+                    let t3 = mt.coxe / p.cdep0;
+                    let t4 = t3 * exp_vgst;
+                    let t5 = t1 * t4 / t0;
+                    t9 = p.mstarcv + n * t4;
+                    let dt9g = t3 * (p.mstarcv - 1.0) * exp_vgst / vtm;
+                    dt9_dvb = t4 * dn_dvb - dt9g * dvth_dvb - t5 * dn_dvb;
+                    dt9_dvd = t4 * dn_dvd - dt9g * dvth_dvd - t5 * dn_dvd;
+                    dt9_dvg = dt9g * dvgs_eff_dvg;
+                }
+
+                let vgsteff_cv = t10 / t9;
+                let t11 = t9 * t9;
+                (
+                    vgsteff_cv,
+                    (t9 * dt10_dvg - t10 * dt9_dvg) / t11,
+                    (t9 * dt10_dvd - t10 * dt9_dvd) / t11,
+                    (t9 * dt10_dvb - t10 * dt9_dvb) / t11,
+                )
+            };
+
+        if model.cap_mod == 1 {
+            // --- capMod = 1 intrinsic charge model (b4ld.c:3460-3629) ---
+            let vfb = inst.vfbzb;
+            let v3 = vfb - vgs_eff + vbseff_cv - DELTA_3;
+            let t0 = if vfb <= 0.0 {
+                (v3 * v3 - 4.0 * DELTA_3 * vfb).sqrt()
+            } else {
+                (v3 * v3 + 4.0 * DELTA_3 * vfb).sqrt()
+            };
+            let t1 = 0.5 * (1.0 + v3 / t0);
+            let vfbeff = vfb - 0.5 * (v3 + t0);
+            let dvfbeff_dvg = t1 * dvgs_eff_dvg;
+            let dvfbeff_dvb = -t1 * dvbseff_cv_dvb;
+
+            let qac0 = cox_wl * (vfbeff - vfb);
+            let dqac0_dvg = cox_wl * dvfbeff_dvg;
+            let dqac0_dvb = cox_wl * dvfbeff_dvb;
+
+            let t0 = 0.5 * p.k1ox;
+            let t3 = vgs_eff - vfbeff - vbseff_cv - vgsteff_cv;
+            let (t1, t2);
+            if p.k1ox == 0.0 {
+                t1 = 0.0;
+                t2 = 0.0;
+            } else if t3 < 0.0 {
+                t1 = t0 + t3 / p.k1ox;
+                t2 = cox_wl;
+            } else {
+                t1 = (t0 * t0 + t3).sqrt();
+                t2 = cox_wl * t0 / t1;
+            }
+
+            let qsub0 = cox_wl * p.k1ox * (t1 - t0);
+            let dqsub0_dvg = t2 * (dvgs_eff_dvg - dvfbeff_dvg - dvgsteff_cv_dvg);
+            let dqsub0_dvd = -t2 * dvgsteff_cv_dvd;
+            let dqsub0_dvb = -t2 * (dvfbeff_dvb + dvbseff_cv_dvb + dvgsteff_cv_dvb);
+
+            let abulk_cv = abulk0_q * p.abulk_cv_factor;
+            let dabulk_cv_dvb = p.abulk_cv_factor * dabulk0_q_dvb;
+            let vdsat_cv = vgsteff_cv / abulk_cv;
+
+            let t0 = vdsat_cv - vds_c - DELTA_4;
+            let dt0_dvg = 1.0 / abulk_cv;
+            let dt0_dvb = -vdsat_cv * dabulk_cv_dvb / abulk_cv;
+            let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+            let mut dt1_dvg = (t0 + DELTA_4 + DELTA_4) / t1;
+            let dt1_dvd = -t0 / t1;
+            let dt1_dvb = dt1_dvg * dt0_dvb;
+            dt1_dvg *= dt0_dvg;
+            let (mut vdseff_cv, mut dvdseff_cv_dvg, dvdseff_cv_dvd, mut dvdseff_cv_dvb);
+            if t0 >= 0.0 {
+                vdseff_cv = vdsat_cv - 0.5 * (t0 + t1);
+                dvdseff_cv_dvg = 0.5 * (dt0_dvg - dt1_dvg);
+                dvdseff_cv_dvd = 0.5 * (1.0 - dt1_dvd);
+                dvdseff_cv_dvb = 0.5 * (dt0_dvb - dt1_dvb);
+            } else {
+                let t3 = (DELTA_4 + DELTA_4) / (t1 - t0);
+                let t4 = 1.0 - t3;
+                let t5 = vdsat_cv * t3 / (t1 - t0);
+                vdseff_cv = vdsat_cv * t4;
+                dvdseff_cv_dvg = dt0_dvg * t4 + t5 * (dt1_dvg - dt0_dvg);
+                dvdseff_cv_dvd = t5 * (dt1_dvd + 1.0);
+                dvdseff_cv_dvb = dt0_dvb * (t4 - t5) + t5 * dt1_dvb;
+            }
+
+            if vds_c == 0.0 {
+                vdseff_cv = 0.0;
+                dvdseff_cv_dvg = 0.0;
+                dvdseff_cv_dvb = 0.0;
+            }
+
+            let t0 = abulk_cv * vdseff_cv;
+            let t1 = 12.0 * (vgsteff_cv - 0.5 * t0 + 1.0e-20);
+            let t2 = vdseff_cv / t1;
+            let t3 = t0 * t2;
+
+            let t4 = 1.0 - 12.0 * t2 * t2 * abulk_cv;
+            let t5 = 6.0 * t0 * (4.0 * vgsteff_cv - t0) / (t1 * t1) - 0.5;
+            let t6 = 12.0 * t2 * t2 * vgsteff_cv;
+
+            let mut qgate_l = cox_wl * (vgsteff_cv - 0.5 * vdseff_cv + t3);
+            let mut cgg1 = cox_wl * (t4 + t5 * dvdseff_cv_dvg);
+            let cgd1 = cox_wl * t5 * dvdseff_cv_dvd + cgg1 * dvgsteff_cv_dvd;
+            let cgb1 = cox_wl * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb) + cgg1 * dvgsteff_cv_dvb;
+            cgg1 *= dvgsteff_cv_dvg;
+
+            let t7 = 1.0 - abulk_cv;
+            let mut qbulk_l = cox_wl * t7 * (0.5 * vdseff_cv - t3);
+            let t4 = -t7 * (t4 - 1.0);
+            let t5 = -t7 * t5;
+            let t6 = -(t7 * t6 + (0.5 * vdseff_cv - t3));
+            let mut cbg1 = cox_wl * (t4 + t5 * dvdseff_cv_dvg);
+            let cbd1 = cox_wl * t5 * dvdseff_cv_dvd + cbg1 * dvgsteff_cv_dvd;
+            let cbb1 = cox_wl * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb) + cbg1 * dvgsteff_cv_dvb;
+            cbg1 *= dvgsteff_cv_dvg;
+
+            let (qsrc, mut csg, csd, mut csb);
+            if model.xpart > 0.5 {
+                // 0/100 partition.
+                let t1x = t1 + t1;
+                qsrc = -cox_wl * (0.5 * vgsteff_cv + 0.25 * t0 - t0 * t0 / t1x);
+                let t7x = (4.0 * vgsteff_cv - t0) / (t1x * t1x);
+                let t4x = -(0.5 + 24.0 * t0 * t0 / (t1x * t1x));
+                let t5x = -(0.25 * abulk_cv - 12.0 * abulk_cv * t0 * t7x);
+                let t6x = -(0.25 * vdseff_cv - 12.0 * t0 * vdseff_cv * t7x);
+                csg = cox_wl * (t4x + t5x * dvdseff_cv_dvg);
+                csd = cox_wl * t5x * dvdseff_cv_dvd + csg * dvgsteff_cv_dvd;
+                csb = cox_wl * (t5x * dvdseff_cv_dvb + t6x * dabulk_cv_dvb) + csg * dvgsteff_cv_dvb;
+                csg *= dvgsteff_cv_dvg;
+            } else if model.xpart < 0.5 {
+                // 40/60 partition.
+                let t1x = t1 / 12.0;
+                let t2x = 0.5 * cox_wl / (t1x * t1x);
+                let t3x = vgsteff_cv
+                    * (2.0 * t0 * t0 / 3.0 + vgsteff_cv * (vgsteff_cv - 4.0 * t0 / 3.0))
+                    - 2.0 * t0 * t0 * t0 / 15.0;
+                qsrc = -t2x * t3x;
+                let t7x = 4.0 / 3.0 * vgsteff_cv * (vgsteff_cv - t0) + 0.4 * t0 * t0;
+                let t4x = -2.0 * qsrc / t1x
+                    - t2x
+                        * (vgsteff_cv * (3.0 * vgsteff_cv - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
+                let t5x = (qsrc / t1x + t2x * t7x) * abulk_cv;
+                let t6x = qsrc / t1x * vdseff_cv + t2x * t7x * vdseff_cv;
+                csg = t4x + t5x * dvdseff_cv_dvg;
+                csd = t5x * dvdseff_cv_dvd + csg * dvgsteff_cv_dvd;
+                csb = t5x * dvdseff_cv_dvb + t6x * dabulk_cv_dvb + csg * dvgsteff_cv_dvb;
+                csg *= dvgsteff_cv_dvg;
+            } else {
+                // 50/50 partition.
+                qsrc = -0.5 * (qgate_l + qbulk_l);
+                csg = -0.5 * (cgg1 + cbg1);
+                csb = -0.5 * (cgb1 + cbb1);
+                csd = -0.5 * (cgd1 + cbd1);
+            }
+
+            qgate_l += qac0 + qsub0;
+            qbulk_l -= qac0 + qsub0;
+            let qdrn_l = -(qgate_l + qbulk_l + qsrc);
+
+            let cgg = dqac0_dvg + dqsub0_dvg + cgg1;
+            let cgd = dqsub0_dvd + cgd1;
+            let mut cgb = dqac0_dvb + dqsub0_dvb + cgb1;
+
+            let cbg = cbg1 - dqac0_dvg - dqsub0_dvg;
+            let cbd = cbd1 - dqsub0_dvd;
+            let mut cbb = cbb1 - dqac0_dvb - dqsub0_dvb;
+
+            cgb *= dvbseff_dvb;
+            cbb *= dvbseff_dvb;
+            csb *= dvbseff_dvb;
+
+            ch.cggb = cgg;
+            ch.cgsb = -(cgg + cgd + cgb);
+            ch.cgdb = cgd;
+            ch.cdgb = -(cgg + cbg + csg);
+            ch.cdsb = cgg + cgd + cgb + cbg + cbd + cbb + csg + csd + csb;
+            ch.cddb = -(cgd + cbd + csd);
+            ch.cbgb = cbg;
+            ch.cbsb = -(cbg + cbd + cbb);
+            ch.cbdb = cbd;
+
+            qgate = qgate_l;
+            qbulk = qbulk_l;
+            qdrn = qdrn_l;
         } else {
-            let exp_vgst = vgst_nvt.exp();
-            vgsteff_cv = t0 * (1.0 + exp_vgst).ln();
-            let dvg = exp_vgst / (1.0 + exp_vgst);
-            dvgsteff_cv_dvd = -dvg * (dvth_dvd + (vgst - voffcv) / noff * dnoff_dvd)
-                + vgsteff_cv / noff * dnoff_dvd;
-            dvgsteff_cv_dvb = -dvg * (dvth_dvb + (vgst - voffcv) / noff * dnoff_dvb)
-                + vgsteff_cv / noff * dnoff_dvb;
-            dvgsteff_cv_dvg = dvg * dvgs_eff_dvg;
-        }
+            // --- Charge-thickness capMod (CTM) begins (3632-3920) ---
+            let v3 = inst.vfbzb - vgs_eff + vbseff_cv - DELTA_3;
+            let t0 = if inst.vfbzb <= 0.0 {
+                (v3 * v3 - 4.0 * DELTA_3 * inst.vfbzb).sqrt()
+            } else {
+                (v3 * v3 + 4.0 * DELTA_3 * inst.vfbzb).sqrt()
+            };
+            let t1 = 0.5 * (1.0 + v3 / t0);
+            let vfbeff = inst.vfbzb - 0.5 * (v3 + t0);
+            let dvfbeff_dvg = t1 * dvgs_eff_dvg;
+            let dvfbeff_dvb = -t1 * dvbseff_cv_dvb;
 
-        // --- Charge-thickness capMod (CTM) begins (3632-3920) ---
-        let v3 = inst.vfbzb - vgs_eff + vbseff_cv - DELTA_3;
-        let t0 = if inst.vfbzb <= 0.0 {
-            (v3 * v3 - 4.0 * DELTA_3 * inst.vfbzb).sqrt()
-        } else {
-            (v3 * v3 + 4.0 * DELTA_3 * inst.vfbzb).sqrt()
-        };
-        let t1 = 0.5 * (1.0 + v3 / t0);
-        let vfbeff = inst.vfbzb - 0.5 * (v3 + t0);
-        let dvfbeff_dvg = t1 * dvgs_eff_dvg;
-        let dvfbeff_dvb = -t1 * dvbseff_cv_dvb;
+            let cox = inst.coxp;
+            let mut tox = 1.0e8 * inst.toxp;
+            let t0 = (vgs_eff - vbseff_cv - inst.vfbzb) / tox;
+            let dt0_dvg = dvgs_eff_dvg / tox;
+            let dt0_dvb = -dvbseff_cv_dvb / tox;
 
-        let cox = inst.coxp;
-        let mut tox = 1.0e8 * inst.toxp;
-        let t0 = (vgs_eff - vbseff_cv - inst.vfbzb) / tox;
-        let dt0_dvg = dvgs_eff_dvg / tox;
-        let dt0_dvb = -dvbseff_cv_dvb / tox;
+            let tmp = t0 * p.acde;
+            let (mut tcen, mut dtcen_dvg, mut dtcen_dvb);
+            if -EXP_THRESHOLD < tmp && tmp < EXP_THRESHOLD {
+                tcen = p.ldeb * tmp.exp();
+                dtcen_dvg = p.acde * tcen;
+                dtcen_dvb = dtcen_dvg * dt0_dvb;
+                dtcen_dvg *= dt0_dvg;
+            } else if tmp <= -EXP_THRESHOLD {
+                tcen = p.ldeb * MIN_EXP;
+                dtcen_dvg = 0.0;
+                dtcen_dvb = 0.0;
+            } else {
+                tcen = p.ldeb * MAX_EXP;
+                dtcen_dvg = 0.0;
+                dtcen_dvb = 0.0;
+            }
 
-        let tmp = t0 * p.acde;
-        let (mut tcen, mut dtcen_dvg, mut dtcen_dvb);
-        if -EXP_THRESHOLD < tmp && tmp < EXP_THRESHOLD {
-            tcen = p.ldeb * tmp.exp();
-            dtcen_dvg = p.acde * tcen;
-            dtcen_dvb = dtcen_dvg * dt0_dvb;
-            dtcen_dvg *= dt0_dvg;
-        } else if tmp <= -EXP_THRESHOLD {
-            tcen = p.ldeb * MIN_EXP;
-            dtcen_dvg = 0.0;
-            dtcen_dvb = 0.0;
-        } else {
-            tcen = p.ldeb * MAX_EXP;
-            dtcen_dvg = 0.0;
-            dtcen_dvb = 0.0;
-        }
+            let link = 1.0e-3 * inst.toxp;
+            let v3 = p.ldeb - tcen - link;
+            let v4 = (v3 * v3 + 4.0 * link * p.ldeb).sqrt();
+            tcen = p.ldeb - 0.5 * (v3 + v4);
+            let t1 = 0.5 * (1.0 + v3 / v4);
+            dtcen_dvg *= t1;
+            dtcen_dvb *= t1;
 
-        let link = 1.0e-3 * inst.toxp;
-        let v3 = p.ldeb - tcen - link;
-        let v4 = (v3 * v3 + 4.0 * link * p.ldeb).sqrt();
-        tcen = p.ldeb - 0.5 * (v3 + v4);
-        let t1 = 0.5 * (1.0 + v3 / v4);
-        dtcen_dvg *= t1;
-        dtcen_dvb *= t1;
+            let ccen = epssub / tcen;
+            let t2 = cox / (cox + ccen);
+            let coxeff_acc = t2 * ccen;
+            let t3 = -ccen / tcen;
+            let mut dcoxeff_dvg = t2 * t2 * t3;
+            let dcoxeff_dvb = dcoxeff_dvg * dtcen_dvb;
+            dcoxeff_dvg *= dtcen_dvg;
+            let mut cox_wlcen = cox_wl * coxeff_acc / mt.coxe;
 
-        let ccen = epssub / tcen;
-        let t2 = cox / (cox + ccen);
-        let coxeff_acc = t2 * ccen;
-        let t3 = -ccen / tcen;
-        let mut dcoxeff_dvg = t2 * t2 * t3;
-        let dcoxeff_dvb = dcoxeff_dvg * dtcen_dvb;
-        dcoxeff_dvg *= dtcen_dvg;
-        let mut cox_wlcen = cox_wl * coxeff_acc / mt.coxe;
+            let qac0 = cox_wlcen * (vfbeff - inst.vfbzb);
+            let qov_cox = qac0 / coxeff_acc;
+            let dqac0_dvg = cox_wlcen * dvfbeff_dvg + qov_cox * dcoxeff_dvg;
+            let dqac0_dvb = cox_wlcen * dvfbeff_dvb + qov_cox * dcoxeff_dvb;
 
-        let qac0 = cox_wlcen * (vfbeff - inst.vfbzb);
-        let qov_cox = qac0 / coxeff_acc;
-        let dqac0_dvg = cox_wlcen * dvfbeff_dvg + qov_cox * dcoxeff_dvg;
-        let dqac0_dvb = cox_wlcen * dvfbeff_dvb + qov_cox * dcoxeff_dvb;
+            let t0 = 0.5 * p.k1ox;
+            let t3 = vgs_eff - vfbeff - vbseff_cv - vgsteff_cv;
+            let (t1, t2);
+            if p.k1ox == 0.0 {
+                t1 = 0.0;
+                t2 = 0.0;
+            } else if t3 < 0.0 {
+                t1 = t0 + t3 / p.k1ox;
+                t2 = cox_wlcen;
+            } else {
+                t1 = (t0 * t0 + t3).sqrt();
+                t2 = cox_wlcen * t0 / t1;
+            }
 
-        let t0 = 0.5 * p.k1ox;
-        let t3 = vgs_eff - vfbeff - vbseff_cv - vgsteff_cv;
-        let (t1, t2);
-        if p.k1ox == 0.0 {
-            t1 = 0.0;
-            t2 = 0.0;
-        } else if t3 < 0.0 {
-            t1 = t0 + t3 / p.k1ox;
-            t2 = cox_wlcen;
-        } else {
-            t1 = (t0 * t0 + t3).sqrt();
-            t2 = cox_wlcen * t0 / t1;
-        }
+            let qsub0 = cox_wlcen * p.k1ox * (t1 - t0);
+            let qov_cox = qsub0 / coxeff_acc;
+            let dqsub0_dvg =
+                t2 * (dvgs_eff_dvg - dvfbeff_dvg - dvgsteff_cv_dvg) + qov_cox * dcoxeff_dvg;
+            let dqsub0_dvd = -t2 * dvgsteff_cv_dvd;
+            let dqsub0_dvb =
+                -t2 * (dvfbeff_dvb + dvbseff_cv_dvb + dvgsteff_cv_dvb) + qov_cox * dcoxeff_dvb;
 
-        let qsub0 = cox_wlcen * p.k1ox * (t1 - t0);
-        let qov_cox = qsub0 / coxeff_acc;
-        let dqsub0_dvg =
-            t2 * (dvgs_eff_dvg - dvfbeff_dvg - dvgsteff_cv_dvg) + qov_cox * dcoxeff_dvg;
-        let dqsub0_dvd = -t2 * dvgsteff_cv_dvd;
-        let dqsub0_dvb =
-            -t2 * (dvfbeff_dvb + dvbseff_cv_dvb + dvgsteff_cv_dvb) + qov_cox * dcoxeff_dvb;
+            // Gate-bias dependent delta Phis.
+            let (denomi_dp, t0);
+            if p.k1ox <= 0.0 {
+                denomi_dp = 0.25 * p.moin * vtm;
+                t0 = 0.5 * p.sqrt_phi;
+            } else {
+                denomi_dp = p.moin * vtm * p.k1ox * p.k1ox;
+                t0 = p.k1ox * p.sqrt_phi;
+            }
+            let t1 = 2.0 * t0 + vgsteff_cv;
+            let delta_phi = vtm * (1.0 + t1 * vgsteff_cv / denomi_dp).ln();
+            let ddelta_phi_dvg = 2.0 * vtm * (t1 - t0) / (denomi_dp + t1 * vgsteff_cv);
+            // End of delta Phis.
 
-        // Gate-bias dependent delta Phis.
-        let (denomi_dp, t0);
-        if p.k1ox <= 0.0 {
-            denomi_dp = 0.25 * p.moin * vtm;
-            t0 = 0.5 * p.sqrt_phi;
-        } else {
-            denomi_dp = p.moin * vtm * p.k1ox * p.k1ox;
-            t0 = p.k1ox * p.sqrt_phi;
-        }
-        let t1 = 2.0 * t0 + vgsteff_cv;
-        let delta_phi = vtm * (1.0 + t1 * vgsteff_cv / denomi_dp).ln();
-        let ddelta_phi_dvg = 2.0 * vtm * (t1 - t0) / (denomi_dp + t1 * vgsteff_cv);
-        // End of delta Phis.
+            // VgDP = Vgsteff - DeltaPhi.
+            let t0 = vgsteff_cv - delta_phi - 0.001;
+            let dt0_dvg = 1.0 - ddelta_phi_dvg;
+            let t1 = (t0 * t0 + vgsteff_cv * 0.004).sqrt();
+            let vg_dp = 0.5 * (t0 + t1);
+            let dvg_dp_dvg = 0.5 * (dt0_dvg + (t0 * dt0_dvg + 0.002) / t1);
 
-        // VgDP = Vgsteff - DeltaPhi.
-        let t0 = vgsteff_cv - delta_phi - 0.001;
-        let dt0_dvg = 1.0 - ddelta_phi_dvg;
-        let t1 = (t0 * t0 + vgsteff_cv * 0.004).sqrt();
-        let vg_dp = 0.5 * (t0 + t1);
-        let dvg_dp_dvg = 0.5 * (dt0_dvg + (t0 * dt0_dvg + 0.002) / t1);
+            tox += tox; // Tcen reevaluated below due to different Vgsteff
+            let t0 = (vgsteff_cv + inst.vtfbphi2) / tox;
+            let tmp = (model.bdos * 0.7 * t0.ln()).exp();
+            let t1 = 1.0 + tmp;
+            let t2 = model.bdos * 0.7 * tmp / (t0 * tox);
+            tcen = model.ados * 1.9e-9 / t1;
+            dtcen_dvg = -tcen * t2 / t1;
+            let dtcen_dvd = dtcen_dvg * dvgsteff_cv_dvd;
+            dtcen_dvb = dtcen_dvg * dvgsteff_cv_dvb;
+            dtcen_dvg *= dvgsteff_cv_dvg;
 
-        tox += tox; // Tcen reevaluated below due to different Vgsteff
-        let t0 = (vgsteff_cv + inst.vtfbphi2) / tox;
-        let tmp = (model.bdos * 0.7 * t0.ln()).exp();
-        let t1 = 1.0 + tmp;
-        let t2 = model.bdos * 0.7 * tmp / (t0 * tox);
-        tcen = model.ados * 1.9e-9 / t1;
-        dtcen_dvg = -tcen * t2 / t1;
-        let dtcen_dvd = dtcen_dvg * dvgsteff_cv_dvd;
-        dtcen_dvb = dtcen_dvg * dvgsteff_cv_dvb;
-        dtcen_dvg *= dvgsteff_cv_dvg;
+            let ccen = epssub / tcen;
+            let t0 = cox / (cox + ccen);
+            let coxeff_inv = t0 * ccen;
+            let t1 = -ccen / tcen;
+            dcoxeff_dvg = t0 * t0 * t1;
+            let dcoxeff_dvd = dcoxeff_dvg * dtcen_dvd;
+            let dcoxeff_dvb = dcoxeff_dvg * dtcen_dvb;
+            dcoxeff_dvg *= dtcen_dvg;
+            cox_wlcen = cox_wl * coxeff_inv / mt.coxe;
 
-        let ccen = epssub / tcen;
-        let t0 = cox / (cox + ccen);
-        let coxeff_inv = t0 * ccen;
-        let t1 = -ccen / tcen;
-        dcoxeff_dvg = t0 * t0 * t1;
-        let dcoxeff_dvd = dcoxeff_dvg * dtcen_dvd;
-        let dcoxeff_dvb = dcoxeff_dvg * dtcen_dvb;
-        dcoxeff_dvg *= dtcen_dvg;
-        cox_wlcen = cox_wl * coxeff_inv / mt.coxe;
+            let abulk_cv = abulk0_q * p.abulk_cv_factor;
+            let dabulk_cv_dvb = p.abulk_cv_factor * dabulk0_q_dvb;
+            let vdsat_cv = vg_dp / abulk_cv;
 
-        let abulk_cv = abulk0_q * p.abulk_cv_factor;
-        let dabulk_cv_dvb = p.abulk_cv_factor * dabulk0_q_dvb;
-        let vdsat_cv = vg_dp / abulk_cv;
+            let t0 = vdsat_cv - vds_c - DELTA_4;
+            let dt0_dvg = dvg_dp_dvg / abulk_cv;
+            let dt0_dvb = -vdsat_cv * dabulk_cv_dvb / abulk_cv;
+            let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
+            let mut dt1_dvg = (t0 + DELTA_4 + DELTA_4) / t1;
+            let dt1_dvd = -t0 / t1;
+            let dt1_dvb = dt1_dvg * dt0_dvb;
+            dt1_dvg *= dt0_dvg;
+            let (mut vdseff_cv, mut dvdseff_cv_dvg, dvdseff_cv_dvd, mut dvdseff_cv_dvb);
+            if t0 >= 0.0 {
+                vdseff_cv = vdsat_cv - 0.5 * (t0 + t1);
+                dvdseff_cv_dvg = 0.5 * (dt0_dvg - dt1_dvg);
+                dvdseff_cv_dvd = 0.5 * (1.0 - dt1_dvd);
+                dvdseff_cv_dvb = 0.5 * (dt0_dvb - dt1_dvb);
+            } else {
+                let t3 = (DELTA_4 + DELTA_4) / (t1 - t0);
+                let t4 = 1.0 - t3;
+                let t5 = vdsat_cv * t3 / (t1 - t0);
+                vdseff_cv = vdsat_cv * t4;
+                dvdseff_cv_dvg = dt0_dvg * t4 + t5 * (dt1_dvg - dt0_dvg);
+                dvdseff_cv_dvd = t5 * (dt1_dvd + 1.0);
+                dvdseff_cv_dvb = dt0_dvb * (t4 - t5) + t5 * dt1_dvb;
+            }
 
-        let t0 = vdsat_cv - vds_c - DELTA_4;
-        let dt0_dvg = dvg_dp_dvg / abulk_cv;
-        let dt0_dvb = -vdsat_cv * dabulk_cv_dvb / abulk_cv;
-        let t1 = (t0 * t0 + 4.0 * DELTA_4 * vdsat_cv).sqrt();
-        let mut dt1_dvg = (t0 + DELTA_4 + DELTA_4) / t1;
-        let dt1_dvd = -t0 / t1;
-        let dt1_dvb = dt1_dvg * dt0_dvb;
-        dt1_dvg *= dt0_dvg;
-        let (mut vdseff_cv, mut dvdseff_cv_dvg, dvdseff_cv_dvd, mut dvdseff_cv_dvb);
-        if t0 >= 0.0 {
-            vdseff_cv = vdsat_cv - 0.5 * (t0 + t1);
-            dvdseff_cv_dvg = 0.5 * (dt0_dvg - dt1_dvg);
-            dvdseff_cv_dvd = 0.5 * (1.0 - dt1_dvd);
-            dvdseff_cv_dvb = 0.5 * (dt0_dvb - dt1_dvb);
-        } else {
-            let t3 = (DELTA_4 + DELTA_4) / (t1 - t0);
-            let t4 = 1.0 - t3;
-            let t5 = vdsat_cv * t3 / (t1 - t0);
-            vdseff_cv = vdsat_cv * t4;
-            dvdseff_cv_dvg = dt0_dvg * t4 + t5 * (dt1_dvg - dt0_dvg);
-            dvdseff_cv_dvd = t5 * (dt1_dvd + 1.0);
-            dvdseff_cv_dvb = dt0_dvb * (t4 - t5) + t5 * dt1_dvb;
-        }
+            if vds_c == 0.0 {
+                vdseff_cv = 0.0;
+                dvdseff_cv_dvg = 0.0;
+                dvdseff_cv_dvb = 0.0;
+            }
 
-        if vds_c == 0.0 {
-            vdseff_cv = 0.0;
-            dvdseff_cv_dvg = 0.0;
-            dvdseff_cv_dvb = 0.0;
-        }
+            let t0 = abulk_cv * vdseff_cv;
+            let t1 = vg_dp;
+            let t2 = 12.0 * (t1 - 0.5 * t0 + 1.0e-20);
+            let t3 = t0 / t2;
+            let t4 = 1.0 - 12.0 * t3 * t3;
+            let t5 = abulk_cv * (6.0 * t0 * (4.0 * t1 - t0) / (t2 * t2) - 0.5);
+            let t6 = t5 * vdseff_cv / abulk_cv;
 
-        let t0 = abulk_cv * vdseff_cv;
-        let t1 = vg_dp;
-        let t2 = 12.0 * (t1 - 0.5 * t0 + 1.0e-20);
-        let t3 = t0 / t2;
-        let t4 = 1.0 - 12.0 * t3 * t3;
-        let t5 = abulk_cv * (6.0 * t0 * (4.0 * t1 - t0) / (t2 * t2) - 0.5);
-        let t6 = t5 * vdseff_cv / abulk_cv;
-
-        let mut qgate_l = cox_wlcen * (t1 - t0 * (0.5 - t3));
-        let qov_cox = qgate_l / coxeff_inv;
-        let mut cgg1 = cox_wlcen * (t4 * dvg_dp_dvg + t5 * dvdseff_cv_dvg);
-        let cgd1 = cox_wlcen * t5 * dvdseff_cv_dvd + cgg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
-        let cgb1 = cox_wlcen * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb)
-            + cgg1 * dvgsteff_cv_dvb
-            + qov_cox * dcoxeff_dvb;
-        cgg1 = cgg1 * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
-
-        let t7 = 1.0 - abulk_cv;
-        let t8 = t2 * t2;
-        let t9 = 12.0 * t7 * t0 * t0 / (t8 * abulk_cv);
-        let t10 = t9 * dvg_dp_dvg;
-        let t11 = -t7 * t5 / abulk_cv;
-        let t12 = -(t9 * t1 / abulk_cv + vdseff_cv * (0.5 - t0 / t2));
-
-        let mut qbulk_l = cox_wlcen * t7 * (0.5 * vdseff_cv - t0 * vdseff_cv / t2);
-        let qov_cox = qbulk_l / coxeff_inv;
-        let mut cbg1 = cox_wlcen * (t10 + t11 * dvdseff_cv_dvg);
-        let cbd1 =
-            cox_wlcen * t11 * dvdseff_cv_dvd + cbg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
-        let cbb1 = cox_wlcen * (t11 * dvdseff_cv_dvb + t12 * dabulk_cv_dvb)
-            + cbg1 * dvgsteff_cv_dvb
-            + qov_cox * dcoxeff_dvb;
-        cbg1 = cbg1 * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
-
-        let (qsrc, mut csg, csd, csb);
-        if model.xpart > 0.5 {
-            // 0/100 partition.
-            qsrc = -cox_wlcen * (t1 / 2.0 + t0 / 4.0 - 0.5 * t0 * t0 / t2);
-            let qov_cox = qsrc / coxeff_inv;
-            let t2x = t2 + t2;
-            let t3x = t2x * t2x;
-            let t7x = -(0.25 - 12.0 * t0 * (4.0 * t1 - t0) / t3x);
-            let t4x = -(0.5 + 24.0 * t0 * t0 / t3x) * dvg_dp_dvg;
-            let t5x = t7x * abulk_cv;
-            let t6x = t7x * vdseff_cv;
-
-            csg = cox_wlcen * (t4x + t5x * dvdseff_cv_dvg);
-            csd = cox_wlcen * t5x * dvdseff_cv_dvd + csg * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
-            csb = cox_wlcen * (t5x * dvdseff_cv_dvb + t6x * dabulk_cv_dvb)
-                + csg * dvgsteff_cv_dvb
+            let mut qgate_l = cox_wlcen * (t1 - t0 * (0.5 - t3));
+            let qov_cox = qgate_l / coxeff_inv;
+            let mut cgg1 = cox_wlcen * (t4 * dvg_dp_dvg + t5 * dvdseff_cv_dvg);
+            let cgd1 =
+                cox_wlcen * t5 * dvdseff_cv_dvd + cgg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
+            let cgb1 = cox_wlcen * (t5 * dvdseff_cv_dvb + t6 * dabulk_cv_dvb)
+                + cgg1 * dvgsteff_cv_dvb
                 + qov_cox * dcoxeff_dvb;
-            csg = csg * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
-        } else if model.xpart < 0.5 {
-            // 40/60 partition.
-            let t2x = t2 / 12.0;
-            let t3x = 0.5 * cox_wlcen / (t2x * t2x);
-            let t4x =
-                t1 * (2.0 * t0 * t0 / 3.0 + t1 * (t1 - 4.0 * t0 / 3.0)) - 2.0 * t0 * t0 * t0 / 15.0;
-            qsrc = -t3x * t4x;
-            let qov_cox = qsrc / coxeff_inv;
-            let t8x = 4.0 / 3.0 * t1 * (t1 - t0) + 0.4 * t0 * t0;
-            let t5x =
-                -2.0 * qsrc / t2x - t3x * (t1 * (3.0 * t1 - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
-            let t6x = abulk_cv * (qsrc / t2x + t3x * t8x);
-            let t7x = t6x * vdseff_cv / abulk_cv;
+            cgg1 = cgg1 * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
 
-            csg = t5x * dvg_dp_dvg + t6x * dvdseff_cv_dvg;
-            csd = csg * dvgsteff_cv_dvd + t6x * dvdseff_cv_dvd + qov_cox * dcoxeff_dvd;
-            csb = csg * dvgsteff_cv_dvb
-                + t6x * dvdseff_cv_dvb
-                + t7x * dabulk_cv_dvb
+            let t7 = 1.0 - abulk_cv;
+            let t8 = t2 * t2;
+            let t9 = 12.0 * t7 * t0 * t0 / (t8 * abulk_cv);
+            let t10 = t9 * dvg_dp_dvg;
+            let t11 = -t7 * t5 / abulk_cv;
+            let t12 = -(t9 * t1 / abulk_cv + vdseff_cv * (0.5 - t0 / t2));
+
+            let mut qbulk_l = cox_wlcen * t7 * (0.5 * vdseff_cv - t0 * vdseff_cv / t2);
+            let qov_cox = qbulk_l / coxeff_inv;
+            let mut cbg1 = cox_wlcen * (t10 + t11 * dvdseff_cv_dvg);
+            let cbd1 =
+                cox_wlcen * t11 * dvdseff_cv_dvd + cbg1 * dvgsteff_cv_dvd + qov_cox * dcoxeff_dvd;
+            let cbb1 = cox_wlcen * (t11 * dvdseff_cv_dvb + t12 * dabulk_cv_dvb)
+                + cbg1 * dvgsteff_cv_dvb
                 + qov_cox * dcoxeff_dvb;
-            csg = csg * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
-        } else {
-            // 50/50 partition.
-            qsrc = -0.5 * qgate_l;
-            csg = -0.5 * cgg1;
-            csd = -0.5 * cgd1;
-            csb = -0.5 * cgb1;
-        }
+            cbg1 = cbg1 * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
 
-        qgate_l += qac0 + qsub0 - qbulk_l;
-        qbulk_l -= qac0 + qsub0;
-        let qdrn_l = -(qgate_l + qbulk_l + qsrc);
+            let (qsrc, mut csg, csd, csb);
+            if model.xpart > 0.5 {
+                // 0/100 partition.
+                qsrc = -cox_wlcen * (t1 / 2.0 + t0 / 4.0 - 0.5 * t0 * t0 / t2);
+                let qov_cox = qsrc / coxeff_inv;
+                let t2x = t2 + t2;
+                let t3x = t2x * t2x;
+                let t7x = -(0.25 - 12.0 * t0 * (4.0 * t1 - t0) / t3x);
+                let t4x = -(0.5 + 24.0 * t0 * t0 / t3x) * dvg_dp_dvg;
+                let t5x = t7x * abulk_cv;
+                let t6x = t7x * vdseff_cv;
 
-        let cbg = cbg1 - dqac0_dvg - dqsub0_dvg;
-        let cbd = cbd1 - dqsub0_dvd;
-        let cbb = cbb1 - dqac0_dvb - dqsub0_dvb;
+                csg = cox_wlcen * (t4x + t5x * dvdseff_cv_dvg);
+                csd = cox_wlcen * t5x * dvdseff_cv_dvd
+                    + csg * dvgsteff_cv_dvd
+                    + qov_cox * dcoxeff_dvd;
+                csb = cox_wlcen * (t5x * dvdseff_cv_dvb + t6x * dabulk_cv_dvb)
+                    + csg * dvgsteff_cv_dvb
+                    + qov_cox * dcoxeff_dvb;
+                csg = csg * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
+            } else if model.xpart < 0.5 {
+                // 40/60 partition.
+                let t2x = t2 / 12.0;
+                let t3x = 0.5 * cox_wlcen / (t2x * t2x);
+                let t4x = t1 * (2.0 * t0 * t0 / 3.0 + t1 * (t1 - 4.0 * t0 / 3.0))
+                    - 2.0 * t0 * t0 * t0 / 15.0;
+                qsrc = -t3x * t4x;
+                let qov_cox = qsrc / coxeff_inv;
+                let t8x = 4.0 / 3.0 * t1 * (t1 - t0) + 0.4 * t0 * t0;
+                let t5x = -2.0 * qsrc / t2x
+                    - t3x * (t1 * (3.0 * t1 - 8.0 * t0 / 3.0) + 2.0 * t0 * t0 / 3.0);
+                let t6x = abulk_cv * (qsrc / t2x + t3x * t8x);
+                let t7x = t6x * vdseff_cv / abulk_cv;
 
-        let cgg = cgg1 - cbg;
-        let cgd = cgd1 - cbd;
-        let cgb = cgb1 - cbb;
+                csg = t5x * dvg_dp_dvg + t6x * dvdseff_cv_dvg;
+                csd = csg * dvgsteff_cv_dvd + t6x * dvdseff_cv_dvd + qov_cox * dcoxeff_dvd;
+                csb = csg * dvgsteff_cv_dvb
+                    + t6x * dvdseff_cv_dvb
+                    + t7x * dabulk_cv_dvb
+                    + qov_cox * dcoxeff_dvb;
+                csg = csg * dvgsteff_cv_dvg + qov_cox * dcoxeff_dvg;
+            } else {
+                // 50/50 partition.
+                qsrc = -0.5 * qgate_l;
+                csg = -0.5 * cgg1;
+                csd = -0.5 * cgd1;
+                csb = -0.5 * cgb1;
+            }
 
-        let cgb = cgb * dvbseff_dvb;
-        let cbb = cbb * dvbseff_dvb;
-        let csb = csb * dvbseff_dvb;
+            qgate_l += qac0 + qsub0 - qbulk_l;
+            qbulk_l -= qac0 + qsub0;
+            let qdrn_l = -(qgate_l + qbulk_l + qsrc);
 
-        ch.cggb = cgg;
-        ch.cgsb = -(cgg + cgd + cgb);
-        ch.cgdb = cgd;
-        ch.cdgb = -(cgg + cbg + csg);
-        ch.cdsb = cgg + cgd + cgb + cbg + cbd + cbb + csg + csd + csb;
-        ch.cddb = -(cgd + cbd + csd);
-        ch.cbgb = cbg;
-        ch.cbsb = -(cbg + cbd + cbb);
-        ch.cbdb = cbd;
+            let cbg = cbg1 - dqac0_dvg - dqsub0_dvg;
+            let cbd = cbd1 - dqsub0_dvd;
+            let cbb = cbb1 - dqac0_dvb - dqsub0_dvb;
 
-        qgate = qgate_l;
-        qbulk = qbulk_l;
-        qdrn = qdrn_l;
-    } // End of CTM
+            let cgg = cgg1 - cbg;
+            let cgd = cgd1 - cbd;
+            let cgb = cgb1 - cbb;
+
+            let cgb = cgb * dvbseff_dvb;
+            let cbb = cbb * dvbseff_dvb;
+            let csb = csb * dvbseff_dvb;
+
+            ch.cggb = cgg;
+            ch.cgsb = -(cgg + cgd + cgb);
+            ch.cgdb = cgd;
+            ch.cdgb = -(cgg + cbg + csg);
+            ch.cdsb = cgg + cgd + cgb + cbg + cbd + cbb + csg + csd + csb;
+            ch.cddb = -(cgd + cbd + csd);
+            ch.cbgb = cbg;
+            ch.cbsb = -(cbg + cbd + cbb);
+            ch.cbdb = cbd;
+
+            qgate = qgate_l;
+            qbulk = qbulk_l;
+            qdrn = qdrn_l;
+        } // End of CTM
+    } // End of CAPMOD=0/1/2 intrinsic charge
 
     ch.csgb = -ch.cggb - ch.cdgb - ch.cbgb;
     ch.csdb = -ch.cgdb - ch.cddb - ch.cbdb;
@@ -2108,12 +3286,20 @@ pub fn eval(
         }
     }
 
-    // --- Overlap charges (4138-4185; rgateMod != 3 path) ---
-    let vgdx = vgd;
-    let vgsx = vgs;
-    // capMod == 2 (and 1) overlap form.
+    // --- Overlap charges (4138-4185; rgateMod=3 evaluates them from GM) ---
+    let (vgdx, vgsx) = if model.rgate_mod == 3 {
+        (vgmd, vgms)
+    } else {
+        (vgd, vgs)
+    };
     let (mut cgdo, mut qgdo, mut cgso, mut qgso);
-    {
+    if model.cap_mod == 0 {
+        cgdo = p.cgdo;
+        qgdo = p.cgdo * vgdx;
+        cgso = p.cgso;
+        qgso = p.cgso * vgsx;
+    } else {
+        // capMod == 1/2 smoothed overlap form.
         let t0 = vgdx + DELTA_1;
         let t1 = (t0 * t0 + 4.0 * DELTA_1).sqrt();
         let t2 = 0.5 * (t0 - t1);
@@ -2141,16 +3327,52 @@ pub fn eval(
     ch.cgso = cgso;
     ch.qgso = qgso;
     ch.cgbo = p.cgbo;
+    ch.qchqs = -(qbulk + qgate);
+    let cox_wl = mt.coxe * p.weff_cv * p.leff_cv * nf;
+    ch.cox_wl = cox_wl;
+    ch.gcrg = op.gcrg;
+    ch.gcrgg = op.gcrgg;
+    ch.gcrgd = op.gcrgd;
+    ch.gcrgs = op.gcrgs;
+    ch.gcrgb = op.gcrgb;
+    ch.taunet = if (model.trnqs_mod != 0 || model.acnqs_mod != 0) && cox_wl > 0.0 && op.gcrg > 0.0 {
+        cox_wl / op.gcrg
+    } else {
+        0.0
+    };
 
     // --- Mode-dependent node-charge assembly (4188-4427; trnqsMod = 0,
-    // rgateMod != 3, rbodyMod = 0) ---
-    if mode > 0 {
+    // rbodyMod = 0) ---
+    if mode > 0 && model.rgate_mod == 3 {
+        let qdrn_n = qdrn - qgdo;
+        let qgmb = p.cgbo * vgmb;
+        let qgmid = qgdo + qgso + qgmb;
+        let qbulk_n = qbulk - qgmb;
+        let qsrc_n = -(qgate + qgmid + qbulk_n + qdrn_n);
+        ch.qg_node = qgate;
+        ch.qgmid_node = qgmid;
+        ch.qd_node = qdrn_n;
+        ch.qb_node = qbulk_n;
+        ch.qs_node = qsrc_n;
+    } else if mode > 0 {
         let qdrn_n = qdrn - qgdo;
         let qgb = p.cgbo * vgb;
         let qgate_n = qgate + qgdo + qgso + qgb;
         let qbulk_n = qbulk - qgb;
         let qsrc_n = -(qgate_n + qbulk_n + qdrn_n);
         ch.qg_node = qgate_n;
+        ch.qgmid_node = 0.0;
+        ch.qd_node = qdrn_n;
+        ch.qb_node = qbulk_n;
+        ch.qs_node = qsrc_n;
+    } else if model.rgate_mod == 3 {
+        let qsrc_n = qdrn - qgso;
+        let qgmb = p.cgbo * vgmb;
+        let qgmid = qgdo + qgso + qgmb;
+        let qbulk_n = qbulk - qgmb;
+        let qdrn_n = -(qgate + qgmid + qbulk_n + qsrc_n);
+        ch.qg_node = qgate;
+        ch.qgmid_node = qgmid;
         ch.qd_node = qdrn_n;
         ch.qb_node = qbulk_n;
         ch.qs_node = qsrc_n;
@@ -2161,6 +3383,7 @@ pub fn eval(
         let qbulk_n = qbulk - qgb;
         let qdrn_n = -(qgate_n + qbulk_n + qsrc_n);
         ch.qg_node = qgate_n;
+        ch.qgmid_node = 0.0;
         ch.qd_node = qdrn_n;
         ch.qb_node = qbulk_n;
         ch.qs_node = qsrc_n;

@@ -11,8 +11,8 @@
 //!   (W, L, NF) exactly like the C knot list; see [`SizeDepCache`].
 //! - [`Bsim4v8InstTemp`]: the instance tail — `delvto`/`mulu0`,
 //!   `vtfbphi1/2`, `vbsc`, `k2ox`, `vfbzb`, effective junction
-//!   areas/perimeters (`BSIM4PAeffGeo`, geoMod=0), series conductances, the
-//!   `dioMod=1` forward-limiting anchors, and the reverse-bias TAT
+//!   areas/perimeters (`BSIM4PAeffGeo`, geoMod 0 through 10), series
+//!   conductances, junction-diode `dioMod` limiting anchors, and the reverse-bias TAT
 //!   saturation currents.
 //!
 //! The C mutates the model card in a few checks (`njs`/`njd` < 0.1,
@@ -22,13 +22,15 @@
 //! pass, leaving one stale evaluation).
 
 use super::common::{
-    CHARGE_Q, CONST_ROOT2, CONST_VT0, EPS0, EPSSI, EXP_THRESHOLD, KB_OVER_Q, MAX_EXP, MIN_EXP, PI,
-    dexp_temp,
+    CHARGE_Q, CONST_CHARGE, CONST_ROOT2, CONST_VT0, EPS0, EPSSI, EXP_THRESHOLD, KB_OVER_Q, MAX_EXP,
+    MIN_EXP, PI, dexp_temp,
 };
 use super::params::Bsim4v8Model;
 use crate::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+const STRESS_DELTA: Value = 1.0e-9;
 
 /// Per-model temperature data (b4temp.c lines 94-415 + the GEDL block).
 #[derive(Debug, Clone, Default)]
@@ -120,7 +122,7 @@ pub struct Bsim4v8ModelTemp {
 }
 
 impl Bsim4v8ModelTemp {
-    /// Port of the model-level head of `BSIM4temp` (mtrlMod = 0 paths).
+    /// Port of the model-level head of `BSIM4temp`.
     ///
     /// `temp` is the device operating temperature in Kelvin. The
     /// `pbs`/`pbsws`/... < 0.1 clamps are applied to local copies; the model
@@ -171,12 +173,20 @@ impl Bsim4v8ModelTemp {
         let mjswd = mj_clamp(m.mjswd, "mjswd");
         let mjswgd = mj_clamp(m.mjswgd, "mjswgd");
 
-        // mtrlMod = 0 oxide/substrate constants.
-        let epsrox = m.epsrox;
-        let toxe = m.toxe;
-        let epssub = EPSSI;
+        // b4temp.c "dunga" material constants.
+        let epsrox = m.effective_epsrox();
+        let toxe = m.effective_toxe();
+        let epssub = if m.mtrl_mod != 0 {
+            EPS0 * m.epsrsub
+        } else {
+            EPSSI
+        };
         let coxe = epsrox * EPS0 / toxe;
-        let coxp = m.epsrox * EPS0 / m.toxp;
+        let coxp = if m.mtrl_mod == 0 || m.mtrl_compat_mod != 0 {
+            m.epsrox * EPS0 / m.toxp
+        } else {
+            coxe
+        };
 
         let tnom = m.tnom;
         let tratio = temp / tnom;
@@ -185,14 +195,29 @@ impl Bsim4v8ModelTemp {
         let factor1 = (epssub / (epsrox * EPS0) * toxe).sqrt();
 
         let vtm0 = KB_OVER_Q * tnom;
-        let eg0 = 1.16 - 7.02e-4 * tnom * tnom / (tnom + 1108.0);
-        let ni = 1.45e10
-            * (tnom / 300.15)
-            * (tnom / 300.15).sqrt()
-            * (21.5565981 - eg0 / (2.0 * vtm0)).exp();
+        let (eg0, ni) = if m.mtrl_mod == 0 {
+            let eg0 = 1.16 - 7.02e-4 * tnom * tnom / (tnom + 1108.0);
+            let ni = 1.45e10
+                * (tnom / 300.15)
+                * (tnom / 300.15).sqrt()
+                * (21.5565981 - eg0 / (2.0 * vtm0)).exp();
+            (eg0, ni)
+        } else {
+            let eg0 = m.bg0sub - m.tbgasub * tnom * tnom / (tnom + m.tbgbsub);
+            let t0 = m.bg0sub - m.tbgasub * 90090.0225 / (300.15 + m.tbgbsub);
+            let ni = m.ni0sub
+                * (tnom / 300.15)
+                * (tnom / 300.15).sqrt()
+                * ((t0 - eg0) / (2.0 * vtm0)).exp();
+            (eg0, ni)
+        };
 
         let vtm = KB_OVER_Q * temp;
-        let eg = 1.16 - 7.02e-4 * temp * temp / (temp + 1108.0);
+        let eg = if m.mtrl_mod == 0 {
+            1.16 - 7.02e-4 * temp * temp / (temp + 1108.0)
+        } else {
+            m.bg0sub - m.tbgasub * temp * temp / (temp + m.tbgbsub)
+        };
 
         let (mut s_js, mut s_jsws, mut s_jswgs, mut d_js, mut d_jsws, mut d_jswgs);
         if temp != tnom {
@@ -392,6 +417,32 @@ fn theta_form(t0: Value) -> Value {
     }
 }
 
+/// `BSIM4polyDepletion` value path used by the compat0 EOT-to-TOXP
+/// calculation in `b4temp.c`. The load-side evaluator carries the derivative;
+/// the temp path only needs `Vgs_eff`.
+#[inline]
+fn poly_depletion_value(
+    phi: Value,
+    ngate: Value,
+    epsgate: Value,
+    coxe: Value,
+    vgs: Value,
+) -> Value {
+    if ngate > 1.0e18 && ngate < 1.0e25 && vgs > phi && epsgate != 0.0 {
+        let t1 = 1.0e6 * CONST_CHARGE * epsgate * ngate / (coxe * coxe);
+        let t8 = vgs - phi;
+        let t4 = (1.0 + 2.0 * t8 / t1).sqrt();
+        let t2 = 2.0 * t8 / (t4 + 1.0);
+        let t3 = 0.5 * t2 * t2 / t1;
+        let t7 = 1.12 - t3 - 0.05;
+        let t6 = (t7 * t7 + 0.224).sqrt();
+        let t5 = 1.12 - 0.5 * (t7 + t6);
+        vgs - t5
+    } else {
+        vgs
+    }
+}
+
 /// Size-dependent parameter knot (`bsim4SizeDependParam`), one per drawn
 /// (W, L, NF) triple per temperature pass.
 #[derive(Debug, Clone, Default)]
@@ -566,14 +617,23 @@ pub struct Bsim4v8SizeDep {
     pub leff_cv: Value,
     pub weff_cv: Value,
     pub weff_cj: Value,
+    /// Drawn length plus `XL` (`Lnew`), used by gate-resistance geometry.
+    pub lnew: Value,
     pub abulk_cv_factor: Value,
     pub cgso: Value,
     pub cgdo: Value,
     pub cgbo: Value,
     pub u0temp: Value,
+    pub kvth0we: Value,
+    pub k2we: Value,
+    pub ku0we: Value,
     pub vsattemp: Value,
     pub rds0: Value,
     pub rdswmin: Value,
+    pub rd0: Value,
+    pub rdwmin: Value,
+    pub rs0: Value,
+    pub rswmin: Value,
     pub sqrt_phi: Value,
     pub phis3: Value,
     pub phi: Value,
@@ -592,7 +652,14 @@ pub struct Bsim4v8SizeDep {
     pub litl: Value,
     pub k1ox: Value,
     pub vfbzbfactor: Value,
+    pub stress_ku0: Value,
+    pub stress_kvth0: Value,
+    pub stress_ku0temp: Value,
+    pub stress_inv_od_ref: Value,
+    pub stress_rho_ref: Value,
     pub dvtp2factor: Value,
+    /// `pParam->BSIM4VgsteffVth`, used by the high-k `mobMod=3` branch.
+    pub vgsteff_vth: Value,
     pub tox_ratio: Value,
     pub tox_ratio_edge: Value,
     pub aechvb: Value,
@@ -628,14 +695,15 @@ impl Bsim4v8SizeDep {
         let tnom = mt.tnom;
         let tratio = temp / tnom;
         let del_temp = temp - tnom;
-        let toxe = m.toxe;
-        let epsrox = m.epsrox;
+        let toxe = m.effective_toxe();
+        let epsrox = m.effective_epsrox();
         let epssub = mt.epssub;
         let vtm0 = mt.vtm0;
 
         // --- Geometry scaling (b4temp.c:454-519) ---
         let lnew = ldrn + m.xl;
         let wnew = wdrn / nf + m.xw;
+        p.lnew = lnew;
 
         let t0 = lnew.powf(m.lln);
         let t1 = wnew.powf(m.lwn);
@@ -700,7 +768,7 @@ impl Bsim4v8SizeDep {
             cigs, aigd, bigd, cigd, aigbacc, bigbacc, cigbacc, aigbinv, bigbinv, cigbinv, nigc,
             nigbacc, nigbinv, ntox, eigbinv, pigcd, poxedge, xrcrg1, xrcrg2, lambda, vtl, xn,
             vfbsdoff, tvfbsdoff, cgsl, cgdl, ckappas, ckappad, cf, clc, cle, vfbcv, acde, moin,
-            noff, voffcv,
+            noff, voffcv, kvth0we, k2we, ku0we,
         );
         // v4.7 temperature dependence of leakage (applied to the binned
         // values below).
@@ -713,6 +781,7 @@ impl Bsim4v8SizeDep {
         // --- Temperature adjustment (b4temp.c:1185-1298) ---
         let t0 = tratio - 1.0;
         let pow_weff_wr = (p.weff_cj * 1.0e6).powf(p.wr) * nf;
+        let (mut rd0_temp, mut rdwmin_temp, mut rs0_temp, mut rswmin_temp) = (0.0, 0.0, 0.0, 0.0);
 
         p.ucs *= tratio.powf(p.ucste);
         if m.temp_mod == 0 {
@@ -722,6 +791,12 @@ impl Bsim4v8SizeDep {
             p.ud += p.ud1 * t0;
             p.vsattemp = p.vsat - p.at * t0;
             let t10 = p.prt * t0;
+            if m.rds_mod != 0 {
+                rd0_temp = p.rdw + t10;
+                rdwmin_temp = m.rdwmin + t10;
+                rs0_temp = p.rsw + t10;
+                rswmin_temp = m.rswmin + t10;
+            }
             // Internal Rds(V) in IV (rdsMod = 0).
             p.rds0 = (p.rdsw + t10) * nf / pow_weff_wr;
             p.rdswmin = (m.rdswmin + t10) * nf / pow_weff_wr;
@@ -740,9 +815,35 @@ impl Bsim4v8SizeDep {
             }
             p.vsattemp = p.vsat * (1.0 - p.at * del_temp);
             let t10 = 1.0 + p.prt * del_temp;
+            if m.rds_mod != 0 {
+                rd0_temp = p.rdw * t10;
+                rdwmin_temp = m.rdwmin * t10;
+                rs0_temp = p.rsw * t10;
+                rswmin_temp = m.rswmin * t10;
+            }
             p.rds0 = p.rdsw * t10 * nf / pow_weff_wr;
             p.rdswmin = m.rdswmin * t10 * nf / pow_weff_wr;
         }
+        if rd0_temp < 0.0 {
+            log::warn!("BSIM4: Rdw at current temperature is negative; set to zero");
+            rd0_temp = 0.0;
+        }
+        if rdwmin_temp < 0.0 {
+            log::warn!("BSIM4: Rdwmin at current temperature is negative; set to zero");
+            rdwmin_temp = 0.0;
+        }
+        if rs0_temp < 0.0 {
+            log::warn!("BSIM4: Rsw at current temperature is negative; set to zero");
+            rs0_temp = 0.0;
+        }
+        if rswmin_temp < 0.0 {
+            log::warn!("BSIM4: Rswmin at current temperature is negative; set to zero");
+            rswmin_temp = 0.0;
+        }
+        p.rd0 = rd0_temp / pow_weff_wr;
+        p.rdwmin = rdwmin_temp / pow_weff_wr;
+        p.rs0 = rs0_temp / pow_weff_wr;
+        p.rswmin = rswmin_temp / pow_weff_wr;
 
         if p.u0 > 1.0 {
             p.u0 /= 1.0e4;
@@ -795,13 +896,26 @@ impl Bsim4v8SizeDep {
         p.xdep0 = (2.0 * epssub / (CHARGE_Q * p.ndep * 1.0e6)).sqrt() * p.sqrt_phi;
         p.sqrt_xdep0 = p.xdep0.sqrt();
 
-        // mtrlMod = 0.
-        p.litl = (3.0 * 3.9 / epsrox * p.xj * toxe).sqrt();
-        p.vbi = vtm0 * (p.nsd * p.ndep / (mt.ni * mt.ni)).ln();
-        p.vfbsd = if p.ngate > 0.0 {
-            vtm0 * (p.ngate / p.nsd).ln()
+        p.litl = if m.mtrl_mod == 0 {
+            (3.0 * 3.9 / epsrox * p.xj * toxe).sqrt()
         } else {
-            0.0
+            (m.epsrsub / epsrox * p.xj * toxe).sqrt()
+        };
+        p.vbi = vtm0 * (p.nsd * p.ndep / (mt.ni * mt.ni)).ln();
+        p.vfbsd = if m.mtrl_mod == 0 {
+            if p.ngate > 0.0 {
+                vtm0 * (p.ngate / p.nsd).ln()
+            } else {
+                0.0
+            }
+        } else {
+            let mut t0 = vtm0 * (p.nsd / mt.ni).ln();
+            let t1 = 0.5 * mt.eg0;
+            if t0 > t1 {
+                t0 = t1;
+            }
+            let t2 = m.easub + t1 - m.mtype * t0;
+            m.phig - t2
         };
 
         p.cdep0 = (CHARGE_Q * epssub * p.ndep * 1.0e6 / 2.0 / p.phi).sqrt();
@@ -894,10 +1008,18 @@ impl Bsim4v8SizeDep {
             p.k1 = p.gamma2 - 2.0 * p.k2 * (p.phi - p.vbm).sqrt();
         }
 
-        // --- vfb / vth0 (b4temp.c:1470-1499, mtrlMod = 0) ---
+        // --- vfb / vth0 (b4temp.c:1470-1499) ---
         if !m.vfb_given {
             if m.vth0_given {
                 p.vfb = m.mtype * p.vth0 - p.phi - p.k1 * p.sqrt_phi;
+            } else if m.mtrl_mod != 0 && m.phig_given && m.nsub_given {
+                let mut t0 = vtm0 * (p.nsub / mt.ni).ln();
+                let t1 = 0.5 * mt.eg0;
+                if t0 > t1 {
+                    t0 = t1;
+                }
+                let t2 = m.easub + t1 + m.mtype * t0;
+                p.vfb = m.phig - t2;
             } else {
                 p.vfb = -1.0;
             }
@@ -938,6 +1060,56 @@ impl Bsim4v8SizeDep {
         };
         let t5 = p.k1ox * (t0 - 1.0) * p.sqrt_phi + t3;
         p.vfbzbfactor = -t8 - t9 + p.k3 * t4 + t5 - p.phi - p.k1 * p.sqrt_phi;
+
+        // Stress-effect size precompute (b4temp.c:1574-1601).
+        let wlod = if m.wlod < 0.0 {
+            log::warn!("BSIM4: WLOD = {} is less than zero; using zero", m.wlod);
+            0.0
+        } else {
+            m.wlod
+        };
+        let w_tmp = wnew + wlod;
+        let t0 = lnew.powf(m.llodku0);
+        let t1 = w_tmp.powf(m.wlodku0);
+        let tmp1 = m.lku0 / t0 + m.wku0 / t1 + m.pku0 / (t0 * t1);
+        p.stress_ku0 = 1.0 + tmp1;
+
+        let t0 = lnew.powf(m.llodvth);
+        let t1 = w_tmp.powf(m.wlodvth);
+        let tmp1 = m.lkvth0 / t0 + m.wkvth0 / t1 + m.pkvth0 / (t0 * t1);
+        p.stress_kvth0 = 1.0 + tmp1;
+        p.stress_kvth0 = (p.stress_kvth0 * p.stress_kvth0 + STRESS_DELTA).sqrt();
+
+        p.stress_ku0temp = p.stress_ku0 * (1.0 + m.tku0 * (tratio - 1.0)) + STRESS_DELTA;
+        let inv_saref = 1.0 / (m.saref + 0.5 * ldrn);
+        let inv_sbref = 1.0 / (m.sbref + 0.5 * ldrn);
+        p.stress_inv_od_ref = inv_saref + inv_sbref;
+        p.stress_rho_ref = m.ku0 / p.stress_ku0temp * p.stress_inv_od_ref;
+
+        // High-k mobility precompute for mobMod=3 (b4temp.c:1603-1646).
+        if m.mob_mod == 3 {
+            let lt1 = mt.factor1 * p.sqrt_xdep0;
+            let theta0 = theta_form(p.dvt1 * p.leff / lt1);
+            let tmp1 = epssub / p.xdep0;
+            let tmp2 = p.nfactor * tmp1;
+            let tmp3 = (tmp2 + p.cdsc * theta0 + p.cit) / mt.coxe;
+            let n0 = if tmp3 >= -0.5 {
+                1.0 + tmp3
+            } else {
+                let t0 = 1.0 / (3.0 + 8.0 * tmp3);
+                (1.0 + 3.0 * tmp3) * t0
+            };
+            let t0 = n0 * mt.vtm;
+            let t2 = p.voffcbn / t0;
+            let t4 = if t2 < -EXP_THRESHOLD {
+                p.mstar + mt.coxe * MIN_EXP / p.cdep0 * n0
+            } else if t2 > EXP_THRESHOLD {
+                p.mstar + mt.coxe * MAX_EXP / p.cdep0 * n0
+            } else {
+                p.mstar + t2.exp() * mt.coxe / p.cdep0 * n0
+            };
+            p.vgsteff_vth = t0 * 2.0_f64.ln() / t4;
+        }
 
         // New DITS term added in 4.7.
         let t0 = -p.dvtp3 * p.leff.ln();
@@ -1032,9 +1204,8 @@ impl Bsim4v8SizeDep {
         if p.b1 == -p.weff {
             return fatal("(B1 + Weff) = 0 causing divided-by-zero".to_string());
         }
-        // u0temp/vsattemp are knot-level here (no stress/mulu0 yet); the C
-        // checks the instance copies, which equal these in the supported
-        // (stress-free) configuration up to the positive mulu0 factor.
+        // u0temp/vsattemp are knot-level here; stress/WPE/MULU0 adjust the
+        // instance copies in `Bsim4v8InstTemp`.
         if p.u0temp <= 0.0 {
             return fatal(format!(
                 "u0 at current temperature = {:e} is not positive",
@@ -1171,6 +1342,12 @@ pub struct Bsim4v8Geometry {
     pub nf: Value,
     /// Parallel multiplier `M` (applied by the stamp, not the eval).
     pub m: Value,
+    /// Instance `GEOMOD` override; when not given, the model selector applies.
+    pub geo_mod: i32,
+    pub geo_mod_given: bool,
+    /// Instance `RGEOMOD`: S/D resistance geometry selector.
+    pub rgeo_mod: i32,
+    pub rgeo_mod_given: bool,
     /// `MIN`: minimize either D (0) or S (1) diffusions for even NF.
     pub min_sd: i32,
     pub drain_area: Value,
@@ -1191,11 +1368,20 @@ pub struct Bsim4v8Geometry {
     pub mulu0: Value,
     /// Instance temperature offset `DTEMP` (Celsius delta).
     pub dtemp: Value,
-    /// Stress-effect layout distances (`SA`/`SB`/`SD`); a configuration that
-    /// activates the stress model is rejected at construction.
+    /// Stress-effect layout distances (`SA`/`SB`/`SD`).
     pub sa: Value,
     pub sb: Value,
     pub sd: Value,
+    /// Well-proximity spacing/integrals (`SC` derives SCA/SCB/SCC when none
+    /// of the three integrals are given).
+    pub sc: Value,
+    pub sc_given: bool,
+    pub sca: Value,
+    pub sca_given: bool,
+    pub scb: Value,
+    pub scb_given: bool,
+    pub scc: Value,
+    pub scc_given: bool,
     /// `OFF`: start the device off in the initial DC iteration (engine
     /// seam; not used by the eval itself).
     pub off: bool,
@@ -1213,6 +1399,10 @@ impl Default for Bsim4v8Geometry {
             w: 5.0e-6,
             nf: 1.0,
             m: 1.0,
+            geo_mod: 0,
+            geo_mod_given: false,
+            rgeo_mod: 0,
+            rgeo_mod_given: false,
             min_sd: 0,
             drain_area: 0.0,
             drain_area_given: false,
@@ -1232,6 +1422,14 @@ impl Default for Bsim4v8Geometry {
             sa: 0.0,
             sb: 0.0,
             sd: 0.0,
+            sc: 0.0,
+            sc_given: false,
+            sca: 0.0,
+            sca_given: false,
+            scb: 0.0,
+            scb_given: false,
+            scc: 0.0,
+            scc_given: false,
             off: false,
             ic_vds: 0.0,
             ic_vgs: 0.0,
@@ -1264,48 +1462,404 @@ fn num_finger_diff(nf: Value, min_sd: i32) -> (Value, Value, Value, Value) {
     }
 }
 
-/// `BSIM4PAeffGeo` for `geoMod = 0` (isolated end diffusions, shared
-/// internal ones). Returns `(ps, pd, as_, ad)`.
-fn pa_eff_geo_0(
+/// `BSIM4PAeffGeo` diffusion geometry. Returns `(ps, pd, as_, ad)`.
+fn pa_eff_geo(
     nf: Value,
+    geo: i32,
     min_sd: i32,
     weff_cj: Value,
     dmcg: Value,
     dmci: Value,
     dmdg: Value,
 ) -> (Value, Value, Value, Value) {
-    let _ = dmdg;
-    let (nu_int_d, nu_end_d, nu_int_s, nu_end_s) = num_finger_diff(nf, min_sd);
+    let (nu_int_d, nu_end_d, nu_int_s, nu_end_s) = if geo < 9 {
+        num_finger_diff(nf, min_sd)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
     let t0 = dmcg + dmci;
     let t1 = dmcg + dmcg;
+    let t2 = dmdg + dmdg;
     let p_iso = t0 + t0 + weff_cj;
     let p_sha = t1;
+    let p_mer = t2;
     let a_iso = t0 * weff_cj;
     let a_sha = dmcg * weff_cj;
-    (
-        nu_end_s * p_iso + nu_int_s * p_sha,
-        nu_end_d * p_iso + nu_int_d * p_sha,
-        nu_end_s * a_iso + nu_int_s * a_sha,
-        nu_end_d * a_iso + nu_int_d * a_sha,
-    )
+    let a_mer = dmdg * weff_cj;
+
+    match geo {
+        0 => (
+            nu_end_s * p_iso + nu_int_s * p_sha,
+            nu_end_d * p_iso + nu_int_d * p_sha,
+            nu_end_s * a_iso + nu_int_s * a_sha,
+            nu_end_d * a_iso + nu_int_d * a_sha,
+        ),
+        1 => (
+            nu_end_s * p_iso + nu_int_s * p_sha,
+            (nu_end_d + nu_int_d) * p_sha,
+            nu_end_s * a_iso + nu_int_s * a_sha,
+            (nu_end_d + nu_int_d) * a_sha,
+        ),
+        2 => (
+            (nu_end_s + nu_int_s) * p_sha,
+            nu_end_d * p_iso + nu_int_d * p_sha,
+            (nu_end_s + nu_int_s) * a_sha,
+            nu_end_d * a_iso + nu_int_d * a_sha,
+        ),
+        3 => (
+            (nu_end_s + nu_int_s) * p_sha,
+            (nu_end_d + nu_int_d) * p_sha,
+            (nu_end_s + nu_int_s) * a_sha,
+            (nu_end_d + nu_int_d) * a_sha,
+        ),
+        4 => (
+            nu_end_s * p_iso + nu_int_s * p_sha,
+            nu_end_d * p_mer + nu_int_d * p_sha,
+            nu_end_s * a_iso + nu_int_s * a_sha,
+            nu_end_d * a_mer + nu_int_d * a_sha,
+        ),
+        5 => (
+            (nu_end_s + nu_int_s) * p_sha,
+            nu_end_d * p_mer + nu_int_d * p_sha,
+            (nu_end_s + nu_int_s) * a_sha,
+            nu_end_d * a_mer + nu_int_d * a_sha,
+        ),
+        6 => (
+            nu_end_s * p_mer + nu_int_s * p_sha,
+            nu_end_d * p_iso + nu_int_d * p_sha,
+            nu_end_s * a_mer + nu_int_s * a_sha,
+            nu_end_d * a_iso + nu_int_d * a_sha,
+        ),
+        7 => (
+            nu_end_s * p_mer + nu_int_s * p_sha,
+            (nu_end_d + nu_int_d) * p_sha,
+            nu_end_s * a_mer + nu_int_s * a_sha,
+            (nu_end_d + nu_int_d) * a_sha,
+        ),
+        8 => (
+            nu_end_s * p_mer + nu_int_s * p_sha,
+            nu_end_d * p_mer + nu_int_d * p_sha,
+            nu_end_s * a_mer + nu_int_s * a_sha,
+            nu_end_d * a_mer + nu_int_d * a_sha,
+        ),
+        9 => (
+            p_iso + (nf - 1.0) * p_sha,
+            nf * p_sha,
+            a_iso + (nf - 1.0) * a_sha,
+            nf * a_sha,
+        ),
+        10 => (
+            nf * p_sha,
+            p_iso + (nf - 1.0) * p_sha,
+            nf * a_sha,
+            a_iso + (nf - 1.0) * a_sha,
+        ),
+        _ => (0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+/// `BSIM4RdsEndIso` (`b4geo.c`): end resistance for isolated diffusions.
+fn rds_end_iso(
+    weff_cj: Value,
+    rsh: Value,
+    dmcg: Value,
+    dmci: Value,
+    nu_end: Value,
+    rgeo: i32,
+    source: bool,
+) -> Value {
+    if source {
+        match rgeo {
+            1 | 2 | 5 => {
+                if nu_end == 0.0 {
+                    0.0
+                } else {
+                    rsh * dmcg / (weff_cj * nu_end)
+                }
+            }
+            3 | 4 | 6 => {
+                let contact = dmcg + dmci;
+                if nu_end == 0.0 || contact == 0.0 {
+                    0.0
+                } else {
+                    rsh * weff_cj / (3.0 * nu_end * contact)
+                }
+            }
+            _ => 0.0,
+        }
+    } else {
+        match rgeo {
+            1 | 3 | 7 => {
+                if nu_end == 0.0 {
+                    0.0
+                } else {
+                    rsh * dmcg / (weff_cj * nu_end)
+                }
+            }
+            2 | 4 | 8 => {
+                let contact = dmcg + dmci;
+                if nu_end == 0.0 || contact == 0.0 {
+                    0.0
+                } else {
+                    rsh * weff_cj / (3.0 * nu_end * contact)
+                }
+            }
+            _ => 0.0,
+        }
+    }
+}
+
+/// `BSIM4RdsEndSha` (`b4geo.c`): end resistance for shared diffusions.
+fn rds_end_sha(
+    weff_cj: Value,
+    rsh: Value,
+    dmcg: Value,
+    nu_end: Value,
+    rgeo: i32,
+    source: bool,
+) -> Value {
+    if source {
+        match rgeo {
+            1 | 2 | 5 => {
+                if nu_end == 0.0 {
+                    0.0
+                } else {
+                    rsh * dmcg / (weff_cj * nu_end)
+                }
+            }
+            3 | 4 | 6 => {
+                if nu_end == 0.0 || dmcg == 0.0 {
+                    0.0
+                } else {
+                    rsh * weff_cj / (6.0 * nu_end * dmcg)
+                }
+            }
+            _ => 0.0,
+        }
+    } else {
+        match rgeo {
+            1 | 3 | 7 => {
+                if nu_end == 0.0 {
+                    0.0
+                } else {
+                    rsh * dmcg / (weff_cj * nu_end)
+                }
+            }
+            2 | 4 | 8 => {
+                if nu_end == 0.0 || dmcg == 0.0 {
+                    0.0
+                } else {
+                    rsh * weff_cj / (6.0 * nu_end * dmcg)
+                }
+            }
+            _ => 0.0,
+        }
+    }
+}
+
+/// `BSIM4RdseffGeo` (`b4geo.c`): resistance from implicit S/D geometry.
+fn rdseff_geo(
+    nf: Value,
+    geo: i32,
+    rgeo: i32,
+    min_sd: i32,
+    weff_cj: Value,
+    rsh: Value,
+    dmcg: Value,
+    dmci: Value,
+    dmdg: Value,
+    source: bool,
+) -> Value {
+    if rgeo <= 0 || weff_cj <= 0.0 || rsh <= 0.0 {
+        return 0.0;
+    }
+
+    let (nu_int_d, nu_end_d, nu_int_s, nu_end_s) = if geo < 9 {
+        num_finger_diff(nf, min_sd)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+
+    let mut rint = 0.0;
+    if geo < 9 {
+        let nu_int = if source { nu_int_s } else { nu_int_d };
+        if nu_int != 0.0 {
+            rint = rsh * dmcg / (weff_cj * nu_int);
+        }
+    }
+
+    let rend = match geo {
+        0 => {
+            if source {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_s, rgeo, true)
+            } else {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_d, rgeo, false)
+            }
+        }
+        1 => {
+            if source {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_s, rgeo, true)
+            } else {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_d, rgeo, false)
+            }
+        }
+        2 => {
+            if source {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_s, rgeo, true)
+            } else {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_d, rgeo, false)
+            }
+        }
+        3 => {
+            if source {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_s, rgeo, true)
+            } else {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_d, rgeo, false)
+            }
+        }
+        4 => {
+            if source {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_s, rgeo, true)
+            } else {
+                rsh * dmdg / weff_cj
+            }
+        }
+        5 => {
+            if source {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_s, rgeo, true)
+            } else {
+                rsh * dmdg / (weff_cj * nu_end_d)
+            }
+        }
+        6 => {
+            if source {
+                rsh * dmdg / weff_cj
+            } else {
+                rds_end_iso(weff_cj, rsh, dmcg, dmci, nu_end_d, rgeo, false)
+            }
+        }
+        7 => {
+            if source {
+                rsh * dmdg / (weff_cj * nu_end_s)
+            } else {
+                rds_end_sha(weff_cj, rsh, dmcg, nu_end_d, rgeo, false)
+            }
+        }
+        8 => rsh * dmdg / weff_cj,
+        9 => {
+            if source {
+                if nf == 2.0 {
+                    rint = 0.0;
+                } else {
+                    rint = rsh * dmcg / (weff_cj * (nf - 2.0));
+                }
+                0.5 * rsh * dmcg / weff_cj
+            } else {
+                rint = rsh * dmcg / (weff_cj * nf);
+                0.0
+            }
+        }
+        10 => {
+            if source {
+                rint = rsh * dmcg / (weff_cj * nf);
+                0.0
+            } else {
+                if nf == 2.0 {
+                    rint = 0.0;
+                } else {
+                    rint = rsh * dmcg / (weff_cj * (nf - 2.0));
+                }
+                0.5 * rsh * dmcg / weff_cj
+            }
+        }
+        _ => 0.0,
+    };
+
+    if rint <= 0.0 {
+        rend
+    } else if rend <= 0.0 {
+        rint
+    } else {
+        rint * rend / (rint + rend)
+    }
+}
+
+/// Well-proximity effective scatter integral (`sceff`) from BSIM4temp.
+fn wpe_sceff(model: &Bsim4v8Model, geom: &Bsim4v8Geometry) -> Value {
+    let scref = if model.scref > 0.0 {
+        model.scref
+    } else {
+        log::warn!("BSIM4: SCREF is not positive; using 1e-6 for WPE");
+        1.0e-6
+    };
+    let mut sc = geom.sc;
+    let mut sca = geom.sca;
+    let mut scb = geom.scb;
+    let mut scc = geom.scc;
+
+    if !geom.sca_given && !geom.scb_given && !geom.scc_given {
+        if geom.sc_given && geom.sc > 0.0 {
+            let nf = if geom.nf.is_finite() && geom.nf > 0.0 {
+                geom.nf
+            } else {
+                1.0
+            };
+            let wdrn = geom.w / nf;
+            if wdrn > 0.0 {
+                let t1 = geom.sc + wdrn;
+                let t2 = 1.0 / scref;
+                sca = scref * scref / (geom.sc * t1);
+                scb = ((0.1 * geom.sc + 0.01 * scref) * (-10.0 * geom.sc * t2).exp()
+                    - (0.1 * t1 + 0.01 * scref) * (-10.0 * t1 * t2).exp())
+                    / wdrn;
+                scc = ((0.05 * geom.sc + 0.0025 * scref) * (-20.0 * geom.sc * t2).exp()
+                    - (0.05 * t1 + 0.0025 * scref) * (-20.0 * t1 * t2).exp())
+                    / wdrn;
+            } else {
+                log::warn!("BSIM4: WPE SC given but drawn per-finger width is non-positive");
+            }
+        } else {
+            log::warn!("BSIM4: WPE enabled but none of SCA, SCB, SCC, or positive SC is given");
+        }
+    }
+
+    if sca < 0.0 {
+        log::warn!("BSIM4: SCA is negative; set to zero");
+        sca = 0.0;
+    }
+    if scb < 0.0 {
+        log::warn!("BSIM4: SCB is negative; set to zero");
+        scb = 0.0;
+    }
+    if scc < 0.0 {
+        log::warn!("BSIM4: SCC is negative; set to zero");
+        scc = 0.0;
+    }
+    if sc < 0.0 {
+        log::warn!("BSIM4: SC is negative; set to zero");
+        sc = 0.0;
+    }
+    let _ = sc;
+
+    sca + model.web * scb + model.wec * scc
 }
 
 /// Per-instance temperature tail of `BSIM4temp` (post size knot).
 #[derive(Debug, Clone, Default)]
 pub struct Bsim4v8InstTemp {
-    /// `pParam->vth0 + delvto` (`here->BSIM4vth0`; stress-free path).
+    /// `here->BSIM4vth0` after stress/WPE plus `delvto`.
     pub vth0: Value,
     /// `pParam->vfb + type*delvto` (`here->BSIM4vfb`).
     pub vfb: Value,
     /// `pParam->vfbzbfactor + type*vth0` (`here->BSIM4vfbzb`).
     pub vfbzb: Value,
-    /// `pParam->u0temp * mulu0` (`here->BSIM4u0temp`).
+    /// `here->BSIM4u0temp` after stress/WPE plus `mulu0`.
     pub u0temp: Value,
-    /// `pParam->vsattemp` (`here->BSIM4vsattemp`).
+    /// `here->BSIM4vsattemp` after stress.
     pub vsattemp: Value,
-    /// `pParam->eta0` (`here->BSIM4eta0`).
+    /// `here->BSIM4eta0` after stress.
     pub eta0: Value,
-    /// `pParam->k2` (`here->BSIM4k2`).
+    /// `here->BSIM4k2` after stress/WPE.
     pub k2: Value,
     /// `here->BSIM4k2ox = k2 * toxe / toxm`.
     pub k2ox: Value,
@@ -1323,16 +1877,39 @@ pub struct Bsim4v8InstTemp {
     pub pdeff: Value,
     pub aseff: Value,
     pub adeff: Value,
-    /// `1 / (rsh * nrd)` or 0 (`here->BSIM4drainConductance`).
+    /// Fixed drain-side S/D conductance from explicit squares or `RGEOMOD`.
     pub drain_conductance: Value,
-    /// `1 / (rsh * nrs)` or 0 (`here->BSIM4sourceConductance`).
+    /// Fixed source-side S/D conductance from explicit squares or `RGEOMOD`.
     pub source_conductance: Value,
+    /// `here->BSIM4grgeltd`, the constant electrode gate conductance for
+    /// `RGATEMOD=1`.
+    pub gate_conductance: Value,
+    /// Body-resistance network conductances (`grbdb/grbpb/grbps/grbsb/grbpd`).
+    pub body_drain_bulk_conductance: Value,
+    pub body_prime_bulk_conductance: Value,
+    pub body_prime_source_conductance: Value,
+    pub body_source_bulk_conductance: Value,
+    pub body_prime_drain_conductance: Value,
+    /// ngspice `bodymode` for RBODYMOD noise/source selection: 0, 1, 3, or 5.
+    pub body_resistance_mode: i32,
     /// Junction saturation currents (recomputed identically in b4ld.c).
     pub source_sat_current: Value,
     pub drain_sat_current: Value,
-    /// `dioMod = 1` forward limiting anchors: `(vjsmFwd, IVjsmFwd)`.
+    /// `dioMod = 1/2` forward limiting anchors: `(vjsmFwd, IVjsmFwd)`.
     pub vjsm_fwd: Option<(Value, Value)>,
     pub vjdm_fwd: Option<(Value, Value)>,
+    /// `dioMod = 0/2` breakdown exponential factors and `dioMod = 2`
+    /// reverse limiting anchors/slopes.
+    pub xexp_bvs: Value,
+    pub xexp_bvd: Value,
+    pub vjsm_rev: Value,
+    pub vjdm_rev: Value,
+    pub s_iv_rev: Value,
+    pub d_iv_rev: Value,
+    pub s_slp_fwd: Value,
+    pub d_slp_fwd: Value,
+    pub s_slp_rev: Value,
+    pub d_slp_rev: Value,
     /// Reverse-bias trap-assisted saturation currents.
     pub s_jct_temp_rev_sat_cur: Value,
     pub d_jct_temp_rev_sat_cur: Value,
@@ -1342,6 +1919,90 @@ pub struct Bsim4v8InstTemp {
     pub d_swg_temp_rev_sat_cur: Value,
     /// Number of fingers (the load scales by it explicitly).
     pub nf: Value,
+}
+
+fn compat0_eot_toxp(
+    m: &Bsim4v8Model,
+    mt: &Bsim4v8ModelTemp,
+    size: &Bsim4v8SizeDep,
+    vth0: Value,
+    vfb: Value,
+) -> (Value, Value) {
+    if m.mtrl_mod == 0 || m.mtrl_compat_mod != 0 {
+        return (m.toxp, mt.coxp);
+    }
+
+    let toxe = m.effective_toxe();
+    let epsrox = m.effective_epsrox();
+    let vtm_eot = KB_OVER_Q * m.tempeot;
+    let ni2 = mt.ni * mt.ni;
+    let vbieot = vtm_eot * (size.nsd * size.ndep / ni2).ln();
+    let phieot = vtm_eot * (size.ndep / mt.ni).ln() + size.phin + 0.4;
+    if phieot <= 0.0 {
+        log::warn!(
+            "BSIM4: phieot = {phieot:e} is not positive during MTRLCOMPATMOD=0 TOXP iteration; using model TOXP"
+        );
+        return (m.toxp, mt.coxp);
+    }
+
+    let vfb_plus_phi = vfb + phieot;
+    let vddeot = m.mtype * m.vddeot;
+    let vgs_eff =
+        poly_depletion_value(vfb_plus_phi, size.ngate, m.epsrgate * EPS0, mt.coxe, vddeot);
+
+    let v0 = vbieot - phieot;
+    let lt1 = mt.factor1 * size.sqrt_xdep0;
+    let theta0 = theta_form(size.dvt1 * m.leffeot / lt1);
+    let delt_vth = size.dvt0 * theta0 * v0;
+
+    let theta0w = theta_form(size.dvt1w * m.weffeot * m.leffeot / lt1);
+    let delt_vth_w = size.dvt0w * theta0w * v0;
+
+    let temp_ratio_eot = m.tempeot / m.tnom - 1.0;
+    let lpe = (1.0 + size.lpe0 / m.leffeot).sqrt();
+    let temp_shift = (size.kt1 + size.kt1l / m.leffeot) * temp_ratio_eot;
+    let k1_shift = size.k1ox * (lpe - 1.0) * phieot.sqrt() + temp_shift;
+    let vth_narrow_w = toxe * phieot / (m.weffeot + size.w0);
+    let lpe_vb = (1.0 + size.lpeb / m.leffeot).sqrt();
+    let mut vth =
+        m.mtype * vth0 + (size.k1ox - size.k1) * phieot.sqrt() * lpe_vb - delt_vth - delt_vth_w
+            + size.k3 * vth_narrow_w
+            + k1_shift;
+
+    let tmp1 = mt.epssub / size.xdep0;
+    let tmp2 = size.nfactor * tmp1;
+    let tmp3 = (tmp2 + size.cdsc * theta0 + size.cit) / mt.coxe;
+    let n = if tmp3 >= -0.5 {
+        1.0 + tmp3
+    } else {
+        (1.0 + 3.0 * tmp3) / (3.0 + 8.0 * tmp3)
+    };
+
+    if size.dvtp0 > 0.0 {
+        let pocket_length = m.leffeot + 2.0 * size.dvtp0;
+        vth -= n * vtm_eot * (m.leffeot / pocket_length).ln();
+    }
+
+    let vgsteff = vgs_eff - vth;
+    let vtfbphi2eot = (4.0 * (m.mtype * vth0 - vfb - phieot)).max(0.0);
+    let mut toxpf = toxe;
+    for _ in 0..=4 {
+        let toxpi = toxpf;
+        let tmp2 = 2.0e8 * toxpf;
+        let t0 = (vgsteff + vtfbphi2eot) / tmp2;
+        if t0 <= 0.0 {
+            log::warn!("BSIM4: non-positive TOXP iteration argument {t0:e}; using model TOXP");
+            return (m.toxp, mt.coxp);
+        }
+        let t1 = 1.0 + (m.bdos * 0.7 * t0.ln()).exp();
+        let tcen = m.ados * 1.9e-9 / t1;
+        toxpf = toxe - epsrox / m.epsrsub * tcen;
+        if (toxpf - toxpi).abs() <= 1.0e-12 {
+            break;
+        }
+    }
+
+    (toxpf, epsrox * EPS0 / toxpf)
 }
 
 impl Bsim4v8InstTemp {
@@ -1354,17 +2015,69 @@ impl Bsim4v8InstTemp {
         let m = model;
         let nf = geom.nf;
 
-        // Stress effect and WPE are rejected at construction; here the
-        // stress-free copies apply.
-        let vth0_pre = size.vth0;
-        let eta0 = size.eta0;
-        let k2 = size.k2;
-        let vsattemp = size.vsattemp;
+        // Stress effect (b4temp.c:1656-1701). WPE remains an instance-tail
+        // adjustment because its SC/SCA/SCB/SCC inputs are per-instance.
+        let stress_active =
+            geom.sa > 0.0 && geom.sb > 0.0 && (geom.nf == 1.0 || (geom.nf > 1.0 && geom.sd > 0.0));
+        let (mut vth0_pre, eta0, mut k2, vsattemp, mut u0temp_pre) = if stress_active {
+            let mut inv_sa = 0.0;
+            let mut inv_sb = 0.0;
+            let mut i = 0.0;
+            while i < nf {
+                let offset = i * (geom.sd + geom.l);
+                inv_sa += 1.0 / nf / (geom.sa + 0.5 * geom.l + offset);
+                inv_sb += 1.0 / nf / (geom.sb + 0.5 * geom.l + offset);
+                i += 1.0;
+            }
+
+            let kvsat = if m.kvsat < -1.0 {
+                log::warn!("BSIM4: KVSAT = {} is too small; using -1", m.kvsat);
+                -1.0
+            } else if m.kvsat > 1.0 {
+                log::warn!("BSIM4: KVSAT = {} is too large; using 1", m.kvsat);
+                1.0
+            } else {
+                m.kvsat
+            };
+
+            let inv_od_eff = inv_sa + inv_sb;
+            let rho = m.ku0 / size.stress_ku0temp * inv_od_eff;
+            let u0temp = size.u0temp * (1.0 + rho) / (1.0 + size.stress_rho_ref);
+            let vsattemp =
+                size.vsattemp * (1.0 + kvsat * rho) / (1.0 + kvsat * size.stress_rho_ref);
+
+            let od_offset = inv_od_eff - size.stress_inv_od_ref;
+            let dvth0_lod = m.kvth0 / size.stress_kvth0 * od_offset;
+            let dk2_lod = m.stk2 / size.stress_kvth0.powf(m.lodk2) * od_offset;
+            let deta0_lod = m.steta0 / size.stress_kvth0.powf(m.lodeta0) * od_offset;
+
+            (
+                size.vth0 + dvth0_lod,
+                size.eta0 + deta0_lod,
+                size.k2 + dk2_lod,
+                vsattemp,
+                u0temp,
+            )
+        } else {
+            (size.vth0, size.eta0, size.k2, size.vsattemp, size.u0temp)
+        };
+
+        if m.wpemod != 0 {
+            let sceff = wpe_sceff(m, geom);
+            vth0_pre += size.kvth0we * sceff;
+            k2 += size.k2we * sceff;
+            let mut mobility_scale = 1.0 + size.ku0we * sceff;
+            if mobility_scale <= 0.0 {
+                log::warn!("BSIM4: KU0WE makes WPE mobility non-positive; clamped to zero");
+                mobility_scale = 0.0;
+            }
+            u0temp_pre *= mobility_scale;
+        }
 
         // delvto / mulu0.
         let vth0 = vth0_pre + geom.delvto;
         let vfb = size.vfb + m.mtype * geom.delvto;
-        let u0temp = size.u0temp * geom.mulu0;
+        let u0temp = u0temp_pre * geom.mulu0;
 
         // Instance variables.
         let t3 = m.mtype * vth0 - vfb - size.phi;
@@ -1383,15 +2096,44 @@ impl Bsim4v8InstTemp {
         if vbsc > size.vbm {
             vbsc = size.vbm;
         }
-        let k2ox = k2 * m.toxe / m.toxm;
+        let k2ox = k2 * m.effective_toxe() / m.toxm;
         let vfbzb = size.vfbzbfactor + m.mtype * vth0;
+        let (toxp, coxp) = compat0_eot_toxp(m, mt, size, vth0, vfb);
+
+        let rgeltd = m.rshg * (m.xgw + size.weff_cj / (3.0 * m.ngcon))
+            / (m.ngcon * nf * (size.lnew - m.xgl));
+        let gate_conductance = if rgeltd > 0.0 {
+            1.0 / rgeltd
+        } else {
+            if m.rgate_mod != 0 {
+                log::warn!("BSIM4: gate conductance reset to 1.0e3 mho");
+            }
+            1.0e3
+        };
 
         // Effective junction perimeters and areas (New Diode Model v4.7).
         let dmcg_eff = m.dmcg - m.dmcgt;
         let dmci_eff = m.dmci;
         let dmdg_eff = m.dmdg - m.dmcgt;
-        let (geo_ps, geo_pd, geo_as, geo_ad) =
-            pa_eff_geo_0(nf, geom.min_sd, size.weff_cj, dmcg_eff, dmci_eff, dmdg_eff);
+        let geo_mod = if geom.geo_mod_given {
+            geom.geo_mod
+        } else {
+            m.geo_mod
+        };
+        let rgeo_mod = if geom.rgeo_mod_given || geom.rgeo_mod != 0 {
+            geom.rgeo_mod
+        } else {
+            m.rgeo_mod
+        };
+        let (geo_ps, geo_pd, geo_as, geo_ad) = pa_eff_geo(
+            nf,
+            geo_mod,
+            geom.min_sd,
+            size.weff_cj,
+            dmcg_eff,
+            dmci_eff,
+            dmdg_eff,
+        );
 
         let mut pseff = if geom.source_perimeter_given {
             if geom.source_perimeter == 0.0 {
@@ -1448,20 +2190,132 @@ impl Bsim4v8InstTemp {
             adeff = 0.0;
         }
 
-        // Series conductances (rdsMod = 0, rgeoMod = 0): an internal node
-        // exists only when rsh > 0 and the square count was given positive.
-        let cond = |squares_given: bool, squares: Value| {
-            if m.sheet_resistance > 0.0 && squares_given && squares > 0.0 {
-                let r = m.sheet_resistance * squares;
-                if r > 0.0 { 1.0 / r } else { 1.0e3 }
+        // Series conductances. RDSMOD=1 forces D'/S' and ngspice falls back
+        // to a 1000 mho limiter when no explicit sheet path exists.
+        let cond = |source: bool, squares_given: bool, squares: Value| {
+            let resistance = if m.sheet_resistance > 0.0 {
+                if squares_given {
+                    Some(m.sheet_resistance * squares)
+                } else if rgeo_mod > 0 {
+                    Some(rdseff_geo(
+                        nf,
+                        geo_mod,
+                        rgeo_mod,
+                        geom.min_sd,
+                        size.weff_cj,
+                        m.sheet_resistance,
+                        dmcg_eff,
+                        dmci_eff,
+                        dmdg_eff,
+                        source,
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(r) = resistance {
+                if r > 0.0 {
+                    1.0 / r
+                } else if m.rds_mod != 0 {
+                    1.0e3
+                } else {
+                    0.0
+                }
+            } else if m.rds_mod != 0 {
+                1.0e3
             } else {
                 0.0
             }
         };
-        let source_conductance = cond(geom.source_squares_given, geom.source_squares);
-        let drain_conductance = cond(geom.drain_squares_given, geom.drain_squares);
+        let source_conductance = cond(true, geom.source_squares_given, geom.source_squares);
+        let drain_conductance = cond(false, geom.drain_squares_given, geom.drain_squares);
+        let body_conductance = |resistance: Value| {
+            if resistance < 1.0e-3 {
+                1.0e3
+            } else {
+                m.gbmin + 1.0 / resistance
+            }
+        };
+        let body_resistance_mode = if m.rbody_mod == 0 {
+            0
+        } else if m.rbody_mod == 1 {
+            5
+        } else if !m.rbps0_given || !m.rbpd0_given {
+            1
+        } else if (!m.rbsbx0_given && !m.rbsby0_given) || (!m.rbdbx0_given && !m.rbdby0_given) {
+            3
+        } else {
+            5
+        };
+        let scaled_body_resistance =
+            |base: Value, l_exp: Value, w_exp: Value, nf_exp: Value| -> Value {
+                (base.ln()
+                    + l_exp * (size.leff * 1.0e6).ln()
+                    + w_exp * (size.weff * 1.0e6).ln()
+                    + nf_exp * geom.nf.ln())
+                .exp()
+            };
+        let parallel = |a: Value, b: Value| -> Value {
+            let denom = a + b;
+            if denom > 0.0 { a * b / denom } else { 0.0 }
+        };
+        let (rbdb, rbpb, rbsb, rbps, rbpd) = if m.rbody_mod == 2 {
+            let rbpbx = scaled_body_resistance(m.rbpbx0, m.rbpbxl, m.rbpbxw, m.rbpbxnf);
+            let rbpby = scaled_body_resistance(m.rbpby0, m.rbpbyl, m.rbpbyw, m.rbpbynf);
+            let rbpb = parallel(rbpbx, rbpby);
+            let (rbsb, rbdb) = if body_resistance_mode == 5 {
+                let rbsbx = scaled_body_resistance(m.rbsbx0, m.rbsdbxl, m.rbsdbxw, m.rbsdbxnf);
+                let rbsby = scaled_body_resistance(m.rbsby0, m.rbsdbyl, m.rbsdbyw, m.rbsdbynf);
+                let rbdbx = scaled_body_resistance(m.rbdbx0, m.rbsdbxl, m.rbsdbxw, m.rbsdbxnf);
+                let rbdby = scaled_body_resistance(m.rbdby0, m.rbsdbyl, m.rbsdbyw, m.rbsdbynf);
+                (parallel(rbsbx, rbsby), parallel(rbdbx, rbdby))
+            } else {
+                (m.rbsb, m.rbdb)
+            };
+            let (rbps, rbpd) = if body_resistance_mode == 3 || body_resistance_mode == 5 {
+                (
+                    scaled_body_resistance(m.rbps0, m.rbpsl, m.rbpsw, m.rbpsnf),
+                    scaled_body_resistance(m.rbpd0, m.rbpdl, m.rbpdw, m.rbpdnf),
+                )
+            } else {
+                (m.rbps, m.rbpd)
+            };
+            (rbdb, rbpb, rbsb, rbps, rbpd)
+        } else {
+            (m.rbdb, m.rbpb, m.rbsb, m.rbps, m.rbpd)
+        };
+        let (
+            body_drain_bulk_conductance,
+            body_prime_bulk_conductance,
+            body_prime_source_conductance,
+            body_source_bulk_conductance,
+            body_prime_drain_conductance,
+        ) = if m.rbody_mod == 1 || (m.rbody_mod == 2 && body_resistance_mode == 5) {
+            (
+                body_conductance(rbdb),
+                body_conductance(rbpb),
+                body_conductance(rbps),
+                body_conductance(rbsb),
+                body_conductance(rbpd),
+            )
+        } else if m.rbody_mod == 2 && body_resistance_mode == 3 {
+            (
+                m.gbmin,
+                body_conductance(rbpb),
+                body_conductance(rbps),
+                m.gbmin,
+                body_conductance(rbpd),
+            )
+        } else if m.rbody_mod == 2 && body_resistance_mode == 1 {
+            (m.gbmin, body_conductance(rbpb), 1.0e3, m.gbmin, 1.0e3)
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0.0)
+        };
 
-        // Junction saturation currents + dioMod = 1 anchors.
+        // Junction saturation currents + diode model limiting anchors.
         let nvtms = mt.vtm * mt.njs;
         let source_sat_current = if aseff <= 0.0 && pseff <= 0.0 {
             0.0
@@ -1470,12 +2324,52 @@ impl Bsim4v8InstTemp {
                 + pseff * mt.s_jct_sidewall_temp_sat_cur_density
                 + size.weff_cj * nf * mt.s_jct_gate_sidewall_temp_sat_cur_density
         };
-        let vjsm_fwd = if source_sat_current > 0.0 {
-            let v = dio_ijth_vjm_eval(nvtms, mt.ijthsfwd, source_sat_current, 0.0);
-            Some((v, source_sat_current * (v / nvtms).exp()))
-        } else {
-            None
-        };
+        let mut vjsm_fwd = None;
+        let mut xexp_bvs = 0.0;
+        let mut vjsm_rev = 0.0;
+        let mut s_iv_rev = 0.0;
+        let mut s_slp_fwd = 0.0;
+        let mut s_slp_rev = 0.0;
+        if source_sat_current > 0.0 {
+            match m.dio_mod {
+                0 => {
+                    xexp_bvs = if mt.bvs / nvtms > EXP_THRESHOLD {
+                        m.xjbvs * MIN_EXP
+                    } else {
+                        m.xjbvs * (-mt.bvs / nvtms).exp()
+                    };
+                }
+                1 => {
+                    let v = dio_ijth_vjm_eval(nvtms, mt.ijthsfwd, source_sat_current, 0.0);
+                    vjsm_fwd = Some((v, source_sat_current * (v / nvtms).exp()));
+                }
+                2 => {
+                    xexp_bvs = if mt.bvs / nvtms > EXP_THRESHOLD {
+                        MIN_EXP
+                    } else {
+                        (-mt.bvs / nvtms).exp()
+                    };
+                    xexp_bvs *= m.xjbvs;
+
+                    let v = dio_ijth_vjm_eval(nvtms, mt.ijthsfwd, source_sat_current, xexp_bvs);
+                    let t0 = (v / nvtms).exp();
+                    let iv_fwd = source_sat_current * (t0 - xexp_bvs / t0 + xexp_bvs - 1.0);
+                    s_slp_fwd = source_sat_current * (t0 + xexp_bvs / t0) / nvtms;
+                    vjsm_fwd = Some((v, iv_fwd));
+
+                    let mut t2 = mt.ijthsrev / source_sat_current;
+                    if t2 < 1.0 {
+                        t2 = 10.0;
+                        log::warn!("BSIM4: ijthsrev too small and set to 10 times IsbSat");
+                    }
+                    vjsm_rev = -mt.bvs - nvtms * ((t2 - 1.0) / m.xjbvs).ln();
+                    let t1 = m.xjbvs * (-(mt.bvs + vjsm_rev) / nvtms).exp();
+                    s_iv_rev = source_sat_current * (1.0 + t1);
+                    s_slp_rev = -source_sat_current * t1 / nvtms;
+                }
+                _ => {}
+            }
+        }
 
         let nvtmd = mt.vtm * mt.njd;
         let drain_sat_current = if adeff <= 0.0 && pdeff <= 0.0 {
@@ -1485,12 +2379,52 @@ impl Bsim4v8InstTemp {
                 + pdeff * mt.d_jct_sidewall_temp_sat_cur_density
                 + size.weff_cj * nf * mt.d_jct_gate_sidewall_temp_sat_cur_density
         };
-        let vjdm_fwd = if drain_sat_current > 0.0 {
-            let v = dio_ijth_vjm_eval(nvtmd, mt.ijthdfwd, drain_sat_current, 0.0);
-            Some((v, drain_sat_current * (v / nvtmd).exp()))
-        } else {
-            None
-        };
+        let mut vjdm_fwd = None;
+        let mut xexp_bvd = 0.0;
+        let mut vjdm_rev = 0.0;
+        let mut d_iv_rev = 0.0;
+        let mut d_slp_fwd = 0.0;
+        let mut d_slp_rev = 0.0;
+        if drain_sat_current > 0.0 {
+            match m.dio_mod {
+                0 => {
+                    xexp_bvd = if mt.bvd / nvtmd > EXP_THRESHOLD {
+                        m.xjbvd * MIN_EXP
+                    } else {
+                        m.xjbvd * (-mt.bvd / nvtmd).exp()
+                    };
+                }
+                1 => {
+                    let v = dio_ijth_vjm_eval(nvtmd, mt.ijthdfwd, drain_sat_current, 0.0);
+                    vjdm_fwd = Some((v, drain_sat_current * (v / nvtmd).exp()));
+                }
+                2 => {
+                    xexp_bvd = if mt.bvd / nvtmd > EXP_THRESHOLD {
+                        MIN_EXP
+                    } else {
+                        (-mt.bvd / nvtmd).exp()
+                    };
+                    xexp_bvd *= m.xjbvd;
+
+                    let v = dio_ijth_vjm_eval(nvtmd, mt.ijthdfwd, drain_sat_current, xexp_bvd);
+                    let t0 = (v / nvtmd).exp();
+                    let iv_fwd = drain_sat_current * (t0 - xexp_bvd / t0 + xexp_bvd - 1.0);
+                    d_slp_fwd = drain_sat_current * (t0 + xexp_bvd / t0) / nvtmd;
+                    vjdm_fwd = Some((v, iv_fwd));
+
+                    let mut t2 = mt.ijthdrev / drain_sat_current;
+                    if t2 < 1.0 {
+                        t2 = 10.0;
+                        log::warn!("BSIM4: ijthdrev too small and set to 10 times IdbSat");
+                    }
+                    vjdm_rev = -mt.bvd - nvtmd * ((t2 - 1.0) / m.xjbvd).ln();
+                    let t1 = m.xjbvd * (-(mt.bvd + vjdm_rev) / nvtmd).exp();
+                    d_iv_rev = drain_sat_current * (1.0 + t1);
+                    d_slp_rev = -drain_sat_current * t1 / nvtmd;
+                }
+                _ => {}
+            }
+        }
 
         // Reverse-bias trap-assisted saturation currents.
         let jtweff = if m.jtweff < 0.0 {
@@ -1520,18 +2454,35 @@ impl Bsim4v8InstTemp {
             vbsc,
             vtfbphi1,
             vtfbphi2,
-            toxp: m.toxp,
-            coxp: mt.coxp,
+            toxp,
+            coxp,
             pseff,
             pdeff,
             aseff,
             adeff,
             drain_conductance,
             source_conductance,
+            gate_conductance,
+            body_drain_bulk_conductance,
+            body_prime_bulk_conductance,
+            body_prime_source_conductance,
+            body_source_bulk_conductance,
+            body_prime_drain_conductance,
+            body_resistance_mode,
             source_sat_current,
             drain_sat_current,
             vjsm_fwd,
             vjdm_fwd,
+            xexp_bvs,
+            xexp_bvd,
+            vjsm_rev,
+            vjdm_rev,
+            s_iv_rev,
+            d_iv_rev,
+            s_slp_fwd,
+            d_slp_fwd,
+            s_slp_rev,
+            d_slp_rev,
             s_jct_temp_rev_sat_cur,
             d_jct_temp_rev_sat_cur,
             s_sw_temp_rev_sat_cur,

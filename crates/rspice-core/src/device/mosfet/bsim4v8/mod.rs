@@ -13,48 +13,56 @@
 //!   ([`Bsim4v8Model`]); TNOM enters in Celsius exactly as b4mpar.c converts.
 //! - `BSIM4temp`: the per-model temperature block, the (W, L, NF)-keyed
 //!   `bsim4SizeDependParam` knots, and the per-instance tail
-//!   (`delvto`/`mulu0`, `vfbzb`/`vtfbphi*`/`vbsc`, `BSIM4PAeffGeo` for
-//!   geoMod=0, series conductances, the `dioMod=1` forward anchors, the
+//!   (stress layout correction, well proximity, `delvto`/`mulu0`,
+//!   `vfbzb`/`vtfbphi*`/`vbsc`, `BSIM4PAeffGeo` diffusion variants,
+//!   series conductances from explicit `NRD`/`NRS` or `RGEOMOD=1..8`
+//!   implicit resistance geometry, the junction-diode limiting anchors, the
 //!   reverse TAT saturation currents) — see [`temp`], including the
 //!   always-on fatal checks of b4check.c. All four `tempMod` variants
 //!   (0/1/2/3) are covered.
-//! - `BSIM4load` DC path for the canonical mode set: junction diodes
-//!   (`dioMod=1` ijth linearization, explicit `gmin`), reverse-bias TAT
+//! - `BSIM4load` DC path for the canonical mode set plus `rdsMod=1`
+//!   external source/drain resistance, `rbodyMod=1/2` distributed substrate
+//!   resistance, builder-lowered `rgateMod=1` constant gate-electrode
+//!   resistance, native `rgateMod=2` bias-dependent gate resistance, and
+//!   native `rgateMod=3` middle-gate resistance:
+//!   junction diodes
+//!   (`dioMod=0/1/2`, explicit `gmin`), reverse-bias TAT
 //!   current, Vth chain (DVT/DSUB, `K1ox`/`K2ox`, DITS incl. v4.7
-//!   `DITS_SFT2`), poly depletion, `Vgsteff`, internal `Rds(V)`, `Abulk`,
-//!   MOBMOD 0/1/2, `Vdsat` (with `lambda` velocity overshoot and `vtl`
+//!   `DITS_SFT2`), poly depletion, `Vgsteff`, internal `Rds(V)` or external
+//!   nonlinear `Rd(V)`/`Rs(V)`, `Abulk`,
+//!   MOBMOD 0 through 6, `Vdsat` (with `lambda` velocity overshoot and `vtl`
 //!   source-end velocity limit), `Vdseff`, the Early stack
 //!   (`Vasat`/`VACLM`/`VADIBL`/`VADITS`/`VASCBE`), `Ids` with analytic
 //!   `gm`/`gds`/`gmbs`, the substrate current, and GIDL/GISL for both
 //!   `gidlMod` 0 and 1 — see [`eval`].
-//! - CAPMOD=2 (charge-thickness) intrinsic charges with the full
-//!   capacitance matrix, junction depletion charges, and the smoothed
-//!   overlap charges, plus the mode-dependent node-charge assembly.
+//! - CAPMOD=0/1/2 intrinsic charges with CVCHARGEMOD=0/1 where applicable,
+//!   the full capacitance matrix, junction depletion charges, CAPMOD=0
+//!   linear overlap charges, CAPMOD=1/2 smoothed overlap charges, and the
+//!   mode-dependent node-charge assembly.
 //!
 //! # What is intentionally not ported (typed errors, not silent fallbacks)
 //!
 //! Rejected at construction ([`Bsim4v8::new`]):
 //!
-//! - `rdsMod=1` (external S/D resistance nodes), `rgateMod=1/2/3` (gate
-//!   resistance network), `rbodyMod=1/2` (substrate network),
-//!   `trnqsMod`/`acnqsMod=1` (charge-deficit NQS).
-//! - `mobMod=3/4/5/6` (high-k / Synopsys variants).
-//! - `dioMod=0/2` (resistance-free / breakdown diode).
-//! - `igcMod`/`igbMod != 0` (gate tunneling currents).
-//! - `capMod=0/1` charge models (the default `capMod=2` is the ported one).
-//! - `mtrlMod=1` (non-silicon substrate) and `wpemod=1` (well proximity).
-//! - The stress model: instance `sa>0 && sb>0` (with `nf=1`, or `nf>1` and
-//!   `sd>0`, the exact b4temp.c activation test).
-//! - `geoMod != 0` unless all of AD/AS/PD/PS are given explicitly (only
-//!   the geoMod=0 variant of `BSIM4PAeffGeo` is ported).
+//! - invalid `rgateMod` and `rbodyMod` selector values. Transient NQS is
+//!   native for the supported source/drain, body, and gate-resistance
+//!   topologies, and it may coexist with AC NQS on the same model card.
 //!
-//! Rejected at charge-request time (DC is unaffected): `cvchargeMod=1`,
-//!   `xpart < 0` (intrinsic-charge suppression) is honored.
+//! AC charge-deficit NQS (`acnqsMod=1`) is native for `rbodyMod = 0/1/2`,
+//! `rdsMod = 0/1`, and `rgateMod = 0/1/2/3`.
+//!
+//! Rejected at charge-request time (DC is unaffected): unknown `cvchargeMod`
+//! selectors. The `capMod=0/1/2` charge paths are ported; after those
+//! selectors are validated,
+//! `xpart < 0` suppresses intrinsic channel charge as ngspice does.
 //!
 //! Noise selectors (`fnoiMod`/`tnoiMod`) and the SOA limits are accepted
 //! and stored — they do not affect the DC/charge load. ngspice-46's BSIM4
 //! parses an instance `dtemp` but never uses it; this port does the same
 //! (the device evaluates at the temperature the temp pass ran at).
+//! In noise analysis, `tnoiMod=0/1/2`, `fnoiMod=0/1`, gate-shot sources, and
+//! the `tnoiMod=1` source/drain series-noise conductance adjustment are
+//! emitted natively for the supported `rdsMod=0/1` topologies.
 //!
 //! # Integration seams
 //!
@@ -73,7 +81,7 @@ pub mod params;
 pub mod temp;
 
 pub use device::{Bsim4v8ChargeMatrix, Bsim4v8Device};
-pub use eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8Op};
+pub use eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8JunctionBias, Bsim4v8Op};
 pub use params::{Binned, Bsim4v8Model};
 pub use temp::{Bsim4v8Geometry, Bsim4v8InstTemp, Bsim4v8ModelTemp, Bsim4v8SizeDep, SizeDepCache};
 
@@ -159,79 +167,77 @@ impl Bsim4v8 {
         model: &Bsim4v8Model,
         geom: &Bsim4v8Geometry,
     ) -> Result<(), String> {
-        if model.rds_mod != 0 {
+        if model.rgate_mod > 3 {
             return Err(format!(
-                "BSIM4 '{name}': RDSMOD={} is not implemented (only RDSMOD=0)",
-                model.rds_mod
-            ));
-        }
-        if model.rgate_mod != 0 {
-            return Err(format!(
-                "BSIM4 '{name}': RGATEMOD={} is not implemented (only RGATEMOD=0)",
+                "BSIM4 '{name}': RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
                 model.rgate_mod
             ));
         }
-        if model.rbody_mod != 0 {
+        if model.rbody_mod > 2 {
             return Err(format!(
-                "BSIM4 '{name}': RBODYMOD={} is not implemented (only RBODYMOD=0)",
+                "BSIM4 '{name}': RBODYMOD={} is not implemented (only RBODYMOD=0, 1, or 2)",
                 model.rbody_mod
             ));
         }
-        if model.trnqs_mod != 0 || model.acnqs_mod != 0 {
-            return Err(format!(
-                "BSIM4 '{name}': TRNQSMOD/ACNQSMOD=1 is not implemented"
-            ));
+        if model.trnqs_mod != 0 {
+            if !matches!(model.rgate_mod, 0 | 1 | 2 | 3) {
+                return Err(format!(
+                    "BSIM4 '{name}': TRNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
+                    model.rgate_mod
+                ));
+            }
         }
-        if !(0..=2).contains(&model.mob_mod) {
+        if model.acnqs_mod != 0 {
+            if !matches!(model.rgate_mod, 0 | 1 | 2 | 3) {
+                return Err(format!(
+                    "BSIM4 '{name}': ACNQSMOD=1 with RGATEMOD={} is not implemented (only RGATEMOD=0, 1, 2, or 3)",
+                    model.rgate_mod
+                ));
+            }
+        }
+        if !(0..=6).contains(&model.mob_mod) {
             return Err(format!(
-                "BSIM4 '{name}': MOBMOD={} is not implemented (only 0, 1 or 2)",
+                "BSIM4 '{name}': MOBMOD={} is unsupported (supported selectors: 0 through 6)",
                 model.mob_mod
             ));
         }
-        if model.dio_mod != 1 {
+        // Stress model activation test of b4temp.c:1656.
+        let stress_active =
+            geom.sa > 0.0 && geom.sb > 0.0 && (geom.nf == 1.0 || (geom.nf > 1.0 && geom.sd > 0.0));
+        if stress_active {
+            if model.saref <= 0.0 {
+                return Err(format!(
+                    "BSIM4 '{name}': SAREF={} is not positive for active stress effect",
+                    model.saref
+                ));
+            }
+            if model.sbref <= 0.0 {
+                return Err(format!(
+                    "BSIM4 '{name}': SBREF={} is not positive for active stress effect",
+                    model.sbref
+                ));
+            }
+        }
+        let geo_mod = if geom.geo_mod_given {
+            geom.geo_mod
+        } else {
+            model.geo_mod
+        };
+        if !(0..=10).contains(&geo_mod) {
             return Err(format!(
-                "BSIM4 '{name}': DIOMOD={} is not implemented (only DIOMOD=1)",
-                model.dio_mod
+                "BSIM4 '{name}': GEOMOD={} is unsupported (supported selectors: 0 through 10)",
+                geo_mod
             ));
         }
-        if model.igc_mod != 0 || model.igb_mod != 0 {
+        let rgeo_mod = if geom.rgeo_mod_given || geom.rgeo_mod != 0 {
+            geom.rgeo_mod
+        } else {
+            model.rgeo_mod
+        };
+        if !(0..=8).contains(&rgeo_mod) {
             return Err(format!(
-                "BSIM4 '{name}': gate current IGCMOD={}/IGBMOD={} is not implemented",
-                model.igc_mod, model.igb_mod
-            ));
-        }
-        if model.cap_mod != 2 {
-            return Err(format!(
-                "BSIM4 '{name}': CAPMOD={} is not implemented (only CAPMOD=2)",
-                model.cap_mod
-            ));
-        }
-        if model.mtrl_mod != 0 {
-            return Err(format!(
-                "BSIM4 '{name}': MTRLMOD=1 is not implemented (only MTRLMOD=0)"
-            ));
-        }
-        if model.wpemod != 0 {
-            return Err(format!(
-                "BSIM4 '{name}': WPEMOD=1 (well proximity effect) is not implemented"
-            ));
-        }
-        // Stress model activation test of b4temp.c:1593.
-        if geom.sa > 0.0 && geom.sb > 0.0 && (geom.nf == 1.0 || (geom.nf > 1.0 && geom.sd > 0.0)) {
-            return Err(format!(
-                "BSIM4 '{name}': the stress effect model (SA/SB given) is not implemented"
-            ));
-        }
-        if model.geo_mod != 0
-            && !(geom.drain_area_given
-                && geom.source_area_given
-                && geom.drain_perimeter_given
-                && geom.source_perimeter_given)
-        {
-            return Err(format!(
-                "BSIM4 '{name}': GEOMOD={} without explicit AD/AS/PD/PS is not implemented \
-                 (only the GEOMOD=0 diffusion geometry)",
-                model.geo_mod
+                "BSIM4 '{name}': RGEOMOD={} is unsupported (supported selectors: 0 through 8)",
+                rgeo_mod
             ));
         }
         Ok(())
@@ -244,12 +250,35 @@ impl Bsim4v8 {
         gmin: Value,
         compute_charges: bool,
     ) -> Result<Bsim4v8Op, String> {
+        self.eval_with_junction_bias(bias, None, gmin, compute_charges)
+    }
+
+    pub fn eval_with_junction_bias(
+        &self,
+        bias: Bsim4v8Bias,
+        junction_bias: Option<Bsim4v8JunctionBias>,
+        gmin: Value,
+        compute_charges: bool,
+    ) -> Result<Bsim4v8Op, String> {
+        self.eval_with_junction_and_gate_mid_bias(bias, junction_bias, None, gmin, compute_charges)
+    }
+
+    pub fn eval_with_junction_and_gate_mid_bias(
+        &self,
+        bias: Bsim4v8Bias,
+        junction_bias: Option<Bsim4v8JunctionBias>,
+        gate_mid_vgs: Option<Value>,
+        gmin: Value,
+        compute_charges: bool,
+    ) -> Result<Bsim4v8Op, String> {
         eval::eval(
             &self.model,
             &self.model_temp,
             &self.size,
             &self.inst,
             bias,
+            junction_bias,
+            gate_mid_vgs,
             gmin,
             compute_charges,
         )
@@ -342,7 +371,13 @@ impl Bsim4v8 {
 /// that b4ld.c feeds into the convergence counter. The flag-less variant
 /// lives on [`Mosfet`] (`dev_pnjlim`); the BSIM4 load needs the flag, so
 /// the few lines are mirrored here with the check semantics intact.
-fn pnjlim(vnew: Value, vold: Value, vt: Value, vcrit: Value, icheck: &mut bool) -> Value {
+pub(super) fn pnjlim(
+    vnew: Value,
+    vold: Value,
+    vt: Value,
+    vcrit: Value,
+    icheck: &mut bool,
+) -> Value {
     if vnew > vcrit && (vnew - vold).abs() > vt + vt {
         *icheck = true;
         if vold > 0.0 {
