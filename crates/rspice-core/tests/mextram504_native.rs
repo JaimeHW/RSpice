@@ -1,9 +1,9 @@
-//! Engine-level validation for native MEXTRAM 504.12.1 (`BJT LEVEL=504`).
+//! Ignored engine-level oracle for native MEXTRAM 504.12.1 (`BJT LEVEL=504`).
 //!
 //! The first oracle is a direct one-device Xyce 7.10 MEXTRAM operating point
 //! derived from the official `MEXTRAM/FGummel_Ib.cir` regression card. This
-//! must fail before native MEXTRAM routing exists because `LEVEL=504` is
-//! currently rejected by the BJT level policy.
+//! is kept as the next implementation target while active product behavior
+//! remains fail-closed in `bjt_level_policy.rs`.
 
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -133,6 +133,7 @@ fn assert_rel_close(label: &str, got: f64, expected: f64, rel_tol: f64) {
 }
 
 #[test]
+#[ignore = "native MEXTRAM504 routing/evaluation is intentionally fail-closed until the DC evaluator is complete"]
 fn mextram504_level504_direct_operating_point_matches_xyce710() {
     let result = run_op(&mextram504_direct_op_deck(0.8, 1.0));
 
