@@ -818,6 +818,42 @@ mod tests {
     }
 
     #[test]
+    fn biases_apply_type_to_pnp_collapsed_collector_algebra() {
+        let model = Mextram504Model::from_params(
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            super::super::Mextram504Polarity::Pnp,
+        );
+
+        let biases = Mextram504Biases::from_probes(
+            &model,
+            &probe_fixture(-1.0),
+            Mextram504LimiterMemory::default(),
+            false,
+        );
+
+        assert_close(biases.vb2c1, 1.0);
+        assert_close(biases.vb2c2, 2.0);
+        assert_close(biases.vb2e1, -2.0);
+        assert_close(biases.vb1e1, -1.0);
+        assert_close(biases.vb1b2, 1.0);
+        assert_close(biases.vsc1, -32.0);
+        assert_close(biases.vc1c2, 1.0);
+        assert_close(biases.vee1, -25.0);
+        assert_close(biases.vbb1, -14.0);
+        assert_close(biases.vbe, 10.0);
+        assert_close(biases.vbc, -10.0);
+        assert_close(biases.vc4c1, 0.0);
+        assert_close(biases.vc3c4, 0.0);
+        assert_close(biases.vb1c4, 2.0);
+        assert_close(biases.vcc3, -2.0);
+        assert_close(biases.vbc3, -12.0);
+        assert_close(biases.vsc4, -32.0);
+        assert_close(biases.vsc3, -32.0);
+        assert!(!biases.limiter_applied);
+    }
+
+    #[test]
     fn biases_apply_xyce_trunc_ev_to_four_limited_probes_only() {
         let model = Mextram504Model::from_params(
             &std::collections::HashMap::new(),
@@ -850,6 +886,30 @@ mod tests {
     }
 
     #[test]
+    fn biases_leave_limiter_flag_clear_when_enabled_values_do_not_change() {
+        let model = Mextram504Model::from_params(
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            super::super::Mextram504Polarity::Npn,
+        );
+        let probes = probe_fixture(1.0);
+        let memory = Mextram504LimiterMemory {
+            vb2c1: probes.b2_c1,
+            vb2c2: probes.b2_c2,
+            vb1e1: probes.b1_e1,
+            vb1b2: probes.b1_b2,
+        };
+
+        let biases = Mextram504Biases::from_probes(&model, &probes, memory, true);
+
+        assert_close(biases.vb2c1, probes.b2_c1);
+        assert_close(biases.vb2c2, probes.b2_c2);
+        assert_close(biases.vb1e1, probes.b1_e1);
+        assert_close(biases.vb1b2, probes.b1_b2);
+        assert!(!biases.limiter_applied);
+    }
+
+    #[test]
     fn biases_select_xyce_distributed_collector_voltage_path() {
         let probes = probe_fixture(1.0);
         let model_params = std::collections::HashMap::from([
@@ -869,6 +929,11 @@ mod tests {
         );
         assert_close(full_biases.vc4c1, 6.0);
         assert_close(full_biases.vc3c4, -1.0);
+        assert_close(full_biases.vb1c4, -8.0);
+        assert_close(full_biases.vcc3, -3.0);
+        assert_close(full_biases.vbc3, 7.0);
+        assert_close(full_biases.vsc4, 26.0);
+        assert_close(full_biases.vsc3, 27.0);
 
         let extrinsic_only = Mextram504Model::from_params(
             &std::collections::HashMap::from([("RCBLX".to_string(), 3.0)]),
@@ -883,6 +948,11 @@ mod tests {
         );
         assert_close(extrinsic_biases.vc4c1, 0.0);
         assert_close(extrinsic_biases.vc3c4, 5.0);
+        assert_close(extrinsic_biases.vb1c4, -2.0);
+        assert_close(extrinsic_biases.vcc3, -3.0);
+        assert_close(extrinsic_biases.vbc3, 7.0);
+        assert_close(extrinsic_biases.vsc4, 32.0);
+        assert_close(extrinsic_biases.vsc3, 27.0);
 
         let intrinsic_only = Mextram504Model::from_params(
             &std::collections::HashMap::from([("RCBLI".to_string(), 4.0)]),
@@ -897,5 +967,10 @@ mod tests {
         );
         assert_close(intrinsic_biases.vc4c1, 6.0);
         assert_close(intrinsic_biases.vc3c4, 0.0);
+        assert_close(intrinsic_biases.vb1c4, -8.0);
+        assert_close(intrinsic_biases.vcc3, -4.0);
+        assert_close(intrinsic_biases.vbc3, 6.0);
+        assert_close(intrinsic_biases.vsc4, 26.0);
+        assert_close(intrinsic_biases.vsc3, 26.0);
     }
 }
