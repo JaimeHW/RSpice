@@ -74,8 +74,19 @@ impl Bjt {
         self.ikr = 0.0;
         self.qbm = 0.0;
         self.nkf = 0.5;
+        self.nkf_given = false;
         self.ibei_nominal = 0.0;
         self.ibci_nominal = 0.0;
+        self.vbbe_nominal = 0.0;
+        self.nbbe_nominal = 1.0;
+        self.ibbe_nominal = 1e-6;
+        self.vbbe = 0.0;
+        self.nbbe = 1.0;
+        self.ibbe = 1e-6;
+        self.ebbe = 1.0;
+        self.tvbbe1 = 0.0;
+        self.tvbbe2 = 0.0;
+        self.tnbbe = 0.0;
     }
 
     #[inline]
@@ -144,6 +155,16 @@ impl Bjt {
         self.ibci = self.ibci_nominal;
         self.ibcn = self.ibcn_nominal;
         self.wbe = 1.0;
+        self.vbbe_nominal = 0.0;
+        self.nbbe_nominal = 1.0;
+        self.ibbe_nominal = 1e-6;
+        self.vbbe = 0.0;
+        self.nbbe = 1.0;
+        self.ibbe = 1e-6;
+        self.ebbe = 1.0;
+        self.tvbbe1 = 0.0;
+        self.tvbbe2 = 0.0;
+        self.tnbbe = 0.0;
         self.nei = 1.0;
         self.nen = 2.0;
         self.nci = 1.0;
@@ -214,6 +235,7 @@ impl Bjt {
         self.tavc = 0.0;
         self.qbm = 0.0;
         self.nkf = 0.5;
+        self.nkf_given = false;
         self.xikf = 0.0;
         self.xrcx = 0.0;
         self.xrbx = 0.0;
@@ -477,6 +499,8 @@ impl Bjt {
         let nf_temp = self.nf_nominal * (1.0 + delta_t * self.tnf);
         let nr_temp = self.nr_nominal * (1.0 + delta_t * self.tnf);
         let avc2_temp = self.avc2_nominal * (1.0 + (temp - self.tnom) * self.tavc);
+        let vbbe_temp = self.vbbe_nominal * (1.0 + delta_t * (self.tvbbe1 + delta_t * self.tvbbe2));
+        let nbbe_temp = self.nbbe_nominal * (1.0 + delta_t * self.tnbbe);
         let ikf_temp = if self.ikf_nominal > 0.0 {
             self.ikf_nominal * ratio.powf(self.xikf)
         } else {
@@ -529,6 +553,20 @@ impl Bjt {
         self.iben = (iben_temp * scale).max(0.0);
         self.ibci = (ibci_temp * scale).max(0.0);
         self.ibcn = (ibcn_temp * scale).max(0.0);
+        self.vbbe = if vbbe_temp.is_finite() {
+            vbbe_temp
+        } else {
+            self.vbbe_nominal
+        };
+        self.nbbe = if nbbe_temp.is_finite() {
+            nbbe_temp.max(1e-12)
+        } else {
+            self.nbbe_nominal.max(1e-12)
+        };
+        self.ibbe = (self.ibbe_nominal * scale).max(0.0);
+        self.ebbe = (-self.vbbe / (self.nbbe * vt.max(1e-18)))
+            .clamp(-80.0, 80.0)
+            .exp();
         self.isp = (isp_temp * scale).max(0.0);
         self.ibeip = (ibeip_temp * scale).max(0.0);
         self.ibenp = (ibenp_temp * scale).max(0.0);
@@ -1067,7 +1105,42 @@ impl Bjt {
         if let Some(&v) = params.get("WBE")
             && v.is_finite()
         {
-            self.wbe = v.clamp(0.0, 1.0);
+            self.wbe = v;
+        }
+        if let Some(&v) = params.get("VBBE")
+            && v.is_finite()
+        {
+            self.vbbe_nominal = v.max(0.0);
+            self.vbbe = self.vbbe_nominal;
+        }
+        if let Some(&v) = params.get("NBBE")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.nbbe_nominal = v;
+            self.nbbe = v;
+        }
+        if let Some(&v) = params.get("IBBE")
+            && v.is_finite()
+            && v > 0.0
+        {
+            self.ibbe_nominal = v;
+            self.ibbe = v;
+        }
+        if let Some(&v) = params.get("TVBBE1")
+            && v.is_finite()
+        {
+            self.tvbbe1 = v;
+        }
+        if let Some(&v) = params.get("TVBBE2")
+            && v.is_finite()
+        {
+            self.tvbbe2 = v;
+        }
+        if let Some(&v) = params.get("TNBBE")
+            && v.is_finite()
+        {
+            self.tnbbe = v;
         }
         if let Some(&v) = params.get("FC")
             && v.is_finite()
@@ -1134,11 +1207,19 @@ impl Bjt {
         {
             self.qbm = v;
         }
-        if let Some(&v) = params.get("NKF")
+        if let Some(v) = params
+            .get("NK")
+            .copied()
+            .or_else(|| params.get("NKF").copied())
             && v.is_finite()
             && v > 0.0
         {
-            self.nkf = v;
+            self.nkf = if self.charge_model == BjtChargeModel::LegacyGummelPoon {
+                v.min(1.0)
+            } else {
+                v
+            };
+            self.nkf_given = true;
         }
         if let Some(v) = params
             .get("ISRR")

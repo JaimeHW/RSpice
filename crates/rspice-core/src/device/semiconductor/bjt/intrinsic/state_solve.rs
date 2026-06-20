@@ -248,10 +248,12 @@ impl Bjt {
         vbp: Value,
         vsi: Value,
     ) -> EvaluatedBjtState {
-        let (linearized, intrinsic) = self.linearize_currents_with_branches(vbi - vei, vbi - vci);
+        let (linearized, intrinsic) =
+            self.linearize_currents_with_branches(vbi - vei, vbx - vei, vbi - vci);
         EvaluatedBjtState {
             linearized,
             ibe: intrinsic.ibe,
+            ibex: intrinsic.ibex,
             ibc: intrinsic.ibc,
             iciei: intrinsic.iciei,
             ircx: self.ircx_branch(vc, vcx),
@@ -315,6 +317,7 @@ impl Bjt {
         evaluated.linearized.dib_dvrth = (plus.linearized.ib - minus.linearized.ib) / denom;
         evaluated.linearized.dqb_dvrth = (plus.linearized.qb - minus.linearized.qb) / denom;
         Self::apply_thermal_derivative(&mut evaluated.ibe, plus.ibe, minus.ibe, denom);
+        Self::apply_thermal_derivative(&mut evaluated.ibex, plus.ibex, minus.ibex, denom);
         Self::apply_thermal_derivative(&mut evaluated.ibc, plus.ibc, minus.ibc, denom);
         Self::apply_thermal_derivative(&mut evaluated.iciei, plus.iciei, minus.iciei, denom);
         Self::apply_thermal_derivative(&mut evaluated.ircx, plus.ircx, minus.ircx, denom);
@@ -724,7 +727,13 @@ impl Bjt {
         if has_rbx {
             let row = Self::sub_branches(
                 Self::sub_branches(
-                    Self::sub_branches(eval.irbx, if has_rbi { eval.irbi } else { base_internal }),
+                    Self::sub_branches(
+                        Self::sub_branches(
+                            eval.irbx,
+                            if has_rbi { eval.irbi } else { base_internal },
+                        ),
+                        eval.ibex,
+                    ),
                     eval.ibep,
                 ),
                 eval.iccp,
@@ -747,7 +756,7 @@ impl Bjt {
         }
 
         if has_re {
-            let row = Self::sub_branches(eval.ire, emitter_internal);
+            let row = Self::sub_branches(Self::add_branches(eval.ire, eval.ibex), emitter_internal);
             residual[IDX_VEI] = row.current;
             jacobian[IDX_VEI] = row.d_internal;
         } else {
@@ -900,7 +909,13 @@ impl Bjt {
         if has_rbx {
             let row = Self::sub_branches(
                 Self::sub_branches(
-                    Self::sub_branches(eval.irbx, if has_rbi { eval.irbi } else { base_internal }),
+                    Self::sub_branches(
+                        Self::sub_branches(
+                            eval.irbx,
+                            if has_rbi { eval.irbi } else { base_internal },
+                        ),
+                        eval.ibex,
+                    ),
                     eval.ibep,
                 ),
                 eval.iccp,
@@ -932,7 +947,7 @@ impl Bjt {
         }
 
         if has_re {
-            let row = Self::sub_branches(eval.ire, emitter_internal);
+            let row = Self::sub_branches(Self::add_branches(eval.ire, eval.ibex), emitter_internal);
             assign_row(
                 IDX_VEI,
                 row,

@@ -44,16 +44,25 @@ impl Bjt {
             let q2 = inv_rolloff_f * ifi + inv_rolloff_r * iri;
             let dq2_dvbe_eff = inv_rolloff_f * gfi;
             let dq2_dvbc_eff = inv_rolloff_r * gri;
-            let sqrt_arg = (1.0 + 4.0 * q2).max(0.0);
-            let sqrt_term = if sqrt_arg > 0.0 {
-                sqrt_arg.sqrt().max(1e-18)
+            let rolloff_arg = (1.0 + 4.0 * q2).max(0.0);
+            let (rolloff_term, drolloff_dq2) = if self.nkf_given {
+                let nkf = self.nkf.clamp(1e-12, 1.0);
+                if rolloff_arg > 0.0 {
+                    let term = rolloff_arg.powf(nkf).max(1e-18);
+                    (term, 4.0 * nkf * term / rolloff_arg)
+                } else {
+                    (1.0, 0.0)
+                }
+            } else if rolloff_arg > 0.0 {
+                let term = rolloff_arg.sqrt().max(1e-18);
+                (term, 2.0 / term)
             } else {
-                1.0
+                (1.0, 0.0)
             };
             (
-                (0.5 * q1 * (1.0 + sqrt_term)).max(1e-12),
-                0.5 * (1.0 + sqrt_term) * dq1_dvbe_eff + q1 * dq2_dvbe_eff / sqrt_term,
-                0.5 * (1.0 + sqrt_term) * dq1_dvbc_eff + q1 * dq2_dvbc_eff / sqrt_term,
+                (0.5 * q1 * (1.0 + rolloff_term)).max(1e-12),
+                0.5 * (1.0 + rolloff_term) * dq1_dvbe_eff + 0.5 * q1 * drolloff_dq2 * dq2_dvbe_eff,
+                0.5 * (1.0 + rolloff_term) * dq1_dvbc_eff + 0.5 * q1 * drolloff_dq2 * dq2_dvbc_eff,
             )
         };
 
@@ -383,13 +392,52 @@ impl Bjt {
         }
     }
 
+    #[inline]
+    fn vbic13_reverse_be_exp_lina(value: Value, max_value: Value, slope: Value) -> (Value, Value) {
+        if !value.is_finite() || !max_value.is_finite() || !slope.is_finite() || slope <= 0.0 {
+            return (0.0, 0.0);
+        }
+
+        if value < max_value {
+            let arg = (value * slope).clamp(-80.0, 80.0);
+            let exp_value = arg.exp();
+            return (exp_value, slope * exp_value);
+        }
+
+        let limit_arg = (max_value * slope).clamp(-80.0, 80.0);
+        let limit_exp = limit_arg.exp();
+        let continuation = 1.0 + (value - max_value) * slope;
+        (limit_exp * continuation, limit_exp * slope)
+    }
+
+    fn vbic13_reverse_be_breakdown_current(&self, vbe_eff: Value) -> (Value, Value) {
+        if self.charge_model != BjtChargeModel::Vbic
+            || self.vbbe_nominal <= 0.0
+            || self.ibbe <= 0.0
+            || self.nbbe <= 0.0
+            || self.vt <= 0.0
+        {
+            return (0.0, 0.0);
+        }
+
+        let denom = self.nbbe * self.vt.max(1e-18);
+        let afac = 1.0 / denom;
+        let bias = -self.vbbe - vbe_eff;
+        let model_ibbe = self.ibbe_nominal.max(1e-300);
+        let max_value = denom * (self.ebbe.max(0.0) + 1.0 / model_ibbe).ln();
+        let (expx, dexpx_dbias) = Self::vbic13_reverse_be_exp_lina(bias, max_value, afac);
+        (-self.ibbe * (expx - self.ebbe), self.ibbe * dexpx_dbias)
+    }
+
     pub(in crate::device::semiconductor::bjt) fn linearize_currents_with_branches(
         &self,
         vbe: Value,
+        vbex: Value,
         vbc: Value,
     ) -> (BjtLinearization, BjtIntrinsicBranches) {
         let p = self.polarity();
         let vbe_eff = p * vbe;
+        let vbex_eff = p * vbex;
         let vbc_eff = p * vbc;
         let transport = self.transport_charge_state(vbe_eff, vbc_eff);
         let bc = self.base_collector_current_state(transport, vbc_eff);
@@ -399,16 +447,52 @@ impl Bjt {
         // rows nonsingular at saturation boundaries, and gmin stepping ramps
         // them through the device equations, not just the matrix diagonal.
         let gmin = self.junction_gmin;
-        let ib_be = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
-            + self.diode_current_with_is(self.iben, vbe_eff, self.nen)
-            + gmin * vbe_eff;
-        let dibe_dvbe = self.gbe(vbe) + gmin;
+        let (ibe_breakdown, dibe_breakdown_dvbe) =
+            self.vbic13_reverse_be_breakdown_current(vbe_eff);
+        let wbe = if self.charge_model == BjtChargeModel::Vbic {
+            self.wbe
+        } else {
+            1.0
+        };
+        let ibe_normal = self.diode_current_with_is(self.ibei, vbe_eff, self.nei)
+            + self.diode_current_with_is(self.iben, vbe_eff, self.nen);
+        let dibe_normal_dvbe = self.diode_conductance_with_is(self.ibei, vbe_eff, self.nei)
+            + self.diode_conductance_with_is(self.iben, vbe_eff, self.nen);
+        let ibex_normal = if self.charge_model == BjtChargeModel::Vbic {
+            (1.0 - wbe)
+                * (self.diode_current_with_is(self.ibei, vbex_eff, self.nei)
+                    + self.diode_current_with_is(self.iben, vbex_eff, self.nen))
+        } else {
+            0.0
+        };
+        let dibex_normal_dvbex = if self.charge_model == BjtChargeModel::Vbic {
+            (1.0 - wbe)
+                * (self.diode_conductance_with_is(self.ibei, vbex_eff, self.nei)
+                    + self.diode_conductance_with_is(self.iben, vbex_eff, self.nen))
+        } else {
+            0.0
+        };
+        let ibe_intrinsic_breakdown = wbe * ibe_breakdown;
+        let dibe_intrinsic_breakdown_dvbe = wbe * dibe_breakdown_dvbe;
+        let ibex_breakdown = (1.0 - wbe) * ibe_breakdown;
+        let dibex_breakdown_dvbe = (1.0 - wbe) * dibe_breakdown_dvbe;
+        let ib_be = wbe * ibe_normal + ibe_intrinsic_breakdown + gmin * vbe_eff;
+        let dibe_dvbe = wbe * dibe_normal_dvbe + dibe_intrinsic_breakdown_dvbe + gmin;
         let ibc = bc.ibc + gmin * vbc_eff;
         let dibc_dvbc = bc.dibc_dvbc_eff + gmin;
         let iciei = transport.itzf - transport.itzr;
         let diciei_dvbe = transport.ditzf_dvbe_eff - transport.ditzr_dvbe_eff;
         let diciei_dvbc = transport.ditzf_dvbc_eff - transport.ditzr_dvbc_eff;
         let ibe_branch = Self::branch_from_vbe_vbc(p * ib_be, dibe_dvbe, 0.0);
+        let mut ibex_branch =
+            Self::branch_from_vbe_vbc(p * ibex_breakdown, dibex_breakdown_dvbe, 0.0);
+        if self.charge_model == BjtChargeModel::Vbic {
+            let ibex_by_vbex = ibex_normal + gmin * vbex_eff;
+            let dibex_by_vbex = dibex_normal_dvbex + gmin;
+            ibex_branch.current += p * ibex_by_vbex;
+            ibex_branch.d_internal[IDX_VBX] += dibex_by_vbex;
+            ibex_branch.d_internal[IDX_VEI] -= dibex_by_vbex;
+        }
         let ibc_branch = Self::branch_from_vbe_vbc(p * ibc, bc.dibc_dvbe_eff, dibc_dvbc);
         let iciei_branch = Self::branch_from_vbe_vbc(p * iciei, diciei_dvbe, diciei_dvbc);
         let linearized = BjtLinearization {
@@ -432,6 +516,7 @@ impl Bjt {
             linearized,
             BjtIntrinsicBranches {
                 ibe: ibe_branch,
+                ibex: ibex_branch,
                 ibc: ibc_branch,
                 iciei: iciei_branch,
             },

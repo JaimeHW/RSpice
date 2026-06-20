@@ -289,7 +289,7 @@ impl Bjt {
         let [_, vci, vbx, vbi, vei, vbp, vsi, vrth, vxf1, vxf2] = reduction.internal_voltages;
         let [vc, vb, ve, _vs] = reduction.external_voltages;
         let p = self.polarity();
-        let wbe = self.wbe.clamp(0.0, 1.0);
+        let wbe = self.wbe;
         let transport = inputs.transport;
         let parasitic = inputs.parasitic;
         let epi = inputs.epi;
@@ -347,7 +347,7 @@ impl Bjt {
         qbe.d_internal[IDX_VCI] = -p * dqbe_dvbc_eff;
         branches[0] = qbe;
 
-        if self.cje > 0.0 && wbe < 1.0 {
+        if self.cje > 0.0 && wbe != 1.0 {
             let mut qbex = BjtChargeBranch {
                 pos_internal: Some(IDX_VBX),
                 neg_internal: Some(IDX_VEI),

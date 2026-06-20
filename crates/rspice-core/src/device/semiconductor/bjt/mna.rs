@@ -27,8 +27,8 @@ use super::*;
 pub(crate) struct VbicNoiseOperatingModel {
     /// `(label, node+, node−, conductance)` for rcx/rci/rbx/rbi/re/rbp.
     pub thermal: [(&'static str, NodeId, NodeId, Value); 6],
-    /// `(label, node+, node−, branch current)` for iciei/ibe/ibep.
-    pub shot: [(&'static str, NodeId, NodeId, Value); 3],
+    /// `(label, node+, node-, branch current)` for iciei/ibe/ibex/ibep.
+    pub shot: [(&'static str, NodeId, NodeId, Value); 4],
     /// Intrinsic B-E current and node pair for the KFN flicker source.
     pub flicker_ibe: (NodeId, NodeId, Value),
     /// Parasitic B-E current and node pair for the second flicker source.
@@ -96,6 +96,7 @@ impl Bjt {
             shot: [
                 ("ic", self.node_ci, self.node_ei, eval.iciei.current),
                 ("ibe", self.node_bi, self.node_ei, eval.ibe.current),
+                ("ibex", self.node_bx, self.node_ei, eval.ibex.current),
                 ("ibep", self.node_bx, self.node_bp, eval.ibep.current),
             ],
             flicker_ibe: (self.node_bi, self.node_ei, eval.ibe.current),

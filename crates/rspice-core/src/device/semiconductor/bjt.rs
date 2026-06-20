@@ -121,6 +121,7 @@ struct BaseCollectorCurrentState {
 #[derive(Debug, Clone, Copy)]
 struct BjtIntrinsicBranches {
     ibe: BranchLinearization,
+    ibex: BranchLinearization,
     ibc: BranchLinearization,
     iciei: BranchLinearization,
 }
@@ -178,7 +179,7 @@ struct BranchLinearization {
 pub(crate) const BJT_DYNAMIC_CHARGE_COUNT: usize = 11;
 pub(crate) const BJT_INTERNAL_STATE_DIM: usize = DYNAMIC_INTERNAL_DIM;
 pub(crate) const BJT_EXTERNAL_STATE_DIM: usize = EXTERNAL_DIM;
-pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 9;
+pub(crate) const VBIC_TRANSIENT_CONVERGENCE_BRANCH_COUNT: usize = 10;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_VOLTAGE_COUNT: usize = 9;
 pub(crate) const VBIC_TRANSIENT_CONVERGENCE_ICIEI_INDEX: usize = 2;
 
@@ -409,6 +410,7 @@ pub(crate) struct BjtChargeSnapshot {
 struct EvaluatedBjtState {
     linearized: BjtLinearization,
     ibe: BranchLinearization,
+    ibex: BranchLinearization,
     ibc: BranchLinearization,
     iciei: BranchLinearization,
     ircx: BranchLinearization,
@@ -673,6 +675,20 @@ pub struct Bjt {
     pub ajs: Value,
     /// Portion of intrinsic B-E depletion charge assigned to Vbei (WBE)
     pub wbe: Value,
+    /// VBIC13 reverse B-E breakdown voltage at active temperature (VBBE_T).
+    pub vbbe: Value,
+    /// VBIC13 reverse B-E breakdown emission coefficient at active temperature (NBBE_T).
+    pub nbbe: Value,
+    /// Active VBIC13 reverse B-E breakdown current after instance scaling (IBBE).
+    pub ibbe: Value,
+    /// VBIC13 reverse B-E breakdown equilibrium exponential, recomputed from VBBE/NBBE/Vt.
+    pub ebbe: Value,
+    /// First-order temperature coefficient for VBBE (TVBBE1).
+    pub tvbbe1: Value,
+    /// Second-order temperature coefficient for VBBE (TVBBE2).
+    pub tvbbe2: Value,
+    /// Temperature coefficient for NBBE (TNBBE).
+    pub tnbbe: Value,
     /// Circuit-level junction GMIN (ngspice `CKTgmin`): every nonlinear
     /// branch carries a `gmin` parallel in ngspice's bjt/vbic loads, and
     /// gmin stepping ramps this value through the device equations, not
@@ -712,6 +728,8 @@ pub struct Bjt {
     pub qbm: Value,
     /// High-current beta roll-off exponent (NKF)
     pub nkf: Value,
+    /// Whether NK/NKF was explicitly provided on the model card.
+    nkf_given: bool,
     /// Reverse transport scale factor (ISRR in VBIC)
     pub isrr: Value,
     /// Parasitic transport saturation current (ISP)
@@ -828,6 +846,12 @@ pub struct Bjt {
     ibci_nominal: Value,
     /// Nominal non-ideal base-collector saturation current before scaling.
     ibcn_nominal: Value,
+    /// Nominal VBIC13 reverse B-E breakdown voltage before temperature scaling.
+    vbbe_nominal: Value,
+    /// Nominal VBIC13 reverse B-E breakdown emission coefficient before temperature scaling.
+    nbbe_nominal: Value,
+    /// Nominal VBIC13 reverse B-E breakdown current before instance scaling.
+    ibbe_nominal: Value,
     /// Nominal parasitic transport saturation current before scaling.
     isp_nominal: Value,
     /// Nominal ideal parasitic B-E saturation current before scaling.
@@ -931,7 +955,7 @@ pub struct Bjt {
 }
 
 impl Bjt {
-    const VBIC_CONVERGENCE_BRANCH_COUNT: usize = 9;
+    const VBIC_CONVERGENCE_BRANCH_COUNT: usize = 10;
     const THERMAL_VARIANT_CACHE_CAPACITY: usize = 4;
 
     /// Create a new NPN BJT with default 2N2222 parameters
@@ -1051,6 +1075,13 @@ impl Bjt {
             ms: 0.33,
             ajs: -0.5,
             wbe: 1.0,
+            vbbe: 0.0,
+            nbbe: 1.0,
+            ibbe: 1e-6,
+            ebbe: 1.0,
+            tvbbe1: 0.0,
+            tvbbe2: 0.0,
+            tnbbe: 0.0,
             junction_gmin: 0.0,
             ajc: -0.5,
             mjc: 0.33, // B-C grading coefficient
@@ -1069,6 +1100,7 @@ impl Bjt {
             ikr: 0.0,
             qbm: 0.0,
             nkf: 0.5,
+            nkf_given: false,
             isrr: 1.0,
             isp: 0.0,
             wsp: 1.0,
@@ -1126,6 +1158,9 @@ impl Bjt {
             iben_nominal: 0.0,
             ibci_nominal: 1e-14,
             ibcn_nominal: 0.0,
+            vbbe_nominal: 0.0,
+            nbbe_nominal: 1.0,
+            ibbe_nominal: 1e-6,
             isp_nominal: 0.0,
             ibeip_nominal: 0.0,
             ibenp_nominal: 0.0,
@@ -1397,7 +1432,9 @@ impl Bjt {
             .copied()
             .filter(|level| level.is_finite())
         {
-            return level >= 4.0;
+            return [4.0, 11.0, 12.0]
+                .iter()
+                .any(|expected| (level - expected).abs() <= 1e-9);
         }
 
         [
@@ -1405,7 +1442,8 @@ impl Bjt {
             "CJCP", "AJE", "AJC", "ISP", "WSP", "NFP", "IKP", "IBEIP", "IBENP", "IBCIP", "IBCNP",
             "NCIP", "NCNP", "XRE", "XRBI", "XRCI", "XRS", "XVO", "XRBP", "TNF", "XIKF", "XRCX",
             "XRBX", "EAIS", "EANS", "EAP", "CBEO", "CBCO", "QCO", "PS", "MS", "AJS", "WBE", "QTF",
-            "XTF", "VTF", "ITF", "CCSO", "QBM", "NKF", "TD", "RTH", "CTH", "SELFT",
+            "VBBE", "NBBE", "IBBE", "TVBBE1", "TVBBE2", "TNBBE", "EBBE", "XTF", "VTF", "ITF",
+            "CCSO", "QBM", "TD", "RTH", "CTH", "SELFT",
         ]
         .iter()
         .any(|key| params.contains_key(*key))

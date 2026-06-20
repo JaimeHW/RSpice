@@ -368,7 +368,13 @@ impl Bjt {
         if has_rbx {
             let row = Self::sub_branches(
                 Self::sub_branches(
-                    Self::sub_branches(eval.irbx, if has_rbi { eval.irbi } else { base_internal }),
+                    Self::sub_branches(
+                        Self::sub_branches(
+                            eval.irbx,
+                            if has_rbi { eval.irbi } else { base_internal },
+                        ),
+                        eval.ibex,
+                    ),
                     eval.ibep,
                 ),
                 eval.iccp,
@@ -393,7 +399,7 @@ impl Bjt {
         }
 
         if has_re {
-            let row = Self::sub_branches(eval.ire, emitter_internal);
+            let row = Self::sub_branches(Self::add_branches(eval.ire, eval.ibex), emitter_internal);
             for idx in 0..INTERNAL_DIM {
                 jacobian[IDX_VEI][idx] = row.d_internal[idx];
             }
@@ -474,11 +480,14 @@ impl Bjt {
         } else {
             Self::add_branches(
                 Self::add_branches(
-                    if Self::series_active(self.rbi) {
-                        eval.irbi
-                    } else {
-                        base_internal
-                    },
+                    Self::add_branches(
+                        if Self::series_active(self.rbi) {
+                            eval.irbi
+                        } else {
+                            base_internal
+                        },
+                        eval.ibex,
+                    ),
                     eval.ibep,
                 ),
                 eval.iccp,
@@ -487,7 +496,7 @@ impl Bjt {
         let emitter = if Self::series_active(self.re) {
             eval.ire
         } else {
-            emitter_internal
+            Self::sub_branches(emitter_internal, eval.ibex)
         };
         let substrate = if Self::series_active(self.rs) {
             eval.irs
@@ -540,6 +549,13 @@ impl Bjt {
             eval.ibe,
             vbi - vei,
             [0.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
+            zero_external,
+        );
+        add_power(
+            &mut power,
+            eval.ibex,
+            vbx - vei,
+            [0.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0],
             zero_external,
         );
         add_power(
@@ -748,7 +764,7 @@ impl Bjt {
         let eval = self.evaluate_state(0.0, 0.0, 0.0, 0.0, vcx, vci, vbx, vbi, vei, vbp, vsi, vrth);
         [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
-            eval.iccp,
+            eval.iccp, eval.ibex,
         ]
     }
 
@@ -771,7 +787,7 @@ impl Bjt {
 
         let static_branches = [
             eval.ibe, eval.ibep, eval.iciei, eval.ibc, eval.irci, eval.irbi, eval.irbp, eval.ibcp,
-            eval.iccp,
+            eval.iccp, eval.ibex,
         ];
         for (branch_idx, branch) in static_branches.iter().enumerate() {
             currents[branch_idx] = branch.current;
@@ -978,15 +994,6 @@ impl Bjt {
                 matrix.stamp(nodes[row_idx], nodes[col_idx], rows[row_idx][col_idx]);
             }
         }
-    }
-
-    /// Get base-emitter junction conductance
-    /// Includes minimum conductance floor for numerical stability
-    pub(super) fn gbe(&self, vbe: Value) -> Value {
-        let vp = self.polarity() * vbe;
-        let g = self.diode_conductance_with_is(self.ibei, vp, self.nei)
-            + self.diode_conductance_with_is(self.iben, vp, self.nen);
-        g.max(1e-15) // Minimum floor prevents singular matrix
     }
 
     /// Junction voltage limiting (Nagel's algorithm from SPICE)

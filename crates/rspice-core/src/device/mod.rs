@@ -48,7 +48,10 @@ pub use passive::{
     Capacitor, CoupledInductorPair, Inductor, InductorCoupling, MultiWindingTransformer, Resistor,
     SaturableInductor,
 };
-pub use semiconductor::{Bjt, BjtType, Diode};
+pub use semiconductor::{
+    Bjt, BjtType, Diode, Mextram504, Mextram504Model, Mextram504Nodes, Mextram504Op,
+    Mextram504Polarity,
+};
 
 // Re-export from root-level modules
 pub use behavioral::{BehavioralCurrentSource, BehavioralSources, BehavioralVoltageSource};
