@@ -70,6 +70,7 @@ impl Engine {
         jfet_history: &mut JfetTransientHistory,
         diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
+        vdmos_history: &mut VdmosTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
         bsim3_history: &mut Bsim3TransientHistory,
         bsim4_history: &mut Bsim4TransientHistory,
@@ -111,6 +112,9 @@ impl Engine {
         *mosfet_history = Self::initialize_mosfet_history(circuit, solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
+        *vdmos_history = Self::initialize_vdmos_history(circuit, solution);
+        vdmos_history.accepted_dt_prev = hinted_max_step;
+        vdmos_history.accepted_dt_prev_prev = hinted_max_step;
         *b3soi_history = Self::initialize_b3soi_history(circuit, solution);
         *bsim3_history = Self::initialize_bsim3_history(circuit, solution);
         bsim3_history.accepted_dt_prev = hinted_max_step;
@@ -255,7 +259,11 @@ impl Engine {
             vds_prev_prev: Vec::with_capacity(n),
             qds_prev: Vec::with_capacity(n),
             qds_prev_prev: Vec::with_capacity(n),
+            qds_prev_prev_prev: Vec::with_capacity(n),
             cqds_prev: Vec::with_capacity(n),
+            jfet2_vgstrap_prev: Vec::with_capacity(n),
+            jfet2_vgdtrap_prev: Vec::with_capacity(n),
+            jfet2_power_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
@@ -263,12 +271,28 @@ impl Engine {
         for jfet in &circuit.jfets {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, solution);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, solution);
-            let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let jfet2_charge = jfet.analytic_gate_charge_state(
+                vgs_eval,
+                vgd_eval,
+                jfet.analysis_temperature(),
+                None,
+            );
+            let (cgs, cgd) = jfet2_charge
+                .map(|charge| (charge.cgs, charge.cgd))
+                .unwrap_or_else(|| {
+                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
+                });
             let cds = jfet.transient_drain_source_capacitance();
             let vds_charge = vgs_eval - vgd_eval;
-            let qgs = cgs.max(0.0) * vgs_charge;
-            let qgd = cgd.max(0.0) * vgd_charge;
+            let qgs = jfet2_charge
+                .map(|charge| charge.qgs)
+                .unwrap_or_else(|| cgs.max(0.0) * vgs_charge);
+            let qgd = jfet2_charge
+                .map(|charge| charge.qgd)
+                .unwrap_or_else(|| cgd.max(0.0) * vgd_charge);
             let qds = cds.max(0.0) * vds_charge;
+            let (_, _, power) =
+                jfet.jfet2_next_transient_memory(vgs_eval, vgd_eval, vgs_eval, vgd_eval, 0.0, 0.0);
             history.vgs_prev.push(vgs_charge);
             history.vgs_prev_prev.push(vgs_charge);
             history.qgs_prev.push(qgs);
@@ -285,10 +309,32 @@ impl Engine {
             history.vds_prev_prev.push(vds_charge);
             history.qds_prev.push(qds);
             history.qds_prev_prev.push(qds);
+            history.qds_prev_prev_prev.push(qds);
             history.cqds_prev.push(0.0);
+            history.jfet2_vgstrap_prev.push(vgs_eval);
+            history.jfet2_vgdtrap_prev.push(vgd_eval);
+            history.jfet2_power_prev.push(power);
         }
 
         history
+    }
+
+    #[inline]
+    pub(super) fn refresh_jfet2_transient_linearizations(
+        circuit: &mut crate::circuit::Circuit,
+        solution: &[Value],
+        dt: Value,
+        history: &JfetTransientHistory,
+    ) {
+        for (idx, jfet) in circuit.jfets.iter_mut().enumerate() {
+            jfet.refresh_jfet2_transient_operating_terms(
+                solution,
+                history.jfet2_vgstrap_prev[idx],
+                history.jfet2_vgdtrap_prev[idx],
+                history.jfet2_power_prev[idx],
+                dt,
+            );
+        }
     }
 
     pub(super) fn initialize_diode_history(
@@ -411,6 +457,121 @@ impl Engine {
             history.qbd_prev.push(qbd);
             history.qbd_prev_prev.push(qbd);
             history.cqbd_prev.push(0.0);
+        }
+
+        history
+    }
+
+    #[inline]
+    pub(super) fn initialize_vdmos_history(
+        circuit: &crate::circuit::Circuit,
+        solution: &[Value],
+    ) -> VdmosTransientHistory {
+        let n = circuit.vdmoses.len();
+        let mut history = VdmosTransientHistory {
+            vgs_prev: Vec::with_capacity(n),
+            vgs_prev_prev: Vec::with_capacity(n),
+            qgs_prev: Vec::with_capacity(n),
+            qgs_prev_prev: Vec::with_capacity(n),
+            qgs_prev_prev_prev: Vec::with_capacity(n),
+            cqgs_prev: Vec::with_capacity(n),
+            vgd_prev: Vec::with_capacity(n),
+            vgd_prev_prev: Vec::with_capacity(n),
+            qgd_prev: Vec::with_capacity(n),
+            qgd_prev_prev: Vec::with_capacity(n),
+            qgd_prev_prev_prev: Vec::with_capacity(n),
+            cqgd_prev: Vec::with_capacity(n),
+            vgb_prev: Vec::with_capacity(n),
+            vgb_prev_prev: Vec::with_capacity(n),
+            qgb_prev: Vec::with_capacity(n),
+            qgb_prev_prev: Vec::with_capacity(n),
+            qgb_prev_prev_prev: Vec::with_capacity(n),
+            cqgb_prev: Vec::with_capacity(n),
+            vds_prev: Vec::with_capacity(n),
+            vds_prev_prev: Vec::with_capacity(n),
+            qds_prev: Vec::with_capacity(n),
+            qds_prev_prev: Vec::with_capacity(n),
+            qds_prev_prev_prev: Vec::with_capacity(n),
+            cqds_prev: Vec::with_capacity(n),
+            vbs_prev: Vec::with_capacity(n),
+            vbs_prev_prev: Vec::with_capacity(n),
+            qbs_prev: Vec::with_capacity(n),
+            qbs_prev_prev: Vec::with_capacity(n),
+            qbs_prev_prev_prev: Vec::with_capacity(n),
+            cqbs_prev: Vec::with_capacity(n),
+            vbd_prev: Vec::with_capacity(n),
+            vbd_prev_prev: Vec::with_capacity(n),
+            qbd_prev: Vec::with_capacity(n),
+            qbd_prev_prev: Vec::with_capacity(n),
+            qbd_prev_prev_prev: Vec::with_capacity(n),
+            cqbd_prev: Vec::with_capacity(n),
+            vd1_prev: Vec::with_capacity(n),
+            vd1_prev_prev: Vec::with_capacity(n),
+            qd1_prev: Vec::with_capacity(n),
+            qd1_prev_prev: Vec::with_capacity(n),
+            qd1_prev_prev_prev: Vec::with_capacity(n),
+            cqd1_prev: Vec::with_capacity(n),
+            accepted_dt_prev: 0.0,
+            accepted_dt_prev_prev: 0.0,
+        };
+
+        for vdmos in &circuit.vdmoses.devices {
+            let (vgs, vgd, vgb, vds) = vdmos.transient_charge_branch_voltages_at(solution);
+            let vd1 = vdmos.d1_charge_branch_voltage_at(solution);
+            let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(solution);
+            let (cgs, cgd, cds) = vdmos.capacitances(vgs, vds);
+            let cgb = vdmos.gate_bulk_capacitance();
+            let (qbs, _) = vdmos.body_source_transient_charge_and_capacitance_at(vbs);
+            let (qbd, _) = vdmos.body_drain_transient_charge_and_capacitance_at(vbd);
+            let (qd1, _) = vdmos.d1_charge_and_capacitance_at(vd1);
+            history.vgs_prev.push(vgs);
+            history.vgs_prev_prev.push(vgs);
+            history.qgs_prev.push(cgs.max(0.0) * vgs);
+            history.qgs_prev_prev.push(cgs.max(0.0) * vgs);
+            history.qgs_prev_prev_prev.push(cgs.max(0.0) * vgs);
+            history.cqgs_prev.push(0.0);
+
+            history.vgd_prev.push(vgd);
+            history.vgd_prev_prev.push(vgd);
+            history.qgd_prev.push(cgd.max(0.0) * vgd);
+            history.qgd_prev_prev.push(cgd.max(0.0) * vgd);
+            history.qgd_prev_prev_prev.push(cgd.max(0.0) * vgd);
+            history.cqgd_prev.push(0.0);
+
+            history.vgb_prev.push(vgb);
+            history.vgb_prev_prev.push(vgb);
+            history.qgb_prev.push(cgb.max(0.0) * vgb);
+            history.qgb_prev_prev.push(cgb.max(0.0) * vgb);
+            history.qgb_prev_prev_prev.push(cgb.max(0.0) * vgb);
+            history.cqgb_prev.push(0.0);
+
+            history.vds_prev.push(vds);
+            history.vds_prev_prev.push(vds);
+            history.qds_prev.push(cds.max(0.0) * vds);
+            history.qds_prev_prev.push(cds.max(0.0) * vds);
+            history.qds_prev_prev_prev.push(cds.max(0.0) * vds);
+            history.cqds_prev.push(0.0);
+
+            history.vbs_prev.push(vbs);
+            history.vbs_prev_prev.push(vbs);
+            history.qbs_prev.push(qbs);
+            history.qbs_prev_prev.push(qbs);
+            history.qbs_prev_prev_prev.push(qbs);
+            history.cqbs_prev.push(0.0);
+
+            history.vbd_prev.push(vbd);
+            history.vbd_prev_prev.push(vbd);
+            history.qbd_prev.push(qbd);
+            history.qbd_prev_prev.push(qbd);
+            history.qbd_prev_prev_prev.push(qbd);
+            history.cqbd_prev.push(0.0);
+
+            history.vd1_prev.push(vd1);
+            history.vd1_prev_prev.push(vd1);
+            history.qd1_prev.push(qd1);
+            history.qd1_prev_prev.push(qd1);
+            history.qd1_prev_prev_prev.push(qd1);
+            history.cqd1_prev.push(0.0);
         }
 
         history
@@ -629,37 +790,80 @@ impl Engine {
         for (idx, jfet) in circuit.jfets.iter().enumerate() {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, voltages);
             let (vgs_charge, vgd_charge) = Self::jfet_charge_branch_voltages(jfet, voltages);
-            let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let jfet2_charge = jfet.analytic_gate_charge_state(
+                vgs_eval,
+                vgd_eval,
+                jfet.analysis_temperature(),
+                Some((
+                    history.vgs_prev[idx],
+                    history.vgd_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgd_prev[idx],
+                )),
+            );
+            let (cgs, cgd) = jfet2_charge
+                .map(|charge| (charge.cgs, charge.cgd))
+                .unwrap_or_else(|| {
+                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
+                });
             let cds = jfet.transient_drain_source_capacitance();
             let vds_charge = vgs_eval - vgd_eval;
 
             if !suppress_gate_charge && cgs.is_finite() && cgs > 0.0 {
-                let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    cgs,
-                    vgs_charge,
-                    history.vgs_prev[idx],
-                    history.qgs_prev[idx],
-                    history.qgs_prev_prev[idx],
-                    history.cqgs_prev[idx],
-                );
+                let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
+                    Self::nonlinear_charge_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        charge.qgs,
+                        history.qgs_prev[idx],
+                        history.qgs_prev_prev[idx],
+                        history.cqgs_prev[idx],
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        history.vgs_prev[idx],
+                        history.qgs_prev[idx],
+                        history.qgs_prev_prev[idx],
+                        history.cqgs_prev[idx],
+                    )
+                };
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.source, geq, ieq);
             }
 
             if !suppress_gate_charge && cgd.is_finite() && cgd > 0.0 {
-                let (geq, ieq, _q_curr, _cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    cgd,
-                    vgd_charge,
-                    history.vgd_prev[idx],
-                    history.qgd_prev[idx],
-                    history.qgd_prev_prev[idx],
-                    history.cqgd_prev[idx],
-                );
+                let (geq, ieq, _q_curr, _cq_curr) = if let Some(charge) = jfet2_charge {
+                    Self::nonlinear_charge_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        charge.qgd,
+                        history.qgd_prev[idx],
+                        history.qgd_prev_prev[idx],
+                        history.cqgd_prev[idx],
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        history.vgd_prev[idx],
+                        history.qgd_prev[idx],
+                        history.qgd_prev_prev[idx],
+                        history.cqgd_prev[idx],
+                    )
+                };
                 Self::stamp_two_terminal_companion(matrix, rhs, jfet.gate, jfet.drain, geq, ieq);
             }
 
@@ -713,6 +917,35 @@ impl Engine {
                     TwoTerminalStampSlots::link(matrix, mos.node_gate, mos.node_bulk),
                     TwoTerminalStampSlots::link(matrix, bs_pos, bs_neg),
                     TwoTerminalStampSlots::link(matrix, bd_pos, bd_neg),
+                ]
+            })
+            .collect()
+    }
+
+    pub(super) fn link_vdmos_companion_slots(
+        circuit: &crate::circuit::Circuit,
+        matrix: &crate::solver::StaticMatrix,
+    ) -> Vec<[TwoTerminalStampSlots; 7]> {
+        circuit
+            .vdmoses
+            .devices
+            .iter()
+            .map(|vdmos| {
+                let (gs_pos, gs_neg) = vdmos.gate_source_charge_nodes();
+                let (gd_pos, gd_neg) = vdmos.gate_drain_charge_nodes();
+                let (gb_pos, gb_neg) = vdmos.gate_bulk_charge_nodes();
+                let (ds_pos, ds_neg) = vdmos.drain_source_charge_nodes();
+                let (bs_pos, bs_neg) = vdmos.body_source_charge_nodes();
+                let (bd_pos, bd_neg) = vdmos.body_drain_charge_nodes();
+                let (d1_pos, d1_neg) = vdmos.d1_charge_nodes();
+                [
+                    TwoTerminalStampSlots::link(matrix, gs_pos, gs_neg),
+                    TwoTerminalStampSlots::link(matrix, gd_pos, gd_neg),
+                    TwoTerminalStampSlots::link(matrix, gb_pos, gb_neg),
+                    TwoTerminalStampSlots::link(matrix, ds_pos, ds_neg),
+                    TwoTerminalStampSlots::link(matrix, bs_pos, bs_neg),
+                    TwoTerminalStampSlots::link(matrix, bd_pos, bd_neg),
+                    TwoTerminalStampSlots::link(matrix, d1_pos, d1_neg),
                 ]
             })
             .collect()
@@ -911,6 +1144,156 @@ impl Engine {
     }
 
     #[inline]
+    pub(super) fn stamp_vdmos_transient_companions(
+        circuit: &crate::circuit::Circuit,
+        matrix: &mut crate::solver::StaticMatrix,
+        rhs: &mut [Value],
+        voltages: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &VdmosTransientHistory,
+        slots: &[[TwoTerminalStampSlots; 7]],
+    ) {
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
+            let terms = Self::vdmos_companion_branch_terms(
+                vdmos,
+                idx,
+                voltages,
+                effective_method,
+                trap_order,
+                dt,
+                history,
+            );
+            for (branch, &(geq, ieq)) in terms.iter().enumerate() {
+                if geq > 0.0 {
+                    Self::stamp_two_terminal_companion_direct(
+                        matrix,
+                        rhs,
+                        &slots[idx][branch],
+                        geq,
+                        ieq,
+                    );
+                }
+            }
+        }
+    }
+
+    fn vdmos_companion_branch_terms(
+        vdmos: &crate::device::Vdmos,
+        idx: usize,
+        voltages: &[Value],
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &VdmosTransientHistory,
+    ) -> [(Value, Value); 7] {
+        let mut terms = [(0.0, 0.0); 7];
+        let (vgs, vgd, vgb, vds) = vdmos.transient_charge_branch_voltages_at(voltages);
+        let vd1 = vdmos.d1_charge_branch_voltage_at(voltages);
+        let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(voltages);
+        let (cgs, cgd, cds) = vdmos.capacitances(vgs, vds);
+        let cgb = vdmos.gate_bulk_capacitance();
+        let (qbs, cbs) = vdmos.body_source_transient_charge_and_capacitance_at(vbs);
+        let (qbd, cbd) = vdmos.body_drain_transient_charge_and_capacitance_at(vbd);
+        let (qd1, cd1) = vdmos.d1_charge_and_capacitance_at(vd1);
+
+        let (geq_gs, ieq_gs, _qgs, _cqgs) = Self::jfet_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cgs,
+            vgs,
+            history.vgs_prev[idx],
+            history.qgs_prev[idx],
+            history.qgs_prev_prev[idx],
+            history.cqgs_prev[idx],
+        );
+        terms[0] = (geq_gs, ieq_gs);
+
+        let (geq_gd, ieq_gd, _qgd, _cqgd) = Self::jfet_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cgd,
+            vgd,
+            history.vgd_prev[idx],
+            history.qgd_prev[idx],
+            history.qgd_prev_prev[idx],
+            history.cqgd_prev[idx],
+        );
+        terms[1] = (geq_gd, ieq_gd);
+
+        let (geq_gb, ieq_gb, _qgb, _cqgb) = Self::jfet_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cgb,
+            vgb,
+            history.vgb_prev[idx],
+            history.qgb_prev[idx],
+            history.qgb_prev_prev[idx],
+            history.cqgb_prev[idx],
+        );
+        terms[2] = (geq_gb, ieq_gb);
+
+        let (geq_ds, ieq_ds, _qds, _cqds) = Self::jfet_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cds,
+            vds,
+            history.vds_prev[idx],
+            history.qds_prev[idx],
+            history.qds_prev_prev[idx],
+            history.cqds_prev[idx],
+        );
+        terms[3] = (geq_ds, ieq_ds);
+
+        let (geq_bs, ieq_bs, _qbs, _cqbs) = Self::nonlinear_charge_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cbs,
+            vbs,
+            qbs,
+            history.qbs_prev[idx],
+            history.qbs_prev_prev[idx],
+            history.cqbs_prev[idx],
+        );
+        terms[4] = (geq_bs, ieq_bs);
+
+        let (geq_bd, ieq_bd, _qbd, _cqbd) = Self::nonlinear_charge_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cbd,
+            vbd,
+            qbd,
+            history.qbd_prev[idx],
+            history.qbd_prev_prev[idx],
+            history.cqbd_prev[idx],
+        );
+        terms[5] = (geq_bd, ieq_bd);
+
+        let (geq_d1, ieq_d1, _qd1, _cqd1) = Self::nonlinear_charge_companion_terms(
+            effective_method,
+            trap_order,
+            dt,
+            cd1,
+            vd1,
+            qd1,
+            history.qd1_prev[idx],
+            history.qd1_prev_prev[idx],
+            history.cqd1_prev[idx],
+        );
+        terms[6] = (geq_d1, ieq_d1);
+
+        terms
+    }
+
+    #[inline]
     pub(super) fn initialize_b3soi_history(
         circuit: &crate::circuit::Circuit,
         solution: &[Value],
@@ -933,10 +1316,14 @@ impl Engine {
             qe_prev_prev: Vec::with_capacity(n),
             qe_prev_prev_prev: Vec::with_capacity(n),
             cqe_prev: Vec::with_capacity(n),
+            qth_prev: Vec::with_capacity(n),
+            qth_prev_prev: Vec::with_capacity(n),
+            qth_prev_prev_prev: Vec::with_capacity(n),
+            cqth_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
-        let mut seed = |qg: Value, qb: Value, qd: Value, qe: Value| {
+        let mut seed = |qg: Value, qb: Value, qd: Value, qe: Value, qth: Value| {
             h.qg_prev.push(qg);
             h.qg_prev_prev.push(qg);
             h.qg_prev_prev_prev.push(qg);
@@ -953,6 +1340,10 @@ impl Engine {
             h.qe_prev_prev.push(qe);
             h.qe_prev_prev_prev.push(qe);
             h.cqe_prev.push(0.0);
+            h.qth_prev.push(qth);
+            h.qth_prev_prev.push(qth);
+            h.qth_prev_prev_prev.push(qth);
+            h.cqth_prev.push(0.0);
         };
         // The history is indexed DD devices first, then FD, then PD; the
         // stamp/commit/truncation walks use the same concatenated order.
@@ -960,34 +1351,34 @@ impl Engine {
         // aligned, but contribute no charges.
         for dev in &circuit.b3soi.devices {
             if dev.charges_suppressed() {
-                seed(0.0, 0.0, 0.0, 0.0);
+                seed(0.0, 0.0, 0.0, 0.0, 0.0);
                 continue;
             }
             let c = dev.charge_at(solution);
-            seed(c.qg, c.qb, c.qd, c.qe);
+            seed(c.qg, c.qb, c.qd, c.qe, c.qth);
         }
         for dev in &circuit.b3soi_fd.devices {
             if dev.charges_suppressed() {
-                seed(0.0, 0.0, 0.0, 0.0);
+                seed(0.0, 0.0, 0.0, 0.0, 0.0);
                 continue;
             }
             let c = dev.charge_at(solution);
-            seed(c.qg, c.qb, c.qd, c.qe);
+            seed(c.qg, c.qb, c.qd, c.qe, c.qth);
         }
         for dev in &circuit.b3soi_pd.devices {
             if dev.charges_suppressed() {
-                seed(0.0, 0.0, 0.0, 0.0);
+                seed(0.0, 0.0, 0.0, 0.0, 0.0);
                 continue;
             }
             let c = dev.charge_at(solution);
-            seed(c.qg, c.qb, c.qd, c.qe);
+            seed(c.qg, c.qb, c.qd, c.qe, c.qth);
         }
         h
     }
 
-    /// Integrate one SOI device's four node charges with the engine
+    /// Integrate one SOI device's node charges with the engine
     /// coefficient and its per-charge history slot, yielding the equivalent
-    /// charge currents `(cqg, cqb, cqd, cqe)`.
+    /// charge currents `(cqg, cqb, cqd, cqe, cqth)`.
     #[inline]
     #[allow(clippy::too_many_arguments)]
     fn b3soi_companion_currents(
@@ -1000,7 +1391,8 @@ impl Engine {
         qb: Value,
         qd: Value,
         qe: Value,
-    ) -> (Value, Value, Value, Value) {
+        qth: Value,
+    ) -> (Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
             Self::jfet_companion_ccap(
                 effective_method,
@@ -1037,6 +1429,12 @@ impl Engine {
                 history.qe_prev_prev[idx],
                 history.cqe_prev[idx],
             ),
+            cq(
+                qth,
+                history.qth_prev[idx],
+                history.qth_prev_prev[idx],
+                history.cqth_prev[idx],
+            ),
         )
     }
 
@@ -1051,10 +1449,12 @@ impl Engine {
         qb: Value,
         qd: Value,
         qe: Value,
+        qth: Value,
         cqg: Value,
         cqb: Value,
         cqd: Value,
         cqe: Value,
+        cqth: Value,
     ) {
         history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
         history.qg_prev_prev[idx] = history.qg_prev[idx];
@@ -1072,15 +1472,19 @@ impl Engine {
         history.qe_prev_prev[idx] = history.qe_prev[idx];
         history.qe_prev[idx] = qe;
         history.cqe_prev[idx] = cqe;
+        history.qth_prev_prev_prev[idx] = history.qth_prev_prev[idx];
+        history.qth_prev_prev[idx] = history.qth_prev[idx];
+        history.qth_prev[idx] = qth;
+        history.cqth_prev[idx] = cqth;
     }
 
-    /// Stamp the B3SOIDD transient charge companion for every SOI instance.
+    /// Stamp the B3SOI transient charge companion for every SOI instance.
     ///
-    /// Integrates each of the four coupled node charges with the engine's
+    /// Integrates each coupled node charge with the engine's
     /// integration coefficient `ag0` and the per-charge history, then stamps the
     /// coupled `gc**·ag0` capacitance matrix plus the `ceqq*` equivalent charge
-    /// currents (b3soiddld.c charge load). KCL-symmetric: the device routes the
-    /// full 5-terminal coupling so charge is conserved across g/b/d/s/e.
+    /// currents (B3SOI charge load). Active DD/FD/PD self-heating also stamps
+    /// the thermal `qth` companion onto the temperature node.
     #[inline]
     pub(super) fn stamp_b3soi_transient_companions(
         circuit: &crate::circuit::Circuit,
@@ -1109,7 +1513,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1119,8 +1523,19 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
-            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
+            dev.stamp_charge_companion(
+                &charge,
+                ag0,
+                cqg,
+                cqb,
+                cqd,
+                cqe,
+                cqth,
+                voltages,
+                &mut stamper,
+            );
             idx += 1;
         }
         for dev in &circuit.b3soi_fd.devices {
@@ -1129,7 +1544,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1139,8 +1554,19 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
-            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
+            dev.stamp_charge_companion(
+                &charge,
+                ag0,
+                cqg,
+                cqb,
+                cqd,
+                cqe,
+                cqth,
+                voltages,
+                &mut stamper,
+            );
             idx += 1;
         }
         for dev in &circuit.b3soi_pd.devices {
@@ -1149,7 +1575,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1159,8 +1585,19 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
-            dev.stamp_charge_companion(&charge, ag0, cqg, cqb, cqd, cqe, voltages, &mut stamper);
+            dev.stamp_charge_companion(
+                &charge,
+                ag0,
+                cqg,
+                cqb,
+                cqd,
+                cqe,
+                cqth,
+                voltages,
+                &mut stamper,
+            );
             idx += 1;
         }
     }
@@ -1186,7 +1623,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1196,9 +1633,11 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
             Self::b3soi_commit_history_slot(
-                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
+                cqd, cqe, cqth,
             );
             idx += 1;
         }
@@ -1208,7 +1647,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1218,9 +1657,11 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
             Self::b3soi_commit_history_slot(
-                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
+                cqd, cqe, cqth,
             );
             idx += 1;
         }
@@ -1230,7 +1671,7 @@ impl Engine {
                 continue;
             }
             let charge = dev.charge_at(voltages);
-            let (cqg, cqb, cqd, cqe) = Self::b3soi_companion_currents(
+            let (cqg, cqb, cqd, cqe, cqth) = Self::b3soi_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
@@ -1240,9 +1681,11 @@ impl Engine {
                 charge.qb,
                 charge.qd,
                 charge.qe,
+                charge.qth,
             );
             Self::b3soi_commit_history_slot(
-                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, cqg, cqb, cqd, cqe,
+                history, idx, charge.qg, charge.qb, charge.qd, charge.qe, charge.qth, cqg, cqb,
+                cqd, cqe, cqth,
             );
             idx += 1;
         }
@@ -1269,6 +1712,14 @@ impl Engine {
             qd_prev_prev: Vec::with_capacity(n),
             qd_prev_prev_prev: Vec::with_capacity(n),
             cqd_prev: Vec::with_capacity(n),
+            qcheq_prev: Vec::with_capacity(n),
+            qcheq_prev_prev: Vec::with_capacity(n),
+            qcheq_prev_prev_prev: Vec::with_capacity(n),
+            cqcheq_prev: Vec::with_capacity(n),
+            qcdump_prev: Vec::with_capacity(n),
+            qcdump_prev_prev: Vec::with_capacity(n),
+            qcdump_prev_prev_prev: Vec::with_capacity(n),
+            cqcdump_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
@@ -1311,6 +1762,28 @@ impl Engine {
             h.cqg_prev.push(0.0);
             h.cqb_prev.push(0.0);
             h.cqd_prev.push(0.0);
+            let qcheq = if dev.uses_trnqs() { c.qcheq } else { 0.0 };
+            for slot in [
+                &mut h.qcheq_prev,
+                &mut h.qcheq_prev_prev,
+                &mut h.qcheq_prev_prev_prev,
+            ] {
+                slot.push(qcheq);
+            }
+            let qcdump = if dev.uses_trnqs() {
+                dev.trnqs_qcdump_state(solution)
+            } else {
+                0.0
+            };
+            for slot in [
+                &mut h.qcdump_prev,
+                &mut h.qcdump_prev_prev,
+                &mut h.qcdump_prev_prev_prev,
+            ] {
+                slot.push(qcdump);
+            }
+            h.cqcheq_prev.push(0.0);
+            h.cqcdump_prev.push(0.0);
         }
         h
     }
@@ -1363,9 +1836,47 @@ impl Engine {
         )
     }
 
+    #[inline]
+    fn bsim3_trnqs_companion_currents(
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Bsim3TransientHistory,
+        idx: usize,
+        qcheq: Value,
+        qcdump: Value,
+    ) -> (Value, Value) {
+        let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
+            Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                q,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            )
+        };
+        (
+            cq(
+                qcheq,
+                history.qcheq_prev[idx],
+                history.qcheq_prev_prev[idx],
+                history.cqcheq_prev[idx],
+            ),
+            cq(
+                qcdump,
+                history.qcdump_prev[idx],
+                history.qcdump_prev_prev[idx],
+                history.cqcdump_prev[idx],
+            ),
+        )
+    }
+
     /// Stamp the BSIM3 transient charge companion for every instance: the
     /// mode-assembled `gc**·ag0` capacitance matrix plus the `ceqq*`
-    /// equivalent charge currents (b3ld.c charge load, nqsMod = 0).
+    /// equivalent charge currents. `NQSMOD=1` also stamps the hidden
+    /// charge-deficit row from b3ld.c.
     #[inline]
     pub(super) fn stamp_bsim3_transient_companions(
         circuit: &crate::circuit::Circuit,
@@ -1389,19 +1900,58 @@ impl Engine {
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
             let (charge, mode) = dev.charge_at(voltages);
+            let (qg, qb, qd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&charge)
+            } else {
+                (charge.qg_state(), charge.qb_state(), charge.qd_state())
+            };
             let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
                 history,
                 idx,
-                charge.qg_state(),
-                charge.qb_state(),
-                charge.qd_state(),
+                qg,
+                qb,
+                qd,
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b3ld.c: m * ceqq*).
-            dev.stamp_charge_companion(&charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper);
+            if dev.uses_trnqs() {
+                let qcdump = dev.trnqs_qcdump_state(voltages);
+                let (cqcheq, cqcdump) = Self::bsim3_trnqs_companion_currents(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    history,
+                    idx,
+                    charge.qcheq,
+                    qcdump,
+                );
+                dev.stamp_trnqs_charge_companion(
+                    &charge,
+                    mode,
+                    ag0,
+                    cqg,
+                    cqb,
+                    cqd,
+                    cqcheq,
+                    cqcdump,
+                    voltages,
+                    &mut stamper,
+                );
+            } else {
+                dev.stamp_charge_companion(
+                    &charge,
+                    mode,
+                    ag0,
+                    cqg,
+                    cqb,
+                    cqd,
+                    voltages,
+                    &mut stamper,
+                );
+            }
         }
     }
 
@@ -1421,7 +1971,11 @@ impl Engine {
         let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, dev) in circuit.bsim3v3.devices.iter().enumerate() {
             let (charge, _mode) = dev.charge_at(voltages);
-            let (qg, qb, qd) = (charge.qg_state(), charge.qb_state(), charge.qd_state());
+            let (qg, qb, qd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&charge)
+            } else {
+                (charge.qg_state(), charge.qb_state(), charge.qd_state())
+            };
             let (cqg, cqb, cqd) = Self::bsim3_companion_currents(
                 effective_method,
                 trap_order,
@@ -1444,6 +1998,29 @@ impl Engine {
             history.qd_prev_prev[idx] = history.qd_prev[idx];
             history.qd_prev[idx] = qd;
             history.cqd_prev[idx] = cqd;
+            let qcheq = if dev.uses_trnqs() { charge.qcheq } else { 0.0 };
+            let qcdump = if dev.uses_trnqs() {
+                dev.trnqs_qcdump_state(voltages)
+            } else {
+                0.0
+            };
+            let (cqcheq, cqcdump) = Self::bsim3_trnqs_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                qcheq,
+                qcdump,
+            );
+            history.qcheq_prev_prev_prev[idx] = history.qcheq_prev_prev[idx];
+            history.qcheq_prev_prev[idx] = history.qcheq_prev[idx];
+            history.qcheq_prev[idx] = qcheq;
+            history.cqcheq_prev[idx] = cqcheq;
+            history.qcdump_prev_prev_prev[idx] = history.qcdump_prev_prev[idx];
+            history.qcdump_prev_prev[idx] = history.qcdump_prev[idx];
+            history.qcdump_prev[idx] = qcdump;
+            history.cqcdump_prev[idx] = cqcdump;
         }
         history.accepted_dt_prev_prev = history.accepted_dt_prev;
         history.accepted_dt_prev = dt;
@@ -1460,6 +2037,10 @@ impl Engine {
             qg_prev_prev: Vec::with_capacity(n),
             qg_prev_prev_prev: Vec::with_capacity(n),
             cqg_prev: Vec::with_capacity(n),
+            qgmid_prev: Vec::with_capacity(n),
+            qgmid_prev_prev: Vec::with_capacity(n),
+            qgmid_prev_prev_prev: Vec::with_capacity(n),
+            cqgmid_prev: Vec::with_capacity(n),
             qb_prev: Vec::with_capacity(n),
             qb_prev_prev: Vec::with_capacity(n),
             qb_prev_prev_prev: Vec::with_capacity(n),
@@ -1468,6 +2049,22 @@ impl Engine {
             qd_prev_prev: Vec::with_capacity(n),
             qd_prev_prev_prev: Vec::with_capacity(n),
             cqd_prev: Vec::with_capacity(n),
+            qbs_prev: Vec::with_capacity(n),
+            qbs_prev_prev: Vec::with_capacity(n),
+            qbs_prev_prev_prev: Vec::with_capacity(n),
+            cqbs_prev: Vec::with_capacity(n),
+            qbd_prev: Vec::with_capacity(n),
+            qbd_prev_prev: Vec::with_capacity(n),
+            qbd_prev_prev_prev: Vec::with_capacity(n),
+            cqbd_prev: Vec::with_capacity(n),
+            qcheq_prev: Vec::with_capacity(n),
+            qcheq_prev_prev: Vec::with_capacity(n),
+            qcheq_prev_prev_prev: Vec::with_capacity(n),
+            cqcheq_prev: Vec::with_capacity(n),
+            qcdump_prev: Vec::with_capacity(n),
+            qcdump_prev_prev: Vec::with_capacity(n),
+            qcdump_prev_prev_prev: Vec::with_capacity(n),
+            cqcdump_prev: Vec::with_capacity(n),
             accepted_dt_prev: 0.0,
             accepted_dt_prev_prev: 0.0,
         };
@@ -1477,9 +2074,22 @@ impl Engine {
         // the unscaled CKTstate charges).
         for dev in &circuit.bsim4v8.devices {
             let (c, _mode) = dev.charge_at(solution);
-            for (q, slots) in [
+            let rbody = dev.rbody_enabled();
+            let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&c, solution)
+            } else {
                 (
                     c.qg_state(),
+                    c.qgmid_state(),
+                    c.qb_state_for_rbody(rbody),
+                    c.qd_state(),
+                    c.qbs,
+                    c.qbd,
+                )
+            };
+            for (q, slots) in [
+                (
+                    qg,
                     [
                         &mut h.qg_prev,
                         &mut h.qg_prev_prev,
@@ -1487,7 +2097,7 @@ impl Engine {
                     ],
                 ),
                 (
-                    c.qb_state(),
+                    qb,
                     [
                         &mut h.qb_prev,
                         &mut h.qb_prev_prev,
@@ -1495,7 +2105,7 @@ impl Engine {
                     ],
                 ),
                 (
-                    c.qd_state(),
+                    qd,
                     [
                         &mut h.qd_prev,
                         &mut h.qd_prev_prev,
@@ -1507,17 +2117,70 @@ impl Engine {
                     slot.push(q);
                 }
             }
+            for slot in [
+                &mut h.qgmid_prev,
+                &mut h.qgmid_prev_prev,
+                &mut h.qgmid_prev_prev_prev,
+            ] {
+                slot.push(qgmid);
+            }
+            for (q, slots) in [
+                (
+                    qbs,
+                    [
+                        &mut h.qbs_prev,
+                        &mut h.qbs_prev_prev,
+                        &mut h.qbs_prev_prev_prev,
+                    ],
+                ),
+                (
+                    qbd,
+                    [
+                        &mut h.qbd_prev,
+                        &mut h.qbd_prev_prev,
+                        &mut h.qbd_prev_prev_prev,
+                    ],
+                ),
+            ] {
+                for slot in slots {
+                    slot.push(q);
+                }
+            }
             h.cqg_prev.push(0.0);
+            h.cqgmid_prev.push(0.0);
             h.cqb_prev.push(0.0);
             h.cqd_prev.push(0.0);
+            h.cqbs_prev.push(0.0);
+            h.cqbd_prev.push(0.0);
+            for slot in [
+                &mut h.qcheq_prev,
+                &mut h.qcheq_prev_prev,
+                &mut h.qcheq_prev_prev_prev,
+            ] {
+                slot.push(c.qchqs);
+            }
+            let qcdump = if dev.uses_trnqs() {
+                dev.trnqs_qcdump_state(solution)
+            } else {
+                0.0
+            };
+            for slot in [
+                &mut h.qcdump_prev,
+                &mut h.qcdump_prev_prev,
+                &mut h.qcdump_prev_prev_prev,
+            ] {
+                slot.push(qcdump);
+            }
+            h.cqcheq_prev.push(0.0);
+            h.cqcdump_prev.push(0.0);
         }
         h
     }
 
-    /// Integrate one BSIM4 device's three composite node charges with the
+    /// Integrate one BSIM4 device's charge states with the
     /// engine coefficient and its history slot, yielding the equivalent
-    /// charge currents `(cqg, cqb, cqd)` (ngspice `NIintegrate` on
-    /// `BSIM4qg`/`BSIM4qb`/`BSIM4qd`, b4ld.c:4630-4638).
+    /// charge currents (ngspice `NIintegrate` on `BSIM4qg`/`BSIM4qb`/
+    /// `BSIM4qd`, plus `qbs`/`qbd` when `rbodyMod > 0`; b4ld.c:4630-4649).
     #[inline]
     fn bsim4_companion_currents(
         effective_method: IntegrationMethod,
@@ -1526,9 +2189,12 @@ impl Engine {
         history: &Bsim4TransientHistory,
         idx: usize,
         qg: Value,
+        qgmid: Value,
         qb: Value,
         qd: Value,
-    ) -> (Value, Value, Value) {
+        qbs: Value,
+        qbd: Value,
+    ) -> (Value, Value, Value, Value, Value, Value) {
         let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
             Self::jfet_companion_ccap(
                 effective_method,
@@ -1548,6 +2214,12 @@ impl Engine {
                 history.cqg_prev[idx],
             ),
             cq(
+                qgmid,
+                history.qgmid_prev[idx],
+                history.qgmid_prev_prev[idx],
+                history.cqgmid_prev[idx],
+            ),
+            cq(
                 qb,
                 history.qb_prev[idx],
                 history.qb_prev_prev[idx],
@@ -1558,6 +2230,55 @@ impl Engine {
                 history.qd_prev[idx],
                 history.qd_prev_prev[idx],
                 history.cqd_prev[idx],
+            ),
+            cq(
+                qbs,
+                history.qbs_prev[idx],
+                history.qbs_prev_prev[idx],
+                history.cqbs_prev[idx],
+            ),
+            cq(
+                qbd,
+                history.qbd_prev[idx],
+                history.qbd_prev_prev[idx],
+                history.cqbd_prev[idx],
+            ),
+        )
+    }
+
+    #[inline]
+    fn bsim4_trnqs_companion_currents(
+        effective_method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &Bsim4TransientHistory,
+        idx: usize,
+        qcheq: Value,
+        qcdump: Value,
+    ) -> (Value, Value) {
+        let cq = |q: Value, q_prev: Value, q_prev_prev: Value, cq_prev: Value| {
+            Self::jfet_companion_ccap(
+                effective_method,
+                trap_order,
+                dt,
+                q,
+                q_prev,
+                q_prev_prev,
+                cq_prev,
+            )
+        };
+        (
+            cq(
+                qcheq,
+                history.qcheq_prev[idx],
+                history.qcheq_prev_prev[idx],
+                history.cqcheq_prev[idx],
+            ),
+            cq(
+                qcdump,
+                history.qcdump_prev[idx],
+                history.qcdump_prev_prev[idx],
+                history.cqcdump_prev[idx],
             ),
         )
     }
@@ -1588,19 +2309,74 @@ impl Engine {
         let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
             let (charge, mode) = dev.charge_at(voltages);
-            let (cqg, cqb, cqd) = Self::bsim4_companion_currents(
+            let rbody = dev.rbody_enabled();
+            let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&charge, voltages)
+            } else {
+                (
+                    charge.qg_state(),
+                    charge.qgmid_state(),
+                    charge.qb_state_for_rbody(rbody),
+                    charge.qd_state(),
+                    charge.qbs,
+                    charge.qbd,
+                )
+            };
+            let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
                 history,
                 idx,
-                charge.qg_state(),
-                charge.qb_state(),
-                charge.qd_state(),
+                qg,
+                qgmid,
+                qb,
+                qd,
+                qbs,
+                qbd,
             );
             // The history carries per-device charges; the device stamp
             // applies the parallel multiplier itself (b4ld.c: mult_q * ceqq*).
-            dev.stamp_charge_companion(&charge, mode, ag0, cqg, cqb, cqd, voltages, &mut stamper);
+            if dev.uses_trnqs() {
+                let qcdump = dev.trnqs_qcdump_state(voltages);
+                let (cqcheq, cqcdump) = Self::bsim4_trnqs_companion_currents(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    history,
+                    idx,
+                    charge.qchqs,
+                    qcdump,
+                );
+                dev.stamp_trnqs_charge_companion(
+                    &charge,
+                    mode,
+                    ag0,
+                    cqg,
+                    cqb,
+                    cqd,
+                    cqbs,
+                    cqbd,
+                    cqcheq,
+                    cqcdump,
+                    voltages,
+                    &mut stamper,
+                );
+            } else {
+                dev.stamp_charge_companion(
+                    &charge,
+                    mode,
+                    ag0,
+                    cqg,
+                    cqgmid,
+                    cqb,
+                    cqd,
+                    cqbs,
+                    cqbd,
+                    voltages,
+                    &mut stamper,
+                );
+            }
         }
     }
 
@@ -1620,21 +2396,40 @@ impl Engine {
         let effective_method = Self::effective_companion_method(method, trap_order);
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
             let (charge, _mode) = dev.charge_at(voltages);
-            let (qg, qb, qd) = (charge.qg_state(), charge.qb_state(), charge.qd_state());
-            let (cqg, cqb, cqd) = Self::bsim4_companion_currents(
+            let rbody = dev.rbody_enabled();
+            let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&charge, voltages)
+            } else {
+                (
+                    charge.qg_state(),
+                    charge.qgmid_state(),
+                    charge.qb_state_for_rbody(rbody),
+                    charge.qd_state(),
+                    charge.qbs,
+                    charge.qbd,
+                )
+            };
+            let (cqg, cqgmid, cqb, cqd, cqbs, cqbd) = Self::bsim4_companion_currents(
                 effective_method,
                 trap_order,
                 dt,
                 history,
                 idx,
                 qg,
+                qgmid,
                 qb,
                 qd,
+                qbs,
+                qbd,
             );
             history.qg_prev_prev_prev[idx] = history.qg_prev_prev[idx];
             history.qg_prev_prev[idx] = history.qg_prev[idx];
             history.qg_prev[idx] = qg;
             history.cqg_prev[idx] = cqg;
+            history.qgmid_prev_prev_prev[idx] = history.qgmid_prev_prev[idx];
+            history.qgmid_prev_prev[idx] = history.qgmid_prev[idx];
+            history.qgmid_prev[idx] = qgmid;
+            history.cqgmid_prev[idx] = cqgmid;
             history.qb_prev_prev_prev[idx] = history.qb_prev_prev[idx];
             history.qb_prev_prev[idx] = history.qb_prev[idx];
             history.qb_prev[idx] = qb;
@@ -1643,6 +2438,37 @@ impl Engine {
             history.qd_prev_prev[idx] = history.qd_prev[idx];
             history.qd_prev[idx] = qd;
             history.cqd_prev[idx] = cqd;
+            history.qbs_prev_prev_prev[idx] = history.qbs_prev_prev[idx];
+            history.qbs_prev_prev[idx] = history.qbs_prev[idx];
+            history.qbs_prev[idx] = qbs;
+            history.cqbs_prev[idx] = cqbs;
+            history.qbd_prev_prev_prev[idx] = history.qbd_prev_prev[idx];
+            history.qbd_prev_prev[idx] = history.qbd_prev[idx];
+            history.qbd_prev[idx] = qbd;
+            history.cqbd_prev[idx] = cqbd;
+            let qcheq = charge.qchqs;
+            let qcdump = if dev.uses_trnqs() {
+                dev.trnqs_qcdump_state(voltages)
+            } else {
+                0.0
+            };
+            let (cqcheq, cqcdump) = Self::bsim4_trnqs_companion_currents(
+                effective_method,
+                trap_order,
+                dt,
+                history,
+                idx,
+                qcheq,
+                qcdump,
+            );
+            history.qcheq_prev_prev_prev[idx] = history.qcheq_prev_prev[idx];
+            history.qcheq_prev_prev[idx] = history.qcheq_prev[idx];
+            history.qcheq_prev[idx] = qcheq;
+            history.cqcheq_prev[idx] = cqcheq;
+            history.qcdump_prev_prev_prev[idx] = history.qcdump_prev_prev[idx];
+            history.qcdump_prev_prev[idx] = history.qcdump_prev[idx];
+            history.qcdump_prev[idx] = qcdump;
+            history.cqcdump_prev[idx] = cqcdump;
         }
         history.accepted_dt_prev_prev = history.accepted_dt_prev;
         history.accepted_dt_prev = dt;
@@ -2190,6 +3016,7 @@ impl Engine {
         jfet_history: &mut JfetTransientHistory,
         diode_history: &mut DiodeTransientHistory,
         mosfet_history: &mut MosfetTransientHistory,
+        vdmos_history: &mut VdmosTransientHistory,
         b3soi_history: &mut B3SoiTransientHistory,
         bsim3_history: &mut Bsim3TransientHistory,
         bsim4_history: &mut Bsim4TransientHistory,
@@ -2546,9 +3373,35 @@ impl Engine {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, accepted_solution);
             let (vgs_charge, vgd_charge) =
                 Self::jfet_charge_branch_voltages(jfet, accepted_solution);
-            let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let (vgstrap, vgdtrap, power) = jfet.jfet2_next_transient_memory(
+                vgs_eval,
+                vgd_eval,
+                jfet_history.jfet2_vgstrap_prev[idx],
+                jfet_history.jfet2_vgdtrap_prev[idx],
+                jfet_history.jfet2_power_prev[idx],
+                dt,
+            );
+            let jfet2_charge = jfet.analytic_gate_charge_state(
+                vgs_eval,
+                vgd_eval,
+                jfet.analysis_temperature(),
+                Some((
+                    jfet_history.vgs_prev[idx],
+                    jfet_history.vgd_prev[idx],
+                    jfet_history.qgs_prev[idx],
+                    jfet_history.qgd_prev[idx],
+                )),
+            );
+            let (cgs, cgd) = jfet2_charge
+                .map(|charge| (charge.cgs, charge.cgd))
+                .unwrap_or_else(|| {
+                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
+                });
             let cds = jfet.transient_drain_source_capacitance();
             let vds_charge = vgs_eval - vgd_eval;
+            jfet_history.jfet2_vgstrap_prev[idx] = vgstrap;
+            jfet_history.jfet2_vgdtrap_prev[idx] = vgdtrap;
+            jfet_history.jfet2_power_prev[idx] = power;
             jfet_history.vgs_prev_prev[idx] = jfet_history.vgs_prev[idx];
             jfet_history.vgs_prev[idx] = vgs_charge;
             jfet_history.vgd_prev_prev[idx] = jfet_history.vgd_prev[idx];
@@ -2556,33 +3409,61 @@ impl Engine {
             jfet_history.vds_prev_prev[idx] = jfet_history.vds_prev[idx];
             jfet_history.vds_prev[idx] = vds_charge;
             if !suppress_gate_charge_history {
-                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
-                    dt,
-                    cgs,
-                    vgs_charge,
-                    jfet_history.vgs_prev_prev[idx],
-                    jfet_history.qgs_prev[idx],
-                    jfet_history.qgs_prev_prev[idx],
-                    jfet_history.cqgs_prev[idx],
-                );
+                let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = if let Some(charge) = jfet2_charge {
+                    Self::nonlinear_charge_companion_terms(
+                        method,
+                        trap_order,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        charge.qgs,
+                        jfet_history.qgs_prev[idx],
+                        jfet_history.qgs_prev_prev[idx],
+                        jfet_history.cqgs_prev[idx],
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        method,
+                        trap_order,
+                        dt,
+                        cgs,
+                        vgs_charge,
+                        jfet_history.vgs_prev_prev[idx],
+                        jfet_history.qgs_prev[idx],
+                        jfet_history.qgs_prev_prev[idx],
+                        jfet_history.cqgs_prev[idx],
+                    )
+                };
                 jfet_history.qgs_prev_prev_prev[idx] = jfet_history.qgs_prev_prev[idx];
                 jfet_history.qgs_prev_prev[idx] = jfet_history.qgs_prev[idx];
                 jfet_history.qgs_prev[idx] = qgs_curr;
                 jfet_history.cqgs_prev[idx] = cqgs_curr;
 
-                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
-                    method,
-                    trap_order,
-                    dt,
-                    cgd,
-                    vgd_charge,
-                    jfet_history.vgd_prev_prev[idx],
-                    jfet_history.qgd_prev[idx],
-                    jfet_history.qgd_prev_prev[idx],
-                    jfet_history.cqgd_prev[idx],
-                );
+                let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = if let Some(charge) = jfet2_charge {
+                    Self::nonlinear_charge_companion_terms(
+                        method,
+                        trap_order,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        charge.qgd,
+                        jfet_history.qgd_prev[idx],
+                        jfet_history.qgd_prev_prev[idx],
+                        jfet_history.cqgd_prev[idx],
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        method,
+                        trap_order,
+                        dt,
+                        cgd,
+                        vgd_charge,
+                        jfet_history.vgd_prev_prev[idx],
+                        jfet_history.qgd_prev[idx],
+                        jfet_history.qgd_prev_prev[idx],
+                        jfet_history.cqgd_prev[idx],
+                    )
+                };
                 jfet_history.qgd_prev_prev_prev[idx] = jfet_history.qgd_prev_prev[idx];
                 jfet_history.qgd_prev_prev[idx] = jfet_history.qgd_prev[idx];
                 jfet_history.qgd_prev[idx] = qgd_curr;
@@ -2600,6 +3481,7 @@ impl Engine {
                     jfet_history.qds_prev_prev[idx],
                     jfet_history.cqds_prev[idx],
                 );
+                jfet_history.qds_prev_prev_prev[idx] = jfet_history.qds_prev_prev[idx];
                 jfet_history.qds_prev_prev[idx] = jfet_history.qds_prev[idx];
                 jfet_history.qds_prev[idx] = qds_curr;
                 jfet_history.cqds_prev[idx] = cqds_curr;
@@ -2749,6 +3631,145 @@ impl Engine {
         mosfet_history.accepted_dt_prev_prev = mosfet_history.accepted_dt_prev;
         mosfet_history.accepted_dt_prev = dt;
 
+        for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
+            let (vgs, vgd, vgb, vds) = vdmos.transient_charge_branch_voltages_at(accepted_solution);
+            let vd1 = vdmos.d1_charge_branch_voltage_at(accepted_solution);
+            let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(accepted_solution);
+            let (cgs, cgd, cds) = vdmos.capacitances(vgs, vds);
+            let cgb = vdmos.gate_bulk_capacitance();
+            let (qbs_exact, cbs) = vdmos.body_source_transient_charge_and_capacitance_at(vbs);
+            let (qbd_exact, cbd) = vdmos.body_drain_transient_charge_and_capacitance_at(vbd);
+            let (qd1_exact, cd1) = vdmos.d1_charge_and_capacitance_at(vd1);
+
+            vdmos_history.vgs_prev_prev[idx] = vdmos_history.vgs_prev[idx];
+            vdmos_history.vgs_prev[idx] = vgs;
+            let (_geq_gs, _ieq_gs, qgs_curr, cqgs_curr) = Self::jfet_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cgs,
+                vgs,
+                vdmos_history.vgs_prev_prev[idx],
+                vdmos_history.qgs_prev[idx],
+                vdmos_history.qgs_prev_prev[idx],
+                vdmos_history.cqgs_prev[idx],
+            );
+            vdmos_history.qgs_prev_prev_prev[idx] = vdmos_history.qgs_prev_prev[idx];
+            vdmos_history.qgs_prev_prev[idx] = vdmos_history.qgs_prev[idx];
+            vdmos_history.qgs_prev[idx] = qgs_curr;
+            vdmos_history.cqgs_prev[idx] = cqgs_curr;
+
+            vdmos_history.vgd_prev_prev[idx] = vdmos_history.vgd_prev[idx];
+            vdmos_history.vgd_prev[idx] = vgd;
+            let (_geq_gd, _ieq_gd, qgd_curr, cqgd_curr) = Self::jfet_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cgd,
+                vgd,
+                vdmos_history.vgd_prev_prev[idx],
+                vdmos_history.qgd_prev[idx],
+                vdmos_history.qgd_prev_prev[idx],
+                vdmos_history.cqgd_prev[idx],
+            );
+            vdmos_history.qgd_prev_prev_prev[idx] = vdmos_history.qgd_prev_prev[idx];
+            vdmos_history.qgd_prev_prev[idx] = vdmos_history.qgd_prev[idx];
+            vdmos_history.qgd_prev[idx] = qgd_curr;
+            vdmos_history.cqgd_prev[idx] = cqgd_curr;
+
+            vdmos_history.vgb_prev_prev[idx] = vdmos_history.vgb_prev[idx];
+            vdmos_history.vgb_prev[idx] = vgb;
+            let (_geq_gb, _ieq_gb, qgb_curr, cqgb_curr) = Self::jfet_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cgb,
+                vgb,
+                vdmos_history.vgb_prev_prev[idx],
+                vdmos_history.qgb_prev[idx],
+                vdmos_history.qgb_prev_prev[idx],
+                vdmos_history.cqgb_prev[idx],
+            );
+            vdmos_history.qgb_prev_prev_prev[idx] = vdmos_history.qgb_prev_prev[idx];
+            vdmos_history.qgb_prev_prev[idx] = vdmos_history.qgb_prev[idx];
+            vdmos_history.qgb_prev[idx] = qgb_curr;
+            vdmos_history.cqgb_prev[idx] = cqgb_curr;
+
+            vdmos_history.vds_prev_prev[idx] = vdmos_history.vds_prev[idx];
+            vdmos_history.vds_prev[idx] = vds;
+            let (_geq_ds, _ieq_ds, qds_curr, cqds_curr) = Self::jfet_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cds,
+                vds,
+                vdmos_history.vds_prev_prev[idx],
+                vdmos_history.qds_prev[idx],
+                vdmos_history.qds_prev_prev[idx],
+                vdmos_history.cqds_prev[idx],
+            );
+            vdmos_history.qds_prev_prev_prev[idx] = vdmos_history.qds_prev_prev[idx];
+            vdmos_history.qds_prev_prev[idx] = vdmos_history.qds_prev[idx];
+            vdmos_history.qds_prev[idx] = qds_curr;
+            vdmos_history.cqds_prev[idx] = cqds_curr;
+
+            vdmos_history.vbs_prev_prev[idx] = vdmos_history.vbs_prev[idx];
+            vdmos_history.vbs_prev[idx] = vbs;
+            let (_geq_bs, _ieq_bs, qbs_curr, cqbs_curr) = Self::nonlinear_charge_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cbs,
+                vbs,
+                qbs_exact,
+                vdmos_history.qbs_prev[idx],
+                vdmos_history.qbs_prev_prev[idx],
+                vdmos_history.cqbs_prev[idx],
+            );
+            vdmos_history.qbs_prev_prev_prev[idx] = vdmos_history.qbs_prev_prev[idx];
+            vdmos_history.qbs_prev_prev[idx] = vdmos_history.qbs_prev[idx];
+            vdmos_history.qbs_prev[idx] = qbs_curr;
+            vdmos_history.cqbs_prev[idx] = cqbs_curr;
+
+            vdmos_history.vbd_prev_prev[idx] = vdmos_history.vbd_prev[idx];
+            vdmos_history.vbd_prev[idx] = vbd;
+            let (_geq_bd, _ieq_bd, qbd_curr, cqbd_curr) = Self::nonlinear_charge_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cbd,
+                vbd,
+                qbd_exact,
+                vdmos_history.qbd_prev[idx],
+                vdmos_history.qbd_prev_prev[idx],
+                vdmos_history.cqbd_prev[idx],
+            );
+            vdmos_history.qbd_prev_prev_prev[idx] = vdmos_history.qbd_prev_prev[idx];
+            vdmos_history.qbd_prev_prev[idx] = vdmos_history.qbd_prev[idx];
+            vdmos_history.qbd_prev[idx] = qbd_curr;
+            vdmos_history.cqbd_prev[idx] = cqbd_curr;
+
+            vdmos_history.vd1_prev_prev[idx] = vdmos_history.vd1_prev[idx];
+            vdmos_history.vd1_prev[idx] = vd1;
+            let (_geq_d1, _ieq_d1, qd1_curr, cqd1_curr) = Self::nonlinear_charge_companion_terms(
+                method,
+                trap_order,
+                dt,
+                cd1,
+                vd1,
+                qd1_exact,
+                vdmos_history.qd1_prev[idx],
+                vdmos_history.qd1_prev_prev[idx],
+                vdmos_history.cqd1_prev[idx],
+            );
+            vdmos_history.qd1_prev_prev_prev[idx] = vdmos_history.qd1_prev_prev[idx];
+            vdmos_history.qd1_prev_prev[idx] = vdmos_history.qd1_prev[idx];
+            vdmos_history.qd1_prev[idx] = qd1_curr;
+            vdmos_history.cqd1_prev[idx] = cqd1_curr;
+        }
+        vdmos_history.accepted_dt_prev_prev = vdmos_history.accepted_dt_prev;
+        vdmos_history.accepted_dt_prev = dt;
+
         Self::update_b3soi_history(
             circuit,
             accepted_solution,
@@ -2797,6 +3818,66 @@ impl crate::device::MatrixStamper for StaticMatrixChargeStamper<'_> {
     fn stamp_rhs(&mut self, index: crate::circuit::NodeId, value: Value) {
         if index > 0 && index <= self.rhs.len() {
             self.rhs[index - 1] += value;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Netlist;
+
+    #[test]
+    fn pvdmos_companion_slots_follow_polarity_normalized_charge_voltages() {
+        let deck = "\
+PVDMOS charge slot orientation
+VD d 0 -0.5
+VG g 0 0
+VS s 0 0
+M1 d g s 0 PM W=1 L=1u
+.MODEL PM PMOS LEVEL=18
++ VTO=-100
++ RD=0
++ RS=0
++ RG=0
++ CGDO=1e-11
++ CGSO=1e-11
++ CGBO=1e-11
++ CBD=0
++ CBS=0
++ D1CJO=1e-12
++ D1TT=0
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+
+        let slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
+        let vdmos = &circuit.vdmoses.devices[0];
+        let di = vdmos.drain_int.unwrap_or(vdmos.drain);
+        let si = vdmos.source_int.unwrap_or(vdmos.source);
+        let d1p = vdmos.d1_prime.unwrap_or(vdmos.source);
+
+        let expected = [
+            (si, vdmos.gate),
+            (di, vdmos.gate),
+            (vdmos.bulk, vdmos.gate),
+            (si, di),
+            (si, vdmos.bulk),
+            (di, vdmos.bulk),
+            (d1p, vdmos.drain),
+        ];
+
+        for (branch, (slot, expected_nodes)) in slots[0].iter().zip(expected).enumerate() {
+            assert_eq!(
+                (slot.pos, slot.neg),
+                expected_nodes,
+                "PVDMOS companion branch {branch} must be oriented with the polarity-normalized charge voltage"
+            );
         }
     }
 }

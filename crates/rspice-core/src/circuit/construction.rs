@@ -28,6 +28,7 @@ impl CircuitData {
             b3soi_pd: B3SoiPds::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
+            vdmoses: Vdmoses::new(),
             jfets: Vec::new(),
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
@@ -49,6 +50,9 @@ impl CircuitData {
             behavioral_sources: BehavioralSources::new(),
             // XSPICE instances
             xspice_instances: Vec::new(),
+            xspice_digital_values: HashMap::new(),
+            xspice_digital_event_times: HashMap::new(),
+            xspice_event_queue: EventQueue::new(),
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             // Verilog-A devices
             #[cfg(feature = "veriloga")]
@@ -222,17 +226,46 @@ impl CircuitData {
             dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
             dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
             dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
+            dev.node_charge_deficit = Self::remap_node_id(dev.node_charge_deficit, old_node_id);
         }
         for dev in &mut self.bsim4v8.devices {
+            dev.node_drain_external = Self::remap_node_id(dev.node_drain_external, old_node_id);
             dev.node_drain = Self::remap_node_id(dev.node_drain, old_node_id);
+            dev.node_gate_external = Self::remap_node_id(dev.node_gate_external, old_node_id);
+            dev.node_gate_mid = Self::remap_node_id(dev.node_gate_mid, old_node_id);
             dev.node_gate = Self::remap_node_id(dev.node_gate, old_node_id);
+            dev.node_source_external = Self::remap_node_id(dev.node_source_external, old_node_id);
             dev.node_source = Self::remap_node_id(dev.node_source, old_node_id);
+            dev.node_bulk_external = Self::remap_node_id(dev.node_bulk_external, old_node_id);
             dev.node_bulk = Self::remap_node_id(dev.node_bulk, old_node_id);
+            dev.node_drain_body = Self::remap_node_id(dev.node_drain_body, old_node_id);
+            dev.node_source_body = Self::remap_node_id(dev.node_source_body, old_node_id);
+            dev.node_charge_deficit = Self::remap_node_id(dev.node_charge_deficit, old_node_id);
+        }
+        for vdmos in &mut self.vdmoses.devices {
+            vdmos.drain = Self::remap_node_id(vdmos.drain, old_node_id);
+            vdmos.gate = Self::remap_node_id(vdmos.gate, old_node_id);
+            vdmos.source = Self::remap_node_id(vdmos.source, old_node_id);
+            vdmos.bulk = Self::remap_node_id(vdmos.bulk, old_node_id);
+            vdmos.drain_int = vdmos
+                .drain_int
+                .map(|node| Self::remap_node_id(node, old_node_id));
+            vdmos.drain_drift = vdmos
+                .drain_drift
+                .map(|node| Self::remap_node_id(node, old_node_id));
+            vdmos.source_int = vdmos
+                .source_int
+                .map(|node| Self::remap_node_id(node, old_node_id));
+            vdmos.d1_prime = vdmos
+                .d1_prime
+                .map(|node| Self::remap_node_id(node, old_node_id));
         }
         for jfet in &mut self.jfets {
             jfet.drain = Self::remap_node_id(jfet.drain, old_node_id);
             jfet.gate = Self::remap_node_id(jfet.gate, old_node_id);
             jfet.source = Self::remap_node_id(jfet.source, old_node_id);
+            jfet.external_drain = Self::remap_node_id(jfet.external_drain, old_node_id);
+            jfet.external_source = Self::remap_node_id(jfet.external_source, old_node_id);
         }
         Self::remap_node_slice(&mut self.vcvs.node_pos, old_node_id);
         Self::remap_node_slice(&mut self.vcvs.node_neg, old_node_id);
@@ -544,5 +577,39 @@ impl CircuitData {
     /// Number of branches
     pub fn num_branches(&self) -> usize {
         self.num_branches
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::Vdmos;
+
+    #[test]
+    fn vdmos_remap_updates_drain_drift_node() {
+        let mut circuit = CircuitData::new();
+        let drain = circuit.get_or_create_node("d");
+        let gate = circuit.get_or_create_node("g");
+        let source = circuit.get_or_create_node("s");
+        let bulk = circuit.get_or_create_node("b");
+        let drain_drift = circuit.get_or_create_node("dd");
+        let drain_int = circuit.get_or_create_node("di");
+        let source_int = circuit.get_or_create_node("si");
+        let d1_prime = circuit.get_or_create_node("d1p");
+
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), drain, gate, source);
+        vdmos.set_bulk_node(bulk);
+        vdmos.set_drain_drift_node(drain_drift);
+        vdmos.set_internal_nodes(drain_int, source_int);
+        vdmos.set_d1_prime_node(d1_prime);
+        circuit.vdmoses.add(vdmos);
+
+        circuit.remap_node_to_ground(drain_drift);
+
+        let vdmos = &circuit.vdmoses.devices[0];
+        assert_eq!(vdmos.drain_drift, Some(0));
+        assert_eq!(vdmos.drain_int, Some(drain_int - 1));
+        assert_eq!(vdmos.source_int, Some(source_int - 1));
+        assert_eq!(vdmos.d1_prime, Some(d1_prime - 1));
     }
 }

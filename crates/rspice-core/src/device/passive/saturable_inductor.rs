@@ -218,19 +218,25 @@ impl SaturableInductor {
         }
         1.0 - (self.l_eff - self.l_min) / l_range
     }
-}
 
-impl DynamicDevice for SaturableInductor {
-    fn stamp_transient(
+    /// Stamp this inductor after verifying its MNA branch has been assigned.
+    ///
+    /// Public direct-device callers should prefer this checked API. The
+    /// legacy [`DynamicDevice`] implementation logs and returns on this error
+    /// because that trait cannot report failures.
+    pub fn try_stamp_transient(
         &self,
         _voltages: &[Value],
         dt: Value,
         matrix: &mut impl MatrixStamper,
         _rhs: &mut [Value],
-    ) {
-        let branch = self
-            .branch_index
-            .expect("Branch index must be set for inductor");
+    ) -> Result<(), String> {
+        let Some(branch) = self.branch_index else {
+            return Err(format!(
+                "Saturable inductor '{}' cannot be stamped before its MNA branch index is assigned",
+                self.name
+            ));
+        };
 
         // Use incremental inductance for better convergence
         let l_inc = self.incremental_inductance(self.current);
@@ -249,6 +255,21 @@ impl DynamicDevice for SaturableInductor {
         // Equivalent voltage source for trapezoidal rule
         let veq = req * self.current_prev + self.voltage_prev;
         matrix.stamp_rhs(branch, veq);
+        Ok(())
+    }
+}
+
+impl DynamicDevice for SaturableInductor {
+    fn stamp_transient(
+        &self,
+        _voltages: &[Value],
+        dt: Value,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+    ) {
+        if let Err(message) = self.try_stamp_transient(_voltages, dt, matrix, rhs) {
+            log::error!("{message}");
+        }
     }
 
     fn step(&mut self, voltages: &[Value], dt: Value) {

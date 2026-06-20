@@ -11,7 +11,7 @@ use crate::analysis::CompanionCoefficients;
 use crate::device::behavioral::BehavioralSources;
 use crate::device::{Cccs, Ccvs, MatrixStamper, NonlinearConvergenceCriteria, Vccs, Vcvs};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
-use crate::xspice::{CodeModelRegistry, XspiceInstance};
+use crate::xspice::{CodeModelRegistry, DigitalValue, EventQueue, XspiceInstance};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -19,7 +19,7 @@ use thiserror::Error;
 mod storage;
 pub use storage::{
     B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Capacitors, CurrentSources, Diodes,
-    Inductors, Mosfets, Resistors, VoltageSources,
+    Inductors, Mosfets, Resistors, Vdmoses, VoltageSources,
 };
 mod construction;
 mod external_models;
@@ -308,6 +308,7 @@ pub struct CircuitData {
     pub(crate) b3soi_pd: B3SoiPds,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
+    pub(crate) vdmoses: Vdmoses,
     pub(crate) jfets: Vec<crate::device::Jfet>,
 
     // Controlled sources
@@ -344,6 +345,12 @@ pub struct CircuitData {
     // XSPICE code model instances
     /// XSPICE instance storage for code model evaluation
     pub(crate) xspice_instances: Vec<XspiceInstance>,
+    /// Circuit-level digital node values driven by XSPICE events.
+    pub(crate) xspice_digital_values: HashMap<NodeId, DigitalValue>,
+    /// Last event time per XSPICE digital node.
+    pub(crate) xspice_digital_event_times: HashMap<NodeId, Value>,
+    /// Circuit-level XSPICE digital event queue.
+    pub(crate) xspice_event_queue: EventQueue,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
 

@@ -372,7 +372,7 @@ impl Engine {
         // residual and fixed-point update, not by the previous device history
         // used to protect Newton steps while finding them.
         let snapshot = circuit.nonlinear_state_snapshot();
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let node_count = circuit.num_nodes().min(size);
         let verdict = matrix.with_probe_values(|probe, rhs| {
             for i in 0..node_count {

@@ -419,6 +419,61 @@ impl Bsim4v8s {
     }
 }
 
+/// Native VDMOS power MOSFET storage.
+///
+/// These devices use the generic [`MatrixStamper`] path: their internal
+/// drain/source resistance topology is instance-dependent, and the VDMOS
+/// direct stamper does not participate in the legacy MOSFET fast path.
+#[derive(Debug, Clone, Default)]
+pub struct Vdmoses {
+    pub devices: Vec<Vdmos>,
+}
+
+impl Vdmoses {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn add(&mut self, vdmos: Vdmos) {
+        self.devices.push(vdmos);
+    }
+
+    pub fn len(&self) -> usize {
+        self.devices.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.devices.is_empty()
+    }
+
+    /// Update all VDMOS devices with the current solution.
+    pub fn update_all(&mut self, voltages: &[Value]) {
+        use crate::device::NonlinearDevice;
+        for d in &mut self.devices {
+            d.update(voltages);
+        }
+    }
+
+    /// Stamp all VDMOS devices into the matrix for the Newton iteration.
+    pub fn stamp_all(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        rhs: &mut [Value],
+        voltages: &[Value],
+    ) {
+        use crate::device::NonlinearDevice;
+        for d in &self.devices {
+            d.stamp_nonlinear(voltages, matrix, rhs);
+        }
+    }
+
+    /// Check whether all VDMOS devices have converged.
+    pub fn all_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        use crate::device::NonlinearDevice;
+        self.devices.iter().all(|d| d.is_converged(criteria))
+    }
+}
+
 /// MOSFET storage for nonlinear Newton-Raphson iteration
 #[derive(Debug, Clone, Default)]
 pub struct Mosfets {

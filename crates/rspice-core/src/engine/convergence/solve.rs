@@ -55,7 +55,7 @@ impl Engine {
 
         matrix.clear_values();
         rhs.fill(0.0);
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin_floor);
 
         let direct_result = matrix.solve(&rhs);
@@ -159,7 +159,7 @@ impl Engine {
         let mut hit_voltage_limit = false;
         let mut limited_nodes: Vec<usize> = Vec::new();
         let mut damping_state = NewtonDampingState::default();
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let requires_conservative_nonlinear_limiting =
             circuit.requires_conservative_solution_damping();
         // ngspice's flat Newton: when junction devices replace their own
@@ -329,6 +329,7 @@ impl Engine {
         }
 
         if residual_stalled
+            && !circuit.has_b3soi_devices()
             && let Some(refined) = self.refine_fallback_candidate(circuit, matrix, &solution, abort)
         {
             log::info!(
@@ -657,7 +658,7 @@ impl Engine {
             matrix,
             &mut rhs,
             time,
-            self.config.convergence_config.gmin_target.max(0.0),
+            self.dc_nodal_gmin_floor(circuit),
         );
         matrix.solve(&rhs).map_err(SimulationError::Solver)
     }
@@ -671,7 +672,7 @@ impl Engine {
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
         let mut solution = self
             .linear_presolve_for_guess_with_linear_stamp(circuit, matrix, |circuit, matrix, rhs| {

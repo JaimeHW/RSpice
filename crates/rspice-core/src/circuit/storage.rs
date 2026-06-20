@@ -7,7 +7,7 @@
 use super::{NodeId, TwoTerminalStamp, project_two_terminal_voltage};
 use crate::Value;
 use crate::analysis::{CompanionCoefficients, IntegrationMethod};
-use crate::device::{Bjt, Diode, MatrixStamper, Mosfet, NonlinearConvergenceCriteria};
+use crate::device::{Bjt, Diode, MatrixStamper, Mosfet, NonlinearConvergenceCriteria, Vdmos};
 use crate::solver::{CscIndex, StaticMatrix, TripletMatrix};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock, RwLock};
@@ -17,6 +17,8 @@ mod passive;
 mod sources;
 
 pub use inductors::Inductors;
-pub use nonlinear::{B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Diodes, Mosfets};
+pub use nonlinear::{
+    B3SoiDds, B3SoiFds, B3SoiPds, Bjts, Bsim3v3s, Bsim4v8s, Diodes, Mosfets, Vdmoses,
+};
 pub use passive::{Capacitors, Resistors};
 pub use sources::{CurrentSources, VoltageSources};

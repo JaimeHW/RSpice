@@ -31,6 +31,109 @@ impl Engine {
         );
         Self::new(resolved)
     }
+
+    /// Refuse analyses that require native BSIM4 charge equations when a
+    /// card selects a charge model not yet ported. DC evaluation remains
+    /// valid for these cards because BSIM4's DC path is capmod-independent.
+    pub(crate) fn ensure_supported_bsim4_dynamic_charges(
+        circuit: &crate::CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        for dev in &circuit.bsim4v8.devices {
+            let model = &dev.core.model;
+            if !(0..=2).contains(&model.cap_mod) {
+                return Err(SimulationError::Circuit(format!(
+                    "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
+                     selects CAPMOD={} (only CAPMOD=0, 1, or 2 is implemented for charge-based analyses; \
+                     DC operating point is supported)",
+                    dev.name, model.cap_mod
+                )));
+            }
+            if !(0..=1).contains(&model.cvcharge_mod) {
+                return Err(SimulationError::Circuit(format!(
+                    "{analysis} analysis requires native BSIM4 charge model equations; BSIM4 '{}' \
+                     selects CVCHARGEMOD={} (only CVCHARGEMOD=0 or 1 is implemented for \
+                     charge-based analyses; DC operating point is supported)",
+                    dev.name, model.cvcharge_mod
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn unsupported_b3soi_capmod_error(
+        analysis: &str,
+        family: &str,
+        name: &str,
+        selected: i32,
+        supported: &str,
+    ) -> SimulationError {
+        SimulationError::Circuit(format!(
+            "{analysis} analysis requires native {family} charge model equations; {family} '{name}' \
+             selects CAPMOD={selected} (only {supported} is implemented for charge-based \
+             analyses; DC operating point is supported)"
+        ))
+    }
+
+    /// Refuse analyses that require B3SOI charge equations when a card selects
+    /// a charge model not yet ported. DC evaluation remains valid because the
+    /// SOI DC paths are capmod-independent.
+    pub(crate) fn ensure_supported_b3soi_dynamic_charges(
+        circuit: &crate::CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        for dev in &circuit.b3soi_fd.devices {
+            if dev.charges_suppressed() {
+                continue;
+            }
+            if dev.model.cap_mod != 2 && dev.model.cap_mod != 3 {
+                return Err(Self::unsupported_b3soi_capmod_error(
+                    analysis,
+                    "B3SOIFD",
+                    &dev.name,
+                    dev.model.cap_mod,
+                    "CAPMOD=2 or 3",
+                ));
+            }
+        }
+        for dev in &circuit.b3soi.devices {
+            if dev.charges_suppressed() {
+                continue;
+            }
+            if dev.model.cap_mod != 2 && dev.model.cap_mod != 3 {
+                return Err(Self::unsupported_b3soi_capmod_error(
+                    analysis,
+                    "B3SOIDD",
+                    &dev.name,
+                    dev.model.cap_mod,
+                    "CAPMOD=2 or 3",
+                ));
+            }
+        }
+        for dev in &circuit.b3soi_pd.devices {
+            if dev.charges_suppressed() {
+                continue;
+            }
+            if dev.model.cap_mod != 2 && dev.model.cap_mod != 3 {
+                return Err(Self::unsupported_b3soi_capmod_error(
+                    analysis,
+                    "B3SOIPD",
+                    &dev.name,
+                    dev.model.cap_mod,
+                    "CAPMOD=2 or 3",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_supported_dynamic_charges(
+        circuit: &crate::CircuitData,
+        analysis: &str,
+    ) -> Result<(), SimulationError> {
+        Self::ensure_supported_bsim4_dynamic_charges(circuit, analysis)?;
+        Self::ensure_supported_b3soi_dynamic_charges(circuit, analysis)
+    }
 }
 
 impl Default for Engine {

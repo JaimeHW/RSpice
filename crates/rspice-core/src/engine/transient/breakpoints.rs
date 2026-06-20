@@ -194,6 +194,51 @@ impl Engine {
         {
             Self::add_source_spec_breakpoints(breakpoints, spec, tstop, tstep_hint);
         }
+
+        for instance in &circuit.xspice_instances {
+            if !instance.model_name().eq_ignore_ascii_case("d_source") {
+                continue;
+            }
+
+            let input_file = instance
+                .string_param("input_file")
+                .filter(|path| !path.trim().is_empty())
+                .unwrap_or("source.txt");
+            match std::fs::read_to_string(input_file) {
+                Ok(contents) => {
+                    for (line_idx, line) in contents.lines().enumerate() {
+                        let trimmed = line.trim();
+                        if trimmed.is_empty() || trimmed.starts_with('*') {
+                            continue;
+                        }
+                        let Some(time_token) = trimmed.split_whitespace().next() else {
+                            continue;
+                        };
+                        match crate::netlist::lexer::parse_spice_value(time_token) {
+                            Ok(time) => {
+                                Self::add_breakpoint_if_in_range(breakpoints, time, tstop);
+                            }
+                            Err(err) => {
+                                log::warn!(
+                                    "Failed to parse d_source breakpoint time '{}' in '{}' line {}: {:?}",
+                                    time_token,
+                                    input_file,
+                                    line_idx + 1,
+                                    err
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    log::warn!(
+                        "Failed to load d_source input_file '{}' for breakpoint extraction: {}",
+                        input_file,
+                        err
+                    );
+                }
+            }
+        }
     }
 
     pub(super) fn transmission_line_delays(circuit: &crate::circuit::Circuit) -> Vec<Value> {

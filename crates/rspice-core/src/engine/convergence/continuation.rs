@@ -112,7 +112,7 @@ impl Engine {
     ) -> Result<Vec<Value>, SolverError> {
         // Source stepping sequence
         const SOURCE_SCALES: &[Value] = &[0.0, 0.1, 0.25, 0.5, 0.75, 1.0];
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
 
         let size = circuit.matrix_size();
         let mut solution = vec![0.0; size]; // Start from zero

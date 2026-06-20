@@ -10,11 +10,15 @@ pub(crate) struct NonlinearDeviceStateSnapshot {
     b3soi_pd: B3SoiPds,
     bsim3v3: Bsim3v3s,
     bsim4v8: Bsim4v8s,
+    vdmoses: Vdmoses,
     jfets: Vec<crate::device::Jfet>,
     vswitches: Vec<crate::device::VoltageSwitch>,
     iswitches: Vec<crate::device::CurrentSwitch>,
     behavioral_sources: BehavioralSources,
     xspice_instances: Vec<XspiceInstance>,
+    xspice_digital_values: HashMap<NodeId, DigitalValue>,
+    xspice_digital_event_times: HashMap<NodeId, Value>,
+    xspice_event_queue: EventQueue,
     #[cfg(feature = "veriloga")]
     veriloga_devices: crate::device::veriloga::VerilogADevices,
 }
@@ -30,6 +34,7 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -88,6 +93,7 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.vdmoses.is_empty()
             || !self.jfets.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
@@ -121,6 +127,7 @@ impl CircuitData {
             || !self.b3soi_pd.is_empty()
             || !self.bsim3v3.is_empty()
             || !self.bsim4v8.is_empty()
+            || !self.vdmoses.is_empty()
             || !self.vswitches.is_empty()
             || !self.iswitches.is_empty()
             || self.has_xspice_devices()
@@ -210,11 +217,15 @@ impl CircuitData {
             b3soi_pd: self.b3soi_pd.clone(),
             bsim3v3: self.bsim3v3.clone(),
             bsim4v8: self.bsim4v8.clone(),
+            vdmoses: self.vdmoses.clone(),
             jfets: self.jfets.clone(),
             vswitches: self.vswitches.clone(),
             iswitches: self.iswitches.clone(),
             behavioral_sources: self.behavioral_sources.clone(),
             xspice_instances: self.xspice_instances.clone(),
+            xspice_digital_values: self.xspice_digital_values.clone(),
+            xspice_digital_event_times: self.xspice_digital_event_times.clone(),
+            xspice_event_queue: self.xspice_event_queue.clone(),
             #[cfg(feature = "veriloga")]
             veriloga_devices: self.veriloga_devices.clone(),
         }
@@ -230,11 +241,15 @@ impl CircuitData {
         self.b3soi_pd = snapshot.b3soi_pd;
         self.bsim3v3 = snapshot.bsim3v3;
         self.bsim4v8 = snapshot.bsim4v8;
+        self.vdmoses = snapshot.vdmoses;
         self.jfets = snapshot.jfets;
         self.vswitches = snapshot.vswitches;
         self.iswitches = snapshot.iswitches;
         self.behavioral_sources = snapshot.behavioral_sources;
         self.xspice_instances = snapshot.xspice_instances;
+        self.xspice_digital_values = snapshot.xspice_digital_values;
+        self.xspice_digital_event_times = snapshot.xspice_digital_event_times;
+        self.xspice_event_queue = snapshot.xspice_event_queue;
         #[cfg(feature = "veriloga")]
         {
             self.veriloga_devices = snapshot.veriloga_devices;
@@ -252,6 +267,7 @@ impl CircuitData {
         self.b3soi_pd.update_all(voltages);
         self.bsim3v3.update_all(voltages);
         self.bsim4v8.update_all(voltages);
+        self.vdmoses.update_all(voltages);
         let mut order: Vec<usize> = (0..self.jfets.len()).collect();
         order.sort_by_key(|&idx| (self.jfets[idx].model_order(), std::cmp::Reverse(idx)));
         let mut hfet_inverse_latched = false;
@@ -326,6 +342,7 @@ impl CircuitData {
         // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
         // rows through the stamper's RHS hook).
         self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
+        self.vdmoses.stamp_all(&mut stamper, &mut [], voltages);
         for vswitch in &self.vswitches {
             vswitch.stamp_nonlinear(voltages, &mut stamper, &mut []);
         }
@@ -371,6 +388,7 @@ impl CircuitData {
             && self.b3soi_pd.all_converged(criteria)
             && self.bsim3v3.all_converged(criteria)
             && self.bsim4v8.all_converged(criteria)
+            && self.vdmoses.all_converged(criteria)
             && self.jfets.iter().all(|jfet| jfet.is_converged(criteria))
             && self.vswitches.iter().all(|sw| sw.is_converged(criteria))
             && self.iswitches.iter().all(|sw| sw.is_converged(criteria))

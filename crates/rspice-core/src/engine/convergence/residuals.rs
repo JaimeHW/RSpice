@@ -82,7 +82,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
     ) -> bool {
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_residual_converged_with_linear_stamp(
             circuit,
             matrix,
@@ -104,7 +104,7 @@ impl Engine {
         solution: &[Value],
         source_scale: Value,
     ) -> bool {
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_residual_converged_with_linear_stamp(
             circuit,
             matrix,
@@ -232,7 +232,7 @@ impl Engine {
         matrix: &mut StaticMatrix,
         solution: &[Value],
     ) -> Option<Value> {
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
             let node_count = circuit.num_nodes().min(rhs.len());
             for i in 0..node_count {
@@ -249,7 +249,7 @@ impl Engine {
         solution: &[Value],
         source_scale: Value,
     ) -> Option<Value> {
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
             let node_count = circuit.num_nodes().min(rhs.len());
             for i in 0..node_count {
@@ -290,7 +290,7 @@ impl Engine {
         anchor_solution: &[Value],
         pseudo_conductance: Value,
     ) -> Option<Value> {
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
             for i in 0..rhs.len() {
                 matrix.add(i, i, gmin_floor + pseudo_conductance);

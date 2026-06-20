@@ -106,6 +106,82 @@ impl CircuitData {
             });
         }
 
+        for dev in &self.b3soi_fd.devices {
+            let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "B3SOIFD",
+                region: Some(region),
+                params: vec![
+                    ("id", id),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("vbs", vbs),
+                    ("vth", vth),
+                    ("vdsat", vdsat),
+                    ("gm", gm),
+                    ("gds", gds),
+                    ("gmb", gmbs),
+                ],
+            });
+        }
+
+        for dev in &self.b3soi.devices {
+            let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "B3SOIDD",
+                region: Some(region),
+                params: vec![
+                    ("id", id),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("vbs", vbs),
+                    ("vth", vth),
+                    ("vdsat", vdsat),
+                    ("gm", gm),
+                    ("gds", gds),
+                    ("gmb", gmbs),
+                ],
+            });
+        }
+
+        for dev in &self.b3soi_pd.devices {
+            let (id, vgs, vds, vbs, vth, vdsat, gm, gds, gmbs, region) = dev.op_values();
+            entries.push(DeviceOpEntry {
+                name: dev.name.clone(),
+                device_kind: "B3SOIPD",
+                region: Some(region),
+                params: vec![
+                    ("id", id),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("vbs", vbs),
+                    ("vth", vth),
+                    ("vdsat", vdsat),
+                    ("gm", gm),
+                    ("gds", gds),
+                    ("gmb", gmbs),
+                ],
+            });
+        }
+
+        for vdmos in &self.vdmoses.devices {
+            let (id, vgs, vds, diode_id, power, region) = vdmos.op_values();
+            entries.push(DeviceOpEntry {
+                name: vdmos.name.clone(),
+                device_kind: "VDMOS",
+                region: Some(region),
+                params: vec![
+                    ("id", id),
+                    ("vgs", vgs),
+                    ("vds", vds),
+                    ("idiode", diode_id),
+                    ("power", power),
+                ],
+            });
+        }
+
         for bjt in &self.bjts.devices {
             let (vbe, vbc, ic, ib, gm) = bjt.op_values();
             let beta = if ib.abs() > 1e-30 { ic / ib } else { 0.0 };
@@ -138,6 +214,8 @@ impl CircuitData {
             let (vgs, vds, ids, gm, gds, igs, igd) = jfet.op_values();
             let device_kind = match jfet.params.channel_model {
                 crate::device::JfetChannelModel::ShichmanHodges => "JFET",
+                crate::device::JfetChannelModel::ParkerSkellern => "JFET2",
+                crate::device::JfetChannelModel::XyceModifiedShockley => "JFET2_XYCE",
                 _ => "MESFET",
             };
             entries.push(DeviceOpEntry {
@@ -216,6 +294,7 @@ impl CircuitData {
             + self.diodes.len()
             + self.bjts.len()
             + self.mosfets.len()
+            + self.vdmoses.len()
             + self.jfets.len()
             + self.vcvs.len()
             + self.vccs.len()

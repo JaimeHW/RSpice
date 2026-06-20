@@ -148,6 +148,21 @@ impl CircuitData {
                 ],
             );
         }
+        for vdmos in &self.vdmoses.devices {
+            Self::add_force_accept_topology_clique(
+                &mut graph,
+                &[
+                    vdmos.drain,
+                    vdmos.gate,
+                    vdmos.source,
+                    vdmos
+                        .drain_drift
+                        .unwrap_or_else(|| vdmos.drain_int.unwrap_or(vdmos.drain)),
+                    vdmos.drain_int.unwrap_or(vdmos.drain),
+                    vdmos.source_int.unwrap_or(vdmos.source),
+                ],
+            );
+        }
         for jfet in &self.jfets {
             Self::add_force_accept_topology_clique(
                 &mut graph,
@@ -205,6 +220,26 @@ impl CircuitData {
         for idx in 0..self.ccvs.len() {
             push_pair(self.ccvs.node_pos[idx], self.ccvs.node_neg[idx]);
         }
+        for instance in &self.xspice_instances {
+            for (port_idx, port) in instance.ports().iter().enumerate() {
+                let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
+                    && matches!(
+                        port.default_type,
+                        crate::xspice::PortType::Voltage
+                            | crate::xspice::PortType::DifferentialVoltage
+                    );
+                if !is_voltage_output {
+                    continue;
+                }
+                match instance.connection_at(port_idx) {
+                    Some(crate::xspice::PortConnection::Analog(node)) => push_pair(*node, 0),
+                    Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
+                        push_pair(*pos, *neg)
+                    }
+                    _ => {}
+                }
+            }
+        }
 
         pairs
     }
@@ -238,6 +273,29 @@ impl CircuitData {
         for idx in 0..self.ccvs.len() {
             Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_pos[idx]);
             Self::mark_force_accept_protected_node(&mut mask, self.ccvs.node_neg[idx]);
+        }
+        for instance in &self.xspice_instances {
+            for (port_idx, port) in instance.ports().iter().enumerate() {
+                let is_voltage_output = matches!(port.direction, crate::xspice::PortDirection::Out)
+                    && matches!(
+                        port.default_type,
+                        crate::xspice::PortType::Voltage
+                            | crate::xspice::PortType::DifferentialVoltage
+                    );
+                if !is_voltage_output {
+                    continue;
+                }
+                match instance.connection_at(port_idx) {
+                    Some(crate::xspice::PortConnection::Analog(node)) => {
+                        Self::mark_force_accept_protected_node(&mut mask, *node);
+                    }
+                    Some(crate::xspice::PortConnection::Differential(pos, neg)) => {
+                        Self::mark_force_accept_protected_node(&mut mask, *pos);
+                        Self::mark_force_accept_protected_node(&mut mask, *neg);
+                    }
+                    _ => {}
+                }
+            }
         }
 
         mask
@@ -288,5 +346,32 @@ impl CircuitData {
             );
         }
         changed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::Vdmos;
+
+    #[test]
+    fn vdmos_drain_drift_participates_in_force_accept_topology() {
+        let mut circuit = CircuitData::new();
+        let drain = circuit.get_or_create_node("d");
+        let gate = circuit.get_or_create_node("g");
+        let source = circuit.get_or_create_node("s");
+        let drain_drift = circuit.get_or_create_node("dd");
+        let drain_int = circuit.get_or_create_node("di");
+
+        circuit.resistors.add("ranchor".to_string(), 0, drain, 1.0);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), drain, gate, source);
+        vdmos.set_drain_drift_node(drain_drift);
+        vdmos.set_internal_nodes(drain_int, source);
+        circuit.vdmoses.add(vdmos);
+
+        let reachable = circuit.force_accept_ground_reachable_nodes();
+
+        assert!(reachable[drain_drift]);
+        assert!(reachable[drain_int]);
     }
 }

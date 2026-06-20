@@ -420,6 +420,7 @@ impl Engine {
         trap_order: u8,
         dt: Value,
         history: &JfetTransientHistory,
+        suppress_gate_charge: bool,
         reltol: Value,
         current_abstol: Value,
         charge_abstol: Value,
@@ -437,51 +438,102 @@ impl Engine {
             let (vgs_eval, vgd_eval) = Self::jfet_branch_voltages(jfet, candidate_solution);
             let (vgs_charge, vgd_charge) =
                 Self::jfet_charge_branch_voltages(jfet, candidate_solution);
-            let (cgs, cgd) = jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.params.tnom);
+            let jfet2_charge = jfet.analytic_gate_charge_state(
+                vgs_eval,
+                vgd_eval,
+                jfet.analysis_temperature(),
+                Some((
+                    history.vgs_prev[idx],
+                    history.vgd_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgd_prev[idx],
+                )),
+            );
+            let (cgs, cgd) = jfet2_charge
+                .map(|charge| (charge.cgs, charge.cgd))
+                .unwrap_or_else(|| {
+                    jfet.transient_capacitances(vgs_eval, vgd_eval, jfet.analysis_temperature())
+                });
+            let cds = jfet.transient_drain_source_capacitance();
 
             for (
+                is_gate_charge,
                 capacitance,
                 voltage,
                 voltage_prev,
+                q_curr_exact,
                 q_prev,
                 q_prev_prev,
                 q_prev_prev_prev,
                 cq_prev,
             ) in [
                 (
+                    true,
                     cgs,
                     vgs_charge,
                     history.vgs_prev[idx],
+                    jfet2_charge.map(|charge| charge.qgs),
                     history.qgs_prev[idx],
                     history.qgs_prev_prev[idx],
                     history.qgs_prev_prev_prev[idx],
                     history.cqgs_prev[idx],
                 ),
                 (
+                    true,
                     cgd,
                     vgd_charge,
                     history.vgd_prev[idx],
+                    jfet2_charge.map(|charge| charge.qgd),
                     history.qgd_prev[idx],
                     history.qgd_prev_prev[idx],
                     history.qgd_prev_prev_prev[idx],
                     history.cqgd_prev[idx],
                 ),
+                (
+                    false,
+                    cds,
+                    vgs_charge - vgd_charge,
+                    history.vds_prev[idx],
+                    None,
+                    history.qds_prev[idx],
+                    history.qds_prev_prev[idx],
+                    history.qds_prev_prev_prev[idx],
+                    history.cqds_prev[idx],
+                ),
             ] {
+                if suppress_gate_charge && is_gate_charge {
+                    continue;
+                }
+
                 if !capacitance.is_finite() || capacitance <= 0.0 {
                     continue;
                 }
 
-                let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
-                    effective_method,
-                    trap_order,
-                    dt,
-                    capacitance,
-                    voltage,
-                    voltage_prev,
-                    q_prev,
-                    q_prev_prev,
-                    cq_prev,
-                );
+                let (_geq, _ieq, q_curr, cq_curr) = if let Some(q_exact) = q_curr_exact {
+                    Self::nonlinear_charge_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        capacitance,
+                        voltage,
+                        q_exact,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    )
+                } else {
+                    Self::jfet_companion_terms(
+                        effective_method,
+                        trap_order,
+                        dt,
+                        capacitance,
+                        voltage,
+                        voltage_prev,
+                        q_prev,
+                        q_prev_prev,
+                        cq_prev,
+                    )
+                };
                 let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
                     q_curr,
                     q_prev,
@@ -713,13 +765,209 @@ impl Engine {
         found_branch.then_some(limit)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn vdmos_ngspice_truncation_limit(
+        circuit: &crate::circuit::Circuit,
+        candidate_solution: &[Value],
+        method: IntegrationMethod,
+        trap_order: u8,
+        dt: Value,
+        history: &VdmosTransientHistory,
+        reltol: Value,
+        current_abstol: Value,
+        charge_abstol: Value,
+        trtol: Value,
+    ) -> Option<Value> {
+        if history.accepted_dt_prev <= 0.0 || !history.accepted_dt_prev.is_finite() {
+            return None;
+        }
+
+        let effective_method = Self::effective_companion_method(method, trap_order);
+        let mut limit = 2.0 * dt;
+        let mut found_branch = false;
+
+        for (idx, vdmos) in circuit.vdmoses.devices.iter().enumerate() {
+            let (vgs, vgd, vgb, vds) =
+                vdmos.transient_charge_branch_voltages_at(candidate_solution);
+            let vd1 = vdmos.d1_charge_branch_voltage_at(candidate_solution);
+            let (vbs, vbd) = vdmos.body_charge_branch_voltages_at(candidate_solution);
+            let (cgs, cgd, cds) = vdmos.capacitances(vgs, vds);
+            let cgb = vdmos.gate_bulk_capacitance();
+            let (qbs, cbs) = vdmos.body_source_transient_charge_and_capacitance_at(vbs);
+            let (qbd, cbd) = vdmos.body_drain_transient_charge_and_capacitance_at(vbd);
+            let (qd1, cd1) = vdmos.d1_charge_and_capacitance_at(vd1);
+
+            for (
+                capacitance,
+                voltage,
+                voltage_prev,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_prev,
+            ) in [
+                (
+                    cgs,
+                    vgs,
+                    history.vgs_prev[idx],
+                    history.qgs_prev[idx],
+                    history.qgs_prev_prev[idx],
+                    history.qgs_prev_prev_prev[idx],
+                    history.cqgs_prev[idx],
+                ),
+                (
+                    cgd,
+                    vgd,
+                    history.vgd_prev[idx],
+                    history.qgd_prev[idx],
+                    history.qgd_prev_prev[idx],
+                    history.qgd_prev_prev_prev[idx],
+                    history.cqgd_prev[idx],
+                ),
+                (
+                    cgb,
+                    vgb,
+                    history.vgb_prev[idx],
+                    history.qgb_prev[idx],
+                    history.qgb_prev_prev[idx],
+                    history.qgb_prev_prev_prev[idx],
+                    history.cqgb_prev[idx],
+                ),
+                (
+                    cds,
+                    vds,
+                    history.vds_prev[idx],
+                    history.qds_prev[idx],
+                    history.qds_prev_prev[idx],
+                    history.qds_prev_prev_prev[idx],
+                    history.cqds_prev[idx],
+                ),
+            ] {
+                if !capacitance.is_finite() || capacitance <= 0.0 {
+                    continue;
+                }
+
+                let (_geq, _ieq, q_curr, cq_curr) = Self::jfet_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    capacitance,
+                    voltage,
+                    voltage_prev,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+
+            for (
+                capacitance,
+                voltage,
+                q_curr_exact,
+                q_prev,
+                q_prev_prev,
+                q_prev_prev_prev,
+                cq_prev,
+            ) in [
+                (
+                    cbs,
+                    vbs,
+                    qbs,
+                    history.qbs_prev[idx],
+                    history.qbs_prev_prev[idx],
+                    history.qbs_prev_prev_prev[idx],
+                    history.cqbs_prev[idx],
+                ),
+                (
+                    cbd,
+                    vbd,
+                    qbd,
+                    history.qbd_prev[idx],
+                    history.qbd_prev_prev[idx],
+                    history.qbd_prev_prev_prev[idx],
+                    history.cqbd_prev[idx],
+                ),
+                (
+                    cd1,
+                    vd1,
+                    qd1,
+                    history.qd1_prev[idx],
+                    history.qd1_prev_prev[idx],
+                    history.qd1_prev_prev_prev[idx],
+                    history.cqd1_prev[idx],
+                ),
+            ] {
+                if !capacitance.is_finite() || capacitance <= 0.0 {
+                    continue;
+                }
+
+                let (_geq, _ieq, q_curr, cq_curr) = Self::nonlinear_charge_companion_terms(
+                    effective_method,
+                    trap_order,
+                    dt,
+                    capacitance,
+                    voltage,
+                    q_curr_exact,
+                    q_prev,
+                    q_prev_prev,
+                    cq_prev,
+                );
+                let Some(branch_limit) = Self::ngspice_charge_truncation_limit(
+                    q_curr,
+                    q_prev,
+                    q_prev_prev,
+                    q_prev_prev_prev,
+                    cq_curr,
+                    cq_prev,
+                    dt,
+                    history.accepted_dt_prev,
+                    history.accepted_dt_prev_prev,
+                    effective_method,
+                    trap_order,
+                    reltol,
+                    current_abstol,
+                    charge_abstol,
+                    trtol,
+                ) else {
+                    continue;
+                };
+                found_branch = true;
+                limit = limit.min(branch_limit);
+            }
+        }
+
+        found_branch.then_some(limit)
+    }
+
     /// LTE truncation limit for the BSIMSOI (level 56) charge states.
     ///
-    /// Mirrors [`Self::mosfet_ngspice_truncation_limit`] but over the four
-    /// coupled SOI node charges (qg/qb/qd/qe). The floating-body charge `qb`
-    /// participates, so the local-truncation-error step control resolves the
-    /// body transient the way ngspice's `B3SOIDDtrunc` does. Returns the
-    /// tightest per-charge step bound, or `None` when no SOI charge is active.
+    /// Mirrors [`Self::mosfet_ngspice_truncation_limit`] but over the three
+    /// B3SOI states that ngspice's `B3SOIDDtrunc` feeds to `CKTterr`: `qb`,
+    /// `qg`, and `qd`. `qe` and DD's thermal `qth` are still integrated by the
+    /// transient companion/history path, but they do not independently reduce
+    /// the accepted timestep. Returns the tightest per-charge step bound, or
+    /// `None` when no SOI charge is active.
     pub(super) fn b3soi_ngspice_truncation_limit(
         circuit: &crate::circuit::Circuit,
         candidate_solution: &[Value],
@@ -741,45 +989,38 @@ impl Engine {
 
         // The history is indexed DD devices first, then FD, then PD,
         // matching the companion stamp/commit walks.
-        let mut device_charges: Vec<(Value, Value, Value, Value)> = Vec::with_capacity(
+        let mut device_charges: Vec<(Value, Value, Value)> = Vec::with_capacity(
             circuit.b3soi.devices.len()
                 + circuit.b3soi_fd.devices.len()
                 + circuit.b3soi_pd.devices.len(),
         );
         for dev in &circuit.b3soi.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                device_charges.push((0.0, 0.0, 0.0));
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+            device_charges.push((c.qg, c.qb, c.qd));
         }
         for dev in &circuit.b3soi_fd.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                device_charges.push((0.0, 0.0, 0.0));
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+            device_charges.push((c.qg, c.qb, c.qd));
         }
         for dev in &circuit.b3soi_pd.devices {
             if dev.charges_suppressed() {
-                device_charges.push((0.0, 0.0, 0.0, 0.0));
+                device_charges.push((0.0, 0.0, 0.0));
                 continue;
             }
             let c = dev.charge_at(candidate_solution);
-            device_charges.push((c.qg, c.qb, c.qd, c.qe));
+            device_charges.push((c.qg, c.qb, c.qd));
         }
 
-        for (idx, (qg, qb, qd, qe)) in device_charges.into_iter().enumerate() {
+        for (idx, (qg, qb, qd)) in device_charges.into_iter().enumerate() {
             for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
-                (
-                    qg,
-                    history.qg_prev[idx],
-                    history.qg_prev_prev[idx],
-                    history.qg_prev_prev_prev[idx],
-                    history.cqg_prev[idx],
-                ),
                 (
                     qb,
                     history.qb_prev[idx],
@@ -788,18 +1029,18 @@ impl Engine {
                     history.cqb_prev[idx],
                 ),
                 (
+                    qg,
+                    history.qg_prev[idx],
+                    history.qg_prev_prev[idx],
+                    history.qg_prev_prev_prev[idx],
+                    history.cqg_prev[idx],
+                ),
+                (
                     qd,
                     history.qd_prev[idx],
                     history.qd_prev_prev[idx],
                     history.qd_prev_prev_prev[idx],
                     history.cqd_prev[idx],
-                ),
-                (
-                    qe,
-                    history.qe_prev[idx],
-                    history.qe_prev_prev[idx],
-                    history.qe_prev_prev_prev[idx],
-                    history.cqe_prev[idx],
                 ),
             ] {
                 // Integrated charge current at the candidate point.
@@ -930,11 +1171,11 @@ impl Engine {
 
     /// LTE truncation limit for the BSIM4 v4.8 (level 14/54) charge states.
     ///
-    /// Mirrors [`Self::bsim3_ngspice_truncation_limit`] over the three
-    /// composite BSIM4 node charges (`qg`/`qb`/`qd`, junction depletion
-    /// charges folded in) — exactly the states `b4trunc.c` feeds `CKTterr`
-    /// for `trnqsMod = rgateMod = rbodyMod = 0`. Returns the tightest
-    /// per-charge step bound, or `None` when no charge is active.
+    /// Mirrors [`Self::bsim3_ngspice_truncation_limit`] over BSIM4
+    /// `qg`/`qb`/`qd`; when `rbodyMod > 0`, `qb` is the intrinsic bulk charge
+    /// and ngspice also runs `CKTterr` for separate `qbs`/`qbd` junction
+    /// states (b4trunc.c). Returns the tightest per-charge step bound, or
+    /// `None` when no charge is active.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn bsim4_ngspice_truncation_limit(
         circuit: &crate::circuit::Circuit,
@@ -957,29 +1198,24 @@ impl Engine {
 
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
             let (c, _mode) = dev.charge_at(candidate_solution);
-            for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
+            let rbody = dev.rbody_enabled();
+            let (qg, _qgmid, qb, qd, _qbs, _qbd) = if dev.uses_trnqs() {
+                dev.trnqs_state_charges(&c, candidate_solution)
+            } else {
                 (
                     c.qg_state(),
-                    history.qg_prev[idx],
-                    history.qg_prev_prev[idx],
-                    history.qg_prev_prev_prev[idx],
-                    history.cqg_prev[idx],
-                ),
-                (
-                    c.qb_state(),
-                    history.qb_prev[idx],
-                    history.qb_prev_prev[idx],
-                    history.qb_prev_prev_prev[idx],
-                    history.cqb_prev[idx],
-                ),
-                (
+                    c.qgmid_state(),
+                    c.qb_state_for_rbody(rbody),
                     c.qd_state(),
-                    history.qd_prev[idx],
-                    history.qd_prev_prev[idx],
-                    history.qd_prev_prev_prev[idx],
-                    history.cqd_prev[idx],
-                ),
-            ] {
+                    c.qbs,
+                    c.qbd,
+                )
+            };
+            let mut consider_charge = |q_curr: Value,
+                                       q_prev: Value,
+                                       q_prev_prev: Value,
+                                       q_prev_prev_prev: Value,
+                                       cq_prev: Value| {
                 // Integrated charge current at the candidate point.
                 let cq_curr = Self::jfet_companion_ccap(
                     effective_method,
@@ -1007,10 +1243,77 @@ impl Engine {
                     charge_abstol,
                     trtol,
                 ) else {
-                    continue;
+                    return;
                 };
                 found_branch = true;
                 limit = limit.min(branch_limit);
+            };
+
+            for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
+                (
+                    qg,
+                    history.qg_prev[idx],
+                    history.qg_prev_prev[idx],
+                    history.qg_prev_prev_prev[idx],
+                    history.cqg_prev[idx],
+                ),
+                (
+                    qb,
+                    history.qb_prev[idx],
+                    history.qb_prev_prev[idx],
+                    history.qb_prev_prev_prev[idx],
+                    history.cqb_prev[idx],
+                ),
+                (
+                    qd,
+                    history.qd_prev[idx],
+                    history.qd_prev_prev[idx],
+                    history.qd_prev_prev_prev[idx],
+                    history.cqd_prev[idx],
+                ),
+            ] {
+                consider_charge(q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev);
+            }
+
+            if dev.core.model.rgate_mod == 3 {
+                consider_charge(
+                    c.qgmid_state(),
+                    history.qgmid_prev[idx],
+                    history.qgmid_prev_prev[idx],
+                    history.qgmid_prev_prev_prev[idx],
+                    history.cqgmid_prev[idx],
+                );
+            }
+
+            if rbody {
+                for (q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev) in [
+                    (
+                        c.qbs,
+                        history.qbs_prev[idx],
+                        history.qbs_prev_prev[idx],
+                        history.qbs_prev_prev_prev[idx],
+                        history.cqbs_prev[idx],
+                    ),
+                    (
+                        c.qbd,
+                        history.qbd_prev[idx],
+                        history.qbd_prev_prev[idx],
+                        history.qbd_prev_prev_prev[idx],
+                        history.cqbd_prev[idx],
+                    ),
+                ] {
+                    consider_charge(q_curr, q_prev, q_prev_prev, q_prev_prev_prev, cq_prev);
+                }
+            }
+
+            if dev.uses_trnqs() {
+                consider_charge(
+                    dev.trnqs_qcdump_state(candidate_solution),
+                    history.qcdump_prev[idx],
+                    history.qcdump_prev_prev[idx],
+                    history.qcdump_prev_prev_prev[idx],
+                    history.cqcdump_prev[idx],
+                );
             }
         }
 
@@ -1130,6 +1433,7 @@ impl Engine {
         jfet_history: &JfetTransientHistory,
         diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
+        vdmos_history: &VdmosTransientHistory,
         suppress_gate_charge: bool,
         voltage_abstol: Value,
         reltol: Value,
@@ -1174,7 +1478,7 @@ impl Engine {
         } else {
             None
         };
-        let jfet_limit = if !suppress_gate_charge && !circuit.jfets.is_empty() {
+        let jfet_limit = if !circuit.jfets.is_empty() {
             Self::jfet_ngspice_truncation_limit(
                 circuit,
                 candidate_solution,
@@ -1182,6 +1486,7 @@ impl Engine {
                 trap_order,
                 dt,
                 jfet_history,
+                suppress_gate_charge,
                 reltol,
                 current_abstol,
                 charge_abstol,
@@ -1226,16 +1531,36 @@ impl Engine {
         } else {
             None
         };
+        let vdmos_limit = if !circuit.vdmoses.is_empty() {
+            Self::vdmos_ngspice_truncation_limit(
+                circuit,
+                candidate_solution,
+                method,
+                trap_order,
+                dt,
+                vdmos_history,
+                reltol,
+                current_abstol,
+                charge_abstol,
+                trtol,
+            )
+            .filter(|limit| limit.is_finite() && *limit > 0.0)
+        } else {
+            None
+        };
 
         Self::min_truncation_limit(
             Self::min_truncation_limit(
                 Self::min_truncation_limit(
-                    Self::min_truncation_limit(capacitor_limit, bjt_limit),
-                    jfet_limit,
+                    Self::min_truncation_limit(
+                        Self::min_truncation_limit(capacitor_limit, bjt_limit),
+                        jfet_limit,
+                    ),
+                    diode_limit,
                 ),
-                diode_limit,
+                mosfet_limit,
             ),
-            mosfet_limit,
+            vdmos_limit,
         )
     }
 
@@ -1281,6 +1606,7 @@ impl Engine {
             && circuit.diodes.is_empty()
             && circuit.mosfets.is_empty()
             && circuit.jfets.is_empty()
+            && circuit.vdmoses.is_empty()
             && circuit.tlines.is_empty()
             && circuit.coupled_tlines.is_empty()
             && circuit.coupled_inductor_pairs.is_empty()
@@ -1301,6 +1627,7 @@ impl Engine {
             && circuit.diodes.is_empty()
             && circuit.bjts.devices.is_empty()
             && circuit.mosfets.is_empty()
+            && circuit.vdmoses.is_empty()
             && circuit.tlines.is_empty()
             && circuit.coupled_tlines.is_empty()
             && circuit.coupled_inductor_pairs.is_empty()
@@ -1321,6 +1648,7 @@ impl Engine {
             && circuit.diodes.is_empty()
             && circuit.bjts.devices.is_empty()
             && circuit.jfets.is_empty()
+            && circuit.vdmoses.is_empty()
             && circuit.tlines.is_empty()
             && circuit.coupled_tlines.is_empty()
             && circuit.coupled_inductor_pairs.is_empty()
@@ -1337,6 +1665,7 @@ impl Engine {
         jfet_truncation_limit: Option<Value>,
         diode_truncation_limit: Option<Value>,
         mosfet_truncation_limit: Option<Value>,
+        vdmos_truncation_limit: Option<Value>,
     ) -> bool {
         if circuit.has_xspice_devices()
             || !circuit.inductors.is_empty()
@@ -1355,12 +1684,14 @@ impl Engine {
         // generic node-voltage estimator stays in charge for those decks.
         let diode_controlled = circuit.diodes.is_empty() || diode_truncation_limit.is_some();
         let mosfet_controlled = circuit.mosfets.is_empty() || mosfet_truncation_limit.is_some();
+        let vdmos_controlled = circuit.vdmoses.is_empty() || vdmos_truncation_limit.is_some();
 
         capacitor_controlled
             && bjt_controlled
             && jfet_controlled
             && diode_controlled
             && mosfet_controlled
+            && vdmos_controlled
     }
 
     #[inline]
@@ -1389,6 +1720,7 @@ impl Engine {
         jfet_history: &JfetTransientHistory,
         diode_history: &DiodeTransientHistory,
         mosfet_history: &MosfetTransientHistory,
+        vdmos_history: &VdmosTransientHistory,
         voltage_lte_estimator: &LteEstimator,
         vbic_snapshot_cache: &[Option<BjtChargeSnapshot>],
         voltage_abstol: Value,
@@ -1424,6 +1756,7 @@ impl Engine {
             jfet_history,
             diode_history,
             mosfet_history,
+            vdmos_history,
             false,
             voltage_abstol,
             reltol,
@@ -1544,5 +1877,293 @@ impl Engine {
         }
 
         Some(x)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Netlist;
+
+    fn build_truncation_circuit(deck: &str) -> crate::circuit::Circuit {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        engine.build_circuit(&netlist).expect("circuit builds")
+    }
+
+    #[test]
+    fn family_charge_truncation_lte_shortcuts_do_not_cover_mixed_vdmos_decks() {
+        let bjt_and_vdmos = "\
+Mixed BJT and VDMOS LTE coverage
+VC c 0 0
+VB b 0 0
+VD d 0 0
+VG g 0 0
+VS s 0 0
+Q1 c b 0 QB
+M1 d g s 0 VM W=1 L=1u
+.MODEL QB NPN IS=1e-15 BF=100 CJE=1p
+.MODEL VM NMOS LEVEL=18 VTO=100 CGDO=1e-12 CGSO=0 CGBO=0 CBD=0 CBS=0
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(bjt_and_vdmos);
+        assert!(
+            !Engine::bjt_charge_truncation_covers_transient_lte(&circuit, Some(1.0e-9)),
+            "BJT-family LTE shortcut must not hide generic LTE when a VDMOS is also present"
+        );
+
+        let jfet_and_vdmos = "\
+Mixed JFET and VDMOS LTE coverage
+VD d 0 0
+VG g 0 0
+VS s 0 0
+VJD jd 0 0
+VJG jg 0 0
+VJS js 0 0
+J1 jd jg js JM
+M1 d g s 0 VM W=1 L=1u
+.MODEL JM NJF LEVEL=2 BETA=1e-12 VT0=-2 LAMBDA=0 VBI=1
+.MODEL VM NMOS LEVEL=18 VTO=100 CGDO=1e-12 CGSO=0 CGBO=0 CBD=0 CBS=0
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(jfet_and_vdmos);
+        assert!(
+            !Engine::jfet_charge_truncation_covers_transient_lte(&circuit, Some(1.0e-9)),
+            "JFET-family LTE shortcut must not hide generic LTE when a VDMOS is also present"
+        );
+
+        let mosfet_and_vdmos = "\
+Mixed MOSFET and VDMOS LTE coverage
+VD d 0 0
+VG g 0 0
+VS s 0 0
+VMD md 0 0
+VMG mg 0 0
+VMS ms 0 0
+M0 md mg ms 0 MM W=1u L=1u
+M1 d g s 0 VM W=1 L=1u
+.MODEL MM NMOS LEVEL=1 VTO=1 KP=1e-3
+.MODEL VM NMOS LEVEL=18 VTO=100 CGDO=1e-12 CGSO=0 CGBO=0 CBD=0 CBS=0
+.OP
+.END
+";
+        let circuit = build_truncation_circuit(mosfet_and_vdmos);
+        assert!(
+            !Engine::mosfet_charge_truncation_covers_transient_lte(&circuit, Some(1.0e-9)),
+            "MOSFET-family LTE shortcut must not hide generic LTE when a VDMOS is also present"
+        );
+    }
+
+    #[test]
+    fn b3soi_truncation_ignores_qth_like_ngspice_b3soiddtrunc() {
+        let deck = "\
+B3SOIDD qth truncation coverage
+VD d 0 5
+VG g 0 1.2
+VS s 0 0
+VE e 0 0
+M1 d g s e n1 w=4u l=1u
+.MODEL n1 NMOS LEVEL=56 SHMOD=1 RTH0=0.1 CTH0=1 CAPMOD=2
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+
+        let mut history = Engine::initialize_b3soi_history(&circuit, &base);
+        let dt = 1.0e-9;
+        history.accepted_dt_prev = dt;
+        history.accepted_dt_prev_prev = dt;
+
+        let temp = circuit
+            .get_node_by_name("m1.__temp.internal")
+            .expect("self-heating temp node");
+        let mut candidate = base.clone();
+        candidate[temp - 1] = 100.0;
+
+        let limit = Engine::b3soi_ngspice_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &history,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        )
+        .expect("unchanged qg/qb/qd still yields the default 2*dt bound");
+
+        assert!(
+            (limit - 2.0 * dt).abs() <= 1.0e-18,
+            "B3SOIDDtrunc should ignore qth-only changes; got limit {limit:.9e}"
+        );
+    }
+
+    #[test]
+    fn vdmos_charge_history_participates_in_device_truncation_limit() {
+        let deck = "\
+VDMOS truncation coverage
+VD d 0 0
+VG g 0 0
+VS s 0 0
+M1 d g s 0 OFF W=1 L=1u
+.MODEL OFF NMOS LEVEL=18
++ VTO=100
++ RD=0
++ RS=0
++ RG=0
++ CGDO=1e-9
++ CGSO=0
++ CGBO=0
++ CBD=0
++ CBS=0
++ CJ=0
++ CJSW=0
++ D1CJO=0
++ D1TT=0
++ CV=1
++ CVE=1
++ LAMBDA=0
++ SIGMA0=0
++ UO=230
++ VMAX=4e4
++ DELTA=5
++ TOX=1
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base);
+        let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        let dt = 1.0e-9;
+        bjt_history.accepted_dt_prev = dt;
+        bjt_history.accepted_dt_prev_prev = dt;
+        jfet_history.accepted_dt_prev = dt;
+        jfet_history.accepted_dt_prev_prev = dt;
+        diode_history.accepted_dt_prev = dt;
+        diode_history.accepted_dt_prev_prev = dt;
+        mosfet_history.accepted_dt_prev = dt;
+        mosfet_history.accepted_dt_prev_prev = dt;
+        vdmos_history.accepted_dt_prev = dt;
+        vdmos_history.accepted_dt_prev_prev = dt;
+
+        let gate = circuit.get_node_by_name("g").expect("gate node");
+        let mut candidate = base.clone();
+        candidate[gate - 1] = 1.0;
+
+        let limit = Engine::ngspice_device_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &bjt_history,
+            &[],
+            &jfet_history,
+            &diode_history,
+            &mosfet_history,
+            &vdmos_history,
+            false,
+            1.0e-9,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        );
+
+        assert!(
+            limit.is_some_and(|limit| limit.is_finite() && limit > 0.0),
+            "VDMOS-only charge deck must contribute a truncation limit, got {limit:?}"
+        );
+    }
+
+    #[test]
+    fn jfet2_cds_history_participates_even_when_gate_charge_is_suppressed() {
+        let deck = "\
+JFET2 CDS truncation coverage
+VD d 0 0
+VG g 0 0
+VS s 0 0
+J1 d g s PS area=1
+.MODEL PS NJF(level=2 beta=1e-12 vt0=-2 lambda=0 vbi=1 is=1e-18 n=1 \
+              cgs=0 cgd=0 cds=1e-9)
+.OP
+.END
+";
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let base = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+
+        let mut bjt_history = Engine::initialize_bjt_history(&circuit, &base);
+        let mut jfet_history = Engine::initialize_jfet_history(&circuit, &base);
+        let mut diode_history = Engine::initialize_diode_history(&circuit, &base);
+        let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+        let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        let dt = 1.0e-9;
+        bjt_history.accepted_dt_prev = dt;
+        bjt_history.accepted_dt_prev_prev = dt;
+        jfet_history.accepted_dt_prev = dt;
+        jfet_history.accepted_dt_prev_prev = dt;
+        diode_history.accepted_dt_prev = dt;
+        diode_history.accepted_dt_prev_prev = dt;
+        mosfet_history.accepted_dt_prev = dt;
+        mosfet_history.accepted_dt_prev_prev = dt;
+        vdmos_history.accepted_dt_prev = dt;
+        vdmos_history.accepted_dt_prev_prev = dt;
+
+        let drain = circuit.get_node_by_name("d").expect("drain node");
+        let mut candidate = base.clone();
+        candidate[drain - 1] = 1.0;
+
+        let limit = Engine::ngspice_device_truncation_limit(
+            &circuit,
+            &candidate,
+            IntegrationMethod::Trapezoidal,
+            1,
+            dt,
+            &bjt_history,
+            &[],
+            &jfet_history,
+            &diode_history,
+            &mosfet_history,
+            &vdmos_history,
+            true,
+            1.0e-9,
+            1.0e-3,
+            1.0e-12,
+            1.0e-14,
+            7.0,
+        );
+
+        assert!(
+            limit.is_some_and(|limit| limit.is_finite() && limit > 0.0),
+            "JFET2 CDS charge must contribute a truncation limit independently of gate-charge suppression, got {limit:?}"
+        );
     }
 }

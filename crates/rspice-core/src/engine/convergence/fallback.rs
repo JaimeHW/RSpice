@@ -116,7 +116,7 @@ impl Engine {
             circuit.update_jfet_static_linearizations(&solution);
         }
         let mut used_iterations = 0usize;
-        let gmin_floor = self.config.convergence_config.gmin_target.max(0.0);
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         let mut residual_stall_iterations = 0usize;
 
         for iter in 0..max_iterations {

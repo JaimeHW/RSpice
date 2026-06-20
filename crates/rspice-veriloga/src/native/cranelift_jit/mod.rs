@@ -515,9 +515,3 @@ impl JitCompiler {
         Ok(plan)
     }
 }
-
-impl Default for JitCompiler {
-    fn default() -> Self {
-        Self::new().expect("Failed to create JIT compiler")
-    }
-}

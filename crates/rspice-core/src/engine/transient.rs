@@ -148,7 +148,11 @@ struct JfetTransientHistory {
     vds_prev_prev: Vec<Value>,
     qds_prev: Vec<Value>,
     qds_prev_prev: Vec<Value>,
+    qds_prev_prev_prev: Vec<Value>,
     cqds_prev: Vec<Value>,
+    jfet2_vgstrap_prev: Vec<Value>,
+    jfet2_vgdtrap_prev: Vec<Value>,
+    jfet2_power_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }
@@ -276,13 +280,63 @@ struct MosfetTransientHistory {
     accepted_dt_prev_prev: Value,
 }
 
+#[derive(Debug, Clone, Default)]
+struct VdmosTransientHistory {
+    vgs_prev: Vec<Value>,
+    vgs_prev_prev: Vec<Value>,
+    qgs_prev: Vec<Value>,
+    qgs_prev_prev: Vec<Value>,
+    qgs_prev_prev_prev: Vec<Value>,
+    cqgs_prev: Vec<Value>,
+    vgd_prev: Vec<Value>,
+    vgd_prev_prev: Vec<Value>,
+    qgd_prev: Vec<Value>,
+    qgd_prev_prev: Vec<Value>,
+    qgd_prev_prev_prev: Vec<Value>,
+    cqgd_prev: Vec<Value>,
+    vgb_prev: Vec<Value>,
+    vgb_prev_prev: Vec<Value>,
+    qgb_prev: Vec<Value>,
+    qgb_prev_prev: Vec<Value>,
+    qgb_prev_prev_prev: Vec<Value>,
+    cqgb_prev: Vec<Value>,
+    vds_prev: Vec<Value>,
+    vds_prev_prev: Vec<Value>,
+    qds_prev: Vec<Value>,
+    qds_prev_prev: Vec<Value>,
+    qds_prev_prev_prev: Vec<Value>,
+    cqds_prev: Vec<Value>,
+    vbs_prev: Vec<Value>,
+    vbs_prev_prev: Vec<Value>,
+    qbs_prev: Vec<Value>,
+    qbs_prev_prev: Vec<Value>,
+    qbs_prev_prev_prev: Vec<Value>,
+    cqbs_prev: Vec<Value>,
+    vbd_prev: Vec<Value>,
+    vbd_prev_prev: Vec<Value>,
+    qbd_prev: Vec<Value>,
+    qbd_prev_prev: Vec<Value>,
+    qbd_prev_prev_prev: Vec<Value>,
+    cqbd_prev: Vec<Value>,
+    vd1_prev: Vec<Value>,
+    vd1_prev_prev: Vec<Value>,
+    qd1_prev: Vec<Value>,
+    qd1_prev_prev: Vec<Value>,
+    qd1_prev_prev_prev: Vec<Value>,
+    cqd1_prev: Vec<Value>,
+    accepted_dt_prev: Value,
+    accepted_dt_prev_prev: Value,
+}
+
 /// Per-instance B3SOIDD (BSIMSOI level 56) charge-integration history.
 ///
-/// The SOI charge model integrates four coupled node charges (qg/qb/qd/qe) with
+/// The SOI charge model integrates the coupled node charges (qg/qb/qd/qe) with
 /// the engine's integration coefficient, mirroring ngspice's `NIintegrate` on
-/// `B3SOIDDq{g,b,d,e}`. We keep the last two accepted charges (for Gear/Trap2
-/// history) and the last integrated charge-current `cq*` per node. The SOI body
-/// charge feeds the LTE exactly as the gate charges do.
+/// `B3SOIDDq{g,b,d,e}`. DD and FD self-heating also integrate
+/// `qth = Cth*delTemp`.
+/// We keep the last two accepted charges (for Gear/Trap2 history) and the last
+/// integrated charge-current `cq*` per node. The SOI body and thermal charges
+/// feed LTE exactly as the gate charges do.
 #[derive(Debug, Clone, Default)]
 struct B3SoiTransientHistory {
     qg_prev: Vec<Value>,
@@ -301,6 +355,10 @@ struct B3SoiTransientHistory {
     qe_prev_prev: Vec<Value>,
     qe_prev_prev_prev: Vec<Value>,
     cqe_prev: Vec<Value>,
+    qth_prev: Vec<Value>,
+    qth_prev_prev: Vec<Value>,
+    qth_prev_prev_prev: Vec<Value>,
+    cqth_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }
@@ -326,23 +384,35 @@ struct Bsim3TransientHistory {
     qd_prev_prev: Vec<Value>,
     qd_prev_prev_prev: Vec<Value>,
     cqd_prev: Vec<Value>,
+    qcheq_prev: Vec<Value>,
+    qcheq_prev_prev: Vec<Value>,
+    qcheq_prev_prev_prev: Vec<Value>,
+    cqcheq_prev: Vec<Value>,
+    qcdump_prev: Vec<Value>,
+    qcdump_prev_prev: Vec<Value>,
+    qcdump_prev_prev_prev: Vec<Value>,
+    cqcdump_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }
 
 /// Per-instance BSIM4 v4.8 (MOS level 14/54) charge-integration history.
 ///
-/// The same shape as [`Bsim3TransientHistory`]: with `trnqsMod = rgateMod =
-/// rbodyMod = 0`, b4ld.c integrates exactly three composite CKTstate
-/// charges (`BSIM4qg`, `BSIM4qd = qdrn - qbd`, `BSIM4qb = qbulk + qbd +
-/// qbs`, b4ld.c:4582-4596) and `b4trunc.c` runs `CKTterr` over those same
-/// three states.
+/// The same base shape as [`Bsim3TransientHistory`]: b4ld.c integrates
+/// `BSIM4qg`, `BSIM4qd`, and `BSIM4qb`. When `rbodyMod>0`, `qb` becomes the
+/// intrinsic bulk charge and b4ld.c also integrates separate junction states
+/// `qbs`/`qbd`; when `rgateMod=3`, it also integrates middle-gate overlap
+/// charge `qgmid`. `b4trunc.c` runs `CKTterr` over those extra states too.
 #[derive(Debug, Clone, Default)]
 struct Bsim4TransientHistory {
     qg_prev: Vec<Value>,
     qg_prev_prev: Vec<Value>,
     qg_prev_prev_prev: Vec<Value>,
     cqg_prev: Vec<Value>,
+    qgmid_prev: Vec<Value>,
+    qgmid_prev_prev: Vec<Value>,
+    qgmid_prev_prev_prev: Vec<Value>,
+    cqgmid_prev: Vec<Value>,
     qb_prev: Vec<Value>,
     qb_prev_prev: Vec<Value>,
     qb_prev_prev_prev: Vec<Value>,
@@ -351,6 +421,22 @@ struct Bsim4TransientHistory {
     qd_prev_prev: Vec<Value>,
     qd_prev_prev_prev: Vec<Value>,
     cqd_prev: Vec<Value>,
+    qbs_prev: Vec<Value>,
+    qbs_prev_prev: Vec<Value>,
+    qbs_prev_prev_prev: Vec<Value>,
+    cqbs_prev: Vec<Value>,
+    qbd_prev: Vec<Value>,
+    qbd_prev_prev: Vec<Value>,
+    qbd_prev_prev_prev: Vec<Value>,
+    cqbd_prev: Vec<Value>,
+    qcheq_prev: Vec<Value>,
+    qcheq_prev_prev: Vec<Value>,
+    qcheq_prev_prev_prev: Vec<Value>,
+    cqcheq_prev: Vec<Value>,
+    qcdump_prev: Vec<Value>,
+    qcdump_prev_prev: Vec<Value>,
+    qcdump_prev_prev_prev: Vec<Value>,
+    cqcdump_prev: Vec<Value>,
     accepted_dt_prev: Value,
     accepted_dt_prev_prev: Value,
 }
@@ -547,6 +633,7 @@ impl Engine {
             let checkpoint = TransientCheckpoint::capture(fingerprint, 0.0, &[], &circuit);
             return Ok((result, checkpoint));
         }
+        Self::ensure_supported_dynamic_charges(&circuit, "Transient")?;
         let hinted_max_step = circuit
             .transient_max_step_hint
             .map_or(max_step, |hint| max_step.min(hint));
@@ -944,9 +1031,13 @@ impl Engine {
         // indices instead of a hash lookup per matrix entry.
         let diode_companion_slots = Self::link_diode_companion_slots(&circuit, &matrix);
         let mosfet_companion_slots = Self::link_mosfet_companion_slots(&circuit, &matrix);
+        let vdmos_companion_slots = Self::link_vdmos_companion_slots(&circuit, &matrix);
         let mut mosfet_history = Self::initialize_mosfet_history(&circuit, &solution);
         mosfet_history.accepted_dt_prev = hinted_max_step;
         mosfet_history.accepted_dt_prev_prev = hinted_max_step;
+        let mut vdmos_history = Self::initialize_vdmos_history(&circuit, &solution);
+        vdmos_history.accepted_dt_prev = hinted_max_step;
+        vdmos_history.accepted_dt_prev_prev = hinted_max_step;
         let mut b3soi_history = Self::initialize_b3soi_history(&circuit, &solution);
         b3soi_history.accepted_dt_prev = hinted_max_step;
         b3soi_history.accepted_dt_prev_prev = hinted_max_step;
@@ -1061,6 +1152,7 @@ impl Engine {
                         &mut jfet_history,
                         &mut diode_history,
                         &mut mosfet_history,
+                        &mut vdmos_history,
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
@@ -1378,6 +1470,8 @@ impl Engine {
                         diode_companion_slots: &diode_companion_slots,
                         mosfet_history: &mosfet_history,
                         mosfet_companion_slots: &mosfet_companion_slots,
+                        vdmos_history: &vdmos_history,
+                        vdmos_companion_slots: &vdmos_companion_slots,
                         b3soi_history: &b3soi_history,
                         bsim3_history: &bsim3_history,
                         bsim4_history: &bsim4_history,
@@ -1705,6 +1799,8 @@ impl Engine {
                                 diode_companion_slots: &diode_companion_slots,
                                 mosfet_history: &mosfet_history,
                                 mosfet_companion_slots: &mosfet_companion_slots,
+                                vdmos_history: &vdmos_history,
+                                vdmos_companion_slots: &vdmos_companion_slots,
                                 b3soi_history: &b3soi_history,
                                 bsim3_history: &bsim3_history,
                                 bsim4_history: &bsim4_history,
@@ -1792,6 +1888,8 @@ impl Engine {
                             diode_companion_slots: &diode_companion_slots,
                             mosfet_history: &mosfet_history,
                             mosfet_companion_slots: &mosfet_companion_slots,
+                            vdmos_history: &vdmos_history,
+                            vdmos_companion_slots: &vdmos_companion_slots,
                             b3soi_history: &b3soi_history,
                             bsim3_history: &bsim3_history,
                             bsim4_history: &bsim4_history,
@@ -1908,27 +2006,32 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
-                    let excessive_quiet_force_candidate = Self::is_excessive_quiet_force_candidate(
-                        &solution,
-                        &bounded_force_candidate,
-                        expected_source_delta,
-                        num_nodes,
-                        force_accept_delta_limit,
-                    );
-                    let stale_force_candidate = Self::is_stale_step(
-                        &solution,
-                        &bounded_force_candidate,
-                        expected_source_delta,
-                        num_nodes,
-                    );
-                    let stagnant_force_candidate = Self::is_stagnant_force_candidate(
-                        &circuit,
-                        &solution,
-                        &bounded_force_candidate,
-                        num_nodes,
-                        self.voltage_abstol(),
-                        self.current_abstol(),
-                    );
+                    let use_static_source_recovery_guards =
+                        !circuit.has_xspice_event_driven_devices();
+                    let excessive_quiet_force_candidate = use_static_source_recovery_guards
+                        && Self::is_excessive_quiet_force_candidate(
+                            &solution,
+                            &bounded_force_candidate,
+                            expected_source_delta,
+                            num_nodes,
+                            force_accept_delta_limit,
+                        );
+                    let stale_force_candidate = use_static_source_recovery_guards
+                        && Self::is_stale_step(
+                            &solution,
+                            &bounded_force_candidate,
+                            expected_source_delta,
+                            num_nodes,
+                        );
+                    let stagnant_force_candidate = use_static_source_recovery_guards
+                        && Self::is_stagnant_force_candidate(
+                            &circuit,
+                            &solution,
+                            &bounded_force_candidate,
+                            num_nodes,
+                            self.voltage_abstol(),
+                            self.current_abstol(),
+                        );
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -2053,24 +2156,24 @@ impl Engine {
                     } else {
                         None
                     };
-                    let force_accept_jfet_truncation_limit =
-                        if !suppress_gate_charge && !circuit.jfets.is_empty() {
-                            Self::jfet_ngspice_truncation_limit(
-                                &circuit,
-                                &new_solution,
-                                current_method,
-                                accepted_step_trap_order,
-                                dt,
-                                &jfet_history,
-                                self.voltage_reltol(),
-                                self.current_abstol(),
-                                self.charge_abstol(),
-                                self.transient_trtol(),
-                            )
-                            .filter(|limit| limit.is_finite() && *limit > 0.0)
-                        } else {
-                            None
-                        };
+                    let force_accept_jfet_truncation_limit = if !circuit.jfets.is_empty() {
+                        Self::jfet_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &jfet_history,
+                            suppress_gate_charge,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_capacitor_truncation_limit = if !circuit.capacitors.is_empty()
                     {
                         Self::capacitor_ngspice_truncation_limit(
@@ -2126,6 +2229,23 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_vdmos_truncation_limit = if !circuit.vdmoses.is_empty() {
+                        Self::vdmos_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &vdmos_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -2193,11 +2313,14 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                force_accept_b3soi_truncation_limit,
+                                force_accept_vdmos_truncation_limit,
                             ),
-                            force_accept_bsim3_truncation_limit,
+                            force_accept_b3soi_truncation_limit,
                         ),
-                        force_accept_bsim4_truncation_limit,
+                        Self::min_truncation_limit(
+                            force_accept_bsim3_truncation_limit,
+                            force_accept_bsim4_truncation_limit,
+                        ),
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -2218,6 +2341,7 @@ impl Engine {
                         &mut jfet_history,
                         &mut diode_history,
                         &mut mosfet_history,
+                        &mut vdmos_history,
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
@@ -2235,7 +2359,7 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_timestep();
+                        circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -2366,26 +2490,25 @@ impl Engine {
                 } else {
                     None
                 };
-            let jfet_truncation_limit = if !first_accepted_transient_step
-                && !suppress_gate_charge
-                && !circuit.jfets.is_empty()
-            {
-                Self::jfet_ngspice_truncation_limit(
-                    &circuit,
-                    &new_solution,
-                    current_method,
-                    step_trap_order,
-                    dt,
-                    &jfet_history,
-                    self.voltage_reltol(),
-                    self.current_abstol(),
-                    self.charge_abstol(),
-                    self.transient_trtol(),
-                )
-                .filter(|limit| limit.is_finite() && *limit > 0.0)
-            } else {
-                None
-            };
+            let jfet_truncation_limit =
+                if !first_accepted_transient_step && !circuit.jfets.is_empty() {
+                    Self::jfet_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &jfet_history,
+                        suppress_gate_charge,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let diode_truncation_limit =
                 if !first_accepted_transient_step && !circuit.diodes.is_empty() {
                     Self::diode_ngspice_truncation_limit(
@@ -2427,6 +2550,24 @@ impl Engine {
             } else {
                 None
             };
+            let vdmos_truncation_limit =
+                if !first_accepted_transient_step && !circuit.vdmoses.is_empty() {
+                    Self::vdmos_ngspice_truncation_limit(
+                        &circuit,
+                        &new_solution,
+                        current_method,
+                        step_trap_order,
+                        dt,
+                        &vdmos_history,
+                        self.voltage_reltol(),
+                        self.current_abstol(),
+                        self.charge_abstol(),
+                        self.transient_trtol(),
+                    )
+                    .filter(|limit| limit.is_finite() && *limit > 0.0)
+                } else {
+                    None
+                };
             let b3soi_truncation_limit =
                 if !first_accepted_transient_step && circuit.has_b3soi_devices() {
                     Self::b3soi_ngspice_truncation_limit(
@@ -2497,11 +2638,11 @@ impl Engine {
                             ),
                             mosfet_truncation_limit,
                         ),
-                        b3soi_truncation_limit,
+                        vdmos_truncation_limit,
                     ),
-                    bsim3_truncation_limit,
+                    b3soi_truncation_limit,
                 ),
-                bsim4_truncation_limit,
+                Self::min_truncation_limit(bsim3_truncation_limit, bsim4_truncation_limit),
             );
             let ltra_truncation_limit = if !first_accepted_transient_step {
                 Self::ltra_candidate_truncation_limit(&circuit, &new_solution, t + dt)
@@ -2557,7 +2698,7 @@ impl Engine {
                     // clean stderr at the default log level.
                     if log_count < 40 || (t > 9.5e-8 && dt < 1.0e-15) {
                         log::debug!(
-                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, ltra={:?}, method={:?}, order={}",
+                            "Candidate truncation reject at t={:.6e}, dt={:.3e}, limit={:.3e}, cap={:?}, bjt={:?}, jfet={:?}, dio={:?}, mos={:?}, vdmos={:?}, ltra={:?}, method={:?}, order={}",
                             t,
                             dt,
                             limit,
@@ -2566,6 +2707,7 @@ impl Engine {
                             jfet_truncation_limit,
                             diode_truncation_limit,
                             mosfet_truncation_limit,
+                            vdmos_truncation_limit,
                             ltra_truncation_limit,
                             current_method,
                             step_trap_order
@@ -2604,6 +2746,7 @@ impl Engine {
                     jfet_truncation_limit,
                     diode_truncation_limit,
                     mosfet_truncation_limit,
+                    vdmos_truncation_limit,
                 );
             let (lte, accept) = if locked_grid.is_some() {
                 // The grid is given: a converged Newton solution at the
@@ -2694,27 +2837,32 @@ impl Engine {
                         expected_source_delta,
                         num_nodes,
                     );
-                    let excessive_quiet_force_candidate = Self::is_excessive_quiet_force_candidate(
-                        &solution,
-                        &bounded_force_candidate,
-                        expected_source_delta,
-                        num_nodes,
-                        force_accept_delta_limit,
-                    );
-                    let stale_force_candidate = Self::is_stale_step(
-                        &solution,
-                        &bounded_force_candidate,
-                        expected_source_delta,
-                        num_nodes,
-                    );
-                    let stagnant_force_candidate = Self::is_stagnant_force_candidate(
-                        &circuit,
-                        &solution,
-                        &bounded_force_candidate,
-                        num_nodes,
-                        self.voltage_abstol(),
-                        self.current_abstol(),
-                    );
+                    let use_static_source_recovery_guards =
+                        !circuit.has_xspice_event_driven_devices();
+                    let excessive_quiet_force_candidate = use_static_source_recovery_guards
+                        && Self::is_excessive_quiet_force_candidate(
+                            &solution,
+                            &bounded_force_candidate,
+                            expected_source_delta,
+                            num_nodes,
+                            force_accept_delta_limit,
+                        );
+                    let stale_force_candidate = use_static_source_recovery_guards
+                        && Self::is_stale_step(
+                            &solution,
+                            &bounded_force_candidate,
+                            expected_source_delta,
+                            num_nodes,
+                        );
+                    let stagnant_force_candidate = use_static_source_recovery_guards
+                        && Self::is_stagnant_force_candidate(
+                            &circuit,
+                            &solution,
+                            &bounded_force_candidate,
+                            num_nodes,
+                            self.voltage_abstol(),
+                            self.current_abstol(),
+                        );
 
                     if enforce_force_candidate_safety
                         && (unbounded_force_candidate
@@ -2813,24 +2961,24 @@ impl Engine {
                     } else {
                         None
                     };
-                    let force_accept_jfet_truncation_limit =
-                        if !suppress_gate_charge && !circuit.jfets.is_empty() {
-                            Self::jfet_ngspice_truncation_limit(
-                                &circuit,
-                                &new_solution,
-                                current_method,
-                                accepted_step_trap_order,
-                                dt,
-                                &jfet_history,
-                                self.voltage_reltol(),
-                                self.current_abstol(),
-                                self.charge_abstol(),
-                                self.transient_trtol(),
-                            )
-                            .filter(|limit| limit.is_finite() && *limit > 0.0)
-                        } else {
-                            None
-                        };
+                    let force_accept_jfet_truncation_limit = if !circuit.jfets.is_empty() {
+                        Self::jfet_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &jfet_history,
+                            suppress_gate_charge,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_capacitor_truncation_limit = if !circuit.capacitors.is_empty()
                     {
                         Self::capacitor_ngspice_truncation_limit(
@@ -2886,6 +3034,23 @@ impl Engine {
                         } else {
                             None
                         };
+                    let force_accept_vdmos_truncation_limit = if !circuit.vdmoses.is_empty() {
+                        Self::vdmos_ngspice_truncation_limit(
+                            &circuit,
+                            &new_solution,
+                            current_method,
+                            accepted_step_trap_order,
+                            dt,
+                            &vdmos_history,
+                            self.voltage_reltol(),
+                            self.current_abstol(),
+                            self.charge_abstol(),
+                            self.transient_trtol(),
+                        )
+                        .filter(|limit| limit.is_finite() && *limit > 0.0)
+                    } else {
+                        None
+                    };
                     let force_accept_b3soi_truncation_limit = if circuit.has_b3soi_devices() {
                         Self::b3soi_ngspice_truncation_limit(
                             &circuit,
@@ -2953,11 +3118,14 @@ impl Engine {
                                     ),
                                     force_accept_mosfet_truncation_limit,
                                 ),
-                                force_accept_b3soi_truncation_limit,
+                                force_accept_vdmos_truncation_limit,
                             ),
-                            force_accept_bsim3_truncation_limit,
+                            force_accept_b3soi_truncation_limit,
                         ),
-                        force_accept_bsim4_truncation_limit,
+                        Self::min_truncation_limit(
+                            force_accept_bsim3_truncation_limit,
+                            force_accept_bsim4_truncation_limit,
+                        ),
                     );
                     lte_estimator.record(&new_solution, dt);
                     lte_estimator.set_method_order(effective_method_order(
@@ -2978,6 +3146,7 @@ impl Engine {
                         &mut jfet_history,
                         &mut diode_history,
                         &mut mosfet_history,
+                        &mut vdmos_history,
                         &mut b3soi_history,
                         &mut bsim3_history,
                         &mut bsim4_history,
@@ -2995,7 +3164,7 @@ impl Engine {
                         &mut warned_dynamic_tline_breakpoint_cap,
                     );
                     if circuit.has_xspice_devices() {
-                        circuit.accept_xspice_timestep();
+                        circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
                     }
                     #[cfg(feature = "veriloga")]
                     if circuit.has_veriloga_devices() {
@@ -3058,6 +3227,7 @@ impl Engine {
             }
 
             if locked_grid.is_none()
+                && !circuit.has_xspice_event_driven_devices()
                 && Self::is_stale_step(&solution, &new_solution, expected_source_delta, num_nodes)
             {
                 stale_accept_count += 1;
@@ -3135,6 +3305,7 @@ impl Engine {
                         &jfet_history,
                         &diode_history,
                         &mosfet_history,
+                        &vdmos_history,
                         &lte_estimator,
                         &vbic_snapshot_cache,
                         self.voltage_abstol(),
@@ -3161,6 +3332,7 @@ impl Engine {
                 &mut jfet_history,
                 &mut diode_history,
                 &mut mosfet_history,
+                &mut vdmos_history,
                 &mut b3soi_history,
                 &mut bsim3_history,
                 &mut bsim4_history,
@@ -3181,7 +3353,7 @@ impl Engine {
             let tail_phase_start = crate::time_compat::Instant::now();
             // Accept XSPICE timestep (commit state changes)
             if circuit.has_xspice_devices() {
-                circuit.accept_xspice_timestep();
+                circuit.accept_xspice_transient_timestep(t, dt, &new_solution);
             }
             #[cfg(feature = "veriloga")]
             let veriloga_discontinuity = if circuit.has_veriloga_devices() {
@@ -3228,6 +3400,9 @@ impl Engine {
             if hit_breakpoint {
                 let restart_dt = breakpoints.mark_breakpoint_solved(t);
                 timestep.force_step(restart_dt.min(timestep.dt()).min(max_step));
+                if !circuit.vdmoses.is_empty() {
+                    lte_warmup_skips = lte_warmup_skips.max(2);
+                }
             }
             if !first_accepted_transient_step
                 && let Some(limit) = candidate_truncation_limit

@@ -194,27 +194,46 @@ impl Waveform {
     /// * `time` - Time points (must be monotonically increasing)
     /// * `values` - Signal values at each time point
     ///
-    /// # Panics
-    /// Panics if time and values have different lengths or are empty
-    pub fn new(time: &[Value], values: &[Value]) -> Self {
-        assert_eq!(
-            time.len(),
-            values.len(),
-            "Time and values must have same length"
-        );
-        assert!(!time.is_empty(), "Waveform cannot be empty");
+    /// Returns an error if time and values have different lengths or are empty.
+    pub fn try_new(time: &[Value], values: &[Value]) -> Result<Self, String> {
+        if time.len() != values.len() {
+            return Err(format!(
+                "Time and values must have same length (got {} time points and {} values)",
+                time.len(),
+                values.len()
+            ));
+        }
+        if time.is_empty() {
+            return Err("Waveform cannot be empty".to_string());
+        }
+        if !time.iter().all(|sample| sample.is_finite()) {
+            return Err("Waveform time points must be finite time values".to_string());
+        }
+        if !values.iter().all(|sample| sample.is_finite()) {
+            return Err("Waveform samples must contain only finite values".to_string());
+        }
+        if time.windows(2).any(|window| window[1] <= window[0]) {
+            return Err("Waveform time points must be strictly increasing".to_string());
+        }
 
         let min_value = values.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_value = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
-        Self {
+        Ok(Self {
             time: time.to_vec(),
             values: values.to_vec(),
             min_value,
             max_value,
             min_time: time[0],
             max_time: *time.last().unwrap(),
-        }
+        })
+    }
+
+    /// # Panics
+    /// Panics if time and values have different lengths or are empty. Use
+    /// [`Self::try_new`] when constructing from dynamic input.
+    pub fn new(time: &[Value], values: &[Value]) -> Self {
+        Self::try_new(time, values).unwrap_or_else(|message| panic!("{message}"))
     }
 
     /// Get number of samples
@@ -860,3 +879,43 @@ impl Waveform {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waveform_try_new_rejects_mismatched_arrays() {
+        let err = Waveform::try_new(&[0.0, 1.0], &[1.0]).expect_err("length mismatch");
+
+        assert!(err.contains("same length"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn waveform_try_new_rejects_empty_arrays() {
+        let err = Waveform::try_new(&[], &[]).expect_err("empty waveform");
+
+        assert!(err.contains("empty"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn waveform_try_new_rejects_nonfinite_samples() {
+        let err = Waveform::try_new(&[0.0, f64::NAN], &[1.0, 2.0]).expect_err("non-finite time");
+        assert!(err.contains("finite time"), "unexpected error: {err}");
+
+        let err =
+            Waveform::try_new(&[0.0, 1.0], &[1.0, f64::INFINITY]).expect_err("non-finite value");
+        assert!(err.contains("finite values"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn waveform_try_new_rejects_non_increasing_time() {
+        let err =
+            Waveform::try_new(&[0.0, 2.0, 1.0], &[1.0, 2.0, 3.0]).expect_err("time must increase");
+
+        assert!(
+            err.contains("strictly increasing"),
+            "unexpected error: {err}"
+        );
+    }
+}

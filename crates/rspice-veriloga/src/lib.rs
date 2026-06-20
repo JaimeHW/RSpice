@@ -1,7 +1,7 @@
 //! # RSpice Verilog-A/AMS Compiler
 //!
-//! A full Verilog-A Language Reference Manual (LRM) 2.4 compliant compiler
-//! with Verilog-AMS mixed-signal support for RSpice circuit simulator.
+//! A Verilog-A compiler targeting the supported analog subset of the
+//! Verilog-AMS Language Reference Manual (LRM) 2.4 for RSpice.
 //!
 //! ## Architecture
 //!

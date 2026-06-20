@@ -41,6 +41,22 @@ struct LuWorkspace {
 #[derive(Debug, Clone, Copy)]
 pub struct CscIndex(pub usize);
 
+#[derive(Debug, Clone, Copy)]
+struct MissingMatrixPosition {
+    method: &'static str,
+    row: usize,
+    col: usize,
+}
+
+impl MissingMatrixPosition {
+    fn into_solver_error(self) -> SolverError {
+        SolverError::InvalidCircuit(format!(
+            "{} missing matrix position ({}, {})",
+            self.method, self.row, self.col
+        ))
+    }
+}
+
 /// Pre-built matrix structure with static topology
 ///
 /// This is the critical optimization: we build the structure once during
@@ -62,10 +78,9 @@ pub struct StaticMatrix {
     position_map: FxHashMap<(usize, usize), usize>,
     /// Reusable LU workspace (lazily initialized on first solve)
     lu: Option<LuWorkspace>,
-    /// Experimental KLU-class backend (`RSPICE_SOLVER=klu`): refactors
-    /// the frozen pattern with a stored pivot sequence instead of fully
-    /// re-pivoting every Newton iteration. Lazily initialized; any
-    /// failure falls back to the faer path.
+    /// Default KLU-class real backend: refactors the frozen pattern with a
+    /// stored pivot sequence instead of fully re-pivoting every Newton
+    /// iteration. Lazily initialized; any failure falls back to the faer path.
     klu: Option<crate::solver::klu::KluSolver>,
     /// Scratch values + RHS retained between residual probes (see
     /// [`StaticMatrix::with_probe_values`]).
@@ -74,12 +89,14 @@ pub struct StaticMatrix {
     /// Scratch for the A*x product inside residual norms.
     residual_scratch: Vec<Value>,
     residual_gross_scratch: Vec<Value>,
+    /// First attempted stamp outside the frozen sparsity pattern.
+    stamping_error: Option<MissingMatrixPosition>,
 }
 
 #[cold]
 #[inline(never)]
-fn panic_missing_matrix_position(method: &'static str, row: usize, col: usize) -> ! {
-    panic!("{method} missing matrix position ({row}, {col})");
+fn missing_matrix_position(method: &'static str, row: usize, col: usize) -> MissingMatrixPosition {
+    MissingMatrixPosition { method, row, col }
 }
 
 /// Whether the KLU-class backend handles real solves for this process.
@@ -114,6 +131,7 @@ impl StaticMatrix {
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            stamping_error: None,
         }
     }
 
@@ -228,6 +246,7 @@ impl StaticMatrix {
             probe_rhs: None,
             residual_scratch: Vec::new(),
             residual_gross_scratch: Vec::new(),
+            stamping_error: None,
         })
     }
 
@@ -252,9 +271,41 @@ impl StaticMatrix {
     pub fn add(&mut self, row: usize, col: usize, value: Value) {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
-            None => panic_missing_matrix_position("StaticMatrix::add", row, col),
+            None => {
+                self.record_missing_position("StaticMatrix::add", row, col);
+                return;
+            }
         };
         self.values[idx] += value;
+    }
+
+    /// Checked add for callers that want an immediate structural error.
+    #[inline]
+    pub fn try_add(&mut self, row: usize, col: usize, value: Value) -> Result<(), SolverError> {
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => {
+                let missing = missing_matrix_position("StaticMatrix::try_add", row, col);
+                self.stamping_error.get_or_insert(missing);
+                return Err(missing.into_solver_error());
+            }
+        };
+        self.values[idx] += value;
+        Ok(())
+    }
+
+    #[inline]
+    fn record_missing_position(&mut self, method: &'static str, row: usize, col: usize) {
+        self.stamping_error
+            .get_or_insert_with(|| missing_matrix_position(method, row, col));
+    }
+
+    #[inline]
+    fn check_stamping_error(&self) -> Result<(), SolverError> {
+        match self.stamping_error {
+            Some(error) => Err(error.into_solver_error()),
+            None => Ok(()),
+        }
     }
 
     /// Rows whose entries are all exactly zero (or absent): the immediate
@@ -320,6 +371,7 @@ impl StaticMatrix {
         abstol: Value,
         reltol: Value,
     ) -> Result<Value, SolverError> {
+        self.check_stamping_error()?;
         if self.nrows != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Matrix rows {} don't match RHS size {}",
@@ -403,6 +455,7 @@ impl StaticMatrix {
         solution: &[Value],
         rhs: &[Value],
     ) -> Result<Vec<Value>, SolverError> {
+        self.check_stamping_error()?;
         if solution.len() != self.ncols || rhs.len() != self.nrows {
             return Err(SolverError::InvalidCircuit(
                 "Residual vector size mismatch".to_string(),
@@ -466,6 +519,7 @@ impl StaticMatrix {
     /// copies and no allocations after the first call.
     pub fn solve(&mut self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
         let n = self.nrows;
+        self.check_stamping_error()?;
 
         if n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
@@ -513,11 +567,11 @@ impl StaticMatrix {
         Ok(ws.rhs.col_as_slice(0).to_vec())
     }
 
-    /// Experimental KLU-class solve (`RSPICE_SOLVER=klu`): values-only
+    /// Default KLU-class real solve: values-only
     /// refactorization over the frozen pattern with a stored pivot
     /// sequence; full re-pivoting only on a growth alarm. Returns `None`
     /// on any backend failure so the caller falls through to faer —
-    /// the experiment can degrade performance but never a result.
+    /// backend fallback can degrade performance but never a result.
     fn try_solve_klu(&mut self, rhs: &[Value]) -> Option<Vec<Value>> {
         let Self {
             nrows,
@@ -556,6 +610,7 @@ impl StaticMatrix {
     /// This is used as a high-stability fallback for small linear systems with
     /// strong transformer/coupling fill-in where sparse LU can become noisy.
     pub fn solve_dense(&self, rhs: &[Value]) -> Result<Vec<Value>, SolverError> {
+        self.check_stamping_error()?;
         if self.nrows != rhs.len() || self.ncols != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
                 "Dense solve requires a square matrix matching RHS size, got {}x{} with RHS {}",
@@ -605,6 +660,8 @@ pub struct ComplexMatrix {
     /// `values`. Consecutive solves against unchanged values (noise analysis
     /// solves one matrix against many excitation vectors) skip refactorizing.
     factorization_valid: bool,
+    /// First attempted stamp outside the frozen sparsity pattern.
+    stamping_error: Option<MissingMatrixPosition>,
 }
 
 impl ComplexMatrix {
@@ -619,6 +676,7 @@ impl ComplexMatrix {
             position_map: real_matrix.position_map.clone(),
             lu: None,
             factorization_valid: false,
+            stamping_error: None,
         };
         // Reuse the real matrix's symbolic analysis when it has already been
         // computed (any DC solve does so); AC sweeps then never repeat it.
@@ -660,7 +718,10 @@ impl ComplexMatrix {
     pub fn add_real(&mut self, row: usize, col: usize, value: Value) {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
-            None => panic_missing_matrix_position("ComplexMatrix::add_real", row, col),
+            None => {
+                self.record_missing_position("ComplexMatrix::add_real", row, col);
+                return;
+            }
         };
         self.values[idx] += Complex64::new(value, 0.0);
         self.factorization_valid = false;
@@ -671,7 +732,10 @@ impl ComplexMatrix {
     pub fn add(&mut self, row: usize, col: usize, value: Complex64) {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
-            None => panic_missing_matrix_position("ComplexMatrix::add", row, col),
+            None => {
+                self.record_missing_position("ComplexMatrix::add", row, col);
+                return;
+            }
         };
         self.values[idx] += value;
         self.factorization_valid = false;
@@ -682,10 +746,85 @@ impl ComplexMatrix {
     pub fn add_imag(&mut self, row: usize, col: usize, value: Value) {
         let idx = match self.position_map.get(&(row, col)) {
             Some(&idx) => idx,
-            None => panic_missing_matrix_position("ComplexMatrix::add_imag", row, col),
+            None => {
+                self.record_missing_position("ComplexMatrix::add_imag", row, col);
+                return;
+            }
         };
         self.values[idx] += Complex64::new(0.0, value);
         self.factorization_valid = false;
+    }
+
+    /// Checked real add for callers that want an immediate structural error.
+    #[inline]
+    pub fn try_add_real(
+        &mut self,
+        row: usize,
+        col: usize,
+        value: Value,
+    ) -> Result<(), SolverError> {
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => {
+                let missing = missing_matrix_position("ComplexMatrix::try_add_real", row, col);
+                self.stamping_error.get_or_insert(missing);
+                return Err(missing.into_solver_error());
+            }
+        };
+        self.values[idx] += Complex64::new(value, 0.0);
+        self.factorization_valid = false;
+        Ok(())
+    }
+
+    /// Checked complex add for callers that want an immediate structural error.
+    #[inline]
+    pub fn try_add(&mut self, row: usize, col: usize, value: Complex64) -> Result<(), SolverError> {
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => {
+                let missing = missing_matrix_position("ComplexMatrix::try_add", row, col);
+                self.stamping_error.get_or_insert(missing);
+                return Err(missing.into_solver_error());
+            }
+        };
+        self.values[idx] += value;
+        self.factorization_valid = false;
+        Ok(())
+    }
+
+    /// Checked imaginary add for callers that want an immediate structural error.
+    #[inline]
+    pub fn try_add_imag(
+        &mut self,
+        row: usize,
+        col: usize,
+        value: Value,
+    ) -> Result<(), SolverError> {
+        let idx = match self.position_map.get(&(row, col)) {
+            Some(&idx) => idx,
+            None => {
+                let missing = missing_matrix_position("ComplexMatrix::try_add_imag", row, col);
+                self.stamping_error.get_or_insert(missing);
+                return Err(missing.into_solver_error());
+            }
+        };
+        self.values[idx] += Complex64::new(0.0, value);
+        self.factorization_valid = false;
+        Ok(())
+    }
+
+    #[inline]
+    fn record_missing_position(&mut self, method: &'static str, row: usize, col: usize) {
+        self.stamping_error
+            .get_or_insert_with(|| missing_matrix_position(method, row, col));
+    }
+
+    #[inline]
+    fn check_stamping_error(&self) -> Result<(), SolverError> {
+        match self.stamping_error {
+            Some(error) => Err(error.into_solver_error()),
+            None => Ok(()),
+        }
     }
 
     /// Materialize the real part of the sparse matrix as a dense matrix.
@@ -723,6 +862,7 @@ impl ComplexMatrix {
     /// consecutive solves with unchanged values.
     pub fn solve(&mut self, rhs: &[Complex64]) -> Result<Vec<Complex64>, SolverError> {
         let n = self.nrows;
+        self.check_stamping_error()?;
 
         if n != rhs.len() {
             return Err(SolverError::InvalidCircuit(format!(
@@ -917,6 +1057,46 @@ impl SparseLuSolver {
 impl Default for SparseLuSolver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_complex::Complex64;
+
+    #[test]
+    fn static_matrix_missing_stamp_returns_solver_error() {
+        let mut matrix = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+
+        matrix.add(0, 1, 2.0);
+        let message = matrix.solve(&[1.0, 1.0]).unwrap_err().to_string();
+
+        assert!(
+            message.contains("missing matrix position")
+                && message.contains("StaticMatrix::add")
+                && message.contains("(0, 1)"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn complex_matrix_missing_stamp_returns_solver_error() {
+        let real = StaticMatrix::from_triplets(2, 2, &[(0, 0, 1.0), (1, 1, 1.0)]).unwrap();
+        let mut matrix = ComplexMatrix::from_real_structure(&real);
+
+        matrix.add_real(0, 1, 2.0);
+        let message = matrix
+            .solve(&[Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)])
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            message.contains("missing matrix position")
+                && message.contains("ComplexMatrix::add_real")
+                && message.contains("(0, 1)"),
+            "unexpected error: {message}"
+        );
     }
 }
 

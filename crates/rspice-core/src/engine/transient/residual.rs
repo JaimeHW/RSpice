@@ -21,6 +21,8 @@ pub(super) struct TransientSystemContext<'a> {
     pub(super) diode_companion_slots: &'a [TwoTerminalStampSlots],
     pub(super) mosfet_history: &'a MosfetTransientHistory,
     pub(super) mosfet_companion_slots: &'a [[TwoTerminalStampSlots; 5]],
+    pub(super) vdmos_history: &'a VdmosTransientHistory,
+    pub(super) vdmos_companion_slots: &'a [[TwoTerminalStampSlots; 7]],
     pub(super) b3soi_history: &'a B3SoiTransientHistory,
     pub(super) bsim3_history: &'a Bsim3TransientHistory,
     pub(super) bsim4_history: &'a Bsim4TransientHistory,
@@ -77,6 +79,7 @@ impl Engine {
         if refresh_nonlinear && circuit.has_nonlinear_devices() {
             circuit.update_nonlinear(solution);
         }
+        Self::refresh_jfet2_transient_linearizations(circuit, solution, dt, ctx.jfet_history);
 
         circuit
             .capacitors
@@ -135,6 +138,17 @@ impl Engine {
             ctx.suppress_gate_charge,
             ctx.mosfet_companion_slots,
         );
+        Self::stamp_vdmos_transient_companions(
+            circuit,
+            matrix,
+            rhs,
+            solution,
+            ctx.method,
+            ctx.trap_order,
+            dt,
+            ctx.vdmos_history,
+            ctx.vdmos_companion_slots,
+        );
         Self::stamp_b3soi_transient_companions(
             circuit,
             matrix,
@@ -185,8 +199,7 @@ impl Engine {
         }
 
         if circuit.has_xspice_devices() {
-            circuit.evaluate_xspice_with_timestep(time, dt, solution);
-            circuit.stamp_xspice(matrix, rhs);
+            circuit.stamp_xspice_transient_trial(matrix, rhs, time, dt, solution);
         }
     }
 
@@ -366,6 +379,9 @@ Q1 C B E 0 QN
         let mut mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
         mosfet_history.accepted_dt_prev = dt;
         mosfet_history.accepted_dt_prev_prev = dt;
+        let mut vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
+        vdmos_history.accepted_dt_prev = dt;
+        vdmos_history.accepted_dt_prev_prev = dt;
         let mut b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
         b3soi_history.accepted_dt_prev = dt;
         b3soi_history.accepted_dt_prev_prev = dt;
@@ -385,6 +401,7 @@ Q1 C B E 0 QN
         ));
         let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
         let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
+        let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
         let ctx = TransientSystemContext {
             coeff: &coeff,
             method,
@@ -395,6 +412,8 @@ Q1 C B E 0 QN
             diode_companion_slots: &diode_companion_slots,
             mosfet_history: &mosfet_history,
             mosfet_companion_slots: &mosfet_companion_slots,
+            vdmos_history: &vdmos_history,
+            vdmos_companion_slots: &vdmos_companion_slots,
             b3soi_history: &b3soi_history,
             bsim3_history: &bsim3_history,
             bsim4_history: &bsim4_history,
@@ -788,6 +807,7 @@ Q1 C B E 0 QN
             let jfet_history = Engine::initialize_jfet_history(&circuit, &base);
             let diode_history = Engine::initialize_diode_history(&circuit, &base);
             let mosfet_history = Engine::initialize_mosfet_history(&circuit, &base);
+            let vdmos_history = Engine::initialize_vdmos_history(&circuit, &base);
             let b3soi_history = Engine::initialize_b3soi_history(&circuit, &base);
             let bsim3_history = Engine::initialize_bsim3_history(&circuit, &base);
             let bsim4_history = Engine::initialize_bsim4_history(&circuit, &base);
@@ -798,6 +818,7 @@ Q1 C B E 0 QN
             let coeff = CompanionCoefficients::for_method(IntegrationMethod::BackwardEuler);
             let diode_companion_slots = Engine::link_diode_companion_slots(&circuit, &matrix);
             let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
+            let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
             let ctx = TransientSystemContext {
                 coeff: &coeff,
                 method: IntegrationMethod::BackwardEuler,
@@ -808,6 +829,8 @@ Q1 C B E 0 QN
                 diode_companion_slots: &diode_companion_slots,
                 mosfet_history: &mosfet_history,
                 mosfet_companion_slots: &mosfet_companion_slots,
+                vdmos_history: &vdmos_history,
+                vdmos_companion_slots: &vdmos_companion_slots,
                 b3soi_history: &b3soi_history,
                 bsim3_history: &bsim3_history,
                 bsim4_history: &bsim4_history,

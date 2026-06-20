@@ -171,18 +171,40 @@ impl Engine {
             }
         }
 
+        // Native VDMOS stamps external drain/source, optional internal
+        // drain/source nodes, and transconductance columns from the gate.
+        for vdmos in &circuit.vdmoses.devices {
+            let d = vdmos.drain;
+            let g = vdmos.gate;
+            let s = vdmos.source;
+            let b = vdmos.bulk;
+            let di = vdmos.drain_int.unwrap_or(d);
+            let dd = vdmos.drain_drift.unwrap_or(di);
+            let si = vdmos.source_int.unwrap_or(s);
+            let d1p = vdmos.d1_prime.unwrap_or(s);
+            for &row in &[d, g, s, b, dd, di, si, d1p] {
+                for &col in &[d, g, s, b, dd, di, si, d1p] {
+                    if row > 0 && col > 0 {
+                        triplets.push((row - 1, col - 1, 0.0));
+                    }
+                }
+            }
+        }
+
         // B3SOIDD (BSIMSOI level 56) stamps.
-        // 5-terminal SOI device (drain, gate, source, back-gate E, body). The DC
-        // load couples body/junction rows and the CAPMOD=3 charge companion
-        // couples every terminal, so reserve the full 5x5 block.
+        // 5-terminal SOI device (drain, gate, source, back-gate E, body) plus
+        // the optional self-heating temperature node. The DC load couples
+        // body/junction/thermal rows and the CAPMOD=3 charge companion couples
+        // every terminal, so reserve the full active block.
         for dev in &circuit.b3soi.devices {
             let d = dev.node_drain;
             let g = dev.node_gate;
             let s = dev.node_source;
             let e = dev.node_e;
             let b = dev.node_body;
-            for &row in &[d, g, s, e, b] {
-                for &col in &[d, g, s, e, b] {
+            let t = dev.node_temp;
+            for &row in &[d, g, s, e, b, t] {
+                for &col in &[d, g, s, e, b, t] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }
@@ -199,8 +221,9 @@ impl Engine {
             let s = dev.node_source;
             let e = dev.node_e;
             let b = dev.node_body;
-            for &row in &[d, g, s, e, b] {
-                for &col in &[d, g, s, e, b] {
+            let t = dev.node_temp;
+            for &row in &[d, g, s, e, b, t] {
+                for &col in &[d, g, s, e, b, t] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }
@@ -218,8 +241,9 @@ impl Engine {
             let e = dev.node_e;
             let b = dev.node_body;
             let p = dev.node_p;
-            for &row in &[d, g, s, e, b, p] {
-                for &col in &[d, g, s, e, b, p] {
+            let t = dev.node_temp;
+            for &row in &[d, g, s, e, b, p, t] {
+                for &col in &[d, g, s, e, b, p, t] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }
@@ -228,17 +252,18 @@ impl Engine {
         }
 
         // BSIM3v3.3 (MOS level 8/49) stamps. The DC load couples the
-        // substrate-current rows and the CAPMOD=3 charge companion couples
-        // every terminal, so reserve the full 4x4 (drain-prime, gate,
-        // source-prime, bulk) block — the series RSH resistors are separate
-        // linear elements with their own pattern.
+        // substrate-current rows and the CAPMOD charge companion couples
+        // every terminal; NQSMOD=1 adds the hidden charge-deficit row/column.
+        // The series RSH resistors are separate linear elements with their
+        // own pattern.
         for dev in &circuit.bsim3v3.devices {
             let d = dev.node_drain;
             let g = dev.node_gate;
             let s = dev.node_source;
             let b = dev.node_bulk;
-            for &row in &[d, g, s, b] {
-                for &col in &[d, g, s, b] {
+            let q = dev.node_charge_deficit;
+            for &row in &[d, g, s, b, q] {
+                for &col in &[d, g, s, b, q] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }
@@ -246,16 +271,26 @@ impl Engine {
             }
         }
 
-        // BSIM4 v4.8 (MOS level 14/54) stamps: same full 4x4 reservation —
-        // the substrate-current and GIDL/GISL rows plus the CAPMOD=2 charge
-        // companion couple every terminal pair.
+        // BSIM4 v4.8 (MOS level 14/54) stamps: reserve the external/prime
+        // drain-source terminals, gate, external/body-prime nodes, and the
+        // optional RBODY drain/source body nodes. This covers the DC body
+        // network, the CAPMOD=0/1/2 charge companion, and the TRNQSMOD=1
+        // hidden charge-deficit row/column.
         for dev in &circuit.bsim4v8.devices {
+            let de = dev.node_drain_external;
             let d = dev.node_drain;
+            let ge = dev.node_gate_external;
+            let gm = dev.node_gate_mid;
             let g = dev.node_gate;
+            let se = dev.node_source_external;
             let s = dev.node_source;
+            let be = dev.node_bulk_external;
             let b = dev.node_bulk;
-            for &row in &[d, g, s, b] {
-                for &col in &[d, g, s, b] {
+            let db = dev.node_drain_body;
+            let sb = dev.node_source_body;
+            let q = dev.node_charge_deficit;
+            for &row in &[de, d, ge, gm, g, se, s, be, b, db, sb, q] {
+                for &col in &[de, d, ge, gm, g, se, s, be, b, db, sb, q] {
                     if row > 0 && col > 0 {
                         triplets.push((row - 1, col - 1, 0.0));
                     }

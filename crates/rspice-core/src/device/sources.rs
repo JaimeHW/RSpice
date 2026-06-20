@@ -72,6 +72,36 @@ impl VoltageSource {
         self.branch_index = Some(index);
     }
 
+    /// Stamp this source after verifying its MNA branch has been assigned.
+    ///
+    /// Public direct-device callers should prefer this checked API. The
+    /// legacy [`LinearDevice`] implementation logs and returns on this error
+    /// because that trait cannot report failures.
+    pub fn try_stamp_linear(
+        &self,
+        matrix: &mut impl MatrixStamper,
+        _rhs: &mut [Value],
+    ) -> Result<(), String> {
+        let Some(branch) = self.branch_index else {
+            return Err(format!(
+                "Voltage source '{}' cannot be stamped before its MNA branch index is assigned",
+                self.name
+            ));
+        };
+
+        // MNA stamp for ideal voltage source
+        // Adds extra equation: V(n+) - V(n-) = Vs
+        // Adds branch current variable
+
+        matrix.stamp(branch, self.node_pos, 1.0);
+        matrix.stamp(branch, self.node_neg, -1.0);
+        matrix.stamp(self.node_pos, branch, 1.0);
+        matrix.stamp(self.node_neg, branch, -1.0);
+
+        matrix.stamp_rhs(branch, self.dc_value);
+        Ok(())
+    }
+
     /// Get voltage at given time for transient analysis
     pub fn voltage_at(&self, time: Value) -> Value {
         match &self.transient_fn {
@@ -159,21 +189,10 @@ impl VoltageSource {
 }
 
 impl LinearDevice for VoltageSource {
-    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, _rhs: &mut [Value]) {
-        let branch = self
-            .branch_index
-            .expect("Branch index must be set for voltage source");
-
-        // MNA stamp for ideal voltage source
-        // Adds extra equation: V(n+) - V(n-) = Vs
-        // Adds branch current variable
-
-        matrix.stamp(branch, self.node_pos, 1.0);
-        matrix.stamp(branch, self.node_neg, -1.0);
-        matrix.stamp(self.node_pos, branch, 1.0);
-        matrix.stamp(self.node_neg, branch, -1.0);
-
-        matrix.stamp_rhs(branch, self.dc_value);
+    fn stamp_linear(&self, matrix: &mut impl MatrixStamper, rhs: &mut [Value]) {
+        if let Err(message) = self.try_stamp_linear(matrix, rhs) {
+            log::error!("{message}");
+        }
     }
 }
 
@@ -241,5 +260,58 @@ impl LinearDevice for CurrentSource {
         // Current flows from node_pos to node_neg
         matrix.stamp_rhs(self.node_pos, -self.dc_value);
         matrix.stamp_rhs(self.node_neg, self.dc_value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    #[derive(Default)]
+    struct RecordingStamper {
+        stamps: usize,
+        rhs_stamps: usize,
+    }
+
+    impl MatrixStamper for RecordingStamper {
+        fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {
+            self.stamps += 1;
+        }
+
+        fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {
+            self.rhs_stamps += 1;
+        }
+    }
+
+    #[test]
+    fn voltage_source_without_branch_index_reports_checked_error() {
+        let source = VoltageSource::new_dc("V1".to_string(), 1, 0, 5.0);
+        let mut matrix = RecordingStamper::default();
+        let mut rhs = [];
+
+        let message = source
+            .try_stamp_linear(&mut matrix, &mut rhs)
+            .expect_err("missing branch index must be a checked error");
+
+        assert!(
+            message.contains("branch index is assigned"),
+            "unexpected error: {message}"
+        );
+        assert_eq!(matrix.stamps, 0);
+        assert_eq!(matrix.rhs_stamps, 0);
+    }
+
+    #[test]
+    fn voltage_source_legacy_stamp_without_branch_index_does_not_panic() {
+        let source = VoltageSource::new_dc("V1".to_string(), 1, 0, 5.0);
+        let mut matrix = RecordingStamper::default();
+        let mut rhs = [];
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            source.stamp_linear(&mut matrix, &mut rhs);
+        }));
+
+        assert!(result.is_ok(), "legacy trait wrapper should not panic");
     }
 }
