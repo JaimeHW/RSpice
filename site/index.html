@@ -721,18 +721,18 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       <div class="wrap proof-grid">
         <div class="proof-cell">
           <p class="kicker">Oracle-validated</p>
-          <p>The nightly gate tracks <strong>111 passing decks out of the 113-deck
-          ngspice-46 corpus</strong>, with under-review decks kept visible.</p>
+          <p>The regression gate tracks the vendored <strong>ngspice-46 corpus with
+          under-review decks kept out of pass counts</strong> and reproducible validation contracts.</p>
         </div>
         <div class="proof-cell">
           <p class="kicker">Compact models, compiled</p>
-          <p>A built-in <strong>Verilog-A compiler</strong> ships BSIM4.8 as a compiled
-          model — and takes your foundry's .va decks, NDA and all.</p>
+          <p>A built-in <strong>Verilog-A compiler</strong> compiles supported Verilog-A modules
+          locally; multi-module foundry files work when they fit the documented analog subset.</p>
         </div>
         <div class="proof-cell">
           <p class="kicker">Deterministic by design</p>
-          <p>Seeded Monte Carlo, reproducible runs, a memory-safe Rust core —
-          <strong>the same deck gives the same answer, every time</strong>.</p>
+          <p>Seeded Monte Carlo, reproducible validation runs under documented build and thread settings,
+          and a memory-safe Rust core.</p>
         </div>
       </div>
     </div>
@@ -783,7 +783,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         </div>
         <div class="acard">
           <div class="acard-head"><h3>Verilog-A models</h3><span class="cmd">compile-va</span></div>
-          <p>Compiled compact models — BSIM4.8 ships as Verilog-A; bring your foundry's .va decks.</p>
+          <p>Compiled compact models — supported Verilog-A modules run locally through the documented analog subset.</p>
         </div>
         <div class="acard pro">
           <div class="acard-head"><h3>Harmonic balance</h3><span class="chip-pro">PRO</span><span class="cmd">--hb-freq</span></div>
@@ -865,8 +865,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
             traces row-by-row against checked-in references with probe-aware tolerances.</li>
             <li><strong>Targeted oracles</strong> — history-coupled devices use replay fixtures,
             and RF/math kernels use focused analytic or cross-check tests where available.</li>
-            <li><strong>Open corpus</strong> — the 113 conformance decks are vendored from the
-            ngspice test suite; the nightly gate currently tracks a 111/113 watermark.</li>
+            <li><strong>Open corpus</strong> — the conformance decks are vendored from the
+            ngspice test suite; under-review cases stay visible and current pass counts belong to rerun logs.</li>
           </ul>
           <div class="val-cta">
             <a class="btn btn-ghost" href="parity.html">Open the parity dashboard <span class="arr">→</span></a>
@@ -932,12 +932,12 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         </div>
         <div class="tier">
           <div class="tier-head">
-            <p class="kicker">Team</p>
+            <p class="kicker">Planned Team</p>
             <p class="tier-name"><span class="tier-price" style="font-size:22px;">Per seat</span><span class="tier-tag">early access</span></p>
           </div>
           <ul>
             <li>Everything in Pro</li>
-            <li>Cloud simulation runners</li>
+            <li>Shared run coordination</li>
             <li>Shared libraries &amp; PDK sync</li>
             <li>Pooled, reassignable seats</li>
           </ul>
@@ -946,14 +946,14 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         </div>
         <div class="tier">
           <div class="tier-head">
-            <p class="kicker">Enterprise</p>
+            <p class="kicker">Planned Enterprise</p>
             <p class="tier-price" style="font-size:22px;">Custom</p>
           </div>
           <ul>
             <li>Floating &amp; offline licenses</li>
             <li>Air-gapped installs</li>
-            <li>On-prem cloud runners</li>
-            <li>Procurement, SLAs, escrow</li>
+            <li>On-prem deployment planning</li>
+            <li>Procurement-ready licensing terms</li>
           </ul>
           <a class="btn btn-ghost" href="https://github.com/JaimeHW/RSpice/issues"
              title="Open a GitHub issue — the interim contact channel">Talk to us</a>

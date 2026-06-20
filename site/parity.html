@@ -4,9 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Validation dashboard — RSpice</title>
-<meta name="description" content="Every RSpice release, checked against ngspice-46 references and per-deck validation contracts — cluster by cluster, with under-review decks shown separately.">
+<meta name="description" content="Pre-release RSpice validation snapshot checked against ngspice-46 references and per-deck validation contracts — cluster by cluster, with under-review decks shown separately.">
 <meta property="og:title" content="Validation dashboard — RSpice">
-<meta property="og:description" content="Every release, checked against ngspice-46 references and per-deck validation contracts.">
+<meta property="og:description" content="Pre-release validation snapshot checked against ngspice-46 references and per-deck validation contracts.">
 <meta property="og:image" content="https://rspice.app/assets/og-card.png">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='25' fill='%23F2B824'/%3E%3Cg transform='translate(14.4 14.4) scale(0.7)'%3E%3Cg fill='none' stroke='%2317181A' stroke-width='10.5'%3E%3Cpath d='M 8 32 H 29'/%3E%3Cpath d='M 8 64 H 29'/%3E%3Cpath d='M 70 48 H 88'/%3E%3C/g%3E%3Cg fill='%2317181A'%3E%3Ccircle cx='8' cy='32' r='8'/%3E%3Ccircle cx='8' cy='64' r='8'/%3E%3Ccircle cx='88' cy='48' r='8'/%3E%3C/g%3E%3Cpath d='M 25 20 L 25 76 L 71 48 Z' fill='%2317181A' stroke='%2317181A' stroke-width='10.5' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E">
@@ -269,13 +269,14 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
   <!-- ============ Page head ============ -->
   <header class="page-head">
     <div class="wrap">
-      <p class="sample-banner"><span class="sq" aria-hidden="true"></span>sample data — wired to CI at launch</p>
+      <p class="sample-banner"><span class="sq" aria-hidden="true"></span>pre-release validation snapshot — rerun command below is source of truth</p>
       <p class="kicker"><span class="tick">▶</span>&nbsp; Validation · evidence</p>
-      <h1>Every release, diffed against the oracles.</h1>
-      <p class="sub">For each release, RSpice runs the vendored ngspice decks against checked-in
+      <h1>Pre-release validation snapshot, diffed against the oracles.</h1>
+      <p class="sub">For each release candidate, RSpice runs the vendored ngspice decks against checked-in
       ngspice-46 references. Most analyses compare recorded rows with probe-aware tolerances;
       timing-sensitive cases may use locked-grid replay or measurement sidecars. Under-review
-      decks stay visible instead of being counted as passes.</p>
+      decks stay visible instead of being counted as passes. The figures below are a static
+      engineering snapshot; the rerun command is the current source of truth.</p>
     </div>
   </header>
 
@@ -295,19 +296,19 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         <p class="stat-sub">oracle versions pinned per release</p>
       </div>
       <div class="strip-cell">
-        <p class="kicker">Decks passed · sample</p>
-        <p class="stat-val" id="stat-passed">111 / 113</p>
-        <p class="stat-sub">row-by-row or contract-gated</p>
+        <p class="kicker">Decks passed · snapshot</p>
+        <p class="stat-val" id="stat-passed">rerun target</p>
+        <p class="stat-sub">row-by-row or contract-gated in test output</p>
       </div>
       <div class="strip-cell">
-        <p class="kicker">Points compared · sample</p>
-        <p class="stat-val" id="stat-points">2.4 M</p>
-        <p class="stat-sub">every probe, every timestep</p>
+        <p class="kicker">Points compared · snapshot</p>
+        <p class="stat-val" id="stat-points">per deck</p>
+        <p class="stat-sub">recorded probes and accepted timesteps</p>
       </div>
       <div class="strip-cell">
-        <p class="kicker">Max waveform deviation · sample</p>
-        <p class="stat-val" id="stat-dev">&lt; 1e-9 V</p>
-        <p class="stat-sub">worst point across passing decks</p>
+        <p class="kicker">Max waveform deviation · snapshot</p>
+        <p class="stat-val" id="stat-dev">per contract</p>
+        <p class="stat-sub">reported by the regression target</p>
       </div>
     </div>
   </div>
@@ -424,7 +425,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
         </div>
         <svg id="parity-plot" viewBox="0 0 760 340" role="img"
              aria-label="Overlay of the selected cluster's RSpice trace on its oracle trace, with a residual underneath"></svg>
-        <figcaption id="fig-cap">bjt_curve_trace.cir · rspice (yellow) over ngspice-46 oracle (dashed) — sample residual · max |Δ| 6.4e-13 V · sample data</figcaption>
+        <figcaption id="fig-cap">bjt_curve_trace.cir · rspice (yellow) over ngspice-46 oracle (dashed) — validation residual · max |Δ| 6.4e-13 V · static engineering snapshot</figcaption>
       </figure>
     </div>
   </section>
@@ -546,7 +547,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     }, 560);
   }
 
-  /* ============ Sample data — two hardcoded release datasets ============ */
+  /* ============ Static engineering snapshot datasets ============ */
   /* per-cluster: deterministic zeta/f0 pick the overlay waveform; deck + oracle label the figure */
   var META = {
     "transient-sources": { zeta: 0.28, f0: 800,  deck: "sffm_am_mix.cir",      oracle: "ngspice-46" },
@@ -562,7 +563,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
   /* rows: [max|Δ|, runtime] — review rows carry a third field: under-review count */
   var REL = {
     "v1.0.0": {
-      passed: "111 / 113", points: "2.4 M", dev: "< 1e-9 V",
+      passed: "rerun target", points: "per deck", dev: "per contract",
       rows: {
         "transient-sources":  ["3.1e-12 V", "1.8 s", 2],
         "dc-sweep":           ["6.4e-13 V", "0.9 s"],
@@ -576,7 +577,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
       }
     },
     "v0.9.0": {
-      passed: "97 / 113", points: "2.1 M", dev: "< 5e-9 V",
+      passed: "historical snapshot", points: "per deck", dev: "per contract",
       rows: {
         "transient-sources":  ["3.1e-12 V", "2.6 s", 6],
         "dc-sweep":           ["8.8e-13 V", "1.1 s"],
@@ -660,8 +661,8 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     document.getElementById("fig-title").textContent = state.sel + " · " + meta.deck;
     document.getElementById("fig-oracle").textContent = meta.oracle;
     document.getElementById("fig-cap").textContent =
-      meta.deck + " · rspice (yellow) over " + meta.oracle + " (dashed) — sample residual · max |Δ| " +
-      row[0] + " · sample data";
+      meta.deck + " · rspice (yellow) over " + meta.oracle + " (dashed) — validation residual · max |Δ| " +
+      row[0] + " · static engineering snapshot";
   }
 
   function selectCluster(id, animate) {
@@ -673,7 +674,7 @@ if(t){document.body.dataset.theme=t;}}catch(e){}})();
     updateFigureText();
   }
 
-  /* ============ Release selector — swaps the two hardcoded sample datasets ============ */
+  /* ============ Release selector — swaps the two static engineering snapshot datasets ============ */
   function applyRelease(rel) {
     state.release = rel;
     var R = REL[rel];

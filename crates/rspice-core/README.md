@@ -76,8 +76,9 @@ Verified against `src/device/`:
 inductors (`K`), saturable inductor, and a Jiles-Atherton magnetic
 hysteresis model.
 
-**Semiconductors** (`semiconductor/`) — junction diode; BJT (with a VBIC
-path exercised by `tests/vbic_excess_phase_oracle.rs`).
+**Semiconductors** (`semiconductor/`) — junction diode; BJT (legacy
+Gummel-Poon by default / `LEVEL=1`, VBIC at `LEVEL=4`, and explicit
+rejection for unsupported advanced BJT levels).
 
 **MOSFETs and FET-family models** (`mosfet/`) —
 
@@ -88,21 +89,31 @@ path exercised by `tests/vbic_excess_phase_oracle.rs`).
 - EKV (`ekv.rs`)
 - VDMOS power MOSFET (`vdmos/` — device, recovery, thermal submodules)
 - B3SOI silicon-on-insulator, in DD/FD/PD variants (`b3soi/dd`, `b3soi/fd`, `b3soi/pd`)
-- JFET level 1 (`jfet/`, `jfet.rs`); `LEVEL=2` cards currently warn and
-  fall back to level-1 equations.
+- JFET level 1 and native Parker-Skellern JFET2 (`jfet/`, `jfet.rs`;
+  `NJF`/`PJF LEVEL=2`) with ngspice-compatible `P`, `Q`, `XI`, `Z`,
+  `VST`, `MVST`, `MXI`, `LFGAM`, `LFG1`, `LFG2`, `HFGAM`, `HFG1`,
+  `HFG2`, `HFETA`, `HFE1`, `HFE2`, `TAUG`, `TAUD`, `DELTA`, `ACGAM`,
+  `XC`, `CDS`, `IBD`, `VBD`, and `VER` model parameters plus the common
+  JFET aliases such as `VT0`/`VTO` and `VBI`/`PB`. `SimulationConfig`
+  defaults to best-available Parker-Skellern behavior, while
+  `SpiceDialect::Xyce` selects the internal Xyce modified-Shockley JFET2
+  compatibility path for Xyce regression coverage.
 
 `bsim4v8/` is the native BSIM4 v4.8 path for MOS `LEVEL=14/54`, ported from
 ngspice-46's `src/spicelib/devices/bsim4/`. It is wired through the builder,
 matrix reservation, nonlinear Newton stamping, AC small-signal stamping, and
 transient charge integration; `tests/bsim4_native.rs` pins the engine wiring
-against OP, DC sweep, transient, and `LEVEL=54` decks. The port still rejects
-unported mode selectors with typed errors rather than silently changing
-physics: external bias-dependent S/D resistance (`rdsMod=1`), distributed
-body and gate-resistance networks (`rbodyMod`, `rgateMod`), NQS, `mobMod`
-3-6, gate tunneling currents, non-default `capMod`/`cvchargeMod` charge
-paths, `dioMod=0/2`, `mtrlMod=1`, WPE/stress, and some `geoMod>0`
-implicit-geometry cases. See `src/device/mosfet/bsim4v8/params.rs` and
-`device.rs` for the exact ported/not-ported inventory.
+against OP, DC sweep, transient, and `LEVEL=54` decks. The port supports
+internal and external bias-dependent S/D resistance (`rdsMod=0/1`) and still
+rejects unported mode selectors with typed errors rather than silently changing
+physics: distributed body and gate-resistance networks (`rbodyMod`, `rgateMod`), NQS,
+unknown `cvchargeMod` charge paths, `mtrlMod=1`, and
+other unported mode selectors. `GEOMOD=0..10` implicit diffusion geometry,
+`RGEOMOD=1..8` implicit S/D resistance geometry, `WPEMOD=1` well-proximity
+adjustment, `igcMod`/`igbMod` gate tunneling currents, BSIM4 stress layout
+correction, and `dioMod=0/1/2` junction diode selectors are implemented. See
+`src/device/mosfet/bsim4v8/params.rs` and `device.rs` for the exact
+ported/not-ported inventory.
 
 **Sources and behavioral** — independent sources (`sources.rs`), the four
 controlled sources E/F/G/H (`controlled.rs`), behavioral B-sources whose

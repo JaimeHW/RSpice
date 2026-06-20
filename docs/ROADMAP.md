@@ -179,7 +179,7 @@ OpenVAF/OSDI play, executed in-house.
   vendored test directory.
 
 ### M2.3 — Native-model completion (only where the VA route doesn't cover)
-- BSIM4 native: stress effects (SA/SB/SD), well-proximity (WPE), `rgateMod`/`rbodyMod` networks,
+- BSIM4 native: stress effects (SA/SB/SD), `mtrlMod=1`, `rgateMod`/`rbodyMod` networks,
   `trnqsMod` NQS, `mobMod` variants — required for foundry cards that set them (sky130 sets
   several). Acceptance: full sky130 + GF180 card sets load with **zero ignored-parameter warnings**
   and corner/MC decks match ngspice.

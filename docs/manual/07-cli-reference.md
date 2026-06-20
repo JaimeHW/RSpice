@@ -93,7 +93,7 @@ the deck's ordinary analysis-card sequence.
 | `--monte-carlo N` | Run N operating-point Monte Carlo parameter-variation iterations. |
 | `--seed SEED` | Monte Carlo seed; requires `--monte-carlo`. |
 | `--mc-distribution DIST` | `gaussian`, `uniform`, or `worst-case`; requires `--monte-carlo`. |
-| `--mc-spread SPREAD` | Relative sigma/tolerance; default `0.01`. |
+| `--mc-spread SPREAD` | Non-negative relative sigma/tolerance; `0` repeats nominal samples, default `0.01`. |
 | `--mc-param PARAM` | Restrict Monte Carlo variation to specific parameters; repeatable. |
 | `--pss-freq FREQ` | Periodic steady-state fundamental frequency. |
 | `--pss-harmonics N` | PSS harmonics; default `9`. |

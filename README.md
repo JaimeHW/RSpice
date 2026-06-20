@@ -19,7 +19,7 @@ Python and WebAssembly bindings, and a Verilog-A compiler.
 
 RSpice simulates analog and mixed-signal circuits described as SPICE netlists. The engine assembles modified-nodal-analysis systems and solves them with a damped Newton iteration — merit-based line search, gmin and source stepping, pseudo-transient continuation — under an adaptive-timestep transient loop with local-truncation-error control. The real-valued path defaults to an in-tree KLU-class sparse solver, while [faer](https://crates.io/crates/faer) backs complex/AC-family sparse solves; AC sweeps and Monte Carlo runs parallelize across cores with rayon, and the hottest device-evaluation paths have optional SIMD batch implementations.
 
-Around the engine sit a CLI built for batch runs and CI, a desktop application for schematic capture and waveform inspection, and Python and WebAssembly bindings; a Verilog-A compiler brings behavioral models to all of them.
+Around the engine sit a CLI built for batch runs and CI, a desktop application for schematic capture and waveform inspection, and Python and WebAssembly bindings; a Verilog-A compiler brings behavioral models to the runtimes where that pipeline is enabled.
 
 ## Status
 
@@ -88,9 +88,9 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 
 | Family | Models |
 | :--- | :--- |
-| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`, `CAPMOD=3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
-| Bipolar | Gummel–Poon BJT, with a VBIC charge model including excess phase |
-| Junction | Diode, JFET level 1, MES/MESA/HFET-family `Z` devices, GaN HEMT |
+| MOSFET | Native BSIM4 v4.8 (`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/9/49`, `CAPMOD=2/3`), BSIM3-SOI (FD / DD / PD), EKV, VDMOS, Berkeley MOS1/MOS2/MOS3/MOS6, legacy BSIM1/BSIM2, and an opt-in simplified fallback for unsupported bulk-MOS levels |
+| Bipolar | Gummel-Poon BJT (default / `LEVEL=1`) and native VBIC (`LEVEL=4`, including excess phase); other advanced BJT levels fail explicitly until their native models land |
+| Junction | Diode, JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`, default/best-available), an internal Xyce modified-Shockley JFET2 compatibility mode, MES/MESA/HFET-family `Z` devices, GaN HEMT |
 | Passives | R / C / L with temperature coefficients, coupled inductors and multi-winding transformers, saturable inductor (Jiles–Atherton hysteresis) |
 | Transmission lines | Ideal, lossy (LTRA, TXL), coupled (CPL) |
 | Sources | Independent V/I with `PULSE`, `SIN`, `EXP`, `PWL`, `SFFM`, `AM`, and `TRNOISE` white + 1/f waveforms; E/F/G/H controlled sources; B behavioral sources; PWL file sources |
@@ -99,9 +99,10 @@ target/release/rspice run rc_lowpass.sp -o rc.h5 --format hdf5
 | Verilog-A | Compiled behavioral modules (below) |
 
 BSIM-class models fail with typed errors when a model card requests unported
-physics such as BSIM4 external S/D resistance networks, gate/body resistance
-networks, NQS, non-default charge models, gate tunneling, WPE/stress, or
-unsupported geometry modes. That is deliberate: a commercial simulator should
+physics such as BSIM4 gate/body resistance networks, NQS, material-mode
+effects, or unsupported mode selectors. BSIM4 `RDSMOD=0/1` source/drain
+resistance paths are native, including `RGEOMOD=1..8` implicit S/D resistance
+geometry when `NRD`/`NRS` are omitted. That is deliberate: a commercial simulator should
 reject unsupported physics rather than silently produce plausible but wrong
 currents. The GaN HEMT path is an in-tree physics-style model; CMC ASM-HEMT /
 MVSG qualification remains roadmap work.

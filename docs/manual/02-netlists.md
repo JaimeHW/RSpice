@@ -24,9 +24,9 @@ The first letter of an element name selects the device:
 | `H` | CCVS (linear, `POLY(n)`) | `H1 y 0 V1 1k` |
 | `B` | Behavioral source (`V=expr` / `I=expr`) | `B1 y 0 V=v(a)*v(a)` |
 | `D` | Diode | `D1 a k DMOD` |
-| `Q` | BJT (Gummel-Poon, VBIC via model level) | `Q1 c b e QMOD` |
+| `Q` | BJT (Gummel-Poon default / `LEVEL=1`, VBIC at `LEVEL=4`; unsupported advanced levels reject) | `Q1 c b e QMOD` |
 | `M` | MOSFET (native BSIM4/BSIM3/B3SOI plus classic and opt-in fallback levels) | `M1 d g s b NCH W=10u L=1u` |
-| `J` | JFET level 1; `LEVEL=2` warns and falls back to level 1 | `J1 d g s JMOD` |
+| `J` | JFET level 1 and native Parker-Skellern JFET2 (`NJF`/`PJF LEVEL=2`) | `J1 d g s JMOD` |
 | `Z` | MES/MESA/HFET-family devices | `Z1 d g s ZMOD` |
 | `S` / `W` | Voltage-/current-controlled switch | `S1 a b c d SWMOD` |
 | `T` | Ideal transmission line | `T1 a 0 b 0 Z0=50 TD=1n` |
@@ -45,15 +45,26 @@ forms; `FREQ` is recognized and rejected as unsupported. Current-controlled
 `F`/`H` sources support linear and `POLY` forms only.
 
 MOS model routing is explicit. Native production paths cover BSIM4 v4.8
-(`LEVEL=14/54`, canonical mode set), BSIM3v3.3 (`LEVEL=8/49`), BSIM3-SOI
+(`LEVEL=14/54`, including `RDSMOD=0/1` and `RGEOMOD=1..8` S/D resistance
+geometry), BSIM3v3.3 (`LEVEL=8/9/49`), BSIM3-SOI
 FD/DD/PD (`LEVEL=55/56/57`), Berkeley MOS1/MOS2/MOS3/MOS6,
 legacy BSIM1/BSIM2,
-EKV, and VDMOS. Unsupported BSIM4 mode selectors such as external
-source/drain resistance networks, gate/body resistance networks, NQS,
-non-default charge paths, gate tunneling, WPE/stress, and unsupported
-geometry modes fail with typed errors rather than being silently simplified.
+EKV, and VDMOS. Unsupported BSIM4 mode selectors such as gate/body resistance networks, NQS,
+unknown charge paths, material-mode effects, and unsupported geometry modes fail
+with typed errors rather than being silently simplified.
 Other non-native bulk-MOS levels require `.options allow_simplified_mos=1`
 and use the documented simplified fallback.
+
+JFET model routing supports classic level 1 plus native ngspice-compatible
+Parker-Skellern JFET2 for `NJF`/`PJF LEVEL=2`. This is the default
+best-available behavior. Internal compatibility runs can set
+`SpiceDialect::Xyce` to select the Xyce modified-Shockley JFET2 variant for
+the same level-2 cards. The JFET2 path accepts the common JFET parameters and
+aliases (`VTO`/`VT0`, `BETA`, `LAMBDA`, `VBI`/`PB`, `IS`, `N`, `CGS`, `CGD`,
+`KF`, `AF`) and the level-2 parameter family (`P`, `Q`, `XI`, `Z`, `VST`,
+`MVST`, `MXI`, `LFGAM`, `LFG1`, `LFG2`, `HFGAM`, `HFG1`, `HFG2`, `HFETA`,
+`HFE1`, `HFE2`, `TAUG`, `TAUD`, `DELTA`, `ACGAM`, `XC`, `CDS`, `IBD`,
+`VBD`, `VER`).
 
 ## Sources
 

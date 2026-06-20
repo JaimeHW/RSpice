@@ -79,10 +79,12 @@ release-unoptimized), and no TypeScript definitions are generated.
 
 ## Testing
 
-The crate has no test suite (`test = false`, `doctest = false` in
-`Cargo.toml`). Validation is exercised through the playground page and the
-deployed site demo, which call all four exports against the engine; the
-engine logic itself is tested in `rspice-core`.
+The crate has no standalone Rust test suite (`test = false`, `doctest = false`
+in `Cargo.toml`). Validation is exercised through the playground page and the
+deployed site demo for summary, DC operating-point, and transient flows; the
+`runAcAnalysis` export remains part of the JavaScript API contract but is not
+currently driven by the checked-in playground UI. The engine logic itself is
+tested in `rspice-core`.
 
 ## License
 

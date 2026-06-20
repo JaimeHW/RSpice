@@ -4,11 +4,13 @@
 **Scope:** RSpice repository (`C:\Users\James\Desktop\RSpice`) audited against the local ngspice-46 source tree (`C:\Users\James\Desktop\ngspice-46-release\ngspice-46`).
 **Status:** Engineering research, not legal advice. Prepared by automated/manual code survey; have counsel review before relying on it for licensing or distribution decisions.
 
-**Maintenance note (2026-06-16):** this is a dated provenance audit, not a
-live feature inventory. The current tree now contains RSpice's own
-KLU-class real solver backend in `crates/rspice-core/src/solver/klu.rs`.
-That later solver work is not re-audited here; refresh this document before
-any release that relies on the solver provenance claim.
+**Maintenance note (2026-06-19):** this is a dated provenance audit, not a
+live feature inventory. The current tree contains RSpice's own KLU-class real
+solver backend in `crates/rspice-core/src/solver/klu.rs`. A follow-up source
+survey of that Rust solver and its wrapper comments found no vendored,
+translated, or linked code from ngspice `src/maths/KLU`; the implementation is
+an in-tree sparse-LU backend using published KLU-class algorithm concepts and
+faer's AMD ordering support. Re-run this audit before any formal release.
 
 ---
 
@@ -82,8 +84,9 @@ Risk legend: **none** = behavioral only; **low** = BSD-3 attribution required (n
 - `crates/rspice-ui/src/io/waveform_io/**` — reads/writes the NUTMEG raw **file format** (format compatibility, no code derivation).
 - `crates/rspice-ui/src/simulation/dialog/options/enums.rs` — as of the
   2026-06-10 audit, this mentioned KLU only as a *named option in ngspice*
-  for UI parity and no KLU code/binding existed in the audited tree. Later
-  RSpice KLU-class solver work requires a refreshed audit before release.
+  for UI parity. As of the 2026-06-19 maintenance pass, RSpice's default
+  KLU-class real solver is in-tree Rust code and is not a SuiteSparse/ngspice
+  KLU binding or port.
 
 ## 4. Vendored test decks assessment
 

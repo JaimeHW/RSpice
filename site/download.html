@@ -218,31 +218,31 @@ cargo build --release -p rspice-cli</code></pre>
           <p class="kicker">All platforms · at launch</p>
           <h2 id="h-dl-all">Every artifact, every platform.</h2>
           <p>Installer or portable, your pick — each build is the same engine from the same
-          commit. This is the launch manifest; artifacts publish to
+          commit. This is the example manifest format; artifacts publish to
           <a href="https://github.com/JaimeHW/RSpice/releases" style="color:var(--text);">GitHub Releases</a>.</p>
         </div>
         <div class="dl-grid">
           <div class="dl-card">
             <div class="dl-card-head"><h3>Windows</h3><span class="dl-card-meta">win64 · 10 / 11</span></div>
             <ul class="dl-rows">
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-setup-x64.exe</a><span class="m">installer</span></li>
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-win64.zip</a><span class="m">portable</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-setup-x64.exe</a><span class="m">installer</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-win64.zip</a><span class="m">portable</span></li>
               <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">SHA256SUMS</a><span class="m">checksums</span></li>
             </ul>
           </div>
           <div class="dl-card">
             <div class="dl-card-head"><h3>macOS</h3><span class="dl-card-meta">universal · 13+</span></div>
             <ul class="dl-rows">
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-universal.dmg</a><span class="m">installer</span></li>
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-macos.zip</a><span class="m">portable</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-universal.dmg</a><span class="m">installer</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-macos.zip</a><span class="m">portable</span></li>
               <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">SHA256SUMS</a><span class="m">checksums</span></li>
             </ul>
           </div>
           <div class="dl-card">
             <div class="dl-card-head"><h3>Linux</h3><span class="dl-card-meta">x86_64 · glibc 2.31+</span></div>
             <ul class="dl-rows">
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-x86_64.AppImage</a><span class="m">appimage</span></li>
-              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-1.0.0-linux-x64.tar.gz</a><span class="m">portable</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-x86_64.AppImage</a><span class="m">appimage</span></li>
+              <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">rspice-VERSION-linux-x64.tar.gz</a><span class="m">portable</span></li>
               <li><a href="https://github.com/JaimeHW/RSpice/releases" title="Publishes to GitHub Releases at launch">SHA256SUMS</a><span class="m">checksums</span></li>
             </ul>
           </div>
@@ -255,7 +255,7 @@ cargo build --release -p rspice-cli</code></pre>
         <div class="section-head">
           <p class="kicker">Verify</p>
           <h2 id="h-dl-verify">Check the hash before you trust the binary.</h2>
-          <p>Every release ships a <strong>SHA256SUMS</strong> manifest — one line per artifact.
+          <p>Release builds ship a <strong>SHA256SUMS</strong> manifest — one line per artifact.
           Hash what you downloaded and compare. On Windows:
           <code style="font-family:var(--font-mono);font-size:0.85em;">certutil -hashfile &lt;file&gt; SHA256</code>;
           on macOS and Linux: <code style="font-family:var(--font-mono);font-size:0.85em;">shasum -a 256 -c SHA256SUMS</code>.</p>
@@ -263,15 +263,15 @@ cargo build --release -p rspice-cli</code></pre>
         <figure class="code" style="margin-top:0;">
           <figcaption class="code-bar">
             <span>SHA256SUMS</span>
-            <span class="tag">sample</span>
+            <span class="tag">example</span>
             <button class="code-copy" type="button">Copy</button>
           </figcaption>
-          <pre><code>8ba8d5a4ba0898111f4b99707bbd2b5faeed9d61047c137dedf4f0095c36f118  rspice-1.0.0-setup-x64.exe
-db94070fade09759f0869ba84d1cd5e8fc6717604257fe57a5f94d961bc45d80  rspice-1.0.0-win64.zip
-c3e4f53789678322081b38d7596a8df1c42ab876549cd9ee12eb4eb3d6d07c36  rspice-1.0.0-universal.dmg
-60c06f05fcd357df9a98d909ce62f84176e0175a226c22b3bdd741250811a86b  rspice-1.0.0-macos.zip
-fc9c529340559b8760a841e4cc0bcc7cc02154d58432eb1546cf521d8ea77894  rspice-1.0.0-x86_64.AppImage
-c10177e27e46ac1133afb5fa203113b9e92fa43accc1f13db390b252d45a3d83  rspice-1.0.0-linux-x64.tar.gz</code></pre>
+          <pre><code>&lt;sha256&gt;  rspice-VERSION-setup-x64.exe
+&lt;sha256&gt;  rspice-VERSION-win64.zip
+&lt;sha256&gt;  rspice-VERSION-universal.dmg
+&lt;sha256&gt;  rspice-VERSION-macos.zip
+&lt;sha256&gt;  rspice-VERSION-x86_64.AppImage
+&lt;sha256&gt;  rspice-VERSION-linux-x64.tar.gz</code></pre>
         </figure>
         <p class="small-print">license keys activate offline — a signed key file on disk,
         no account, no telemetry, no phone-home.</p>
