@@ -21,7 +21,7 @@ errors by throwing with the engine's error message.
 | :--- | :--- | :--- |
 | `summarizeNetlist(source)` | netlist text | `{title, element_count, analysis_count, model_count, subcircuit_count, parameter_count}` |
 | `runDcOperatingPoint(source)` | netlist text | `{node_names, node_voltages, branch_names, branch_currents}` |
-| `runAcAnalysis(source, frequencies)` | netlist text, `Float64Array`/array of Hz values (must be non-empty) | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}` — one entry per frequency |
+| `runAcAnalysis(source, frequencies)` | netlist text, `Float64Array`/array of Hz values (must be non-empty; every frequency must be finite and non-negative) | array of `{frequency, node_names, branch_names, voltages: {real, imag}, currents: {real, imag}}` — one entry per frequency |
 | `runTransientAnalysis(source, tstop, max_step)` | netlist text, stop time, max timestep (both must be positive and finite) | `{time, node_names, voltages}` where `voltages` is one `f64` array per node |
 
 The same four operations are also exported as plain Rust functions
@@ -49,8 +49,10 @@ rspice-core = { path = "../rspice-core", default-features = false, features = ["
 `default-features = false` drops `parallel`, `faer-parallel`, and `simd`
 (no rayon or SIMD on this target); the `wasm` feature wires up
 `wasm-bindgen` and the `getrandom/js` browser entropy source that faer
-needs on `wasm32-unknown-unknown`. The solve runs single-threaded on the
-calling (main) thread. Verilog-A is not enabled here.
+needs on `wasm32-unknown-unknown`. The browser playground runs engine calls
+inside a dedicated module Web Worker so long solves do not block the page's
+UI event loop. Inside that worker the solve is still single-threaded; Verilog-A
+is not enabled here.
 
 Not exposed through these bindings: `.MEAS` evaluation, DC/parameter
 sweeps, noise, Monte Carlo, and every other advanced analysis — the
@@ -73,9 +75,9 @@ wasm-bindgen target/wasm32-unknown-unknown/release/rspice_wasm.wasm \
 ```
 
 `web/pkg/` is a build artifact and is not committed. Known gaps tracked in
-`web/README.md`: solves run on the main thread (a Web Worker is the
-production plan), `wasm-opt` is not applied (the module is roughly 3 MB
-release-unoptimized), and no TypeScript definitions are generated.
+`web/README.md`: `wasm-opt` is not applied (the module is roughly 3 MB
+release-unoptimized), no TypeScript definitions are generated, and the worker
+uses one single-threaded engine instance rather than wasm threads.
 
 ## Testing
 
@@ -83,8 +85,11 @@ The crate has no standalone Rust test suite (`test = false`, `doctest = false`
 in `Cargo.toml`). Validation is exercised through the playground page and the
 deployed site demo for summary, DC operating-point, and transient flows; the
 `runAcAnalysis` export remains part of the JavaScript API contract but is not
-currently driven by the checked-in playground UI. The engine logic itself is
-tested in `rspice-core`.
+currently driven by the checked-in playground UI. The static browser contract is
+guarded by `tools/ci/test_wasm_playground.py`, which verifies that both
+playground pages route engine calls through `engine-worker.js` instead of
+importing synchronous solve functions on the main page. The engine logic itself
+is tested in `rspice-core`.
 
 ## License
 

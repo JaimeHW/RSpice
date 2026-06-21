@@ -10,6 +10,8 @@ use wasm_bindgen::prelude::*;
 
 type WasmResult<T> = Result<T, String>;
 
+const MAX_TRANSIENT_POINTS: f64 = 200_000.0;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetlistSummary {
     pub title: String,
@@ -126,6 +128,13 @@ pub fn run_transient_analysis(
     if !max_step.is_finite() || max_step <= 0.0 {
         return Err(format!(
             "Transient maximum step must be positive and finite, got {max_step}"
+        ));
+    }
+    let estimated_points = (tstop / max_step).ceil() + 1.0;
+    if !estimated_points.is_finite() || estimated_points > MAX_TRANSIENT_POINTS {
+        return Err(format!(
+            "Transient request would generate more than {:.0} points; increase max_step or reduce tstop",
+            MAX_TRANSIENT_POINTS
         ));
     }
 

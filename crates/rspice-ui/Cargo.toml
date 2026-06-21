@@ -112,8 +112,9 @@ winresource = "0.1"
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
 tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
 uuid = { version = "1", features = ["v4", "js"] }
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Window", "Document", "Element", "HtmlCanvasElement", "Performance"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console"] }
 js-sys = "0.3"

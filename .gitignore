@@ -27,6 +27,8 @@ Thumbs.db
 # Test outputs
 *.raw
 *.log
+*.pyc
+__pycache__/
 /rtlinv_*.csv
 /rtlinv_*.json
 /rtlinv_*.cir
@@ -35,3 +37,4 @@ design/tools/marks_out.txt
 .agent/
 .worktrees/
 /_site
+site/**/pkg/

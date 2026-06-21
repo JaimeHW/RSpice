@@ -65,13 +65,75 @@
   }
 </script>
 <script type="module">
+  function showStartupError(message) {
+    const el = document.getElementById("rspice_loading");
+    if (!el) {
+      return;
+    }
+    el.replaceChildren();
+    for (const text of [
+      message,
+      "A WebGPU-capable browser (current Chrome/Edge) is required.",
+    ]) {
+      const paragraph = document.createElement("p");
+      paragraph.className = "err";
+      paragraph.textContent = text;
+      el.appendChild(paragraph);
+    }
+  }
+
+  function errorMessage(error) {
+    return error && error.message ? error.message : String(error);
+  }
+
+  function recordWorkerStartupError(message) {
+    window.__RSPICE_SIM_WORKER_ERROR = message;
+  }
+
+  function reportSimulationWorkerStartupError(error) {
+    const message = `RSpice simulation worker failed: ${errorMessage(error)}`;
+    recordWorkerStartupError(message);
+    showStartupError(message);
+  }
+
+  function installSimulationWorker() {
+    try {
+      const worker = new Worker(
+        new URL("./simulation-worker.js", import.meta.url),
+        { type: "module" },
+      );
+      worker.addEventListener("error", (event) => {
+        reportSimulationWorkerStartupError(
+          event.message || "Browser simulation worker failed to load.",
+        );
+      });
+      worker.addEventListener("messageerror", () => {
+        reportSimulationWorkerStartupError(
+          "Browser simulation worker returned an unreadable startup message.",
+        );
+      });
+      worker.addEventListener("message", (event) => {
+        const message = event.data || {};
+        if (message.type === "error" && (!message.id || message.id === 0)) {
+          reportSimulationWorkerStartupError(
+            message.error || message.message || "Browser simulation worker failed to initialize.",
+          );
+        }
+      });
+      window.__RSPICE_SIM_WORKER = worker;
+    } catch (error) {
+      const message = `Failed to start the RSpice simulation worker: ${errorMessage(error)}`;
+      recordWorkerStartupError(message);
+      showStartupError(message);
+      console.error(error);
+    }
+  }
+
+  installSimulationWorker();
+
   import init from "./pkg/rspice-ui.js";
   init().catch((e) => {
-    const el = document.getElementById("rspice_loading");
-    if (el) {
-      el.innerHTML = "<p class='err'>failed to load the RSpice module: " + e +
-        "</p><p class='err'>A WebGPU-capable browser (current Chrome/Edge) is required.</p>";
-    }
+    showStartupError(`Failed to load the RSpice module: ${errorMessage(e)}`);
     console.error(e);
   });
 </script>
