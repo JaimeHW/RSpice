@@ -875,7 +875,7 @@ mod tests {
             "the instance must not observe model port mutations after construction"
         );
         let result = catch_unwind(AssertUnwindSafe(|| {
-            instance.update_inputs(&[0.0], &HashMap::new());
+            instance.update_inputs(&[0.0], &HashMap::new(), &HashMap::new());
             instance
                 .evaluate(0.0, 1e-9, AnalysisType::Transient)
                 .expect("evaluation should use the stable port contract");

@@ -2018,8 +2018,8 @@ VDMOS truncation coverage
 VD d 0 0
 VG g 0 0
 VS s 0 0
-M1 d g s 0 OFF W=1 L=1u
-.MODEL OFF NMOS LEVEL=18
+M1 d g s 0 VTRUNC W=1 L=1u
+.MODEL VTRUNC NMOS LEVEL=18
 + VTO=100
 + RD=0
 + RS=0

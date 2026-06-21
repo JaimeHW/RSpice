@@ -1135,43 +1135,6 @@ mod tests {
         }
     }
 }
-fn unique_temp_path(cir_path: &Path, suffix: &str) -> PathBuf {
-    let stem = cir_path
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-
-    std::env::temp_dir().join(format!(
-        "rspice-ngspice-live-reference-{stem}-{suffix}-{}-{}.txt",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos()
-    ))
-}
-
-fn tail(content: &str) -> String {
-    let lines = content
-        .lines()
-        .rev()
-        .take(3)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join(" | ");
-    truncate(lines.trim(), 240)
-}
 
 fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, String> {
     #[cfg(windows)]
@@ -1197,14 +1160,4 @@ fn prefer_windows_console_ngspice_exe(ngspice_exe: PathBuf) -> Result<PathBuf, S
         }
     }
     Ok(ngspice_exe)
-}
-
-fn truncate(value: &str, max_chars: usize) -> String {
-    let mut iter = value.chars();
-    let truncated = iter.by_ref().take(max_chars).collect::<String>();
-    if iter.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
 }
