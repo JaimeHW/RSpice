@@ -87,44 +87,61 @@ pub enum InputValue {
 }
 
 impl InputValue {
+    /// Try to get an analog scalar value.
+    pub fn try_analog(&self) -> Option<Value> {
+        match self {
+            InputValue::Analog(v) => Some(v.value),
+            _ => None,
+        }
+    }
+
     /// Get analog value, panics if not analog
     pub fn analog(&self) -> Value {
-        match self {
-            InputValue::Analog(v) => v.value,
-            _ => panic!("Expected analog value"),
-        }
+        self.try_analog().expect("Expected analog value")
     }
 
     /// Get analog value or default
     pub fn analog_or(&self, default: Value) -> Value {
+        self.try_analog().unwrap_or(default)
+    }
+
+    /// Try to get an analog vector.
+    pub fn try_analog_vector(&self) -> Option<&[AnalogValue]> {
         match self {
-            InputValue::Analog(v) => v.value,
-            _ => default,
+            InputValue::AnalogVector(v) => Some(v),
+            _ => None,
         }
     }
 
     /// Get analog vector
     pub fn analog_vector(&self) -> &[AnalogValue] {
+        self.try_analog_vector().expect("Expected analog vector")
+    }
+
+    /// Try to get a digital scalar value.
+    pub fn try_digital(&self) -> Option<DigitalValue> {
         match self {
-            InputValue::AnalogVector(v) => v,
-            _ => panic!("Expected analog vector"),
+            InputValue::Digital(v) => Some(*v),
+            _ => None,
         }
     }
 
     /// Get digital value
     pub fn digital(&self) -> DigitalValue {
+        self.try_digital().expect("Expected digital value")
+    }
+
+    /// Try to get a digital vector.
+    pub fn try_digital_vector(&self) -> Option<&[DigitalValue]> {
         match self {
-            InputValue::Digital(v) => *v,
-            _ => panic!("Expected digital value"),
+            InputValue::DigitalVector(v) => Some(v),
+            _ => None,
         }
     }
 
     /// Get digital vector
     pub fn digital_vector(&self) -> &[DigitalValue] {
-        match self {
-            InputValue::DigitalVector(v) => v,
-            _ => panic!("Expected digital vector"),
-        }
+        self.try_digital_vector().expect("Expected digital vector")
     }
 }
 
@@ -313,7 +330,10 @@ impl CmContext {
 
     /// Get analog input value
     pub fn input(&self, name: &str) -> Value {
-        self.inputs.get(name).map(|v| v.analog()).unwrap_or(0.0)
+        self.inputs
+            .get(name)
+            .map(|v| v.analog_or(0.0))
+            .unwrap_or(0.0)
     }
 
     /// Get analog input with explicit port type
@@ -689,3 +709,45 @@ impl CmContext {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xspice::{DigitalState, DigitalStrength};
+
+    #[test]
+    fn scalar_analog_input_accessor_defaults_for_non_analog_ports() {
+        let mut ctx = CmContext::new();
+        ctx.set_input_digital(
+            "in",
+            DigitalValue::new(DigitalState::One, DigitalStrength::Strong),
+        );
+
+        assert_eq!(ctx.input("in"), 0.0);
+        assert_eq!(ctx.input_analog("in"), None);
+    }
+
+    #[test]
+    fn input_value_try_accessors_return_none_for_wrong_type() {
+        let digital = InputValue::Digital(DigitalValue::new(
+            DigitalState::One,
+            DigitalStrength::Strong,
+        ));
+        assert_eq!(digital.try_analog(), None);
+        assert!(digital.try_analog_vector().is_none());
+
+        let analog = InputValue::Analog(AnalogValue::new(1.25));
+        assert_eq!(analog.try_digital(), None);
+        assert!(analog.try_digital_vector().is_none());
+    }
+
+    #[test]
+    fn input_value_try_accessors_return_matching_values() {
+        let analog = InputValue::Analog(AnalogValue::new(1.25));
+        assert_eq!(analog.try_analog(), Some(1.25));
+
+        let digital_value = DigitalValue::new(DigitalState::One, DigitalStrength::Strong);
+        let digital = InputValue::Digital(digital_value);
+        assert_eq!(digital.try_digital(), Some(digital_value));
+    }
+}

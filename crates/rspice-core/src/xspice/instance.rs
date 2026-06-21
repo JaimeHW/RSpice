@@ -9,7 +9,9 @@ use super::{
     PortSpec, PortType,
 };
 use crate::Value;
+use std::any::Any;
 use std::collections::HashMap;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 //=============================================================================
@@ -63,6 +65,8 @@ pub struct XspiceInstance {
     pub name: String,
     /// Reference to the code model
     model: Arc<dyn CodeModel>,
+    /// Immutable port contract captured when the instance is constructed.
+    ports: Vec<PortSpec>,
     /// Port connections (indexed by port spec order)
     connections: Vec<PortConnection>,
     /// Port name to index mapping
@@ -80,6 +84,7 @@ impl std::fmt::Debug for XspiceInstance {
         f.debug_struct("XspiceInstance")
             .field("name", &self.name)
             .field("model", &self.model.name())
+            .field("ports", &self.ports)
             .field("connections", &self.connections)
             .field("output_branches", &self.output_branches)
             .field("initialized", &self.initialized)
@@ -103,7 +108,7 @@ impl XspiceInstance {
         string_params: &[(String, String)],
     ) -> CmResult<Self> {
         let name = name.into();
-        let ports = model.ports();
+        let ports = model.ports().to_vec();
         let port_count = ports.len();
 
         // Validate connection count
@@ -155,7 +160,7 @@ impl XspiceInstance {
         }
 
         // Initialize output ports in context
-        for port in ports {
+        for port in &ports {
             if port.direction == super::PortDirection::Out
                 || port.direction == super::PortDirection::InOut
             {
@@ -166,6 +171,7 @@ impl XspiceInstance {
         Ok(Self {
             name,
             model,
+            ports,
             connections,
             port_indices,
             context,
@@ -181,7 +187,7 @@ impl XspiceInstance {
 
     /// Get port specifications
     pub fn ports(&self) -> &[PortSpec] {
-        self.model.ports()
+        &self.ports
     }
 
     /// Get connection for a port by name
@@ -220,7 +226,14 @@ impl XspiceInstance {
         }
 
         self.context.call_type = CallType::Init;
-        self.model.init(&mut self.context)?;
+        let context_before_init = self.context.clone();
+        match catch_unwind(AssertUnwindSafe(|| self.model.init(&mut self.context))) {
+            Ok(result) => result?,
+            Err(payload) => {
+                self.context = context_before_init;
+                return Err(self.model_panic_error("initialization", payload));
+            }
+        }
         self.initialized = true;
         Ok(())
     }
@@ -236,7 +249,7 @@ impl XspiceInstance {
         digital_values: &HashMap<usize, DigitalValue>,
         digital_event_times: &HashMap<usize, Value>,
     ) {
-        let ports = self.model.ports();
+        let ports = &self.ports;
 
         for (i, port) in ports.iter().enumerate() {
             if port.direction != super::PortDirection::In
@@ -322,7 +335,7 @@ impl XspiceInstance {
     ) -> CmResult<()> {
         self.context.clear_stamps();
         self.context.clear_port_nodes();
-        for (port, connection) in self.model.ports().iter().zip(self.connections.iter()) {
+        for (port, connection) in self.ports.iter().zip(self.connections.iter()) {
             if let PortConnection::Analog(node) = connection {
                 self.context.set_port_node(&port.name, *node);
             }
@@ -338,7 +351,14 @@ impl XspiceInstance {
             _ => CallType::DcAnalysis,
         };
 
-        self.model.evaluate(&mut self.context)
+        let context_before_evaluate = self.context.clone();
+        match catch_unwind(AssertUnwindSafe(|| self.model.evaluate(&mut self.context))) {
+            Ok(result) => result,
+            Err(payload) => {
+                self.context = context_before_evaluate;
+                Err(self.model_panic_error("evaluation", payload))
+            }
+        }
     }
 
     /// Get output value for stamping
@@ -356,7 +376,7 @@ impl XspiceInstance {
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
     {
-        let ports = self.model.ports();
+        let ports = &self.ports;
 
         for (i, port) in ports.iter().enumerate() {
             if port.direction != super::PortDirection::Out
@@ -496,14 +516,14 @@ impl XspiceInstance {
     ///
     /// Called by CircuitData::evaluate_xspice to provide node voltages.
     pub fn set_input_analog(&mut self, port_idx: usize, value: Value) {
-        if let Some(port) = self.model.ports().get(port_idx) {
+        if let Some(port) = self.ports.get(port_idx) {
             self.context.set_input_analog(&port.name, value);
         }
     }
 
     /// Assign an MNA branch ordinal to a voltage-type output port.
     pub fn set_output_branch(&mut self, port_idx: usize, branch_ordinal: usize) -> CmResult<()> {
-        let ports = self.model.ports();
+        let ports = &self.ports;
         let Some(port) = ports.get(port_idx) else {
             return Err(CmError::Internal(format!(
                 "Invalid port index {} for instance {}",
@@ -544,7 +564,7 @@ impl XspiceInstance {
     /// Returns Some((conductance, current)) for output ports that produce
     /// analog contributions, None for inputs or digital ports.
     pub fn get_analog_contribution(&self, port_idx: usize) -> Option<(Value, Value)> {
-        let ports = self.model.ports();
+        let ports = &self.ports;
         if let Some(port) = ports.get(port_idx) {
             let is_output = port.direction == super::PortDirection::Out;
             if is_output && port.default_type.is_analog() {
@@ -589,8 +609,7 @@ impl XspiceInstance {
             1e-12
         };
 
-        self.model
-            .ports()
+        self.ports
             .iter()
             .filter(|port| {
                 port.direction == super::PortDirection::Out
@@ -602,8 +621,266 @@ impl XspiceInstance {
                 (curr - prev).abs() <= tol + tol * curr.abs().max(prev.abs())
             })
     }
+
+    fn model_panic_error(&self, phase: &str, payload: Box<dyn Any + Send + 'static>) -> CmError {
+        CmError::EvaluationError(format!(
+            "XSPICE code model '{}' on instance '{}' panicked during {}: {}",
+            self.model.name(),
+            self.name,
+            phase,
+            panic_payload_message(payload.as_ref())
+        ))
+    }
+}
+
+fn panic_payload_message(payload: &(dyn Any + Send + 'static)) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
 }
 
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::xspice::{DigitalState, DigitalStrength, ParamSpec, PortDirection};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct PanicModel {
+        panic_in_init: bool,
+        panic_in_evaluate: bool,
+        panic_via_context_accessor: bool,
+        ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    struct MutablePortsModel {
+        expanded: Arc<AtomicBool>,
+        initial_ports: Vec<PortSpec>,
+        expanded_ports: Vec<PortSpec>,
+        params: Vec<ParamSpec>,
+    }
+
+    impl MutablePortsModel {
+        fn new(expanded: Arc<AtomicBool>) -> Self {
+            Self {
+                expanded,
+                initial_ports: vec![PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![PortType::Voltage],
+                    is_vector: false,
+                    null_allowed: false,
+                    description: String::new(),
+                }],
+                expanded_ports: vec![
+                    PortSpec {
+                        name: "out".to_string(),
+                        direction: PortDirection::Out,
+                        default_type: PortType::Voltage,
+                        allowed_types: vec![PortType::Voltage],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                    PortSpec {
+                        name: "late_input".to_string(),
+                        direction: PortDirection::In,
+                        default_type: PortType::Voltage,
+                        allowed_types: vec![PortType::Voltage],
+                        is_vector: false,
+                        null_allowed: false,
+                        description: String::new(),
+                    },
+                ],
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for MutablePortsModel {
+        fn name(&self) -> &str {
+            "mutable_ports_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            if self.expanded.load(Ordering::SeqCst) {
+                &self.expanded_ports
+            } else {
+                &self.initial_ports
+            }
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            Ok(())
+        }
+
+        fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
+            ctx.set_output("out", 1.0);
+            Ok(())
+        }
+    }
+
+    impl PanicModel {
+        fn new() -> Self {
+            Self {
+                panic_in_init: false,
+                panic_in_evaluate: false,
+                panic_via_context_accessor: false,
+                ports: vec![PortSpec {
+                    name: "out".to_string(),
+                    direction: PortDirection::Out,
+                    default_type: PortType::Voltage,
+                    allowed_types: vec![PortType::Voltage],
+                    is_vector: false,
+                    null_allowed: false,
+                    description: String::new(),
+                }],
+                params: Vec::new(),
+            }
+        }
+    }
+
+    impl CodeModel for PanicModel {
+        fn name(&self) -> &str {
+            "panic_model"
+        }
+
+        fn ports(&self) -> &[PortSpec] {
+            &self.ports
+        }
+
+        fn parameters(&self) -> &[ParamSpec] {
+            &self.params
+        }
+
+        fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            if self.panic_in_init {
+                panic!("init exploded");
+            }
+            Ok(())
+        }
+
+        fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+            if self.panic_in_evaluate {
+                panic!("evaluate exploded");
+            }
+            if self.panic_via_context_accessor {
+                let digital = super::super::context::InputValue::Digital(DigitalValue::new(
+                    DigitalState::One,
+                    DigitalStrength::Strong,
+                ));
+                let _ = digital.analog();
+            }
+            Ok(())
+        }
+    }
+
+    fn instance_with(model: PanicModel) -> XspiceInstance {
+        XspiceInstance::new(
+            "Apanic",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+        )
+        .expect("panic-model instance should construct")
+    }
+
+    fn assert_evaluation_error(result: CmResult<()>, expected: &str) {
+        match result {
+            Err(CmError::EvaluationError(message)) => {
+                assert!(
+                    message.contains(expected),
+                    "expected message containing `{expected}`, got `{message}`"
+                );
+            }
+            other => panic!("expected evaluation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn evaluate_converts_code_model_panic_to_error() {
+        let mut model = PanicModel::new();
+        model.panic_in_evaluate = true;
+        let mut instance = instance_with(model);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            instance.evaluate(0.0, 1e-9, AnalysisType::Transient)
+        }));
+
+        let result = result.expect("XSPICE evaluate panic must not unwind past instance");
+        assert_evaluation_error(result, "evaluate exploded");
+    }
+
+    #[test]
+    fn init_converts_code_model_panic_to_error() {
+        let mut model = PanicModel::new();
+        model.panic_in_init = true;
+        let mut instance = instance_with(model);
+
+        let result = catch_unwind(AssertUnwindSafe(|| instance.init()));
+
+        let result = result.expect("XSPICE init panic must not unwind past instance");
+        assert_evaluation_error(result, "init exploded");
+    }
+
+    #[test]
+    fn evaluate_converts_context_accessor_panic_to_error() {
+        let mut model = PanicModel::new();
+        model.panic_via_context_accessor = true;
+        let mut instance = instance_with(model);
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            instance.evaluate(0.0, 1e-9, AnalysisType::Transient)
+        }));
+
+        let result = result.expect("XSPICE context helper panic must not unwind past instance");
+        assert_evaluation_error(result, "Expected analog value");
+    }
+
+    #[test]
+    fn instance_uses_construction_time_port_contract() {
+        let expanded = Arc::new(AtomicBool::new(false));
+        let model = MutablePortsModel::new(Arc::clone(&expanded));
+        let mut instance = XspiceInstance::new(
+            "Amutable",
+            Arc::new(model),
+            vec![PortConnection::Analog(1)],
+            &[],
+            &[],
+        )
+        .expect("mutable-ports instance should construct from initial port contract");
+
+        assert_eq!(instance.ports().len(), 1);
+
+        expanded.store(true, Ordering::SeqCst);
+
+        assert_eq!(
+            instance.ports().len(),
+            1,
+            "the instance must not observe model port mutations after construction"
+        );
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            instance.update_inputs(&[0.0], &HashMap::new());
+            instance
+                .evaluate(0.0, 1e-9, AnalysisType::Transient)
+                .expect("evaluation should use the stable port contract");
+            instance.stamp(|_, _, _| {}, |_, _| {});
+        }));
+        result.expect("stable port contract must avoid connection/index panics");
+    }
+}
