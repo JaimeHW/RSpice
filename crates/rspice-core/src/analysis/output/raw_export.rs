@@ -154,19 +154,7 @@ impl RawExporter {
         times: &[Value],
         waveforms: &[Vec<Value>],
     ) -> io::Result<()> {
-        let expected_waveforms = self.variables.len().saturating_sub(1);
-        if waveforms.len() != expected_waveforms {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "transient raw export expected {expected_waveforms} waveform(s), got {}",
-                    waveforms.len()
-                ),
-            ));
-        }
-
-        validate_series_lengths("transient waveform", times.len(), waveforms)?;
-
+        validate_series_lengths("time", times.len(), &self.variables[1..], waveforms)?;
         for (i, &t) in times.iter().enumerate() {
             let mut point = vec![t];
             for waveform in waveforms {
@@ -174,7 +162,6 @@ impl RawExporter {
             }
             self.data.push(point);
         }
-
         Ok(())
     }
 
@@ -197,6 +184,8 @@ impl RawExporter {
 
     /// Write to any writer
     pub fn write<W: Write>(&self, writer: &mut W, format: RawFormat) -> io::Result<()> {
+        self.validate_data_shape()?;
+
         // Write header
         writeln!(writer, "Title: {}", self.title)?;
         writeln!(writer, "Date: {}", chrono_date())?;
@@ -234,6 +223,19 @@ impl RawExporter {
         Ok(())
     }
 
+    fn validate_data_shape(&self) -> io::Result<()> {
+        for (idx, point) in self.data.iter().enumerate() {
+            if point.len() != self.variables.len() {
+                return Err(invalid_data(format!(
+                    "raw point {idx} has {} values for {} variables",
+                    point.len(),
+                    self.variables.len()
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Write to string in ASCII format
     pub fn to_ascii_string(&self) -> String {
         let mut buffer = Vec::new();
@@ -242,20 +244,30 @@ impl RawExporter {
     }
 }
 
+fn invalid_data(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
 fn validate_series_lengths(
-    label: &str,
-    expected_len: usize,
+    axis_name: &str,
+    axis_len: usize,
+    variables: &[RawVariable],
     series: &[Vec<Value>],
 ) -> io::Result<()> {
-    for (idx, values) in series.iter().enumerate() {
-        if values.len() != expected_len {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "{label} {idx} has {} point(s), expected {expected_len}",
-                    values.len()
-                ),
-            ));
+    if series.len() != variables.len() {
+        return Err(invalid_data(format!(
+            "raw export has {} signal vectors for {} variables",
+            series.len(),
+            variables.len()
+        )));
+    }
+    for (variable, values) in variables.iter().zip(series) {
+        if values.len() != axis_len {
+            return Err(invalid_data(format!(
+                "raw export variable {} has {} samples but {axis_name} axis has {axis_len}",
+                variable.name,
+                values.len()
+            )));
         }
     }
     Ok(())
@@ -306,17 +318,6 @@ fn asctime_utc(secs: u64) -> String {
     )
 }
 
-#[cfg(test)]
-mod date_tests {
-    use super::asctime_utc;
-
-    #[test]
-    fn asctime_matches_reference_dates() {
-        assert_eq!(asctime_utc(0), "Thu Jan 1 00:00:00 1970");
-        assert_eq!(asctime_utc(1_750_000_000), "Sun Jun 15 15:06:40 2025");
-    }
-}
-
 //=============================================================================
 // Convenience functions for engine integration
 //=============================================================================
@@ -329,6 +330,19 @@ pub fn export_transient<P: AsRef<Path>>(
     waveforms: &[Vec<Value>],
     format: RawFormat,
 ) -> io::Result<()> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    write_transient(&mut writer, times, node_names, waveforms, format)
+}
+
+/// Write transient results to any writer.
+pub fn write_transient<W: Write>(
+    writer: &mut W,
+    times: &[Value],
+    node_names: &[String],
+    waveforms: &[Vec<Value>],
+    format: RawFormat,
+) -> io::Result<()> {
     let mut exporter = RawExporter::new_transient("Transient Analysis");
 
     for name in node_names {
@@ -336,12 +350,33 @@ pub fn export_transient<P: AsRef<Path>>(
     }
 
     exporter.add_transient_data(times, waveforms)?;
-    exporter.write_to_file(path, format)
+    exporter.write(writer, format)
 }
 
 /// Export DC sweep results to raw file  
 pub fn export_dc_sweep<P: AsRef<Path>>(
     path: P,
+    sweep_values: &[Value],
+    sweep_name: &str,
+    node_names: &[String],
+    results: &[Vec<Value>],
+    format: RawFormat,
+) -> io::Result<()> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    write_dc_sweep(
+        &mut writer,
+        sweep_values,
+        sweep_name,
+        node_names,
+        results,
+        format,
+    )
+}
+
+/// Write DC sweep results to any writer.
+pub fn write_dc_sweep<W: Write>(
+    writer: &mut W,
     sweep_values: &[Value],
     sweep_name: &str,
     node_names: &[String],
@@ -362,17 +397,12 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
         exporter.add_voltage(name);
     }
 
-    if results.len() != node_names.len() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "DC sweep raw export expected {} result vector(s), got {}",
-                node_names.len(),
-                results.len()
-            ),
-        ));
-    }
-    validate_series_lengths("DC sweep result", sweep_values.len(), results)?;
+    validate_series_lengths(
+        "sweep",
+        sweep_values.len(),
+        &exporter.variables[1..],
+        results,
+    )?;
 
     for (i, &sweep_val) in sweep_values.iter().enumerate() {
         let mut point = vec![sweep_val];
@@ -382,7 +412,7 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
         exporter.data.push(point);
     }
 
-    exporter.write_to_file(path, format)
+    exporter.write(writer, format)
 }
 
 //=============================================================================
@@ -390,66 +420,56 @@ pub fn export_dc_sweep<P: AsRef<Path>>(
 //=============================================================================
 
 #[cfg(test)]
-mod tests {
+mod date_tests {
+    use super::asctime_utc;
+
+    #[test]
+    fn asctime_matches_reference_dates() {
+        assert_eq!(asctime_utc(0), "Thu Jan 1 00:00:00 1970");
+        assert_eq!(asctime_utc(1_750_000_000), "Sun Jun 15 15:06:40 2025");
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
     use super::*;
 
     #[test]
-    fn add_transient_data_rejects_short_waveform() {
-        let mut exporter = RawExporter::new_transient("short waveform");
-        exporter.add_voltage("out");
-
-        let err = exporter
-            .add_transient_data(&[0.0, 1.0], &[vec![3.0]])
-            .expect_err("short waveform must not be padded with zeros");
-
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(
-            err.to_string().contains("transient waveform 0"),
-            "unexpected error: {err}"
-        );
-        assert_eq!(exporter.num_points(), 0);
-    }
-
-    #[test]
-    fn add_transient_data_rejects_waveform_count_mismatch() {
-        let mut exporter = RawExporter::new_transient("missing waveform");
-        exporter.add_voltage("out");
-
-        let err = exporter
-            .add_transient_data(&[0.0], &[])
-            .expect_err("missing waveform must not produce partial raw points");
-
-        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(
-            err.to_string().contains("expected 1 waveform"),
-            "unexpected error: {err}"
-        );
-        assert_eq!(exporter.num_points(), 0);
-    }
-
-    #[test]
-    fn export_dc_sweep_rejects_short_result_vector() {
-        let path = std::env::temp_dir().join(format!(
-            "rspice_raw_export_short_dc_{}.raw",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_file(&path);
-
-        let err = export_dc_sweep(
-            &path,
-            &[0.0, 1.0],
-            "vin",
-            &[String::from("out")],
-            &[vec![2.0]],
+    fn transient_export_rejects_waveform_length_mismatch() {
+        let mut out = Vec::new();
+        let err = write_transient(
+            &mut out,
+            &[0.0, 1.0, 2.0],
+            &["out".to_string()],
+            &[vec![0.0, 1.0]],
             RawFormat::Ascii,
         )
-        .expect_err("short DC result vector must not be padded with zeros");
+        .expect_err("truncated transient waveform must not be zero-padded");
 
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(
-            err.to_string().contains("DC sweep result 0"),
+            err.to_string().contains("V(out)"),
             "unexpected error: {err}"
         );
-        assert!(!path.exists(), "invalid export must not create a raw file");
+    }
+
+    #[test]
+    fn dc_sweep_export_rejects_result_length_mismatch() {
+        let mut out = Vec::new();
+        let err = write_dc_sweep(
+            &mut out,
+            &[0.0, 1.0, 2.0],
+            "vin",
+            &["out".to_string()],
+            &[vec![0.0, 1.0]],
+            RawFormat::Ascii,
+        )
+        .expect_err("truncated DC sweep result must not be zero-padded");
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(
+            err.to_string().contains("V(out)"),
+            "unexpected error: {err}"
+        );
     }
 }

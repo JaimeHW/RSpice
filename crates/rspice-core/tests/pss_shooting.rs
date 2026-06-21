@@ -6,7 +6,7 @@
 //! multiplier are all checkable without any reference simulator.
 
 use rspice_core::analysis::PssConfig;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SimulationError};
 use rspice_core::netlist::Netlist;
 
 const F0: f64 = 1.0e6; // 1 MHz drive
@@ -29,6 +29,167 @@ c1 out 0 {C}
         .with_tstab_periods(8)
         .with_tolerance(1e-7);
     engine.run_pss(&netlist, config).expect("PSS converges")
+}
+
+#[test]
+fn pss_rejects_zero_max_iterations_as_invalid_config() {
+    let deck = format!(
+        "\
+* sine-driven rc
+v1 in 0 sin(0 1 {F0})
+r1 in out {R}
+c1 out 0 {C}
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let err = engine
+        .run_pss(&netlist, PssConfig::new(F0).with_max_iterations(0))
+        .expect_err("zero max_iterations must be rejected");
+
+    match err {
+        SimulationError::Circuit(message) => {
+            assert_eq!(message, "Invalid PSS config: max_iterations must be > 0");
+        }
+        other => panic!("expected invalid PSS config error, got {other:?}"),
+    }
+}
+
+#[test]
+fn pss_rejects_invalid_public_numeric_config_as_invalid_config() {
+    let deck = format!(
+        "\
+* sine-driven rc
+v1 in 0 sin(0 1 {F0})
+r1 in out {R}
+c1 out 0 {C}
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+
+    let invalid_cases = vec![
+        (
+            "non-finite fundamental",
+            {
+                let mut config = PssConfig::new(f64::NAN);
+                config.period_guess = 1e-9;
+                config
+            },
+            "Invalid PSS config: fundamental_freq must be finite and >= 0",
+        ),
+        (
+            "negative fundamental",
+            {
+                let mut config = PssConfig::new(-F0);
+                config.period_guess = 1e-9;
+                config
+            },
+            "Invalid PSS config: fundamental_freq must be finite and >= 0",
+        ),
+        (
+            "negative tstab",
+            PssConfig::new(F0).with_tstab(-1e-6),
+            "Invalid PSS config: tstab must be finite and >= 0",
+        ),
+        (
+            "zero tolerance",
+            PssConfig::new(F0).with_tolerance(0.0),
+            "Invalid PSS config: tolerance must be finite and > 0",
+        ),
+        (
+            "non-finite abstol",
+            {
+                let mut config = PssConfig::new(F0);
+                config.abstol = f64::INFINITY;
+                config
+            },
+            "Invalid PSS config: abstol must be finite and > 0",
+        ),
+        (
+            "invalid period guess",
+            {
+                let mut config = PssConfig::autonomous();
+                config.period_guess = 0.0;
+                config
+            },
+            "Invalid PSS config: period_guess must be finite and > 0",
+        ),
+        (
+            "out of range damping",
+            {
+                let mut config = PssConfig::new(F0);
+                config.damping_factor = 1.5;
+                config
+            },
+            "Invalid PSS config: damping_factor must be finite and in [0.1, 1.0]",
+        ),
+        (
+            "invalid period change",
+            {
+                let mut config = PssConfig::autonomous();
+                config.max_period_change = f64::NAN;
+                config
+            },
+            "Invalid PSS config: max_period_change must be finite and > 0",
+        ),
+        (
+            "invalid grid density",
+            {
+                let mut config = PssConfig::new(F0);
+                config.points_per_period = 0;
+                config
+            },
+            "Invalid PSS config: points_per_period must be >= 16",
+        ),
+    ];
+
+    for (case, config, expected) in invalid_cases {
+        let err = match engine.run_pss(&netlist, config) {
+            Ok(_) => panic!("{case} must be rejected"),
+            Err(err) => err,
+        };
+
+        match err {
+            SimulationError::Circuit(message) => {
+                assert_eq!(message, expected, "{case}");
+            }
+            other => panic!("{case}: expected invalid PSS config error, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn driven_pss_ignores_autonomous_period_controls() {
+    let deck = format!(
+        "\
+* sine-driven rc
+v1 in 0 sin(0 1 {F0})
+r1 in out {R}
+c1 out 0 {C}
+.end
+"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let mut config = PssConfig::new(F0)
+        .with_tstab_periods(8)
+        .with_tolerance(1e-7);
+    config.period_guess = 0.0;
+    config.max_period_change = f64::NAN;
+
+    let result = engine
+        .run_pss(&netlist, config)
+        .expect("driven PSS must ignore autonomous-only period controls");
+
+    assert!(
+        result.final_residual < 1e-4,
+        "periodicity residual must be small, got {}",
+        result.final_residual
+    );
 }
 
 #[test]

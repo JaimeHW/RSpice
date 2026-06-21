@@ -71,8 +71,8 @@ impl EyeConfig {
 
     /// Set resolution
     pub fn with_resolution(mut self, h: usize, v: usize) -> Self {
-        self.h_resolution = h;
-        self.v_resolution = v;
+        self.h_resolution = h.max(1);
+        self.v_resolution = v.max(1);
         self
     }
 }
@@ -99,6 +99,11 @@ pub struct EyeDiagram {
 impl EyeDiagram {
     /// Create new empty eye diagram
     pub fn new(config: EyeConfig) -> Self {
+        let config = EyeConfig {
+            h_resolution: config.h_resolution.max(1),
+            v_resolution: config.v_resolution.max(1),
+            ..config
+        };
         let histogram = vec![vec![0; config.v_resolution]; config.h_resolution];
         Self {
             config,
@@ -298,7 +303,11 @@ impl EyeDiagram {
 
     /// Get density at a point (normalized 0-1)
     pub fn density_at(&self, h_frac: Value, v_frac: Value) -> Value {
-        if self.total_samples == 0 {
+        if self.total_samples == 0
+            || self.config.h_resolution == 0
+            || self.config.v_resolution == 0
+            || self.histogram.is_empty()
+        {
             return 0.0;
         }
 
@@ -337,6 +346,27 @@ impl EyeMetrics {
     /// Check if eye meets specification
     pub fn meets_spec(&self, min_height: Value, min_width_ui: Value) -> bool {
         self.eye_height >= min_height && self.eye_width_ui >= min_width_ui
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zero_eye_resolution_is_clamped_before_histogram_access() {
+        let config = EyeConfig::for_rate(1.0).with_resolution(0, 0);
+        let mut eye = EyeDiagram::new(config);
+        let time = [0.0, 0.25, 0.5, 0.75, 1.0, 1.25];
+        let voltage = [0.0, 0.25, 1.0, 0.25, 0.0, 1.0];
+
+        eye.add_waveform(&time, &voltage);
+
+        assert_eq!(eye.config.h_resolution, 1);
+        assert_eq!(eye.config.v_resolution, 1);
+        assert_eq!(eye.histogram.len(), 1);
+        assert_eq!(eye.histogram[0].len(), 1);
+        assert!(eye.density_at(0.5, 0.5).is_finite());
     }
 }
 

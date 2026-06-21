@@ -31,7 +31,7 @@
 //!
 //! # Usage
 //! ```ignore
-//! let waveform = Waveform::new(&time_points, &voltage_values);
+//! let waveform = Waveform::new(&time_points, &voltage_values)?;
 //! let rise_time = waveform.rise_time(0.1, 0.9)?;
 //! let thd = waveform.thd(fundamental_freq)?;
 //! ```
@@ -138,6 +138,8 @@ impl MeasurementResult {
 /// Errors that can occur during measurement
 #[derive(Debug, Clone, PartialEq)]
 pub enum MeasurementError {
+    /// Invalid waveform input
+    InvalidWaveform(String),
     /// Insufficient data points
     InsufficientData(String),
     /// Threshold never crossed
@@ -153,6 +155,7 @@ pub enum MeasurementError {
 impl std::fmt::Display for MeasurementError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidWaveform(msg) => write!(f, "Invalid waveform: {}", msg),
             Self::InsufficientData(msg) => write!(f, "Insufficient data: {}", msg),
             Self::ThresholdNotCrossed(msg) => write!(f, "Threshold not crossed: {}", msg),
             Self::InvalidThreshold(msg) => write!(f, "Invalid threshold: {}", msg),
@@ -194,46 +197,28 @@ impl Waveform {
     /// * `time` - Time points (must be monotonically increasing)
     /// * `values` - Signal values at each time point
     ///
-    /// Returns an error if time and values have different lengths or are empty.
-    pub fn try_new(time: &[Value], values: &[Value]) -> Result<Self, String> {
-        if time.len() != values.len() {
-            return Err(format!(
-                "Time and values must have same length (got {} time points and {} values)",
-                time.len(),
-                values.len()
-            ));
-        }
-        if time.is_empty() {
-            return Err("Waveform cannot be empty".to_string());
-        }
-        if !time.iter().all(|sample| sample.is_finite()) {
-            return Err("Waveform time points must be finite time values".to_string());
-        }
-        if !values.iter().all(|sample| sample.is_finite()) {
-            return Err("Waveform samples must contain only finite values".to_string());
-        }
-        if time.windows(2).any(|window| window[1] <= window[0]) {
-            return Err("Waveform time points must be strictly increasing".to_string());
-        }
+    pub fn new(time: &[Value], values: &[Value]) -> Result<Self, MeasurementError> {
+        Self::try_new(time, values)
+    }
 
+    /// Create a new waveform from time and value arrays.
+    pub fn try_new(time: &[Value], values: &[Value]) -> Result<Self, MeasurementError> {
+        validate_waveform_input(time, values)?;
+        Ok(Self::from_validated_parts(time, values))
+    }
+
+    fn from_validated_parts(time: &[Value], values: &[Value]) -> Self {
         let min_value = values.iter().cloned().fold(f64::INFINITY, f64::min);
         let max_value = values.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
-        Ok(Self {
+        Self {
             time: time.to_vec(),
             values: values.to_vec(),
             min_value,
             max_value,
             min_time: time[0],
-            max_time: *time.last().unwrap(),
-        })
-    }
-
-    /// # Panics
-    /// Panics if time and values have different lengths or are empty. Use
-    /// [`Self::try_new`] when constructing from dynamic input.
-    pub fn new(time: &[Value], values: &[Value]) -> Self {
-        Self::try_new(time, values).unwrap_or_else(|message| panic!("{message}"))
+            max_time: time[time.len() - 1],
+        }
     }
 
     /// Get number of samples
@@ -858,7 +843,7 @@ impl Waveform {
 
     /// Resample waveform at uniform intervals
     pub fn resample(&self, num_points: usize) -> Self {
-        if num_points < 2 {
+        if num_points < 2 || self.time.len() < 2 {
             return self.clone();
         }
 
@@ -872,8 +857,46 @@ impl Waveform {
             new_values.push(self.interpolate(t).unwrap_or(0.0));
         }
 
-        Waveform::new(&new_time, &new_values)
+        Self::from_validated_parts(&new_time, &new_values)
     }
+}
+
+fn validate_waveform_input(time: &[Value], values: &[Value]) -> Result<(), MeasurementError> {
+    if time.len() != values.len() {
+        return Err(MeasurementError::InvalidWaveform(format!(
+            "time and values must have the same length (got {} time point(s), {} value(s))",
+            time.len(),
+            values.len()
+        )));
+    }
+    if time.is_empty() {
+        return Err(MeasurementError::InvalidWaveform(
+            "waveform cannot be empty".to_string(),
+        ));
+    }
+    for (index, (&t, &v)) in time.iter().zip(values).enumerate() {
+        if !t.is_finite() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "time[{index}] must be finite"
+            )));
+        }
+        if !v.is_finite() {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "values[{index}] must be finite"
+            )));
+        }
+    }
+    for (index, pair) in time.windows(2).enumerate() {
+        if pair[1] <= pair[0] {
+            return Err(MeasurementError::InvalidWaveform(format!(
+                "time points must be strictly increasing (time[{index}]={} >= time[{}]={})",
+                pair[0],
+                index + 1,
+                pair[1]
+            )));
+        }
+    }
+    Ok(())
 }
 
 //=============================================================================
@@ -885,37 +908,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waveform_try_new_rejects_mismatched_arrays() {
-        let err = Waveform::try_new(&[0.0, 1.0], &[1.0]).expect_err("length mismatch");
+    fn waveform_new_rejects_empty_data_without_panicking() {
+        let err = Waveform::new(&[], &[]).expect_err("empty waveform should be invalid");
 
-        assert!(err.contains("same length"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn waveform_try_new_rejects_empty_arrays() {
-        let err = Waveform::try_new(&[], &[]).expect_err("empty waveform");
-
-        assert!(err.contains("empty"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn waveform_try_new_rejects_nonfinite_samples() {
-        let err = Waveform::try_new(&[0.0, f64::NAN], &[1.0, 2.0]).expect_err("non-finite time");
-        assert!(err.contains("finite time"), "unexpected error: {err}");
-
-        let err =
-            Waveform::try_new(&[0.0, 1.0], &[1.0, f64::INFINITY]).expect_err("non-finite value");
-        assert!(err.contains("finite values"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn waveform_try_new_rejects_non_increasing_time() {
-        let err =
-            Waveform::try_new(&[0.0, 2.0, 1.0], &[1.0, 2.0, 3.0]).expect_err("time must increase");
-
+        assert!(matches!(err, MeasurementError::InvalidWaveform(_)));
         assert!(
-            err.contains("strictly increasing"),
-            "unexpected error: {err}"
+            err.to_string().contains("empty"),
+            "error should explain the empty waveform: {err}"
+        );
+    }
+
+    #[test]
+    fn waveform_new_rejects_mismatched_data_without_panicking() {
+        let err = Waveform::new(&[0.0, 1.0], &[1.0])
+            .expect_err("mismatched waveform lengths should be invalid");
+
+        assert!(matches!(err, MeasurementError::InvalidWaveform(_)));
+        assert!(
+            err.to_string().contains("same length"),
+            "error should explain the length mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn waveform_new_rejects_non_monotonic_time_without_panicking() {
+        let err = Waveform::new(&[0.0, 1.0, 0.5], &[0.0, 1.0, 2.0])
+            .expect_err("non-monotonic time axis should be invalid");
+
+        assert!(matches!(err, MeasurementError::InvalidWaveform(_)));
+        assert!(
+            err.to_string().contains("strictly increasing"),
+            "error should explain the time ordering problem: {err}"
         );
     }
 }

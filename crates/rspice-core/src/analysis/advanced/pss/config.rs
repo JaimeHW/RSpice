@@ -200,6 +200,43 @@ impl PssConfig {
         self
     }
 
+    /// Validate public configuration before the engine starts solving.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq < 0.0 {
+            return Err("fundamental_freq must be finite and >= 0".to_string());
+        }
+        if !self.tstab.is_finite() || self.tstab < 0.0 {
+            return Err("tstab must be finite and >= 0".to_string());
+        }
+        if self.max_iterations == 0 {
+            return Err("max_iterations must be > 0".to_string());
+        }
+        if !self.tolerance.is_finite() || self.tolerance <= 0.0 {
+            return Err("tolerance must be finite and > 0".to_string());
+        }
+        if !self.abstol.is_finite() || self.abstol <= 0.0 {
+            return Err("abstol must be finite and > 0".to_string());
+        }
+        if !self.damping_factor.is_finite() || !(0.1..=1.0).contains(&self.damping_factor) {
+            return Err("damping_factor must be finite and in [0.1, 1.0]".to_string());
+        }
+        if self.is_autonomous() {
+            if !self.period_guess.is_finite() || self.period_guess <= 0.0 {
+                return Err("period_guess must be finite and > 0".to_string());
+            }
+            if !self.max_period_change.is_finite() || self.max_period_change <= 0.0 {
+                return Err("max_period_change must be finite and > 0".to_string());
+            }
+        }
+        if self.points_per_period < 16 {
+            return Err("points_per_period must be >= 16".to_string());
+        }
+        if !self.effective_tstab().is_finite() {
+            return Err("effective_tstab must be finite".to_string());
+        }
+        Ok(())
+    }
+
     /// Set initial period guess for autonomous circuits.
     ///
     /// Also sets fundamental_freq to the corresponding frequency.

@@ -188,11 +188,19 @@ impl PacConfig {
 
     /// Generate frequency points based on sweep configuration
     pub fn frequency_points(&self) -> Vec<Value> {
-        match self.sweep_type {
+        self.try_frequency_points().unwrap_or_default()
+    }
+
+    /// Generate frequency points, preserving validation failures for callers
+    /// that need to distinguish invalid input from a deliberately empty grid.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, String> {
+        self.validate()?;
+
+        Ok(match self.sweep_type {
             PacSweepType::Linear => self.linear_points(),
             PacSweepType::Decade => self.decade_points(),
             PacSweepType::Octave => self.octave_points(),
-        }
+        })
     }
 
     /// Generate linear frequency sweep points
@@ -261,11 +269,11 @@ impl PacConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), String> {
-        if self.sweep_start <= 0.0 {
-            return Err("Sweep start frequency must be positive".to_string());
+        if !self.sweep_start.is_finite() || self.sweep_start <= 0.0 {
+            return Err("Sweep start frequency must be positive and finite".to_string());
         }
-        if self.sweep_stop < self.sweep_start {
-            return Err("Sweep stop frequency must be >= start".to_string());
+        if !self.sweep_stop.is_finite() || self.sweep_stop < self.sweep_start {
+            return Err("Sweep stop frequency must be finite and >= start".to_string());
         }
         if self.num_points == 0 {
             return Err("Number of frequency points must be at least 1".to_string());
@@ -273,8 +281,12 @@ impl PacConfig {
         if self.sideband_min > self.sideband_max {
             return Err("Sideband min must be <= sideband max".to_string());
         }
-        if self.reltol <= 0.0 || self.abstol <= 0.0 {
-            return Err("Tolerances must be positive".to_string());
+        if !self.reltol.is_finite()
+            || !self.abstol.is_finite()
+            || self.reltol <= 0.0
+            || self.abstol <= 0.0
+        {
+            return Err("Tolerances must be positive and finite".to_string());
         }
         Ok(())
     }
@@ -283,3 +295,53 @@ impl PacConfig {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_non_finite_sweep_values() {
+        for config in [
+            PacConfig::new().with_sweep(f64::NAN, 1.0e3, 10),
+            PacConfig::new().with_sweep(1.0, f64::INFINITY, 10),
+            PacConfig::new().with_sweep(1.0, 1.0e3, 0),
+        ] {
+            assert!(
+                config.validate().is_err(),
+                "invalid PAC sweep config unexpectedly accepted: {config:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_non_finite_tolerances() {
+        for config in [
+            PacConfig::new().with_tolerances(f64::NAN, 1.0e-12),
+            PacConfig::new().with_tolerances(1.0e-3, f64::INFINITY),
+        ] {
+            assert!(
+                config.validate().is_err(),
+                "invalid PAC tolerance config unexpectedly accepted: {config:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn try_frequency_points_returns_validation_error_instead_of_empty_grid() {
+        let config = PacConfig::new().with_sweep(1.0e6, 1.0, 10);
+
+        let err = config
+            .try_frequency_points()
+            .expect_err("invalid PAC sweep should return the validation error");
+
+        assert!(
+            err.contains("Sweep stop frequency"),
+            "unexpected PAC frequency error: {err}"
+        );
+        assert!(
+            config.frequency_points().is_empty(),
+            "legacy frequency_points keeps returning an empty grid for invalid configs"
+        );
+    }
+}

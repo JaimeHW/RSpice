@@ -393,6 +393,10 @@ pub enum NoiseSourceType {
     Bsim4CorrelatedThermal,
 }
 
+/// Shared tabulated noise PSD: sorted `(frequency, power)` points plus a log-log
+/// interpolation flag.
+pub type NoiseTable = std::sync::Arc<(Vec<(Value, Value)>, bool)>;
+
 /// A noise source in the circuit
 #[derive(Debug, Clone)]
 pub struct NoiseSource {
@@ -420,7 +424,7 @@ pub struct NoiseSource {
     pub temperature_offset: Value,
     /// Tabulated PSD for [`NoiseSourceType::Table`]: sorted (f, p) points
     /// and the log-log interpolation flag, scaled by `parameter`
-    pub table: Option<std::sync::Arc<(Vec<(Value, Value)>, bool)>>,
+    pub table: Option<NoiseTable>,
     /// BSIM4 `fnoiMod=1` physical flicker-noise state.
     pub bsim4_flicker: Option<std::sync::Arc<Bsim4FlickerNoise>>,
     /// BSIM3 `noiMod=2/3/6` physical flicker-noise state.

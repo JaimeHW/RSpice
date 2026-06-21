@@ -480,4 +480,68 @@ mod tests {
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
     }
+
+    #[test]
+    fn dc_measure_goal_failure_preserves_contract() {
+        let netlist = Netlist::parse(
+            "measure goal\n\
+             V1 in 0 10\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .dc V1 0 10 1\n\
+             .meas dc vout MAX V(out) GOAL=4 TOL=0.1\n\
+             .end\n",
+        )
+        .expect("aggregate .MEAS with GOAL/TOL parses");
+
+        let mut low = SimulationResult::new(2, 0);
+        low.node_voltages = vec![0.0, 0.0, 0.0];
+        low.node_names = vec!["0".to_string(), "in".to_string(), "out".to_string()];
+
+        let mut high = low.clone();
+        high.node_voltages[2] = 5.0;
+
+        let results = evaluate_dc_measurements(&netlist, &[(0.0, low), (10.0, high)]);
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.name, "VOUT");
+        assert_eq!(result.value, Some(5.0));
+        assert_eq!(result.expected, Some(4.0));
+        assert_eq!(result.tolerance, Some(0.1));
+        assert!(!result.passed);
+        assert!(
+            result
+                .error
+                .as_deref()
+                .is_some_and(|message| message.contains("GOAL"))
+        );
+    }
+
+    #[test]
+    fn dc_measure_goal_failure_preserves_contract_with_engine_sweep() {
+        let netlist = Netlist::parse(
+            "* dc measurement with failing goal\n\
+             V1 in 0 10\n\
+             R1 in out 1k\n\
+             R2 out 0 1k\n\
+             .dc V1 0 10 1\n\
+             .meas dc vout MAX V(out) GOAL=4 TOL=0.1\n\
+             .end\n",
+        )
+        .expect("aggregate .MEAS with GOAL/TOL parses");
+        let engine = crate::Engine::default();
+        let sweep = engine
+            .run_dc_sweep(&netlist, "V1", 0.0, 10.0, 1.0)
+            .expect("DC sweep runs");
+
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert_eq!(result.value, Some(4.9999999999975));
+        assert_eq!(result.expected, Some(4.0));
+        assert_eq!(result.tolerance, Some(0.1));
+        assert!(!result.passed);
+    }
 }

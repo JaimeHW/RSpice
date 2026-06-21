@@ -139,6 +139,10 @@ impl StbConfig {
 
     /// Generate frequency points
     pub fn frequency_points(&self) -> Vec<Value> {
+        if self.validate().is_err() {
+            return Vec::new();
+        }
+
         match self.sweep_type {
             StbSweepType::Linear => self.linear_points(),
             StbSweepType::Decade => self.decade_points(),
@@ -157,9 +161,6 @@ impl StbConfig {
     }
 
     fn decade_points(&self) -> Vec<Value> {
-        if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-            return vec![self.freq_start.max(1e-15)];
-        }
         let log_start = self.freq_start.log10();
         let log_stop = self.freq_stop.log10();
         let num_decades = log_stop - log_start;
@@ -176,9 +177,6 @@ impl StbConfig {
     }
 
     fn octave_points(&self) -> Vec<Value> {
-        if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-            return vec![self.freq_start.max(1e-15)];
-        }
         let log_start = self.freq_start.log2();
         let log_stop = self.freq_stop.log2();
         let num_octaves = log_stop - log_start;
@@ -192,6 +190,26 @@ impl StbConfig {
                 2.0_f64.powf(log_f)
             })
             .collect()
+    }
+
+    /// Validate sweep configuration.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.freq_start.is_finite() || self.freq_start <= 0.0 {
+            return Err("STB start frequency must be positive and finite".to_string());
+        }
+        if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
+            return Err("STB stop frequency must be finite and >= start".to_string());
+        }
+        if self.num_points == 0 {
+            return Err("STB sweep must have at least one point".to_string());
+        }
+        if !self.min_gain_margin_db.is_finite()
+            || !self.min_phase_margin_deg.is_finite()
+            || !self.max_loop_gain_db.is_finite()
+        {
+            return Err("STB margin thresholds must be finite".to_string());
+        }
+        Ok(())
     }
 }
 
@@ -677,3 +695,34 @@ impl StbAnalyzer {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_sweeps_reject_invalid_frequency_grids() {
+        for config in [
+            StbConfig::new()
+                .with_sweep(0.0, 1.0e3, 10)
+                .with_sweep_type(StbSweepType::Decade),
+            StbConfig::new()
+                .with_sweep(f64::NAN, 1.0e3, 10)
+                .with_sweep_type(StbSweepType::Decade),
+            StbConfig::new()
+                .with_sweep(1.0, f64::INFINITY, 10)
+                .with_sweep_type(StbSweepType::Octave),
+            StbConfig::new()
+                .with_sweep(1.0e3, 1.0, 10)
+                .with_sweep_type(StbSweepType::Decade),
+            StbConfig::new()
+                .with_sweep(1.0, 1.0e3, 0)
+                .with_sweep_type(StbSweepType::Decade),
+        ] {
+            assert!(
+                config.frequency_points().is_empty(),
+                "invalid STB sweep config produced points: {config:?}"
+            );
+        }
+    }
+}

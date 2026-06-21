@@ -161,11 +161,19 @@ impl PxfConfig {
 
     /// Generate frequency points based on sweep type
     pub fn frequency_points(&self) -> Vec<Value> {
-        match self.sweep_type {
+        self.try_frequency_points().unwrap_or_default()
+    }
+
+    /// Generate frequency points, preserving validation failures for callers
+    /// that need to distinguish invalid input from a deliberately empty grid.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, PxfError> {
+        self.validate()?;
+
+        Ok(match self.sweep_type {
             PxfSweepType::Linear => self.linear_points(),
             PxfSweepType::Decade => self.decade_points(),
             PxfSweepType::Octave => self.octave_points(),
-        }
+        })
     }
 
     fn linear_points(&self) -> Vec<Value> {
@@ -218,14 +226,14 @@ impl PxfConfig {
 
     /// Validate configuration
     pub fn validate(&self) -> Result<(), PxfError> {
-        if self.freq_start <= 0.0 {
+        if !self.freq_start.is_finite() || self.freq_start <= 0.0 {
             return Err(PxfError::InvalidFrequency(
-                "Start frequency must be positive".into(),
+                "Start frequency must be positive and finite".into(),
             ));
         }
-        if self.freq_stop < self.freq_start {
+        if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
             return Err(PxfError::InvalidFrequency(
-                "Stop frequency must be >= start".into(),
+                "Stop frequency must be finite and >= start".into(),
             ));
         }
         if self.num_points == 0 {
@@ -621,3 +629,40 @@ impl PxfAnalyzer {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_rejects_non_finite_sweep_values() {
+        for config in [
+            PxfConfig::new().with_sweep(f64::NAN, 1.0e3, 10),
+            PxfConfig::new().with_sweep(1.0, f64::INFINITY, 10),
+            PxfConfig::new().with_sweep(1.0, 1.0e3, 0),
+        ] {
+            assert!(
+                config.validate().is_err(),
+                "invalid PXF sweep config unexpectedly accepted: {config:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn try_frequency_points_preserves_validation_error() {
+        let config = PxfConfig::new().with_sweep(1.0e6, 1.0, 10);
+
+        let err = config
+            .try_frequency_points()
+            .expect_err("invalid PXF sweep should return the validation error");
+
+        assert!(
+            err.to_string().contains("Stop frequency"),
+            "unexpected PXF frequency error: {err}"
+        );
+        assert!(
+            config.frequency_points().is_empty(),
+            "legacy frequency_points keeps returning an empty grid for invalid configs"
+        );
+    }
+}

@@ -135,6 +135,11 @@ impl FloquetAnalyzer {
         self.num_harmonics
     }
 
+    /// Return whether real linearization and waveform data have been computed.
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
     /// Set carrier frequency explicitly (overrides 1/period)
     pub fn with_carrier_freq(mut self, freq: Value) -> Self {
         self.carrier_freq = freq;

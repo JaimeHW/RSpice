@@ -201,8 +201,12 @@ impl WaveformRecorder {
         t0: Value,
         initial_values: &[Value],
         config: CompressionConfig,
-    ) -> Self {
-        assert_eq!(initial_values.len(), num_channels);
+    ) -> Result<Self, String> {
+        validate_channel_count(
+            "initial waveform sample",
+            initial_values.len(),
+            num_channels,
+        )?;
 
         let channel_states: Vec<_> = initial_values
             .iter()
@@ -211,21 +215,21 @@ impl WaveformRecorder {
 
         let values: Vec<_> = initial_values.iter().map(|&v| vec![v]).collect();
 
-        Self {
+        Ok(Self {
             config,
             num_channels,
             channel_states,
             times: vec![t0],
             values,
             input_count: 1,
-        }
+        })
     }
 
     /// Record a new time point with values for all channels
     ///
     /// Returns true if any point was actually stored (useful for debugging)
-    pub fn record(&mut self, t: Value, values: &[Value]) -> bool {
-        assert_eq!(values.len(), self.num_channels);
+    pub fn record(&mut self, t: Value, values: &[Value]) -> Result<bool, String> {
+        validate_channel_count("waveform sample", values.len(), self.num_channels)?;
 
         self.input_count += 1;
 
@@ -236,7 +240,7 @@ impl WaveformRecorder {
                 self.values[ch].push(v);
                 self.channel_states[ch].last_stored = (t, v);
             }
-            return true;
+            return Ok(true);
         }
 
         // Check each channel for whether we need to store the previous point
@@ -268,7 +272,7 @@ impl WaveformRecorder {
             self.channel_states[ch].has_previous = true;
         }
 
-        any_stored
+        Ok(any_stored)
     }
 
     /// Store a point at the given time
@@ -296,8 +300,12 @@ impl WaveformRecorder {
     ///
     /// This must be called at the end of simulation to ensure the final
     /// values are recorded.
-    pub fn finalize(&mut self, t_final: Value, final_values: &[Value]) {
-        assert_eq!(final_values.len(), self.num_channels);
+    pub fn finalize(&mut self, t_final: Value, final_values: &[Value]) -> Result<(), String> {
+        validate_channel_count(
+            "final waveform sample",
+            final_values.len(),
+            self.num_channels,
+        )?;
 
         // Always store the final point
         let last_time = *self.times.last().unwrap_or(&0.0);
@@ -308,6 +316,7 @@ impl WaveformRecorder {
                 self.channel_states[ch].last_stored = (t_final, v);
             }
         }
+        Ok(())
     }
 
     /// Get the stored time points
@@ -448,6 +457,19 @@ impl CompressionStats {
 }
 
 impl TransientResultCompressed {
+    fn aligned_channel_values(&self, node: usize) -> Option<&[Value]> {
+        if node >= self.num_nodes {
+            return None;
+        }
+
+        let values = self.voltages.get(node)?;
+        if values.len() != self.time.len() {
+            return None;
+        }
+
+        Some(values.as_slice())
+    }
+
     /// Get value at arbitrary time via linear interpolation
     ///
     /// This is how compressed waveforms are read - the stored points
@@ -458,7 +480,7 @@ impl TransientResultCompressed {
         }
 
         let times = &self.time;
-        let values = &self.voltages[node];
+        let values = self.aligned_channel_values(node)?;
 
         // Handle edge cases
         if time <= times[0] {
@@ -501,6 +523,7 @@ impl TransientResultCompressed {
         if node >= self.num_nodes || self.time.is_empty() || num_points < 2 {
             return None;
         }
+        self.aligned_channel_values(node)?;
 
         let t_start = self.time[0];
         let t_end = *self.time.last().unwrap();
@@ -520,3 +543,69 @@ impl TransientResultCompressed {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn malformed_compressed_result(voltages: Vec<Vec<Value>>) -> TransientResultCompressed {
+        TransientResultCompressed {
+            time: vec![0.0, 1.0, 2.0],
+            voltages,
+            num_nodes: 1,
+            node_names: vec!["out".to_string()],
+            compression_ratio: 1.0,
+            input_points: 3,
+        }
+    }
+
+    #[test]
+    fn compressed_result_rejects_missing_or_misaligned_voltage_channels() {
+        let missing_channel = malformed_compressed_result(Vec::new());
+        assert_eq!(missing_channel.interpolate(0, 0.5), None);
+        assert_eq!(missing_channel.resample(0, 3), None);
+
+        let short_channel = malformed_compressed_result(vec![vec![0.0]]);
+        assert_eq!(short_channel.interpolate(0, 0.5), None);
+        assert_eq!(short_channel.resample(0, 3), None);
+    }
+
+    #[test]
+    fn recorder_new_rejects_mismatched_initial_values_without_panicking() {
+        let err = WaveformRecorder::new(2, 0.0, &[1.0], CompressionConfig::none())
+            .expect_err("initial sample width must be validated");
+        assert!(err.contains("initial waveform sample"));
+    }
+
+    #[test]
+    fn recorder_record_rejects_mismatched_values_without_panicking() {
+        let mut recorder = WaveformRecorder::new(2, 0.0, &[1.0, 2.0], CompressionConfig::none())
+            .expect("recorder initializes");
+
+        let err = recorder
+            .record(1.0, &[3.0])
+            .expect_err("record sample width must be validated");
+        assert!(err.contains("waveform sample"));
+    }
+
+    #[test]
+    fn recorder_finalize_rejects_mismatched_values_without_panicking() {
+        let mut recorder = WaveformRecorder::new(2, 0.0, &[1.0, 2.0], CompressionConfig::none())
+            .expect("recorder initializes");
+
+        let err = recorder
+            .finalize(1.0, &[3.0])
+            .expect_err("final sample width must be validated");
+        assert!(err.contains("final waveform sample"));
+    }
+}
+
+fn validate_channel_count(context: &str, actual: usize, expected: usize) -> Result<(), String> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "{context} has {actual} value(s) but recorder expects {expected} channel(s)"
+        ))
+    }
+}

@@ -3,12 +3,43 @@
 //! reference simulator involved — so a failure is unambiguous.
 
 use rspice_core::analysis::advanced::harmonic_balance::HbConfig;
+use rspice_core::analysis::advanced::pac::{PacConfig, PacSweepType};
 use rspice_core::analysis::advanced::pss::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
+}
+
+fn bsim4_models45() -> String {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/device/mosfet/bsim4v8/testdata/models45.lib"
+    );
+    std::fs::read_to_string(path).expect("read BSIM4 model card")
+}
+
+fn bsim4_rf_deck() -> String {
+    format!(
+        "* bsim4 periodic unsupported-device gate\n\
+         vd d 0 dc 1.1\n\
+         vg g 0 dc 1.1 sin(1.1 0.01 1meg)\n\
+         m1 d g 0 0 n45 w=1u l=45n ad=0.1p as=0.1p pd=2.2u ps=2.2u nrd=0 nrs=0\n\
+         {}\n\
+         .end\n",
+        bsim4_models45()
+    )
+}
+
+fn assert_bsim4_periodic_rejection(err: rspice_core::engine::SimulationError) {
+    let message = err.to_string();
+    assert!(
+        message.contains("HB runtime does not yet support")
+            && message.contains("native BSIM4")
+            && message.contains("1 device"),
+        "periodic analysis must loudly reject unsupported native BSIM4, got: {message}"
+    );
 }
 
 /// Fundamental-coefficient ratio of two nodes from an HB result —
@@ -84,6 +115,43 @@ fn hb_linear_rc_matches_the_ac_transfer_function() {
             "harmonic {k} must vanish on a linear circuit, got {residue:e}"
         );
     }
+}
+
+#[test]
+fn hb_rejects_native_bsim4_instead_of_solving_without_its_nonlinearity() {
+    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
+    let err = engine()
+        .run_hb(&netlist, HbConfig::new(1.0e6).with_harmonics(5))
+        .expect_err("native BSIM4 is not adapted into HB yet");
+
+    assert_bsim4_periodic_rejection(err);
+}
+
+#[test]
+fn pac_rejects_native_bsim4_before_periodic_operating_point() {
+    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
+    let config = PacConfig::new()
+        .with_fundamental(1.0e6)
+        .with_sweep(1.0e3, 1.0e3, 1)
+        .with_sweep_type(PacSweepType::Linear)
+        .with_sidebands(-1, 1)
+        .with_input_source("vg")
+        .with_output_node("d");
+    let err = engine()
+        .run_pac(&netlist, config)
+        .expect_err("native BSIM4 is not adapted into PAC yet");
+
+    assert_bsim4_periodic_rejection(err);
+}
+
+#[test]
+fn pnoise_rejects_native_bsim4_before_noise_folding() {
+    let netlist = Netlist::parse(&bsim4_rf_deck()).expect("deck parses");
+    let err = engine()
+        .run_pnoise(&netlist, 1.0e6, &[1.0e3], "d", None, Some("vg"), 1)
+        .expect_err("native BSIM4 is not adapted into PNoise yet");
+
+    assert_bsim4_periodic_rejection(err);
 }
 
 /// Square-law distortion: a level-1 MOSFET in saturation with LAMBDA=0

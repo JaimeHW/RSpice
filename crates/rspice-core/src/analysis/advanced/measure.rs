@@ -199,6 +199,9 @@ pub struct MeasureResult {
 
 impl MeasureResult {
     pub fn success(name: &str, value: Value) -> Self {
+        if !value.is_finite() {
+            return Self::failed(name, &format!("measurement value is non-finite ({value})"));
+        }
         Self {
             name: name.to_string(),
             value: Some(value),
@@ -225,18 +228,35 @@ impl MeasureResult {
         let Some(goal) = statement.goal else {
             return self;
         };
+        if !goal.is_finite() {
+            self.passed = false;
+            self.error = Some(format!("GOAL must be finite, got {goal}"));
+            self.expected = Some(goal);
+            self.tolerance = statement.tolerance;
+            return self;
+        }
         let tolerance = statement
             .tolerance
             .unwrap_or_else(|| (goal.abs() * 0.01).max(1e-12));
         self.expected = Some(goal);
         self.tolerance = Some(tolerance);
-        if let Some(value) = self.value
-            && (value - goal).abs() > tolerance
-        {
+        if !tolerance.is_finite() || tolerance < 0.0 {
             self.passed = false;
             self.error = Some(format!(
-                "value {value:e} misses GOAL {goal:e} (tolerance {tolerance:e})"
+                "TOL must be a finite non-negative value, got {tolerance}"
             ));
+            return self;
+        }
+        if let Some(value) = self.value {
+            if !value.is_finite() {
+                self.passed = false;
+                self.error = Some(format!("measurement value is non-finite ({value})"));
+            } else if (value - goal).abs() > tolerance {
+                self.passed = false;
+                self.error = Some(format!(
+                    "value {value:e} misses GOAL {goal:e} (tolerance {tolerance:e})"
+                ));
+            }
         }
         self
     }
@@ -289,6 +309,39 @@ impl MeasureEngine {
         time: &[Value],
         signals: &HashMap<String, &[Value]>,
     ) -> Vec<MeasureResult> {
+        if self.measurements.is_empty() {
+            return Vec::new();
+        }
+        if time.is_empty() {
+            return self.fail_all("measurement axis is empty");
+        }
+        if let Some(index) = time.iter().position(|value| !value.is_finite()) {
+            return self.fail_all(&format!(
+                "measurement axis contains non-finite sample at index {index}"
+            ));
+        }
+        if let Some((name, signal)) = signals
+            .iter()
+            .find(|(_, signal)| signal.len() != time.len())
+        {
+            return self.fail_all(&format!(
+                "signal '{name}' has {} samples but measurement axis has {}",
+                signal.len(),
+                time.len()
+            ));
+        }
+        if let Some((name, index, value)) = signals.iter().find_map(|(name, signal)| {
+            signal
+                .iter()
+                .enumerate()
+                .find(|(_, value)| !value.is_finite())
+                .map(|(index, value)| (name, index, *value))
+        }) {
+            return self.fail_all(&format!(
+                "signal '{name}' contains non-finite sample at index {index}: {value}"
+            ));
+        }
+
         // Expression measures (PARAM='...') read other results by name, so
         // they evaluate in a second pass over the directly computed set —
         // and in statement order, so a PARAM may reference an earlier PARAM.
@@ -308,6 +361,13 @@ impl MeasureEngine {
             }
         }
         results
+    }
+
+    fn fail_all(&self, reason: &str) -> Vec<MeasureResult> {
+        self.measurements
+            .iter()
+            .map(|measurement| MeasureResult::failed(&measurement.name, reason))
+            .collect()
     }
 
     fn evaluate_one(
@@ -924,5 +984,126 @@ mod tests {
         let results = engine_with(max_statement("V(nope)")).evaluate(&time, &signals);
         assert_eq!(results[0].value, None);
         assert!(results[0].error.as_deref().unwrap_or("").contains("nope"));
+    }
+
+    #[test]
+    fn empty_axis_reports_failed_measurement_without_panicking() {
+        let data: [Value; 0] = [];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("V(out)")).evaluate(&[], &signals);
+
+        assert_eq!(results[0].value, None);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("axis is empty")
+        );
+    }
+
+    #[test]
+    fn mismatched_signal_length_reports_failed_measurement_without_panicking() {
+        let time = [0.0, 1.0, 2.0];
+        let data = [0.0, 1.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
+
+        assert_eq!(results[0].value, None);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("measurement axis has 3")
+        );
+    }
+
+    #[test]
+    fn non_finite_axis_reports_failed_measurement_without_passing_specs() {
+        let time = [0.0, f64::NAN, 2.0];
+        let data = [0.0, 1.0, 2.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
+
+        assert!(!results[0].passed);
+        assert_eq!(results[0].value, None);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("axis contains non-finite")
+        );
+    }
+
+    #[test]
+    fn non_finite_signal_reports_failed_measurement_without_passing_specs() {
+        let time = [0.0, 1.0, 2.0];
+        let data = [0.0, f64::INFINITY, 2.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
+
+        assert!(!results[0].passed);
+        assert_eq!(results[0].value, None);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("signal 'V(out)' contains non-finite")
+        );
+    }
+
+    #[test]
+    fn param_measure_rejects_non_finite_value() {
+        let statement = MeasureStatement {
+            goal: None,
+            tolerance: None,
+            name: "bad_param".to_string(),
+            measure_type: MeasureType::Param {
+                expression: "sqrt(-1)".to_string(),
+            },
+            analysis: "TRAN".to_string(),
+        };
+        let time = [0.0, 1.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &[0.0, 1.0]);
+
+        let results = engine_with(statement).evaluate(&time, &signals);
+
+        assert!(!results[0].passed);
+        assert_eq!(results[0].value, None);
+        assert!(
+            results[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("non-finite")
+        );
+    }
+
+    #[test]
+    fn non_finite_goal_contract_fails_measurement() {
+        let mut statement = max_statement("V(out)");
+        statement.goal = Some(f64::NAN);
+        let time = [0.0, 1.0];
+        let data = [0.0, 1.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), &data);
+
+        let results = engine_with(statement).evaluate(&time, &signals);
+
+        assert!(!results[0].passed);
+        assert_eq!(results[0].value, Some(1.0));
+        assert!(results[0].error.as_deref().unwrap_or("").contains("GOAL"));
     }
 }

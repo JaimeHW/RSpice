@@ -177,6 +177,29 @@ fn parse_header<R: BufRead>(
             break;
         }
 
+        if in_variables && !line.is_empty() {
+            // Parse variable line: "index name type"
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 {
+                return Err(RawParseError::InvalidHeader(format!(
+                    "Malformed variable definition: {}",
+                    line
+                )));
+            }
+            let index = parts[0].parse::<usize>().map_err(|_| {
+                RawParseError::InvalidHeader(format!(
+                    "Invalid variable index '{}' in '{}'",
+                    parts[0], line
+                ))
+            })?;
+            variables.push(RawVariable {
+                index,
+                name: parts[1].to_string(),
+                var_type: parts[2].to_string(),
+            });
+            continue;
+        }
+
         // Parse header fields
         if let Some((key, value)) = line.split_once(':') {
             let key = key.trim().to_lowercase();
@@ -212,18 +235,6 @@ fn parse_header<R: BufRead>(
                 }
                 _ => {}
             }
-        } else if in_variables && !line.is_empty() {
-            // Parse variable line: "index name type"
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 3
-                && let Ok(index) = parts[0].parse::<usize>()
-            {
-                variables.push(RawVariable {
-                    index,
-                    name: parts[1].to_string(),
-                    var_type: parts[2].to_string(),
-                });
-            }
         }
     }
 
@@ -232,6 +243,21 @@ fn parse_header<R: BufRead>(
     }
     if !saw_no_points {
         return Err(RawParseError::MissingField("No. Points".to_string()));
+    }
+    if variables.len() != header.no_variables {
+        return Err(RawParseError::InvalidHeader(format!(
+            "No. Variables declares {} variable(s), but {} definition(s) were listed",
+            header.no_variables,
+            variables.len()
+        )));
+    }
+    for (expected_index, variable) in variables.iter().enumerate() {
+        if variable.index != expected_index {
+            return Err(RawParseError::InvalidHeader(format!(
+                "Variable '{}' has index {}, expected {}",
+                variable.name, variable.index, expected_index
+            )));
+        }
     }
 
     Ok((header, variables, bytes_read))
@@ -290,7 +316,7 @@ fn detect_binary_encoding(
             if payload_len == row_size.saturating_mul(header.no_points) {
                 matches.push((encoding, header.no_points));
             }
-        } else if payload_len % row_size == 0 {
+        } else if payload_len.is_multiple_of(row_size) {
             matches.push((encoding, payload_len / row_size));
         }
     }
@@ -416,68 +442,149 @@ fn parse_ascii_data<R: BufRead>(
     let mut data: Vec<Vec<f64>> = vec![Vec::new(); num_vars];
     let row_oriented = lines
         .first()
-        .map(|line| line.split_whitespace().count() >= num_vars + 1)
+        .map(|line| line.split_whitespace().count() > num_vars)
         .unwrap_or(false);
 
     if row_oriented {
-        let point_count = if header.no_points > 0 {
-            header.no_points.min(lines.len())
-        } else {
-            lines.len()
-        };
+        let point_count = header.no_points.max(lines.len());
+        if header.no_points > 0 && lines.len() != header.no_points {
+            return Err(RawParseError::DataError(format!(
+                "No. Points declares {} point(s), but ASCII data contains {} row(s)",
+                header.no_points,
+                lines.len()
+            )));
+        }
 
-        for line in lines.iter().take(point_count) {
+        for (point_idx, line) in lines.iter().enumerate().take(point_count) {
             let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() < num_vars + 1 {
+            if parts.len() != num_vars + 1 {
                 return Err(RawParseError::DataError(format!(
-                    "ASCII row is missing values: {}",
-                    line
+                    "ASCII row {} has {} column(s), expected {}",
+                    point_idx,
+                    parts.len(),
+                    num_vars + 1
+                )));
+            }
+            let row_index = parts[0].parse::<usize>().map_err(|_| {
+                RawParseError::DataError(format!("Invalid ASCII row index: {}", parts[0]))
+            })?;
+            if row_index != point_idx {
+                return Err(RawParseError::DataError(format!(
+                    "ASCII row index {} does not match expected point {}",
+                    row_index, point_idx
                 )));
             }
 
             for var_idx in 0..num_vars {
                 let value_str = parts[var_idx + 1];
-                let value = value_str.parse().map_err(|_| {
-                    RawParseError::DataError(format!("Invalid value: {}", value_str))
-                })?;
+                let value = parse_ascii_raw_value(value_str)?;
                 data[var_idx].push(value);
             }
         }
     } else {
-        let max_points = if header.no_points > 0 {
+        if header.no_points > 0 && lines.len() != header.no_points * num_vars {
+            return Err(RawParseError::DataError(format!(
+                "No. Points declares {} point(s), but ASCII data contains {} value row(s) for {} variable(s)",
+                header.no_points,
+                lines.len(),
+                num_vars
+            )));
+        }
+        if !lines.len().is_multiple_of(num_vars) {
+            return Err(RawParseError::DataError(format!(
+                "ASCII data row count {} is not divisible by variable count {}",
+                lines.len(),
+                num_vars
+            )));
+        }
+        let point_count = if header.no_points > 0 {
             header.no_points
         } else {
-            usize::MAX
+            lines.len() / num_vars
         };
-        let mut current_point = 0;
-        let mut current_var = 0;
+        for point_idx in 0..point_count {
+            for (var_idx, column) in data.iter_mut().enumerate().take(num_vars) {
+                let line_idx = point_idx * num_vars + var_idx;
+                let line = &lines[line_idx];
+                let parts = line.split_whitespace().collect::<Vec<_>>();
+                let value_str = if var_idx == 0 {
+                    match parts.as_slice() {
+                        [value] => *value,
+                        [index, value] => {
+                            let row_index = index.parse::<usize>().map_err(|_| {
+                                RawParseError::DataError(format!(
+                                    "Invalid ASCII row index: {}",
+                                    index
+                                ))
+                            })?;
+                            if row_index != point_idx {
+                                return Err(RawParseError::DataError(format!(
+                                    "ASCII row index {} does not match expected point {}",
+                                    row_index, point_idx
+                                )));
+                            }
+                            *value
+                        }
+                        _ => {
+                            return Err(RawParseError::DataError(format!(
+                                "ASCII value row {} has {} column(s), expected 1 or 2",
+                                line_idx,
+                                parts.len()
+                            )));
+                        }
+                    }
+                } else {
+                    match parts.as_slice() {
+                        [value] => *value,
+                        _ => {
+                            return Err(RawParseError::DataError(format!(
+                                "ASCII value row {} has {} column(s), expected 1",
+                                line_idx,
+                                parts.len()
+                            )));
+                        }
+                    }
+                };
 
-        for line in &lines {
-            let value_str = if current_var == 0 {
-                line.split_whitespace().nth(1).unwrap_or(line)
-            } else {
-                line.split_whitespace().next().unwrap_or(line)
-            };
-
-            let value: f64 = value_str
-                .parse()
-                .map_err(|_| RawParseError::DataError(format!("Invalid value: {}", value_str)))?;
-
-            data[current_var].push(value);
-            current_var += 1;
-
-            if current_var >= num_vars {
-                current_var = 0;
-                current_point += 1;
-                if current_point >= max_points {
-                    break;
-                }
+                let value = parse_ascii_raw_value(value_str)?;
+                column.push(value);
             }
         }
     }
 
     let actual_points = data.first().map(Vec::len).unwrap_or(0);
+    if actual_points == 0 {
+        return Err(RawParseError::DataError(
+            "ASCII raw data contains no points".to_string(),
+        ));
+    }
+    for (var_idx, column) in data.iter().enumerate() {
+        if column.len() != actual_points {
+            return Err(RawParseError::DataError(format!(
+                "ASCII raw variable '{}' has {} point(s), expected {}",
+                variables
+                    .get(var_idx)
+                    .map(|var| var.name.as_str())
+                    .unwrap_or("<unknown>"),
+                column.len(),
+                actual_points
+            )));
+        }
+    }
     Ok((build_waveforms(data, None, variables), actual_points))
+}
+
+fn parse_ascii_raw_value(value_str: &str) -> Result<f64, RawParseError> {
+    let value: f64 = value_str
+        .parse()
+        .map_err(|_| RawParseError::DataError(format!("Invalid value: {}", value_str)))?;
+    if !value.is_finite() {
+        return Err(RawParseError::DataError(format!(
+            "Non-finite value: {}",
+            value_str
+        )));
+    }
+    Ok(value)
 }
 
 /// Read a little-endian f64
@@ -492,4 +599,77 @@ fn read_f32_le<R: Read>(reader: &mut R) -> Result<f32, RawParseError> {
     let mut buf = [0u8; 4];
     reader.read_exact(&mut buf)?;
     Ok(f32::from_le_bytes(buf))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_raw(input: &str) -> Result<RawWaveformData, RawParseError> {
+        let mut reader = Cursor::new(input.as_bytes().to_vec());
+        parse_raw_reader(&mut reader)
+    }
+
+    #[test]
+    fn ascii_raw_rejects_variable_count_mismatch() {
+        let err = parse_raw(
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\nValues:\n0 0.0 1.0\n",
+        )
+        .expect_err("declared/listed variable count mismatch must reject");
+
+        assert!(
+            err.to_string().contains("No. Variables") || err.to_string().contains("variable"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ascii_raw_rejects_short_declared_data() {
+        let err = parse_raw(
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0\n",
+        )
+        .expect_err("short data against No. Points must reject");
+
+        assert!(
+            err.to_string().contains("No. Points") || err.to_string().contains("point"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ascii_raw_rejects_extra_columns() {
+        let err = parse_raw(
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0 2.0\n",
+        )
+        .expect_err("extra ASCII data columns must reject");
+
+        assert!(
+            err.to_string().contains("column") || err.to_string().contains("value"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ascii_raw_rejects_nonfinite_values() {
+        let err = parse_raw(
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 NaN\n",
+        )
+        .expect_err("non-finite ASCII raw values must reject");
+
+        assert!(
+            err.to_string().contains("NaN") || err.to_string().contains("finite"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn ascii_raw_accepts_colon_in_variable_name() {
+        let parsed = parse_raw(
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0 time time\n1 V(n:out) voltage\nValues:\n0 0.0 1.0\n",
+        )
+        .expect("colon inside variable names must not be parsed as a header field");
+
+        assert_eq!(parsed.variables[1].name, "V(n:out)");
+        assert_eq!(parsed.waveforms[1].y, vec![1.0]);
+    }
 }

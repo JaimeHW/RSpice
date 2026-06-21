@@ -400,8 +400,6 @@ impl HbSolver {
         Ok(())
     }
 
-    /// Compute full residual including linear and nonlinear contributions
-
     /// Add nonlinear device contributions to residual
     fn add_nonlinear_residual(&mut self, state: &mut HbSolverState) {
         let n_time = self.fft.size();
@@ -966,7 +964,6 @@ impl HbSolver {
     ///
     /// Starts with α = 1 (full Newton step), reduces if residual doesn't decrease.
     /// This is critical for convergence on highly nonlinear circuits.
-
     /// Legacy newton_step for backward compatibility
     pub fn newton_step(
         &mut self,

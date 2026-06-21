@@ -280,6 +280,13 @@ impl PnoiseSolver {
     /// Compute phase noise at all offset frequencies
     pub fn compute(&mut self) -> Result<PnoiseResult, PnoiseError> {
         // Validate
+        if !self.state.carrier_freq.is_finite() || self.state.carrier_freq <= 0.0 {
+            return Err(PnoiseError::InvalidCarrier);
+        }
+        if !self.state.period.is_finite() || self.state.period <= 0.0 {
+            return Err(PnoiseError::InvalidCarrier);
+        }
+
         if self.state.num_nodes == 0 {
             return Err(PnoiseError::NoNodes);
         }
@@ -298,12 +305,14 @@ impl PnoiseSolver {
         let mut result =
             PnoiseResult::new(self.state.carrier_freq, &self.config.output_node.positive);
 
-        // Initialize Floquet if not done
-        if self.state.floquet.is_none() {
-            self.init_floquet(self.config.max_sidebands);
+        let floquet = self
+            .state
+            .floquet
+            .as_ref()
+            .ok_or(PnoiseError::NoPssSolution)?;
+        if !floquet.is_initialized() {
+            return Err(PnoiseError::MissingLinearization);
         }
-
-        let floquet = self.state.floquet.as_ref().unwrap();
 
         // Compute phase noise at each offset
         for &offset in &offsets {
@@ -403,6 +412,8 @@ impl PnoiseSolver {
 /// PNoise solver errors
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PnoiseError {
+    /// Invalid carrier/reference frequency
+    InvalidCarrier,
     /// No nodes in circuit
     NoNodes,
     /// No noise sources defined
@@ -413,21 +424,63 @@ pub enum PnoiseError {
     FloquetFailed,
     /// No PSS solution available
     NoPssSolution,
+    /// Floquet linearization has not been computed
+    MissingLinearization,
 }
 
 impl std::fmt::Display for PnoiseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidCarrier => write!(f, "Invalid carrier frequency"),
             Self::NoNodes => write!(f, "No nodes in circuit"),
             Self::NoNoiseSources => write!(f, "No noise sources defined"),
             Self::InvalidSweep => write!(f, "Invalid offset frequency sweep"),
             Self::FloquetFailed => write!(f, "Floquet analysis failed"),
             Self::NoPssSolution => write!(f, "No periodic steady-state solution available"),
+            Self::MissingLinearization => write!(f, "Missing Floquet linearization"),
         }
     }
 }
 
 impl std::error::Error for PnoiseError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn solver_with_noise(carrier_freq: Value) -> PnoiseSolver {
+        let config = PnoiseConfig::new("out", 1.0e3, 1.0e5);
+        let mut solver = PnoiseSolver::new(config, carrier_freq, 1);
+        solver
+            .state_mut()
+            .add_device_noise(DeviceNoise::thermal("R1", vec![0], 1.0e3, 300.0));
+        solver
+    }
+
+    #[test]
+    fn compute_rejects_missing_pss_or_floquet_data() {
+        let mut solver = solver_with_noise(1.0e6);
+
+        let err = solver
+            .compute()
+            .expect_err("pnoise must not fabricate Floquet data");
+
+        assert_eq!(err, PnoiseError::NoPssSolution);
+    }
+
+    #[test]
+    fn compute_rejects_invalid_carrier_frequency_without_panicking() {
+        for carrier in [0.0, -1.0, Value::NAN, Value::INFINITY] {
+            let mut solver = solver_with_noise(carrier);
+
+            let err = solver
+                .compute()
+                .expect_err("invalid carrier frequency must be rejected");
+
+            assert_eq!(err, PnoiseError::InvalidCarrier);
+        }
+    }
+}
 
 // =============================================================================
 // Tests

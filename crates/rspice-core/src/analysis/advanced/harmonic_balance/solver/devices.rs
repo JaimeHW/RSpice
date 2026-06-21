@@ -1394,6 +1394,9 @@ impl NonlinearDeviceInstance {
 mod tests {
     use super::*;
 
+    type DeliveredNodeQuantityFn<'a> = dyn Fn(&[Value]) -> Vec<(usize, Value)> + 'a;
+    type StampEntriesFn<'a> = dyn Fn(&[Value]) -> Vec<((usize, usize), Value)> + 'a;
+
     /// Deterministic uniform sample in [lo, hi).
     fn lcg(seed: &mut u64, lo: Value, hi: Value) -> Value {
         *seed = seed
@@ -1416,8 +1419,8 @@ mod tests {
         samples: usize,
         seed: u64,
         tol_abs: Value,
-        deliver: &dyn Fn(&[Value]) -> Vec<(usize, Value)>,
-        stamp_fn: &dyn Fn(&[Value]) -> Vec<((usize, usize), Value)>,
+        deliver: &DeliveredNodeQuantityFn<'_>,
+        stamp_fn: &StampEntriesFn<'_>,
     ) {
         let mut seed = seed;
         let h = 1e-7;

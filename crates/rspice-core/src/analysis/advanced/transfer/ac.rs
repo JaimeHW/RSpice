@@ -458,23 +458,52 @@ impl AcTransferConfig {
         self
     }
 
+    /// Validate sweep configuration.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.points_per_decade == 0 {
+            return Err("AC transfer sweep must have at least one point".to_string());
+        }
+        if !self.freq_start.is_finite() {
+            return Err("AC transfer start frequency must be finite".to_string());
+        }
+        if !self.freq_stop.is_finite() || self.freq_stop < self.freq_start {
+            return Err("AC transfer stop frequency must be finite and >= start".to_string());
+        }
+
+        match self.sweep_type {
+            AcSweepType::Linear if self.freq_start < 0.0 => {
+                Err("AC transfer start frequency must be non-negative".to_string())
+            }
+            AcSweepType::Decade | AcSweepType::Octave if self.freq_start <= 0.0 => Err(
+                "AC transfer start frequency must be positive for logarithmic sweeps".to_string(),
+            ),
+            _ => Ok(()),
+        }
+    }
+
     /// Generate frequency points
     pub fn frequency_points(&self) -> Vec<Value> {
-        match self.sweep_type {
+        self.try_frequency_points().unwrap_or_default()
+    }
+
+    /// Generate frequency points, preserving validation failures for callers
+    /// that need to distinguish invalid input from an empty result.
+    pub fn try_frequency_points(&self) -> Result<Vec<Value>, String> {
+        self.validate()?;
+
+        Ok(match self.sweep_type {
             AcSweepType::Linear => {
                 let n = self.points_per_decade;
                 if n <= 1 {
-                    return vec![self.freq_start];
+                    vec![self.freq_start]
+                } else {
+                    let step = (self.freq_stop - self.freq_start) / (n - 1) as Value;
+                    (0..n)
+                        .map(|i| self.freq_start + i as Value * step)
+                        .collect()
                 }
-                let step = (self.freq_stop - self.freq_start) / (n - 1) as Value;
-                (0..n)
-                    .map(|i| self.freq_start + i as Value * step)
-                    .collect()
             }
             AcSweepType::Decade => {
-                if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-                    return vec![self.freq_start.max(1e-15)];
-                }
                 let log_start = self.freq_start.log10();
                 let log_stop = self.freq_stop.log10();
                 let num_decades = log_stop - log_start;
@@ -490,9 +519,6 @@ impl AcTransferConfig {
                     .collect()
             }
             AcSweepType::Octave => {
-                if self.freq_start <= 0.0 || self.freq_stop <= 0.0 {
-                    return vec![self.freq_start.max(1e-15)];
-                }
                 let log2_start = self.freq_start.log2();
                 let log2_stop = self.freq_stop.log2();
                 let num_octaves = log2_stop - log2_start;
@@ -508,7 +534,7 @@ impl AcTransferConfig {
                     })
                     .collect()
             }
-        }
+        })
     }
 }
 
@@ -600,3 +626,41 @@ impl AcTransferAnalyzer {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_frequency_points_preserves_invalid_grid_errors() {
+        let config = AcTransferConfig::decade("out", "vin", 0.0, 1.0e6, 10);
+
+        let err = config
+            .try_frequency_points()
+            .expect_err("invalid AC transfer sweep should return a validation error");
+
+        assert!(
+            err.contains("start frequency"),
+            "unexpected AC transfer error: {err}"
+        );
+        assert!(
+            config.frequency_points().is_empty(),
+            "legacy frequency_points should expose invalid grids as empty"
+        );
+    }
+
+    #[test]
+    fn frequency_points_rejects_non_finite_sweeps() {
+        for config in [
+            AcTransferConfig::linear("out", "vin", f64::NAN, 1.0e6, 10),
+            AcTransferConfig::decade("out", "vin", 1.0, f64::INFINITY, 10),
+            AcTransferConfig::decade("out", "vin", 1.0e6, 1.0, 10),
+            AcTransferConfig::linear("out", "vin", 1.0, 1.0e6, 0),
+        ] {
+            assert!(
+                config.frequency_points().is_empty(),
+                "invalid AC transfer sweep config produced points: {config:?}"
+            );
+        }
+    }
+}
