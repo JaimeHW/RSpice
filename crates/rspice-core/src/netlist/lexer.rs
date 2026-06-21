@@ -501,12 +501,12 @@ impl<'a> Lexer<'a> {
 
 /// Check if character can start an identifier
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_'
+    c.is_ascii_alphabetic() || c == '_' || c == '%'
 }
 
 /// Check if character can be part of an identifier
 fn is_ident_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':'
+    c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '#' || c == ':' || c == '%'
 }
 
 /// Parse SPICE engineering suffix and return (multiplier, chars_consumed)
@@ -674,7 +674,25 @@ pub struct TokenStream {
 
 impl TokenStream {
     /// Create a new token stream from tokens
-    pub fn new(tokens: Vec<Token>) -> Self {
+    pub fn new(mut tokens: Vec<Token>) -> Self {
+        if !matches!(tokens.last().map(|token| &token.kind), Some(TokenKind::Eof)) {
+            let span = tokens.last().map_or(
+                Span {
+                    start: 0,
+                    end: 0,
+                    line: 1,
+                },
+                |token| Span {
+                    start: token.span.end,
+                    end: token.span.end,
+                    line: token.span.line,
+                },
+            );
+            tokens.push(Token {
+                kind: TokenKind::Eof,
+                span,
+            });
+        }
         Self { tokens, pos: 0 }
     }
 
@@ -699,10 +717,11 @@ impl TokenStream {
 
     /// Consume and return the current token
     pub fn advance(&mut self) -> &Token {
+        let current = self.pos.min(self.tokens.len() - 1);
         if self.pos < self.tokens.len() - 1 {
             self.pos += 1;
         }
-        &self.tokens[self.pos - 1]
+        &self.tokens[current]
     }
 
     /// Consume if current token matches, return true if consumed
@@ -805,5 +824,16 @@ mod tests {
     fn unterminated_quoted_expression_is_rejected() {
         assert!(tokenize("R1 a b '2*3").is_err());
         assert!(tokenize("R1 a b 'µ0*2").is_err());
+    }
+    #[test]
+    fn token_stream_empty_input_behaves_as_eof() {
+        let mut stream = TokenStream::new(Vec::new());
+
+        assert!(stream.is_eof());
+        assert_eq!(stream.line(), 1);
+        assert!(matches!(stream.peek().kind, TokenKind::Eof));
+        assert!(matches!(stream.peek_n(8).kind, TokenKind::Eof));
+        assert!(matches!(stream.advance().kind, TokenKind::Eof));
+        assert!(matches!(stream.advance().kind, TokenKind::Eof));
     }
 }

@@ -4,6 +4,7 @@
 //! at initialization and provides query APIs for available models and subcircuits.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::parser::parse_library_content;
 
@@ -111,7 +112,7 @@ pub struct ModelDefinition {
     /// Model type (Diode, NPN, NMOS, etc.)
     pub model_type: ModelType,
     /// Source library file name
-    pub library: &'static str,
+    pub library: Arc<str>,
     /// Description extracted from comments
     pub description: Option<String>,
     /// Number of terminals
@@ -134,7 +135,7 @@ pub struct ModelDefinition {
 
 impl ModelDefinition {
     /// Create a new model definition
-    pub fn new(name: String, model_type: ModelType, library: &'static str) -> Self {
+    pub fn new(name: String, model_type: ModelType, library: impl Into<Arc<str>>) -> Self {
         let terminals = match model_type {
             ModelType::Diode => 2,
             ModelType::NpnBjt | ModelType::PnpBjt => 3,
@@ -146,7 +147,7 @@ impl ModelDefinition {
         Self {
             name,
             model_type,
-            library,
+            library: library.into(),
             description: None,
             terminals,
             lmin: None,
@@ -232,18 +233,18 @@ pub struct SubcircuitDefinition {
     /// Pin names in order
     pub pins: Vec<String>,
     /// Source library file name
-    pub library: &'static str,
+    pub library: Arc<str>,
     /// Description extracted from comments
     pub description: Option<String>,
 }
 
 impl SubcircuitDefinition {
     /// Create a new subcircuit definition
-    pub fn new(name: String, pins: Vec<String>, library: &'static str) -> Self {
+    pub fn new(name: String, pins: Vec<String>, library: impl Into<Arc<str>>) -> Self {
         Self {
             name,
             pins,
-            library,
+            library: library.into(),
             description: None,
         }
     }
@@ -507,10 +508,7 @@ impl LibraryManager {
         let result = parser.parse_file(path).map_err(|e| e.to_string())?;
 
         if !result.errors.is_empty() {
-            // Log warnings but continue
-            for err in &result.errors {
-                eprintln!("Warning: {}", err);
-            }
+            return Err(format_lib_parse_errors(&result.errors));
         }
 
         let mut count = 0;
@@ -520,14 +518,13 @@ impl LibraryManager {
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("external.lib");
-        let lib_name: &'static str = Box::leak(lib_name.to_string().into_boxed_str());
-
+        let lib_name: Arc<str> = Arc::from(lib_name);
         // Load models based on section selection
         if let Some(section_name) = section {
             // Load only the specified section
             if let Some(lib_section) = result.get_section(section_name) {
                 for model in &lib_section.models {
-                    let def = model.to_model_definition(lib_name);
+                    let def = model.to_model_definition(Arc::clone(&lib_name));
                     self.models_by_type
                         .entry(def.model_type)
                         .or_default()
@@ -545,7 +542,7 @@ impl LibraryManager {
         } else {
             // Load all top-level models and all sections
             for model in &result.top_level_models {
-                let def = model.to_model_definition(lib_name);
+                let def = model.to_model_definition(Arc::clone(&lib_name));
                 self.models_by_type
                     .entry(def.model_type)
                     .or_default()
@@ -556,7 +553,7 @@ impl LibraryManager {
 
             for section in &result.sections {
                 for model in &section.models {
-                    let def = model.to_model_definition(lib_name);
+                    let def = model.to_model_definition(Arc::clone(&lib_name));
                     self.models_by_type
                         .entry(def.model_type)
                         .or_default()
@@ -579,6 +576,9 @@ impl LibraryManager {
 
         let mut parser = LibParser::new(base_dir);
         let result = parser.parse_file(path).map_err(|e| e.to_string())?;
+        if !result.errors.is_empty() {
+            return Err(format_lib_parse_errors(&result.errors));
+        }
 
         Ok(result
             .section_names()
@@ -588,9 +588,94 @@ impl LibraryManager {
     }
 }
 
+fn format_lib_parse_errors(errors: &[super::lib_parser::ParseError]) -> String {
+    let mut message = format!("library parse failed with {} error(s)", errors.len());
+    for error in errors {
+        message.push_str("; ");
+        message.push_str(&error.to_string());
+    }
+    message
+}
+
 impl Default for LibraryManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn external_library_names_are_owned_model_metadata() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rspice-library-manager-{unique}"));
+        fs::create_dir_all(&dir).expect("temporary directory is created");
+        let lib_path = dir.join("custom_models.lib");
+        fs::write(
+            &lib_path,
+            ".model nch_custom NMOS (LEVEL=1)\n.model pch_custom PMOS (LEVEL=1)\n",
+        )
+        .expect("external library fixture is written");
+
+        let mut manager = LibraryManager::new();
+        let loaded = manager
+            .load_external_lib(&lib_path, None)
+            .expect("external library loads");
+        let nmos = manager
+            .get_model("nch_custom")
+            .expect("external model is registered");
+        let pmos = manager
+            .get_model("pch_custom")
+            .expect("second external model is registered");
+        let owned_library_name = nmos.library.clone();
+
+        assert_eq!(loaded, 2);
+        assert_eq!(&*owned_library_name, "custom_models.lib");
+        assert!(
+            Arc::ptr_eq(&nmos.library, &pmos.library),
+            "models loaded from one file should share library metadata"
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory is removed");
+    }
+
+    #[test]
+    fn external_library_parser_errors_are_fatal() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rspice-library-manager-bad-{unique}"));
+        fs::create_dir_all(&dir).expect("temporary directory is created");
+        let lib_path = dir.join("partial.lib");
+        fs::write(
+            &lib_path,
+            ".include missing_models.inc\n.model should_not_load NMOS (LEVEL=1)\n",
+        )
+        .expect("external library fixture is written");
+
+        let mut manager = LibraryManager::new();
+        let err = manager
+            .load_external_lib(&lib_path, None)
+            .expect_err("parser errors must reject external libraries");
+
+        assert!(
+            err.contains("Include file not found"),
+            "error should surface parser failure: {err}"
+        );
+        assert!(
+            manager.get_model("should_not_load").is_none(),
+            "partially parsed external models must not be registered"
+        );
+
+        fs::remove_dir_all(&dir).expect("temporary directory is removed");
     }
 }
 

@@ -18,22 +18,22 @@ pub struct SourceRange {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NetlistReferenceKind {
+pub enum ParsedNetlistReferenceKind {
     Model { element: String, name: String },
     Subcircuit { element: String, name: String },
     ControlLine,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NetlistReference {
-    pub kind: NetlistReferenceKind,
+pub struct ParsedNetlistReference {
+    pub kind: ParsedNetlistReferenceKind,
     pub range: SourceRange,
     pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NetlistSourceMap {
-    pub references: Vec<NetlistReference>,
+pub struct ParsedNetlistSourceMap {
+    pub references: Vec<ParsedNetlistReference>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,8 +52,8 @@ pub struct UnknownReferenceDiagnostic {
 }
 
 impl Netlist {
-    pub fn source_map(&self) -> NetlistSourceMap {
-        NetlistSourceMap::from_netlist(self)
+    pub fn source_map(&self) -> ParsedNetlistSourceMap {
+        ParsedNetlistSourceMap::from_netlist(self)
     }
 
     pub fn lint_unknown_references(&self) -> Vec<UnknownReferenceDiagnostic> {
@@ -61,7 +61,7 @@ impl Netlist {
     }
 }
 
-impl NetlistSourceMap {
+impl ParsedNetlistSourceMap {
     pub fn from_netlist(netlist: &Netlist) -> Self {
         let Some(source) = netlist.source_text.as_deref() else {
             return Self::default();
@@ -79,7 +79,7 @@ impl NetlistSourceMap {
 
         for reference in &self.references {
             match &reference.kind {
-                NetlistReferenceKind::Model { element, name } => {
+                ParsedNetlistReferenceKind::Model { element, name } => {
                     if !model_reference_is_known(name, reference.scope.as_deref(), &known_models) {
                         diagnostics.push(UnknownReferenceDiagnostic {
                             kind: UnknownReferenceKind::Model,
@@ -92,7 +92,7 @@ impl NetlistSourceMap {
                         });
                     }
                 }
-                NetlistReferenceKind::Subcircuit { element, name } => {
+                ParsedNetlistReferenceKind::Subcircuit { element, name } => {
                     if !subckt_reference_is_known(name, reference.scope.as_deref(), &known_subckts)
                     {
                         diagnostics.push(UnknownReferenceDiagnostic {
@@ -106,7 +106,7 @@ impl NetlistSourceMap {
                         });
                     }
                 }
-                NetlistReferenceKind::ControlLine => {}
+                ParsedNetlistReferenceKind::ControlLine => {}
             }
         }
 
@@ -116,7 +116,7 @@ impl NetlistSourceMap {
 
 #[derive(Default)]
 struct SourceMapBuilder {
-    references: Vec<NetlistReference>,
+    references: Vec<ParsedNetlistReference>,
     pending: Option<LogicalLine>,
     scope_stack: Vec<String>,
     in_control: bool,
@@ -138,8 +138,8 @@ impl SourceMapBuilder {
             if upper.starts_with(".CONTROL") {
                 self.flush_pending();
                 self.in_control = true;
-                self.references.push(NetlistReference {
-                    kind: NetlistReferenceKind::ControlLine,
+                self.references.push(ParsedNetlistReference {
+                    kind: ParsedNetlistReferenceKind::ControlLine,
                     range: trimmed_range(line_num, line, stripped, trimmed),
                     scope: self.current_scope(),
                 });
@@ -147,8 +147,8 @@ impl SourceMapBuilder {
             }
 
             if self.in_control {
-                self.references.push(NetlistReference {
-                    kind: NetlistReferenceKind::ControlLine,
+                self.references.push(ParsedNetlistReference {
+                    kind: ParsedNetlistReferenceKind::ControlLine,
                     range: trimmed_range(line_num, line, stripped, trimmed),
                     scope: self.current_scope(),
                 });
@@ -210,8 +210,8 @@ impl SourceMapBuilder {
             .extend(references_for_logical_line(&logical));
     }
 
-    fn into_map(self) -> NetlistSourceMap {
-        NetlistSourceMap {
+    fn into_map(self) -> ParsedNetlistSourceMap {
+        ParsedNetlistSourceMap {
             references: self.references,
         }
     }
@@ -269,7 +269,7 @@ impl LogicalLine {
     }
 }
 
-fn references_for_logical_line(logical: &LogicalLine) -> Vec<NetlistReference> {
+fn references_for_logical_line(logical: &LogicalLine) -> Vec<ParsedNetlistReference> {
     let Ok(tokens) = tokenize(&logical.text) else {
         return Vec::new();
     };
@@ -311,11 +311,11 @@ fn references_for_logical_line(logical: &LogicalLine) -> Vec<NetlistReference> {
     };
 
     let kind = if first_char == 'X' {
-        NetlistReferenceKind::Subcircuit { element, name }
+        ParsedNetlistReferenceKind::Subcircuit { element, name }
     } else {
-        NetlistReferenceKind::Model { element, name }
+        ParsedNetlistReferenceKind::Model { element, name }
     };
-    vec![NetlistReference {
+    vec![ParsedNetlistReference {
         kind,
         range,
         scope: logical.scope.clone(),
@@ -610,7 +610,7 @@ fn trimmed_range(line_num: usize, line: &str, stripped: &str, trimmed: &str) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{NetlistReferenceKind, UnknownReferenceKind};
+    use super::{ParsedNetlistReferenceKind, UnknownReferenceKind};
     use crate::netlist::Netlist;
 
     #[test]
@@ -643,7 +643,7 @@ mod tests {
             .find(|reference| {
                 matches!(
                     &reference.kind,
-                    NetlistReferenceKind::Model { element, name }
+                    ParsedNetlistReferenceKind::Model { element, name }
                         if element == "D1" && name == "MISSING_D"
                 )
             })
@@ -657,14 +657,14 @@ mod tests {
         assert!(map.references.iter().any(|reference| {
             matches!(
                 &reference.kind,
-                NetlistReferenceKind::Subcircuit { element, name }
+                ParsedNetlistReferenceKind::Subcircuit { element, name }
                     if element == "XGOOD" && name == "GOOD_CELL"
             )
         }));
         assert!(
             map.references
                 .iter()
-                .any(|reference| matches!(reference.kind, NetlistReferenceKind::ControlLine))
+                .any(|reference| matches!(reference.kind, ParsedNetlistReferenceKind::ControlLine))
         );
 
         let diagnostics = map.lint_unknown_references(&netlist);
@@ -795,7 +795,7 @@ mod tests {
             .find(|reference| {
                 matches!(
                     &reference.kind,
-                    NetlistReferenceKind::Model { element, name }
+                    ParsedNetlistReferenceKind::Model { element, name }
                         if element == "D1" && name == "INC_D"
                 )
             })
@@ -805,5 +805,522 @@ mod tests {
         assert_eq!(map.lint_unknown_references(&netlist), Vec::new());
 
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+// Lightweight source mapping for editor diagnostics.
+
+use std::ops::Range;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Model,
+    Subcircuit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetlistDefinition {
+    pub name: String,
+    pub span: Range<usize>,
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetlistReference {
+    pub name: String,
+    pub kind: ReferenceKind,
+    pub span: Range<usize>,
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NetlistSourceMap {
+    pub model_defs: Vec<NetlistDefinition>,
+    pub subckt_defs: Vec<NetlistDefinition>,
+    pub references: Vec<NetlistReference>,
+}
+
+pub fn source_map_for_editor(buffer: &str) -> NetlistSourceMap {
+    let mut map = NetlistSourceMap::default();
+    let mut logical = None;
+    let mut scopes = Vec::new();
+    let mut offset = 0usize;
+
+    for (line_index, physical) in buffer.split_inclusive('\n').enumerate() {
+        if line_index == 0 {
+            offset += physical.len();
+            continue;
+        }
+
+        let raw = physical.strip_suffix('\n').unwrap_or(physical);
+        let raw = raw.strip_suffix('\r').unwrap_or(raw);
+        let code_end = find_inline_comment(raw).unwrap_or(raw.len());
+        let code = &raw[..code_end];
+        let trimmed = code.trim_start();
+        let lead = code.len() - trimmed.len();
+
+        if trimmed.is_empty() || trimmed.starts_with('*') {
+            flush_logical_line(&mut logical, &mut scopes, &mut map);
+            offset += physical.len();
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix('+') {
+            if let Some(line) = logical.as_mut() {
+                let continued = rest.trim_start();
+                let continued_lead = rest.len() - continued.len();
+                line.push_join_space();
+                line.push_segment(continued, offset + lead + 1 + continued_lead);
+            }
+        } else {
+            flush_logical_line(&mut logical, &mut scopes, &mut map);
+            let mut line = MappedLine::default();
+            line.push_segment(trimmed, offset + lead);
+            logical = Some(line);
+        }
+
+        offset += physical.len();
+    }
+
+    if !buffer.ends_with('\n') && !buffer.is_empty() {
+        // `split_inclusive` already yielded the final unterminated line.
+    }
+    flush_logical_line(&mut logical, &mut scopes, &mut map);
+    map
+}
+
+fn flush_logical_line(
+    line: &mut Option<MappedLine>,
+    scopes: &mut Vec<String>,
+    map: &mut NetlistSourceMap,
+) {
+    if let Some(line) = line.take() {
+        process_logical_line(&line, scopes, map);
+    }
+}
+
+#[derive(Default)]
+struct MappedLine {
+    text: String,
+    byte_offsets: Vec<usize>,
+}
+
+impl MappedLine {
+    fn push_join_space(&mut self) {
+        if !self.text.is_empty()
+            && !self
+                .text
+                .chars()
+                .next_back()
+                .is_some_and(char::is_whitespace)
+        {
+            self.text.push(' ');
+            let offset = self.byte_offsets.last().copied().unwrap_or(0);
+            self.byte_offsets.push(offset);
+        }
+    }
+
+    fn push_segment(&mut self, segment: &str, original_start: usize) {
+        self.text.push_str(segment);
+        self.byte_offsets
+            .extend((0..segment.len()).map(|idx| original_start + idx));
+    }
+
+    fn original_span(&self, span: Range<usize>) -> Option<Range<usize>> {
+        if span.is_empty() || span.end > self.byte_offsets.len() {
+            return None;
+        }
+        let start = self.byte_offsets[span.start];
+        let end = self.byte_offsets[span.end - 1] + 1;
+        Some(start..end)
+    }
+}
+
+fn process_logical_line(line: &MappedLine, scopes: &mut Vec<String>, map: &mut NetlistSourceMap) {
+    let tokens = token_spans(&line.text);
+    let Some(first) = tokens.first() else {
+        return;
+    };
+    let head = &line.text[first.clone()];
+    let scope = current_scope(scopes);
+
+    if head.eq_ignore_ascii_case(".model") {
+        if let Some(name) = tokens.get(1)
+            && let Some(span) = line.original_span(name.clone())
+        {
+            map.model_defs.push(NetlistDefinition {
+                name: line.text[name.clone()].to_string(),
+                span,
+                scope,
+            });
+        }
+        return;
+    }
+
+    if head.eq_ignore_ascii_case(".subckt") {
+        if let Some(name) = tokens.get(1)
+            && let Some(span) = line.original_span(name.clone())
+        {
+            let name_text = line.text[name.clone()].to_string();
+            map.subckt_defs.push(NetlistDefinition {
+                name: name_text.clone(),
+                span,
+                scope: scope.clone(),
+            });
+            scopes.push(match scope {
+                Some(parent) => format!("{parent}.{name_text}"),
+                None => name_text,
+            });
+        }
+        return;
+    }
+
+    if head.eq_ignore_ascii_case(".ends") {
+        scopes.pop();
+        return;
+    }
+
+    if let Some(reference) = reference_from_element_line(line, &tokens, scope) {
+        map.references.push(reference);
+    }
+}
+
+fn current_scope(scopes: &[String]) -> Option<String> {
+    scopes.last().cloned()
+}
+
+fn reference_from_element_line(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    let first = line.text[tokens.first()?.clone()]
+        .chars()
+        .next()?
+        .to_ascii_uppercase();
+    match first {
+        'R' | 'C' | 'L' => passive_model_reference(line, tokens, scope),
+        'A' => xspice_model_reference(line, tokens, scope),
+        'D' => fixed_token_reference(line, tokens, 3, ReferenceKind::Model, scope),
+        'J' | 'Z' | 'W' => fixed_token_reference(line, tokens, 4, ReferenceKind::Model, scope),
+        'S' => fixed_token_reference(line, tokens, 5, ReferenceKind::Model, scope),
+        'O' | 'Y' => tline_model_reference(line, tokens, 5, scope),
+        'P' => p_line_model_reference(line, tokens, scope),
+        'Q' => tail_reference(line, tokens, 4, ReferenceKind::Model, scope),
+        'M' => tail_reference(line, tokens, 5, ReferenceKind::Model, scope),
+        'X' => tail_reference(line, tokens, 1, ReferenceKind::Subcircuit, scope),
+        _ => None,
+    }
+}
+
+fn passive_model_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    model_assignment_span(line, tokens, 3)
+        .and_then(|span| reference_from_span(line, span, ReferenceKind::Model, scope))
+}
+
+fn tline_model_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    start: usize,
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    if let Some(span) = model_assignment_span(line, tokens, start) {
+        return reference_from_span(line, span, ReferenceKind::Model, scope);
+    }
+
+    tokens
+        .iter()
+        .skip(start)
+        .find(|span| {
+            let token = &line.text[(*span).clone()];
+            !is_tline_key_or_value(token) && !looks_numeric(token)
+        })
+        .cloned()
+        .and_then(|span| reference_from_span(line, span, ReferenceKind::Model, scope))
+}
+
+fn p_line_model_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    let span = tokens.last()?.clone();
+    let token = &line.text[span.clone()];
+    if tokens.len() >= 4 && !looks_numeric(token) && !token.contains('=') {
+        reference_from_span(line, span, ReferenceKind::Model, scope)
+    } else {
+        None
+    }
+}
+
+fn xspice_model_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    let mut candidate = None;
+    for span in tokens.iter().skip(1) {
+        if line.text[span.clone()].contains('=') {
+            break;
+        }
+        let token = &line.text[(*span).clone()];
+        if !token.eq_ignore_ascii_case("null") && !token.starts_with('[') && !token.starts_with('%')
+        {
+            candidate = Some(span.clone());
+        }
+    }
+    candidate.and_then(|span| reference_from_span(line, span, ReferenceKind::Model, scope))
+}
+
+fn model_assignment_span(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    start: usize,
+) -> Option<Range<usize>> {
+    for (idx, span) in tokens.iter().enumerate().skip(start) {
+        let token = &line.text[span.clone()];
+        if let Some((key, value)) = token.split_once('=')
+            && key.eq_ignore_ascii_case("model")
+            && !value.is_empty()
+        {
+            let value_start = span.start + key.len() + 1;
+            return Some(value_start..span.end);
+        }
+        if token.eq_ignore_ascii_case("model") {
+            if let Some(eq) = tokens.get(idx + 1)
+                && &line.text[eq.clone()] == "="
+            {
+                return tokens.get(idx + 2).cloned();
+            }
+            return tokens.get(idx + 1).cloned();
+        }
+    }
+    None
+}
+
+fn fixed_token_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    index: usize,
+    kind: ReferenceKind,
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    let span = tokens.get(index)?.clone();
+    reference_from_span(line, span, kind, scope)
+}
+
+fn tail_reference(
+    line: &MappedLine,
+    tokens: &[Range<usize>],
+    start: usize,
+    kind: ReferenceKind,
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    let boundary = tokens
+        .iter()
+        .enumerate()
+        .skip(start)
+        .find(|(_, span)| is_param_boundary(&line.text[(*span).clone()]))
+        .map(|(idx, _)| idx)
+        .unwrap_or(tokens.len());
+    if boundary <= start {
+        return None;
+    }
+    reference_from_span(line, tokens[boundary - 1].clone(), kind, scope)
+}
+
+fn reference_from_span(
+    line: &MappedLine,
+    span: Range<usize>,
+    kind: ReferenceKind,
+    scope: Option<String>,
+) -> Option<NetlistReference> {
+    if line.text[span.clone()].contains('=') {
+        return None;
+    }
+    let original = line.original_span(span.clone())?;
+    Some(NetlistReference {
+        name: line.text[span].to_string(),
+        kind,
+        span: original,
+        scope,
+    })
+}
+
+fn token_spans(line: &str) -> Vec<Range<usize>> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (byte, ch) in line.char_indices() {
+        if ch.is_whitespace() || ch == ',' {
+            if let Some(token_start) = start.take() {
+                spans.push(token_start..byte);
+            }
+        } else if start.is_none() {
+            start = Some(byte);
+        }
+    }
+    if let Some(token_start) = start {
+        spans.push(token_start..line.len());
+    }
+    spans
+}
+
+fn is_param_boundary(token: &str) -> bool {
+    token.eq_ignore_ascii_case("params")
+        || token.eq_ignore_ascii_case("params:")
+        || token.eq_ignore_ascii_case("off")
+        || token.contains('=')
+}
+
+fn is_tline_key_or_value(token: &str) -> bool {
+    token.contains('=')
+        || matches!(
+            token.to_ascii_uppercase().as_str(),
+            "Z0" | "ZO" | "TD" | "F" | "FREQ" | "NL" | "MODEL"
+        )
+}
+
+fn looks_numeric(token: &str) -> bool {
+    token
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_digit() || ch == '+' || ch == '-' || ch == '.')
+}
+
+fn find_inline_comment(line: &str) -> Option<usize> {
+    let semicolon = line.find(';');
+    let dollar = line
+        .char_indices()
+        .find(|(idx, ch)| {
+            *ch == '$'
+                && *idx > 0
+                && line[..*idx]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_whitespace)
+        })
+        .map(|(idx, _)| idx);
+    match (semicolon, dollar) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+#[cfg(test)]
+mod editor_tests {
+    use super::*;
+
+    #[test]
+    fn source_map_records_mos_model_reference_span() {
+        let src = "deck\nM1 d g s b nch W=1u L=1u\n.model nch nmos\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reference = map
+            .references
+            .iter()
+            .find(|r| r.name.eq_ignore_ascii_case("nch"))
+            .unwrap();
+        assert_eq!(reference.kind, ReferenceKind::Model);
+        assert_eq!(&src[reference.span.clone()], "nch");
+        assert_eq!(&src[map.model_defs[0].span.clone()], "nch");
+        assert_eq!(map.model_defs[0].scope, None);
+    }
+
+    #[test]
+    fn source_map_records_subckt_reference_span() {
+        let src = "deck\nX1 a b inv\n.subckt inv a b\n.ends\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reference = map
+            .references
+            .iter()
+            .find(|r| r.kind == ReferenceKind::Subcircuit)
+            .unwrap();
+        assert_eq!(&src[reference.span.clone()], "inv");
+        assert_eq!(&src[map.subckt_defs[0].span.clone()], "inv");
+        assert_eq!(map.subckt_defs[0].scope, None);
+    }
+
+    #[test]
+    fn source_map_maps_model_reference_on_continuation_line() {
+        let src = "deck\nM1 d g s b\n+ nch W=1u L=1u\n.model nch nmos\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reference = map
+            .references
+            .iter()
+            .find(|r| r.kind == ReferenceKind::Model)
+            .unwrap();
+        assert_eq!(&src[reference.span.clone()], "nch");
+        assert!(reference.span.start > src.find("+ ").unwrap());
+    }
+
+    #[test]
+    fn source_map_scopes_local_model_definitions_and_references() {
+        let src = "deck\n.subckt amp in out\nM1 out in 0 0 nch\n.model nch nmos\n.ends\n.subckt buf in out\nM1 out in 0 0 nch\n.ends\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let def = map
+            .model_defs
+            .iter()
+            .find(|definition| definition.name == "nch")
+            .unwrap();
+        assert_eq!(def.scope.as_deref(), Some("amp"));
+
+        let refs = map
+            .references
+            .iter()
+            .filter(|reference| reference.kind == ReferenceKind::Model)
+            .collect::<Vec<_>>();
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].scope.as_deref(), Some("amp"));
+        assert_eq!(refs[1].scope.as_deref(), Some("buf"));
+    }
+
+    #[test]
+    fn source_map_records_passive_model_assignment_span() {
+        let src = "deck\nR1 in out MODEL=rmod L=1u W=2u\n.model rmod r\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reference = map.references.iter().find(|r| r.name == "rmod").unwrap();
+        assert_eq!(reference.kind, ReferenceKind::Model);
+        assert_eq!(&src[reference.span.clone()], "rmod");
+    }
+
+    #[test]
+    fn source_map_records_switch_and_legacy_tline_model_spans() {
+        let src = "deck\nS1 a b ctl 0 swmod\nO1 a b c d omod z0=50\nP1 a b c d pmod\n.model swmod sw\n.model omod txl\n.model pmod txl\n.end\n";
+
+        let map = source_map_for_editor(src);
+        let refs = map
+            .references
+            .iter()
+            .filter(|r| r.kind == ReferenceKind::Model)
+            .map(|r| (&r.name, &src[r.span.clone()]))
+            .collect::<Vec<_>>();
+
+        assert!(refs.contains(&(&"swmod".to_string(), "swmod")));
+        assert!(refs.contains(&(&"omod".to_string(), "omod")));
+        assert!(refs.contains(&(&"pmod".to_string(), "pmod")));
+    }
+
+    #[test]
+    fn source_map_records_xspice_model_span() {
+        let src = "deck\nA1 in out gain gain=2\n.model gain xspice\n.end\n";
+
+        let map = source_map_for_editor(src);
+
+        let reference = map.references.iter().find(|r| r.name == "gain").unwrap();
+        assert_eq!(reference.kind, ReferenceKind::Model);
+        assert_eq!(&src[reference.span.clone()], "gain");
     }
 }

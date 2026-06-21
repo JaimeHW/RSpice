@@ -33,30 +33,45 @@ pub(super) fn parse_source_spec(
             TokenKind::Ident(s) => s.to_uppercase(),
             _ => {
                 // A bare leading value is the DC level.
-                if dc_value.is_none() && ac_terms.is_none() && transient.is_none() {
-                    if let Some(v) = try_value(stream, params) {
-                        dc_value = Some(v);
-                        continue;
+                if dc_value.is_none()
+                    && ac_terms.is_none()
+                    && transient.is_none()
+                    && let Some(v) = try_value(stream, params)
+                {
+                    if !v.is_finite() {
+                        return Err(non_finite_source_value_error(line_num, "DC", "value", v));
                     }
+                    dc_value = Some(v);
+                    continue;
                 }
                 break;
             }
         };
 
         match keyword.as_str() {
+            "DISTOF1" | "DISTOF2" => {
+                consume_distortion_source_annotation(stream, line_num, params)?;
+            }
             "DC" if dc_value.is_none() => {
                 stream.advance();
                 // Allow optional = after DC (e.g., "dc = 5" or "dc 5")
                 skip_commas(stream);
                 stream.consume(&TokenKind::Equals);
-                dc_value = Some(expect_value(stream, line_num, params)?);
+                dc_value = Some(expect_finite_source_value(
+                    stream, line_num, params, "DC", "value",
+                )?);
             }
             "AC" if ac_terms.is_none() => {
                 stream.advance();
+                skip_commas(stream);
+                stream.consume(&TokenKind::Equals);
                 // AC magnitude is optional - defaults to 1.0 if not specified
-                let ac_magnitude = try_value(stream, params).unwrap_or(1.0);
+                let ac_magnitude =
+                    optional_ac_value_or_default(stream, line_num, params, "magnitude", 1.0)?;
                 // SPICE AC phase is specified in degrees; store radians internally.
-                let ac_phase = try_value(stream, params).unwrap_or(0.0).to_radians();
+                let ac_phase =
+                    optional_ac_value_or_default(stream, line_num, params, "phase", 0.0)?
+                        .to_radians();
                 ac_terms = Some((ac_magnitude, ac_phase));
             }
             _ if transient.is_none() => {
@@ -69,10 +84,23 @@ pub(super) fn parse_source_spec(
         }
     }
 
+    skip_commas(stream);
+    if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Unexpected trailing token in source specification: {}",
+                stream.peek().kind
+            ),
+        });
+    }
+
     Ok(match (dc_value, ac_terms, transient) {
         (None, None, None) => {
             // Nothing recognized: surface the same error a bad value gives.
-            SourceSpec::Dc(expect_value(stream, line_num, params)?)
+            SourceSpec::Dc(expect_finite_source_value(
+                stream, line_num, params, "DC", "value",
+            )?)
         }
         (Some(dc_value), None, None) => SourceSpec::Dc(dc_value),
         (None, Some((magnitude, phase)), None) => SourceSpec::Ac { magnitude, phase },
@@ -93,6 +121,110 @@ pub(super) fn parse_source_spec(
             transient: Box::new(transient),
         },
     })
+}
+
+fn consume_distortion_source_annotation(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<(), ParseError> {
+    let TokenKind::Ident(keyword) = &stream.peek().kind else {
+        return Ok(());
+    };
+    let source_name = keyword.to_ascii_uppercase();
+    stream.advance();
+
+    let _magnitude =
+        optional_distortion_value(stream, line_num, params, &source_name, "magnitude")?;
+    let _phase = optional_distortion_value(stream, line_num, params, &source_name, "phase")?;
+
+    Ok(())
+}
+
+fn optional_distortion_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    source_name: &str,
+    arg_name: &str,
+) -> Result<Option<Value>, ParseError> {
+    skip_commas(stream);
+    if source_distortion_annotation_end(stream) {
+        return Ok(None);
+    }
+
+    let found = stream.peek().kind.to_string();
+    let value = expect_value(stream, line_num, params).map_err(|err| ParseError::Syntax {
+        line: line_num,
+        message: format!("{source_name} {arg_name} expected numeric value, found {found} ({err})"),
+    })?;
+    if !value.is_finite() {
+        return Err(non_finite_source_value_error(
+            line_num,
+            source_name,
+            arg_name,
+            value,
+        ));
+    }
+    Ok(Some(value))
+}
+
+fn source_distortion_annotation_end(stream: &TokenStream) -> bool {
+    match &stream.peek().kind {
+        TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(keyword) => is_source_level_keyword(keyword),
+        _ => false,
+    }
+}
+
+fn is_source_level_keyword(keyword: &str) -> bool {
+    matches!(
+        keyword.to_ascii_uppercase().as_str(),
+        "DC" | "AC"
+            | "PULSE"
+            | "SIN"
+            | "SINE"
+            | "PWL"
+            | "EXP"
+            | "SFFM"
+            | "AM"
+            | "TRNOISE"
+            | "DISTOF1"
+            | "DISTOF2"
+    )
+}
+
+fn optional_ac_value_or_default(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    arg_name: &str,
+    default: Value,
+) -> Result<Value, ParseError> {
+    skip_commas(stream);
+    if ac_term_is_omitted(stream) {
+        return Ok(default);
+    }
+
+    let found = stream.peek().kind.to_string();
+    let value = expect_value(stream, line_num, params).map_err(|err| ParseError::Syntax {
+        line: line_num,
+        message: format!("AC {arg_name} expected numeric value, found {found} ({err})"),
+    })?;
+    if !value.is_finite() {
+        return Err(non_finite_source_value_error(
+            line_num, "AC", arg_name, value,
+        ));
+    }
+    Ok(value)
+}
+
+fn ac_term_is_omitted(stream: &TokenStream) -> bool {
+    match &stream.peek().kind {
+        TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(keyword) => is_source_level_keyword(keyword),
+        _ => false,
+    }
 }
 
 fn parse_transient_source_spec_keyword(
@@ -142,55 +274,6 @@ fn parse_transient_source_spec_keyword(
     }
 }
 
-fn source_value_error(line_num: usize, source: &str, field: &str, requirement: &str) -> ParseError {
-    ParseError::InvalidValue(format!(
-        "line {line_num}: {source} {field} must be {requirement}"
-    ))
-}
-
-fn require_finite(
-    line_num: usize,
-    source: &str,
-    field: &str,
-    value: Value,
-) -> Result<(), ParseError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(source_value_error(line_num, source, field, "finite"))
-    }
-}
-
-fn require_optional_finite(
-    line_num: usize,
-    source: &str,
-    field: &str,
-    value: Option<Value>,
-) -> Result<(), ParseError> {
-    match value {
-        Some(value) => require_finite(line_num, source, field, value),
-        None => Ok(()),
-    }
-}
-
-fn require_positive_finite(
-    line_num: usize,
-    source: &str,
-    field: &str,
-    value: Value,
-) -> Result<(), ParseError> {
-    if value.is_finite() && value > 0.0 {
-        Ok(())
-    } else {
-        Err(source_value_error(
-            line_num,
-            source,
-            field,
-            "positive and finite",
-        ))
-    }
-}
-
 /// Parse TRNOISE(NA NT NALPHA NAMP [RTSAM RTSCAPT RTSEMT]).
 ///
 /// White (`NA`/`NT`) and 1/f (`NALPHA`/`NAMP`) terms are supported; the RTS
@@ -203,23 +286,26 @@ fn parse_trnoise_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let na = expect_value_default(stream, params, 0.0);
-    let nt = expect_value_default(stream, params, 0.0);
-    let nalpha = expect_value_default(stream, params, 0.0);
-    let namp = expect_value_default(stream, params, 0.0);
-    let rts = try_value(stream, params);
+    let na = source_value_or_default(stream, line_num, params, "TRNOISE", "NA", has_paren, 0.0)?;
+    let nt = source_value_or_default(stream, line_num, params, "TRNOISE", "NT", has_paren, 0.0)?;
+    let nalpha = source_value_or_default(
+        stream, line_num, params, "TRNOISE", "NALPHA", has_paren, 0.0,
+    )?;
+    let namp =
+        source_value_or_default(stream, line_num, params, "TRNOISE", "NAMP", has_paren, 0.0)?;
+    let rts_amplitude =
+        source_optional_value(stream, line_num, params, "TRNOISE", "RTSAM", has_paren)?;
+    let rts_capture =
+        source_optional_value(stream, line_num, params, "TRNOISE", "RTSCAPT", has_paren)?;
+    let rts_emit = source_optional_value(stream, line_num, params, "TRNOISE", "RTSEMT", has_paren)?;
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
+    close_source_args(stream, line_num, "TRNOISE", has_paren)?;
 
-    require_finite(line_num, "TRNOISE", "NA", na)?;
-    require_finite(line_num, "TRNOISE", "NT", nt)?;
-    require_finite(line_num, "TRNOISE", "NALPHA", nalpha)?;
-    require_finite(line_num, "TRNOISE", "NAMP", namp)?;
-    require_optional_finite(line_num, "TRNOISE", "RTSAM", rts)?;
-
-    if rts.is_some_and(|v| v != 0.0) {
+    if [rts_amplitude, rts_capture, rts_emit]
+        .into_iter()
+        .flatten()
+        .any(|value| value != 0.0)
+    {
         return Err(ParseError::Syntax {
             line: line_num,
             message: "TRNOISE RTS (random telegraph) parameters are not supported yet; \
@@ -258,33 +344,25 @@ fn parse_sffm_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = expect_value_default(stream, params, 0.0);
-    let amplitude = expect_value_default(stream, params, 1.0);
-    let carrier_freq = try_value(stream, params);
-    let modulation_index = try_value(stream, params);
-    let signal_freq = try_value(stream, params);
-    let delay = expect_value_default(stream, params, 0.0);
+    let offset = source_value_or_default(stream, line_num, params, "SFFM", "VO", has_paren, 0.0)?;
+    let amplitude =
+        source_value_or_default(stream, line_num, params, "SFFM", "VA", has_paren, 1.0)?;
+    let carrier_freq = source_optional_value(stream, line_num, params, "SFFM", "FC", has_paren)?
+        .unwrap_or(Value::NAN);
+    let modulation_index =
+        source_optional_value(stream, line_num, params, "SFFM", "MDI", has_paren)?
+            .unwrap_or(Value::NAN);
+    let signal_freq = source_optional_value(stream, line_num, params, "SFFM", "FM", has_paren)?
+        .unwrap_or(Value::NAN);
+    let delay = source_value_or_default(stream, line_num, params, "SFFM", "TD", has_paren, 0.0)?;
     // SFFM/AM phases stay in degrees: the runtime converts exactly like
     // ngspice's vsrcload.c so the stored spec mirrors the netlist text.
-    let phase_modulation = expect_value_default(stream, params, 0.0);
-    let phase_carrier = expect_value_default(stream, params, 0.0);
+    let phase_modulation =
+        source_value_or_default(stream, line_num, params, "SFFM", "PHASEM", has_paren, 0.0)?;
+    let phase_carrier =
+        source_value_or_default(stream, line_num, params, "SFFM", "PHASEC", has_paren, 0.0)?;
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
-
-    require_finite(line_num, "SFFM", "VO", offset)?;
-    require_finite(line_num, "SFFM", "VA", amplitude)?;
-    require_finite(line_num, "SFFM", "TD", delay)?;
-    require_finite(line_num, "SFFM", "PHASEM", phase_modulation)?;
-    require_finite(line_num, "SFFM", "PHASEC", phase_carrier)?;
-    require_optional_finite(line_num, "SFFM", "FC", carrier_freq)?;
-    require_optional_finite(line_num, "SFFM", "MDI", modulation_index)?;
-    require_optional_finite(line_num, "SFFM", "FM", signal_freq)?;
-
-    let carrier_freq = carrier_freq.unwrap_or(Value::NAN);
-    let modulation_index = modulation_index.unwrap_or(Value::NAN);
-    let signal_freq = signal_freq.unwrap_or(Value::NAN);
+    close_source_args(stream, line_num, "SFFM", has_paren)?;
 
     if carrier_freq.is_finite()
         && signal_freq.is_finite()
@@ -320,30 +398,22 @@ fn parse_am_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = expect_value_default(stream, params, 0.0);
-    let modulation_offset = expect_value_default(stream, params, 0.0);
-    let modulation_amplitude = expect_value_default(stream, params, 1.0);
-    let modulating_freq = try_value(stream, params);
-    let carrier_freq = try_value(stream, params);
-    let delay = expect_value_default(stream, params, 0.0);
-    let phase_modulation = expect_value_default(stream, params, 0.0);
-    let phase_carrier = expect_value_default(stream, params, 0.0);
+    let offset = source_value_or_default(stream, line_num, params, "AM", "VO", has_paren, 0.0)?;
+    let modulation_offset =
+        source_value_or_default(stream, line_num, params, "AM", "VMO", has_paren, 0.0)?;
+    let modulation_amplitude =
+        source_value_or_default(stream, line_num, params, "AM", "VMA", has_paren, 1.0)?;
+    let modulating_freq = source_optional_value(stream, line_num, params, "AM", "FM", has_paren)?
+        .unwrap_or(Value::NAN);
+    let carrier_freq = source_optional_value(stream, line_num, params, "AM", "FC", has_paren)?
+        .unwrap_or(Value::NAN);
+    let delay = source_value_or_default(stream, line_num, params, "AM", "TD", has_paren, 0.0)?;
+    let phase_modulation =
+        source_value_or_default(stream, line_num, params, "AM", "PHASEM", has_paren, 0.0)?;
+    let phase_carrier =
+        source_value_or_default(stream, line_num, params, "AM", "PHASEC", has_paren, 0.0)?;
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
-
-    require_finite(line_num, "AM", "VO", offset)?;
-    require_finite(line_num, "AM", "VMO", modulation_offset)?;
-    require_finite(line_num, "AM", "VMA", modulation_amplitude)?;
-    require_finite(line_num, "AM", "TD", delay)?;
-    require_finite(line_num, "AM", "PHASEM", phase_modulation)?;
-    require_finite(line_num, "AM", "PHASEC", phase_carrier)?;
-    require_optional_finite(line_num, "AM", "FM", modulating_freq)?;
-    require_optional_finite(line_num, "AM", "FC", carrier_freq)?;
-
-    let modulating_freq = modulating_freq.unwrap_or(Value::NAN);
-    let carrier_freq = carrier_freq.unwrap_or(Value::NAN);
+    close_source_args(stream, line_num, "AM", has_paren)?;
 
     Ok(SourceSpec::Am {
         offset,
@@ -365,30 +435,19 @@ fn parse_pulse_spec(
     // Consume opening paren if present
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let v1 = expect_value_default(stream, params, 0.0);
-    let v2 = expect_value_default(stream, params, 1.0);
-    let delay = expect_value_default(stream, params, 0.0);
+    let v1 = source_value_or_default(stream, line_num, params, "PULSE", "V1", has_paren, 0.0)?;
+    let v2 = source_value_or_default(stream, line_num, params, "PULSE", "V2", has_paren, 1.0)?;
+    let delay = source_value_or_default(stream, line_num, params, "PULSE", "TD", has_paren, 0.0)?;
     // Keep omitted timing fields as NaN sentinels so transient runtime can
     // resolve ngspice-compatible defaults from .TRAN context (tstep/tstop).
-    let rise = try_value(stream, params);
-    let fall = try_value(stream, params);
-    let width = try_value(stream, params);
+    let rise = source_optional_value(stream, line_num, params, "PULSE", "TR", has_paren)?;
+    let fall = source_optional_value(stream, line_num, params, "PULSE", "TF", has_paren)?;
+    let width = source_optional_value(stream, line_num, params, "PULSE", "PW", has_paren)?;
     let width_defaults_to_zero = rise.is_some() && fall.is_some() && width.is_none();
-    let period = try_value(stream, params);
+    let period = source_optional_value(stream, line_num, params, "PULSE", "PER", has_paren)?
+        .unwrap_or(Value::NAN);
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
-
-    require_finite(line_num, "PULSE", "V1", v1)?;
-    require_finite(line_num, "PULSE", "V2", v2)?;
-    require_finite(line_num, "PULSE", "TD", delay)?;
-    require_optional_finite(line_num, "PULSE", "TR", rise)?;
-    require_optional_finite(line_num, "PULSE", "TF", fall)?;
-    require_optional_finite(line_num, "PULSE", "PW", width)?;
-    require_optional_finite(line_num, "PULSE", "PER", period)?;
-
-    let period = period.unwrap_or(Value::NAN);
+    close_source_args(stream, line_num, "PULSE", has_paren)?;
 
     Ok(SourceSpec::Pulse {
         v1,
@@ -409,26 +468,18 @@ fn parse_sin_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let offset = expect_value_default(stream, params, 0.0);
-    let amplitude = expect_value_default(stream, params, 1.0);
-    let frequency = try_value(stream, params);
-    let delay = expect_value_default(stream, params, 0.0);
-    let damping = expect_value_default(stream, params, 0.0);
+    let offset = source_value_or_default(stream, line_num, params, "SIN", "VO", has_paren, 0.0)?;
+    let amplitude = source_value_or_default(stream, line_num, params, "SIN", "VA", has_paren, 1.0)?;
+    let frequency = source_optional_value(stream, line_num, params, "SIN", "FREQ", has_paren)?
+        .unwrap_or(Value::NAN);
+    let delay = source_value_or_default(stream, line_num, params, "SIN", "TD", has_paren, 0.0)?;
+    let damping =
+        source_value_or_default(stream, line_num, params, "SIN", "THETA", has_paren, 0.0)?;
     // SPICE SIN phase is specified in degrees; store radians internally.
-    let phase = expect_value_default(stream, params, 0.0).to_radians();
+    let phase = source_value_or_default(stream, line_num, params, "SIN", "PHASE", has_paren, 0.0)?
+        .to_radians();
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
-
-    require_finite(line_num, "SIN", "VO", offset)?;
-    require_finite(line_num, "SIN", "VA", amplitude)?;
-    require_optional_finite(line_num, "SIN", "FREQ", frequency)?;
-    require_finite(line_num, "SIN", "TD", delay)?;
-    require_finite(line_num, "SIN", "THETA", damping)?;
-    require_finite(line_num, "SIN", "PHASE", phase)?;
-
-    let frequency = frequency.unwrap_or(Value::NAN);
+    close_source_args(stream, line_num, "SIN", has_paren)?;
 
     Ok(SourceSpec::Sin {
         offset,
@@ -478,29 +529,52 @@ fn parse_pwl_spec(
         let mut time_offset = 0.0;
         let mut value_offset = 0.0;
 
-        while let TokenKind::Ident(key) = &stream.peek().kind {
+        loop {
+            skip_commas(stream);
+            if source_args_end(stream, has_paren) {
+                break;
+            }
+
+            let TokenKind::Ident(key) = &stream.peek().kind else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unsupported PWL FILE option token '{}'", stream.peek().kind),
+                });
+            };
+            let key = key.clone();
             let key_upper = key.to_uppercase();
             stream.advance();
-            stream.consume(&TokenKind::Equals);
 
-            let value = try_value(stream, params).unwrap_or(1.0);
-            match key_upper.as_str() {
-                "TSCALE" | "TIMESCALE" => time_scale = value,
-                "VSCALE" | "VALUESCALE" | "SCALE" => value_scale = value,
-                "TOFFSET" | "TIMEOFFSET" | "TD" => time_offset = value,
-                "VOFFSET" | "VALUEOFFSET" | "DC" => value_offset = value,
-                _ => break,
+            let target = match key_upper.as_str() {
+                "TSCALE" | "TIMESCALE" => &mut time_scale,
+                "VSCALE" | "VALUESCALE" | "SCALE" => &mut value_scale,
+                "TOFFSET" | "TIMEOFFSET" | "TD" => &mut time_offset,
+                "VOFFSET" | "VALUEOFFSET" | "DC" => &mut value_offset,
+                _ => {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!("Unsupported PWL FILE option '{key}'"),
+                    });
+                }
+            };
+
+            if !stream.consume(&TokenKind::Equals) {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("PWL FILE option '{key}' requires '='"),
+                });
             }
+
+            *target =
+                source_optional_value(stream, line_num, params, "PWL FILE", &key_upper, has_paren)?
+                    .ok_or_else(|| ParseError::Syntax {
+                        line: line_num,
+                        message: format!("PWL FILE option '{key}' requires a value"),
+                    })?;
         }
 
-        require_positive_finite(line_num, "PWL FILE", "TSCALE", time_scale)?;
-        require_finite(line_num, "PWL FILE", "VSCALE", value_scale)?;
-        require_finite(line_num, "PWL FILE", "TOFFSET", time_offset)?;
-        require_finite(line_num, "PWL FILE", "VOFFSET", value_offset)?;
-
-        if has_paren {
-            stream.consume(&TokenKind::RParen);
-        }
+        close_source_args(stream, line_num, "PWL FILE", has_paren)?;
+        validate_pwl_file_scaling(line_num, time_scale, value_scale, time_offset, value_offset)?;
 
         return Ok(SourceSpec::PwlFile {
             path,
@@ -522,28 +596,187 @@ fn parse_pwl_spec(
             break;
         }
 
-        if let Some(time) = try_value(stream, params) {
-            if let Some(value) = try_value(stream, params) {
-                require_finite(line_num, "PWL", "time", time)?;
-                require_finite(line_num, "PWL", "value", value)?;
-                points.push((time, value));
-            } else {
-                break;
-            }
+        if let Some(time) =
+            source_optional_value(stream, line_num, params, "PWL", "time", has_paren)?
+        {
+            let Some(value) =
+                source_optional_value(stream, line_num, params, "PWL", "value", has_paren)?
+            else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "PWL requires complete time/value pairs".to_string(),
+                });
+            };
+            points.push((time, value));
         } else {
             break;
         }
     }
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
+    close_source_args(stream, line_num, "PWL", has_paren)?;
 
     if points.is_empty() {
         points.push((0.0, 0.0));
     }
 
     Ok(SourceSpec::Pwl { points })
+}
+
+fn source_value_or_default(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    source_name: &str,
+    arg_name: &str,
+    has_paren: bool,
+    default: Value,
+) -> Result<Value, ParseError> {
+    Ok(
+        source_optional_value(stream, line_num, params, source_name, arg_name, has_paren)?
+            .unwrap_or(default),
+    )
+}
+
+fn source_optional_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    source_name: &str,
+    arg_name: &str,
+    has_paren: bool,
+) -> Result<Option<Value>, ParseError> {
+    skip_commas(stream);
+    if source_numeric_args_end(stream, has_paren) {
+        return Ok(None);
+    }
+
+    let found = stream.peek().kind.to_string();
+    let value = expect_value(stream, line_num, params).map_err(|err| ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{} {} expected numeric value, found {} ({})",
+            source_name, arg_name, found, err
+        ),
+    })?;
+    if !value.is_finite() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{} {} must be finite, got {}", source_name, arg_name, value),
+        });
+    }
+    Ok(Some(value))
+}
+
+fn expect_finite_source_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    source_name: &str,
+    arg_name: &str,
+) -> Result<Value, ParseError> {
+    let value = expect_value(stream, line_num, params)?;
+    if !value.is_finite() {
+        return Err(non_finite_source_value_error(
+            line_num,
+            source_name,
+            arg_name,
+            value,
+        ));
+    }
+    Ok(value)
+}
+
+fn non_finite_source_value_error(
+    line_num: usize,
+    source_name: &str,
+    arg_name: &str,
+    value: Value,
+) -> ParseError {
+    ParseError::Syntax {
+        line: line_num,
+        message: format!("{source_name} {arg_name} must be finite, got {value}"),
+    }
+}
+
+fn validate_pwl_file_scaling(
+    line_num: usize,
+    time_scale: Value,
+    value_scale: Value,
+    time_offset: Value,
+    value_offset: Value,
+) -> Result<(), ParseError> {
+    if !time_scale.is_finite() || time_scale <= 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "PWL FILE TSCALE must be finite and positive".to_string(),
+        });
+    }
+    for (name, value) in [
+        ("VSCALE", value_scale),
+        ("TOFFSET", time_offset),
+        ("VOFFSET", value_offset),
+    ] {
+        if !value.is_finite() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("PWL FILE {name} must be finite"),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn close_source_args(
+    stream: &mut TokenStream,
+    line_num: usize,
+    source_name: &str,
+    has_paren: bool,
+) -> Result<(), ParseError> {
+    skip_commas(stream);
+    if !has_paren {
+        return Ok(());
+    }
+    if stream.consume(&TokenKind::RParen) {
+        return Ok(());
+    }
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!("{} expected ')' before {}", source_name, stream.peek().kind),
+    })
+}
+
+fn source_args_end(stream: &TokenStream, has_paren: bool) -> bool {
+    match &stream.peek().kind {
+        TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(keyword)
+            if !has_paren
+                && (keyword.eq_ignore_ascii_case("AC")
+                    || keyword.eq_ignore_ascii_case("DISTOF1")
+                    || keyword.eq_ignore_ascii_case("DISTOF2")) =>
+        {
+            true
+        }
+        TokenKind::Ident(keyword) if !has_paren && keyword.eq_ignore_ascii_case("DC") => {
+            !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+        }
+        _ => false,
+    }
+}
+
+fn source_numeric_args_end(stream: &TokenStream, has_paren: bool) -> bool {
+    match &stream.peek().kind {
+        TokenKind::RParen | TokenKind::Newline | TokenKind::Eof => true,
+        TokenKind::Ident(keyword)
+            if !has_paren
+                && (keyword.eq_ignore_ascii_case("AC")
+                    || keyword.eq_ignore_ascii_case("DC")
+                    || keyword.eq_ignore_ascii_case("DISTOF1")
+                    || keyword.eq_ignore_ascii_case("DISTOF2")) =>
+        {
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Parse EXP(V1 V2 TD1 TAU1 TD2 TAU2); omitted timing parameters stay NaN
@@ -556,28 +789,18 @@ fn parse_exp_spec(
 ) -> Result<SourceSpec, ParseError> {
     let has_paren = stream.consume(&TokenKind::LParen);
 
-    let v1 = expect_value_default(stream, params, 0.0);
-    let v2 = expect_value_default(stream, params, 1.0);
-    let td1 = try_value(stream, params);
-    let tau1 = try_value(stream, params);
-    let td2 = try_value(stream, params);
-    let tau2 = try_value(stream, params);
+    let v1 = source_value_or_default(stream, line_num, params, "EXP", "V1", has_paren, 0.0)?;
+    let v2 = source_value_or_default(stream, line_num, params, "EXP", "V2", has_paren, 1.0)?;
+    let td1 = source_optional_value(stream, line_num, params, "EXP", "TD1", has_paren)?
+        .unwrap_or(Value::NAN);
+    let tau1 = source_optional_value(stream, line_num, params, "EXP", "TAU1", has_paren)?
+        .unwrap_or(Value::NAN);
+    let td2 = source_optional_value(stream, line_num, params, "EXP", "TD2", has_paren)?
+        .unwrap_or(Value::NAN);
+    let tau2 = source_optional_value(stream, line_num, params, "EXP", "TAU2", has_paren)?
+        .unwrap_or(Value::NAN);
 
-    if has_paren {
-        stream.consume(&TokenKind::RParen);
-    }
-
-    require_finite(line_num, "EXP", "V1", v1)?;
-    require_finite(line_num, "EXP", "V2", v2)?;
-    require_optional_finite(line_num, "EXP", "TD1", td1)?;
-    require_optional_finite(line_num, "EXP", "TAU1", tau1)?;
-    require_optional_finite(line_num, "EXP", "TD2", td2)?;
-    require_optional_finite(line_num, "EXP", "TAU2", tau2)?;
-
-    let td1 = td1.unwrap_or(Value::NAN);
-    let tau1 = tau1.unwrap_or(Value::NAN);
-    let td2 = td2.unwrap_or(Value::NAN);
-    let tau2 = tau2.unwrap_or(Value::NAN);
+    close_source_args(stream, line_num, "EXP", has_paren)?;
 
     Ok(SourceSpec::Exp {
         v1,

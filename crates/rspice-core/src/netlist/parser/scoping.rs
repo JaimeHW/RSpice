@@ -46,7 +46,22 @@ pub(super) fn parse_model_definition(
         (None, Some(second))
     };
 
-    let model_params = parse_model_params(stream, params)?;
+    if ako_base.is_none()
+        && matches!(model_type.as_deref(), Some(kind) if kind.eq_ignore_ascii_case("CPL"))
+    {
+        // CPL model cards carry RLGC matrix/list payloads that are validated
+        // from raw source text by the transmission-line model resolver.
+        stream.skip_to_eol();
+        return Ok(ModelDef {
+            name,
+            model_type: model_type.expect("CPL model carries an explicit type"),
+            params: Vec::new(),
+            expr_params: Vec::new(),
+            string_params: Vec::new(),
+        });
+    }
+
+    let model_params = parse_model_params(stream, line_num, params)?;
 
     let Some(base_name) = ako_base else {
         return Ok(ModelDef {

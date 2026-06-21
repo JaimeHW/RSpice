@@ -378,7 +378,10 @@ impl IncludeProcessor {
         }
 
         if in_section {
-            log::warn!("Library section '{}' missing .ENDL", section);
+            return Err(ParseError::Syntax {
+                line: 0,
+                message: format!("Library section '{}' missing .ENDL", section),
+            });
         }
 
         Ok(section_content.join("\n"))
@@ -573,5 +576,29 @@ r2 a b 2k
             tt.contains("r1") && tt.contains("r2"),
             "mismatched .endl is content, not a terminator: {tt}"
         );
+    }
+
+    #[test]
+    fn unterminated_selected_library_section_is_rejected() {
+        let lib = "\
+.lib tt
+r1 a b 1k
+.lib ss
+r2 a b 2k
+.endl ss
+";
+        let err = IncludeProcessor::default()
+            .extract_section(lib, "tt")
+            .expect_err("unterminated selected library section must reject");
+
+        match err {
+            ParseError::Syntax { message, .. } => {
+                assert!(
+                    message.contains("Library section 'tt' missing .ENDL"),
+                    "unexpected error: {message}"
+                );
+            }
+            other => panic!("expected syntax error, got {other:?}"),
+        }
     }
 }

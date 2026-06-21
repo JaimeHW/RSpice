@@ -4,14 +4,16 @@
 //! Handles multi-line continuations and extracts descriptions from comments.
 
 use super::manager::{ModelDefinition, ModelType, SubcircuitDefinition};
+use std::sync::Arc;
 
 /// Parse library content and extract all model and subcircuit definitions
 pub fn parse_library_content(
     content: &'static str,
-    library_name: &'static str,
+    library_name: &str,
 ) -> (Vec<ModelDefinition>, Vec<SubcircuitDefinition>) {
     let mut models = Vec::new();
     let mut subcircuits = Vec::new();
+    let library_name: Arc<str> = Arc::from(library_name);
 
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0;
@@ -38,7 +40,8 @@ pub fn parse_library_content(
         if upper.starts_with(".SUBCKT") {
             // Parse subcircuit at top level only
             if subckt_depth == 0
-                && let Some(subckt) = parse_subckt_line(line, library_name, &last_comment)
+                && let Some(subckt) =
+                    parse_subckt_line(line, Arc::clone(&library_name), &last_comment)
             {
                 subcircuits.push(subckt);
             }
@@ -49,7 +52,7 @@ pub fn parse_library_content(
         }
         // Parse .MODEL directive - only at top level (outside subcircuits)
         else if upper.starts_with(".MODEL") && subckt_depth == 0 {
-            if let Some(model) = parse_model_line(line, library_name, &last_comment) {
+            if let Some(model) = parse_model_line(line, Arc::clone(&library_name), &last_comment) {
                 models.push(model);
             }
             last_comment.clear();
@@ -69,7 +72,7 @@ pub fn parse_library_content(
 /// Format: .MODEL name type(params...)
 fn parse_model_line(
     line: &str,
-    library_name: &'static str,
+    library_name: Arc<str>,
     description: &str,
 ) -> Option<ModelDefinition> {
     // Remove .MODEL prefix
@@ -102,7 +105,7 @@ fn parse_model_line(
 /// Format: .SUBCKT name pin1 pin2 pin3 ...
 fn parse_subckt_line(
     line: &str,
-    library_name: &'static str,
+    library_name: Arc<str>,
     description: &str,
 ) -> Option<SubcircuitDefinition> {
     // Remove .SUBCKT prefix

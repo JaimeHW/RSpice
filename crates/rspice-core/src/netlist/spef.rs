@@ -164,7 +164,7 @@ impl SpefFile {
                 let n2 = cap
                     .b
                     .as_ref()
-                    .map(|b| node_name(b))
+                    .map(&node_name)
                     .unwrap_or_else(|| "0".to_owned());
                 parasitic_seq += 1;
                 new_elements.push(Element {

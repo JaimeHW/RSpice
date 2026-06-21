@@ -96,9 +96,19 @@ pub fn parse_xspice(
                 ports.push(XspicePort::Analog(node_name));
             }
 
-            // Skip unexpected tokens
-            _ => {
+            // SPICE decks often use commas as loose separators.
+            TokenKind::Comma => {
                 stream.advance();
+            }
+
+            other => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported XSPICE instance token '{}'; expected port, model name, or NAME=value",
+                        other
+                    ),
+                });
             }
         }
     }
@@ -179,14 +189,23 @@ fn parse_bracketed_port(
                 nodes.push(format!("{}", *n as i64));
                 stream.advance();
             }
+            TokenKind::Comma => {
+                stream.advance();
+            }
             TokenKind::Newline | TokenKind::Eof => {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: "Unclosed bracket in digital port".to_string(),
                 });
             }
-            _ => {
-                stream.advance(); // skip unexpected tokens
+            other => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported XSPICE digital port token '{}'; expected node name or ']'",
+                        other
+                    ),
+                });
             }
         }
     }
@@ -232,40 +251,58 @@ fn parse_differential_port(
     // Parse nodes in brackets or parentheses
     let mut nodes = Vec::new();
 
-    match &stream.peek().kind {
+    let (closing, closing_name) = match &stream.peek().kind {
         TokenKind::LBracket => {
             stream.advance();
-            loop {
-                match &stream.peek().kind {
-                    TokenKind::RBracket => {
-                        stream.advance();
-                        break;
-                    }
-                    TokenKind::Ident(id) => {
-                        nodes.push(id.clone());
-                        stream.advance();
-                    }
-                    _ => break,
-                }
-            }
+            (TokenKind::RBracket, "]")
         }
         TokenKind::LParen => {
             stream.advance();
-            loop {
-                match &stream.peek().kind {
-                    TokenKind::RParen => {
-                        stream.advance();
-                        break;
-                    }
-                    TokenKind::Ident(id) => {
-                        nodes.push(id.clone());
-                        stream.advance();
-                    }
-                    _ => break,
-                }
+            (TokenKind::RParen, ")")
+        }
+        other => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Differential port {} requires a bracketed or parenthesized node list, found '{}'",
+                    prefix, other
+                ),
+            });
+        }
+    };
+
+    loop {
+        if stream.check(&closing) {
+            stream.advance();
+            break;
+        }
+
+        match &stream.peek().kind {
+            TokenKind::Ident(_) | TokenKind::Number(_) => {
+                nodes.push(parse_differential_node_name(stream));
+            }
+            TokenKind::Comma => {
+                stream.advance();
+            }
+            TokenKind::Newline | TokenKind::Eof => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unclosed differential port {}; expected '{}'",
+                        prefix, closing_name
+                    ),
+                });
+            }
+            other => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported XSPICE differential port token '{}'; expected node name or '{}'",
+                        other, closing_name
+                    ),
+                });
             }
         }
-        _ => {}
     }
 
     if nodes.len() != 2 {
@@ -287,6 +324,29 @@ fn parse_differential_port(
     } else {
         Ok(XspicePort::DifferentialCurrent { pos, neg })
     }
+}
+
+fn parse_differential_node_name(stream: &mut TokenStream) -> String {
+    let token = stream.advance().clone();
+    let mut node = match token.kind {
+        TokenKind::Ident(id) => id,
+        TokenKind::Number(n) => format!("{}", n as i64),
+        _ => unreachable!("caller only passes node-name tokens"),
+    };
+
+    let sign = match stream.peek().kind {
+        TokenKind::Plus => Some('+'),
+        TokenKind::Minus => Some('-'),
+        _ => None,
+    };
+    if let Some(sign) = sign
+        && stream.peek().span.start == token.span.end
+    {
+        node.push(sign);
+        stream.advance();
+    }
+
+    node
 }
 
 /// Parse a parameter value (number)

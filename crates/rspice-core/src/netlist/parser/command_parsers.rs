@@ -244,7 +244,12 @@ pub(super) fn parse_noise_command(
         "LIN" => FreqVariation::Lin,
         "OCT" => FreqVariation::Oct,
         "DEC" => FreqVariation::Dec,
-        _ => FreqVariation::Dec, // Default
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unknown frequency variation: {}", var_str),
+            });
+        }
     };
 
     let points = expect_value(stream, line_num, params)? as usize;

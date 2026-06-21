@@ -21,6 +21,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::manager::{ModelDefinition, ModelType, SubcircuitDefinition};
 
@@ -171,7 +172,7 @@ impl ParsedModel {
     }
 
     /// Convert to ModelDefinition for library manager
-    pub fn to_model_definition(&self, library: &'static str) -> ModelDefinition {
+    pub fn to_model_definition(&self, library: impl Into<Arc<str>>) -> ModelDefinition {
         let mut def = ModelDefinition::new(self.name.clone(), self.model_type, library);
         if let Some(ref desc) = self.description {
             def = def.with_description(desc.clone());
@@ -220,7 +221,7 @@ impl ParsedSubcircuit {
     }
 
     /// Convert to SubcircuitDefinition for library manager
-    pub fn to_subcircuit_definition(&self, library: &'static str) -> SubcircuitDefinition {
+    pub fn to_subcircuit_definition(&self, library: impl Into<Arc<str>>) -> SubcircuitDefinition {
         let mut def = SubcircuitDefinition::new(self.name.clone(), self.pins.clone(), library);
         if let Some(ref desc) = self.description {
             def = def.with_description(desc.clone());
@@ -314,10 +315,12 @@ impl LibParser {
     fn parse_content(&mut self, content: &str) {
         let lines = self.preprocess_lines(content);
         let mut current_section: Option<LibSection> = None;
-        let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>)> = None;
+        let mut current_section_start_line: Option<usize> = None;
+        let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>, usize)> = None;
         let mut last_comment = String::new();
 
         for (line_num, line) in lines.iter().enumerate() {
+            let line_number = line_num + 1;
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -337,10 +340,20 @@ impl LibParser {
             // Handle .lib section start
             if upper.starts_with(".LIB") && !upper.contains("INCLUDE") {
                 if let Some(section) = current_section.take() {
+                    self.errors.push(ParseError {
+                        message: format!(
+                            ".lib {} at line {} is not closed by .endl before a new .lib section",
+                            section.name,
+                            current_section_start_line.unwrap_or(line_number)
+                        ),
+                        file: self.current_file.clone(),
+                        line: current_section_start_line,
+                    });
                     self.sections.push(section);
                 }
                 if let Some(name) = self.parse_lib_directive(line) {
                     current_section = Some(LibSection::new(name));
+                    current_section_start_line = Some(line_number);
                 }
                 last_comment.clear();
                 continue;
@@ -350,6 +363,7 @@ impl LibParser {
             if upper.starts_with(".ENDL") {
                 if let Some(section) = current_section.take() {
                     self.sections.push(section);
+                    current_section_start_line = None;
                 }
                 continue;
             }
@@ -371,7 +385,7 @@ impl LibParser {
                         Some(last_comment.clone())
                     };
                     subckt.source_file = self.current_file.clone();
-                    subckt_content = Some((subckt, vec![line.to_string()]));
+                    subckt_content = Some((subckt, vec![line.to_string()], line_number));
                 }
                 last_comment.clear();
                 continue;
@@ -379,7 +393,7 @@ impl LibParser {
 
             // Handle .ends
             if upper.starts_with(".ENDS") {
-                if let Some((mut subckt, mut content_lines)) = subckt_content.take() {
+                if let Some((mut subckt, mut content_lines, _)) = subckt_content.take() {
                     content_lines.push(line.to_string());
                     subckt.content = content_lines.join("\n");
 
@@ -393,7 +407,7 @@ impl LibParser {
             }
 
             // Inside subcircuit - collect content
-            if let Some((_, ref mut content_lines)) = subckt_content {
+            if let Some((_, ref mut content_lines, _)) = subckt_content {
                 content_lines.push(line.to_string());
                 continue;
             }
@@ -407,7 +421,7 @@ impl LibParser {
                         Some(last_comment.clone())
                     };
                     model.source_file = self.current_file.clone();
-                    model.source_line = Some(line_num + 1);
+                    model.source_line = Some(line_number);
 
                     if let Some(ref mut section) = current_section {
                         section.models.push(model);
@@ -419,9 +433,28 @@ impl LibParser {
             }
         }
 
-        // Close any unclosed section
+        if let Some((subckt, _, start_line)) = subckt_content {
+            self.errors.push(ParseError {
+                message: format!(
+                    ".subckt {} at line {} is not closed by .ends",
+                    subckt.name, start_line
+                ),
+                file: self.current_file.clone(),
+                line: Some(start_line),
+            });
+        }
+
         if let Some(section) = current_section {
-            self.sections.push(section);
+            let start_line = current_section_start_line;
+            self.errors.push(ParseError {
+                message: format!(
+                    ".lib {} at line {} is not closed by .endl",
+                    section.name,
+                    start_line.unwrap_or(0)
+                ),
+                file: self.current_file.clone(),
+                line: start_line,
+            });
         }
     }
 
@@ -845,3 +878,48 @@ impl LibParseResult {
 //=============================================================================
 // Tests
 //=============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_rejects_unclosed_lib_section() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(".lib TT\n.model nch NMOS (LEVEL=1)\n");
+
+        assert!(
+            !result.is_ok(),
+            "missing .endl must be a parser error, not an implicit close"
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.message.contains(".lib TT")
+                    && error.message.to_ascii_lowercase().contains(".endl")),
+            "errors should name the unterminated section: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn parser_rejects_unclosed_subcircuit() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(".subckt amp in out\nr1 in out 1k\n");
+
+        assert!(
+            !result.is_ok(),
+            "missing .ends must be a parser error, not dropped subcircuit content"
+        );
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|error| error.message.contains(".subckt amp")
+                    && error.message.to_ascii_lowercase().contains(".ends")),
+            "errors should name the unterminated subcircuit: {:?}",
+            result.errors
+        );
+    }
+}

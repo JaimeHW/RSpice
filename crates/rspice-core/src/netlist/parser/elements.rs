@@ -32,6 +32,7 @@ pub(super) fn parse_resistor(
         match &stream.peek().kind {
             TokenKind::Number(_) => {
                 value = Some(expect_value(stream, line_num, params)?);
+                consume_passive_unit_word(stream, PASSIVE_RESISTOR_UNITS);
             }
             TokenKind::Expression(_) => {
                 if let Some(expr) = take_value_expression_string(stream, params) {
@@ -155,15 +156,28 @@ pub(super) fn parse_resistor(
                             });
                         }
                     }
-                } else if model.is_none() && value.is_none() {
-                    // Bare identifier after value-less prefix: treat as model name.
+                } else if model.is_none()
+                    && (value.is_none() && value_expr.is_none()
+                        || resistor_model_token_is_followed_by_params(stream))
+                {
+                    // Bare identifier after value-less prefix, or after an
+                    // explicit value when instance parameters follow: treat
+                    // as model name.
                     model = Some(raw_name);
+                } else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Unexpected trailing token in resistor specification: {raw_name}"
+                        ),
+                    });
                 }
             }
             TokenKind::Number(_) => {
                 // Allow trailing unnamed numeric value as explicit resistance override.
                 value = Some(expect_value(stream, line_num, params)?);
                 value_expr = None;
+                consume_passive_unit_word(stream, PASSIVE_RESISTOR_UNITS);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
                 if let Some(expr) = take_value_expression_string(stream, params) {
@@ -180,7 +194,13 @@ pub(super) fn parse_resistor(
                 }
             }
             _ => {
-                stream.advance();
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unexpected trailing token in resistor specification: {}",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -199,7 +219,6 @@ pub(super) fn parse_resistor(
         });
     }
 
-    let mut instance_params = instance_params;
     let mut nodes = vec![node_pos, node_neg];
     expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
     elements.push(Element {
@@ -215,6 +234,32 @@ pub(super) fn parse_resistor(
     });
 
     Ok(())
+}
+
+fn resistor_model_token_is_followed_by_params(stream: &TokenStream) -> bool {
+    let mut offset = 0usize;
+    while matches!(stream.peek_n(offset).kind, TokenKind::Comma) {
+        offset += 1;
+    }
+
+    matches!(stream.peek_n(offset).kind, TokenKind::Ident(_))
+        && matches!(stream.peek_n(offset + 1).kind, TokenKind::Equals)
+}
+
+const PASSIVE_RESISTOR_UNITS: &[&str] = &["OHM", "OHMS"];
+const PASSIVE_CAPACITOR_UNITS: &[&str] = &["F", "FARAD", "FARADS"];
+const PASSIVE_INDUCTOR_UNITS: &[&str] = &["H", "HENRY", "HENRIES"];
+
+fn consume_passive_unit_word(stream: &mut TokenStream, allowed_units: &[&str]) {
+    let TokenKind::Ident(unit) = &stream.peek().kind else {
+        return;
+    };
+    if allowed_units
+        .iter()
+        .any(|allowed| unit.eq_ignore_ascii_case(allowed))
+    {
+        stream.advance();
+    }
 }
 
 /// Shared value/model/parameter tail for capacitors and inductors.
@@ -312,6 +357,7 @@ fn parse_passive_tail(
     params: &ParamContext,
     element_label: &str,
     value_keys: &[&str],
+    unit_words: &[&str],
     defer_simple_param_refs: bool,
 ) -> Result<PassiveTail, ParseError> {
     let mut tail = PassiveTail {
@@ -330,6 +376,7 @@ fn parse_passive_tail(
         match &stream.peek().kind {
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
+                consume_passive_unit_word(stream, unit_words);
             }
             TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
                 if defer_simple_param_refs && matches!(stream.peek().kind, TokenKind::Expression(_))
@@ -430,15 +477,30 @@ fn parse_passive_tail(
                             });
                         }
                     }
-                } else if tail.model.is_none() && tail.value.is_none() {
+                } else if tail.model.is_none() && tail.value.is_none() && tail.value_expr.is_none()
+                {
                     tail.model = Some(raw_name);
+                } else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Unexpected trailing token in {element_label} specification: {raw_name}"
+                        ),
+                    });
                 }
             }
             TokenKind::Number(_) => {
                 tail.value = Some(expect_value(stream, line_num, params)?);
+                consume_passive_unit_word(stream, unit_words);
             }
             _ => {
-                stream.advance();
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unexpected trailing token in {element_label} specification: {}",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -464,6 +526,7 @@ pub(super) fn parse_capacitor(
         params,
         "capacitor",
         &["C", "VALUE", "CAP"],
+        PASSIVE_CAPACITOR_UNITS,
         defer_simple_param_refs,
     )?;
 
@@ -511,6 +574,7 @@ pub(super) fn parse_inductor(
         params,
         "inductor",
         &["L", "VALUE", "IND"],
+        PASSIVE_INDUCTOR_UNITS,
         defer_simple_param_refs,
     )?;
 
@@ -638,17 +702,59 @@ pub(super) fn parse_diode(
                             });
                         }
                     }
+                    continue;
                 }
+
+                if !area_positional_seen
+                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
+                {
+                    instance_params.push(("AREA".to_string(), parsed));
+                    area_positional_seen = true;
+                    continue;
+                }
+
+                let message = if is_diode_assignment_name(&name_upper)
+                    && token_starts_unassigned_value(&stream.peek().kind, params)
+                {
+                    format!("diode parameter '{}' expected '=' before value", raw_name)
+                } else {
+                    format!(
+                        "Unsupported diode instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        raw_name
+                    )
+                };
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message,
+                });
             }
             TokenKind::Number(v) => {
                 if !area_positional_seen {
                     instance_params.push(("AREA".to_string(), *v));
                     area_positional_seen = true;
+                    stream.advance();
+                    continue;
                 }
-                stream.advance();
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Duplicate positional AREA for diode instance".to_string(),
+                });
             }
             _ => {
-                stream.advance();
+                if !area_positional_seen && let Some(value) = try_value(stream, params) {
+                    instance_params.push(("AREA".to_string(), value));
+                    area_positional_seen = true;
+                    continue;
+                }
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported diode instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -711,6 +817,16 @@ pub(super) fn parse_bjt(
                         // Pattern: model_name param=value
                         // first_ident is the model, don't treat next_ident as model
                         (None, first_ident)
+                    } else if is_bjt_assignment_name(&next_upper)
+                        && token_starts_unassigned_value(&stream.peek_n(1).kind, params)
+                    {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                "BJT parameter '{}' expected '=' before value",
+                                next_ident
+                            ),
+                        });
                     } else {
                         // Pattern: substrate model_name
                         // first is substrate node, second is model
@@ -743,6 +859,7 @@ pub(super) fn parse_bjt(
 
     let mut instance_params = Vec::new();
     let mut deferred_params = Vec::new();
+    let mut area_positional_seen = false;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -775,15 +892,60 @@ pub(super) fn parse_bjt(
                             });
                         }
                     }
+                    continue;
                 }
+
+                if !area_positional_seen
+                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
+                {
+                    instance_params.push(("AREA".to_string(), parsed));
+                    area_positional_seen = true;
+                    continue;
+                }
+
+                let message = if is_bjt_assignment_name(&name_upper)
+                    && token_starts_unassigned_value(&stream.peek().kind, params)
+                {
+                    format!("BJT parameter '{}' expected '=' before value", raw_name)
+                } else {
+                    format!(
+                        "Unsupported BJT instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        raw_name
+                    )
+                };
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message,
+                });
             }
             TokenKind::Number(v) => {
                 // Optional positional area scaling.
-                instance_params.push(("AREA".to_string(), *v));
-                stream.advance();
+                if !area_positional_seen {
+                    instance_params.push(("AREA".to_string(), *v));
+                    area_positional_seen = true;
+                    stream.advance();
+                    continue;
+                }
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Duplicate positional AREA for BJT instance".to_string(),
+                });
             }
             _ => {
-                stream.advance();
+                if !area_positional_seen && let Some(value) = try_value(stream, params) {
+                    instance_params.push(("AREA".to_string(), value));
+                    area_positional_seen = true;
+                    continue;
+                }
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported BJT instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -830,6 +992,25 @@ pub(super) fn parse_mosfet(
         if matches!(&stream.peek().kind, TokenKind::Ident(_))
             && !matches!(stream.peek_n(1).kind, TokenKind::Equals)
         {
+            if let TokenKind::Ident(raw_name) = &stream.peek().kind {
+                let name_upper = raw_name.to_ascii_uppercase();
+                if name_upper == "OFF" {
+                    break;
+                }
+
+                if !tail_tokens.is_empty()
+                    && is_mosfet_assignment_name(&name_upper)
+                    && mosfet_token_starts_unassigned_value(&stream.peek_n(1).kind, params)
+                {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "MOSFET parameter '{}' expected '=' before value",
+                            raw_name
+                        ),
+                    });
+                }
+            }
             tail_tokens.push(expect_node(stream, line_num)?);
             continue;
         }
@@ -861,7 +1042,24 @@ pub(super) fn parse_mosfet(
                 let name_upper = raw_name.to_ascii_uppercase();
                 stream.advance();
 
+                if name_upper == "OFF" && !matches!(stream.peek().kind, TokenKind::Equals) {
+                    instance_params.push(("OFF".to_string(), 1.0));
+                    continue;
+                }
+
                 if stream.consume(&TokenKind::Equals) {
+                    if name_upper == "IC" {
+                        parse_mosfet_ic_vector(
+                            stream,
+                            line_num,
+                            params,
+                            defer_simple_param_refs,
+                            &mut instance_params,
+                            &mut deferred_params,
+                        )?;
+                        continue;
+                    }
+
                     match take_deferrable_value(stream, params, defer_simple_param_refs) {
                         Some(DeferrableValue::Resolved(value)) => {
                             instance_params.push((name_upper, value));
@@ -879,11 +1077,24 @@ pub(super) fn parse_mosfet(
                             });
                         }
                     }
+                } else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "Unsupported MOSFET instance token '{}'; expected NAME=value or OFF",
+                            raw_name
+                        ),
+                    });
                 }
             }
             _ => {
-                // Ignore unsupported MOS instance tokens for now.
-                stream.advance();
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported MOSFET instance token '{}'; expected NAME=value or OFF",
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
@@ -903,6 +1114,110 @@ pub(super) fn parse_mosfet(
     Ok(())
 }
 
+fn parse_mosfet_ic_vector(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    instance_params: &mut Vec<(String, Value)>,
+    deferred_params: &mut Vec<(String, String)>,
+) -> Result<(), ParseError> {
+    for (idx, label) in ["IC_VDS", "IC_VGS", "IC_VBS"].iter().enumerate() {
+        let value = take_mosfet_ic_value(stream, line_num, params, defer_simple_param_refs)?;
+        match value {
+            DeferrableValue::Resolved(value) => instance_params.push(((*label).to_string(), value)),
+            DeferrableValue::Deferred(expr) => deferred_params.push(((*label).to_string(), expr)),
+        }
+
+        if idx == 2 || !stream.consume(&TokenKind::Comma) {
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn take_mosfet_ic_value(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+) -> Result<DeferrableValue, ParseError> {
+    if matches!(stream.peek().kind, TokenKind::Plus | TokenKind::Minus) {
+        return expect_value(stream, line_num, params).map(DeferrableValue::Resolved);
+    }
+
+    take_deferrable_value(stream, params, defer_simple_param_refs).ok_or_else(|| {
+        ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Expected value for MOSFET IC vector, found {}",
+                stream.peek().kind
+            ),
+        }
+    })
+}
+
+fn is_mosfet_assignment_name(name_upper: &str) -> bool {
+    matches!(
+        name_upper,
+        "L" | "W"
+            | "M"
+            | "NF"
+            | "AD"
+            | "AS"
+            | "PD"
+            | "PS"
+            | "NRD"
+            | "NRS"
+            | "SA"
+            | "SB"
+            | "SD"
+            | "SCA"
+            | "SCB"
+            | "SCC"
+            | "SC"
+            | "TEMP"
+            | "DTEMP"
+            | "IC"
+            | "VDS"
+            | "VGS"
+            | "VBS"
+            | "DELVTO"
+            | "GEOMOD"
+    )
+}
+
+fn is_diode_assignment_name(name_upper: &str) -> bool {
+    matches!(
+        name_upper,
+        "AREA" | "M" | "MULT" | "PJ" | "OFF" | "TEMP" | "DTEMP" | "IC" | "NOISY" | "NOISE"
+    )
+}
+
+fn is_bjt_assignment_name(name_upper: &str) -> bool {
+    matches!(
+        name_upper,
+        "AREA" | "AREAB" | "AREAC" | "M" | "MULT" | "OFF" | "TEMP" | "DTEMP" | "IC"
+    )
+}
+
+fn token_starts_unassigned_value(kind: &TokenKind, params: &ParamContext) -> bool {
+    match kind {
+        TokenKind::Number(_) | TokenKind::Expression(_) | TokenKind::Plus | TokenKind::Minus => {
+            true
+        }
+        TokenKind::Ident(name) => {
+            params.get(name).is_some() || crate::netlist::lexer::parse_spice_value(name).is_ok()
+        }
+        _ => false,
+    }
+}
+
+fn mosfet_token_starts_unassigned_value(kind: &TokenKind, params: &ParamContext) -> bool {
+    token_starts_unassigned_value(kind, params)
+}
+
 pub(super) fn parse_jfet(
     stream: &mut TokenStream,
     line_num: usize,
@@ -916,7 +1231,7 @@ pub(super) fn parse_jfet(
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
     let (instance_params, deferred_params) =
-        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs);
+        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "JFET")?;
 
     elements.push(Element {
         name,
@@ -946,7 +1261,7 @@ pub(super) fn parse_mesfet(
     let source = expect_node(stream, line_num)?;
     let model = expect_ident(stream, line_num)?;
     let (instance_params, deferred_params) =
-        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs);
+        parse_fet_instance_params(stream, line_num, params, defer_simple_param_refs, "MESFET")?;
 
     elements.push(Element {
         name,
@@ -962,12 +1277,15 @@ pub(super) fn parse_mesfet(
     Ok(())
 }
 
+type ParsedInstanceParams = (Vec<(String, Value)>, Vec<(String, String)>);
+
 pub(super) fn parse_fet_instance_params(
     stream: &mut TokenStream,
-    _line_num: usize,
+    line_num: usize,
     params: &ParamContext,
     defer_simple_param_refs: bool,
-) -> (Vec<(String, Value)>, Vec<(String, String)>) {
+    element_label: &str,
+) -> Result<ParsedInstanceParams, ParseError> {
     let mut instance_params = Vec::new();
     let mut deferred_params = Vec::new();
     let mut area_positional_seen = false;
@@ -992,19 +1310,39 @@ pub(super) fn parse_fet_instance_params(
                         Some(DeferrableValue::Deferred(expr)) => {
                             deferred_params.push((name_upper, expr));
                         }
-                        None => {}
+                        None => {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for {} parameter '{}'",
+                                    element_label, raw_name
+                                ),
+                            });
+                        }
                     }
                     continue;
                 }
 
                 if name_upper == "OFF" {
+                    instance_params.push(("OFF".to_string(), 1.0));
                     continue;
                 }
 
-                if !area_positional_seen && let Ok(parsed) = raw_name.parse::<f64>() {
+                if !area_positional_seen
+                    && let Ok(parsed) = crate::netlist::lexer::parse_spice_value(&raw_name)
+                {
                     instance_params.push(("AREA".to_string(), parsed));
                     area_positional_seen = true;
+                    continue;
                 }
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported {} instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        element_label, raw_name
+                    ),
+                });
             }
             _ => {
                 if !area_positional_seen && let Some(value) = try_value(stream, params) {
@@ -1012,12 +1350,20 @@ pub(super) fn parse_fet_instance_params(
                     area_positional_seen = true;
                     continue;
                 }
-                stream.advance();
+
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Unsupported {} instance token '{}'; expected NAME=value, positional AREA, or OFF",
+                        element_label,
+                        stream.peek().kind
+                    ),
+                });
             }
         }
     }
 
-    (instance_params, deferred_params)
+    Ok((instance_params, deferred_params))
 }
 
 /// Parse lossless transmission line (O element)
@@ -1284,7 +1630,12 @@ fn try_controlled_source_form(
 
 /// Collect a signed numeric list (POLY coefficients, TABLE pairs) to end of
 /// line, tolerating commas and parentheses as pair decoration.
-fn collect_numeric_tail(stream: &mut TokenStream, params: &ParamContext) -> Vec<Value> {
+fn collect_numeric_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    element_label: &str,
+) -> Result<Vec<Value>, ParseError> {
     let mut values = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
@@ -1295,21 +1646,50 @@ fn collect_numeric_tail(stream: &mut TokenStream, params: &ParamContext) -> Vec<
                 stream.advance();
                 if let Some(value) = try_value(stream, params) {
                     values.push(-value);
+                } else {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "{} numeric tail expected value after '-', found {}",
+                            element_label,
+                            stream.peek().kind
+                        ),
+                    });
                 }
             }
             TokenKind::Plus => {
                 stream.advance();
+                if !matches!(
+                    stream.peek().kind,
+                    TokenKind::Number(_) | TokenKind::Expression(_) | TokenKind::Ident(_)
+                ) {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "{} numeric tail expected value after '+', found {}",
+                            element_label,
+                            stream.peek().kind
+                        ),
+                    });
+                }
             }
             _ => {
                 if let Some(value) = try_value(stream, params) {
                     values.push(value);
                 } else {
-                    stream.advance();
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: format!(
+                            "{} numeric tail contains non-numeric token '{}'",
+                            element_label,
+                            stream.peek().kind
+                        ),
+                    });
                 }
             }
         }
     }
-    values
+    Ok(values)
 }
 
 /// Reconstruct a brace expression argument (`VALUE={...}` / `TABLE {...}`),
@@ -1361,12 +1741,12 @@ fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
     fn push_monomials(
         remaining_vars: &[String],
         degree: usize,
-        prefix: &mut Vec<(usize, usize)>, // (var index offset into vars, exponent)
+        prefix: &[(usize, usize)], // (var index offset into vars, exponent)
         out: &mut Vec<Vec<(usize, usize)>>,
         base_index: usize,
     ) {
         if remaining_vars.len() == 1 {
-            let mut term = prefix.clone();
+            let mut term = prefix.to_vec();
             if degree > 0 {
                 term.push((base_index, degree));
             }
@@ -1374,14 +1754,14 @@ fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
             return;
         }
         for first_exp in (0..=degree).rev() {
-            let mut term_prefix = prefix.clone();
+            let mut term_prefix = prefix.to_vec();
             if first_exp > 0 {
                 term_prefix.push((base_index, first_exp));
             }
             push_monomials(
                 &remaining_vars[1..],
                 degree - first_exp,
-                &mut term_prefix,
+                &term_prefix,
                 out,
                 base_index + 1,
             );
@@ -1402,8 +1782,8 @@ fn poly_expression(vars: &[String], coeffs: &[Value]) -> String {
     let mut degree = 0usize;
     while coeff_idx < coeffs.len() {
         let mut monomials = Vec::new();
-        let mut prefix = Vec::new();
-        push_monomials(vars, degree, &mut prefix, &mut monomials, 0);
+        let prefix = Vec::new();
+        push_monomials(vars, degree, &prefix, &mut monomials, 0);
         for monomial in monomials {
             if coeff_idx >= coeffs.len() {
                 break;
@@ -1467,6 +1847,25 @@ fn unsupported_form_error(line_num: usize, element: &str, form: &str) -> ParseEr
     }
 }
 
+fn reject_unexpected_controlled_source_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    element: &str,
+) -> Result<(), ParseError> {
+    skip_commas(stream);
+    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Ok(());
+    }
+
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Unexpected trailing token in {element} source specification: {}",
+            stream.peek().kind
+        ),
+    })
+}
+
 /// Shared implementation for E (VCVS) and G (VCCS) parsing, covering the
 /// linear, POLY, VALUE, and TABLE forms. Extended forms lower onto the
 /// behavioral-source engine, which provides Newton linearization, AC
@@ -1512,7 +1911,7 @@ fn parse_voltage_controlled_source(
                 let cn = expect_node(stream, line_num)?;
                 vars.push(format!("V({},{})", cp, cn));
             }
-            let coeffs = collect_numeric_tail(stream, params);
+            let coeffs = collect_numeric_tail(stream, line_num, params, element_label)?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -1540,8 +1939,8 @@ fn parse_voltage_controlled_source(
             let input_expr =
                 collect_expression_argument(stream, line_num, Some(&TokenKind::Equals))?;
             stream.consume(&TokenKind::Equals);
-            let flat = collect_numeric_tail(stream, params);
-            if flat.len() < 4 || flat.len() % 2 != 0 {
+            let flat = collect_numeric_tail(stream, line_num, params, element_label)?;
+            if flat.len() < 4 || !flat.len().is_multiple_of(2) {
                 return Err(ParseError::Syntax {
                     line: line_num,
                     message: format!("{} TABLE requires at least two (x,y) pairs", element_label),
@@ -1591,6 +1990,7 @@ fn parse_voltage_controlled_source(
                     control_nodes: (ctrl_pos, ctrl_neg),
                 }
             };
+            reject_unexpected_controlled_source_tail(stream, line_num, element_label)?;
             elements.push(Element {
                 name,
                 kind,
@@ -1629,7 +2029,7 @@ fn parse_current_controlled_source(
                 let source = expect_ident(stream, line_num)?;
                 vars.push(format!("I({})", source));
             }
-            let coeffs = collect_numeric_tail(stream, params);
+            let coeffs = collect_numeric_tail(stream, line_num, params, element_label)?;
             if coeffs.is_empty() {
                 return Err(ParseError::Syntax {
                     line: line_num,
@@ -1683,6 +2083,7 @@ fn parse_current_controlled_source(
                     control_element,
                 }
             };
+            reject_unexpected_controlled_source_tail(stream, line_num, element_label)?;
             elements.push(Element {
                 name,
                 kind,

@@ -22,6 +22,7 @@ pub(super) fn parse_command(
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
+    let mut require_line_consumed = true;
 
     match cmd.as_str() {
         ".OP" => {
@@ -186,6 +187,7 @@ pub(super) fn parse_command(
         ".INCLUDE" | ".INC" => {
             // Include directives are handled in a preprocessing pass
             log::debug!("Include directive found: line {}", line_num);
+            require_line_consumed = false;
         }
         ".SPEF_INCLUDE" => {
             // SPEF parasitics back-annotate after parsing (netlist::spef);
@@ -206,6 +208,7 @@ pub(super) fn parse_command(
         ".LIB" => {
             // Library directives are handled in a preprocessing pass
             log::debug!("Library directive found: line {}", line_num);
+            require_line_consumed = false;
         }
         ".GLOBAL" => {
             parse_global_command(stream, line_num, global_nodes)?;
@@ -242,10 +245,34 @@ pub(super) fn parse_command(
                      whatever it requests (analysis, option, output) will not run"
                 );
             }
+            require_line_consumed = false;
         }
     }
 
+    if require_line_consumed {
+        reject_unconsumed_command_tokens(stream, line_num, &cmd)?;
+    }
+
     Ok(())
+}
+
+fn reject_unconsumed_command_tokens(
+    stream: &mut TokenStream,
+    line_num: usize,
+    command: &str,
+) -> Result<(), ParseError> {
+    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Ok(());
+    }
+
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "{} has unexpected trailing token {:?}",
+            command,
+            stream.peek().kind
+        ),
+    })
 }
 
 /// Parse a `.SAVE`/`.PROBE`/`.PRINT`/`.PLOT` probe list into the netlist's
@@ -487,33 +514,68 @@ pub(super) fn parse_options_command(
         let has_equals = stream.consume(&TokenKind::Equals);
 
         match key_upper.as_str() {
-            "RELTOL" => options.reltol = Some(expect_value(stream, line_num, params)?),
-            "ABSTOL" => options.abstol = Some(expect_value(stream, line_num, params)?),
-            "VNTOL" => options.vntol = Some(expect_value(stream, line_num, params)?),
-            "IABSTOL" => options.iabstol = Some(expect_value(stream, line_num, params)?),
-            "RESIDUAL_RELTOL" | "RESRELTOL" => {
-                options.residual_reltol = Some(expect_value(stream, line_num, params)?)
+            "RELTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.reltol = Some(parse_positive_real_option("RELTOL", value, line_num)?);
             }
-            "GMIN" => options.gmin = Some(expect_value(stream, line_num, params)?),
-            "TRTOL" => options.trtol = Some(expect_value(stream, line_num, params)?),
-            "CHGTOL" => options.chgtol = Some(expect_value(stream, line_num, params)?),
-            "PIVTOL" => options.pivtol = Some(expect_value(stream, line_num, params)?),
-            "TEMP" => options.temp = Some(expect_value(stream, line_num, params)?),
-            "TNOM" => options.tnom = Some(expect_value(stream, line_num, params)?),
+            "ABSTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.abstol = Some(parse_positive_real_option("ABSTOL", value, line_num)?);
+            }
+            "VNTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.vntol = Some(parse_positive_real_option("VNTOL", value, line_num)?);
+            }
+            "IABSTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.iabstol = Some(parse_positive_real_option("IABSTOL", value, line_num)?);
+            }
+            "RESIDUAL_RELTOL" | "RESRELTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.residual_reltol = Some(parse_positive_real_option(
+                    "RESIDUAL_RELTOL",
+                    value,
+                    line_num,
+                )?);
+            }
+            "GMIN" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.gmin = Some(parse_non_negative_real_option("GMIN", value, line_num)?);
+            }
+            "TRTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.trtol = Some(parse_positive_real_option("TRTOL", value, line_num)?);
+            }
+            "CHGTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.chgtol = Some(parse_positive_real_option("CHGTOL", value, line_num)?);
+            }
+            "PIVTOL" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.pivtol = Some(parse_positive_real_option("PIVTOL", value, line_num)?);
+            }
+            "TEMP" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.temp = Some(parse_celsius_option("TEMP", value, line_num)?);
+            }
+            "TNOM" => {
+                let value = expect_value(stream, line_num, params)?;
+                options.tnom = Some(parse_celsius_option("TNOM", value, line_num)?);
+            }
             "SEED" | "RNDSEED" => {
                 // The parse pre-scan applies the seed before any parameter
                 // evaluation; this arm validates and records it for
                 // downstream drivers (e.g. per-run Monte-Carlo streams).
-                if let TokenKind::Ident(word) = &stream.peek().kind {
-                    if word.eq_ignore_ascii_case("random") {
-                        stream.advance();
-                        log::warn!(
-                            "line {line_num}: `.options seed=random` is not supported; \
-                             the deterministic default seed is used (set an explicit \
-                             integer seed to vary the stream)"
-                        );
-                        continue;
-                    }
+                if let TokenKind::Ident(word) = &stream.peek().kind
+                    && word.eq_ignore_ascii_case("random")
+                {
+                    stream.advance();
+                    log::warn!(
+                        "line {line_num}: `.options seed=random` is not supported; \
+                         the deterministic default seed is used (set an explicit \
+                         integer seed to vary the stream)"
+                    );
+                    continue;
                 }
                 let value = expect_value(stream, line_num, params)?;
                 options.seed = Some(parse_seed_option(value, line_num)?);
@@ -611,6 +673,54 @@ pub(super) fn parse_seed_option(value: Value, line_num: usize) -> Result<u64, Pa
         });
     }
     Ok(rounded as u64)
+}
+
+pub(super) fn parse_positive_real_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<Value, ParseError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{} must be a positive finite number, found {}", name, value),
+        });
+    }
+    Ok(value)
+}
+
+pub(super) fn parse_non_negative_real_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<Value, ParseError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{} must be a finite non-negative number, found {}",
+                name, value
+            ),
+        });
+    }
+    Ok(value)
+}
+
+pub(super) fn parse_celsius_option(
+    name: &str,
+    value: Value,
+    line_num: usize,
+) -> Result<Value, ParseError> {
+    if !value.is_finite() || value <= -273.15 {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{} must be finite and above absolute zero, found {} C",
+                name, value
+            ),
+        });
+    }
+    Ok(value)
 }
 
 pub(super) fn parse_usize_option(
@@ -1104,6 +1214,11 @@ pub(super) fn parse_measure_range_options(
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         match &stream.peek().kind {
             TokenKind::Ident(s)
+                if s.eq_ignore_ascii_case("GOAL") || s.eq_ignore_ascii_case("TOL") =>
+            {
+                break;
+            }
+            TokenKind::Ident(s)
                 if s.eq_ignore_ascii_case("FROM") || s.eq_ignore_ascii_case("TO") =>
             {
                 let key = s.to_ascii_uppercase();
@@ -1265,4 +1380,60 @@ pub(super) fn consume_uic_keyword(stream: &mut TokenStream) -> bool {
         return true;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::Netlist;
+
+    fn deck_with_options(options: &str) -> String {
+        format!(
+            "options test\n\
+             {options}\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             .op\n\
+             .end\n"
+        )
+    }
+
+    #[test]
+    fn options_reject_invalid_solver_real_values() {
+        for options in [
+            ".options reltol=0",
+            ".options reltol=-1e-3",
+            ".options abstol=0",
+            ".options vntol=-1n",
+            ".options iabstol=0",
+            ".options residual_reltol=-1e-3",
+            ".options trtol=0",
+            ".options chgtol=-1e-15",
+            ".options pivtol=0",
+            ".options gmin=-1e-12",
+        ] {
+            let err = Netlist::parse(&deck_with_options(options))
+                .expect_err("invalid .OPTIONS value must fail parsing");
+            assert!(
+                err.to_string().contains("Syntax error"),
+                "unexpected error for {options}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn options_reject_non_finite_or_nonphysical_temperature() {
+        for options in [
+            ".options temp=1e309",
+            ".options temp=-273.15",
+            ".options tnom=1e309",
+            ".options tnom=-300",
+        ] {
+            let err = Netlist::parse(&deck_with_options(options))
+                .expect_err("invalid temperature option must fail parsing");
+            assert!(
+                err.to_string().contains("absolute zero") || err.to_string().contains("finite"),
+                "unexpected error for {options}: {err}"
+            );
+        }
+    }
 }

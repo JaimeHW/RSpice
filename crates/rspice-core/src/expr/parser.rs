@@ -33,6 +33,7 @@ impl std::error::Error for ParseError {}
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Number(f64),
+    InvalidNumber(String),
     Ident(String),
     // Operators
     Plus,
@@ -82,7 +83,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn read_number(&mut self) -> f64 {
+    fn read_number(&mut self) -> Token {
         let mut s = String::new();
         while let Some(&c) = self.chars.peek() {
             if c.is_ascii_digit() || c == '.' {
@@ -114,7 +115,10 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let base: f64 = s.parse().unwrap_or(0.0);
+        let base: f64 = match s.parse() {
+            Ok(value) => value,
+            Err(_) => return Token::InvalidNumber(s),
+        };
 
         // ngspice B-source numbers go through INPevaluate: an engineering
         // suffix may follow the digits (even after an exponent, `1e3k` =
@@ -147,7 +151,7 @@ impl<'a> Lexer<'a> {
             };
         }
 
-        base * multiplier
+        Token::Number(base * multiplier)
     }
 
     fn read_ident(&mut self) -> String {
@@ -168,7 +172,7 @@ impl<'a> Lexer<'a> {
         match self.chars.peek() {
             None => Token::Eof,
             Some(&c) => match c {
-                '0'..='9' | '.' => Token::Number(self.read_number()),
+                '0'..='9' | '.' => self.read_number(),
                 'a'..='z' | 'A'..='Z' | '_' => Token::Ident(self.read_ident()),
                 '+' => {
                     self.chars.next();
@@ -309,6 +313,9 @@ impl<'a> Parser<'a> {
                 Token::Invalid(c) => self
                     .errors
                     .push(format!("Invalid character '{}' in expression", c)),
+                Token::InvalidNumber(ref s) => self
+                    .errors
+                    .push(format!("Invalid number '{}' in expression", s)),
                 _ => self.errors.push(format!(
                     "Unexpected trailing token in expression: {:?}",
                     self.current
@@ -499,6 +506,12 @@ impl<'a> Parser<'a> {
             Token::Invalid(c) => {
                 self.errors
                     .push(format!("Invalid character '{}' in expression", c));
+                self.advance();
+                Expr::Const(0.0)
+            }
+            Token::InvalidNumber(s) => {
+                self.errors
+                    .push(format!("Invalid number '{}' in expression", s));
                 self.advance();
                 Expr::Const(0.0)
             }
@@ -711,5 +724,17 @@ mod tests {
         assert_eq!(eval_const("100n"), 100.0 * 1e-9);
         assert_eq!(eval_const("1a"), 1e-18);
         assert_eq!(eval_const("5xyz"), 5.0);
+    }
+
+    #[test]
+    fn invalid_numeric_lexemes_are_rejected_in_strict_parse() {
+        for input in [".", "1..2"] {
+            let err = parse_expression_strict(input)
+                .expect_err("invalid numeric expression must not be coerced to zero");
+            assert!(
+                err.to_string().contains("Invalid number"),
+                "unexpected error for {input}: {err}"
+            );
+        }
     }
 }

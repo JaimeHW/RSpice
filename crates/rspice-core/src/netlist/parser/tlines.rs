@@ -2,6 +2,25 @@
 
 use super::*;
 
+fn reject_unexpected_tail(
+    stream: &mut TokenStream,
+    line_num: usize,
+    element_label: &str,
+) -> Result<(), ParseError> {
+    skip_commas(stream);
+    if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        return Ok(());
+    }
+
+    Err(ParseError::Syntax {
+        line: line_num,
+        message: format!(
+            "Unexpected trailing token in {element_label} specification: {}",
+            stream.peek().kind
+        ),
+    })
+}
+
 /// Parse coupling coefficient: K1 L1 L2 [L3...] coefficient
 pub(super) fn parse_coupling(
     stream: &mut TokenStream,
@@ -49,9 +68,15 @@ pub(super) fn parse_coupling(
     }
 
     let coefficient = expect_value(stream, line_num, params)?;
-
-    // Clamp coefficient to valid range
-    let coefficient = coefficient.abs().min(1.0);
+    if !coefficient.is_finite() || !(0.0..=1.0).contains(&coefficient) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Invalid coupling coefficient {coefficient}: expected a finite value in [0, 1]"
+            ),
+        });
+    }
+    reject_unexpected_tail(stream, line_num, "coupling")?;
 
     elements.push(Element {
         name,
@@ -80,6 +105,7 @@ pub(super) fn parse_vswitch(
 
     // Optional initial state
     let initial_state = parse_switch_state(stream);
+    reject_unexpected_tail(stream, line_num, "voltage-controlled switch")?;
 
     elements.push(Element {
         name,
@@ -109,6 +135,7 @@ pub(super) fn parse_iswitch(
 
     // Optional initial state
     let initial_state = parse_switch_state(stream);
+    reject_unexpected_tail(stream, line_num, "current-controlled switch")?;
 
     elements.push(Element {
         name,
@@ -208,13 +235,24 @@ pub(super) fn parse_tline_params(
                 parsed.z0 = Some(v);
             } else if parsed.td.is_none() {
                 parsed.td = Some(v);
+            } else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Transmission line has too many positional numeric parameters"
+                        .to_string(),
+                });
             }
             continue;
         }
 
         let TokenKind::Ident(token) = &stream.peek().kind else {
-            stream.advance();
-            continue;
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unsupported transmission-line parameter token '{}'",
+                    stream.peek().kind
+                ),
+            });
         };
 
         let token = token.clone();
@@ -257,8 +295,10 @@ pub(super) fn parse_tline_params(
                 parsed.model = Some(expect_ident(stream, line_num)?);
             }
             _ => {
-                // Unknown key/value token; skip one optional value token if present.
-                let _ = try_value(stream, params);
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!("Unsupported transmission-line parameter '{}'", token),
+                });
             }
         }
     }

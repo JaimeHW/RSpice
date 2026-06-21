@@ -74,6 +74,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
     let mut line_num = 1;
     let mut continuation = String::new();
     let mut skipping_data_block = false;
+    let mut data_block_line = None;
 
     for line in lines.iter().skip(1) {
         line_num += 1;
@@ -93,6 +94,7 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         if skipping_data_block {
             if head.eq_ignore_ascii_case(".enddata") {
                 skipping_data_block = false;
+                data_block_line = None;
             }
             continue;
         }
@@ -126,7 +128,14 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
         }
         if head.eq_ignore_ascii_case(".data") {
             skipping_data_block = true;
+            data_block_line = Some(line_num);
             continue;
+        }
+        if head.eq_ignore_ascii_case(".enddata") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".ENDDATA without matching .DATA".to_string(),
+            });
         }
 
         // Handle .VERILOGA directive directly (before continuation handling)
@@ -138,6 +147,13 @@ pub fn parse_netlist(input: &str) -> Result<Netlist, ParseError> {
 
         // Start new continuation or process line
         continuation = trimmed.to_string();
+    }
+
+    if let Some(opened_at_line) = data_block_line {
+        return Err(ParseError::Syntax {
+            line: opened_at_line,
+            message: ".DATA without a matching .ENDDATA".to_string(),
+        });
     }
 
     // Process final line

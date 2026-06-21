@@ -120,23 +120,41 @@ pub(super) struct ParsedModelParams {
 
 pub(super) fn parse_model_params(
     stream: &mut TokenStream,
+    line_num: usize,
     params: &ParamContext,
 ) -> Result<ParsedModelParams, ParseError> {
     let mut numeric_params = Vec::new();
     let mut expr_params = Vec::new();
     let mut string_params = Vec::new();
 
-    // Skip optional opening paren
-    stream.consume(&TokenKind::LParen);
+    let opened_paren = stream.consume(&TokenKind::LParen);
 
-    while !stream.is_eof() {
+    loop {
         skip_commas(stream);
 
-        if matches!(
-            stream.peek().kind,
-            TokenKind::RParen | TokenKind::Newline | TokenKind::Eof
-        ) {
-            break;
+        match &stream.peek().kind {
+            TokenKind::RParen if opened_paren => {
+                stream.advance();
+                return Ok(ParsedModelParams {
+                    numeric: numeric_params,
+                    expr: expr_params,
+                    string: string_params,
+                });
+            }
+            TokenKind::RParen => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Unexpected ')' in .MODEL parameter list".to_string(),
+                });
+            }
+            TokenKind::Newline | TokenKind::Eof if opened_paren => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: "Parenthesized .MODEL parameter list is missing ')'".to_string(),
+                });
+            }
+            TokenKind::Newline | TokenKind::Eof => break,
+            _ => {}
         }
 
         // Look for NAME=VALUE
@@ -163,6 +181,15 @@ pub(super) fn parse_model_params(
                     _ => {
                         if let Some(value) = try_signed_model_value(stream, params) {
                             numeric_params.push((name, value));
+                        } else {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: format!(
+                                    "Expected value for model parameter '{}', found {}",
+                                    name,
+                                    stream.peek().kind
+                                ),
+                            });
                         }
                     }
                 }
@@ -170,12 +197,15 @@ pub(super) fn parse_model_params(
                 numeric_params.push((name, 1.0));
             }
         } else {
-            stream.advance(); // Skip unknown token
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token in .MODEL parameter list: {}",
+                    stream.peek().kind
+                ),
+            });
         }
     }
-
-    // Skip optional closing paren
-    stream.consume(&TokenKind::RParen);
 
     Ok(ParsedModelParams {
         numeric: numeric_params,
@@ -301,12 +331,12 @@ pub(super) fn try_signed_model_value(
         TokenKind::Minus => Some(-1.0),
         _ => None,
     };
-    if let Some(sign) = sign {
-        if token_is_value_like(&stream.peek_n(1).kind, params) {
-            stream.advance();
-            if let Some(magnitude) = try_value_unsigned(stream, params) {
-                return Some(sign * magnitude);
-            }
+    if let Some(sign) = sign
+        && token_is_value_like(&stream.peek_n(1).kind, params)
+    {
+        stream.advance();
+        if let Some(magnitude) = try_value_unsigned(stream, params) {
+            return Some(sign * magnitude);
         }
     }
     try_value_unsigned(stream, params)
@@ -389,15 +419,6 @@ pub(super) fn take_value_expression_string(
         }
         _ => None,
     }
-}
-
-pub(super) fn expect_value_default(
-    stream: &mut TokenStream,
-    params: &ParamContext,
-    default: Value,
-) -> Value {
-    skip_commas(stream);
-    try_value(stream, params).unwrap_or(default)
 }
 
 /// An instance-parameter value: resolved at parse time, or captured as

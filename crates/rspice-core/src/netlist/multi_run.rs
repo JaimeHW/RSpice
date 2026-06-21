@@ -32,6 +32,32 @@ pub struct RunDeck {
     pub source: String,
 }
 
+/// Error raised while expanding HSPICE-style `.ALTER` / `.DATA` constructs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MultiRunError {
+    message: String,
+}
+
+impl MultiRunError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for MultiRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for MultiRunError {}
+
 /// One `.ALTER` block: its title and raw body lines.
 #[derive(Debug, Clone)]
 struct AlterBlock {
@@ -50,15 +76,33 @@ struct DataTable {
 /// Expand a deck into its concrete runs. Decks without `.ALTER`/`.DATA`
 /// constructs pass through untouched as a single unlabeled run.
 pub fn expand_multi_run(source: &str) -> Vec<RunDeck> {
+    match try_expand_multi_run(source) {
+        Ok(decks) => decks,
+        Err(error) => {
+            log::warn!("multi-run expansion failed: {error}");
+            vec![RunDeck {
+                label: None,
+                source: source.to_owned(),
+            }]
+        }
+    }
+}
+
+/// Checked expansion for production callers. Malformed `.DATA` constructs
+/// return an error instead of silently dropping values or running the base deck.
+pub fn try_expand_multi_run(source: &str) -> Result<Vec<RunDeck>, MultiRunError> {
     let has_multi_run = source.lines().any(|line| {
         let token = first_token(line);
-        token.eq_ignore_ascii_case(".alter") || token.eq_ignore_ascii_case(".data")
+        token.eq_ignore_ascii_case(".alter")
+            || token.eq_ignore_ascii_case(".data")
+            || token.eq_ignore_ascii_case(".enddata")
+            || references_data_table(line)
     });
     if !has_multi_run {
-        return vec![RunDeck {
+        return Ok(vec![RunDeck {
             label: None,
             source: source.to_owned(),
-        }];
+        }]);
     }
 
     let (base, alters) = split_alters(source);
@@ -87,12 +131,18 @@ pub fn expand_multi_run(source: &str) -> Vec<RunDeck> {
 
     let mut decks = Vec::new();
     for (label, lines) in variants {
-        let (tables, mut lines) = extract_data_tables(lines);
-        let reference = find_data_reference(&lines, &tables);
+        let (tables, mut lines) = extract_data_tables(lines)?;
+        let reference = find_data_reference(&lines, &tables)?;
 
         match reference {
             Some((table_index, _)) => {
                 let table = &tables[table_index];
+                if table.rows.is_empty() {
+                    return Err(MultiRunError::new(format!(
+                        ".data {} has no rows",
+                        table.name
+                    )));
+                }
                 strip_data_tokens(&mut lines);
                 for (row_index, row) in table.rows.iter().enumerate() {
                     let mut run_lines = lines.clone();
@@ -115,7 +165,7 @@ pub fn expand_multi_run(source: &str) -> Vec<RunDeck> {
             }),
         }
     }
-    decks
+    Ok(decks)
 }
 
 /// Reassemble deck lines with a terminating `.end`.
@@ -145,7 +195,6 @@ fn split_alters(source: &str) -> (Vec<String>, Vec<AlterBlock>) {
         let token = first_token(line);
         if token.eq_ignore_ascii_case(".alter") {
             let title = line
-                .trim_start()
                 .split_whitespace()
                 .skip(1)
                 .collect::<Vec<_>>()
@@ -211,11 +260,11 @@ fn apply_alter(lines: &mut Vec<String>, block: &AlterBlock) {
 fn statements(lines: &[String]) -> Vec<Vec<String>> {
     let mut out: Vec<Vec<String>> = Vec::new();
     for line in lines {
-        if line.trim_start().starts_with('+') {
-            if let Some(last) = out.last_mut() {
-                last.push(line.clone());
-                continue;
-            }
+        if line.trim_start().starts_with('+')
+            && let Some(last) = out.last_mut()
+        {
+            last.push(line.clone());
+            continue;
         }
         out.push(vec![line.clone()]);
     }
@@ -375,24 +424,31 @@ fn scan_assignments(line: &str) -> Vec<(String, usize, usize)> {
 
 /// Pull `.DATA … .ENDDATA` blocks out of the deck, returning the parsed
 /// tables and the deck lines with the blocks removed.
-fn extract_data_tables(lines: Vec<String>) -> (Vec<DataTable>, Vec<String>) {
+fn extract_data_tables(lines: Vec<String>) -> Result<(Vec<DataTable>, Vec<String>), MultiRunError> {
     let mut tables: Vec<DataTable> = Vec::new();
     let mut kept = Vec::with_capacity(lines.len());
     let mut current: Option<DataTable> = None;
     let mut flat_values: Vec<Value> = Vec::new();
 
-    for line in lines {
+    for (line_index, line) in lines.into_iter().enumerate() {
+        let line_number = line_index + 1;
         let token = first_token(&line);
         if let Some(table) = current.as_mut() {
             if token.eq_ignore_ascii_case(".enddata") {
-                let columns = table.params.len().max(1);
-                if flat_values.len() % columns != 0 {
-                    log::warn!(
-                        ".data {}: {} values do not fill {} columns; trailing values dropped",
+                if table.params.is_empty() {
+                    return Err(MultiRunError::new(format!(
+                        ".data {} has no parameter columns",
+                        table.name
+                    )));
+                }
+                let columns = table.params.len();
+                if !flat_values.len().is_multiple_of(columns) {
+                    return Err(MultiRunError::new(format!(
+                        ".data {} has {} values, which does not fill {} columns",
                         table.name,
                         flat_values.len(),
                         columns
-                    );
+                    )));
                 }
                 table.rows = flat_values
                     .chunks_exact(columns)
@@ -409,18 +465,27 @@ fn extract_data_tables(lines: Vec<String>) -> (Vec<DataTable>, Vec<String>) {
                     match parse_spice_value(raw) {
                         Ok(value) => flat_values.push(value),
                         Err(_) => {
-                            log::warn!(".data {}: skipping non-numeric token `{raw}`", table.name)
+                            return Err(MultiRunError::new(format!(
+                                ".data {} line {} contains non-numeric token `{raw}`",
+                                table.name, line_number
+                            )));
                         }
                     }
                 }
             }
             continue;
         }
+        if token.eq_ignore_ascii_case(".enddata") {
+            return Err(MultiRunError::new(format!(
+                ".enddata without matching .data at line {line_number}"
+            )));
+        }
         if token.eq_ignore_ascii_case(".data") {
             let mut fields = line.split_whitespace().skip(1);
             let Some(name) = fields.next() else {
-                log::warn!(".data without a table name; block ignored");
-                continue;
+                return Err(MultiRunError::new(format!(
+                    ".data at line {line_number} is missing a table name"
+                )));
             };
             current = Some(DataTable {
                 name: name.to_owned(),
@@ -433,14 +498,20 @@ fn extract_data_tables(lines: Vec<String>) -> (Vec<DataTable>, Vec<String>) {
     }
 
     if let Some(table) = current {
-        log::warn!(".data {} not closed by .enddata; block ignored", table.name);
+        return Err(MultiRunError::new(format!(
+            ".data {} not closed by .enddata",
+            table.name
+        )));
     }
-    (tables, kept)
+    Ok((tables, kept))
 }
 
 /// Find the first analysis line referencing `DATA=<table>`, resolved
 /// against the extracted tables. Returns `(table_index, line_index)`.
-fn find_data_reference(lines: &[String], tables: &[DataTable]) -> Option<(usize, usize)> {
+fn find_data_reference(
+    lines: &[String],
+    tables: &[DataTable],
+) -> Result<Option<(usize, usize)>, MultiRunError> {
     for (line_index, line) in lines.iter().enumerate() {
         if !is_sweep_analysis(line) {
             continue;
@@ -452,11 +523,16 @@ fn find_data_reference(lines: &[String], tables: &[DataTable]) -> Option<(usize,
             .iter()
             .position(|table| table.name.eq_ignore_ascii_case(&name))
         {
-            Some(table_index) => return Some((table_index, line_index)),
-            None => log::warn!("analysis references unknown .data table `{name}`"),
+            Some(table_index) => return Ok(Some((table_index, line_index))),
+            None => {
+                return Err(MultiRunError::new(format!(
+                    "analysis line {} references unknown .data table `{name}`",
+                    line_index + 1
+                )));
+            }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Whether a statement is an analysis line referencing a `.DATA` table —
@@ -655,6 +731,55 @@ mod tests {
         assert!(!decks[0].source.to_lowercase().contains("data=tbl"));
         // The table block itself is stripped from the emitted decks.
         assert!(!decks[0].source.to_lowercase().contains(".enddata"));
+    }
+
+    #[test]
+    fn checked_data_sweep_rejects_malformed_tables() {
+        let cases = [
+            (
+                "ragged",
+                "t\n.data tbl vdd rl\n1.0 1k\n2.0\n.enddata\n.dc data=tbl\n.end\n",
+                "does not fill 2 columns",
+            ),
+            (
+                "non_numeric",
+                "t\n.data tbl vdd\n1.0\nbad\n.enddata\n.dc data=tbl\n.end\n",
+                "non-numeric token `bad`",
+            ),
+            (
+                "unclosed",
+                "t\n.data tbl vdd\n1.0\n",
+                "not closed by .enddata",
+            ),
+            (
+                "missing_name",
+                "t\n.data\n1.0\n.enddata\n.dc data=tbl\n.end\n",
+                "missing a table name",
+            ),
+            (
+                "empty",
+                "t\n.data tbl vdd\n.enddata\n.dc data=tbl\n.end\n",
+                ".data tbl has no rows",
+            ),
+            (
+                "unknown_reference",
+                "t\nV1 a 0 1\n.dc data=missing\n.end\n",
+                "unknown .data table `missing`",
+            ),
+            (
+                "dangling_enddata",
+                "t\nV1 a 0 1\n.enddata\n.op\n.end\n",
+                ".enddata without matching .data",
+            ),
+        ];
+
+        for (label, source, needle) in cases {
+            let err = try_expand_multi_run(source).expect_err(&format!("{label} should reject"));
+            assert!(
+                err.to_string().contains(needle),
+                "{label}: expected `{needle}`, got `{err}`"
+            );
+        }
     }
 
     #[test]

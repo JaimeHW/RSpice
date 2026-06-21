@@ -112,10 +112,11 @@ pub(super) fn process_line(
         return Ok(());
     }
 
+    let head = line.split_whitespace().next().unwrap_or("");
     let upper = line.to_uppercase();
 
     // Check for .SUBCKT start
-    if upper.starts_with(".SUBCKT") {
+    if head.eq_ignore_ascii_case(".subckt") {
         let subckt = parse_subckt_def(line, line_num)?;
         let parent_scope = state
             .subckt_stack
@@ -141,37 +142,69 @@ pub(super) fn process_line(
     }
 
     // Check for .ENDS
-    if upper.starts_with(".ENDS") {
-        if let Some(mut frame) = state.subckt_stack.pop() {
-            let mut visible_model_aliases = HashMap::new();
-            for ancestor in &state.subckt_stack {
-                for (alias, qualified) in &ancestor.local_model_aliases {
-                    visible_model_aliases.insert(alias.clone(), qualified.clone());
-                }
-            }
-            for (alias, qualified) in &frame.local_model_aliases {
+    if head.eq_ignore_ascii_case(".ends") {
+        let mut fields = line.split_whitespace();
+        fields.next();
+        let end_name = fields.next();
+        if let Some(extra) = fields.next() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".ENDS has unexpected trailing token `{extra}`"),
+            });
+        }
+
+        let Some(open_frame) = state.subckt_stack.last() else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: ".ENDS without matching .SUBCKT".to_string(),
+            });
+        };
+
+        if let Some(end_name) = end_name
+            && !end_name.eq_ignore_ascii_case(&open_frame.def.name)
+            && !end_name.eq_ignore_ascii_case(&open_frame.qualified_name)
+        {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    ".ENDS `{end_name}` does not match open .SUBCKT `{}`",
+                    open_frame.def.name
+                ),
+            });
+        }
+
+        let mut frame = state
+            .subckt_stack
+            .pop()
+            .expect("open .SUBCKT frame checked before pop");
+        let mut visible_model_aliases = HashMap::new();
+        for ancestor in &state.subckt_stack {
+            for (alias, qualified) in &ancestor.local_model_aliases {
                 visible_model_aliases.insert(alias.clone(), qualified.clone());
             }
-
-            rewrite_scoped_references(
-                &mut frame.def.elements,
-                &frame.nested_aliases,
-                &visible_model_aliases,
-            );
-
-            let original_name = frame.def.name.to_ascii_uppercase();
-            frame.def.name = frame.qualified_name.clone();
-            let finalized = frame.def;
-
-            if let Some(parent) = state.subckt_stack.last_mut() {
-                parent
-                    .nested_aliases
-                    .insert(original_name, finalized.name.clone());
-                parent.def.nested_subcircuits.push(finalized.clone());
-            }
-
-            state.subcircuits.push(finalized);
         }
+        for (alias, qualified) in &frame.local_model_aliases {
+            visible_model_aliases.insert(alias.clone(), qualified.clone());
+        }
+
+        rewrite_scoped_references(
+            &mut frame.def.elements,
+            &frame.nested_aliases,
+            &visible_model_aliases,
+        );
+
+        let original_name = frame.def.name.to_ascii_uppercase();
+        frame.def.name = frame.qualified_name.clone();
+        let finalized = frame.def;
+
+        if let Some(parent) = state.subckt_stack.last_mut() {
+            parent
+                .nested_aliases
+                .insert(original_name, finalized.name.clone());
+            parent.def.nested_subcircuits.push(finalized.clone());
+        }
+
+        state.subcircuits.push(finalized);
         return Ok(());
     }
 
