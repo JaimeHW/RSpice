@@ -394,9 +394,71 @@ fn interpolate_compares_across_different_grids() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// NaN never matches, including NaN-vs-NaN.
 #[test]
-fn nan_values_fail_comparison() {
+fn compare_variable_filter_matches_complex_signal_aliases() {
+    let dir = test_dir("complex_filter_aliases");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    let csv = "frequency,Re(V(out)),Im(V(out)),Re(I(V1)),Im(I(V1))\n\
+               1.0e3,1.0,0.25,-0.01,0.02\n\
+               1.0e4,0.5,-0.75,-0.02,0.03\n";
+    std::fs::write(&result, csv).unwrap();
+    std::fs::write(&golden, csv).unwrap();
+
+    for requested in ["V(out)", "v(OUT)", "out", "Re(V(out))"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+            .args([
+                "compare",
+                result.to_str().unwrap(),
+                golden.to_str().unwrap(),
+                "--variables",
+                requested,
+            ])
+            .output()
+            .expect("run rspice");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{requested} should select V(out) real/imag parts; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn compare_explicit_missing_variable_respects_ignore_missing() {
+    let dir = test_dir("explicit_ignore_missing");
+    std::fs::write(dir.join("result.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+    std::fs::write(dir.join("golden.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+            "--variables",
+            "V(MISSING)",
+            "--ignore-missing",
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "explicit missing variables should be skippable with --ignore-missing; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// NaN is malformed waveform input, not a value that can compare equal.
+#[test]
+fn nonfinite_values_are_rejected_before_comparison() {
     let dir = test_dir("nan");
     std::fs::write(dir.join("golden.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
     std::fs::write(dir.join("result.csv"), "time,V(OUT)\n0,1.0\n1e-6,NaN\n").unwrap();
@@ -409,10 +471,111 @@ fn nan_values_fail_comparison() {
         ])
         .output()
         .expect("run rspice");
+    assert!(
+        !output.status.success(),
+        "NaN in the result must fail comparison"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("non-finite value"),
+        "stderr should explain the malformed value: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn negative_compare_tolerances_are_usage_errors() {
+    let dir = test_dir("negative_tolerances");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    let csv = "time,V(OUT)\n0,1.0\n1e-6,2.0\n";
+    std::fs::write(&result, csv).unwrap();
+    std::fs::write(&golden, csv).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            result.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--abstol=-1",
+            "--reltol=-1",
+        ])
+        .output()
+        .expect("run rspice");
     assert_eq!(
         output.status.code(),
-        Some(3),
-        "NaN in the result must fail comparison"
+        Some(2),
+        "invalid compare tolerances are usage errors"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--abstol") || stderr.contains("--reltol"),
+        "stderr should identify the invalid tolerance: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ragged_delimited_rows_are_rejected_before_comparison() {
+    let dir = test_dir("ragged_csv");
+    std::fs::write(dir.join("golden.csv"), "time,V(OUT)\n0,1.0\n1e-6,2.0\n").unwrap();
+    std::fs::write(
+        dir.join("result.csv"),
+        "time,V(OUT)\n0,1.0\n1e-6\n2e-6,3.0,extra\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            dir.join("result.csv").to_str().unwrap(),
+            dir.join("golden.csv").to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(
+        !output.status.success(),
+        "ragged delimited input must not silently compare"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("row 3") && stderr.contains("expected 2 columns"),
+        "stderr should name the ragged row and expected width: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bless_missing_golden_validates_result_before_copying() {
+    let dir = test_dir("bless_missing_ragged_csv");
+    let result = dir.join("result.csv");
+    let golden = dir.join("golden.csv");
+    std::fs::write(&result, "time,V(OUT)\n0,1.0\n1e-6\n2e-6,3.0,extra\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "compare",
+            result.to_str().unwrap(),
+            golden.to_str().unwrap(),
+            "--bless",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(
+        !output.status.success(),
+        "malformed result must not be blessed into a missing golden"
+    );
+    assert!(
+        !golden.exists(),
+        "missing golden must not be created from malformed result"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("row 3") && stderr.contains("expected 2 columns"),
+        "stderr should name the malformed result: {stderr}"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

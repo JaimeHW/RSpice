@@ -102,6 +102,102 @@ fn save_flag_restricts_exported_signals() {
 }
 
 #[test]
+fn save_flag_exports_differential_voltage_waveform() {
+    let dir = test_dir("save_diff");
+    let deck = dir.join("divider.sp");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.tran 1n 2n\n.end\n",
+    )
+    .expect("write deck");
+    let out = dir.join("diff.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--save",
+        "V(in,out)",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let csv = std::fs::read_to_string(&out).expect("csv");
+    let mut lines = csv.lines();
+    assert_eq!(
+        lines.next(),
+        Some("time,\"V(in,out)\""),
+        "differential voltage names must be exported as one quoted CSV column"
+    );
+    let values: Vec<f64> = lines
+        .map(|line| {
+            line.split_once(',')
+                .expect("time,value row")
+                .1
+                .parse::<f64>()
+                .expect("numeric differential voltage")
+        })
+        .collect();
+    assert!(!values.is_empty(), "transient output must include samples");
+    for value in values {
+        assert!(
+            (value - 2.5).abs() < 1e-9,
+            "V(in,out) should equal 2.5 V, got {value}"
+        );
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_flag_quotes_differential_voltage_in_dc_csv() {
+    let dir = test_dir("save_diff_op");
+    let deck = dir.join("divider.sp");
+    std::fs::write(
+        &deck,
+        "* divider\nV1 in 0 5\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n",
+    )
+    .expect("write deck");
+    let out = dir.join("diff-op.csv");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--save",
+        "V(in,out)",
+    ]);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let csv = std::fs::read_to_string(&out).expect("csv");
+    assert!(
+        csv.lines().any(|line| line.starts_with("\"V(in,out)\",")),
+        "DC OP CSV must quote differential probe names as one field: {csv}"
+    );
+    assert!(
+        csv.contains("2.500000000e0"),
+        "V(in,out) should equal 2.5 V: {csv}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn numeric_flags_accept_spice_suffixes() {
     let dir = test_dir("suffix");
     let deck = dir.join("rc.sp");

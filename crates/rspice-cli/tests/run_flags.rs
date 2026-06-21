@@ -178,6 +178,79 @@ fn malformed_define_is_a_usage_error() {
 }
 
 #[test]
+fn invalid_solver_controls_are_usage_errors() {
+    let dir = test_dir("invalid_solver_controls");
+    let deck = dir.join("trivial.sp");
+    let out = dir.join("out.csv");
+    std::fs::write(&deck, "* trivial\nv1 1 0 1\nr1 1 0 1k\n.op\n.end\n").expect("write deck");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--maxiter",
+        "0",
+        "--reltol=-1",
+        "--abstol=-1",
+    ]);
+    assert_eq!(output.status.code(), Some(2), "usage errors exit with 2");
+    assert!(
+        !out.exists(),
+        "invalid solver controls must not write an output file"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--maxiter") || stderr.contains("--reltol") || stderr.contains("--abstol"),
+        "stderr should identify the invalid solver control: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn contradictory_min_and_max_step_are_usage_errors() {
+    let dir = test_dir("contradictory_timesteps");
+    let deck = dir.join("trivial.sp");
+    let out = dir.join("out.csv");
+    std::fs::write(
+        &deck,
+        "* trivial transient\nv1 1 0 pulse(0 1 0 1n 1n 5n 10n)\nr1 1 0 1k\n.tran 1n 20n\n.end\n",
+    )
+    .expect("write deck");
+
+    let output = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        out.to_str().unwrap(),
+        "-f",
+        "csv",
+        "--min-step",
+        "1u",
+        "--max-step",
+        "1n",
+    ]);
+
+    assert_eq!(output.status.code(), Some(2), "usage errors exit with 2");
+    assert!(
+        !out.exists(),
+        "contradictory timestep controls must not write an output file"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--min-step") && stderr.contains("--max-step"),
+        "stderr should identify both contradictory timestep flags: {stderr}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn include_search_path_resolves_models() {
     let dir = test_dir("include");
     let model_dir = dir.join("modellib");

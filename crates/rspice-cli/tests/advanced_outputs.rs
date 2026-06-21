@@ -166,11 +166,11 @@ fn monte_carlo_exports_samples_and_is_seed_deterministic() {
 
 #[test]
 fn monte_carlo_zero_spread_exports_nominal_samples() {
-    let dir = test_dir("mc_zero");
+    let dir = test_dir("mc_zero_spread");
     let deck = write_deck(
         &dir,
         "mc_zero.sp",
-        "* deterministic MC plumbing check\n\
+        "* deterministic MC divider\n\
          V1 in 0 5\n\
          R1 in out {rtop}\n\
          R2 out 0 1k\n\
@@ -186,6 +186,8 @@ fn monte_carlo_zero_spread_exports_nominal_samples() {
         deck.to_str().unwrap(),
         "--monte-carlo",
         "4",
+        "--seed",
+        "9",
         "--mc-spread",
         "0",
         "-o",
@@ -195,14 +197,15 @@ fn monte_carlo_zero_spread_exports_nominal_samples() {
     ]);
     assert!(
         output.status.success(),
-        "zero spread should mean deterministic nominal samples; stderr: {}",
+        "zero-spread Monte Carlo should export deterministic nominal samples; stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(&json_out).expect("mc json")).expect("parse");
-    let variables = json["variables"].as_array().expect("variables array");
-    let vout = variables
+    let vout = json["variables"]
+        .as_array()
+        .expect("variables array")
         .iter()
         .find(|v| {
             v["name"]

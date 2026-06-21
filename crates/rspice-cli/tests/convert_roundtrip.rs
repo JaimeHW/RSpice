@@ -177,6 +177,28 @@ fn complex_ac_survives_csv_and_raw_round_trip() {
 }
 
 #[test]
+fn csv_reader_accepts_quoted_comma_signal_names() {
+    let dir = test_dir("quoted_signal_name");
+    let input = dir.join("diff.csv");
+    let output = dir.join("diff.json");
+    std::fs::write(&input, "time,\"V(in,out)\"\n0,2.5\n1e-9,2.5\n").expect("write quoted csv");
+
+    convert(&input, &output, "json", &[]);
+
+    let json = std::fs::read_to_string(&output).expect("json output");
+    assert!(
+        json.contains("\"name\": \"V(in,out)\""),
+        "quoted comma-bearing signal name should survive conversion: {json}"
+    );
+    assert!(
+        json.contains("2.5"),
+        "signal values should survive conversion: {json}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn variable_and_range_filters_apply() {
     let dir = test_dir("filters");
     let raw = simulate(&dir, TRAN_DECK, "raw", "tran.raw");
@@ -235,5 +257,47 @@ fn unknown_variable_filter_is_an_error() {
         stderr.contains("available variables"),
         "error should list available variables: {stderr}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn malformed_json_shape_is_rejected_before_conversion() {
+    let dir = test_dir("bad_json_shape");
+    let input = dir.join("bad.json");
+    let output_path = dir.join("out.csv");
+    std::fs::write(
+        &input,
+        r#"{
+  "analysis": "transient",
+  "scale": { "name": "time", "values": [0.0, 1e-6] },
+  "signals": [
+    { "name": "V(OUT)", "values": [1.0] },
+    { "name": "I(V1)", "real": [0.0, 0.1], "imag": [0.0] }
+  ]
+}
+"#,
+    )
+    .expect("write malformed json");
+
+    let command_output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "convert",
+            input.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+            "--to",
+            "csv",
+        ])
+        .output()
+        .expect("run rspice");
+    assert!(
+        !command_output.status.success(),
+        "mismatched JSON waveform lengths must fail"
+    );
+    let stderr = String::from_utf8_lossy(&command_output.stderr);
+    assert!(
+        stderr.contains("V(OUT)") && stderr.contains("expected 2"),
+        "error should name the first malformed signal and expected length: {stderr}"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

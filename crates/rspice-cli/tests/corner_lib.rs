@@ -53,7 +53,6 @@ fn corner_lib_sections_change_results() {
     let out = dir.join("res.csv");
     let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args([
-            "--quiet",
             "run",
             deck.to_str().unwrap(),
             "--corners",
@@ -143,6 +142,89 @@ fn parallel_corners_match_serial() {
             "corner {corner} must be identical under -j"
         );
     }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn nominal_corners_record_measurements_per_corner() {
+    let dir =
+        std::env::temp_dir().join(format!("rspice_nominal_corner_meas_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create test dir");
+
+    let deck = dir.join("nominal.sp");
+    let summary = dir.join("summary.json");
+    std::fs::write(
+        &deck,
+        "* nominal corner measurement accounting\n\
+         R1 in out 50\n\
+         R2 out 0 50\n\
+         .AC LIN 1 1k 1k\n\
+         .MEAS TRAN SHOULD_FAIL MAX V(out)\n\
+         .END\n",
+    )
+    .expect("write deck");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            deck.to_str().unwrap(),
+            "--corners",
+            "tt,ss",
+            "--summary",
+            summary.to_str().unwrap(),
+        ])
+        .output()
+        .expect("run rspice");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "failed corner measurements must fail the command; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&summary).expect("summary file"))
+            .expect("valid json");
+    let measurements = json["runs"][0]["measurements"]
+        .as_array()
+        .expect("measurements array");
+    let names: Vec<&str> = measurements
+        .iter()
+        .map(|m| m["name"].as_str().expect("measurement name"))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["tt:SHOULD_FAIL", "ss:SHOULD_FAIL"],
+        "nominal corners must report isolated, tagged measurements: {json}"
+    );
+    assert!(
+        measurements
+            .iter()
+            .all(|m| m["passed"].as_bool() == Some(false)),
+        "each corner measurement should fail explicitly: {json}"
+    );
+
+    let display = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["run", deck.to_str().unwrap(), "--corners", "tt,ss"])
+        .output()
+        .expect("run rspice display");
+    assert_eq!(
+        display.status.code(),
+        Some(3),
+        "failed corner measurements must fail the display run; stderr: {}",
+        String::from_utf8_lossy(&display.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&display.stdout);
+    assert!(
+        stdout.contains("FAIL"),
+        "corner summary should mark failed measurements as failed; stdout: {stdout}"
+    );
+    assert!(
+        !stdout.contains("PASS"),
+        "corner summary must not report PASS when measurements failed; stdout: {stdout}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
