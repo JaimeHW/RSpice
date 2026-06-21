@@ -10,7 +10,7 @@ use std::sync::Arc;
 use egui::Ui;
 
 use crate::common::AppState;
-use crate::state::AnalysisType;
+use crate::state::{SharedWaveformValues, ac_bode_summary_for_run};
 use crate::ui::plot::{self, Axis, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -22,65 +22,33 @@ use super::{BodeDerived, well_hint};
 /// The AC signal pair and its computed stability numbers.
 struct BodeModel {
     signal: String,
-    frequency: Arc<[f64]>,
-    gain_db: Arc<[f64]>,
+    frequency: SharedWaveformValues,
+    gain_db: SharedWaveformValues,
     /// The phase trace as displayed: raw ±180°-wrapped samples, or the
     /// unwrapped series when the continuous toggle is on. The margins are
     /// always computed from the raw arrays.
-    phase_deg: Option<Arc<[f64]>>,
+    phase_deg: Option<SharedWaveformValues>,
     /// Finite (min, max) of the displayed phase curve.
     phase_extremes: Option<(f64, f64)>,
     margins: BodeDerived,
 }
 
-/// Find the first crossing of `series` through `level`, interpolated in
-/// log-frequency (frequencies ascending, positive).
-fn crossing(frequency: &[f64], series: &[f64], level: f64) -> Option<f64> {
-    let n = frequency.len().min(series.len());
-    for i in 1..n {
-        let (y0, y1) = (series[i - 1] - level, series[i] - level);
-        if y0 == 0.0 {
-            return Some(frequency[i - 1]);
-        }
-        if y0 * y1 < 0.0 {
-            let t = y0 / (y0 - y1);
-            let (l0, l1) = (frequency[i - 1].log10(), frequency[i].log10());
-            return Some(10f64.powf(l0 + t * (l1 - l0)));
-        }
-    }
-    None
-}
-
 fn build_model(state: &mut AppState) -> Option<BodeModel> {
     let simulation = &state.simulation;
     let run = simulation.active_run()?;
-    let (analysis_index, analysis) = run
-        .analyses
-        .iter()
-        .enumerate()
-        .find(|(_, a)| a.analysis_type == AnalysisType::Ac && !a.waveforms.is_empty())?;
+    let summary = ac_bode_summary_for_run(run)?;
+    let analysis = &run.analyses[summary.analysis_index];
+    let mag = &analysis.waveforms[summary.mag_index];
+    let phase = summary
+        .phase_index
+        .zip(summary.phase_deg.as_ref())
+        .map(|(phase_index, phase)| (phase_index, Arc::clone(phase)));
 
-    // First magnitude waveform (prefer a visible one) and its phase partner.
-    let (mag_index, mag) = analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .filter(|(_, w)| w.name.starts_with('|'))
-        .max_by_key(|(_, w)| w.visible)?;
-    let base = mag.name.trim_start_matches('|').trim_end_matches('|');
-    let phase = analysis
-        .waveforms
-        .iter()
-        .enumerate()
-        .find(|(_, w)| w.name == format!("phase({base})"))
-        .map(|(phase_index, w)| (phase_index, Arc::clone(&w.y)));
-
-    let gain_db = state
-        .shell
-        .results
-        .derived
-        .db((analysis_index as u64) << 32 | mag_index as u64, &mag.y);
-    let frequency = Arc::clone(&mag.x);
+    let gain_db = state.shell.results.derived.db(
+        (summary.analysis_index as u64) << 32 | summary.mag_index as u64,
+        &mag.y,
+    );
+    let frequency = Arc::clone(&summary.frequency);
 
     // Margins + extremes from the curves, cached on (data version, resolved
     // magnitude waveform) — the crossings and folds are O(points) and both
@@ -89,37 +57,26 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     let margins = match state.shell.results.bode {
         Some(d)
             if d.version == version
-                && d.analysis_index == analysis_index
-                && d.mag_index == mag_index =>
+                && d.analysis_index == summary.analysis_index
+                && d.mag_index == summary.mag_index =>
         {
             d
         }
         _ => {
-            let mut d = BodeDerived {
+            let metrics = summary.metrics;
+            let d = BodeDerived {
                 version,
-                analysis_index,
-                mag_index,
-                adc_db: gain_db.first().copied(),
-                ugf: crossing(&frequency, &gain_db, 0.0),
-                pm_deg: None,
-                f180: None,
-                gm_db: None,
-                f3db: None,
-                gain_extremes: super::finite_extremes(&gain_db).unwrap_or((0.0, 0.0)),
-                phase_extremes: phase.as_ref().and_then(|(_, y)| super::finite_extremes(y)),
+                analysis_index: summary.analysis_index,
+                mag_index: summary.mag_index,
+                adc_db: metrics.adc_db,
+                ugf: metrics.ugf,
+                pm_deg: metrics.pm_deg,
+                f180: metrics.f180,
+                gm_db: metrics.gm_db,
+                f3db: metrics.f3db,
+                gain_extremes: metrics.gain_extremes,
+                phase_extremes: metrics.phase_extremes,
             };
-            if let Some(adc) = d.adc_db {
-                d.f3db = crossing(&frequency, &gain_db, adc - 3.0);
-            }
-            if let Some((_, phase)) = &phase {
-                if let Some(ugf) = d.ugf {
-                    d.pm_deg = Some(180.0 + sample_at(&frequency, phase, ugf));
-                }
-                d.f180 = crossing(&frequency, phase, -180.0);
-                if let Some(f180) = d.f180 {
-                    d.gm_db = Some(-sample_at(&frequency, &gain_db, f180));
-                }
-            }
             state.shell.results.bode = Some(d);
             d
         }
@@ -130,7 +87,7 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     // only the displayed trace (and its axis range) changes.
     let (phase_deg, phase_extremes) = match &phase {
         Some((phase_index, raw)) if state.shell.results.phase_continuous => {
-            let key = (analysis_index as u64) << 32 | *phase_index as u64;
+            let key = (summary.analysis_index as u64) << 32 | *phase_index as u64;
             let derived = &mut state.shell.results.derived;
             let series = derived.unwrapped(key, raw);
             let extremes = derived.unwrapped_range(key, raw);
@@ -141,7 +98,7 @@ fn build_model(state: &mut AppState) -> Option<BodeModel> {
     };
 
     Some(BodeModel {
-        signal: base.to_owned(),
+        signal: summary.signal,
         frequency,
         gain_db,
         phase_deg,
@@ -230,7 +187,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .find(|&f| f > 0.0)
         .unwrap_or(1.0);
     let x1 = *model.frequency.last().unwrap_or(&1.0);
-    if !(x1 > x0) {
+    if !matches!(x1.partial_cmp(&x0), Some(std::cmp::Ordering::Greater)) {
         well_hint(ui, "Degenerate frequency axis");
         return;
     }

@@ -1,9 +1,11 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use super::EngineBridge;
 use crate::simulation::config::TransientAnalysisConfig;
 use crate::simulation::results::{SimulationResult, WaveformData};
 use crate::simulation::runner::SimulationError;
+use rspice_core::netlist::AnalysisCommand;
 
 impl EngineBridge {
     /// Run transient analysis.
@@ -12,7 +14,8 @@ impl EngineBridge {
         netlist: &rspice_core::Netlist,
         config: &TransientAnalysisConfig,
     ) -> Result<SimulationResult, SimulationError> {
-        warn_unsupported_uic(config);
+        let prepared_netlist = netlist_for_transient_config(netlist, config);
+        let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
         let max_step = resolve_transient_max_step(config);
         let tran_result = engine
@@ -33,7 +36,8 @@ impl EngineBridge {
         config: &TransientAnalysisConfig,
         abort: &dyn rspice_core::abort_signal::AbortSignal,
     ) -> Result<SimulationResult, SimulationError> {
-        warn_unsupported_uic(config);
+        let prepared_netlist = netlist_for_transient_config(netlist, config);
+        let netlist = prepared_netlist.as_ref();
         let engine = self.engine_for_netlist(netlist);
         let max_step = resolve_transient_max_step(config);
         let tran_result = engine
@@ -48,12 +52,64 @@ impl EngineBridge {
     }
 }
 
-fn warn_unsupported_uic(config: &TransientAnalysisConfig) {
-    if config.uic {
-        log::warn!(
-            "Transient UIC requested, but rspice-core transient startup currently uses DC operating-point initialization"
-        );
+fn netlist_for_transient_config<'a>(
+    netlist: &'a rspice_core::Netlist,
+    config: &TransientAnalysisConfig,
+) -> Cow<'a, rspice_core::Netlist> {
+    let mut transient_count = 0usize;
+    let mut matching_count = 0usize;
+    for analysis in &netlist.analyses {
+        if matches!(analysis, AnalysisCommand::Tran { .. }) {
+            transient_count += 1;
+            if transient_command_matches_config(analysis, config) {
+                matching_count += 1;
+            }
+        }
     }
+    if transient_count == 1 && matching_count == 1 {
+        return Cow::Borrowed(netlist);
+    }
+
+    let mut prepared = netlist.clone();
+    prepared
+        .analyses
+        .retain(|analysis| !matches!(analysis, AnalysisCommand::Tran { .. }));
+    prepared
+        .analyses
+        .push(transient_command_from_config(config));
+    Cow::Owned(prepared)
+}
+
+fn transient_command_from_config(config: &TransientAnalysisConfig) -> AnalysisCommand {
+    AnalysisCommand::Tran {
+        step: config.step_time,
+        stop: config.stop_time,
+        start: (config.start_time > 0.0).then_some(config.start_time),
+        max_step: config.max_timestep,
+        uic: config.uic,
+    }
+}
+
+fn transient_command_matches_config(
+    analysis: &AnalysisCommand,
+    config: &TransientAnalysisConfig,
+) -> bool {
+    let AnalysisCommand::Tran {
+        step,
+        stop,
+        start,
+        max_step,
+        uic,
+    } = analysis
+    else {
+        return false;
+    };
+
+    *step == config.step_time
+        && *stop == config.stop_time
+        && *start == (config.start_time > 0.0).then_some(config.start_time)
+        && *max_step == config.max_timestep
+        && *uic == config.uic
 }
 
 fn resolve_transient_max_step(config: &TransientAnalysisConfig) -> f64 {
@@ -115,5 +171,130 @@ fn convert_transient_result(
         time: filtered_time,
         waveforms,
         measurements,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::netlist::AnalysisCommand;
+
+    fn parse_netlist(source: &str) -> rspice_core::Netlist {
+        rspice_core::Netlist::parse(source).expect("test netlist parses")
+    }
+
+    #[test]
+    fn transient_config_injects_uic_command_for_generated_decks() {
+        let netlist = parse_netlist(
+            "generated transient\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .end\n",
+        );
+        assert!(
+            netlist
+                .analyses
+                .iter()
+                .all(|analysis| !matches!(analysis, AnalysisCommand::Tran { .. }))
+        );
+        let config = TransientAnalysisConfig {
+            stop_time: 1e-6,
+            step_time: 1e-9,
+            start_time: 2e-9,
+            max_timestep: Some(5e-10),
+            uic: true,
+        };
+
+        let prepared = netlist_for_transient_config(&netlist, &config);
+        let tran = prepared
+            .analyses
+            .iter()
+            .find(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .expect("transient command is synthesized");
+
+        match tran {
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            } => {
+                assert_eq!(*step, config.step_time);
+                assert_eq!(*stop, config.stop_time);
+                assert_eq!(*start, Some(config.start_time));
+                assert_eq!(*max_step, config.max_timestep);
+                assert!(*uic);
+            }
+            _ => unreachable!("filtered for transient command"),
+        }
+    }
+
+    #[test]
+    fn transient_config_replaces_stale_parsed_tran_command() {
+        let netlist = parse_netlist(
+            "manual transient\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .tran 1e-9 1e-6\n\
+             .end\n",
+        );
+        let config = TransientAnalysisConfig {
+            stop_time: 2e-6,
+            step_time: 2e-9,
+            start_time: 0.0,
+            max_timestep: Some(1e-9),
+            uic: true,
+        };
+
+        let prepared = netlist_for_transient_config(&netlist, &config);
+        let transients: Vec<_> = prepared
+            .analyses
+            .iter()
+            .filter(|analysis| matches!(analysis, AnalysisCommand::Tran { .. }))
+            .collect();
+
+        assert_eq!(transients.len(), 1);
+        match transients[0] {
+            AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            } => {
+                assert_eq!(*step, config.step_time);
+                assert_eq!(*stop, config.stop_time);
+                assert_eq!(*start, None);
+                assert_eq!(*max_step, config.max_timestep);
+                assert!(*uic);
+            }
+            _ => unreachable!("filtered for transient command"),
+        }
+    }
+
+    #[test]
+    fn transient_config_reuses_matching_parsed_tran_command() {
+        let netlist = parse_netlist(
+            "manual transient\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .tran 2e-9 2e-6 1e-9 1e-9 uic\n\
+             .end\n",
+        );
+        let config = TransientAnalysisConfig {
+            stop_time: 2e-6,
+            step_time: 2e-9,
+            start_time: 1e-9,
+            max_timestep: Some(1e-9),
+            uic: true,
+        };
+
+        let prepared = netlist_for_transient_config(&netlist, &config);
+
+        assert!(
+            matches!(prepared, std::borrow::Cow::Borrowed(_)),
+            "matching manual .tran decks should avoid cloning the parsed netlist"
+        );
     }
 }

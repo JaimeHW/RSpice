@@ -220,6 +220,10 @@ impl Histogram {
 
     /// Get cumulative distribution (CDF) values
     pub fn cdf(&self) -> Vec<f64> {
+        if self.total_count == 0 {
+            return vec![0.0; self.bins.len()];
+        }
+
         let mut cumulative = 0.0;
         let total = self.total_count as f64;
 
@@ -357,3 +361,22 @@ impl HistogramBuilder {
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_histogram_cdf_is_finite_zero_curve() {
+        let hist = HistogramBuilder::new().name("empty").bin_count(4).build(&[
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ]);
+
+        let cdf = hist.cdf();
+
+        assert_eq!(cdf, vec![0.0; 4]);
+        assert!(cdf.iter().all(|value| value.is_finite()));
+    }
+}

@@ -194,15 +194,14 @@ impl<'a> StripHeader<'a> {
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 1.0;
-            if self.closable {
-                if IconButton::new(Icon::Close)
+            if self.closable
+                && IconButton::new(Icon::Close)
                     .side(22.0)
                     .tooltip("Close strip")
                     .show(ui)
                     .clicked()
-                {
-                    out.close_clicked = true;
-                }
+            {
+                out.close_clicked = true;
             }
             let tip = if self.maximized {
                 "Restore strips"

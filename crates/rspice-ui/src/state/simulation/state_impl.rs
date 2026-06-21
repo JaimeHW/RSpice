@@ -1,14 +1,12 @@
 use super::*;
 
 impl SimulationState {
-    /// Trigger a run from the configured Simulate workspace run set.
-    pub fn request_run_set(&mut self) {
-        self.run_intent = SimulationRunIntent::RunSet;
+    pub fn request_simulate_run_set(&mut self) {
+        self.run_intent = SimulationRunIntent::SimulateRunSet;
         self.trigger_simulation = true;
     }
 
-    /// Trigger a run from the manual netlist editor buffer.
-    pub fn request_manual_deck(&mut self) {
+    pub fn request_manual_deck_run(&mut self) {
         self.run_intent = SimulationRunIntent::ManualDeck;
         self.trigger_simulation = true;
     }
@@ -274,6 +272,37 @@ impl SimulationState {
         self.runs.iter().find(|run| run.id == run_id)
     }
 
+    /// Look up a mutable run by its stable ID.
+    pub fn run_by_id_mut(&mut self, run_id: u64) -> Option<&mut SimulationRun> {
+        self.runs.iter_mut().find(|run| run.id == run_id)
+    }
+
+    /// Select a run by stable ID.
+    pub fn select_run_by_id(&mut self, run_id: u64) -> bool {
+        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_id) else {
+            return false;
+        };
+        self.select_run(run_idx)
+    }
+
+    /// Select the most recently added analysis within a stable run ID.
+    pub fn select_latest_analysis_in_run(&mut self, run_id: u64) -> bool {
+        let Some(run_idx) = self.runs.iter().position(|run| run.id == run_id) else {
+            return false;
+        };
+        let Some(last_idx) = self
+            .runs
+            .get(run_idx)
+            .and_then(|run| run.analyses.len().checked_sub(1))
+        else {
+            return false;
+        };
+        self.active_run_idx = Some(run_idx);
+        self.active_analysis_idx = Some(last_idx);
+        self.sync_selected_analysis_waveforms();
+        true
+    }
+
     /// Whether a run is currently overlaid onto the active run.
     pub fn is_run_overlaid(&self, run_id: u64) -> bool {
         self.overlay_run_ids.contains(&run_id)
@@ -360,6 +389,51 @@ impl SimulationState {
         self.active_analysis_idx = None;
         self.sync_selected_analysis_waveforms();
         // Don't reset next_run_id to preserve uniqueness
+    }
+
+    /// Replace persisted run history and rebuild every derived selection cache.
+    ///
+    /// Project files persist stable run/analysis IDs rather than fragile vector
+    /// indices. On restore, this method maps those IDs back to the current
+    /// history layout and falls back to the newest analysis when the saved
+    /// selection is missing or stale.
+    pub fn restore_run_history(
+        &mut self,
+        runs: Vec<SimulationRun>,
+        next_run_id: u64,
+        active_run_id: Option<u64>,
+        active_analysis_id: Option<u64>,
+        overlay_run_ids: Vec<u64>,
+    ) {
+        self.runs = runs;
+        self.prune_runs_history();
+
+        let max_run_id = self.runs.iter().map(|run| run.id).max().unwrap_or(0);
+        self.next_run_id = next_run_id.max(max_run_id);
+
+        self.active_run_idx = active_run_id
+            .and_then(|id| self.runs.iter().position(|run| run.id == id))
+            .or_else(|| (!self.runs.is_empty()).then_some(0));
+
+        self.active_analysis_idx = self.active_run_idx.and_then(|run_idx| {
+            let run = &self.runs[run_idx];
+            active_analysis_id
+                .and_then(|id| run.analyses.iter().position(|analysis| analysis.id == id))
+                .or_else(|| (!run.analyses.is_empty()).then_some(0))
+        });
+
+        let active_id = self.active_run().map(|run| run.id);
+        self.overlay_run_ids.clear();
+        for id in overlay_run_ids {
+            if Some(id) != active_id
+                && self.runs.iter().any(|run| run.id == id)
+                && !self.overlay_run_ids.contains(&id)
+            {
+                self.overlay_run_ids.push(id);
+            }
+        }
+
+        self.sync_selected_analysis_waveforms();
     }
 
     /// Prune runs history to stay within MAX_RUN_HISTORY limit

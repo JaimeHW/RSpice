@@ -10,6 +10,8 @@ mod parametric;
 mod sweep_points;
 mod types;
 
+pub(crate) use sweep_points::expand_step_sweep_values;
+
 pub use corner::{
     run_corner_analysis, run_corner_analysis_with_config,
     run_corner_analysis_with_config_and_source_path, run_corner_analysis_with_source_path,

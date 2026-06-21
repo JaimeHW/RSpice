@@ -528,10 +528,10 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
             }
         });
 
-    if let Some(idx) = remove {
-        if let Some(drafts) = state.shell.results.spec_drafts.as_mut() {
-            drafts.remove(idx);
-        }
+    if let Some(idx) = remove
+        && let Some(drafts) = state.shell.results.spec_drafts.as_mut()
+    {
+        drafts.remove(idx);
     }
 }
 

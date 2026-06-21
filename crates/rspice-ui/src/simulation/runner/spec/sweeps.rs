@@ -16,7 +16,7 @@ pub(super) fn run_sweep_spec(
         AnalysisSpec::MonteCarlo => run_monte_carlo(netlist, source_path),
         AnalysisSpec::Parametric => run_parametric(netlist, options, source_path),
         AnalysisSpec::Corner => run_corner(netlist, options, source_path),
-        _ => unreachable!("non-sweep spec routed to sweep runner"),
+        other => Err(super::misrouted_spec_error("sweep", &other)),
     }
 }
 

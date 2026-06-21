@@ -5,7 +5,7 @@ use std::fmt;
 const MAX_SWEEP_POINTS: usize = 1_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum StepSweepExpandError {
+pub(crate) enum StepSweepExpandError {
     NonFiniteLinearSweep,
     ZeroLinearStep,
     LinearDirectionMismatch,
@@ -61,7 +61,7 @@ fn checked_total_points(span: Value, density: usize) -> Result<usize, StepSweepE
     Ok(total_points)
 }
 
-pub(super) fn expand_step_sweep_values(
+pub(crate) fn expand_step_sweep_values(
     sweep: &StepSweep,
 ) -> Result<Vec<Value>, StepSweepExpandError> {
     match sweep {

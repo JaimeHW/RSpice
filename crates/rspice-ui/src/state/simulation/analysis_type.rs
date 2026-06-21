@@ -8,7 +8,7 @@
 /// - Noise → Noise Spectrum Plot
 /// - PoleZero → S-plane Pole-Zero Diagram
 /// - Sensitivity → Parameter Sensitivity Bar Chart
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum AnalysisType {
     /// DC operating point analysis - node voltages and branch currents
     DcOp,
@@ -167,7 +167,6 @@ impl AnalysisType {
             | AnalysisType::Soa => ("Time", "s", "Voltage", "V"),
             AnalysisType::Ac
             | AnalysisType::Disto
-            | AnalysisType::Noise
             | AnalysisType::Tf
             | AnalysisType::Pac
             | AnalysisType::Pxf
@@ -176,7 +175,7 @@ impl AnalysisType {
             | AnalysisType::SParameter
             | AnalysisType::HarmonicBalance
             | AnalysisType::Fourier => ("Frequency", "Hz", "Magnitude", "V"),
-            AnalysisType::Pnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
+            AnalysisType::Noise | AnalysisType::Pnoise => ("Frequency", "Hz", "Noise", "V^2/Hz"),
             AnalysisType::DcSweep => ("Voltage", "V", "Voltage", "V"),
             AnalysisType::DcOp => ("", "", "Voltage", "V"),
             AnalysisType::PoleZero => ("Real", "", "Imaginary", ""),

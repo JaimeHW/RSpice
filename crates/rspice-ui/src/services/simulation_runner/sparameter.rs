@@ -178,12 +178,8 @@ fn run_sparameter_analysis_typed(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err(SParameterRunError::Data(
-            "S-parameter sweep generated no frequency points".to_string(),
-        ));
-    }
+    )
+    .map_err(SParameterRunError::Data)?;
 
     let num_ports = config.ports.len();
     let num_freqs = frequencies.len();

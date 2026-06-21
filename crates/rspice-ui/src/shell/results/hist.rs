@@ -100,31 +100,33 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Spec limits from the yield manager, when present.
     if let Some(yield_result) = state.simulation.yield_results.first() {
-        if let Some(lsl) = yield_result.spec.min {
-            if lsl > x0 && lsl < x1 {
-                spec.markers.push(plot::Marker {
-                    x: lsl,
-                    y: y1 * 0.72,
-                    side: plot::YSide::Left,
-                    color: c.err,
-                    label: format!("LSL {}", fmt_si(lsl, "", 2)),
-                    drop_line: true,
-                    label_dy: 0.0,
-                });
-            }
+        if let Some(lsl) = yield_result.spec.min
+            && lsl > x0
+            && lsl < x1
+        {
+            spec.markers.push(plot::Marker {
+                x: lsl,
+                y: y1 * 0.72,
+                side: plot::YSide::Left,
+                color: c.err,
+                label: format!("LSL {}", fmt_si(lsl, "", 2)),
+                drop_line: true,
+                label_dy: 0.0,
+            });
         }
-        if let Some(usl) = yield_result.spec.max {
-            if usl > x0 && usl < x1 {
-                spec.markers.push(plot::Marker {
-                    x: usl,
-                    y: y1 * 0.72,
-                    side: plot::YSide::Left,
-                    color: c.err,
-                    label: format!("USL {}", fmt_si(usl, "", 2)),
-                    drop_line: true,
-                    label_dy: 0.0,
-                });
-            }
+        if let Some(usl) = yield_result.spec.max
+            && usl > x0
+            && usl < x1
+        {
+            spec.markers.push(plot::Marker {
+                x: usl,
+                y: y1 * 0.72,
+                side: plot::YSide::Left,
+                color: c.err,
+                label: format!("USL {}", fmt_si(usl, "", 2)),
+                drop_line: true,
+                label_dy: 0.0,
+            });
         }
     }
 
@@ -142,23 +144,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     spec.underlay = Some(Box::new(move |painter, mapper| {
         if let Some((lsl, usl)) = spec_limits {
             let wash = err.gamma_multiply(0.09);
-            if let Some(lsl) = lsl {
-                if lsl > x0 {
-                    let rect = egui::Rect::from_min_max(
-                        egui::pos2(mapper.rect.left(), mapper.rect.top()),
-                        egui::pos2(mapper.x(lsl.min(x1)), mapper.rect.bottom()),
-                    );
-                    painter.rect_filled(rect, 0.0, wash);
-                }
+            if let Some(lsl) = lsl
+                && lsl > x0
+            {
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(mapper.rect.left(), mapper.rect.top()),
+                    egui::pos2(mapper.x(lsl.min(x1)), mapper.rect.bottom()),
+                );
+                painter.rect_filled(rect, 0.0, wash);
             }
-            if let Some(usl) = usl {
-                if usl < x1 {
-                    let rect = egui::Rect::from_min_max(
-                        egui::pos2(mapper.x(usl.max(x0)), mapper.rect.top()),
-                        egui::pos2(mapper.rect.right(), mapper.rect.bottom()),
-                    );
-                    painter.rect_filled(rect, 0.0, wash);
-                }
+            if let Some(usl) = usl
+                && usl < x1
+            {
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(mapper.x(usl.max(x0)), mapper.rect.top()),
+                    egui::pos2(mapper.rect.right(), mapper.rect.bottom()),
+                );
+                painter.rect_filled(rect, 0.0, wash);
             }
         }
         for bin in bins {

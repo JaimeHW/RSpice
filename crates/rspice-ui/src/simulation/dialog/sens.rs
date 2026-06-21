@@ -91,8 +91,8 @@ impl SensConfig {
         if self.output_expr.is_empty() {
             return Err("Output expression required".into());
         }
-        if self.sens_type == SensType::Ac && self.ac_freq <= 0.0 {
-            return Err("AC frequency must be positive".into());
+        if self.sens_type == SensType::Ac && (!self.ac_freq.is_finite() || self.ac_freq <= 0.0) {
+            return Err("AC frequency must be finite and positive".into());
         }
         if self.threshold < 0.0 {
             return Err("Threshold cannot be negative".into());
@@ -135,7 +135,8 @@ impl SensDialogState {
             0 => SensType::Dc,
             _ => SensType::Ac,
         };
-        let freq = super::options::parse_si_value(&self.ac_freq).unwrap_or(1e6);
+        let freq = super::options::parse_si_value(&self.ac_freq)
+            .map_err(|err| format!("Invalid AC frequency: {}", err))?;
         let config = SensConfig {
             output_expr: self.output_expr.clone(),
             sens_type,
@@ -164,5 +165,25 @@ fn format_freq(f: f64) -> String {
         format!("{}k", f / 1e3)
     } else {
         format!("{}", f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SensConfig, SensDialogState, SensType};
+
+    #[test]
+    fn ac_sensitivity_dialog_rejects_invalid_frequency_text() {
+        let mut state = SensDialogState::from_config(
+            &SensConfig::new("V(out)")
+                .with_type(SensType::Ac)
+                .with_ac_freq(1e6),
+        );
+        state.ac_freq = "not-a-frequency".to_string();
+
+        let err = state
+            .to_config()
+            .expect_err("invalid AC frequency text must not silently default");
+        assert!(err.contains("AC frequency"));
     }
 }

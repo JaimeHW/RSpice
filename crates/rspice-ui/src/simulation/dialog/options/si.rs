@@ -9,7 +9,7 @@ pub fn parse_si_value(s: &str) -> Result<f64, ParseError> {
     }
 
     if let Ok(v) = s.parse::<f64>() {
-        return Ok(v);
+        return finite_value(s, v);
     }
 
     let bytes = s.as_bytes();
@@ -47,6 +47,9 @@ pub fn parse_si_value(s: &str) -> Result<f64, ParseError> {
     let base: f64 = num_part
         .parse()
         .map_err(|_| ParseError::InvalidNumber(num_part.to_string()))?;
+    if !base.is_finite() {
+        return Err(ParseError::NonFinite(num_part.to_string()));
+    }
     let suffix = suffix.trim().to_lowercase();
 
     let multiplier = match suffix.as_str() {
@@ -65,7 +68,15 @@ pub fn parse_si_value(s: &str) -> Result<f64, ParseError> {
         other => return Err(ParseError::UnknownSuffix(other.to_string())),
     };
 
-    Ok(base * multiplier)
+    finite_value(s, base * multiplier)
+}
+
+fn finite_value(source: &str, value: f64) -> Result<f64, ParseError> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(ParseError::NonFinite(source.to_string()))
+    }
 }
 
 /// Format a value with SI prefix.
@@ -111,6 +122,7 @@ pub enum ParseError {
     Empty,
     NoNumericPart,
     InvalidNumber(String),
+    NonFinite(String),
     UnknownSuffix(String),
 }
 
@@ -120,9 +132,25 @@ impl fmt::Display for ParseError {
             ParseError::Empty => write!(f, "Empty string"),
             ParseError::NoNumericPart => write!(f, "No numeric part found"),
             ParseError::InvalidNumber(s) => write!(f, "Invalid number: {}", s),
+            ParseError::NonFinite(s) => write!(f, "Non-finite numeric value: {}", s),
             ParseError::UnknownSuffix(s) => write!(f, "Unknown SI suffix: {}", s),
         }
     }
 }
 
 impl std::error::Error for ParseError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{ParseError, parse_si_value};
+
+    #[test]
+    fn parse_si_value_rejects_non_finite_literals() {
+        for text in ["NaN", "inf", "-inf", "1e309"] {
+            assert!(
+                matches!(parse_si_value(text), Err(ParseError::NonFinite(_))),
+                "{text} should be rejected as non-finite"
+            );
+        }
+    }
+}

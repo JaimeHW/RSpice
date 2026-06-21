@@ -74,7 +74,7 @@ impl ScriptExecutor {
     fn handle_run(&self, analysis: Option<&str>, state: &mut SimulationState) -> CommandOutput {
         match analysis {
             Some("transient") | Some("tran") => {
-                state.request_run_set();
+                state.request_simulate_run_set();
                 CommandOutput {
                     success: true,
                     message: "Simulation triggered successfully (Transient)".to_string(),

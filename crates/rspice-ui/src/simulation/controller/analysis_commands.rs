@@ -253,25 +253,7 @@ impl SimulationController {
         }
     }
 
-    /// Compose the run deck from a manually edited netlist source. The deck's
-    /// own analysis cards drive the queue, so generated UI analysis lines are
-    /// intentionally not appended.
-    pub(super) fn compose_manual_netlist(source: &str, analysis_lines: &[String]) -> String {
-        let _ = analysis_lines;
-        let mut lines: Vec<String> = source
-            .lines()
-            .filter(|line| {
-                let trimmed = line.trim();
-                !(trimmed.eq_ignore_ascii_case(".end"))
-            })
-            .map(|line| line.to_string())
-            .collect();
-        lines.push(".end".to_string());
-        let mut merged = lines.join("\n");
-        merged.push('\n');
-        merged
-    }
-
+    /// Inject non-default UI simulation options before `.end`.
     pub(super) fn apply_simulation_options_to_netlist(
         netlist: &str,
         options: &crate::simulation::dialog::SimulationOptions,

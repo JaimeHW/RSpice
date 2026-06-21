@@ -4,6 +4,7 @@
 use egui::Ui;
 
 use crate::common::AppState;
+use crate::state::SimulationRun;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{TreeRow, kv_row, section_header};
@@ -25,7 +26,7 @@ fn run_history_section(ui: &mut Ui, state: &mut AppState) {
     if let Some(action) = section_header(ui, "Run history", Some("Clear"))
         && action.clicked()
     {
-        state.simulation.clear_runs();
+        state.clear_simulation_results();
     }
 
     ui.scope(|ui| {
@@ -49,13 +50,8 @@ fn run_history_section(ui: &mut Ui, state: &mut AppState) {
             .iter()
             .enumerate()
             .map(|(idx, run)| {
-                let label = format!("#{} · {}", run.id, state.shell.corner);
-                let meta = if run.success {
-                    format!("{:.1} s", run.elapsed_time)
-                } else {
-                    "failed".to_owned()
-                };
-                (idx, label, meta, run.success)
+                let row = run_history_row_text(run);
+                (idx, row.label, row.meta, row.success)
             })
             .collect();
         for (idx, label, meta, success) in rows {
@@ -71,6 +67,32 @@ fn run_history_section(ui: &mut Ui, state: &mut AppState) {
             }
         }
     });
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RunHistoryRowText {
+    label: String,
+    meta: String,
+    success: bool,
+}
+
+fn run_history_row_text(run: &SimulationRun) -> RunHistoryRowText {
+    let label = if run.label.trim().is_empty() {
+        format!("Run {}", run.id)
+    } else {
+        run.label.clone()
+    };
+    let meta = if run.success {
+        format!("{:.1} s", run.elapsed_time)
+    } else {
+        "failed".to_owned()
+    };
+
+    RunHistoryRowText {
+        label,
+        meta,
+        success: run.success,
+    }
 }
 
 fn engine_section(ui: &mut Ui, state: &mut AppState) {
@@ -234,4 +256,45 @@ pub fn right(ui: &mut Ui, state: &mut AppState) {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_history_row_text_uses_run_owned_label() {
+        let mut run = SimulationRun::new(42);
+        run.label = "Monte Carlo seed 12 - SS / 125 C".to_owned();
+        run.elapsed_time = 0.123;
+
+        let row = run_history_row_text(&run);
+
+        assert_eq!(row.label, "Monte Carlo seed 12 - SS / 125 C");
+        assert_eq!(row.meta, "0.1 s");
+        assert!(row.success);
+    }
+
+    #[test]
+    fn run_history_row_text_falls_back_for_blank_labels() {
+        let mut run = SimulationRun::new(7);
+        run.label = "   ".to_owned();
+
+        let row = run_history_row_text(&run);
+
+        assert_eq!(row.label, "Run 7");
+    }
+
+    #[test]
+    fn run_history_row_text_reports_failed_runs() {
+        let mut run = SimulationRun::new(5);
+        run.label = "AC sweep".to_owned();
+        run.elapsed_time = 2.5;
+        run.success = false;
+
+        let row = run_history_row_text(&run);
+
+        assert_eq!(row.meta, "failed");
+        assert!(!row.success);
+    }
 }

@@ -12,7 +12,7 @@ use egui::Ui;
 
 use crate::analysis::calculator;
 use crate::common::AppState;
-use crate::state::{AnalysisType, SimulationState};
+use crate::state::{AnalysisType, SharedWaveformValues, SimulationState};
 use crate::ui::plot::{self, Axis, CursorPair, PlotSpec, Trace, XScale, fmt_si, sample_at};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -20,7 +20,8 @@ use crate::ui::widgets::section_header;
 
 use super::strip::{LegendChip, StripHeader};
 use super::{
-    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, ResultsState, waveform_color, well_hint,
+    DerivedSeries, ExprEditor, ExprSeries, ExprTrace, ResultsState, WaveformSeriesResult,
+    waveform_color, well_hint,
 };
 
 /// How a trace's Y values are interpreted.
@@ -39,8 +40,8 @@ struct StripTrace {
     waveform_index: usize,
     name: String,
     color: egui::Color32,
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
+    x: SharedWaveformValues,
+    y: SharedWaveformValues,
     kind: TraceKind,
     visible: bool,
     /// The run this trace belongs to (cache-key discriminator).
@@ -112,10 +113,10 @@ pub(super) fn cached_models(
     t: &Tokens,
 ) -> Arc<Vec<StripModel>> {
     let fp = models_fingerprint(simulation, results.phase_continuous, t);
-    if let Some((cached_fp, models)) = &results.models.0 {
-        if *cached_fp == fp {
-            return Arc::clone(models);
-        }
+    if let Some((cached_fp, models)) = &results.models.0
+        && *cached_fp == fp
+    {
+        return Arc::clone(models);
     }
     let models = Arc::new(build_models(
         simulation,
@@ -191,7 +192,8 @@ pub(super) fn build_models(
             continue;
         }
         let (x_scale, x_unit, y_unit) = match analysis.analysis_type {
-            AnalysisType::Ac | AnalysisType::Noise => (XScale::Log10, "Hz", "dB"),
+            AnalysisType::Ac => (XScale::Log10, "Hz", "dB"),
+            AnalysisType::Noise | AnalysisType::Pnoise => (XScale::Log10, "Hz", "V^2/Hz"),
             AnalysisType::Transient => (XScale::Linear, "s", "V"),
             AnalysisType::DcSweep => (XScale::Linear, "V", "V"),
             _ => (XScale::Linear, "", "V"),
@@ -513,13 +515,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                                 ));
                             }
                         }
-                        if let Some(chip_index) = header.legend_removed {
-                            if chip_index >= model.signal_trace_count {
-                                remove_expr = Some((
-                                    model.analysis_index,
-                                    chip_index - model.signal_trace_count,
-                                ));
-                            }
+                        if let Some(chip_index) = header.legend_removed
+                            && chip_index >= model.signal_trace_count
+                        {
+                            remove_expr =
+                                Some((model.analysis_index, chip_index - model.signal_trace_count));
                         }
                         if header.maximize_clicked {
                             toggle_maximize = Some(model.analysis_index);
@@ -567,24 +567,23 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     if let Some(idx) = fit_strip {
         results.reset_plot_view(super::ResultViewer::Waves, idx);
     }
-    if let Some((analysis, index)) = toggle_expr {
-        if let Some(expr) = results
+    if let Some((analysis, index)) = toggle_expr
+        && let Some(expr) = results
             .exprs
             .get_mut(&analysis)
             .and_then(|list| list.get_mut(index))
-        {
-            expr.visible = !expr.visible;
-        }
+    {
+        expr.visible = !expr.visible;
     }
-    if let Some((analysis, index)) = remove_expr {
-        if let Some(list) = results.exprs.get_mut(&analysis) {
-            if index < list.len() {
-                let removed = list.remove(index);
-                results.expr_cache.remove(&(analysis, removed.text));
-            }
-            if list.is_empty() {
-                results.exprs.remove(&analysis);
-            }
+    if let Some((analysis, index)) = remove_expr
+        && let Some(list) = results.exprs.get_mut(&analysis)
+    {
+        if index < list.len() {
+            let removed = list.remove(index);
+            results.expr_cache.remove(&(analysis, removed.text));
+        }
+        if list.is_empty() {
+            results.exprs.remove(&analysis);
         }
     }
     if let Some(analysis) = open_editor {
@@ -616,15 +615,15 @@ fn expr_color(tokens: &Tokens, slot: usize) -> egui::Color32 {
 /// The inline expression editor row under a strip header (when open for
 /// this strip): mono input, Enter/Add commits, Esc closes, error inline.
 fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
-    let open_for_strip = state
+    let Some(editor) = state
         .shell
         .results
         .expr_editor
-        .as_ref()
-        .is_some_and(|e| e.analysis_index == analysis_index);
-    if !open_for_strip {
+        .as_mut()
+        .filter(|editor| editor.analysis_index == analysis_index)
+    else {
         return;
-    }
+    };
 
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -659,12 +658,6 @@ fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
             .color(c.text_dim),
     );
 
-    let editor = state
-        .shell
-        .results
-        .expr_editor
-        .as_mut()
-        .expect("checked above");
     let response = row.add(
         egui::TextEdit::singleline(&mut editor.text)
             .font(theme::mono(tokens::FS_1, FontWeight::Regular))
@@ -741,13 +734,15 @@ fn expr_editor_row(ui: &mut Ui, state: &mut AppState, analysis_index: usize) {
     }
 }
 
+type ExpressionEvaluation = (WaveformSeriesResult, Option<(f64, f64)>);
+
 /// Evaluate one expression against an analysis' waveforms. Scalars become a
 /// constant trace across the analysis' x span.
 fn evaluate_expression(
     simulation: &SimulationState,
     analysis_index: usize,
     text: &str,
-) -> (Result<(Arc<[f64]>, Arc<[f64]>), String>, Option<(f64, f64)>) {
+) -> ExpressionEvaluation {
     let Some(analysis) = simulation
         .active_run()
         .and_then(|run| run.analyses.get(analysis_index))
@@ -756,7 +751,10 @@ fn evaluate_expression(
     };
 
     let ctx = calculator::WaveformsContext::new(&analysis.waveforms);
-    let expr = calculator::parser::parse(text);
+    let expr = match calculator::parser::try_parse(text) {
+        Ok(expr) => expr,
+        Err(error) => return (Err(format!("parse error: {error}")), None),
+    };
     match calculator::evaluator::evaluate(&expr, &ctx) {
         Ok(calculator::CalcValue::Waveform(x, y)) if !x.is_empty() => {
             let extremes = super::finite_extremes(&y);
@@ -784,8 +782,8 @@ fn evaluate_expression(
 
 /// One expression trace resolved for plotting.
 struct ResolvedExpr {
-    x: Arc<[f64]>,
-    y: Arc<[f64]>,
+    x: SharedWaveformValues,
+    y: SharedWaveformValues,
     color: egui::Color32,
     cache_key: u64,
     label: String,
@@ -890,17 +888,15 @@ pub(crate) fn toggle_visibility(
         name = Some(waveform.name.clone());
     }
     // Mirror into the live waveform list when this is the active analysis.
-    if state.simulation.active_analysis_idx == Some(analysis_index) {
-        if let Some(name) = name {
-            if let Some(live) = state
-                .simulation
-                .waveforms
-                .iter_mut()
-                .find(|w| w.name == name)
-            {
-                live.visible = !live.visible;
-            }
-        }
+    if state.simulation.active_analysis_idx == Some(analysis_index)
+        && let Some(name) = name
+        && let Some(live) = state
+            .simulation
+            .waveforms
+            .iter_mut()
+            .find(|w| w.name == name)
+    {
+        live.visible = !live.visible;
     }
 }
 
@@ -960,24 +956,22 @@ fn show_strip_plot(ui: &mut Ui, state: &mut AppState, model: &StripModel) {
         .traces
         .iter()
         .any(|trace| trace.kind == TraceKind::PhaseDeg && trace.visible);
-    if has_phase {
-        if let Some((p0, p1)) = y_range(&mut state.shell.results.derived, model, true) {
-            let axis = match view.y_right {
-                // Zoomed: plain linear ticks — the 45° lattice would emit
-                // hundreds of gridlines (or none) at arbitrary zoom depths.
-                Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
-                None => {
-                    // Round phase bounds to 45° so ticks land on familiar angles.
-                    let p0 = (p0 / 45.0).floor() * 45.0;
-                    let p1 = (p1 / 45.0).ceil() * 45.0;
-                    let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
-                        .map(|i| p0 + i as f64 * 45.0)
-                        .collect();
-                    Axis::with_ticks(p0, p1, "°", &ticks)
-                }
-            };
-            spec.y_right = Some((axis, t.color.traces[2]));
-        }
+    if has_phase && let Some((p0, p1)) = y_range(&mut state.shell.results.derived, model, true) {
+        let axis = match view.y_right {
+            // Zoomed: plain linear ticks — the 45° lattice would emit
+            // hundreds of gridlines (or none) at arbitrary zoom depths.
+            Some((z0, z1)) => Axis::linear_with(z0, z1, "°", 5),
+            None => {
+                // Round phase bounds to 45° so ticks land on familiar angles.
+                let p0 = (p0 / 45.0).floor() * 45.0;
+                let p1 = (p1 / 45.0).ceil() * 45.0;
+                let ticks: Vec<f64> = (0..=((p1 - p0) / 45.0) as i64)
+                    .map(|i| p0 + i as f64 * 45.0)
+                    .collect();
+                Axis::with_ticks(p0, p1, "°", &ticks)
+            }
+        };
+        spec.y_right = Some((axis, t.color.traces[2]));
     }
     // 0 dB reference on log-magnitude strips.
     if model.y_unit == "dB" && y0 < 0.0 && y1 > 0.0 {
@@ -1070,10 +1064,10 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    if let Some(action) = section_header(ui, "Cursors", Some("Clear")) {
-        if action.clicked() {
-            state.shell.results.clear_cursors();
-        }
+    if let Some(action) = section_header(ui, "Cursors", Some("Clear"))
+        && action.clicked()
+    {
+        state.shell.results.clear_cursors();
     }
 
     let models = cached_models(&state.simulation, &mut state.shell.results, &t);
@@ -1172,15 +1166,14 @@ fn delta_rows(model: &StripModel, a: f64, b: f64) -> Vec<(String, String)> {
     // dB/decade slope between cursors on log strips.
     if model.x_scale == XScale::Log10 && a > 0.0 && b > 0.0 {
         let dlog = (b.log10() - a.log10()).abs();
-        if dlog > 1e-12 {
-            if let Some(mag) = model
+        if dlog > 1e-12
+            && let Some(mag) = model
                 .traces
                 .iter()
                 .find(|t| t.kind == TraceKind::MagnitudeDb && t.visible)
-            {
-                let ddb = sample_at(&mag.x, &mag.y, b) - sample_at(&mag.x, &mag.y, a);
-                rows.push(("slope".to_owned(), format!("{:.1} dB/dec", ddb / dlog)));
-            }
+        {
+            let ddb = sample_at(&mag.x, &mag.y, b) - sample_at(&mag.x, &mag.y, a);
+            rows.push(("slope".to_owned(), format!("{:.1} dB/dec", ddb / dlog)));
         }
     }
     rows
@@ -1314,4 +1307,28 @@ fn measurement_rows(
     }
     let refs: Vec<(&str, &str)> = rows.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     crate::ui::widgets::measurement_table(ui, &refs);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::{AnalysisResult, WaveformData};
+
+    #[test]
+    fn noise_strip_uses_spectral_density_unit_without_db_conversion() {
+        let mut simulation = SimulationState::default();
+        simulation.start_run().add_analysis(
+            AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
+                WaveformData::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 2.0e-18], "#fff"),
+            ]),
+        );
+        let mut derived = DerivedSeries::default();
+
+        let models = build_models(&simulation, &mut derived, &Tokens::default(), false);
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].y_unit, "V^2/Hz");
+        assert!(matches!(models[0].traces[0].kind, TraceKind::Value));
+        assert_eq!(models[0].traces[0].y.as_slice(), &[1.0e-18, 2.0e-18]);
+    }
 }

@@ -1,110 +1,479 @@
-use std::path::Path;
-
+use super::*;
 use rspice_core::netlist::{
     AnalysisCommand, FreqVariation, Netlist, PoleZeroAnalysisType, PoleZeroTransferType,
+    StepCommand, StepTarget,
 };
 
-use super::*;
+use crate::services::simulation_runner::{
+    CornerBaseMode, CornerFrequencySweep, TempRunConfig, expand_step_sweep_values,
+};
 
-impl SimulationController {
-    pub(super) fn build_manual_analysis_queue_from_source(
-        source: &str,
-        source_path: Option<&Path>,
-    ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
-        let parsed = match source_path {
-            Some(path) => Netlist::parse_with_path(source, path),
-            None => Netlist::parse(source),
-        }
-        .map_err(|err| vec![format!("Manual netlist parse error: {}", err)])?;
-
-        Self::build_manual_analysis_queue(&parsed.analyses)
+pub(super) fn build_manual_deck_queue(
+    state: &AppState,
+    source: &str,
+) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
+    let source = compose_manual_deck_source(source);
+    let parsed =
+        Netlist::parse(&source).map_err(|err| vec![format!("Netlist parse error: {err}")])?;
+    if parsed.analyses.is_empty() {
+        return Err(vec![
+            "No analysis command in netlist. Add .op, .ac, .tran, or another supported analysis."
+                .to_string(),
+        ]);
     }
 
-    fn build_manual_analysis_queue(
-        analyses: &[AnalysisCommand],
-    ) -> Result<Vec<QueuedAnalysis>, Vec<String>> {
-        let mut queue = Vec::new();
-        let mut errors = Vec::new();
+    let step_count = parsed
+        .analyses
+        .iter()
+        .filter(|command| matches!(command, AnalysisCommand::Step(_)))
+        .count();
+    let mc_count = parsed
+        .analyses
+        .iter()
+        .filter(|command| matches!(command, AnalysisCommand::MonteCarlo(_)))
+        .count();
+    let mut preflight_errors = Vec::new();
+    if step_count > 1 {
+        preflight_errors.push(format!(
+            "Manual deck runs support one .step command per run; found {step_count}. Split independent sweeps into separate runs."
+        ));
+    }
+    if mc_count > 1 {
+        preflight_errors.push(format!(
+            "Manual deck runs support one .mc command per run; found {mc_count}. Split independent Monte Carlo studies into separate runs."
+        ));
+    }
+    if !preflight_errors.is_empty() {
+        return Err(preflight_errors);
+    }
 
-        for analysis in analyses {
-            match Self::manual_analysis_to_queue_entries(analysis, analyses) {
-                Ok(entries) => {
-                    for entry in entries {
-                        if let Some(config) = &entry.config {
-                            if let Err(errs) = config.validate() {
-                                errors.push(format!(
-                                    "{} config is invalid: {}",
-                                    entry.spec.run_type().display_name(),
-                                    errs.join(", ")
-                                ));
-                                continue;
-                            }
-                        }
-                        queue.push(entry);
-                    }
-                }
-                Err(err) => errors.push(err),
-            }
+    let temperature_plan = match build_temperature_plan(&parsed.analyses) {
+        Ok(plan) => plan,
+        Err(err) => return Err(vec![err]),
+    };
+    let parameter_step_skips = match parameter_step_context_skips(&parsed.analyses) {
+        Ok(skips) => skips,
+        Err(err) => return Err(vec![err]),
+    };
+
+    let mut queue = Vec::with_capacity(parsed.analyses.len());
+    let mut errors = Vec::new();
+    for (idx, command) in parsed.analyses.iter().enumerate() {
+        if let Some(plan) = &temperature_plan
+            && idx == plan.insert_index
+        {
+            queue.push(plan.item.clone());
         }
+        if temperature_plan
+            .as_ref()
+            .is_some_and(|plan| plan.skip_indices.contains(&idx))
+            || parameter_step_skips.contains(&idx)
+        {
+            continue;
+        }
+        if matches!(command, AnalysisCommand::Temp { .. }) {
+            continue;
+        }
+        match command_to_queue_item(state, command) {
+            Ok(item) => queue.push(item),
+            Err(err) => errors.push(err),
+        }
+    }
 
-        if errors.is_empty() {
-            Ok(queue)
+    if errors.is_empty() && queue.is_empty() {
+        Err(vec![
+            "No runnable analysis command in netlist. Add .op, .ac, .tran, .step, .mc, or another supported analysis."
+                .to_string(),
+        ])
+    } else if errors.is_empty() {
+        Ok(queue)
+    } else {
+        Err(errors)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PlannedQueueItem {
+    insert_index: usize,
+    skip_indices: Vec<usize>,
+    item: QueuedAnalysis,
+}
+
+fn build_temperature_plan(
+    analyses: &[AnalysisCommand],
+) -> Result<Option<PlannedQueueItem>, String> {
+    let step_temp = analyses
+        .iter()
+        .enumerate()
+        .find_map(|(idx, command)| match command {
+            AnalysisCommand::Step(step) if step.target == StepTarget::Temp => Some((idx, step)),
+            _ => None,
+        });
+    let temp_indices: Vec<usize> = analyses
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, command)| matches!(command, AnalysisCommand::Temp { .. }).then_some(idx))
+        .collect();
+
+    if step_temp.is_none() && temp_indices.is_empty() {
+        return Ok(None);
+    }
+    if step_temp.is_some() && !temp_indices.is_empty() {
+        return Err(
+            "Manual temperature sweeps must use either .step temp or .temp, not both".to_string(),
+        );
+    }
+
+    let temperatures_c = if let Some((_, step)) = step_temp {
+        expand_step_sweep_values(&step.sweep)
+            .map_err(|err| format!("temperature .step is invalid: {err}"))?
+    } else {
+        unique_temp_directive_values(analyses)
+    };
+    if temperatures_c.is_empty() {
+        return Err("Manual temperature sweep requires at least one temperature".to_string());
+    }
+
+    let mut supported_bases = Vec::new();
+    let mut unsupported_bases = Vec::new();
+    for (idx, command) in analyses.iter().enumerate() {
+        if Some(idx) == step_temp.map(|(step_idx, _)| step_idx) || temp_indices.contains(&idx) {
+            continue;
+        }
+        if is_temperature_base_command(command) {
+            supported_bases.push((idx, command));
+        } else if is_analysis_command(command) {
+            unsupported_bases.push(command_name(command));
+        }
+    }
+
+    if !unsupported_bases.is_empty() {
+        unsupported_bases.sort_unstable();
+        unsupported_bases.dedup();
+        return Err(format!(
+            "Manual temperature sweeps currently support .op, .dc, .tran, or .ac as the base analysis; found {}",
+            unsupported_bases.join(", ")
+        ));
+    }
+    if supported_bases.len() > 1 {
+        let names = supported_bases
+            .iter()
+            .map(|(_, command)| command_name(command))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(format!(
+            "Manual temperature sweeps currently support one base analysis per run; found {names}"
+        ));
+    }
+    if supported_bases.is_empty() && step_temp.is_none() {
+        return Ok(None);
+    }
+
+    let (base_index, base_mode) = match supported_bases.first() {
+        Some((idx, command)) => (*idx, temperature_base_mode(command)?),
+        None => (
+            step_temp
+                .map(|(idx, _)| idx)
+                .expect(".step temp should have an index"),
+            CornerBaseMode::Op,
+        ),
+    };
+
+    let mut skip_indices = temp_indices;
+    if let Some((idx, _)) = step_temp {
+        skip_indices.push(idx);
+    }
+    if Some(base_index) != step_temp.map(|(idx, _)| idx) {
+        skip_indices.push(base_index);
+    }
+    skip_indices.sort_unstable();
+    skip_indices.dedup();
+
+    let insert_index = skip_indices.iter().copied().min().unwrap_or(base_index);
+    let analysis_line = if step_temp.is_some() {
+        ".step temp"
+    } else {
+        ".temp"
+    }
+    .to_string();
+
+    Ok(Some(PlannedQueueItem {
+        insert_index,
+        skip_indices,
+        item: QueuedAnalysis {
+            spec: AnalysisSpec::Parametric,
+            config: None,
+            spec_options: SpecExecutionOptions {
+                temp: Some(TempRunConfig {
+                    temperatures_c,
+                    base_mode,
+                }),
+                ..SpecExecutionOptions::default()
+            },
+            analysis_line,
+        },
+    }))
+}
+
+fn parameter_step_context_skips(analyses: &[AnalysisCommand]) -> Result<Vec<usize>, String> {
+    let Some((_, step)) = analyses.iter().enumerate().find_map(|(idx, command)| {
+        if let AnalysisCommand::Step(step) = command {
+            (step.target != StepTarget::Temp).then_some((idx, step))
         } else {
-            Err(errors)
+            None
+        }
+    }) else {
+        return Ok(Vec::new());
+    };
+
+    let mut op_indices = Vec::new();
+    let mut unsupported = Vec::new();
+    for (idx, command) in analyses.iter().enumerate() {
+        match command {
+            AnalysisCommand::Op => op_indices.push(idx),
+            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. } => {}
+            AnalysisCommand::MonteCarlo(_) => {}
+            other if is_analysis_command(other) => unsupported.push(command_name(other)),
+            _ => {}
         }
     }
 
-    fn manual_analysis_to_queue_entries(
-        analysis: &AnalysisCommand,
-        all_analyses: &[AnalysisCommand],
-    ) -> Result<Vec<QueuedAnalysis>, String> {
-        let entry = |spec: AnalysisSpec,
-                     config: Option<AnalysisConfig>,
-                     spec_options: SpecExecutionOptions,
-                     analysis_line: String| {
-            QueuedAnalysis {
-                spec,
-                config,
-                spec_options,
-                analysis_line,
-            }
-        };
+    if !unsupported.is_empty() {
+        unsupported.sort_unstable();
+        unsupported.dedup();
+        return Err(format!(
+            "Manual parameter .step runs currently execute DC operating-point sweeps only; found unsupported paired analysis {} for target {}",
+            unsupported.join(", "),
+            step_target_name(step)
+        ));
+    }
 
-        let entries = match analysis {
-            AnalysisCommand::Op => vec![entry(
-                AnalysisSpec::DcOp,
-                Some(AnalysisConfig::DcOp),
-                SpecExecutionOptions::default(),
-                ".op".to_string(),
-            )],
-            AnalysisCommand::Dc {
-                source,
-                start,
-                stop,
-                step,
-                sweep2,
-            } => {
-                let (source2, start2, stop2, step2) = if let Some(sweep) = sweep2 {
-                    (
-                        Some(sweep.source.clone()),
-                        Some(sweep.start),
-                        Some(sweep.stop),
-                        Some(sweep.step),
-                    )
-                } else {
-                    (None, None, None, None)
-                };
-                let spec = AnalysisSpec::DcSweep {
-                    source_name: source.clone(),
-                    start: *start,
-                    stop: *stop,
-                    step: *step,
-                    source2: source2.clone(),
-                    start2,
-                    stop2,
-                    step2,
-                };
-                let config = AnalysisConfig::DcSweep(DcSweepConfig {
+    Ok(op_indices)
+}
+
+fn unique_temp_directive_values(analyses: &[AnalysisCommand]) -> Vec<f64> {
+    let mut temperatures = Vec::new();
+    for command in analyses {
+        if let AnalysisCommand::Temp {
+            temperatures: temps,
+        } = command
+        {
+            for &temp in temps {
+                if !temperatures
+                    .iter()
+                    .any(|existing: &f64| (*existing - temp).abs() < 1e-15)
+                {
+                    temperatures.push(temp);
+                }
+            }
+        }
+    }
+    temperatures
+}
+
+fn is_analysis_command(command: &AnalysisCommand) -> bool {
+    !matches!(command, AnalysisCommand::Temp { .. })
+}
+
+fn is_temperature_base_command(command: &AnalysisCommand) -> bool {
+    matches!(
+        command,
+        AnalysisCommand::Op
+            | AnalysisCommand::Dc { .. }
+            | AnalysisCommand::Tran { .. }
+            | AnalysisCommand::Ac { .. }
+    )
+}
+
+fn temperature_base_mode(command: &AnalysisCommand) -> Result<CornerBaseMode, String> {
+    match command {
+        AnalysisCommand::Op => Ok(CornerBaseMode::Op),
+        AnalysisCommand::Dc {
+            source,
+            start,
+            stop,
+            step,
+            sweep2,
+        } => {
+            if sweep2.is_some() {
+                return Err(
+                    "Manual temperature sweeps do not yet support nested .dc base sweeps"
+                        .to_string(),
+                );
+            }
+            Ok(CornerBaseMode::DcSweep {
+                source_name: source.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+            })
+        }
+        AnalysisCommand::Tran {
+            step,
+            stop,
+            start,
+            max_step,
+            uic,
+        } => {
+            if start.is_some() || max_step.is_some() || *uic {
+                return Err(
+                    "Manual temperature transient sweeps currently support tstep/tstop only"
+                        .to_string(),
+                );
+            }
+            Ok(CornerBaseMode::Transient {
+                stop_time: *stop,
+                step_time: *step,
+            })
+        }
+        AnalysisCommand::Ac {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        } => Ok(CornerBaseMode::Ac {
+            start_freq: *start_freq,
+            stop_freq: *stop_freq,
+            points_per_unit: *points,
+            sweep: corner_frequency_sweep(*variation),
+        }),
+        _ => Err(format!(
+            "{} cannot be used as a manual temperature sweep base analysis",
+            command_name(command)
+        )),
+    }
+}
+
+fn corner_frequency_sweep(variation: FreqVariation) -> CornerFrequencySweep {
+    match variation {
+        FreqVariation::Lin => CornerFrequencySweep::Linear,
+        FreqVariation::Oct => CornerFrequencySweep::Octave,
+        FreqVariation::Dec => CornerFrequencySweep::Decade,
+    }
+}
+
+fn step_target_name(step: &StepCommand) -> &'static str {
+    match step.target {
+        StepTarget::Param => "PARAM",
+        StepTarget::Device => "device",
+        StepTarget::Model => "MODEL",
+        StepTarget::Temp => "TEMP",
+    }
+}
+
+fn command_name(command: &AnalysisCommand) -> &'static str {
+    match command {
+        AnalysisCommand::Op => ".op",
+        AnalysisCommand::Dc { .. } => ".dc",
+        AnalysisCommand::Ac { .. } => ".ac",
+        AnalysisCommand::Stb { .. } => ".stb",
+        AnalysisCommand::Disto { .. } => ".disto",
+        AnalysisCommand::Tran { .. } => ".tran",
+        AnalysisCommand::Noise { .. } => ".noise",
+        AnalysisCommand::PoleZero { .. } => ".pz",
+        AnalysisCommand::Sensitivity { .. } => ".sens",
+        AnalysisCommand::Tf { .. } => ".tf",
+        AnalysisCommand::Four { .. } => ".four",
+        AnalysisCommand::MonteCarlo(_) => ".mc",
+        AnalysisCommand::Step(_) => ".step",
+        AnalysisCommand::Temp { .. } => ".temp",
+    }
+}
+
+pub(super) fn compose_manual_deck_source(source: &str) -> String {
+    let has_end = source
+        .lines()
+        .any(|line| line.trim_start().eq_ignore_ascii_case(".end"));
+    if has_end {
+        source.to_string()
+    } else if source.ends_with('\n') {
+        format!("{source}.end\n")
+    } else {
+        format!("{source}\n.end\n")
+    }
+}
+
+fn frequency_sweep(variation: FreqVariation) -> FrequencySweep {
+    match variation {
+        FreqVariation::Lin => FrequencySweep::Linear,
+        FreqVariation::Oct => FrequencySweep::Octave,
+        FreqVariation::Dec => FrequencySweep::Decade,
+    }
+}
+
+fn ac_sweep(variation: FreqVariation) -> AcSweepType {
+    match variation {
+        FreqVariation::Lin => AcSweepType::Linear,
+        FreqVariation::Oct => AcSweepType::Octave,
+        FreqVariation::Dec => AcSweepType::Decade,
+    }
+}
+
+fn pz_transfer_name(transfer_type: PoleZeroTransferType) -> String {
+    match transfer_type {
+        PoleZeroTransferType::Voltage => "VOL",
+        PoleZeroTransferType::Current => "CUR",
+    }
+    .to_string()
+}
+
+fn pz_analysis_name(analysis_type: PoleZeroAnalysisType) -> String {
+    match analysis_type {
+        PoleZeroAnalysisType::PoleZero => "PZ",
+        PoleZeroAnalysisType::PolesOnly => "POL",
+        PoleZeroAnalysisType::ZerosOnly => "ZER",
+    }
+    .to_string()
+}
+
+fn pz_config_type(analysis_type: PoleZeroAnalysisType) -> PzAnalysisType {
+    match analysis_type {
+        PoleZeroAnalysisType::PoleZero => PzAnalysisType::PoleZero,
+        PoleZeroAnalysisType::PolesOnly => PzAnalysisType::PolesOnly,
+        PoleZeroAnalysisType::ZerosOnly => PzAnalysisType::ZerosOnly,
+    }
+}
+
+fn command_to_queue_item(
+    state: &AppState,
+    command: &AnalysisCommand,
+) -> Result<QueuedAnalysis, String> {
+    let spec_options = SpecExecutionOptions::default();
+    match command {
+        AnalysisCommand::Op => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::DcOp,
+            config: Some(AnalysisConfig::DcOp),
+            spec_options,
+            analysis_line: ".op".to_string(),
+        }),
+        AnalysisCommand::Dc {
+            source,
+            start,
+            stop,
+            step,
+            sweep2,
+        } => {
+            let (source2, start2, stop2, step2) = match sweep2 {
+                Some(second) => (
+                    Some(second.source.clone()),
+                    Some(second.start),
+                    Some(second.stop),
+                    Some(second.step),
+                ),
+                None => (None, None, None, None),
+            };
+            let spec = AnalysisSpec::DcSweep {
+                source_name: source.clone(),
+                start: *start,
+                stop: *stop,
+                step: *step,
+                source2: source2.clone(),
+                start2,
+                stop2,
+                step2,
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::DcSweep(DcSweepConfig {
                     source: source.clone(),
                     start: *start,
                     stop: *stop,
@@ -113,577 +482,482 @@ impl SimulationController {
                     start2,
                     stop2,
                     step2,
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::Ac {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-            } => {
-                let sweep = Self::manual_frequency_sweep(*variation);
-                let spec = AnalysisSpec::Ac {
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                    points_per_unit: *points,
-                    sweep,
-                };
-                let config = AnalysisConfig::Ac(AcAnalysisConfig {
-                    sweep_type: Self::manual_ac_sweep_type(*variation),
-                    num_points: *points,
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::Tran {
-                step,
-                stop,
-                start,
-                max_step,
-                uic,
-            } => {
-                let start_time = start.unwrap_or(0.0);
-                let spec = AnalysisSpec::Transient {
-                    stop_time: *stop,
-                    step_time: *step,
-                    start_time,
-                    max_timestep: *max_step,
-                    uic: *uic,
-                };
-                let config = AnalysisConfig::Transient(TransientAnalysisConfig {
-                    stop_time: *stop,
-                    step_time: *step,
-                    start_time,
-                    max_timestep: *max_step,
-                    uic: *uic,
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::Noise {
-                output_node,
-                reference_node,
-                input_source,
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-            } => {
-                let spec = AnalysisSpec::Noise {
-                    output_node: output_node.clone(),
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                    points_per_decade: *points,
-                    temperature: 300.0,
-                };
-                let config = AnalysisConfig::Noise(NoiseAnalysisConfig {
-                    output_node: output_node.clone(),
-                    reference_node: reference_node.clone().unwrap_or_else(|| "0".to_string()),
-                    input_source: input_source.clone(),
-                    sweep_type: Self::manual_ac_sweep_type(*variation),
-                    num_points: *points,
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::PoleZero {
-                input_pos,
-                input_neg,
-                output_pos,
-                output_neg,
-                transfer_type,
-                analysis_type,
-            } => {
-                let transfer_type = Self::manual_pz_transfer_type(*transfer_type).to_string();
-                let analysis_type = Self::manual_pz_analysis_type(*analysis_type).to_string();
-                let spec = AnalysisSpec::PoleZero {
-                    input_node: input_pos.clone(),
-                    input_ref: input_neg.clone(),
-                    output_node: output_pos.clone(),
-                    output_ref: output_neg.clone(),
-                    transfer_type: transfer_type.clone(),
-                    analysis_type: analysis_type.clone(),
-                };
-                let config = AnalysisConfig::PoleZero(PoleZeroConfig {
-                    input_node: input_pos.clone(),
-                    input_ref: input_neg.clone(),
-                    output_node: output_pos.clone(),
-                    output_ref: output_neg.clone(),
-                    transfer_type,
-                    analysis_type: match *analysis_type {
-                        ref mode if mode == "POL" => PzAnalysisType::PolesOnly,
-                        ref mode if mode == "ZER" => PzAnalysisType::ZerosOnly,
-                        _ => PzAnalysisType::PoleZero,
-                    },
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::Sensitivity {
-                output_node,
-                reference_node,
-                ac_sweep,
-            } => {
-                let output_var = Self::manual_voltage_probe(output_node, reference_node.as_deref());
-                let spec = AnalysisSpec::Sensitivity {
-                    output_var: output_var.clone(),
-                    ac_mode: ac_sweep.is_some(),
-                    frequency: ac_sweep.map(|sweep| sweep.start_freq),
-                };
-                let config = AnalysisConfig::Sensitivity(SensitivityConfig {
-                    output_var,
-                    ac_mode: ac_sweep.is_some(),
-                    frequency: ac_sweep.map(|sweep| sweep.start_freq),
-                });
-                vec![entry(
-                    spec,
-                    Some(config.clone()),
-                    SpecExecutionOptions::default(),
-                    config.to_spice(),
-                )]
-            }
-            AnalysisCommand::Disto {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-                f2_over_f1,
-            } => {
-                let spec = AnalysisSpec::Disto {
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                    points_per_unit: *points,
-                    sweep: Self::manual_frequency_sweep(*variation),
-                    f2_over_f1: *f2_over_f1,
-                };
-                vec![entry(
-                    spec,
-                    None,
-                    SpecExecutionOptions::default(),
-                    Self::manual_disto_line(
-                        *variation,
-                        *points,
-                        *start_freq,
-                        *stop_freq,
-                        *f2_over_f1,
-                    ),
-                )]
-            }
-            AnalysisCommand::Tf {
-                output_node,
-                reference_node,
-                output_is_current,
-                input_source,
-            } => {
-                if *output_is_current {
-                    return Err(
-                        "Transfer Function: manual .tf current probes are not supported by the UI runner yet"
-                            .to_string(),
-                    );
-                }
-                let mut spec_options = SpecExecutionOptions::default();
-                spec_options.tf = Some(crate::services::simulation_runner::TfRunConfig {
-                    input_source: input_source.clone(),
-                    output_node: output_node.clone(),
-                    output_ref: reference_node
-                        .clone()
-                        .filter(|node| !node.trim().is_empty()),
-                    ..crate::services::simulation_runner::TfRunConfig::default()
-                });
-                vec![entry(
-                    AnalysisSpec::Tf,
-                    None,
-                    spec_options,
-                    format!(
-                        ".tf {} {}",
-                        Self::manual_voltage_probe(output_node, reference_node.as_deref()),
-                        input_source
-                    ),
-                )]
-            }
-            AnalysisCommand::Four {
-                fundamental,
-                outputs,
-                num_harmonics,
-            } => {
-                let (start_time, stop_time) = Self::manual_fourier_window(all_analyses)?;
-                let mut entries = Vec::with_capacity(outputs.len());
-                for output in outputs {
-                    let (output_node, output_ref) = Self::manual_fourier_output(output);
-                    let spec = AnalysisSpec::Fourier {
-                        fundamental_freq: *fundamental,
-                        num_harmonics: *num_harmonics,
-                        output_node,
-                        output_ref,
-                        start_time,
-                        stop_time,
-                    };
-                    entries.push(entry(
-                        spec,
-                        None,
-                        SpecExecutionOptions::default(),
-                        format!(".four {} {}", fundamental, output),
-                    ));
-                }
-                entries
-            }
-            AnalysisCommand::Stb {
-                variation,
-                points,
-                start_freq,
-                stop_freq,
-                probe,
-            } => {
-                let spec = AnalysisSpec::Stb {
-                    probe_node: probe.clone(),
-                    start_freq: *start_freq,
-                    stop_freq: *stop_freq,
-                    sweep: Self::manual_frequency_sweep(*variation),
-                    points_per_decade: *points,
-                };
-                vec![entry(
-                    spec,
-                    None,
-                    SpecExecutionOptions::default(),
-                    Self::manual_stb_line(*variation, *points, *start_freq, *stop_freq, probe),
-                )]
-            }
-            AnalysisCommand::MonteCarlo(_)
-            | AnalysisCommand::Step(_)
-            | AnalysisCommand::Temp { .. } => Vec::new(),
-        };
-
-        Ok(entries)
-    }
-
-    fn manual_frequency_sweep(variation: FreqVariation) -> FrequencySweep {
-        match variation {
-            FreqVariation::Dec => FrequencySweep::Decade,
-            FreqVariation::Oct => FrequencySweep::Octave,
-            FreqVariation::Lin => FrequencySweep::Linear,
+                })),
+                analysis_line: ".dc".to_string(),
+                spec,
+                spec_options,
+            })
         }
-    }
-
-    fn manual_ac_sweep_type(variation: FreqVariation) -> AcSweepType {
-        match variation {
-            FreqVariation::Dec => AcSweepType::Decade,
-            FreqVariation::Oct => AcSweepType::Octave,
-            FreqVariation::Lin => AcSweepType::Linear,
-        }
-    }
-
-    fn manual_sweep_keyword(variation: FreqVariation) -> &'static str {
-        match variation {
-            FreqVariation::Dec => "dec",
-            FreqVariation::Oct => "oct",
-            FreqVariation::Lin => "lin",
-        }
-    }
-
-    fn manual_pz_transfer_type(transfer_type: PoleZeroTransferType) -> &'static str {
-        match transfer_type {
-            PoleZeroTransferType::Voltage => "VOL",
-            PoleZeroTransferType::Current => "CUR",
-        }
-    }
-
-    fn manual_pz_analysis_type(analysis_type: PoleZeroAnalysisType) -> &'static str {
-        match analysis_type {
-            PoleZeroAnalysisType::PoleZero => "PZ",
-            PoleZeroAnalysisType::PolesOnly => "POL",
-            PoleZeroAnalysisType::ZerosOnly => "ZER",
-        }
-    }
-
-    fn manual_voltage_probe(node: &str, reference: Option<&str>) -> String {
-        match reference.map(str::trim).filter(|node| !node.is_empty()) {
-            Some(reference) => format!("V({},{})", node, reference),
-            None => format!("V({})", node),
-        }
-    }
-
-    fn manual_disto_line(
-        variation: FreqVariation,
-        points: usize,
-        start_freq: f64,
-        stop_freq: f64,
-        f2_over_f1: Option<f64>,
-    ) -> String {
-        let mut line = format!(
-            ".disto {} {} {} {}",
-            Self::manual_sweep_keyword(variation),
-            points,
-            start_freq,
-            stop_freq
-        );
-        if let Some(ratio) = f2_over_f1 {
-            line.push_str(&format!(" {}", ratio));
-        }
-        line
-    }
-
-    fn manual_stb_line(
-        variation: FreqVariation,
-        points: usize,
-        start_freq: f64,
-        stop_freq: f64,
-        probe: &str,
-    ) -> String {
-        format!(
-            ".stb {} {} {} {} probe={}",
-            Self::manual_sweep_keyword(variation),
+        AnalysisCommand::Ac {
+            variation,
             points,
             start_freq,
             stop_freq,
-            probe
-        )
-    }
-
-    fn manual_fourier_window(analyses: &[AnalysisCommand]) -> Result<(f64, f64), String> {
-        for analysis in analyses {
-            if let AnalysisCommand::Tran { stop, start, .. } = analysis {
-                return Ok((start.unwrap_or(0.0), *stop));
-            }
+        } => {
+            let spec = AnalysisSpec::Ac {
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                points_per_unit: *points,
+                sweep: frequency_sweep(*variation),
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::Ac(AcAnalysisConfig {
+                    sweep_type: ac_sweep(*variation),
+                    num_points: *points,
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                })),
+                analysis_line: ".ac".to_string(),
+                spec,
+                spec_options,
+            })
         }
-        Err("Fourier: .four requires .tran in the manual deck".to_string())
-    }
-
-    fn manual_fourier_output(output: &str) -> (String, String) {
-        let trimmed = output.trim();
-        let inner = trimmed
-            .strip_prefix(['V', 'v'])
-            .and_then(|s| s.strip_prefix('('))
-            .and_then(|s| s.strip_suffix(')'))
-            .unwrap_or(trimmed);
-        let mut parts = inner.split(',').map(str::trim);
-        let node = parts.next().unwrap_or(inner).to_string();
-        let reference = parts.next().unwrap_or("0").to_string();
-        (node, reference)
+        AnalysisCommand::Stb {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            probe,
+        } => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::Stb {
+                probe_node: probe.clone(),
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                points_per_decade: *points,
+            },
+            config: None,
+            spec_options,
+            analysis_line: format!(
+                ".stb {} {} {} {} probe={}",
+                frequency_sweep(*variation).runner_keyword(),
+                points,
+                start_freq,
+                stop_freq,
+                probe
+            ),
+        }),
+        AnalysisCommand::Disto {
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+            f2_over_f1,
+        } => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::Disto {
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                points_per_unit: *points,
+                sweep: frequency_sweep(*variation),
+                f2_over_f1: *f2_over_f1,
+            },
+            config: None,
+            spec_options,
+            analysis_line: ".disto".to_string(),
+        }),
+        AnalysisCommand::Tran {
+            step,
+            stop,
+            start,
+            max_step,
+            uic,
+        } => {
+            let start_time = start.unwrap_or(0.0);
+            let spec = AnalysisSpec::Transient {
+                stop_time: *stop,
+                step_time: *step,
+                start_time,
+                max_timestep: *max_step,
+                uic: *uic,
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::Transient(TransientAnalysisConfig {
+                    stop_time: *stop,
+                    step_time: *step,
+                    start_time,
+                    max_timestep: *max_step,
+                    uic: *uic,
+                })),
+                analysis_line: ".tran".to_string(),
+                spec,
+                spec_options,
+            })
+        }
+        AnalysisCommand::Noise {
+            output_node,
+            reference_node,
+            input_source,
+            variation,
+            points,
+            start_freq,
+            stop_freq,
+        } => {
+            let reference_node = reference_node.clone().unwrap_or_else(|| "0".to_string());
+            let spec = AnalysisSpec::Noise {
+                output_node: output_node.clone(),
+                start_freq: *start_freq,
+                stop_freq: *stop_freq,
+                points_per_decade: *points,
+                temperature: state.sim_setup.options.temp + 273.15,
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
+                    output_node: output_node.clone(),
+                    reference_node,
+                    input_source: input_source.clone(),
+                    sweep_type: ac_sweep(*variation),
+                    num_points: *points,
+                    start_freq: *start_freq,
+                    stop_freq: *stop_freq,
+                })),
+                analysis_line: ".noise".to_string(),
+                spec,
+                spec_options,
+            })
+        }
+        AnalysisCommand::PoleZero {
+            input_pos,
+            input_neg,
+            output_pos,
+            output_neg,
+            transfer_type,
+            analysis_type,
+        } => {
+            let transfer_name = pz_transfer_name(*transfer_type);
+            let analysis_name = pz_analysis_name(*analysis_type);
+            let spec = AnalysisSpec::PoleZero {
+                input_node: input_pos.clone(),
+                input_ref: input_neg.clone(),
+                output_node: output_pos.clone(),
+                output_ref: output_neg.clone(),
+                transfer_type: transfer_name.clone(),
+                analysis_type: analysis_name.clone(),
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::PoleZero(PoleZeroConfig {
+                    input_node: input_pos.clone(),
+                    input_ref: input_neg.clone(),
+                    output_node: output_pos.clone(),
+                    output_ref: output_neg.clone(),
+                    transfer_type: transfer_name,
+                    analysis_type: pz_config_type(*analysis_type),
+                })),
+                analysis_line: ".pz".to_string(),
+                spec,
+                spec_options,
+            })
+        }
+        AnalysisCommand::Sensitivity {
+            output_node,
+            reference_node,
+            ac_sweep,
+        } => {
+            let output_var = match reference_node {
+                Some(reference) => format!("V({output_node},{reference})"),
+                None => format!("V({output_node})"),
+            };
+            let frequency = ac_sweep.as_ref().map(|sweep| sweep.start_freq);
+            let spec = AnalysisSpec::Sensitivity {
+                output_var: output_var.clone(),
+                ac_mode: ac_sweep.is_some(),
+                frequency,
+            };
+            Ok(QueuedAnalysis {
+                config: Some(AnalysisConfig::Sensitivity(SensitivityConfig {
+                    output_var,
+                    ac_mode: ac_sweep.is_some(),
+                    frequency,
+                })),
+                analysis_line: ".sens".to_string(),
+                spec,
+                spec_options,
+            })
+        }
+        AnalysisCommand::Tf { .. } => Err(
+            "Manual deck classic .tf is a DC transfer-function analysis; the current XF runner is frequency-sweep based, so .tf decks are rejected until DC .tf execution is wired through without invented sweep defaults"
+                .to_string(),
+        ),
+        AnalysisCommand::Four {
+            fundamental,
+            outputs,
+            num_harmonics,
+        } => {
+            let Some(output) = outputs.first() else {
+                return Err(".four requires at least one output".to_string());
+            };
+            Ok(QueuedAnalysis {
+                spec: AnalysisSpec::Fourier {
+                    fundamental_freq: *fundamental,
+                    num_harmonics: *num_harmonics,
+                    output_node: output.clone(),
+                    output_ref: "0".to_string(),
+                    start_time: 0.0,
+                    stop_time: 0.0,
+                },
+                config: None,
+                spec_options,
+                analysis_line: ".four".to_string(),
+            })
+        }
+        AnalysisCommand::MonteCarlo(_) => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::MonteCarlo,
+            config: None,
+            spec_options,
+            analysis_line: ".mc".to_string(),
+        }),
+        AnalysisCommand::Step(_) => Ok(QueuedAnalysis {
+            spec: AnalysisSpec::Parametric,
+            config: None,
+            spec_options,
+            analysis_line: ".step".to_string(),
+        }),
+        AnalysisCommand::Temp { .. } => {
+            Err(".temp directives must be planned as temperature sweeps before queueing".to_string())
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::*;
+    use super::*;
+    use crate::services::simulation_runner::CornerBaseMode;
+    use crate::simulation::multi_run::FrequencySweep;
+
+    fn specs_for(source: &str) -> Vec<AnalysisSpec> {
+        let state = AppState::default();
+        build_manual_deck_queue(&state, source)
+            .expect("manual deck queue")
+            .into_iter()
+            .map(|q| q.spec)
+            .collect()
+    }
 
     #[test]
-    fn manual_queue_uses_parsed_analysis_commands() {
-        let source = "manual analyses\n\
-             V1 in 0 DC 0 AC 1\n\
-             V2 bias 0 DC 0\n\
-             Vloop loop 0 0\n\
-             R1 in out 1k\n\
-             C1 out 0 1n\n\
-             .op\n\
-             .ac dec 5 1 1e6\n\
-             .tran 1n 10n 2n 500p uic\n\
-             .dc V1 0 5 1 V2 0 1 0.5\n\
-             .noise V(out,0) V1 oct 4 10 1k\n\
-             .pz in 0 out 0 vol pol\n\
-             .sens V(out,0) ac lin 3 100 300\n\
-             .disto lin 7 1k 10k 1.2\n\
-             .tf V(out,0) V1\n\
-             .four 1k V(out)\n\
-             .stb dec 12 10 1e6 probe=Vloop\n\
-             .end\n";
+    fn manual_deck_preserves_common_analysis_order() {
+        let specs = specs_for(
+            "deck\nR1 out 0 1k\nV1 out 0 1 AC 1\n.op\n.ac dec 20 1 1g\n.tran 1n 1u\n.end\n",
+        );
 
-        let queue =
-            SimulationController::build_manual_analysis_queue_from_source(source, None).unwrap();
-
-        assert_eq!(queue.len(), 11);
-        assert!(matches!(queue[0].spec, AnalysisSpec::DcOp));
+        assert!(matches!(specs[0], AnalysisSpec::DcOp));
         assert!(matches!(
-            queue[1].config,
-            Some(AnalysisConfig::Ac(AcAnalysisConfig {
-                sweep_type: AcSweepType::Decade,
-                num_points: 5,
-                start_freq: 1.0,
-                stop_freq: 1e6,
-            }))
+            specs[1],
+            AnalysisSpec::Ac {
+                start_freq,
+                stop_freq,
+                points_per_unit: 20,
+                sweep: FrequencySweep::Decade
+            } if (start_freq - 1.0).abs() < 1e-12 && (stop_freq - 1e9).abs() < 1.0
         ));
         assert!(matches!(
-            queue[2].config,
-            Some(AnalysisConfig::Transient(TransientAnalysisConfig {
+            specs[2],
+            AnalysisSpec::Transient {
                 step_time,
                 stop_time,
                 start_time,
-                max_timestep: Some(max_timestep),
-                uic: true,
-            })) if step_time == 1e-9
-                && stop_time == 1e-8
-                && start_time == 2e-9
-                && max_timestep == 5e-10
-        ));
-        assert!(matches!(
-            queue[3].config,
-            Some(AnalysisConfig::DcSweep(DcSweepConfig {
-                ref source,
-                start: 0.0,
-                stop: 5.0,
-                step: 1.0,
-                ref source2,
-                start2: Some(0.0),
-                stop2: Some(1.0),
-                step2: Some(0.5),
-            })) if source == "V1" && source2.as_deref() == Some("V2")
-        ));
-        assert!(matches!(
-            queue[4].config,
-            Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
-                ref output_node,
-                ref reference_node,
-                ref input_source,
-                sweep_type: AcSweepType::Octave,
-                num_points: 4,
-                start_freq: 10.0,
-                stop_freq: 1000.0,
-            })) if output_node.eq_ignore_ascii_case("out")
-                && reference_node == "0"
-                && input_source.eq_ignore_ascii_case("V1")
-        ));
-        assert!(matches!(
-            queue[5].spec,
-            AnalysisSpec::PoleZero {
-                ref transfer_type,
-                ref analysis_type,
-                ..
-            } if transfer_type == "VOL" && analysis_type == "POL"
-        ));
-        assert!(matches!(
-            queue[6].config,
-            Some(AnalysisConfig::Sensitivity(SensitivityConfig {
-                ref output_var,
-                ac_mode: true,
-                frequency: Some(100.0),
-            })) if output_var.eq_ignore_ascii_case("V(out,0)")
-        ));
-        assert!(matches!(
-            queue[7].spec,
-            AnalysisSpec::Disto {
-                sweep: FrequencySweep::Linear,
-                points_per_unit: 7,
-                start_freq,
-                stop_freq,
-                f2_over_f1: Some(1.2),
-            } if start_freq == 1000.0 && stop_freq == 10000.0
-        ));
-        assert!(matches!(queue[8].spec, AnalysisSpec::Tf));
-        assert!(queue[8].spec_options.tf.is_some());
-        assert!(matches!(
-            queue[9].spec,
-            AnalysisSpec::Fourier {
-                fundamental_freq: 1000.0,
-                num_harmonics: 9,
-                ref output_node,
-                ref output_ref,
-                start_time,
-                stop_time,
-            } if output_node.eq_ignore_ascii_case("out")
-                && output_ref == "0"
-                && start_time == 2e-9
-                && stop_time == 1e-8
-        ));
-        assert!(matches!(
-            queue[10].spec,
-            AnalysisSpec::Stb {
-                ref probe_node,
-                start_freq: 10.0,
-                stop_freq: 1e6,
-                points_per_decade: 12,
-                ..
-            } if probe_node == "VLOOP"
+                max_timestep: None,
+                uic: false
+            } if (step_time - 1e-9).abs() < 1e-21
+                && (stop_time - 1e-6).abs() < 1e-18
+                && start_time == 0.0
         ));
     }
 
     #[test]
-    fn manual_netlist_composition_does_not_append_generated_analysis_lines() {
-        let source = "deck\nR1 in 0 1k\n.op\n.end\n";
-        let merged =
-            SimulationController::compose_manual_netlist(source, &[".tran 1e-9 1e-6".to_string()]);
+    fn temp_command_queue_fallback_reports_error_without_panicking() {
+        let state = AppState::default();
+        let err = command_to_queue_item(
+            &state,
+            &AnalysisCommand::Temp {
+                temperatures: vec![25.0],
+            },
+        )
+        .expect_err(".temp fallback should be a recoverable queueing error");
 
-        assert_eq!(merged, "deck\nR1 in 0 1k\n.op\n.end\n");
+        assert!(err.contains(".temp"));
+        assert!(err.contains("temperature sweeps"));
     }
 
     #[test]
-    fn manual_stb_preserves_non_decade_sweep_type() {
-        let source = "manual stb\nVloop loop 0 0\n.stb lin 12 10 1e6 probe=Vloop\n.end\n";
+    fn manual_deck_dc_and_noise_build_configs_without_dialog_state() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\nV1 in 0 0 AC 1\nR1 in out 1k\n.ac lin 5 1 5\n.noise v(out) V1 dec 10 1 1e6\n.end\n",
+        )
+        .expect("queue builds");
 
-        let queue =
-            SimulationController::build_manual_analysis_queue_from_source(source, None).unwrap();
-
-        assert_eq!(queue.len(), 1);
-        assert!(matches!(
-            queue[0].spec,
-            AnalysisSpec::Stb {
-                sweep: FrequencySweep::Linear,
-                points_per_decade: 12,
-                ..
-            }
-        ));
+        assert!(matches!(queue[0].spec, AnalysisSpec::Ac { .. }));
+        assert!(matches!(queue[1].config, Some(AnalysisConfig::Noise(_))));
     }
 
     #[test]
-    fn manual_fourier_uses_parsed_tran_window() {
-        let source = "manual fourier\n\
-            V1 out 0 sin(0 1 1k)\n\
-            .tran 1n 20n 5n\n\
-            .four 1k V(out)\n\
-            .end\n";
+    fn manual_deck_mc_and_step_are_runnable_specs() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\n.param rload=1k\nV1 in 0 1\nR1 in out {rload}\nR2 out 0 1k\n.step param rload 500 1500 500\n.mc 8 seed 7 dist uniform spread 0.05\n.end\n",
+        )
+        .expect("manual deck queue");
 
-        let queue =
-            SimulationController::build_manual_analysis_queue_from_source(source, None).unwrap();
-
-        let fourier = queue
-            .iter()
-            .find_map(|entry| match &entry.spec {
-                AnalysisSpec::Fourier {
-                    start_time,
-                    stop_time,
-                    ..
-                } => Some((*start_time, *stop_time)),
-                _ => None,
-            })
-            .expect("fourier entry exists");
-        assert_eq!(fourier, (5e-9, 20e-9));
+        assert_eq!(queue.len(), 2);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+        assert!(queue[0].config.is_none());
+        assert!(matches!(queue[1].spec, AnalysisSpec::MonteCarlo));
+        assert!(queue[1].config.is_none());
     }
 
     #[test]
-    fn manual_fourier_requires_transient_card() {
-        let source = "manual fourier\nV1 out 0 sin(0 1 1k)\n.four 1k V(out)\n.end\n";
-
-        let errors = SimulationController::build_manual_analysis_queue_from_source(source, None)
-            .expect_err("fourier without .tran should be rejected");
+    fn manual_deck_tf_rejects_invented_ac_sweep_fallback() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(
+            &state,
+            "deck\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n.tf V(out) V1\n.end\n",
+        )
+        .expect_err("classic .tf must not be mapped to default AC/XF sweep");
 
         assert!(
-            errors
-                .iter()
-                .any(|err| err.contains(".four requires .tran"))
+            err.iter().any(|message| message.contains("classic .tf")),
+            "expected manual .tf diagnostic, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn manual_deck_rejects_multiple_step_commands() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(
+            &state,
+            "deck\n.param rload=1k cload=1p\nV1 out 0 1\nR1 out 0 {rload}\nC1 out 0 {cload}\n.step param rload 1k 2k 1k\n.step param cload 1p 2p 1p\n.end\n",
+        )
+        .expect_err("multiple step commands should be diagnosed");
+
+        assert!(
+            err.iter().any(|message| message.contains("one .step")),
+            "expected duplicate .step diagnostic, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn manual_deck_rejects_multiple_monte_carlo_commands() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(
+            &state,
+            "deck\n.param rload=1k\nV1 out 0 1\nR1 out 0 {rload}\n.mc 4 seed 1\n.mc 5 seed 2\n.end\n",
+        )
+        .expect_err("multiple Monte Carlo commands should be diagnosed");
+
+        assert!(
+            err.iter().any(|message| message.contains("one .mc")),
+            "expected duplicate .mc diagnostic, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn manual_deck_temp_directive_does_not_block_runnable_analysis() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(&state, "deck\n.temp 125\nV1 out 0 1\n.op\n.end\n")
+            .expect("manual deck queue");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+        let temp = queue[0]
+            .spec_options
+            .temp
+            .as_ref()
+            .expect("temperature options");
+        assert_eq!(temp.temperatures_c, vec![125.0]);
+        assert!(matches!(temp.base_mode, CornerBaseMode::Op));
+    }
+
+    #[test]
+    fn manual_deck_step_temp_uses_paired_transient_base_analysis() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(
+            &state,
+            "deck\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 1k\n.tran 1n 10n\n.step temp list 0 25 125\n.end\n",
+        )
+        .expect("manual deck queue");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+        let temp = queue[0]
+            .spec_options
+            .temp
+            .as_ref()
+            .expect("temperature options");
+        assert_eq!(temp.temperatures_c, vec![0.0, 25.0, 125.0]);
+        assert!(matches!(
+            temp.base_mode,
+            CornerBaseMode::Transient {
+                stop_time,
+                step_time,
+            } if (stop_time - 10e-9).abs() < 1e-21
+                && (step_time - 1e-9).abs() < 1e-21
+        ));
+    }
+
+    #[test]
+    fn manual_deck_temp_list_uses_paired_op_base_analysis() {
+        let state = AppState::default();
+        let queue = build_manual_deck_queue(&state, "deck\n.temp 25 125\nV1 out 0 1\n.op\n.end\n")
+            .expect("manual deck queue");
+
+        assert_eq!(queue.len(), 1);
+        assert!(matches!(queue[0].spec, AnalysisSpec::Parametric));
+        let temp = queue[0]
+            .spec_options
+            .temp
+            .as_ref()
+            .expect("temperature options");
+        assert_eq!(temp.temperatures_c, vec![25.0, 125.0]);
+        assert!(matches!(temp.base_mode, CornerBaseMode::Op));
+    }
+
+    #[test]
+    fn manual_deck_rejects_parameter_step_with_transient_base_analysis() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(
+            &state,
+            "deck\n.param rload=1k\nV1 out 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 out 0 {rload}\n.tran 1n 10n\n.step param rload 1k 2k 1k\n.end\n",
+        )
+        .expect_err("parameter step with transient should be diagnosed");
+
+        assert!(
+            err.iter()
+                .any(|message| message.contains("parameter .step")),
+            "expected unsupported parameter .step diagnostic, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn manual_deck_temp_only_reports_no_runnable_analysis() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(&state, "deck\n.temp 25 125\n.end\n")
+            .expect_err("temperature directive alone should not run");
+
+        assert!(
+            err.iter()
+                .any(|message| message.contains("No runnable analysis command"))
+        );
+    }
+
+    #[test]
+    fn manual_deck_source_does_not_append_analysis_lines() {
+        let source = "deck\nR1 out 0 1k\n.op\n.end\n";
+        assert_eq!(compose_manual_deck_source(source), source);
+    }
+
+    #[test]
+    fn manual_deck_adds_end_only_when_missing() {
+        assert_eq!(compose_manual_deck_source("deck\n.op"), "deck\n.op\n.end\n");
+    }
+
+    #[test]
+    fn manual_deck_reports_no_analysis() {
+        let state = AppState::default();
+        let err = build_manual_deck_queue(&state, "deck\nR1 a 0 1k\n.end\n")
+            .expect_err("no analysis should fail");
+        assert!(
+            err.iter()
+                .any(|e| e.contains("No analysis command in netlist"))
         );
     }
 }

@@ -79,7 +79,7 @@ pub(super) fn run_device_spec(
             max_vce,
             source_path,
         ),
-        _ => unreachable!("non-device spec routed to device runner"),
+        other => Err(super::misrouted_spec_error("device", &other)),
     }
 }
 
@@ -155,6 +155,7 @@ fn run_reliability(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_optimization(
     netlist: &str,
     variables: Vec<crate::simulation::multi_run::OptimizationVariable>,

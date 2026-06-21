@@ -42,10 +42,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         let points = smith.traces[index].points.clone();
         let derived = &mut state.shell.results.derived;
         let re = derived.get_or(0x501_0000 | (index as u64) << 8, || {
-            points.iter().map(|p| p.s.re).collect()
+            std::sync::Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
         });
         let im = derived.get_or(0x501_0001 | (index as u64) << 8, || {
-            points.iter().map(|p| p.s.im).collect()
+            std::sync::Arc::new(points.iter().map(|p| p.s.im).collect::<Vec<_>>())
         });
         arrays.push((index, re, im));
     }

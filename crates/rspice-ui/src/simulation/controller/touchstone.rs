@@ -1,10 +1,12 @@
 use super::*;
 
 impl SimulationController {
-    pub(super) fn maybe_export_touchstone(
+    pub(super) fn maybe_export_touchstone_for_run(
         &self,
         state: &mut AppState,
         result: &crate::simulation::SimulationResult,
+        export_io: &(impl crate::common::export_workflow::ExportWorkflowIo + ?Sized),
+        run_id: u64,
     ) {
         let Some(crate::simulation::multi_run::AnalysisSpec::SParameter { z0, ports, .. }) =
             self.current_spec.as_ref()
@@ -28,7 +30,6 @@ impl SimulationController {
             return;
         }
 
-        let run_id = state.simulation.active_run().map(|run| run.id).unwrap_or(0);
         let z0_by_port: Vec<f64> = ports.iter().map(|port| port.z0.unwrap_or(*z0)).collect();
         let dataset = match Self::build_touchstone_dataset(
             result,
@@ -54,11 +55,13 @@ impl SimulationController {
             Self::touchstone_export_path(state, run_id, self.current_analysis_idx, num_ports);
 
         let writer = WaveformWriter::new(WaveformFormat::Touchstone);
-        match writer.write(&dataset, &path) {
-            Ok(()) => state.push_sim_message(ConsoleMessage::info(format!(
-                "Exported Touchstone: {}",
-                path.display()
-            ))),
+        let export_result = writer
+            .write_text(&dataset)
+            .and_then(|contents| export_io.write_text_file(&path, &contents));
+        match export_result {
+            Ok(()) => state.push_sim_message(ConsoleMessage::info(
+                Self::touchstone_export_completed_message(&path),
+            )),
             Err(e) => state.push_sim_message(ConsoleMessage::warning(format!(
                 "Touchstone export failed: {}",
                 e
@@ -184,6 +187,20 @@ impl SimulationController {
         }
 
         Ok(dataset)
+    }
+
+    pub(super) fn touchstone_export_completed_message(path: &std::path::Path) -> String {
+        #[cfg(target_arch = "wasm32")]
+        {
+            format!(
+                "Touchstone download started: {} (confirm the browser accepted the download)",
+                path.display()
+            )
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            format!("Exported Touchstone: {}", path.display())
+        }
     }
 
     fn push_complex_signal_pair(

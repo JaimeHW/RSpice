@@ -37,10 +37,10 @@ pub struct NyquistDerived {
 
 fn derived(state: &mut AppState) -> Option<NyquistDerived> {
     let version = state.simulation.data_version;
-    if let Some(cached) = state.shell.results.nyquist {
-        if cached.version == version {
-            return Some(cached);
-        }
+    if let Some(cached) = state.shell.results.nyquist
+        && cached.version == version
+    {
+        return Some(cached);
     }
     let curve = active_curve(state)?;
     let computed = NyquistDerived {
@@ -74,8 +74,12 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let (re, im) = {
         let points: Vec<_> = curve.points.clone();
         let derived = &mut state.shell.results.derived;
-        let re = derived.get_or(0x917_0001, || points.iter().map(|p| p.real).collect());
-        let im = derived.get_or(0x917_0002, || points.iter().map(|p| p.imag).collect());
+        let re = derived.get_or(0x917_0001, || {
+            std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>())
+        });
+        let im = derived.get_or(0x917_0002, || {
+            std::sync::Arc::new(points.iter().map(|p| p.imag).collect::<Vec<_>>())
+        });
         (re, im)
     };
 

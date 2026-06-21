@@ -1,7 +1,20 @@
 use super::*;
 use std::sync::Arc;
 
-pub type SharedWaveformValues = Arc<[Value]>;
+pub type SharedWaveformValues = Arc<Vec<Value>>;
+
+/// Original complex samples associated with a display trace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ComplexWaveformComponents {
+    /// Source signal name before display transformations such as magnitude.
+    pub source_name: String,
+
+    /// Real component samples.
+    pub real: SharedWaveformValues,
+
+    /// Imaginary component samples.
+    pub imag: SharedWaveformValues,
+}
 
 /// Waveform trace data
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +30,9 @@ pub struct WaveformData {
 
     /// Trace color (hex string)
     pub color: String,
+
+    /// Optional original complex samples for export and downstream analysis.
+    pub complex: Option<ComplexWaveformComponents>,
 
     /// Whether this trace is visible
     pub visible: bool,
@@ -35,8 +51,24 @@ impl WaveformData {
             x: x.into(),
             y: y.into(),
             color: color.into(),
+            complex: None,
             visible: true,
         }
+    }
+
+    /// Attach original complex samples to a derived display trace.
+    pub fn with_complex_components(
+        mut self,
+        source_name: impl Into<String>,
+        real: impl Into<SharedWaveformValues>,
+        imag: impl Into<SharedWaveformValues>,
+    ) -> Self {
+        self.complex = Some(ComplexWaveformComponents {
+            source_name: source_name.into(),
+            real: real.into(),
+            imag: imag.into(),
+        });
+        self
     }
 
     /// Get the X range (min, max)

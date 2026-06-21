@@ -83,14 +83,20 @@ impl FourierConfig {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.fundamental_freq <= 0.0 {
-            return Err("Fundamental frequency must be positive".into());
+        if !self.fundamental_freq.is_finite() || self.fundamental_freq <= 0.0 {
+            return Err("Fundamental frequency must be finite and positive".into());
         }
         if self.num_harmonics == 0 {
             return Err("Number of harmonics must be at least 1".into());
         }
         if self.output_node.is_empty() {
             return Err("Output node must be specified".into());
+        }
+        if !self.start_time.is_finite() || !self.stop_time.is_finite() {
+            return Err("Analysis window times must be finite".into());
+        }
+        if self.start_time < 0.0 {
+            return Err("Start time must be non-negative".into());
         }
         if self.stop_time <= self.start_time {
             return Err("Stop time must be after start time".into());
@@ -135,7 +141,7 @@ impl FourierDialogState {
     pub fn to_config(&self) -> Result<FourierConfig, String> {
         let fund = parse_si_value(&self.fundamental).map_err(|e| format!("Bad freq: {}", e))?;
         let harm: u32 = self.harmonics.parse().map_err(|_| "Bad harmonics")?;
-        let start = parse_si_value(&self.start_time).unwrap_or(0.0);
+        let start = parse_si_value(&self.start_time).map_err(|e| format!("Bad start: {}", e))?;
         let stop = parse_si_value(&self.stop_time).map_err(|e| format!("Bad stop: {}", e))?;
 
         let config = FourierConfig {
@@ -182,5 +188,31 @@ fn format_time(t: f64) -> String {
         format!("{}n", t / 1e-9)
     } else {
         format!("{}p", t / 1e-12)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FourierConfig, FourierDialogState};
+
+    #[test]
+    fn fourier_dialog_rejects_invalid_start_time_text() {
+        let mut state = FourierDialogState::from_config(&FourierConfig::default());
+        state.start_time = "bad-start".to_string();
+
+        let err = state
+            .to_config()
+            .expect_err("invalid Fourier start time must not silently default");
+        assert!(err.contains("start"));
+    }
+
+    #[test]
+    fn fourier_config_rejects_non_finite_window() {
+        let config = FourierConfig::new(1e6, 10).with_window(f64::NAN, 10e-6);
+
+        let err = config
+            .validate()
+            .expect_err("NaN Fourier start time must be rejected");
+        assert!(err.contains("finite"));
     }
 }

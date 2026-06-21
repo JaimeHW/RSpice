@@ -138,7 +138,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         Some((f0, _)) if f0 > 0.0 => (f0 * 11.0).min(data_max),
         _ => data_max,
     };
-    if !(x1 > 0.0) {
+    if !matches!(x1.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
         well_hint(ui, "Degenerate spectrum");
         return;
     }

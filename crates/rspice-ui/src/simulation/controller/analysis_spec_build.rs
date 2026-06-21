@@ -219,8 +219,8 @@ impl SimulationController {
                 frequency: *frequency,
             })),
             _ => Err(format!(
-                "{:?} is not supported by the UI runner yet",
-                spec.run_type()
+                "{} runs through the spec-driven simulation path and cannot be converted to a legacy analysis config",
+                spec.run_type().display_name()
             )),
         }
     }

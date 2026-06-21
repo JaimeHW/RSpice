@@ -183,12 +183,8 @@ fn run_disto_analysis_nonlinear_hb(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err(DistoRunError::Data(
-            "DISTO sweep generated no frequency points".to_string(),
-        ));
-    }
+    )
+    .map_err(DistoRunError::Data)?;
 
     struct DistoAccum {
         fundamental_gain_db: Vec<Value>,
@@ -350,12 +346,8 @@ fn run_disto_analysis_linearized(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err(DistoRunError::Data(
-            "DISTO sweep generated no frequency points".to_string(),
-        ));
-    }
+    )
+    .map_err(DistoRunError::Data)?;
 
     let mut traces = Vec::with_capacity(ac.responses.len());
     for (name, response) in &ac.responses {

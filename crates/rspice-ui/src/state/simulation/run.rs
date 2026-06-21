@@ -41,11 +41,34 @@ impl SimulationRun {
     }
 
     /// Add an analysis result to this run
-    pub fn add_analysis(&mut self, analysis: AnalysisResult) {
+    pub fn add_analysis(&mut self, mut analysis: AnalysisResult) {
+        if analysis.id == 0
+            || self
+                .analyses
+                .iter()
+                .any(|existing| existing.id == analysis.id)
+        {
+            analysis.id = self.next_available_analysis_id();
+        }
         if !analysis.success {
             self.success = false;
         }
         self.analyses.push(analysis);
+    }
+
+    fn next_available_analysis_id(&self) -> u64 {
+        let mut next_id = self
+            .analyses
+            .iter()
+            .map(|analysis| analysis.id)
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .expect("analysis id space exhausted");
+        while self.analyses.iter().any(|analysis| analysis.id == next_id) {
+            next_id = next_id.checked_add(1).expect("analysis id space exhausted");
+        }
+        next_id
     }
 
     /// Set the total elapsed time for this run
@@ -89,5 +112,21 @@ impl SimulationRun {
             (hours - 12, "PM")
         };
         format!("{}:{:02}:{:02} {}", hour_12, minutes, seconds, am_pm)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_analysis_assigns_unique_ids_when_converters_reuse_placeholder() {
+        let mut run = SimulationRun::new(7);
+
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
+        run.add_analysis(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
+
+        let ids: Vec<_> = run.analyses.iter().map(|analysis| analysis.id).collect();
+        assert_eq!(ids, vec![1, 2]);
     }
 }

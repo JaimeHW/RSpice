@@ -151,10 +151,7 @@ pub fn run_tf_analysis_with_config_and_source_path(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err("TF frequency sweep produced no points".to_string());
-    }
+    )?;
 
     let ac_results = engine
         .run_ac(&tf_netlist, &frequencies)

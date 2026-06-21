@@ -223,10 +223,7 @@ fn run_base_mode_ac_point(
         stop_freq,
         points_per_unit,
         sweep.as_keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err("Corner AC base mode generated no frequency points".to_string());
-    }
+    )?;
 
     let dc_result = engine
         .run_dc_op(netlist)

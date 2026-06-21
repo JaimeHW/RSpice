@@ -1,6 +1,6 @@
 use crate::simulation::config::{
-    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, NoiseAnalysisConfig,
-    PoleZeroConfig, PzAnalysisType, SensitivityConfig, TransientAnalysisConfig,
+    AcAnalysisConfig, AcSweepType, AnalysisConfig, DcSweepConfig, PoleZeroConfig, PzAnalysisType,
+    SensitivityConfig, TransientAnalysisConfig,
 };
 use crate::simulation::multi_run::{AnalysisSpec, FrequencySweep};
 
@@ -47,21 +47,6 @@ pub(super) fn analysis_config_from_spec(spec: &AnalysisSpec) -> Option<AnalysisC
         } => Some(AnalysisConfig::Ac(AcAnalysisConfig {
             sweep_type: ac_sweep_type_from_spec(*sweep),
             num_points: *points_per_unit,
-            start_freq: *start_freq,
-            stop_freq: *stop_freq,
-        })),
-        AnalysisSpec::Noise {
-            output_node,
-            start_freq,
-            stop_freq,
-            points_per_decade,
-            ..
-        } => Some(AnalysisConfig::Noise(NoiseAnalysisConfig {
-            output_node: output_node.clone(),
-            reference_node: "0".to_string(),
-            input_source: "V1".to_string(),
-            sweep_type: AcSweepType::Decade,
-            num_points: *points_per_decade,
             start_freq: *start_freq,
             stop_freq: *stop_freq,
         })),

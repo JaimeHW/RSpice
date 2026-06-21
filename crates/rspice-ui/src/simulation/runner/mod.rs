@@ -19,6 +19,10 @@ use super::results::SimulationResult;
 use super::status::{SimulationProgress, SimulationStatus};
 
 mod spec;
+#[cfg(any(target_arch = "wasm32", test))]
+mod wasm_worker;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod worker_contract;
 
 /// Optional execution overrides for spec-driven analyses.
 #[derive(Debug, Clone, Default)]
@@ -37,7 +41,7 @@ pub struct SpecExecutionOptions {
 //=============================================================================
 
 #[derive(Debug, Clone)]
-enum SimulationRequest {
+pub(crate) enum SimulationRequest {
     Config(Box<AnalysisConfig>),
     Spec {
         spec: Box<AnalysisSpec>,
@@ -46,7 +50,7 @@ enum SimulationRequest {
 }
 
 #[derive(Debug, Clone)]
-struct NetlistInput {
+pub(crate) struct NetlistInput {
     netlist: String,
     source_path: Option<PathBuf>,
 }
@@ -67,6 +71,10 @@ pub struct SimulationRunner {
 
     /// Completed inline result waiting for the controller to poll it.
     pending_result: Option<Result<SimulationResult, SimulationError>>,
+
+    /// Browser worker state. Native builds use `thread_handle`.
+    #[cfg(target_arch = "wasm32")]
+    worker_handle: wasm_worker::WorkerHandle,
 }
 
 impl Default for SimulationRunner {
@@ -83,11 +91,18 @@ impl SimulationRunner {
             abort_flag: Arc::new(AtomicBool::new(false)),
             thread_handle: None,
             pending_result: None,
+            #[cfg(target_arch = "wasm32")]
+            worker_handle: wasm_worker::WorkerHandle::new(),
         }
     }
 
     /// Check if a simulation is currently running
     pub fn is_running(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if self.worker_handle.is_running() {
+            return true;
+        }
+
         if let Some(ref handle) = self.thread_handle {
             !handle.is_finished()
         } else {
@@ -117,6 +132,26 @@ impl SimulationRunner {
     /// Abort current simulation
     pub fn abort(&self) {
         self.abort_flag.store(true, Ordering::SeqCst);
+        #[cfg(target_arch = "wasm32")]
+        self.worker_handle.abort();
+    }
+
+    /// Abort and discard all runner-local completion/progress state.
+    ///
+    /// Native worker threads cannot be force-killed, but setting the shared
+    /// abort flag and dropping the join handle detaches stale work so its
+    /// eventual result cannot be polled into a replacement document.
+    pub(crate) fn reset_for_design_replacement(&mut self) {
+        self.abort();
+        self.thread_handle = None;
+        self.pending_result = None;
+        self.abort_flag = Arc::new(AtomicBool::new(false));
+        self.progress = Arc::new(Mutex::new(SimulationProgress::default()));
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = self.worker_handle.poll_result();
+        }
     }
 
     /// Check if aborted
@@ -129,7 +164,12 @@ impl SimulationRunner {
     /// Returns `Some(result)` if simulation completed, `None` if still running or no simulation.
     pub fn poll_result(&mut self) -> Option<Result<SimulationResult, SimulationError>> {
         if let Some(result) = self.pending_result.take() {
-            return Some(result);
+            return Some(self.result_after_abort(result));
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        if let Some(result) = self.worker_handle.poll_result() {
+            return Some(self.result_after_abort(result));
         }
 
         // Check if thread is finished
@@ -138,30 +178,48 @@ impl SimulationRunner {
         if is_finished {
             // Take the handle and join
             if let Some(handle) = self.thread_handle.take() {
-                match handle.join() {
-                    Ok(result) => {
-                        return Some(result);
-                    }
-                    Err(_) => {
-                        return Some(Err(SimulationError::ThreadPanic));
-                    }
-                }
+                let result = match handle.join() {
+                    Ok(result) => result,
+                    Err(_) => Err(SimulationError::ThreadPanic),
+                };
+                return Some(self.result_after_abort(result));
             }
         }
 
         None
     }
 
+    fn result_after_abort(
+        &self,
+        result: Result<SimulationResult, SimulationError>,
+    ) -> Result<SimulationResult, SimulationError> {
+        if self.abort_flag.load(Ordering::SeqCst) {
+            Err(SimulationError::Aborted)
+        } else {
+            result
+        }
+    }
+
     fn has_unpolled_result(&self) -> bool {
-        self.pending_result.is_some()
+        let has_native_result = self.pending_result.is_some()
             || self
                 .thread_handle
                 .as_ref()
-                .is_some_and(|handle| handle.is_finished())
+                .is_some_and(|handle| handle.is_finished());
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            has_native_result || self.worker_handle.has_unpolled_result()
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            has_native_result
+        }
     }
 
-    #[cfg(any(target_arch = "wasm32", test))]
-    fn store_pending_result(
+    #[cfg(test)]
+    pub(crate) fn store_pending_result(
         &mut self,
         result: Result<SimulationResult, SimulationError>,
     ) -> Result<(), SimulationError> {
@@ -265,11 +323,9 @@ impl SimulationRunner {
         let progress = Arc::clone(&self.progress);
         let abort_flag = Arc::clone(&self.abort_flag);
 
-        // Spawn simulation thread with real engine. Browser builds have no
-        // threads: solve inline on the UI thread (demo-scale decks finish in
-        // milliseconds; a Web Worker is the planned home) — progress state is
-        // final by the time this returns, and the absent JoinHandle is fine
-        // because completion is observed through `progress`, not the handle.
+        // Spawn simulation thread with real engine. Browser builds route
+        // through the module worker so the egui UI thread stays responsive.
+        // Former inline browser execution is deliberately not retained.
         #[cfg(not(target_arch = "wasm32"))]
         {
             let handle = std::thread::spawn(move || {
@@ -279,8 +335,13 @@ impl SimulationRunner {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let result = run_simulation_thread(request, input, progress, abort_flag);
-            self.store_pending_result(result)?;
+            wasm_worker::start_worker_request(
+                &mut self.worker_handle,
+                request,
+                input,
+                progress,
+                abort_flag,
+            )?;
         }
         Ok(())
     }
@@ -317,12 +378,21 @@ fn lock_progress<'a>(
     }
 }
 
+pub(in crate::simulation::runner) type ProgressObserver = fn(&SimulationProgress);
+
+fn notify_progress(progress: &SimulationProgress, observer: Option<ProgressObserver>) {
+    if let Some(observer) = observer {
+        observer(progress);
+    }
+}
+
 /// Bridges the engine's abort/progress hook onto the runner's shared state:
 /// polls the UI abort flag and folds the reported completed fraction back
 /// into the status line at the engine's abort-poll cadence.
 struct RunnerSignal {
     abort_flag: Arc<AtomicBool>,
     progress: Arc<Mutex<SimulationProgress>>,
+    progress_observer: Option<ProgressObserver>,
 }
 
 impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
@@ -333,17 +403,195 @@ impl rspice_core::abort_signal::AbortSignal for RunnerSignal {
     fn observe_progress(&self, fraction: f64) {
         let mut p = lock_progress(&self.progress, "observe_progress");
         p.observe_engine_fraction(fraction);
+        notify_progress(&p, self.progress_observer);
+    }
+}
+
+fn initial_status_for_request(request: &SimulationRequest) -> SimulationStatus {
+    match request {
+        SimulationRequest::Config(config) => match config.as_ref() {
+            AnalysisConfig::DcOp => SimulationStatus::DcOperatingPoint,
+            AnalysisConfig::DcSweep(dc) => SimulationStatus::DcSweep {
+                source: dc.source.clone(),
+                progress: 0.0,
+            },
+            AnalysisConfig::Transient(tran) => SimulationStatus::Transient {
+                time: 0.0,
+                stop_time: tran.stop_time,
+            },
+            AnalysisConfig::Ac(ac) => SimulationStatus::AcAnalysis {
+                freq: ac.start_freq,
+                stop_freq: ac.stop_freq,
+            },
+            AnalysisConfig::Noise(noise) => SimulationStatus::NoiseAnalysis {
+                freq: noise.start_freq,
+                stop_freq: noise.stop_freq,
+            },
+            AnalysisConfig::PoleZero(_) => SimulationStatus::PoleZero,
+            AnalysisConfig::Sensitivity(_) => SimulationStatus::Sensitivity,
+        },
+        SimulationRequest::Spec { spec, options } => initial_status_for_spec(spec, options),
+    }
+}
+
+fn initial_status_for_spec(
+    spec: &AnalysisSpec,
+    options: &SpecExecutionOptions,
+) -> SimulationStatus {
+    match spec {
+        AnalysisSpec::DcOp => SimulationStatus::DcOperatingPoint,
+        AnalysisSpec::DcSweep { source_name, .. } => SimulationStatus::DcSweep {
+            source: source_name.clone(),
+            progress: 0.0,
+        },
+        AnalysisSpec::Transient { stop_time, .. } => SimulationStatus::Transient {
+            time: 0.0,
+            stop_time: *stop_time,
+        },
+        AnalysisSpec::Ac {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::Disto {
+            start_freq,
+            stop_freq,
+            ..
+        } => SimulationStatus::AcAnalysis {
+            freq: *start_freq,
+            stop_freq: *stop_freq,
+        },
+        AnalysisSpec::Noise {
+            start_freq,
+            stop_freq,
+            ..
+        } => SimulationStatus::NoiseAnalysis {
+            freq: *start_freq,
+            stop_freq: *stop_freq,
+        },
+        AnalysisSpec::Pss {
+            fundamental_freq, ..
+        } => SimulationStatus::Transient {
+            time: 0.0,
+            stop_time: positive_period(*fundamental_freq),
+        },
+        AnalysisSpec::HarmonicBalance { tones, .. } => SimulationStatus::AcAnalysis {
+            freq: tones.first().map(|tone| tone.frequency).unwrap_or(1.0),
+            stop_freq: tones
+                .iter()
+                .map(|tone| tone.frequency * tone.harmonics.max(1) as f64)
+                .fold(1.0, f64::max),
+        },
+        AnalysisSpec::Tf => {
+            let tf = options.tf.as_ref().cloned().unwrap_or_default();
+            SimulationStatus::AcAnalysis {
+                freq: tf.start_freq,
+                stop_freq: tf.stop_freq,
+            }
+        }
+        AnalysisSpec::Sensitivity { .. } => SimulationStatus::Sensitivity,
+        AnalysisSpec::PoleZero { .. } => SimulationStatus::PoleZero,
+        AnalysisSpec::Pac => {
+            let pac = options.pac.as_ref().cloned().unwrap_or_default();
+            SimulationStatus::AcAnalysis {
+                freq: pac.start_freq,
+                stop_freq: pac.stop_freq,
+            }
+        }
+        AnalysisSpec::Pnoise => {
+            let pnoise = options.pnoise.as_ref().cloned().unwrap_or_default();
+            SimulationStatus::NoiseAnalysis {
+                freq: pnoise.start_freq,
+                stop_freq: pnoise.stop_freq,
+            }
+        }
+        AnalysisSpec::Pxf => {
+            let pxf = options.pxf.as_ref().cloned().unwrap_or_default();
+            SimulationStatus::AcAnalysis {
+                freq: pxf.start_freq,
+                stop_freq: pxf.stop_freq,
+            }
+        }
+        AnalysisSpec::Pstb => {
+            let pstb = options.pstb.as_ref().cloned().unwrap_or_default();
+            SimulationStatus::AcAnalysis {
+                freq: pstb.pss_fundamental_freq,
+                stop_freq: pstb.pss_fundamental_freq,
+            }
+        }
+        AnalysisSpec::Stb {
+            start_freq,
+            stop_freq,
+            ..
+        }
+        | AnalysisSpec::SParameter {
+            start_freq,
+            stop_freq,
+            ..
+        } => SimulationStatus::AcAnalysis {
+            freq: *start_freq,
+            stop_freq: *stop_freq,
+        },
+        AnalysisSpec::MonteCarlo => SimulationStatus::PostProcessing,
+        AnalysisSpec::Parametric => SimulationStatus::DcSweep {
+            source: if options.temp.is_some() {
+                "TEMP".to_string()
+            } else {
+                "STEP".to_string()
+            },
+            progress: 0.0,
+        },
+        AnalysisSpec::Corner => SimulationStatus::DcSweep {
+            source: "CORNER".to_string(),
+            progress: 0.0,
+        },
+        AnalysisSpec::Reliability { .. } | AnalysisSpec::Optimization { .. } => {
+            SimulationStatus::PostProcessing
+        }
+        AnalysisSpec::Soa { stop_time, .. } | AnalysisSpec::Envelope { stop_time, .. } => {
+            SimulationStatus::Transient {
+                time: 0.0,
+                stop_time: *stop_time,
+            }
+        }
+        AnalysisSpec::Fourier {
+            fundamental_freq,
+            num_harmonics,
+            ..
+        } => SimulationStatus::AcAnalysis {
+            freq: *fundamental_freq,
+            stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
+        },
+    }
+}
+
+fn positive_period(frequency: f64) -> f64 {
+    if frequency > 0.0 {
+        1.0 / frequency
+    } else {
+        0.0
     }
 }
 
 /// Simulation execution in background thread
 ///
 /// Runs the actual rspice-core simulation engine.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 fn run_simulation_thread(
     request: SimulationRequest,
     input: NetlistInput,
     progress: Arc<Mutex<SimulationProgress>>,
     abort_flag: Arc<AtomicBool>,
+) -> Result<SimulationResult, SimulationError> {
+    run_simulation_thread_with_progress_observer(request, input, progress, abort_flag, None)
+}
+
+pub(in crate::simulation::runner) fn run_simulation_thread_with_progress_observer(
+    request: SimulationRequest,
+    input: NetlistInput,
+    progress: Arc<Mutex<SimulationProgress>>,
+    abort_flag: Arc<AtomicBool>,
+    progress_observer: Option<ProgressObserver>,
 ) -> Result<SimulationResult, SimulationError> {
     use super::engine_bridge::EngineBridge;
 
@@ -351,12 +599,14 @@ fn run_simulation_thread(
     {
         let mut p = lock_progress(&progress, "run_simulation_thread(parse)");
         p.update_status(SimulationStatus::Parsing);
+        notify_progress(&p, progress_observer);
     }
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
         let mut p = lock_progress(&progress, "run_simulation_thread(abort-after-parse)");
         p.abort();
+        notify_progress(&p, progress_observer);
         return Err(SimulationError::Aborted);
     }
 
@@ -367,202 +617,36 @@ fn run_simulation_thread(
     {
         let mut p = lock_progress(&progress, "run_simulation_thread(build)");
         p.update_status(SimulationStatus::Building);
+        notify_progress(&p, progress_observer);
     }
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
         let mut p = lock_progress(&progress, "run_simulation_thread(abort-after-build)");
         p.abort();
+        notify_progress(&p, progress_observer);
         return Err(SimulationError::Aborted);
     }
 
-    // Update status based on analysis type
+    // Update status based on analysis type.
     {
         let mut p = lock_progress(&progress, "run_simulation_thread(status-by-analysis)");
-        match &request {
-            SimulationRequest::Config(config) => match config.as_ref() {
-                AnalysisConfig::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
-                AnalysisConfig::DcSweep(dc) => p.update_status(SimulationStatus::DcSweep {
-                    source: dc.source.clone(),
-                    progress: 0.0,
-                }),
-                AnalysisConfig::Transient(tran) => p.update_status(SimulationStatus::Transient {
-                    time: 0.0,
-                    stop_time: tran.stop_time,
-                }),
-                AnalysisConfig::Ac(ac) => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: ac.start_freq,
-                    stop_freq: ac.stop_freq,
-                }),
-                _ => p.update_status(SimulationStatus::DcOperatingPoint),
-            },
-            SimulationRequest::Spec { spec, options } => match spec.as_ref() {
-                AnalysisSpec::DcOp => p.update_status(SimulationStatus::DcOperatingPoint),
-                AnalysisSpec::DcSweep { source_name, .. } => {
-                    p.update_status(SimulationStatus::DcSweep {
-                        source: source_name.clone(),
-                        progress: 0.0,
-                    })
-                }
-                AnalysisSpec::Transient { stop_time, .. } => {
-                    p.update_status(SimulationStatus::Transient {
-                        time: 0.0,
-                        stop_time: *stop_time,
-                    })
-                }
-                AnalysisSpec::Ac {
-                    start_freq,
-                    stop_freq,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *start_freq,
-                    stop_freq: *stop_freq,
-                }),
-                AnalysisSpec::Disto {
-                    start_freq,
-                    stop_freq,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *start_freq,
-                    stop_freq: *stop_freq,
-                }),
-                AnalysisSpec::Noise {
-                    start_freq,
-                    stop_freq,
-                    ..
-                } => p.update_status(SimulationStatus::NoiseAnalysis {
-                    freq: *start_freq,
-                    stop_freq: *stop_freq,
-                }),
-                AnalysisSpec::Pss {
-                    fundamental_freq, ..
-                } => {
-                    let period = if *fundamental_freq > 0.0 {
-                        1.0 / *fundamental_freq
-                    } else {
-                        0.0
-                    };
-                    p.update_status(SimulationStatus::Transient {
-                        time: 0.0,
-                        stop_time: period,
-                    })
-                }
-                AnalysisSpec::HarmonicBalance { tones, .. } => {
-                    p.update_status(SimulationStatus::AcAnalysis {
-                        freq: tones.first().map(|tone| tone.frequency).unwrap_or(1.0),
-                        stop_freq: tones
-                            .iter()
-                            .map(|tone| tone.frequency * tone.harmonics.max(1) as f64)
-                            .fold(1.0, f64::max),
-                    })
-                }
-                AnalysisSpec::Pac => {
-                    if let Some(pac) = &options.as_ref().pac {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: pac.start_freq,
-                            stop_freq: pac.stop_freq,
-                        });
-                    } else {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: 1.0,
-                            stop_freq: 1.0,
-                        });
-                    }
-                }
-                AnalysisSpec::Pxf => {
-                    if let Some(pxf) = &options.as_ref().pxf {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: pxf.start_freq,
-                            stop_freq: pxf.stop_freq,
-                        });
-                    } else {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: 1.0,
-                            stop_freq: 1.0,
-                        });
-                    }
-                }
-                AnalysisSpec::Stb {
-                    start_freq,
-                    stop_freq,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *start_freq,
-                    stop_freq: *stop_freq,
-                }),
-                AnalysisSpec::Pstb => {
-                    if let Some(pstb) = &options.as_ref().pstb {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: pstb.pss_fundamental_freq,
-                            stop_freq: pstb.pss_fundamental_freq,
-                        });
-                    } else {
-                        p.update_status(SimulationStatus::AcAnalysis {
-                            freq: 1.0,
-                            stop_freq: 1.0,
-                        });
-                    }
-                }
-                AnalysisSpec::SParameter {
-                    start_freq,
-                    stop_freq,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *start_freq,
-                    stop_freq: *stop_freq,
-                }),
-                AnalysisSpec::Envelope { stop_time, .. } => {
-                    p.update_status(SimulationStatus::Transient {
-                        time: 0.0,
-                        stop_time: *stop_time,
-                    })
-                }
-                AnalysisSpec::Fourier {
-                    fundamental_freq,
-                    num_harmonics,
-                    ..
-                } => p.update_status(SimulationStatus::AcAnalysis {
-                    freq: *fundamental_freq,
-                    stop_freq: *fundamental_freq * (*num_harmonics).max(1) as f64,
-                }),
-                AnalysisSpec::MonteCarlo => p.update_status(SimulationStatus::PostProcessing),
-                AnalysisSpec::Parametric => p.update_status(SimulationStatus::DcSweep {
-                    source: "STEP".to_string(),
-                    progress: 0.0,
-                }),
-                AnalysisSpec::Corner => p.update_status(SimulationStatus::DcSweep {
-                    source: "TEMP".to_string(),
-                    progress: 0.0,
-                }),
-                AnalysisSpec::Reliability { .. } => {
-                    p.update_status(SimulationStatus::PostProcessing)
-                }
-                AnalysisSpec::Optimization { .. } => {
-                    p.update_status(SimulationStatus::PostProcessing)
-                }
-                AnalysisSpec::Soa { stop_time, .. } => {
-                    p.update_status(SimulationStatus::Transient {
-                        time: 0.0,
-                        stop_time: *stop_time,
-                    })
-                }
-                AnalysisSpec::PoleZero { .. } => p.update_status(SimulationStatus::PoleZero),
-                AnalysisSpec::Sensitivity { .. } => p.update_status(SimulationStatus::Sensitivity),
-                _ => p.update_status(SimulationStatus::PostProcessing),
-            },
-        }
+        p.update_status(initial_status_for_request(&request));
+        notify_progress(&p, progress_observer);
     }
 
     // Check for abort
     if abort_flag.load(Ordering::SeqCst) {
         let mut p = lock_progress(&progress, "run_simulation_thread(abort-before-execute)");
         p.abort();
+        notify_progress(&p, progress_observer);
         return Err(SimulationError::Aborted);
     }
 
     let signal = RunnerSignal {
         abort_flag: abort_flag.clone(),
         progress: progress.clone(),
+        progress_observer,
     };
 
     let result = match request {
@@ -602,6 +686,7 @@ fn run_simulation_thread(
     {
         let mut p = lock_progress(&progress, "run_simulation_thread(complete)");
         p.complete();
+        notify_progress(&p, progress_observer);
     }
 
     log::info!("Simulation thread completed successfully");
@@ -673,8 +758,6 @@ impl std::error::Error for SimulationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     #[test]
     fn poll_result_returns_pending_result_once() {
@@ -751,57 +834,112 @@ mod tests {
     }
 
     #[test]
-    fn spec_run_uses_source_path_for_relative_includes() {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock is after epoch")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "rspice-spec-source-path-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&dir).expect("create temp deck directory");
-        fs::write(dir.join("load.inc"), "RLOAD out 0 1k\n").expect("write include");
-        let source_path = dir.join("main.cir");
-        let deck = "source path tf\n\
-            .include \"load.inc\"\n\
-            V1 in 0 1\n\
-            R1 in out 1k\n\
-            .tf V(out) V1\n\
-            .end\n";
-        fs::write(&source_path, deck).expect("write deck");
-
-        let mut options = SpecExecutionOptions::default();
-        options.tf = Some(crate::services::simulation_runner::TfRunConfig {
-            input_source: "V1".to_string(),
-            output_node: "out".to_string(),
-            stop_freq: 10.0,
-            ..crate::services::simulation_runner::TfRunConfig::default()
-        });
-
+    fn design_replacement_reset_isolates_old_native_handles() {
         let mut runner = SimulationRunner::new();
-        runner
-            .start_spec_with_options_with_source_path(
-                AnalysisSpec::Tf,
-                deck.to_string(),
-                options,
-                Some(source_path),
-            )
-            .expect("start tf spec run");
+        let old_abort = Arc::clone(&runner.abort_flag);
+        let old_progress = Arc::clone(&runner.progress);
 
-        let mut result = None;
-        for _ in 0..100 {
-            if let Some(polled) = runner.poll_result() {
-                result = Some(polled);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        let result = result.expect("test simulation should finish quickly");
-        let _ = fs::remove_dir_all(&dir);
+        runner.reset_for_design_replacement();
+
         assert!(
-            result.is_ok(),
-            "relative include should resolve: {result:?}"
+            old_abort.load(Ordering::SeqCst),
+            "old worker handle should remain aborted"
+        );
+        assert!(
+            !runner.is_aborted(),
+            "future runs should start from a fresh abort flag"
+        );
+        assert!(!Arc::ptr_eq(&old_abort, &runner.abort_flag));
+        assert!(!Arc::ptr_eq(&old_progress, &runner.progress));
+    }
+
+    #[test]
+    fn initial_status_uses_specific_config_statuses() {
+        let noise = SimulationRequest::Config(Box::new(AnalysisConfig::Noise(
+            crate::simulation::config::NoiseAnalysisConfig {
+                output_node: "out".to_string(),
+                reference_node: "0".to_string(),
+                input_source: "V1".to_string(),
+                sweep_type: crate::simulation::config::AcSweepType::Decade,
+                num_points: 10,
+                start_freq: 12.0,
+                stop_freq: 34.0,
+            },
+        )));
+        assert_eq!(
+            initial_status_for_request(&noise),
+            SimulationStatus::NoiseAnalysis {
+                freq: 12.0,
+                stop_freq: 34.0
+            }
+        );
+
+        let pole_zero = SimulationRequest::Config(Box::new(AnalysisConfig::PoleZero(
+            crate::simulation::config::PoleZeroConfig {
+                input_node: "in".to_string(),
+                input_ref: "0".to_string(),
+                output_node: "out".to_string(),
+                output_ref: "0".to_string(),
+                transfer_type: "VOL".to_string(),
+                analysis_type: crate::simulation::config::PzAnalysisType::PoleZero,
+            },
+        )));
+        assert_eq!(
+            initial_status_for_request(&pole_zero),
+            SimulationStatus::PoleZero
+        );
+
+        let sensitivity = SimulationRequest::Config(Box::new(AnalysisConfig::Sensitivity(
+            crate::simulation::config::SensitivityConfig {
+                output_var: "V(out)".to_string(),
+                ac_mode: false,
+                frequency: None,
+            },
+        )));
+        assert_eq!(
+            initial_status_for_request(&sensitivity),
+            SimulationStatus::Sensitivity
+        );
+    }
+
+    #[test]
+    fn initial_status_uses_spec_execution_options_for_rf_analyses() {
+        let tf = SimulationRequest::Spec {
+            spec: Box::new(AnalysisSpec::Tf),
+            options: Box::new(SpecExecutionOptions {
+                tf: Some(crate::services::simulation_runner::TfRunConfig {
+                    start_freq: 10.0,
+                    stop_freq: 20.0,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        };
+        assert_eq!(
+            initial_status_for_request(&tf),
+            SimulationStatus::AcAnalysis {
+                freq: 10.0,
+                stop_freq: 20.0
+            }
+        );
+
+        let pnoise = SimulationRequest::Spec {
+            spec: Box::new(AnalysisSpec::Pnoise),
+            options: Box::new(SpecExecutionOptions {
+                pnoise: Some(crate::services::simulation_runner::PnoiseRunConfig {
+                    start_freq: 3.0,
+                    stop_freq: 30.0,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+        };
+        assert_eq!(
+            initial_status_for_request(&pnoise),
+            SimulationStatus::NoiseAnalysis {
+                freq: 3.0,
+                stop_freq: 30.0
+            }
         );
     }
 }

@@ -111,7 +111,7 @@ pub fn run_noise_analysis_with_source_path(
         .ok_or_else(|| format!("Output node '{}' not found", output_node))?;
 
     // Generate frequency points (always log-spaced for noise)
-    let frequencies = generate_freq_points(start_freq, stop_freq, points_per_decade, "dec");
+    let frequencies = generate_freq_points(start_freq, stop_freq, points_per_decade, "dec")?;
 
     // Run noise analysis
     let results = engine
@@ -119,4 +119,24 @@ pub fn run_noise_analysis_with_source_path(
         .map_err(|e| format!("Noise analysis error: {}", e))?;
 
     Ok(NoiseData::from_results(results))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NOISY_DIVIDER_DECK: &str = "\
+V1 in 0 DC 1
+R1 in out 1k
+R2 out 0 1k
+.end
+";
+
+    #[test]
+    fn noise_runner_rejects_empty_frequency_sweep_instead_of_empty_success() {
+        let error = run_noise_analysis(NOISY_DIVIDER_DECK, "out", 0.0, 1.0e6, 10, 300.15)
+            .expect_err("zero start frequency must be invalid");
+
+        assert!(error.contains("frequency"));
+    }
 }

@@ -3,7 +3,7 @@ use crate::analysis::eye_diagram::data::{EyeData, EyeDataBuilder};
 use crate::analysis::fft::{FftInputOptions, PreparedFftInput};
 use crate::common::app::ActiveViewer;
 use crate::common::app::AppState;
-use crate::state::AnalysisType;
+use crate::state::{AnalysisType, SharedWaveformValues};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 
@@ -49,8 +49,8 @@ struct PendingDerivedViewTask {
 struct DerivedWaveformSource {
     analysis: ActiveTransientAnalysisKey,
     source_name: String,
-    time: Arc<[f64]>,
-    values: Arc<[f64]>,
+    time: SharedWaveformValues,
+    values: SharedWaveformValues,
     fft_options: FftInputOptions,
 }
 

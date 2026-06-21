@@ -31,11 +31,16 @@ use crate::common::app::ActiveViewer;
 use crate::common::{AppState, RSpiceApp};
 use crate::simulation::SimulationController;
 use crate::simulation::controller::DerivedViewerLoadState;
-use crate::state::WaveformData;
+use crate::state::{SharedWaveformValues, WaveformData};
 use crate::ui::plot::{CursorPair, DecimationCache};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, docbar};
+
+pub type WaveformSeries = (SharedWaveformValues, SharedWaveformValues);
+pub type WaveformSeriesResult = Result<WaveformSeries, String>;
+type WindowStatsKey = (u64, u64, u64);
+type WindowStats = Option<(f64, f64, f64)>;
 
 /// The result viewers, in tab order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -208,8 +213,7 @@ pub struct ResultsState {
     /// tweaks is how engineers compare iterations.
     pub views: std::collections::HashMap<(ResultViewer, usize), PlotView>,
     /// User expression traces per waves strip (analysis index), evaluated by
-    /// the calculator against that analysis' waveforms. Persisted with the
-    /// session (visibility resets to on).
+    /// the calculator against that analysis' waveforms.
     pub exprs: std::collections::HashMap<usize, Vec<ExprTrace>>,
     /// The inline expression editor, when open (one strip at a time).
     pub expr_editor: Option<ExprEditor>,
@@ -268,7 +272,7 @@ pub struct ExprSeries {
     /// `simulation.data_version` the series was computed against.
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
-    pub series: Result<(std::sync::Arc<[f64]>, std::sync::Arc<[f64]>), String>,
+    pub series: WaveformSeriesResult,
     /// Finite (min, max) of y, for the automatic fit.
     pub y_extremes: Option<(f64, f64)>,
 }
@@ -278,6 +282,17 @@ impl ResultsState {
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();
         self.cursor_strip = None;
+    }
+
+    /// Clear result UI state that is tied to the active project/design data.
+    pub fn clear_project_scoped_state(&mut self) {
+        let viewer = self.viewer;
+        let phase_continuous = self.phase_continuous;
+        *self = Self {
+            viewer,
+            phase_continuous,
+            ..Self::default()
+        };
     }
 
     /// The zoom/pan override for one plot (copy; default = automatic view).
@@ -376,13 +391,13 @@ pub(super) fn finite_extremes(values: &[f64]) -> Option<(f64, f64)> {
 #[derive(Debug, Clone, Default)]
 pub struct DerivedSeries {
     version: u64,
-    map: std::collections::HashMap<u64, std::sync::Arc<[f64]>>,
+    map: std::collections::HashMap<u64, SharedWaveformValues>,
     /// Cached finite (min, max) per series key — axis autoranges must not
     /// rescan millions of samples per frame.
     ranges: std::collections::HashMap<u64, Option<(f64, f64)>>,
     /// Cached windowed (min, max, rms) measurements, keyed by
     /// (series key, window-start bits, window-end bits).
-    stats: std::collections::HashMap<(u64, u64, u64), Option<(f64, f64, f64)>>,
+    stats: std::collections::HashMap<WindowStatsKey, WindowStats>,
 }
 
 impl DerivedSeries {
@@ -417,8 +432,8 @@ impl DerivedSeries {
     pub fn get_or(
         &mut self,
         key: u64,
-        build: impl FnOnce() -> std::sync::Arc<[f64]>,
-    ) -> std::sync::Arc<[f64]> {
+        build: impl FnOnce() -> SharedWaveformValues,
+    ) -> SharedWaveformValues {
         if let Some(hit) = self.map.get(&key) {
             return std::sync::Arc::clone(hit);
         }
@@ -428,12 +443,14 @@ impl DerivedSeries {
     }
 
     /// 20·log₁₀ of a linear-magnitude series, cached under `key`.
-    pub fn db(&mut self, key: u64, magnitude: &[f64]) -> std::sync::Arc<[f64]> {
+    pub fn db(&mut self, key: u64, magnitude: &[f64]) -> SharedWaveformValues {
         self.get_or(key, || {
-            magnitude
-                .iter()
-                .map(|&m| 20.0 * m.max(1e-30).log10())
-                .collect()
+            std::sync::Arc::new(
+                magnitude
+                    .iter()
+                    .map(|&m| 20.0 * m.max(1e-30).log10())
+                    .collect::<Vec<_>>(),
+            )
         })
     }
 
@@ -443,9 +460,11 @@ impl DerivedSeries {
 
     /// Continuous (unwrapped) copy of a ±180°-wrapped phase-degree series,
     /// cached under `key` like `db`.
-    pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> std::sync::Arc<[f64]> {
+    pub fn unwrapped(&mut self, key: u64, phase_deg: &[f64]) -> SharedWaveformValues {
         self.get_or(Self::UNWRAP_KEY_BIT | key, || {
-            crate::analysis::calculator::functions::unwrap_phase_deg(phase_deg).into()
+            std::sync::Arc::new(crate::analysis::calculator::functions::unwrap_phase_deg(
+                phase_deg,
+            ))
         })
     }
 
@@ -615,14 +634,14 @@ pub(super) fn panel_note(ui: &mut Ui, text: &str) {
 /// Parse a `#rrggbb` trace color, falling back to the palette cycle.
 pub fn trace_color(hex: &str, fallback: egui::Color32) -> egui::Color32 {
     let hex = hex.trim_start_matches('#');
-    if hex.len() == 6 {
-        if let Ok(value) = u32::from_str_radix(hex, 16) {
-            return egui::Color32::from_rgb(
-                ((value >> 16) & 0xff) as u8,
-                ((value >> 8) & 0xff) as u8,
-                (value & 0xff) as u8,
-            );
-        }
+    if hex.len() == 6
+        && let Ok(value) = u32::from_str_radix(hex, 16)
+    {
+        return egui::Color32::from_rgb(
+            ((value >> 16) & 0xff) as u8,
+            ((value >> 8) & 0xff) as u8,
+            (value & 0xff) as u8,
+        );
     }
     fallback
 }

@@ -88,11 +88,40 @@ pub fn run_ac_analysis_with_source_path(
     source_path: Option<&Path>,
 ) -> Result<AcData, String> {
     let netlist = parse_runner_netlist(netlist_text, source_path)?;
-    let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type);
+    let frequencies = generate_freq_points(start_freq, stop_freq, num_points, sweep_type)?;
     let engine = Engine::new(build_engine_config(&netlist, None));
     let results = engine
         .run_ac(&netlist, &frequencies)
         .map_err(|e| format!("AC analysis error: {}", e))?;
 
     Ok(AcData::from_results(results))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RC_DECK: &str = "\
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1n
+.end
+";
+
+    #[test]
+    fn ac_runner_rejects_empty_frequency_sweep_instead_of_empty_success() {
+        let error = run_ac_analysis(RC_DECK, 0.0, 1.0e6, 10, "dec")
+            .expect_err("zero start frequency must be invalid");
+
+        assert!(error.contains("frequency"));
+    }
+
+    #[test]
+    fn ac_runner_rejects_unknown_sweep_type_instead_of_linear_fallback() {
+        let error = run_ac_analysis(RC_DECK, 1.0, 1.0e6, 10, "banana")
+            .expect_err("unknown AC sweep keyword must be invalid");
+
+        assert!(error.contains("sweep"));
+        assert!(error.contains("banana"));
+    }
 }

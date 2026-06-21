@@ -4,13 +4,10 @@ use super::*;
 // Simulation State
 //=============================================================================
 
-/// Requested simulation source for the next controller start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SimulationRunIntent {
-    /// Run the analyses configured in the Simulate workspace.
     #[default]
-    RunSet,
-    /// Run the text deck currently owned by the netlist editor.
+    SimulateRunSet,
     ManualDeck,
 }
 
@@ -24,12 +21,12 @@ pub struct SimulationState {
     /// When set to true, toolbar will start simulation and reset to false
     pub trigger_simulation: bool,
 
-    /// Source selected for the next simulation trigger.
-    pub run_intent: SimulationRunIntent,
-
     /// Flag to trigger simulation abort from stop button
     /// When set to true, SimulationController will call runner.abort() and reset to false
     pub trigger_abort: bool,
+
+    /// Which workflow requested the next simulation start.
+    pub run_intent: SimulationRunIntent,
 
     /// Current simulation progress (0.0 to 1.0)
     pub progress: f64,

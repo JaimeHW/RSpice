@@ -285,12 +285,8 @@ fn run_pnoise_analysis_with_config_typed(
         config.stop_freq,
         config.points_per_unit,
         config.sweep.keyword(),
-    );
-    if frequencies.is_empty() {
-        return Err(PnoiseRunError::Data(
-            "PNOISE frequency sweep produced no points".to_string(),
-        ));
-    }
+    )
+    .map_err(PnoiseRunError::Data)?;
 
     let sideband_stride =
         resolve_pnoise_sideband_stride(config.max_sideband).map_err(PnoiseRunError::Data)?;
@@ -344,7 +340,7 @@ fn run_pnoise_analysis_with_config_typed(
         config.output_node.trim(),
         pnoise_ref,
         pnoise_input,
-        config.max_sideband.max(1) as i32,
+        config.max_sideband.max(1),
     ) {
         Ok(exact) => {
             if config.noise_summary {

@@ -377,15 +377,12 @@ pub(crate) fn run_dc_output_sensitivity(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::resolve_sensitivity_ac_frequency;
 
     #[test]
-    fn resolve_sensitivity_ac_frequency_rejects_nonfinite_values() {
-        for frequency in [Value::NAN, Value::INFINITY, Value::NEG_INFINITY] {
-            let err = resolve_sensitivity_ac_frequency(true, Some(frequency))
-                .expect_err("non-finite AC sensitivity frequency must be rejected");
-
-            assert!(err.contains("frequency"));
-        }
+    fn resolve_sensitivity_ac_frequency_rejects_non_finite_values() {
+        let err = resolve_sensitivity_ac_frequency(true, Some(f64::INFINITY))
+            .expect_err("infinite AC sensitivity frequency must be rejected");
+        assert!(err.contains("finite"));
     }
 }

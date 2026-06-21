@@ -105,7 +105,7 @@ pub(super) fn run_periodic_spec(
             f2_over_f1,
             source_path,
         ),
-        _ => unreachable!("non-periodic spec routed to periodic runner"),
+        other => Err(super::misrouted_spec_error("periodic", &other)),
     }
 }
 

@@ -88,9 +88,19 @@ pub(super) fn generate_freq_points(
     stop: Value,
     points: usize,
     sweep_type: &str,
-) -> Vec<Value> {
-    if points == 0 || start <= 0.0 || stop <= 0.0 {
-        return vec![];
+) -> Result<Vec<Value>, String> {
+    if points == 0 {
+        return Err("frequency sweep must request at least one point".to_string());
+    }
+    if !start.is_finite() || !stop.is_finite() || start <= 0.0 || stop <= 0.0 {
+        return Err(format!(
+            "frequency sweep bounds must be finite and positive (start={start}, stop={stop})"
+        ));
+    }
+    if stop < start {
+        return Err(format!(
+            "frequency sweep stop frequency ({stop}) must be greater than or equal to start frequency ({start})"
+        ));
     }
 
     match sweep_type.to_lowercase().as_str() {
@@ -98,29 +108,32 @@ pub(super) fn generate_freq_points(
             let num_decades = (stop / start).log10();
             let total_points = ((points as f64) * num_decades).round() as usize;
             let total_points = total_points.max(2);
-            (0..total_points)
+            Ok((0..total_points)
                 .map(|idx| {
                     let t = idx as f64 / (total_points - 1) as f64;
                     start * (stop / start).powf(t)
                 })
-                .collect()
+                .collect())
         }
         "oct" | "octave" => {
             let num_octaves = (stop / start).log2();
             let total_points = ((points as f64) * num_octaves).round() as usize;
             let total_points = total_points.max(2);
-            (0..total_points)
+            Ok((0..total_points)
                 .map(|idx| {
                     let t = idx as f64 / (total_points - 1) as f64;
                     start * (stop / start).powf(t)
                 })
-                .collect()
+                .collect())
         }
-        _ => (0..points)
+        "lin" | "linear" => Ok((0..points)
             .map(|idx| {
                 let t = idx as f64 / (points - 1).max(1) as f64;
                 start + t * (stop - start)
             })
-            .collect(),
+            .collect()),
+        _ => Err(format!(
+            "unknown frequency sweep type '{sweep_type}'; expected lin, dec, or oct"
+        )),
     }
 }
