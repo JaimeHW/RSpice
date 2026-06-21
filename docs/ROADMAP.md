@@ -156,8 +156,9 @@ hand-porting six 20k-line models. The in-tree VA compiler is the strategic asset
 OpenVAF/OSDI play, executed in-house.
 
 ### M2.1 — VA pipeline industrial qualification
-- Target: compile **`models/veriloga/bsim4.va` (12.6k lines) end-to-end** and match the native
-  BSIM4 implementation: DC ±1e-6 rel, AC/noise/tran within harness tolerances on the bsim4 suite.
+- Target: compile an externally supplied, clean-provenance **BSIM4 Verilog-A** source end-to-end
+  and match the native BSIM4 implementation: DC ±1e-6 rel, AC/noise/tran within harness tolerances
+  on the bsim4 suite.
 - Required runtime features to audit/complete: `ddx`, `$limit` with pnjlim-equivalent callbacks
   (Newton limiting parity), internal-node collapse, `white_noise/flicker_noise` → noise-analysis
   integration, parameter ranges/defaults, `$param_given`, temperature update path, bias-independent

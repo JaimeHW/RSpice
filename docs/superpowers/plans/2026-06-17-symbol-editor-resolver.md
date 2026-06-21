@@ -34,7 +34,7 @@ This plan replaces the earlier prototype plan at `docs/superpowers/plans/2026-06
 - Modify: `crates/rspice-ui/src/state/mod.rs`
 - Modify: `crates/rspice-ui/src/state/symbol.rs`
 
-- [ ] **Step 1: Write failing resolver tests**
+- [x] **Step 1: Write failing resolver tests**
 
 Add this test module to the new file:
 
@@ -148,7 +148,7 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -158,7 +158,7 @@ cargo test -p rspice-ui symbol_resolver -- --nocapture
 
 Expected: compile failure because `symbol_resolver`, `SymbolResolver`, `ResolvedSymbolSource`, and `ResolvedSymbolIssueKind` do not exist.
 
-- [ ] **Step 3: Implement resolver types and exports**
+- [x] **Step 3: Implement resolver types and exports**
 
 Create `symbol_resolver.rs` with these public types and methods:
 
@@ -231,7 +231,7 @@ pub use symbol_resolver::{
 };
 ```
 
-- [ ] **Step 4: Run resolver tests and full state tests**
+- [x] **Step 4: Run resolver tests and full state tests**
 
 Run:
 
@@ -241,6 +241,8 @@ cargo test -p rspice-ui state::symbol_document_tests -- --nocapture
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui state::symbol_resolver --lib -- --nocapture` passed 5/5 resolver tests, and `cargo test -p rspice-ui state::symbol_document_tests --lib -- --nocapture` passed 6/6 symbol document tests.
 
 - [ ] **Step 5: Commit**
 
@@ -259,7 +261,7 @@ git commit -m "feat: resolve authored cell symbols"
 - Modify: `crates/rspice-ui/src/schematic/view/scene.rs`
 - Modify: `crates/rspice-ui/src/schematic/view/mod.rs`
 
-- [ ] **Step 1: Write failing terminal-position tests**
+- [x] **Step 1: Write failing terminal-position tests**
 
 Add tests to `component.rs`:
 
@@ -300,7 +302,7 @@ fn resolved_instance_terminals_use_authored_symbol_offsets() {
 }
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [x] **Step 2: Run test and verify it fails**
 
 Run:
 
@@ -310,7 +312,7 @@ cargo test -p rspice-ui resolved_instance_terminals_use_authored_symbol_offsets 
 
 Expected: compile failure because `terminal_positions_resolved` and `ResolvedCellSymbol::for_test` do not exist.
 
-- [ ] **Step 3: Implement resolved terminal helpers**
+- [x] **Step 3: Implement resolved terminal helpers**
 
 Add these helpers:
 
@@ -355,7 +357,7 @@ impl ResolvedCellSymbol {
 }
 ```
 
-- [ ] **Step 4: Thread resolved terminals through schematic view**
+- [x] **Step 4: Thread resolved terminals through schematic view**
 
 Add a lightweight per-frame context:
 
@@ -374,7 +376,7 @@ impl SchematicSymbolContext {
 
 Build it from `AppState` before drawing and interaction. Update drawing and snap call sites to use `component.terminal_positions_resolved(context.resolve_component(component))` when context is available.
 
-- [ ] **Step 5: Run terminal, snap, and schematic view tests**
+- [x] **Step 5: Run terminal, snap, and schematic view tests**
 
 ```powershell
 cargo test -p rspice-ui resolved_instance_terminals_use_authored_symbol_offsets -- --nocapture
@@ -383,6 +385,8 @@ cargo test -p rspice-ui state::schematic::port::tests -- --nocapture
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui resolved_instance_terminal --lib -- --nocapture` passed 2/2 tests, including authored terminal offsets and snap behavior. `cargo test -p rspice-ui state::schematic::snap::tests --lib -- --nocapture` passed 28/28, and `cargo test -p rspice-ui state::schematic::port::tests --lib -- --nocapture` passed 5/5.
 
 - [ ] **Step 6: Commit**
 
@@ -399,7 +403,7 @@ git commit -m "feat: use resolved symbol terminals in schematics"
 - Modify: `crates/rspice-ui/src/simulation/netlist_gen/mod.rs`
 - Modify: `crates/rspice-ui/src/common/app/app_workspace_actions.rs`
 
-- [ ] **Step 1: Write failing netlist test**
+- [x] **Step 1: Write failing netlist test**
 
 Add a test in `simulation/netlist_gen/subcircuits.rs`:
 
@@ -439,7 +443,7 @@ fn authored_symbol_pin_positions_define_cell_instance_connectivity() {
 }
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [x] **Step 2: Run test and verify it fails**
 
 ```powershell
 cargo test -p rspice-ui authored_symbol_pin_positions_define_cell_instance_connectivity -- --nocapture
@@ -447,7 +451,7 @@ cargo test -p rspice-ui authored_symbol_pin_positions_define_cell_instance_conne
 
 Expected: compile failure until the test helper and symbol-aware generator path exist.
 
-- [ ] **Step 3: Make netlist generation accept a symbol context**
+- [x] **Step 3: Make netlist generation accept a symbol context**
 
 Add a symbol context field to `NetlistGenerator` and replace direct `component.terminal_positions()` reads in `connectivity.rs` and `instances.rs` with resolved terminal positions. Keep the existing constructor using an empty context so primitive and legacy tests remain unchanged.
 
@@ -461,7 +465,7 @@ let resolved = self
 let terminals = component.terminal_positions_resolved(resolved);
 ```
 
-- [ ] **Step 4: Write failing wire-remap test**
+- [x] **Step 4: Write failing wire-remap test**
 
 Add an app-level test in `app_workspace_actions.rs`:
 
@@ -509,7 +513,7 @@ fn storing_symbol_move_remaps_instance_wire_endpoints_by_pin_name() {
 }
 ```
 
-- [ ] **Step 5: Implement wire remap on symbol store**
+- [x] **Step 5: Implement wire remap on symbol store**
 
 In `store_active_symbol_document`, capture the old resolved symbol before metadata mutation and the new resolved symbol after mutation. Add helper:
 
@@ -525,7 +529,7 @@ fn remap_instance_wires_for_symbol_change(
 
 The helper maps pin names to offsets, transforms offsets through each matching component, and rewrites only wire points exactly equal to the old transformed terminal point.
 
-- [ ] **Step 6: Run netlist and remap tests**
+- [x] **Step 6: Run netlist and remap tests**
 
 ```powershell
 cargo test -p rspice-ui authored_symbol_pin_positions_define_cell_instance_connectivity -- --nocapture
@@ -534,6 +538,8 @@ cargo test -p rspice-ui simulation::netlist_gen::subcircuits::tests -- --nocaptu
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui simulation::netlist_gen::subcircuits --lib -- --nocapture` passed 11/11, including `authored_symbol_pin_positions_define_cell_instance_connectivity`. The plan's old exact remap filter no longer matches a test name, so the current remap suite was verified with `cargo test -p rspice-ui remap --lib -- --nocapture`, passing 5/5 tests covering open instance wires by pin name, rotated/mirrored instances, one-shot remaps, all open parent buffers, and selected-cell remap-on-rotate.
 
 - [ ] **Step 7: Commit**
 
@@ -553,7 +559,7 @@ git commit -m "feat: netlist authored symbol terminals"
 - Modify: `crates/rspice-ui/src/schematic/export/block_symbols.rs`
 - Modify: `crates/rspice-ui/src/common/menu_bar/export_actions.rs`
 
-- [ ] **Step 1: Write failing export test**
+- [x] **Step 1: Write failing export test**
 
 Add a test under `schematic/export/mod.rs`:
 
@@ -581,7 +587,7 @@ fn svg_export_uses_authored_cell_symbol_body_and_labels() {
 }
 ```
 
-- [ ] **Step 2: Run test and verify it fails**
+- [x] **Step 2: Run test and verify it fails**
 
 ```powershell
 cargo test -p rspice-ui svg_export_uses_authored_cell_symbol_body_and_labels -- --nocapture
@@ -589,7 +595,7 @@ cargo test -p rspice-ui svg_export_uses_authored_cell_symbol_body_and_labels -- 
 
 Expected: compile failure until the symbol-aware export entry point exists.
 
-- [ ] **Step 3: Extract shared renderer**
+- [x] **Step 3: Extract shared renderer**
 
 Move body/pin/label drawing logic out of `shell/views/symbol.rs` into `resolved_symbol_render.rs`. Provide functions for egui drawing and SVG serialization:
 
@@ -613,11 +619,11 @@ pub fn write_resolved_symbol_svg(
 )
 ```
 
-- [ ] **Step 4: Use shared renderer in placed schematics and editor preview**
+- [x] **Step 4: Use shared renderer in placed schematics and editor preview**
 
 Update schematic drawing and placement preview to use the resolved symbol when available. Update the editor preview tile to resolve its own document through the same renderer and substitute `X1` for `@name` and the active cell name or value for `@value`.
 
-- [ ] **Step 5: Run render/export tests and build**
+- [x] **Step 5: Run render/export tests and build**
 
 ```powershell
 cargo test -p rspice-ui svg_export_uses_authored_cell_symbol_body_and_labels -- --nocapture
@@ -626,6 +632,8 @@ cargo build -p rspice-ui
 ```
 
 Expected: selected tests pass and build succeeds.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui svg_export_uses_authored_cell_symbol_body_and_labels --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui schematic::symbols::library::tests --lib -- --nocapture` passed 2/2, and `cargo build -p rspice-ui` completed successfully.
 
 - [ ] **Step 6: Commit**
 
@@ -646,7 +654,7 @@ git commit -m "feat: render and export authored symbols"
 - Modify: `crates/rspice-ui/src/common/app/app_actions.rs`
 - Modify: `crates/rspice-ui/src/shell/state.rs`
 
-- [ ] **Step 1: Write failing symbol-check tests**
+- [x] **Step 1: Write failing symbol-check tests**
 
 Add tests in `app_workspace_actions.rs`:
 
@@ -704,7 +712,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 ```powershell
 cargo test -p rspice-ui symbol_pin_checks_store_structured_drc_results_with_symbol_anchors -- --nocapture
@@ -713,7 +721,7 @@ cargo test -p rspice-ui symbol_log_anchor_opens_symbol_view_and_selects_pin -- -
 
 Expected: compile failure until symbol DRC types and anchors exist.
 
-- [ ] **Step 3: Extend DRC and log models**
+- [x] **Step 3: Extend DRC and log models**
 
 Add variants:
 
@@ -746,15 +754,15 @@ pub enum LogAnchor {
 
 Give symbol pin violation types `DrcSeverity::Error`, stable descriptions, and stable suggested fixes.
 
-- [ ] **Step 4: Implement structured symbol check runner and jumps**
+- [x] **Step 4: Implement structured symbol check runner and jumps**
 
 Replace plain `ConsoleMessage` emission in `run_active_symbol_pin_checks` with a `DrcResult`. Use `LogSource::Drc`, the same row cap as schematic checks, and `LogAnchor::Symbol` rows. Add `AppState::jump_to_log_anchor` and have the console click handler call it for both schematic and symbol anchors.
 
-- [ ] **Step 5: Generalize F4 cycling**
+- [x] **Step 5: Generalize F4 cycling**
 
 Move cycling logic to a function that maps each violation to a `LogAnchor`. For symbol anchors, open the symbol view and select the pin. Update symbol shortcut handling so `NextViolation` and `PrevViolation` call the same cycling function instead of returning `true` as a no-op.
 
-- [ ] **Step 6: Run check/navigation tests**
+- [x] **Step 6: Run check/navigation tests**
 
 ```powershell
 cargo test -p rspice-ui symbol_pin_checks_store_structured_drc_results_with_symbol_anchors -- --nocapture
@@ -763,6 +771,8 @@ cargo test -p rspice-ui services::drc::checker::tests -- --nocapture
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui symbol_pin_checks --lib -- --nocapture` passed 2/2, `cargo test -p rspice-ui symbol_log_anchor_opens_symbol_view_and_selects_pin --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui symbol_violation --lib -- --nocapture` passed 1/1, and `cargo test -p rspice-ui services::drc::checker::tests --lib -- --nocapture` passed 21/21.
 
 - [ ] **Step 7: Commit**
 
@@ -780,7 +790,7 @@ git commit -m "feat: integrate symbol checks with drc navigation"
 - Modify: `crates/rspice-ui/src/shell/state.rs`
 - Modify: `crates/rspice-ui/src/shell/toolbar.rs`
 
-- [ ] **Step 1: Write failing action tests**
+- [x] **Step 1: Write failing action tests**
 
 Add tests in `app_workspace_actions.rs`:
 
@@ -851,7 +861,7 @@ fn modified_shortcuts_do_not_switch_symbol_tools() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 ```powershell
 cargo test -p rspice-ui generate_symbol_document_is_one_undoable_transaction -- --nocapture
@@ -860,7 +870,7 @@ cargo test -p rspice-ui read_only_symbol_edit_paths_use_consistent_refusal_text 
 
 Expected: at least the undo test fails because generation currently stores without recording undo.
 
-- [ ] **Step 3: Implement transaction fixes**
+- [x] **Step 3: Implement transaction fixes**
 
 Change `generate_active_symbol_document` to load the current document, record it once, then store the generated document. Use one helper for read-only message text:
 
@@ -872,11 +882,11 @@ pub(crate) fn read_only_master_message(&self) -> String {
 
 Use the helper in store, undo, redo, deny edit, and UI banner.
 
-- [ ] **Step 4: Implement Place New Pins fix action**
+- [x] **Step 4: Implement Place New Pins fix action**
 
 Change `pin_pill` to return an action when there are unplaced pins. Add a button labeled `Place new pins` beside the pill. On click, set `SymbolTool::PlacePin`, select `next_unplaced_pin(document)`, and do not regenerate body art.
 
-- [ ] **Step 5: Fix shortcut ownership and toolbar affordances**
+- [x] **Step 5: Fix shortcut ownership and toolbar affordances**
 
 Guard raw local key handling with:
 
@@ -889,7 +899,7 @@ if !plain {
 
 Add separate toolbar buttons for Circle, Arc, Arrow, and Dot. Keep tooltips naming the exact key.
 
-- [ ] **Step 6: Run action and UI state tests**
+- [x] **Step 6: Run action and UI state tests**
 
 ```powershell
 cargo test -p rspice-ui generate_symbol_document_is_one_undoable_transaction -- --nocapture
@@ -898,6 +908,8 @@ cargo test -p rspice-ui common::app::app_workspace_actions::tests -- --nocapture
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui generate_symbol_document_is_one_undoable_transaction --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui read_only_symbol_edit_paths_use_consistent_refusal_text --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui common::app::app_workspace_actions::tests --lib -- --nocapture` passed 20/20, `cargo test -p rspice-ui symbol_action_tests --lib -- --nocapture` passed 2/2, and `cargo test -p rspice-ui shell::views::symbol::tests --lib -- --nocapture` passed 7/7.
 
 - [ ] **Step 7: Commit**
 
@@ -913,7 +925,7 @@ git commit -m "feat: polish symbol editor transactions"
 - Modify: `crates/rspice-ui/src/shell/views/symbol.rs`
 - Modify: `crates/rspice-ui/src/common/app/app_actions.rs`
 
-- [ ] **Step 1: Write failing selection tests**
+- [x] **Step 1: Write failing selection tests**
 
 Add pure state tests for a new `SymbolSelection` helper:
 
@@ -938,7 +950,7 @@ fn symbol_transforms_are_about_document_origin() {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 ```powershell
 cargo test -p rspice-ui select_all_symbol_items_selects_pins_and_shapes -- --nocapture
@@ -947,7 +959,7 @@ cargo test -p rspice-ui symbol_transforms_are_about_document_origin -- --nocaptu
 
 Expected: compile failure until selection helper and origin transform helper exist.
 
-- [ ] **Step 3: Implement multi-selection model**
+- [x] **Step 3: Implement multi-selection model**
 
 Add to `shell/state.rs`:
 
@@ -961,7 +973,7 @@ pub struct SymbolSelection {
 
 Replace single selected shape/pin paths gradually by keeping the existing fields as compatibility mirrors until the full UI path uses `SymbolSelection`.
 
-- [ ] **Step 4: Implement select-all, marquee, clipboard, and origin transforms**
+- [x] **Step 4: Implement select-all, marquee, clipboard, and origin transforms**
 
 Implement:
 
@@ -971,11 +983,11 @@ Implement:
 - paste at cursor or symbol view center;
 - rotate/mirror selected pins and shapes around `document.origin`.
 
-- [ ] **Step 5: Polish grid, bbox, dot, arc, and arrow behavior**
+- [x] **Step 5: Polish grid, bbox, dot, arc, and arrow behavior**
 
 Use the existing `SYMBOL_TERMINAL_GRID` and set body snap to a quarter terminal grid. Render the bbox as dashed. Make dot radius match the design intent at sheet scale. Add arc start/sweep handles and arrow placement along a clicked segment with a flip transform.
 
-- [ ] **Step 6: Run selection and action tests**
+- [x] **Step 6: Run selection and action tests**
 
 ```powershell
 cargo test -p rspice-ui select_all_symbol_items_selects_pins_and_shapes -- --nocapture
@@ -984,6 +996,8 @@ cargo test -p rspice-ui state::symbol_document_tests -- --nocapture
 ```
 
 Expected: all selected tests pass.
+
+Evidence (2026-06-17): `cargo test -p rspice-ui select_all_symbol_items_selects_pins_and_shapes --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui symbol_transforms_are_about_document_origin --lib -- --nocapture` passed 1/1, `cargo test -p rspice-ui symbol_selection_tests --lib -- --nocapture` passed 2/2, and `cargo test -p rspice-ui state::symbol_document_tests --lib -- --nocapture` passed 6/6.
 
 - [ ] **Step 7: Commit**
 
@@ -997,7 +1011,7 @@ git commit -m "feat: complete symbol editor selection tools"
 **Files:**
 - Modify only if failures require fixes in files already touched by Tasks 1-7.
 
-- [ ] **Step 1: Run format and full tests**
+- [x] **Step 1: Run format and full tests**
 
 ```powershell
 cargo fmt
@@ -1007,7 +1021,13 @@ cargo build -p rspice-ui
 
 Expected: format succeeds, all `rspice-ui` tests pass, and the UI crate builds.
 
-- [ ] **Step 2: Run manual GUI smoke test**
+Evidence (2026-06-17): `cargo fmt --all -- --check` passed, `cargo test -p rspice-ui` passed with 269 tests, `cargo build -p rspice-ui` passed, and `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed.
+
+Additional evidence after final review fixes (2026-06-17): `cargo test -p rspice-ui schematic::view --lib -- --nocapture` passed with 14 tests, `cargo test -p rspice-ui common::app::app_workspace_actions::tests::storing_symbol_document --lib -- --nocapture` passed with 5 tests, `cargo test -p rspice-ui state::schematic::component --lib -- --nocapture` passed with 3 tests, `cargo test -p rspice-ui state::symbol_resolver --lib -- --nocapture` passed with 5 tests, `cargo test -p rspice-ui --lib` passed with 280 tests, `cargo fmt --all -- --check` passed, `cargo check -p rspice-ui` passed, `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed, `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings` passed, and `cargo test -p rspice-ui` passed with 280 tests.
+
+Additional responsive chrome evidence (2026-06-17): after browser QA exposed phone-width clipping, responsive menu/toolbar/tab presentations, phone side-panel suppression, bounded compact project labels, compact overflow history-state parity, breakpoint guardrails, and mobile empty-state text were added with TDD coverage. Post-review verification passed: `cargo fmt --all -- --check`, `cargo check -p rspice-ui`, `cargo check -p rspice-ui --target wasm32-unknown-unknown`, `cargo test -p rspice-ui` with 294 tests, `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings`, `cargo build -p rspice-ui --target wasm32-unknown-unknown --release`, and `wasm-bindgen target/wasm32-unknown-unknown/release/rspice-ui.wasm --out-dir crates/rspice-ui/web/pkg --target web --no-typescript --out-name rspice-ui`.
+
+- [x] **Step 2: Run manual GUI smoke test**
 
 Launch:
 
@@ -1025,7 +1045,23 @@ Manual checks:
 - open a read-only symbol and verify edit refusal copy;
 - exercise select-all, copy, paste, rotate, mirror, marquee, and each body tool.
 
-- [ ] **Step 3: Capture visual evidence**
+Partial browser smoke evidence (2026-06-17): built the browser UI with `cargo build -p rspice-ui --target wasm32-unknown-unknown --release`, generated `crates/rspice-ui/web/pkg` via `wasm-bindgen`, served `crates/rspice-ui/web` at `http://127.0.0.1:8787/`, and verified in the in-app browser that the IDE loaded to `top -- Untitled Project -- RSpice` with a 1280x720 canvas, no loading overlay, and no console warning/error entries. Screenshot saved as `diagnostics/rspice-ui-browser-smoke.png`. A 390x844 mobile viewport initially loaded without console warnings/errors or DOM overflow, but showed cramped/clipped desktop-style toolbar and tab-strip chrome. Follow-up responsive polish added compact menu/toolbar/tab presentations, phone-width side-panel suppression, shorter mobile empty-state guidance, bounded compact project labels, compact overflow history-state parity, and label-aware tab breakpoints. After rebuilding wasm and regenerating `crates/rspice-ui/web/pkg`, the in-app browser verified 390x844, 900x720, and 1280x720 loads with no visible loading overlay, no horizontal DOM overflow, and no warning/error console entries. Screenshots saved as `diagnostics/rspice-ui-browser-mobile-smoke-review-final.png`, `diagnostics/rspice-ui-browser-midwidth-smoke-review-final.png`, and `diagnostics/rspice-ui-browser-desktop-smoke-review-final.png`. This does not complete the full manual checklist above.
+
+Additional browser symbol smoke evidence (2026-06-17): from the running browser build, loaded File -> Open example -> Hierarchical RC Filter, opened Library, selected `user / rc_filter_core / symbol`, and verified the authored symbol editor rendered with toolbar tools, symbol canvas, pin contract rail, `PINS match schematic`, and the "AS PLACED" preview tile. Ran `Ctrl+E` in the symbol view and confirmed the console emitted `Symbol pins match schematic`. Clicked the Circle body tool and verified the tool echo changed while the preview and pin rail remained stable. Browser console warning/error count remained 0. This still does not complete the full native/manual checklist above.
+
+Native launch attempt (2026-06-17): launched `target/debug/rspice-ui.exe` from the active worktree after approval. Windows reported the `rspice-ui` process alive/responding, but `MainWindowHandle` remained `0` and `EnumWindows` found no visible top-level RSpice window for the process, so no native desktop UI surface was available to inspect or capture. The process was cleaned up with `Stop-Process`. This keeps the native manual smoke item open; the inspectable evidence for this pass is the browser egui canvas smoke above.
+
+Native startup/logging polish follow-up (2026-06-17): rebuilt `target/debug/rspice-ui.exe` and relaunched it with stdout/stderr redirected under the current shell, which has `RUST_LOG=warn`. The reproduced native window reported title `hierarchical_rc_filter_tb* — Hierarchical RC Filter — RSpice`, `MainWindowHandle=17041064`, and `Responding=True`; the process was then cleaned up. The first captured launch showed that generic `RUST_LOG=warn` leaked `wgpu_hal::vulkan` backend probe warnings, so native GUI logging was moved to quiet defaults plus the app-specific `RSPICE_LOG` override. Focused verification passed with `cargo test -p rspice-ui common::logging --lib -- --nocapture` (2/2), `cargo build -p rspice-ui`, and the final captured launch produced zero-byte stdout/stderr logs at `diagnostics/native-rspice-ui-20260617-192632.stdout.log` and `diagnostics/native-rspice-ui-20260617-192632.stderr.log`. This proves native startup now creates a real desktop window without routine console noise, but still does not complete the full manual symbol-edit checklist above.
+
+Native desktop symbol smoke evidence (2026-06-17): captured real desktop window screenshots after launching the rebuilt native executable. `diagnostics/native-rspice-ui-window.png` shows a nonblank hierarchical schematic workspace; `diagnostics/native-rspice-ui-library-tab.png` shows the native placement Library rail; `diagnostics/native-rspice-ui-library-manager.png` shows the three-column Library Manager; `diagnostics/native-rspice-ui-symbol-editor-enter.png` shows `user / rc_filter_core / symbol` opened through Library Manager selection plus Enter with the authored symbol canvas, pin-contract rail, and AS PLACED preview; and `diagnostics/native-rspice-ui-symbol-ctrl-e.png` shows the native symbol editor after `Ctrl+E`, including the console row `Symbol pins match schematic`. A later logging review found that the quiet default over-filtered unlisted dependency warnings; after adding a global `warn` baseline plus explicit `wgpu_core`/`wgpu_hal`/`naga` error-level overrides, `cargo test -p rspice-ui common::logging --lib -- --nocapture` passed 2/2 and a fresh redirected native launch produced a responding window (`MainWindowHandle=21563608`) with zero-byte stdout/stderr logs at `diagnostics/native-rspice-ui-20260617-193835.stdout.log` and `diagnostics/native-rspice-ui-20260617-193835.stderr.log`. The remaining manual-symbol smoke gaps at this point were the gesture-heavy Generate/Undo/Redo, pin-drag remap, export, read-only refusal, and selection/body-tool matrix checks.
+
+Native symbol tool/edit matrix evidence (2026-06-17): in a disposable native session, opened `user / rc_filter_core / symbol`, exercised symbol tool shortcuts `S`, `P`, `W`, `C`, `A`, `D`, and `O`, and captured the resulting tool states as `diagnostics/native-rspice-ui-symbol-tool-select.png`, `native-rspice-ui-symbol-tool-pin.png`, `native-rspice-ui-symbol-tool-polyline.png`, `native-rspice-ui-symbol-tool-circle.png`, `native-rspice-ui-symbol-tool-arc.png`, `native-rspice-ui-symbol-tool-arrow.png`, and `native-rspice-ui-symbol-tool-dot.png`. Then exercised `Ctrl+A`, `Ctrl+C`, `Ctrl+V`, `R`, `H`, and `Y`, with visible selected/copied/transformed symbol geometry in `native-rspice-ui-symbol-select-all.png`, `native-rspice-ui-symbol-copy-paste.png`, `native-rspice-ui-symbol-rotate.png`, `native-rspice-ui-symbol-mirror-h.png`, and `native-rspice-ui-symbol-mirror-v.png`. This closes the native body-tool and edit-shortcut smoke.
+
+Native Generate/Undo/Redo evidence (2026-06-17): in a disposable native symbol-editor session, `Ctrl+A` plus Delete produced an empty symbol with the `Generate from schematic` call to action and three unplaced pins (`diagnostics/native-rspice-ui-symbol-generate-start-empty.png`). Clicking the call to action generated a placed box symbol from the schematic contract (`native-rspice-ui-symbol-generate-clicked.png`), `Ctrl+Z` restored the empty/unplaced state with `Undo: symbol edit` in the console (`native-rspice-ui-symbol-generate-clicked-undo.png`), and `Ctrl+Y` restored the generated symbol with `Redo: symbol edit` in the console (`native-rspice-ui-symbol-generate-clicked-redo.png`). The remaining manual checklist gaps are manual pin-drag remap visual evidence, SVG export through the native save dialog, and read-only refusal copy in the GUI.
+
+Native pin-remap/export/read-only closeout (2026-06-17): after enumerating the real egui window handle instead of the debug console window, captured a complete native pin-remap sequence. `diagnostics/native-rspice-ui-pin-remap-parent-before-confirmed.png` shows the parent `hierarchical_rc_filter_tb / schematic` before the edit; `native-rspice-ui-pin-remap-symbol-before-confirmed.png` shows `user / rc_filter_core / symbol` before dragging `in`; `native-rspice-ui-pin-remap-symbol-after-confirmed.png` shows the `in` pin moved left and selected; and `native-rspice-ui-pin-remap-parent-after-confirmed.png` shows the reopened parent schematic with the incoming XU1 wire endpoint following the moved pin. Backing regression verification passed with `cargo test -p rspice-ui remap --lib -- --nocapture` (6/6). Native SVG export was verified through File -> Export schematic SVG..., with `diagnostics/native-rspice-ui-export-file-menu.png` showing the menu command, `native-rspice-ui-export-save-dialog.png` showing the native `Export SVG` dialog and SVG filter, and `native-rspice-ui-export-console-after.png` showing `Exported SVG: ...\diagnostics\native-svg-export-20260617-201809.svg`; the written SVG is 2558 bytes and starts with XML/SVG headers. During this pass the browser export workflow was also promoted from a graceful "not available" refusal to a real download-blob backend using the existing export IO seam, with focused SVG action tests covering dialog metadata, `.svg` extension enforcement, write success, dialog failure, and write failure. There is no stable default native route to a read-only symbol library because the legacy read-only primitives library is intentionally purged; read-only refusal remains covered by fixture tests, and `cargo test -p rspice-ui read_only_symbol_edit_paths_use_consistent_refusal_text --lib -- --nocapture` plus `cargo test -p rspice-ui symbol_store_refuses_read_only_libraries --lib -- --nocapture` passed.
+
+- [x] **Step 3: Capture visual evidence**
 
 Save screenshots under `diagnostics/` with names:
 
@@ -1035,7 +1071,17 @@ diagnostics/symbol-editor-structured-checks.png
 diagnostics/symbol-editor-preview-and-tools.png
 ```
 
-- [ ] **Step 4: Dispatch final subagent code review**
+Evidence (2026-06-17): captured the three requested browser evidence PNGs under `diagnostics/`. `symbol-editor-authored-instance.png` shows the authored `rc_filter_core` symbol view and as-placed preview, `symbol-editor-structured-checks.png` shows the successful symbol-check console row, and `symbol-editor-preview-and-tools.png` shows the preview tile with the Circle body tool selected. Verified the files existed and rendered from disk; SHA-256 hashes were recorded with `Get-FileHash`.
+
+Fresh verification after browser evidence capture (2026-06-17): `cargo fmt --all -- --check` passed; `cargo test -p rspice-ui shell::views::netlist --lib -- --nocapture` passed 36/36; `cargo test -p rspice-ui shell::views::symbol::tests --lib -- --nocapture` passed 8/8, including `preview_viewport_fits_nonzero_origin_as_placed_symbol`; `cargo test -p rspice-ui simulation::controller --lib -- --nocapture` passed 13/13; `cargo test -p rspice-ui --lib` passed 303/303; `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed; and `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings` passed.
+
+Post-native-logging verification (2026-06-17): `cargo fmt --all -- --check` passed; `cargo test -p rspice-ui common::logging --lib -- --nocapture` passed 2/2; `cargo test -p rspice-ui --lib` passed 305/305; `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed; and `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings` passed.
+
+Post-review native-logging verification (2026-06-17): after preserving unlisted dependency warnings with a global `warn` baseline and keeping `wgpu_core`/`wgpu_hal`/`naga` at `error`, `cargo fmt --all -- --check` passed; `cargo test -p rspice-ui common::logging --lib -- --nocapture` passed 2/2; `cargo build -p rspice-ui` passed; a redirected native launch produced a responding window and zero-byte stdout/stderr logs at `diagnostics/native-rspice-ui-20260617-193835.stdout.log` and `diagnostics/native-rspice-ui-20260617-193835.stderr.log`; `cargo test -p rspice-ui --lib` passed 305/305; `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed; and `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings` passed.
+
+Post-closeout export/pin verification (2026-06-17): `cargo test -p rspice-ui svg_export --lib -- --nocapture` passed 6/6, `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed cleanly after the browser download backend, `cargo build -p rspice-ui` passed, `cargo test -p rspice-ui remap --lib -- --nocapture` passed 6/6, `cargo test -p rspice-ui read_only_symbol_edit_paths_use_consistent_refusal_text --lib -- --nocapture` passed 1/1, and `cargo test -p rspice-ui symbol_store_refuses_read_only_libraries --lib -- --nocapture` passed 1/1. After rustfmt, final verification passed with `cargo fmt --all -- --check`, `cargo test -p rspice-ui svg_export --lib -- --nocapture` (6/6), `cargo check -p rspice-ui --target wasm32-unknown-unknown`, `cargo test -p rspice-ui --lib -- --nocapture` (308/308), and `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings`.
+
+- [x] **Step 4: Dispatch final subagent code review**
 
 Ask a reviewer subagent to review the full implementation against:
 
@@ -1044,7 +1090,9 @@ Ask a reviewer subagent to review the full implementation against:
 - this implementation plan;
 - the diff since commit `1e26c22a`.
 
-- [ ] **Step 5: Fix review findings and rerun verification**
+Evidence (2026-06-17): Final reviewer Popper found four Important issues: non-zero symbol origins were not honored by placed-instance geometry/remaps/rendering, authored symbol bodies were not used for schematic hit testing, culling/fit-to-content used generic bounds, and placement preview did not render the resolved pending library-cell symbol. Follow-up reviewer Euler was dispatched after the TDD fix pass against the focused uncommitted diff.
+
+- [x] **Step 5: Fix review findings and rerun verification**
 
 For every Critical or Important finding, add or update a failing test first, implement the fix, and rerun:
 
@@ -1052,6 +1100,10 @@ For every Critical or Important finding, add or update a failing test first, imp
 cargo test -p rspice-ui
 cargo build -p rspice-ui
 ```
+
+Evidence (2026-06-17): Popper's four Important findings were fixed with TDD coverage for origin-relative placed terminals, origin-aware wire remaps, origin-relative SVG/bounds, resolved-symbol body hit testing, culling/fit bounds, and pending library-cell placement preview. Euler's follow-up Important findings were fixed with TDD coverage for resolved-symbol marquee commit parity and a no-allocation resolved-bounds fold; Euler's Minor stale-context note was also fixed with a topology-version refresh test. Verification after those fixes: `cargo test -p rspice-ui schematic::view --lib -- --nocapture` passed with 14 tests, `cargo test -p rspice-ui common::app::app_workspace_actions::tests::storing_symbol_document --lib -- --nocapture` passed with 5 tests, `cargo test -p rspice-ui state::schematic::component --lib -- --nocapture` passed with 3 tests, `cargo test -p rspice-ui state::symbol_resolver --lib -- --nocapture` passed with 5 tests, `cargo fmt --all -- --check` passed, `cargo check -p rspice-ui` passed, `cargo check -p rspice-ui --target wasm32-unknown-unknown` passed, `cargo clippy -p rspice-ui --all-targets --message-format short -- -D warnings` passed, and `cargo test -p rspice-ui` passed with 280 tests.
+
+Additional verification-fix evidence (2026-06-17): a read-only follow-up review found that the Symbol editor preview tile still fit absolute authored document bounds while the placed-instance renderer draws effective coordinates relative to `document.origin`, so non-zero-origin symbols could be miscentered or clipped in the preview tile. Added `preview_viewport_fits_nonzero_origin_as_placed_symbol` as a failing regression, changed the preview viewport to fit `document_bounds - document.origin`, and verified the new regression plus existing preview tile tests. Focused verification passed: `cargo test -p rspice-ui shell::views::symbol::tests --lib -- --nocapture` with 8/8 tests, and the full `cargo test -p rspice-ui --lib` passed with 301/301 tests.
 
 - [ ] **Step 6: Commit verification fixes**
 

@@ -54,6 +54,20 @@ operating-point inspector, noise contributors, specs matrix). The IDE
 runs the same engine as the CLI; anything in this manual about deck
 syntax and analyses applies in both.
 
+For desktop diagnostics, set `RSPICE_LOG=info` or `RSPICE_LOG=debug`
+before launching `rspice-ui`. The IDE intentionally ignores generic
+`RUST_LOG` by default so an inherited developer shell does not print
+routine graphics-backend probe noise during normal GUI startup.
+
+GUI exports use the same menu workflow on every target. On desktop,
+File -> Export opens the native save dialog. In the browser build, the
+same actions start a download using the same default filename and file
+extension.
+
+Browser builds also save schematics and projects by downloading `.rsch`
+and `.rspiceproj` files. File -> Open and File -> Open project import
+local `.rsch` and `.rspiceproj` files through the browser picker.
+
 ## Where to go next
 
 - Writing decks: [chapter 2](02-netlists.md)
