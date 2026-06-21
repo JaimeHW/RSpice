@@ -19,7 +19,7 @@ use super::cadence_psf::{ParsedCadencePsfBinary, parse_cadence_psf_binary};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 mod reader;

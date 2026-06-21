@@ -3,70 +3,222 @@ use super::*;
 impl WaveformReader {
     /// Read NUTMEG/raw format
     pub(super) fn read_nutmeg(&self, path: &Path) -> Result<WaveformDataset, String> {
-        let file = File::open(path).map_err(|e| format!("Failed to open: {}", e))?;
-        let reader = BufReader::new(file);
+        let parsed = rspice_core::compat::parse_raw_file(path)
+            .map_err(|e| format!("Failed to read raw/Nutmeg '{}': {}", path.display(), e))?;
+        let x_waveform = parsed.waveforms.first().ok_or_else(|| {
+            format!(
+                "Raw/Nutmeg file '{}' contained no waveforms",
+                path.display()
+            )
+        })?;
+        let x_variable = parsed.variables.first().ok_or_else(|| {
+            format!(
+                "Raw/Nutmeg file '{}' contained no variable definitions",
+                path.display()
+            )
+        })?;
+        if x_waveform.y.is_empty() {
+            return Err(format!(
+                "Raw/Nutmeg file '{}' has an empty independent variable '{}'",
+                path.display(),
+                x_waveform.name
+            ));
+        }
+        if !x_waveform.y.iter().all(|value| value.is_finite()) {
+            return Err(format!(
+                "Raw/Nutmeg file '{}' has non-finite independent variable '{}'",
+                path.display(),
+                x_waveform.name
+            ));
+        }
+        let x_len = x_waveform.y.len();
 
-        let mut dataset = WaveformDataset::new("");
-        let mut variables: Vec<(String, SignalType)> = Vec::new();
-        let mut in_header = true;
-        let mut num_points = 0;
-        let mut values_buffer: Vec<Vec<f64>> = Vec::new();
+        let title = if parsed.header.title.trim().is_empty() {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("raw")
+                .to_string()
+        } else {
+            parsed.header.title.clone()
+        };
+        let mut dataset = WaveformDataset::new(title);
+        dataset.analysis = parsed.header.plotname.clone();
+        dataset
+            .metadata
+            .insert("format".to_string(), "raw-nutmeg".to_string());
+        dataset
+            .metadata
+            .insert("source_path".to_string(), path.display().to_string());
+        dataset.metadata.insert(
+            "num_variables".to_string(),
+            parsed.header.no_variables.to_string(),
+        );
+        dataset
+            .metadata
+            .insert("num_points".to_string(), x_len.to_string());
 
-        for line in reader.lines() {
-            let line = line.map_err(|e| format!("Read error: {}", e))?;
-            let trimmed = line.trim();
+        let mut x_signal = WaveformSignal::new(
+            x_waveform.name.clone(),
+            SignalType::from(x_variable.var_type.as_str()),
+        );
+        x_signal.data = x_waveform.y.clone();
+        dataset.set_x(x_signal);
 
-            if in_header {
-                if let Some(stripped) = trimmed.strip_prefix("Title:") {
-                    dataset.title = stripped.trim().to_string();
-                } else if let Some(stripped) = trimmed.strip_prefix("Plotname:") {
-                    dataset.analysis = stripped.trim().to_string();
-                } else if trimmed.starts_with("No. Variables:") {
-                    // Parse number of variables
-                } else if let Some(stripped) = trimmed.strip_prefix("No. Points:") {
-                    num_points = stripped.trim().parse().unwrap_or(0);
-                } else if trimmed.starts_with("Variables:") {
-                    // Next lines are variable definitions
-                } else if trimmed.starts_with("Values:") {
-                    in_header = false;
-                    // Initialize buffers
-                    values_buffer = vec![Vec::with_capacity(num_points); variables.len()];
-                } else if trimmed.contains('\t') && !trimmed.is_empty() {
-                    // Variable definition line: index\tname\ttype
-                    let parts: Vec<&str> = trimmed.split('\t').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[1].trim().to_string();
-                        let sig_type = SignalType::from(parts[2].trim());
-                        variables.push((name, sig_type));
-                    }
+        for (idx, waveform) in parsed.waveforms.iter().enumerate().skip(1) {
+            let variable = parsed.variables.get(idx).ok_or_else(|| {
+                format!(
+                    "Raw/Nutmeg file '{}' waveform '{}' has no variable definition",
+                    path.display(),
+                    waveform.name
+                )
+            })?;
+            let signal_type = SignalType::from(variable.var_type.as_str());
+            if waveform.y.len() != x_len {
+                return Err(format!(
+                    "Raw/Nutmeg signal '{}' has {} point(s), expected {}",
+                    waveform.name,
+                    waveform.y.len(),
+                    x_len
+                ));
+            }
+            if !waveform.y.iter().all(|value| value.is_finite()) {
+                return Err(format!(
+                    "Raw/Nutmeg signal '{}' contains non-finite values",
+                    waveform.name
+                ));
+            }
+
+            if let Some(imag) = &waveform.y_imag {
+                if imag.len() != x_len {
+                    return Err(format!(
+                        "Raw/Nutmeg imaginary signal '{}' has {} point(s), expected {}",
+                        waveform.name,
+                        imag.len(),
+                        x_len
+                    ));
                 }
+                if !imag.iter().all(|value| value.is_finite()) {
+                    return Err(format!(
+                        "Raw/Nutmeg imaginary signal '{}' contains non-finite values",
+                        waveform.name
+                    ));
+                }
+
+                let mut real_signal = WaveformSignal::new(
+                    format!("{}_RE", waveform.name),
+                    raw_complex_signal_type(signal_type, false),
+                );
+                real_signal.data = waveform.y.clone();
+                dataset.add_signal(real_signal);
+
+                let mut imag_signal = WaveformSignal::new(
+                    format!("{}_IM", waveform.name),
+                    raw_complex_signal_type(signal_type, true),
+                );
+                imag_signal.data = imag.clone();
+                dataset.add_signal(imag_signal);
             } else {
-                // Data section
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                for (i, val) in parts.iter().enumerate() {
-                    if i < values_buffer.len()
-                        && let Ok(v) = val.parse::<f64>()
-                    {
-                        values_buffer[i].push(v);
-                    }
-                }
+                let mut signal = WaveformSignal::new(waveform.name.clone(), signal_type);
+                signal.data = waveform.y.clone();
+                dataset.add_signal(signal);
             }
         }
 
-        // Create signals from buffers
-        for (i, (name, sig_type)) in variables.into_iter().enumerate() {
-            let mut signal = WaveformSignal::new(name, sig_type);
-            if i < values_buffer.len() {
-                signal.data = values_buffer[i].clone();
-            }
-
-            if i == 0 {
-                dataset.x_signal = Some(signal);
-            } else {
-                dataset.signals.push(signal);
-            }
+        if dataset.signals.is_empty() {
+            return Err(format!(
+                "Raw/Nutmeg file '{}' contained no dependent signals",
+                path.display()
+            ));
         }
 
         Ok(dataset)
+    }
+}
+
+fn raw_complex_signal_type(signal_type: SignalType, imag: bool) -> SignalType {
+    match (signal_type, imag) {
+        (SignalType::Voltage, false) | (SignalType::VoltageReal, false) => SignalType::VoltageReal,
+        (SignalType::Voltage, true) | (SignalType::VoltageImag, true) => SignalType::VoltageImag,
+        (SignalType::Current, false) | (SignalType::CurrentReal, false) => SignalType::CurrentReal,
+        (SignalType::Current, true) | (SignalType::CurrentImag, true) => SignalType::CurrentImag,
+        _ => SignalType::Unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is available")
+            .as_nanos();
+        path.push(format!("rspice-nutmeg-{name}-{nonce}.raw"));
+        path
+    }
+
+    fn write_temp_raw(name: &str, contents: &str) -> PathBuf {
+        let path = temp_path(name);
+        fs::write(&path, contents).expect("write temporary raw waveform");
+        path
+    }
+
+    #[test]
+    fn nutmeg_reader_rejects_empty_files() {
+        let path = write_temp_raw("empty", "");
+        let reader = WaveformReader::new(WaveformFormat::Nutmeg);
+
+        let err = reader
+            .read(&path)
+            .expect_err("empty Nutmeg/raw files must reject import");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("raw") || err.contains("header") || err.contains("empty"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nutmeg_reader_rejects_invalid_declared_point_count() {
+        let path = write_temp_raw(
+            "bad-points",
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: nope\nVariables:\n0 time time\n1 V(out) voltage\nValues:\n0 0.0 1.0\n",
+        );
+        let reader = WaveformReader::new(WaveformFormat::Nutmeg);
+
+        let err = reader
+            .read(&path)
+            .expect_err("invalid No. Points must reject import");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("No. Points") || err.contains("points"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nutmeg_reader_rejects_bad_values_without_ragged_data() {
+        let path = write_temp_raw(
+            "bad-value",
+            "Title: t\nPlotname: Transient Analysis\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n0\ttime\ttime\n1\tV(out)\tvoltage\nValues:\n0 0.0 bad\n",
+        );
+        let reader = WaveformReader::new(WaveformFormat::Nutmeg);
+
+        let err = reader
+            .read(&path)
+            .expect_err("bad raw data values must reject import");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("bad") || err.contains("value"),
+            "unexpected error: {err}"
+        );
     }
 }

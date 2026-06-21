@@ -17,8 +17,12 @@
 //! - **Version Migration**: Handles older file format versions gracefully
 //! - **Native Dialogs**: Uses rfd for platform-native file pickers
 
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Write};
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs;
+use std::fs::File;
+use std::io::{BufReader, Read};
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -66,7 +70,7 @@ impl SchematicVersion {
     /// We can read files from the same major version, but not
     /// files from future major versions.
     pub fn is_compatible(&self) -> bool {
-        self.major <= Self::current().major
+        self.major == Self::current().major
     }
 
     /// Check if migration is needed (older minor/patch version)
@@ -286,15 +290,13 @@ pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, Schematic
 #[cfg(target_arch = "wasm32")]
 pub fn show_open_dialog() -> Result<PathBuf, SchematicIoError> {
     Err(SchematicIoError::Io(
-        "File dialogs not supported on web".to_string(),
+        "Use the browser schematic import workflow for web file selection".to_string(),
     ))
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn show_save_dialog(_default_name: Option<&str>) -> Result<PathBuf, SchematicIoError> {
-    Err(SchematicIoError::Io(
-        "File dialogs not supported on web".to_string(),
-    ))
+pub fn show_save_dialog(default_name: Option<&str>) -> Result<PathBuf, SchematicIoError> {
+    Ok(suggested_schematic_save_path(default_name))
 }
 
 // =============================================================================
@@ -327,35 +329,65 @@ pub fn save_schematic(schematic: &SchematicState, path: &Path) -> Result<(), Sch
 ///
 /// This is the low-level save function used by `save_schematic`.
 pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), SchematicIoError> {
-    // Create backup if file exists
-    if path.exists() {
-        let backup_path = path.with_extension("rsch.bak");
-        if let Err(e) = fs::copy(path, &backup_path) {
-            log::warn!("Failed to create backup: {}", e);
-            // Continue anyway - backup failure shouldn't block save
+    #[cfg(target_arch = "wasm32")]
+    {
+        let contents = serialize_schematic_file(file)?;
+        crate::common::browser_download::download_text_file(path, &contents)
+            .map_err(SchematicIoError::Io)?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Create backup if file exists
+        if path.exists() {
+            let backup_path = path.with_extension("rsch.bak");
+            if let Err(e) = fs::copy(path, &backup_path) {
+                log::warn!("Failed to create backup: {}", e);
+                // Continue anyway - backup failure shouldn't block save
+            }
         }
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        // Write to temporary file first
+        let temp_path = path.with_extension("rsch.tmp");
+        let temp_file = File::create(&temp_path)?;
+        let mut writer = BufWriter::new(temp_file);
+
+        serde_json::to_writer_pretty(&mut writer, file)
+            .map_err(|e| SchematicIoError::SerializeError(e.to_string()))?;
+
+        writer.flush()?;
+
+        // Atomic rename
+        fs::rename(&temp_path, path)?;
+
+        log::info!("Saved schematic to: {}", path.display());
+        Ok(())
     }
+}
 
-    // Ensure parent directory exists
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn suggested_schematic_save_path(default_name: Option<&str>) -> PathBuf {
+    let mut path = PathBuf::from(
+        default_name
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or("untitled.rsch"),
+    );
+    crate::common::file_actions::ensure_file_extension(&mut path, "rsch");
+    path
+}
 
-    // Write to temporary file first
-    let temp_path = path.with_extension("rsch.tmp");
-    let temp_file = File::create(&temp_path)?;
-    let mut writer = BufWriter::new(temp_file);
-
-    serde_json::to_writer_pretty(&mut writer, file)
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn serialize_schematic_file(file: &SchematicFile) -> Result<String, SchematicIoError> {
+    let mut contents = serde_json::to_string_pretty(file)
         .map_err(|e| SchematicIoError::SerializeError(e.to_string()))?;
-
-    writer.flush()?;
-
-    // Atomic rename
-    fs::rename(&temp_path, path)?;
-
-    log::info!("Saved schematic to: {}", path.display());
-    Ok(())
+    contents.push('\n');
+    Ok(contents)
 }
 
 /// Load schematic from file
@@ -363,6 +395,26 @@ pub fn save_schematic_file(file: &SchematicFile, path: &Path) -> Result<(), Sche
 /// Validates version compatibility and recalculates runtime state.
 pub fn load_schematic(path: &Path) -> Result<SchematicState, SchematicIoError> {
     let file = load_schematic_file(path)?;
+    let schematic = prepare_loaded_schematic(file, Some(path))?;
+
+    log::info!("Loaded schematic from: {}", path.display());
+    Ok(schematic)
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) fn load_schematic_text(
+    contents: &str,
+    source_path: Option<&Path>,
+) -> Result<SchematicState, SchematicIoError> {
+    let file: SchematicFile =
+        serde_json::from_str(contents).map_err(|e| SchematicIoError::ParseError(e.to_string()))?;
+    prepare_loaded_schematic(file, source_path)
+}
+
+fn prepare_loaded_schematic(
+    file: SchematicFile,
+    source_path: Option<&Path>,
+) -> Result<SchematicState, SchematicIoError> {
     file.validate()?;
 
     let mut schematic = file.schematic;
@@ -370,17 +422,16 @@ pub fn load_schematic(path: &Path) -> Result<SchematicState, SchematicIoError> {
     // Recalculate runtime state (IDs, counters, etc.)
     schematic.recalculate_runtime_state();
 
-    // Set the file path for subsequent saves
-    schematic.current_file = Some(path.to_path_buf());
+    // Set the file path for subsequent saves.
+    schematic.current_file = source_path.map(Path::to_path_buf);
 
-    // Mark for fit-to-view and history reset
+    // Mark for fit-to-view and history reset.
     schematic.needs_fit = true;
     schematic.needs_history_reset = true;
 
-    // Clear dirty flag since we just loaded
+    // Clear dirty flag since we just loaded.
     schematic.is_dirty = false;
 
-    log::info!("Loaded schematic from: {}", path.display());
     Ok(schematic)
 }
 
@@ -393,9 +444,199 @@ pub fn load_schematic_file(path: &Path) -> Result<SchematicFile, SchematicIoErro
     }
 
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file);
+    let mut contents = String::new();
+    reader.read_to_string(&mut contents)?;
 
-    serde_json::from_reader(reader).map_err(|e| SchematicIoError::ParseError(e.to_string()))
+    serde_json::from_str(&contents).map_err(|e| SchematicIoError::ParseError(e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schematic_version_requires_current_major() {
+        assert!(SchematicVersion::current().is_compatible());
+        assert!(
+            !SchematicVersion {
+                major: 0,
+                minor: 9,
+                patch: 0,
+            }
+            .is_compatible()
+        );
+        assert!(
+            !SchematicVersion {
+                major: 2,
+                minor: 0,
+                patch: 0,
+            }
+            .is_compatible()
+        );
+    }
+
+    #[test]
+    fn suggested_schematic_save_path_defaults_and_enforces_extension() {
+        assert_eq!(
+            suggested_schematic_save_path(None),
+            PathBuf::from("untitled.rsch")
+        );
+        assert_eq!(
+            suggested_schematic_save_path(Some("filter")),
+            PathBuf::from("filter.rsch")
+        );
+        assert_eq!(
+            suggested_schematic_save_path(Some("filter.rsch")),
+            PathBuf::from("filter.rsch")
+        );
+    }
+
+    #[test]
+    fn schematic_file_serializes_to_versioned_json() {
+        let file = SchematicFile::new(SchematicState::default());
+
+        let json = serialize_schematic_file(&file).expect("schematic serializes");
+
+        assert!(json.contains("\"version\""));
+        assert!(json.contains("\"schematic\""));
+        assert!(json.ends_with('\n'));
+    }
+
+    #[test]
+    fn schematic_text_load_validates_and_prepares_runtime_state() {
+        let mut original = SchematicState::default();
+        original.current_file = Some(PathBuf::from("stale-native-path.rsch"));
+        original.is_dirty = true;
+        original.needs_fit = false;
+        original.needs_history_reset = false;
+        let file = SchematicFile::new(original);
+        let json = serialize_schematic_file(&file).expect("schematic serializes");
+
+        let loaded = load_schematic_text(&json, Some(Path::new("browser-filter.rsch")))
+            .expect("schematic text loads");
+
+        assert_eq!(
+            loaded.current_file.as_deref(),
+            Some(Path::new("browser-filter.rsch"))
+        );
+        assert!(loaded.needs_fit);
+        assert!(loaded.needs_history_reset);
+        assert!(!loaded.is_dirty);
+    }
+
+    #[test]
+    fn schematic_text_load_without_source_path_clears_stale_file_identity() {
+        let mut original = SchematicState::default();
+        original.current_file = Some(PathBuf::from("stale-native-path.rsch"));
+        let file = SchematicFile::new(original);
+        let json = serialize_schematic_file(&file).expect("schematic serializes");
+
+        let loaded = load_schematic_text(&json, None).expect("schematic text loads");
+
+        assert!(loaded.current_file.is_none());
+        assert!(!loaded.is_dirty);
+    }
+
+    #[test]
+    fn schematic_text_load_reports_parse_errors_without_filesystem() {
+        let err = load_schematic_text("{not valid json", Some(Path::new("bad.rsch")))
+            .expect_err("invalid schematic text fails");
+
+        assert!(matches!(err, SchematicIoError::ParseError(_)));
+    }
+
+    #[test]
+    fn schematic_text_load_removes_malformed_wires_and_stale_selection() {
+        use crate::state::{ComponentType, Point, Wire};
+
+        let mut original = SchematicState::default();
+        let live_component_id = original.add_component(ComponentType::Resistor, Point::new(0, 0));
+        original.wires.push(Wire::new(98, Vec::new()));
+        original.wires.push(Wire::new(99, vec![Point::new(5, 5)]));
+        original
+            .wires
+            .push(Wire::new(100, vec![Point::new(0, 0), Point::new(20, 0)]));
+        original
+            .clipboard
+            .wires
+            .push(Wire::new(101, vec![Point::new(7, 7)]));
+        original
+            .clipboard
+            .wires
+            .push(Wire::new(102, vec![Point::new(10, 10), Point::new(20, 10)]));
+
+        original.selection.select_component(live_component_id);
+        original.selection.select_component(404);
+        original.selection.select_wire(98);
+        original.selection.select_wire(100);
+        original.selection.select_wire_segment(99, 0);
+        original.selection.select_wire_segment(100, 0);
+        original.selection.select_wire_vertex(99, 0);
+        original.selection.select_wire_vertex(100, 1);
+
+        let json =
+            serialize_schematic_file(&SchematicFile::new(original)).expect("schematic serializes");
+
+        let mut loaded = load_schematic_text(&json, Some(Path::new("corrupt-import.rsch")))
+            .expect("repairable schematic loads");
+
+        assert_eq!(loaded.wires.len(), 1);
+        assert_eq!(loaded.wires[0].id, 100);
+        assert_eq!(loaded.clipboard.wires.len(), 1);
+        assert_eq!(loaded.clipboard.wires[0].id, 102);
+        assert!(loaded.selection.has_component(live_component_id));
+        assert!(!loaded.selection.has_component(404));
+        assert!(loaded.selection.has_wire(100));
+        assert!(!loaded.selection.has_wire(98));
+        assert_eq!(loaded.selection.wire_segments.len(), 1);
+        assert!(loaded.selection.has_wire_segment(100, 0));
+        assert_eq!(loaded.selection.wire_vertices.len(), 1);
+        assert!(loaded.selection.has_wire_vertex(100, 1));
+        assert_eq!(loaded.wire_vertex_at(Point::new(5, 5)), None);
+
+        loaded.ensure_canvas_cache();
+        assert_eq!(loaded.wire_vertex_at(Point::new(5, 5)), None);
+    }
+
+    #[test]
+    fn schematic_text_load_repairs_duplicate_wire_ids() {
+        use crate::state::{Point, Wire};
+        use std::collections::HashSet;
+
+        let mut original = SchematicState::default();
+        original
+            .wires
+            .push(Wire::segment(40, Point::new(0, 0), Point::new(20, 0)));
+        original
+            .wires
+            .push(Wire::segment(40, Point::new(0, 10), Point::new(20, 10)));
+        original.selection.select_wire(40);
+
+        let json =
+            serialize_schematic_file(&SchematicFile::new(original)).expect("schematic serializes");
+
+        let mut loaded = load_schematic_text(&json, Some(Path::new("duplicate-wires.rsch")))
+            .expect("repairable schematic loads");
+
+        let mut wire_ids: HashSet<u64> = loaded.wires.iter().map(|wire| wire.id).collect();
+        assert_eq!(wire_ids.len(), loaded.wires.len());
+        assert_eq!(
+            loaded.wires.iter().filter(|wire| wire.id == 40).count(),
+            1,
+            "the original duplicate id must stay with exactly one wire"
+        );
+        assert!(
+            loaded.selection.has_wire(40),
+            "ambiguous selection should remain attached to the first retained wire"
+        );
+
+        let fresh_id = loaded.add_wire(vec![Point::new(0, 20), Point::new(20, 20)]);
+        assert!(
+            fresh_id.is_some_and(|id| wire_ids.insert(id)),
+            "new wires must not reuse repaired ids"
+        );
+    }
 }
 
 // =============================================================================

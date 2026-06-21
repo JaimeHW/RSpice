@@ -25,7 +25,227 @@ impl ViewerCapability {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis::{
+        BodeData, EyeData, EyeTrace, FftData, FrequencyResponse, HistogramBuilder, NyquistData,
+        PoleZeroData, WindowFunction,
+    };
+    use crate::panels::{LogSeverity, LogSource};
+    use crate::services::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
+
+    fn seed_result_viewers(state: &mut AppState) {
+        state
+            .simulation
+            .runs
+            .push(crate::state::SimulationRun::new(1));
+        state.simulation.active_run_idx = Some(0);
+
+        state
+            .analysis
+            .histogram_state
+            .load_histogram(HistogramBuilder::new().build(&[1.0, 2.0, 3.0]));
+
+        let mut bode = BodeData::new();
+        bode.add_response(FrequencyResponse::from_arrays(
+            "old bode",
+            &[1.0, 10.0],
+            &[1.0, 0.1],
+            &[0.0, -1.0],
+        ));
+        state.analysis.bode_plot_state.load_data(bode);
+
+        state
+            .analysis
+            .nyquist_state
+            .load_data(NyquistData::from_arrays(
+                "old nyquist",
+                &[1.0, 10.0],
+                &[1.0, -0.5],
+                &[0.0, 0.25],
+            ));
+
+        state
+            .analysis
+            .smith_chart_state
+            .load_sparam_data("S11", &[1.0], &[0.25], &[0.0]);
+
+        let mut pz = PoleZeroData::new("old pz");
+        pz.add_real_pole(-1.0);
+        state.analysis.pole_zero_state.load_data(pz);
+
+        let mut eye = EyeData::new(1e-9, 2);
+        eye.add_trace(EyeTrace::new(vec![0.0, 0.5, 1.0], vec![0.0, 1.0, 0.0]));
+        state.analysis.eye_diagram_state.load_data(eye);
+
+        state
+            .analysis
+            .fft_state
+            .load_data(FftData::from_time_domain(
+                "old fft",
+                &[0.0, 1.0, 0.0, -1.0, 0.0, 1.0, 0.0, -1.0],
+                8.0,
+                WindowFunction::Rectangular,
+            ));
+    }
+
+    fn seed_blocking_drc_result(state: &mut AppState) {
+        let mut result = DrcResult::new();
+        result.add_violation(DrcViolation::new(
+            1,
+            DrcViolationType::MissingGround,
+            "missing ground",
+            DrcLocation::Global,
+        ));
+        result.completed = true;
+        state.dialogs.drc_results = Some(result);
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        state
+            .log_buffer
+            .log(LogSeverity::Error, LogSource::Drc, "old DRC anchor", None);
+    }
+
+    #[test]
+    fn clearing_simulation_results_clears_specialized_result_viewers() {
+        let mut state = AppState::default();
+        seed_result_viewers(&mut state);
+        assert!(state.simulation.has_results());
+        assert!(state.viewer_is_available(ActiveViewer::Histogram));
+        assert!(state.viewer_is_available(ActiveViewer::SmithChart));
+        assert!(state.viewer_is_available(ActiveViewer::Fft));
+
+        state.clear_simulation_results();
+
+        assert!(!state.simulation.has_results());
+        for viewer in [
+            ActiveViewer::SmithChart,
+            ActiveViewer::EyeDiagram,
+            ActiveViewer::Histogram,
+            ActiveViewer::BodePlot,
+            ActiveViewer::Nyquist,
+            ActiveViewer::Fft,
+            ActiveViewer::PoleZero,
+        ] {
+            assert!(
+                !state.viewer_is_available(viewer),
+                "{} should be unavailable after clearing results",
+                viewer.name()
+            );
+        }
+    }
+
+    #[test]
+    fn clearing_design_execution_context_clears_stale_drc_results() {
+        let mut state = AppState::default();
+        seed_blocking_drc_result(&mut state);
+        assert!(state.current_blocking_drc_result().is_some());
+
+        state.clear_design_execution_context();
+
+        assert!(state.dialogs.drc_results.is_none());
+        assert!(state.dialogs.drc_cycle.is_none());
+        assert!(state.current_blocking_drc_result().is_none());
+        assert_eq!(
+            state.log_buffer.entries_by_source(LogSource::Drc).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn clearing_design_execution_context_clears_project_scoped_results_state() {
+        use crate::shell::results::{ExprEditor, ExprSeries, ExprTrace, PlotView, ResultViewer};
+
+        let mut state = AppState::default();
+        state.shell.results_seen_version = 99;
+        let results = &mut state.shell.results;
+        results.viewer = ResultViewer::Fft;
+        results.phase_continuous = true;
+        results.cursors.place(1.0);
+        results.cursor_strip = Some(0);
+        results.hidden_strips.insert(0);
+        results.maximized_strip = Some(0);
+        results.views.insert(
+            (ResultViewer::Waves, 0),
+            PlotView {
+                x: Some((0.0, 1.0)),
+                y: Some((-1.0, 1.0)),
+                y_right: None,
+            },
+        );
+        results.exprs.insert(
+            0,
+            vec![ExprTrace {
+                text: "V(out)/V(in)".to_string(),
+                visible: true,
+            }],
+        );
+        results.expr_editor = Some(ExprEditor {
+            analysis_index: 0,
+            text: "V(out)".to_string(),
+            error: Some("stale".to_string()),
+            want_focus: false,
+        });
+        results.expr_cache.insert(
+            (0, "V(out)".to_string()),
+            ExprSeries {
+                version: 10,
+                series: Err("stale".to_string()),
+                y_extremes: Some((0.0, 1.0)),
+            },
+        );
+        results.rf_pin.insert(ResultViewer::Smith, (0, 1));
+        results.op_filter = "M1".to_string();
+        results.op_sort = Some(("gm".to_string(), true));
+        results.spec_drafts = Some(Vec::new());
+
+        state.clear_design_execution_context();
+        let results = &state.shell.results;
+
+        assert_eq!(state.shell.results_seen_version, 0);
+        assert_eq!(results.viewer, ResultViewer::Fft);
+        assert!(results.phase_continuous);
+        assert!(!results.cursors.any());
+        assert_eq!(results.cursor_strip, None);
+        assert!(results.hidden_strips.is_empty());
+        assert_eq!(results.maximized_strip, None);
+        assert!(results.views.is_empty());
+        assert!(results.exprs.is_empty());
+        assert!(results.expr_editor.is_none());
+        assert!(results.expr_cache.is_empty());
+        assert!(results.rf_pin.is_empty());
+        assert!(results.op_filter.is_empty());
+        assert_eq!(results.op_sort, None);
+        assert!(results.spec_drafts.is_none());
+    }
+}
+
 impl AppState {
+    /// Clear execution and viewer state tied to the previous design document.
+    ///
+    /// Use when replacing the active schematic/project with unrelated design
+    /// content. File identity and dirty state are intentionally left to the
+    /// caller because open/import/new workflows each own those semantics.
+    pub(crate) fn clear_design_execution_context(&mut self) {
+        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+        self.workspace.netlist_source = None;
+        self.workspace.netlist_source_path = None;
+        self.simulation = crate::state::SimulationState::default();
+        self.shell.netlist = Default::default();
+        self.shell.results_seen_version = 0;
+        self.shell.results.clear_project_scoped_state();
+        self.dialogs.drc_results = None;
+        self.dialogs.drc_cycle = None;
+        self.log_buffer.clear_source(crate::panels::LogSource::Drc);
+        self.clear_specialized_viewer_data();
+    }
+
+    /// Clear user-visible simulation result history and derived result viewers.
+    pub(crate) fn clear_simulation_results(&mut self) {
+        self.simulation.clear_runs();
+        self.clear_specialized_viewer_data();
+    }
+
     /// Clear transient-derived viewer caches without disturbing AC/RF state.
     pub fn clear_transient_specialized_viewer_data(&mut self) {
         self.analysis.fft_state.clear();

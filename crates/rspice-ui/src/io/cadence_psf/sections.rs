@@ -178,8 +178,14 @@ pub(super) fn parse_group_signals(cursor: &mut &[u8]) -> Result<Vec<SignalRef>, 
     let _group_id = read_u32(cursor)?;
     let _group_name = parse_string(cursor)?;
     let count = read_u32(cursor)? as usize;
+    validate_declared_count_fits_remaining("trace group", count, 16, cursor.len())?;
 
-    let mut signals = Vec::with_capacity(count);
+    let mut signals = Vec::new();
+    signals.try_reserve(count).map_err(|_| {
+        CadencePsfError::new(format!(
+            "trace group declares too many signals ({count}) to allocate"
+        ))
+    })?;
     for _ in 0..count {
         let block = read_u32(cursor)?;
         if block != 16 {
@@ -333,4 +339,58 @@ pub(super) fn reject_non_zero_trailing_bytes(
         section_name,
         trailing.len()
     )))
+}
+
+pub(super) fn validate_declared_count_fits_remaining(
+    label: &str,
+    declared: usize,
+    min_bytes_per_item: usize,
+    remaining_bytes: usize,
+) -> Result<(), CadencePsfError> {
+    if min_bytes_per_item == 0 {
+        return Ok(());
+    }
+    let max_from_remaining = remaining_bytes / min_bytes_per_item;
+    if declared > max_from_remaining {
+        return Err(CadencePsfError::new(format!(
+            "{label} declares {declared} item(s), but remaining payload ({remaining_bytes} bytes) can hold at most {max_from_remaining}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_be_bytes());
+    }
+
+    fn push_string(bytes: &mut Vec<u8>, value: &str) {
+        push_u32(bytes, value.len() as u32);
+        bytes.extend_from_slice(value.as_bytes());
+        let pad = (4 - (value.len() % 4)) % 4;
+        bytes.extend(std::iter::repeat_n(0, pad));
+    }
+
+    #[test]
+    fn trace_group_count_is_bounded_by_remaining_bytes() {
+        let mut bytes = Vec::new();
+        push_u32(&mut bytes, 7);
+        push_string(&mut bytes, "group");
+        push_u32(&mut bytes, 2);
+        let mut cursor = bytes.as_slice();
+
+        let err =
+            parse_group_signals(&mut cursor).expect_err("oversized trace group must be rejected");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("trace group")
+                && message.contains("declares 2")
+                && message.contains("remaining"),
+            "unexpected error: {message}"
+        );
+    }
 }

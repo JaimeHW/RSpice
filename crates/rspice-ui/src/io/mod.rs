@@ -28,8 +28,8 @@ pub use lib_parser::{
 };
 pub use netlist_export::{ExportOptions, NetlistExporter, NetlistFormat};
 pub use project_io::{
-    ProjectFile, ProjectIoError, ProjectVersion, load_project_file, save_project_file,
-    show_open_project_dialog, show_save_project_dialog,
+    ProjectFile, ProjectIoError, ProjectSimulationResults, ProjectVersion, load_project_file,
+    save_project_file, show_open_project_dialog, show_save_project_dialog,
 };
 pub use schematic_io::{
     SchematicFile, SchematicIoError, SchematicVersion, load_schematic, save_schematic,

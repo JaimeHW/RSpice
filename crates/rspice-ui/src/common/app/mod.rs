@@ -25,6 +25,17 @@ use egui::Context;
 
 use crate::state::{SchematicState, SimulationState};
 
+#[cfg(target_arch = "wasm32")]
+const BROWSER_UNLOAD_WARNING: &str = "RSpice has unsaved changes.";
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    static BROWSER_UNLOAD_DIRTY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static BROWSER_UNLOAD_LISTENER: std::cell::RefCell<
+        Option<wasm_bindgen::closure::Closure<dyn FnMut(web_sys::BeforeUnloadEvent)>>
+    > = const { std::cell::RefCell::new(None) };
+}
+
 mod active_viewer;
 pub use active_viewer::ActiveViewer;
 
@@ -131,6 +142,9 @@ pub struct AppState {
     pub(crate) schematic: SchematicState,
     /// Simulation results and waveforms
     pub(crate) simulation: SimulationState,
+    /// Monotonic token that invalidates in-flight controller work whenever an
+    /// unrelated design document replaces the active project/schematic.
+    pub(crate) design_execution_epoch: u64,
     /// Dialog visibility
     pub(crate) dialogs: DialogState,
     /// Typed analysis configuration behind the Simulate view.
@@ -166,6 +180,10 @@ pub struct AppState {
     /// Recently opened/saved schematic and project files, most recent first
     /// (persisted across sessions; drives File ▸ Open recent).
     pub(crate) recent_files: Vec<RecentFile>,
+    /// Browser-only suggested filename for the next schematic download.
+    pub(crate) browser_schematic_save_name: Option<String>,
+    /// Browser-only suggested filename for the next project download.
+    pub(crate) browser_project_save_name: Option<String>,
     /// The activated license key as pasted (persisted; re-verified on load).
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
@@ -183,13 +201,78 @@ impl Default for AppState {
 }
 
 impl AppState {
-    /// Whether a run can start: a circuit exists, nothing is running, and
-    /// the run set has at least one analysis ticked. Every Run affordance
-    /// (toolbar, run bar, menu, F5) gates on this.
+    /// Whether a run can start. Every Run affordance (toolbar, run bar, menu,
+    /// F5) gates on this so schematic preflight is consistent everywhere.
     pub fn can_run_simulation(&self) -> bool {
-        !self.schematic.components.is_empty()
-            && !self.simulation.is_running
-            && !self.sim_setup.enabled.is_empty()
+        self.simulation_run_block_reason().is_none()
+    }
+
+    /// User-facing reason the Run command is currently blocked.
+    pub fn simulation_run_block_reason(&self) -> Option<String> {
+        if self.simulation.is_running {
+            return Some("A simulation is already running".to_string());
+        }
+        self.simulation_run_preflight_block_reason()
+    }
+
+    /// User-facing preflight reason a new run cannot start, excluding the
+    /// transient "already running" state so queued re-runs can share it.
+    pub fn simulation_run_preflight_block_reason(&self) -> Option<String> {
+        if self.sim_setup.enabled.is_empty() {
+            return Some("Tick at least one analysis in the Simulate view".to_string());
+        }
+        if self.schematic.components.is_empty() {
+            return Some("Add a component before running a schematic simulation".to_string());
+        }
+        if let Some(result) = self.current_blocking_drc_result() {
+            let summary = result.summary();
+            return Some(format!(
+                "Fix current DRC errors before simulation ({} critical, {} error{})",
+                summary.critical,
+                summary.errors,
+                if summary.errors == 1 { "" } else { "s" }
+            ));
+        }
+        None
+    }
+
+    /// User-facing reason the Netlist workspace cannot run the current deck.
+    pub fn manual_deck_run_block_reason(&self) -> Option<String> {
+        if self.simulation.is_running {
+            return Some("A simulation is already running".to_string());
+        }
+        let source = self
+            .workspace
+            .netlist_source
+            .as_deref()
+            .unwrap_or(self.simulation.netlist_content.as_str());
+        if source.trim().is_empty() {
+            return Some("Enter a netlist before running".to_string());
+        }
+        None
+    }
+
+    /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
+    pub(crate) fn request_netlist_manual_deck_run(&mut self) {
+        self.simulation.run_intent = crate::state::SimulationRunIntent::ManualDeck;
+        if self.simulation.is_running {
+            self.shell.netlist.rerun_queued = true;
+        } else {
+            self.simulation.request_manual_deck_run();
+        }
+    }
+
+    /// Current error-level schematic DRC result that blocks generated runs.
+    /// Stale DRC is non-blocking because it no longer describes the current
+    /// topology. Manual deck runs use `manual_deck_run_block_reason` instead.
+    pub fn current_blocking_drc_result(&self) -> Option<&crate::services::drc::DrcResult> {
+        if self.dialogs.drc_checked_version != self.schematic.topology_version() {
+            return None;
+        }
+        self.dialogs
+            .drc_results
+            .as_ref()
+            .filter(|result| result.has_errors())
     }
 
     /// Request a run from the Simulate workspace run set.
@@ -372,7 +455,23 @@ impl RSpiceApp {
         }
 
         self.handle_shortcuts(ctx);
-        self.simulation_controller.update(&mut self.state);
+        #[cfg(target_arch = "wasm32")]
+        crate::common::browser_file_import::register_text_import_repaint_context(ctx);
+        #[cfg(target_arch = "wasm32")]
+        if crate::common::project_workflow::poll_browser_project_import(&mut self.state) {
+            self.restore_workspace_after_project_load();
+        }
+        #[cfg(target_arch = "wasm32")]
+        if crate::common::file_workflow::poll_browser_schematic_import(&mut self.state) {
+            self.state.clear_transient_specialized_viewer_data();
+        }
+        #[cfg(target_arch = "wasm32")]
+        crate::common::netlist_workflow::poll_browser_netlist_import(&mut self.state);
+        self.simulation_controller
+            .update(&mut self.state, self.export_workflow_io.as_ref());
+        if self.state.simulation.is_running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
         if matches!(
             self.state.workspace.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
@@ -388,11 +487,14 @@ impl RSpiceApp {
     /// Keep the OS window title (or browser tab title) in sync with the
     /// active document: `cell* — project — RSpice`.
     fn sync_window_title(&mut self, ctx: &Context) {
-        let dirty = if self.state.schematic.is_dirty || self.state.workspace.any_dirty() {
-            "*"
-        } else {
-            ""
-        };
+        let has_unsaved_changes = should_warn_before_browser_unload(
+            self.state.schematic.is_dirty,
+            self.state.workspace.any_dirty(),
+        );
+        #[cfg(target_arch = "wasm32")]
+        update_browser_before_unload_guard(has_unsaved_changes);
+
+        let dirty = if has_unsaved_changes { "*" } else { "" };
         let view = &self.state.workspace.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
@@ -489,6 +591,157 @@ impl RSpiceApp {
     }
 }
 
+fn should_warn_before_browser_unload(schematic_dirty: bool, workspace_dirty: bool) -> bool {
+    schematic_dirty || workspace_dirty
+}
+
+#[cfg(target_arch = "wasm32")]
+fn update_browser_before_unload_guard(has_unsaved_changes: bool) {
+    use wasm_bindgen::JsCast as _;
+
+    BROWSER_UNLOAD_DIRTY.with(|dirty| dirty.set(has_unsaved_changes));
+    BROWSER_UNLOAD_LISTENER.with(|listener| {
+        if listener.borrow().is_some() {
+            return;
+        }
+
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let callback = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::BeforeUnloadEvent)>::new(
+            |event: web_sys::BeforeUnloadEvent| {
+                let dirty = BROWSER_UNLOAD_DIRTY.with(|state| state.get());
+                if dirty {
+                    event.prevent_default();
+                    event.set_return_value(BROWSER_UNLOAD_WARNING);
+                }
+            },
+        );
+        if window
+            .add_event_listener_with_callback("beforeunload", callback.as_ref().unchecked_ref())
+            .is_ok()
+        {
+            *listener.borrow_mut() = Some(callback);
+        }
+    });
+}
+
 // =============================================================================
 // Tests
 // =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::drc::{
+        DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
+    };
+    use crate::state::{ComponentType, Point};
+
+    fn runnable_state() -> AppState {
+        let mut state = AppState::default();
+        state
+            .schematic
+            .add_component(ComponentType::Resistor, Point::new(0, 0));
+        assert!(
+            !state.sim_setup.enabled.is_empty(),
+            "default run set should contain a runnable analysis"
+        );
+        state
+    }
+
+    fn drc_result(violation_type: DrcViolationType, severity: Option<DrcSeverity>) -> DrcResult {
+        let mut result = DrcResult::new();
+        let mut violation = DrcViolation::new(
+            1,
+            violation_type,
+            violation_type.description(),
+            DrcLocation::Global,
+        );
+        if let Some(severity) = severity {
+            violation = violation.with_severity(severity);
+        }
+        result.add_violation(violation);
+        result.completed = true;
+        result
+    }
+
+    #[test]
+    fn run_readiness_blocks_current_drc_errors_for_generated_schematic_runs() {
+        let mut state = runnable_state();
+        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+
+        assert!(
+            !state.can_run_simulation(),
+            "current error-level DRC results must block schematic simulation"
+        );
+    }
+
+    #[test]
+    fn run_readiness_allows_stale_or_warning_only_drc_results() {
+        let mut state = runnable_state();
+        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
+        state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_sub(1);
+        assert!(
+            state.can_run_simulation(),
+            "stale DRC results should not block after schematic edits"
+        );
+
+        state.dialogs.drc_results = Some(drc_result(
+            DrcViolationType::UnconnectedPin,
+            Some(DrcSeverity::Warning),
+        ));
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        assert!(
+            state.can_run_simulation(),
+            "warning-only DRC results should not block simulation"
+        );
+    }
+
+    #[test]
+    fn generated_and_manual_runs_have_separate_drc_readiness() {
+        let mut state = runnable_state();
+        state.workspace.netlist_source = Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
+        state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
+        state.dialogs.drc_checked_version = state.schematic.topology_version();
+
+        assert!(
+            !state.can_run_simulation(),
+            "schematic Simulate must still be blocked by current schematic DRC"
+        );
+        assert!(
+            state.manual_deck_run_block_reason().is_none(),
+            "manual deck runs should not be blocked by schematic DRC"
+        );
+    }
+
+    #[test]
+    fn netlist_manual_run_request_queues_when_engine_is_busy() {
+        let mut state = AppState::default();
+        state.simulation.is_running = true;
+        state.request_netlist_manual_deck_run();
+
+        assert_eq!(
+            state.simulation.run_intent,
+            crate::state::SimulationRunIntent::ManualDeck
+        );
+        assert!(!state.simulation.trigger_simulation);
+        assert!(state.shell.netlist.rerun_queued);
+
+        state.simulation.is_running = false;
+        state.shell.netlist.rerun_queued = false;
+        state.request_netlist_manual_deck_run();
+
+        assert!(state.simulation.trigger_simulation);
+        assert!(!state.shell.netlist.rerun_queued);
+    }
+
+    #[test]
+    fn browser_unload_warning_tracks_schematic_or_workspace_dirty_state() {
+        assert!(!should_warn_before_browser_unload(false, false));
+        assert!(should_warn_before_browser_unload(true, false));
+        assert!(should_warn_before_browser_unload(false, true));
+        assert!(should_warn_before_browser_unload(true, true));
+    }
+}

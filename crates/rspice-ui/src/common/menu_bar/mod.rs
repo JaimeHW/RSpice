@@ -16,7 +16,7 @@ mod tools_menu;
 mod veriloga_cache;
 mod waveform_export;
 
-pub(crate) use examples_menu::load_named_example;
+pub(crate) use examples_menu::{load_named_example, request_load_named_example};
 pub(crate) use export_actions::{action_export_netlist_with_io, action_view_netlist};
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use help_menu::{DOC_REFERENCES, open_documentation_reference};

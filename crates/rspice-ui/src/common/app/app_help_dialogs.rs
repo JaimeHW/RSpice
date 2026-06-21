@@ -142,7 +142,7 @@ impl RSpiceApp {
         self.state
             .shell
             .toasts
-            .info(ctx, &format!("Plotted {expression}"));
+            .info(ctx, format!("Plotted {expression}"));
     }
 
     pub(super) fn render_shortcuts_help_dialog(&mut self, ctx: &Context) {

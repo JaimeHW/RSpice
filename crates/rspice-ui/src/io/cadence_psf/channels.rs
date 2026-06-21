@@ -15,17 +15,61 @@ pub(super) fn qualify_signal_name(base: &str, suffix: &str) -> String {
     }
 }
 
-pub(super) fn init_channels(specs: &[ChannelSpec], capacity_hint: usize) -> Vec<SignalChannel> {
-    specs
-        .iter()
-        .map(|spec| SignalChannel {
+pub(super) fn init_channels(
+    specs: &[ChannelSpec],
+    capacity_hint: usize,
+) -> Result<Vec<SignalChannel>, CadencePsfError> {
+    let mut channels = Vec::new();
+    channels.try_reserve(specs.len()).map_err(|_| {
+        CadencePsfError::new(format!(
+            "PSF type expands to too many signal channels ({})",
+            specs.len()
+        ))
+    })?;
+
+    for spec in specs {
+        channels.push(SignalChannel {
             suffix: spec.suffix.clone(),
             values: match spec.kind {
-                ChannelKind::Real => SignalValues::Real(Vec::with_capacity(capacity_hint)),
-                ChannelKind::Complex => SignalValues::Complex(Vec::with_capacity(capacity_hint)),
+                ChannelKind::Real => real_signal_values_with_capacity(
+                    capacity_hint,
+                    &format!("channel '{}'", spec.suffix),
+                )?,
+                ChannelKind::Complex => complex_signal_values_with_capacity(
+                    capacity_hint,
+                    &format!("channel '{}'", spec.suffix),
+                )?,
             },
-        })
-        .collect()
+        });
+    }
+
+    Ok(channels)
+}
+
+pub(super) fn real_signal_values_with_capacity(
+    capacity_hint: usize,
+    label: &str,
+) -> Result<SignalValues, CadencePsfError> {
+    let mut values = Vec::new();
+    values.try_reserve(capacity_hint).map_err(|_| {
+        CadencePsfError::new(format!(
+            "PSF {label} declares too many samples ({capacity_hint}) to allocate"
+        ))
+    })?;
+    Ok(SignalValues::Real(values))
+}
+
+fn complex_signal_values_with_capacity(
+    capacity_hint: usize,
+    label: &str,
+) -> Result<SignalValues, CadencePsfError> {
+    let mut values = Vec::new();
+    values.try_reserve(capacity_hint).map_err(|_| {
+        CadencePsfError::new(format!(
+            "PSF {label} declares too many complex samples ({capacity_hint}) to allocate"
+        ))
+    })?;
+    Ok(SignalValues::Complex(values))
 }
 
 pub(super) fn resolve_array_element_type(

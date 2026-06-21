@@ -8,11 +8,11 @@
 //! console stamps, elapsed readouts, DRC/optimizer timing).
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) use std::time::Instant;
+pub use std::time::Instant;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Instant(f64);
+pub struct Instant(f64);
 
 #[cfg(target_arch = "wasm32")]
 impl Instant {

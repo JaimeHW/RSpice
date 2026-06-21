@@ -193,7 +193,11 @@ impl RSpiceApp {
                 }
             }
             ShortcutCommand::RunSimulation => {
-                if self.state.can_run_simulation() {
+                if self.state.shell.view == crate::shell::WorkspaceView::Netlist {
+                    if self.state.manual_deck_run_block_reason().is_none() {
+                        self.state.request_netlist_manual_deck_run();
+                    }
+                } else if self.state.can_run_simulation() {
                     self.state.request_run_set_simulation();
                     self.state.shell.view = crate::shell::WorkspaceView::Simulate;
                 }

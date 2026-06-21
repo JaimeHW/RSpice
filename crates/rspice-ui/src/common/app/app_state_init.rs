@@ -31,6 +31,7 @@ pub(super) fn default_app_state() -> AppState {
     AppState {
         schematic,
         simulation: crate::state::SimulationState::default(),
+        design_execution_epoch: 0,
         dialogs: DialogState::default(),
         sim_setup: super::SimSetupState::new(),
         log_buffer: crate::panels::LogBuffer::default(),
@@ -48,6 +49,8 @@ pub(super) fn default_app_state() -> AppState {
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
         recent_files: Vec::new(),
+        browser_schematic_save_name: None,
+        browser_project_save_name: None,
         license_key: None,
         license: None,
         analysis,

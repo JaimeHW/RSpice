@@ -16,21 +16,26 @@
 //! - Theme provides consistent styling across all components
 
 pub mod app;
+#[cfg(target_arch = "wasm32")]
+pub(crate) mod browser_download;
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) mod browser_file_import;
 pub mod examples;
 pub(crate) mod export_workflow;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
+pub mod logging;
 pub mod menu_bar;
+pub(crate) mod netlist_workflow;
 pub(crate) mod project_workflow;
 pub mod simulation_analysis_tabs;
-pub(crate) mod time_compat;
+pub mod time_compat;
 
 // Re-export main application type
 pub use app::{AppState, ConsoleMessage, RSpiceApp};
 
-/// Run `work` on a background thread natively; inline on wasm32, which has no
-/// threads — the browser build solves on the UI thread until simulations move
-/// into a Web Worker.
+/// Run `work` on a background thread natively; inline on wasm32 for short UI
+/// tasks that are not routed through the browser simulation worker.
 pub(crate) fn spawn_or_inline(work: impl FnOnce() + Send + 'static) {
     #[cfg(not(target_arch = "wasm32"))]
     {

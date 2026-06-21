@@ -1,18 +1,29 @@
-use super::AppState;
+use super::{AppState, ConsoleMessage};
+use crate::io::ProjectSimulationResults;
 
 impl serde::Serialize for AppState {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        // Serialize minimal state needed for session recovery.
+        // Serialize durable state needed for session recovery. Runtime runner
+        // flags stay out of the session; only user-visible result history is
+        // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("AppState", 5)?;
+        let mut simulation_results = ProjectSimulationResults::from_state(&self.simulation);
+        if simulation_results.validate().is_err() {
+            simulation_results = ProjectSimulationResults::default();
+        }
+        let field_count = if simulation_results.is_empty() { 5 } else { 6 };
+        let mut state = serializer.serialize_struct("AppState", field_count)?;
         state.serialize_field("project_workspace", &self.workspace)?;
         state.serialize_field("library_manager", &self.library_manager)?;
         state.serialize_field("shell", &crate::shell::ShellStateSer::from(&self.shell))?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
+        if !simulation_results.is_empty() {
+            state.serialize_field("simulation_results", &simulation_results)?;
+        }
         state.end()
     }
 }
@@ -36,6 +47,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             recent_files: Vec<super::RecentFile>,
             #[serde(default)]
             license_key: Option<String>,
+            #[serde(default)]
+            simulation_results: ProjectSimulationResults,
         }
 
         // Deserialize minimal persisted data and use defaults for the rest.
@@ -62,6 +75,22 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license,
             ..Default::default()
         };
+        let (simulation_results, simulation_results_warning) = match de
+            .simulation_results
+            .validate()
+        {
+            Ok(()) => (de.simulation_results, None),
+            Err(error) => (
+                ProjectSimulationResults::default(),
+                Some(format!(
+                    "Simulation results were not restored because their persisted session data is invalid: {error}"
+                )),
+            ),
+        };
+        simulation_results.apply_to_state(&mut state.simulation);
+        if let Some(warning) = simulation_results_warning {
+            state.push_user_message(ConsoleMessage::warning(warning));
+        }
         state.workspace.save_active_schematic(&state.schematic);
         Ok(state)
     }
@@ -69,4 +98,161 @@ impl<'de> serde::Deserialize<'de> for AppState {
 
 fn default_library_manager() -> crate::state::LibraryManager {
     crate::state::LibraryManager::with_primitives()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn app_state_session_round_trip_restores_results_but_not_runtime_flags() {
+        let mut state = AppState::default();
+        let waveform = crate::state::WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 0.75, 1.5],
+            "#00aaff",
+        );
+        let mut run = crate::state::SimulationRun::new(3);
+        run.label = "Run 3 (session fixture)".to_string();
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![waveform]),
+        );
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 3;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        state.simulation.is_running = true;
+        state.simulation.trigger_abort = true;
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        assert!(json.contains("simulation_results"));
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.simulation.run_count(), 1);
+        assert_eq!(
+            restored
+                .simulation
+                .active_run()
+                .expect("active restored run")
+                .label,
+            "Run 3 (session fixture)"
+        );
+        assert_eq!(restored.simulation.waveforms[0].name, "V(out)");
+        assert!(!restored.simulation.is_running);
+        assert!(!restored.simulation.trigger_abort);
+    }
+
+    #[test]
+    fn legacy_session_without_results_loads_empty_result_history() {
+        let restored: AppState = serde_json::from_str("{}").expect("legacy session loads");
+
+        assert_eq!(restored.simulation.run_count(), 0);
+        assert!(restored.simulation.waveforms.is_empty());
+        assert!(!restored.simulation.is_running);
+    }
+
+    #[test]
+    fn app_state_session_omits_empty_result_history() {
+        let state = AppState::default();
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+
+        assert!(!json.contains("simulation_results"));
+    }
+
+    #[test]
+    fn app_state_session_omits_invalid_result_history() {
+        let mut state = AppState::default();
+        let waveform = crate::state::WaveformData::new(
+            "V(out)",
+            vec![0.0, 1.0],
+            vec![0.0, f64::NAN],
+            "#00aaff",
+        );
+        let mut run = crate::state::SimulationRun::new(3);
+        run.add_analysis(
+            crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
+                .with_waveforms(vec![waveform]),
+        );
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 3;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert!(!json.contains("simulation_results"));
+        assert_eq!(restored.simulation.run_count(), 0);
+    }
+
+    #[test]
+    fn app_state_session_does_not_persist_waves_expr_traces() {
+        let mut state = AppState::default();
+        state.shell.results.exprs.insert(
+            0,
+            vec![crate::shell::results::ExprTrace {
+                text: "V(out)/V(in)".to_string(),
+                visible: true,
+            }],
+        );
+
+        let json = serde_json::to_string(&state).expect("session serializes");
+
+        assert!(
+            !json.contains("expr_traces"),
+            "project-scoped Waves expressions must not be stored in shell session JSON: {json}"
+        );
+        assert!(
+            !json.contains("V(out)/V(in)"),
+            "project-scoped Waves expression text leaked into session JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn legacy_session_expr_traces_are_ignored_on_load() {
+        let json = r#"{
+            "shell": {
+                "result_viewer": "Waves",
+                "expr_traces": [[0, "V(out)/V(in)"]]
+            }
+        }"#;
+
+        let restored: AppState = serde_json::from_str(json).expect("legacy session loads");
+
+        assert!(
+            restored.shell.results.exprs.is_empty(),
+            "legacy project-scoped Waves traces must not be restored into a new session"
+        );
+    }
+
+    #[test]
+    fn app_state_session_drops_invalid_result_history_on_load() {
+        let mut state = AppState::default();
+        let mut run = crate::state::SimulationRun::new(3);
+        run.add_analysis(crate::state::AnalysisResult::new(
+            1,
+            crate::state::AnalysisType::Transient,
+            "TRAN",
+        ));
+        state.simulation.runs = vec![run];
+        state.simulation.next_run_id = 3;
+        state.simulation.active_run_idx = Some(0);
+        state.simulation.active_analysis_idx = Some(0);
+        let json = serde_json::to_string(&state)
+            .expect("session serializes")
+            .replace("\"schema_version\":1", "\"schema_version\":999");
+
+        let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
+
+        assert_eq!(restored.simulation.run_count(), 0);
+        assert!(restored.simulation.waveforms.is_empty());
+        assert!(restored.log_buffer.entries().any(|entry| {
+            entry
+                .message
+                .contains("Simulation results were not restored")
+        }));
+    }
 }

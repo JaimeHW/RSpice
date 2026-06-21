@@ -28,14 +28,16 @@ pub(super) fn action_export_svg_with_io(
         filter_name: "SVG Image",
         filter_extensions: &["svg"],
     }) {
-        Some(mut path) => {
+        Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, "svg");
 
             match io.write_text_file(&path, &svg_content) {
                 Ok(()) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Exported SVG: {}",
-                        path.display()
+                        "{}",
+                        crate::common::export_workflow::export_completion_message(
+                            "SVG", &path, None, io
+                        )
                     )));
                 }
                 Err(e) => {
@@ -46,8 +48,14 @@ pub(super) fn action_export_svg_with_io(
                 }
             }
         }
-        None => {
+        Ok(None) => {
             // User cancelled - no message needed
+        }
+        Err(e) => {
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
+                "SVG export failed: {}",
+                e
+            )));
         }
     }
 }
@@ -91,15 +99,19 @@ pub(crate) fn action_export_netlist_with_io(
         filter_name,
         filter_extensions: &[extension],
     }) {
-        Some(mut path) => {
+        Ok(Some(mut path)) => {
             crate::common::file_actions::ensure_file_extension(&mut path, extension);
 
             match io.write_text_file(&path, &netlist_content) {
                 Ok(()) => {
                     state.push_user_message(crate::common::app::ConsoleMessage::info(format!(
-                        "Exported {}: {}",
-                        filter_name,
-                        path.display()
+                        "{}",
+                        crate::common::export_workflow::export_completion_message(
+                            filter_name,
+                            &path,
+                            None,
+                            io
+                        )
                     )));
                 }
                 Err(e) => {
@@ -110,8 +122,14 @@ pub(crate) fn action_export_netlist_with_io(
                 }
             }
         }
-        None => {
+        Ok(None) => {
             // User cancelled - no message needed
+        }
+        Err(e) => {
+            state.push_user_message(crate::common::app::ConsoleMessage::error(format!(
+                "Netlist export failed: {}",
+                e
+            )));
         }
     }
 }
@@ -171,4 +189,181 @@ fn build_menu_netlist(state: &mut AppState, format: crate::io::NetlistFormat) ->
         }
         _ => spice_netlist,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::cell::RefCell;
+    use std::path::{Path, PathBuf};
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct SaveDialogConfigSnapshot {
+        title: String,
+        default_name: String,
+        filter_name: String,
+        filter_extensions: Vec<String>,
+    }
+
+    #[derive(Debug)]
+    struct MockExportWorkflowIo {
+        dialog_result: Result<Option<PathBuf>, String>,
+        write_result: Result<(), String>,
+        saved_paths_are_reopenable: bool,
+        configs: RefCell<Vec<SaveDialogConfigSnapshot>>,
+        writes: RefCell<Vec<(PathBuf, String)>>,
+    }
+
+    impl MockExportWorkflowIo {
+        fn returning_path(path: impl Into<PathBuf>) -> Self {
+            Self {
+                dialog_result: Ok(Some(path.into())),
+                write_result: Ok(()),
+                saved_paths_are_reopenable: true,
+                configs: RefCell::default(),
+                writes: RefCell::default(),
+            }
+        }
+
+        fn failing_dialog(message: impl Into<String>) -> Self {
+            Self {
+                dialog_result: Err(message.into()),
+                write_result: Ok(()),
+                saved_paths_are_reopenable: true,
+                configs: RefCell::default(),
+                writes: RefCell::default(),
+            }
+        }
+
+        fn with_write_error(mut self, message: impl Into<String>) -> Self {
+            self.write_result = Err(message.into());
+            self
+        }
+
+        fn download_only(mut self) -> Self {
+            self.saved_paths_are_reopenable = false;
+            self
+        }
+    }
+
+    impl ExportWorkflowIo for MockExportWorkflowIo {
+        fn show_save_dialog(
+            &self,
+            config: SaveDialogConfig<'_>,
+        ) -> Result<Option<PathBuf>, String> {
+            self.configs.borrow_mut().push(SaveDialogConfigSnapshot {
+                title: config.title.to_owned(),
+                default_name: config.default_name.to_owned(),
+                filter_name: config.filter_name.to_owned(),
+                filter_extensions: config
+                    .filter_extensions
+                    .iter()
+                    .map(|extension| (*extension).to_owned())
+                    .collect(),
+            });
+            self.dialog_result.clone()
+        }
+
+        fn write_text_file(&self, path: &Path, contents: &str) -> Result<(), String> {
+            self.writes
+                .borrow_mut()
+                .push((path.to_path_buf(), contents.to_owned()));
+            self.write_result.clone()
+        }
+
+        fn write_waveform_csv(
+            &self,
+            _dataset: &crate::io::WaveformDataset,
+            _path: &Path,
+        ) -> Result<(), String> {
+            Ok(())
+        }
+
+        fn saved_paths_are_reopenable(&self) -> bool {
+            self.saved_paths_are_reopenable
+        }
+    }
+
+    fn last_log_message(state: &AppState) -> String {
+        state
+            .log_buffer
+            .entries()
+            .last()
+            .expect("a user-facing log line is emitted")
+            .message
+            .clone()
+    }
+
+    #[test]
+    fn svg_export_uses_dialog_defaults_and_writes_svg_file() {
+        let mut state = AppState::default();
+        state.schematic.current_file = Some(PathBuf::from("designs").join("rc_filter.sch"));
+        let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("rc_filter"));
+
+        action_export_svg_with_io(&mut state, &io);
+
+        assert_eq!(
+            io.configs.borrow().as_slice(),
+            &[SaveDialogConfigSnapshot {
+                title: "Export SVG".to_owned(),
+                default_name: "rc_filter.svg".to_owned(),
+                filter_name: "SVG Image".to_owned(),
+                filter_extensions: vec!["svg".to_owned()],
+            }]
+        );
+        let writes = io.writes.borrow();
+        assert_eq!(writes.len(), 1);
+        assert_eq!(writes[0].0, PathBuf::from("exports").join("rc_filter.svg"));
+        assert!(writes[0].1.starts_with("<?xml version=\"1.0\""));
+        assert!(
+            writes[0]
+                .1
+                .contains("<svg xmlns=\"http://www.w3.org/2000/svg\"")
+        );
+        assert_eq!(
+            last_log_message(&state),
+            format!("Exported SVG: {}", writes[0].0.display())
+        );
+    }
+
+    #[test]
+    fn svg_export_reports_save_dialog_errors_without_writing() {
+        let mut state = AppState::default();
+        let io = MockExportWorkflowIo::failing_dialog("native dialog unavailable");
+
+        action_export_svg_with_io(&mut state, &io);
+
+        assert!(io.writes.borrow().is_empty());
+        assert_eq!(
+            last_log_message(&state),
+            "SVG export failed: native dialog unavailable"
+        );
+    }
+
+    #[test]
+    fn svg_export_reports_file_write_errors() {
+        let mut state = AppState::default();
+        let io = MockExportWorkflowIo::returning_path(PathBuf::from("schematic.svg"))
+            .with_write_error("disk full");
+
+        action_export_svg_with_io(&mut state, &io);
+
+        assert_eq!(io.writes.borrow().len(), 1);
+        assert_eq!(last_log_message(&state), "SVG export failed: disk full");
+    }
+
+    #[test]
+    fn svg_export_reports_browser_download_start_without_claiming_file_written() {
+        let mut state = AppState::default();
+        let io =
+            MockExportWorkflowIo::returning_path(PathBuf::from("schematic.svg")).download_only();
+
+        action_export_svg_with_io(&mut state, &io);
+
+        assert_eq!(
+            last_log_message(&state),
+            "SVG download started: schematic.svg (confirm the browser accepted the download)"
+        );
+    }
 }

@@ -20,6 +20,7 @@ impl WaveformReader {
         let mut declared_freqs: Option<usize> = None;
         let mut reference_values: Option<Vec<f64>> = None;
         let mut numeric_tokens: Vec<f64> = Vec::new();
+        let mut saw_end = false;
 
         for (line_idx, line_result) in reader.lines().enumerate() {
             let line_no = line_idx + 1;
@@ -30,6 +31,13 @@ impl WaveformReader {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
+            }
+
+            if saw_end {
+                return Err(format!(
+                    "Touchstone line {}: content after [End] is not allowed",
+                    line_no
+                ));
             }
 
             if trimmed.starts_with('#') {
@@ -86,7 +94,16 @@ impl WaveformReader {
                             Some(Self::parse_touchstone_numeric_values(value, line_no)?);
                     }
                     // Section present for clarity in v2 files; data parser is token-stream based.
-                    "network data" | "end" => {}
+                    "network data" => {}
+                    "end" => {
+                        if !value.is_empty() {
+                            return Err(format!(
+                                "Touchstone line {}: [End] must not have trailing content",
+                                line_no
+                            ));
+                        }
+                        saw_end = true;
+                    }
                     _ => {}
                 }
                 continue;
@@ -96,19 +113,22 @@ impl WaveformReader {
                 if token == "+" {
                     continue;
                 }
-                let value = Self::parse_touchstone_numeric_token(token).ok_or_else(|| {
-                    format!(
-                        "Touchstone line {}: expected numeric token, got '{}'",
-                        line_no, token
-                    )
-                })?;
+                let value =
+                    Self::parse_touchstone_numeric_token(token, line_no).ok_or_else(|| {
+                        format!(
+                            "Touchstone line {}: expected numeric token, got '{}'",
+                            line_no, token
+                        )
+                    })?;
                 numeric_tokens.push(value);
             }
         }
 
-        let num_ports = declared_ports
-            .or_else(|| Self::infer_touchstone_ports_from_tokens(&numeric_tokens, matrix_format))
-            .ok_or_else(|| "Unable to determine Touchstone port count".to_string())?;
+        let num_ports = match declared_ports {
+            Some(ports) => Some(ports),
+            None => Self::infer_touchstone_ports_from_tokens(&numeric_tokens, matrix_format)?,
+        }
+        .ok_or_else(|| "Unable to determine Touchstone port count".to_string())?;
         if num_ports == 0 {
             return Err("Touchstone [Number of Ports] must be >= 1".to_string());
         }
@@ -169,7 +189,10 @@ impl WaveformReader {
                                 first,
                                 second,
                                 options.data_format,
-                            );
+                            )
+                            .map_err(|e| {
+                                format!("Touchstone frequency point {}: {}", freq_idx, e)
+                            })?;
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -183,7 +206,10 @@ impl WaveformReader {
                                 first,
                                 second,
                                 options.data_format,
-                            );
+                            )
+                            .map_err(|e| {
+                                format!("Touchstone frequency point {}: {}", freq_idx, e)
+                            })?;
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -197,7 +223,10 @@ impl WaveformReader {
                                 first,
                                 second,
                                 options.data_format,
-                            );
+                            )
+                            .map_err(|e| {
+                                format!("Touchstone frequency point {}: {}", freq_idx, e)
+                            })?;
                             matrix_re[row][col][freq_idx] = re;
                             matrix_im[row][col][freq_idx] = im;
                         }
@@ -317,10 +346,10 @@ impl WaveformReader {
     fn infer_touchstone_ports_from_tokens(
         tokens: &[f64],
         matrix_format: TouchstoneMatrixFormat,
-    ) -> Option<usize> {
+    ) -> Result<Option<usize>, String> {
         // Guard against unrealistic matrices while still supporting large N.
         const MAX_PORTS_TO_INFER: usize = 64;
-        let mut best_match = None;
+        let mut matches = Vec::new();
         for ports in 1..=MAX_PORTS_TO_INFER {
             let Some(record_width) = Self::touchstone_values_per_frequency(ports, matrix_format)
             else {
@@ -337,10 +366,17 @@ impl WaveformReader {
                 freq.is_finite() && freq > 0.0
             });
             if freqs_valid {
-                best_match = Some(ports);
+                matches.push(ports);
             }
         }
-        best_match
+        match matches.as_slice() {
+            [] => Ok(None),
+            [ports] => Ok(Some(*ports)),
+            _ => Err(format!(
+                "Touchstone port count is ambiguous ({:?}); use an .sNp extension or [Number of Ports]",
+                matches
+            )),
+        }
     }
 
     fn parse_touchstone_option_line(
@@ -416,8 +452,8 @@ impl WaveformReader {
                     line_no
                 ));
             }
-            reference_ohms =
-                Self::parse_touchstone_numeric_token(fields[idx]).ok_or_else(|| {
+            reference_ohms = Self::parse_touchstone_numeric_token(fields[idx], line_no)
+                .ok_or_else(|| {
                     format!(
                         "Touchstone line {}: invalid reference impedance '{}'",
                         line_no, fields[idx]
@@ -473,7 +509,7 @@ impl WaveformReader {
             if token.is_empty() {
                 continue;
             }
-            let parsed = Self::parse_touchstone_numeric_token(token).ok_or_else(|| {
+            let parsed = Self::parse_touchstone_numeric_token(token, line_no).ok_or_else(|| {
                 format!(
                     "Touchstone line {}: invalid numeric value '{}'",
                     line_no, token
@@ -490,8 +526,9 @@ impl WaveformReader {
         Ok(out)
     }
 
-    fn parse_touchstone_numeric_token(token: &str) -> Option<f64> {
-        token.replace(['D', 'd'], "e").parse::<f64>().ok()
+    fn parse_touchstone_numeric_token(token: &str, _line_no: usize) -> Option<f64> {
+        let parsed = token.replace(['D', 'd'], "e").parse::<f64>().ok()?;
+        parsed.is_finite().then_some(parsed)
     }
 
     fn resolve_touchstone_reference_values(
@@ -526,10 +563,19 @@ impl WaveformReader {
         first: f64,
         second: f64,
         format: TouchstoneDataFormat,
-    ) -> (f64, f64) {
-        match format {
+    ) -> Result<(f64, f64), String> {
+        if !first.is_finite() || !second.is_finite() {
+            return Err("non-finite S-parameter token".to_string());
+        }
+        let value = match format {
             TouchstoneDataFormat::Ri => (first, second),
             TouchstoneDataFormat::Ma => {
+                if first < 0.0 {
+                    return Err(format!(
+                        "negative MA magnitude {} is invalid; magnitude must be >= 0",
+                        first
+                    ));
+                }
                 let angle = second.to_radians();
                 (first * angle.cos(), first * angle.sin())
             }
@@ -538,6 +584,109 @@ impl WaveformReader {
                 let angle = second.to_radians();
                 (magnitude * angle.cos(), magnitude * angle.sin())
             }
+        };
+        if !value.0.is_finite() || !value.1.is_finite() {
+            return Err("S-parameter conversion produced non-finite value".to_string());
         }
+        Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        temp_path_with_extension(name, "s1p")
+    }
+
+    fn temp_path_with_extension(name: &str, extension: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock is available")
+            .as_nanos();
+        path.push(format!("rspice-touchstone-{name}-{nonce}.{extension}"));
+        path
+    }
+
+    fn write_temp_touchstone(name: &str, contents: &str) -> PathBuf {
+        let path = temp_path(name);
+        fs::write(&path, contents).expect("write temporary Touchstone waveform");
+        path
+    }
+
+    #[test]
+    fn touchstone_rejects_nonfinite_sparameter_values() {
+        let path = write_temp_touchstone("nonfinite", "# Hz S RI R 50\n1.0 NaN 0.0\n");
+        let reader = WaveformReader::new(WaveformFormat::Touchstone);
+
+        let err = reader
+            .read(&path)
+            .expect_err("non-finite Touchstone S-parameter values must reject import");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("NaN") || err.contains("non-finite"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn touchstone_rejects_negative_ma_magnitudes() {
+        let path = write_temp_touchstone("negative-ma", "# Hz S MA R 50\n1.0 -0.5 0.0\n");
+        let reader = WaveformReader::new(WaveformFormat::Touchstone);
+
+        let err = reader
+            .read(&path)
+            .expect_err("Touchstone MA magnitude must not be negative");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("magnitude") && err.contains("negative"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn touchstone_rejects_data_after_end_section() {
+        let path = write_temp_touchstone(
+            "after-end",
+            "[Version] 2.0\n# Hz S RI R 50\n[Number of Ports] 1\n[Network Data]\n1.0 0.0 0.0\n[End]\n2.0 0.0 0.0\n",
+        );
+        let reader = WaveformReader::new(WaveformFormat::Touchstone);
+
+        let err = reader
+            .read(&path)
+            .expect_err("Touchstone data after [End] must reject import");
+        let _ = fs::remove_file(&path);
+
+        assert!(
+            err.contains("[End]") || err.contains("after end"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn touchstone_generic_snp_rejects_ambiguous_port_count() {
+        let path = temp_path_with_extension("ambiguous-generic", "snp");
+        let mut contents = "# Hz S RI R 50\n".to_string();
+        for idx in 1..=11 {
+            contents.push_str(&format!(
+                "{idx} {idx}.11 0 {idx}.21 0 {idx}.12 0 {idx}.22 0\n"
+            ));
+        }
+        fs::write(&path, contents).expect("write temporary generic Touchstone waveform");
+        let reader = WaveformReader::new(WaveformFormat::Touchstone);
+
+        let err = reader
+            .read(&path)
+            .expect_err("ambiguous generic .snp import must reject");
+        let _ = fs::remove_file(&path);
+
+        assert!(err.contains("ambiguous"), "unexpected error: {err}");
     }
 }

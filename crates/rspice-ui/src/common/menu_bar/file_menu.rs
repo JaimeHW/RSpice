@@ -16,6 +16,7 @@ pub(crate) enum FileMenuAction {
     Open,
     Save,
     SaveAs,
+    ImportNetlist,
     ExportSvg,
     ExportCsvWaveforms,
     ImportVerilogA,
@@ -76,6 +77,12 @@ pub(crate) fn dispatch_file_menu_action(
                     file_workflow_io,
                 );
             }
+        }
+        FileMenuAction::ImportNetlist => {
+            if require_save_confirmation_if_dirty(state, ConfirmationAction::ImportNetlist) {
+                return;
+            }
+            crate::common::netlist_workflow::import_netlist(state);
         }
         FileMenuAction::ExportSvg => {
             super::export_actions::action_export_svg_with_io(state, export_workflow_io)

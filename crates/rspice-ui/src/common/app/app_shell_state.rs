@@ -20,6 +20,11 @@ pub enum ConfirmationAction {
     /// Open a file from the recent-files list (path stored alongside the
     /// pending action in [`ConfirmationDialogState::pending_path`])
     OpenRecent,
+    /// Load a bundled example circuit (name stored alongside the pending
+    /// action in [`ConfirmationDialogState::pending_example`]).
+    OpenExample,
+    /// Import a SPICE deck into the Netlist workspace.
+    ImportNetlist,
     /// Close the application
     Exit,
 }
@@ -33,6 +38,8 @@ impl ConfirmationAction {
             ConfirmationAction::FileNew => "Create New Schematic",
             ConfirmationAction::FileOpen => "Open Schematic",
             ConfirmationAction::OpenRecent => "Open Recent File",
+            ConfirmationAction::OpenExample => "Open Example",
+            ConfirmationAction::ImportNetlist => "Import SPICE Deck",
             ConfirmationAction::Exit => "Exit RSpice",
         }
     }
@@ -46,8 +53,10 @@ impl ConfirmationAction {
             ConfirmationAction::FileNew
             | ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent
+            | ConfirmationAction::OpenExample
+            | ConfirmationAction::ImportNetlist
             | ConfirmationAction::Exit => {
-                "The current schematic has unsaved changes.\nDo you want to save before continuing?"
+                "The current design has unsaved changes.\nDo you want to save before continuing?"
             }
         }
     }
@@ -65,6 +74,8 @@ pub struct ConfirmationDialogState {
     pub pending_action: Option<ConfirmationAction>,
     /// Target path for path-carrying actions ([`ConfirmationAction::OpenRecent`]).
     pub pending_path: Option<std::path::PathBuf>,
+    /// Example name for [`ConfirmationAction::OpenExample`].
+    pub pending_example: Option<String>,
 }
 
 impl ConfirmationDialogState {
@@ -73,6 +84,7 @@ impl ConfirmationDialogState {
         self.visible = true;
         self.pending_action = Some(action);
         self.pending_path = None;
+        self.pending_example = None;
     }
 
     /// Open the confirmation dialog for an action that targets a known path.
@@ -80,6 +92,15 @@ impl ConfirmationDialogState {
         self.visible = true;
         self.pending_action = Some(action);
         self.pending_path = Some(path);
+        self.pending_example = None;
+    }
+
+    /// Open the confirmation dialog for an action that targets a bundled example.
+    pub fn show_with_example(&mut self, action: ConfirmationAction, name: String) {
+        self.visible = true;
+        self.pending_action = Some(action);
+        self.pending_path = None;
+        self.pending_example = Some(name);
     }
 
     /// Close the dialog and clear pending action
@@ -87,6 +108,7 @@ impl ConfirmationDialogState {
         self.visible = false;
         self.pending_action = None;
         self.pending_path = None;
+        self.pending_example = None;
     }
 
     /// Check if dialog is open for a specific action

@@ -5,9 +5,11 @@ use super::cadence_psf_type_meta::TypeMetaCache;
 use super::channels::{
     build_channel_index_cache, channel_sample_width, collect_channel_specs_for_type, init_channels,
     pad_untouched_channels, push_named_channel_cached, push_scalar_channel,
+    real_signal_values_with_capacity,
 };
 use super::sections::{
     flatten_traces, header_usize, parse_zero_pad, reject_non_zero_trailing_bytes,
+    validate_declared_count_fits_remaining,
 };
 use super::toc::TocEntry;
 use super::types::{
@@ -35,13 +37,19 @@ pub(super) fn parse_values(
     }
 
     let sweep_points = header_usize(header, "PSF sweep points")?;
+    validate_declared_count_fits_remaining(
+        "PSF sweep points",
+        sweep_points,
+        8,
+        end_of_section - (entry.start + 8),
+    )?;
     let mut values: HashMap<u32, Vec<SignalChannel>> = HashMap::new();
     for sweep in sweeps {
         values.insert(
             sweep.id,
             vec![SignalChannel {
                 suffix: String::new(),
-                values: SignalValues::Real(Vec::with_capacity(sweep_points)),
+                values: real_signal_values_with_capacity(sweep_points, "sweep signal")?,
             }],
         );
     }
@@ -62,7 +70,7 @@ pub(super) fn parse_values(
         let mut specs = Vec::new();
         collect_channel_specs_for_type(signal.type_id, types, "", &mut specs)?;
         if !specs.is_empty() {
-            values.insert(signal.id, init_channels(&specs, sweep_points));
+            values.insert(signal.id, init_channels(&specs, sweep_points)?);
         }
     }
 
@@ -149,6 +157,44 @@ pub(super) fn parse_non_windowed_values<'a>(
     }
 
     Ok(cursor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::toc::TocEntry;
+    use super::*;
+
+    #[test]
+    fn sweep_points_are_bounded_by_value_payload_before_allocation() {
+        let mut header = HashMap::new();
+        header.insert("PSF sweep points".to_string(), CadencePsfValue::Int(2));
+        let sweeps = vec![SignalRef {
+            id: 1,
+            name: "time".to_string(),
+            type_id: 11,
+        }];
+        let types = HashMap::new();
+        let traces = Vec::new();
+        let file = [0, 0, 0, 0, 0, 0, 0, 8];
+
+        let err = parse_values(
+            &file,
+            TocEntry { start: 0, end: 8 },
+            &header,
+            &types,
+            &sweeps,
+            &traces,
+        )
+        .expect_err("sweep point count beyond payload must be rejected");
+
+        let message = err.to_string();
+        assert!(
+            message.contains("PSF sweep points")
+                && message.contains("declares 2")
+                && message.contains("remaining"),
+            "unexpected error: {message}"
+        );
+    }
 }
 
 pub(super) fn parse_windowed_values<'a>(
