@@ -308,6 +308,17 @@ impl PyNetlist {
             .collect()
     }
 
+    /// Parsed .MEAS verification contracts as
+    /// `(name, analysis, goal, tolerance)` tuples.
+    #[getter]
+    fn measurement_specs(&self) -> Vec<(String, String, Option<f64>, Option<f64>)> {
+        self.inner
+            .measurements
+            .iter()
+            .map(|m| (m.name.clone(), m.analysis.clone(), m.goal, m.tolerance))
+            .collect()
+    }
+
     /// Human-readable summaries of the netlist's analysis directives
     ///
     /// Example:

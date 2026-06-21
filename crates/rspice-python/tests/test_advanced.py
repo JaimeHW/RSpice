@@ -45,6 +45,29 @@ class TestNoise:
         with pytest.raises(ValueError):
             engine.run_noise(rc_lowpass, "out", [100.0], temperature=-10.0)
 
+    def test_run_evaluates_noise_measurements(self, engine):
+        netlist = rspice.Netlist.parse(
+            """* Noise measurement
+V1 in 0 DC 1 AC 1
+R1 in out 1k
+C1 out 0 1u
+.noise V(out) V1 LIN 3 10 1000
+.meas noise max_onoise MAX onoise_spectrum
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert report.noise is not None
+        assert report.num_measurements == 1
+        measurement = report.measurement("max_onoise")
+        assert measurement is not None
+        assert measurement.analysis == "NOISE"
+        assert measurement.passed
+        assert measurement.value > 0.0
+        assert report.all_passed
+
 
 class TestPoleZero:
     def test_rc_pole_location(self, engine, rc_lowpass):
@@ -165,6 +188,14 @@ class TestSensitivity:
             engine.run_sensitivity(param_divider, "out", "rval", float("nan"))
         with pytest.raises(ValueError):
             engine.run_sensitivity(param_divider, "out", "rval", 1000.0, delta=-1.0)
+        with pytest.raises(ValueError):
+            engine.run_sensitivity_ac(
+                param_divider, "out", "rval", float("nan"), [10.0, 100.0]
+            )
+        with pytest.raises(ValueError):
+            engine.run_sensitivity_ac(
+                param_divider, "out", "rval", 1000.0, [10.0, 100.0], delta=-1.0
+            )
 
     def test_ac_sensitivity_shape(self, engine):
         netlist = rspice.Netlist.parse(
@@ -196,6 +227,18 @@ class TestStep:
     def test_step_element_name_raises(self, engine, divider):
         with pytest.raises(rspice.SimulationError):
             engine.run_step(divider, "R1", [1e3, 2e3])
+
+    def test_step_empty_values_raise(self, engine, param_divider):
+        with pytest.raises(rspice.SimulationError, match="no sweep values"):
+            engine.run_step(param_divider, "rval", [])
+
+    def test_step_non_finite_values_raise_valueerror(self, engine, param_divider):
+        with pytest.raises(ValueError, match="finite"):
+            engine.run_step(param_divider, "rval", [1e3, float("nan")])
+
+    def test_step_failed_requested_point_raises(self, engine, param_divider):
+        with pytest.raises(rspice.SimulationError, match=r"\.STEP PARAM rval = 0"):
+            engine.run_step(param_divider, "rval", [1e3, 0.0])
 
 
 class TestTransferFunction:

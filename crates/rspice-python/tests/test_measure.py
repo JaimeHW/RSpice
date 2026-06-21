@@ -145,6 +145,37 @@ R2 out 0 1k
             report.assert_passed()
         assert "vmax" in str(exc_info.value).lower()
 
+    def test_goal_failure_with_value_fails_report(self, engine):
+        # The measurement evaluates to 5 V, but the declared spec is 4 V +/- 0.1 V.
+        # A numeric value must not be mistaken for a passed verification.
+        netlist = rspice.Netlist.parse(
+            """* dc measurement with failing goal
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.dc V1 0 10 1
+.meas dc vout MAX V(out) GOAL=4 TOL=0.1
+.end
+"""
+        )
+        assert netlist.measurement_specs == [("VOUT", "DC", 4.0, 0.1)]
+        report = engine.run(netlist)
+        measurement = report.measurement("vout")
+
+        assert measurement is not None
+        assert measurement.value == pytest.approx(5.0)
+        assert measurement.expected == pytest.approx(4.0)
+        assert measurement.tolerance == pytest.approx(0.1)
+        assert not measurement.passed
+        assert "FAILED" in repr(measurement)
+        assert not report.all_passed
+        assert [failure.name.lower() for failure in report.failures] == ["vout"]
+        with pytest.raises(rspice.MeasurementError) as exc_info:
+            report.assert_passed()
+        assert "vout" in str(exc_info.value).lower()
+        with pytest.raises(ValueError):
+            float(measurement)
+
     def test_failed_when_condition_reports_error(self, engine):
         # V(out) never reaches 5 V in this deck: FIND ... WHEN must fail.
         netlist = rspice.Netlist.parse(
@@ -184,6 +215,29 @@ R2 out 0 1k
         assert len(skipped) == 1
         assert skipped[0].kind == "temp"
         assert skipped[0].reason
+
+    def test_skipped_directive_fails_success_contract_even_when_measurement_passes(
+        self, engine
+    ):
+        netlist = rspice.Netlist.parse(
+            """* passing measurement plus unsupported directive
+V1 in 0 10
+R1 in out 1k
+R2 out 0 1k
+.dc V1 0 10 1
+.meas dc vout MAX V(out) GOAL=5 TOL=1e-9
+.temp 50
+.end
+"""
+        )
+
+        report = engine.run(netlist)
+
+        assert report.measurement("vout").passed
+        assert [record.kind for record in report.skipped] == ["temp"]
+        assert not report.all_passed
+        with pytest.raises(rspice.MeasurementError, match="skipped"):
+            report.assert_passed()
 
 
 class TestRunMultipleAnalyses:

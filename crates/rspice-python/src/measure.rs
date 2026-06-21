@@ -50,6 +50,17 @@ pub(crate) fn evaluate_ac_measurements(
         .collect()
 }
 
+/// Evaluate the netlist's NOISE .MEAS statements against a sweep.
+pub(crate) fn evaluate_noise_measurements(
+    netlist: &Netlist,
+    sweep: &[rspice_core::analysis::NoiseResult],
+) -> Vec<PyMeasurement> {
+    measure_signals::evaluate_noise_measurements(netlist, sweep)
+        .iter()
+        .map(|r| PyMeasurement::from_core(r, "NOISE"))
+        .collect()
+}
+
 /// Produce explicit not-evaluated entries for measurements whose analysis
 /// did not run, so CI fails loudly instead of silently skipping checks.
 pub(crate) fn unevaluated_measurements(

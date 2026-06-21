@@ -18,6 +18,46 @@ use pyo3::prelude::*;
 use rspice_core::analysis::IntegrationMethod;
 use rspice_core::engine::{BypassConfig, ConvergenceConfig, DampingStrategy, SimulationConfig};
 
+fn validate_positive(name: &str, value: f64) -> PyResult<f64> {
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{name} must be a positive finite number, got {value}"
+        )))
+    }
+}
+
+fn validate_nonnegative(name: &str, value: f64) -> PyResult<f64> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{name} must be a non-negative finite number, got {value}"
+        )))
+    }
+}
+
+fn validate_positive_usize(name: &str, value: usize) -> PyResult<usize> {
+    if value > 0 {
+        Ok(value)
+    } else {
+        Err(PyValueError::new_err(format!(
+            "{name} must be at least 1, got {value}"
+        )))
+    }
+}
+
+fn validate_timestep_window(min_timestep: f64, max_timestep: f64) -> PyResult<()> {
+    if min_timestep <= max_timestep {
+        Ok(())
+    } else {
+        Err(PyValueError::new_err(format!(
+            "min_timestep ({min_timestep}) must be <= max_timestep ({max_timestep})"
+        )))
+    }
+}
+
 /// Damping strategy for Newton-Raphson iterations
 ///
 /// Controls how Newton iteration steps are modified to improve convergence:
@@ -157,26 +197,28 @@ impl PyBypassConfig {
     ///     abstol: Absolute voltage tolerance for bypass detection
     #[new]
     #[pyo3(signature = (*, enabled=None, reltol=None, abstol=None))]
-    fn new(enabled: Option<bool>, reltol: Option<f64>, abstol: Option<f64>) -> Self {
+    fn new(enabled: Option<bool>, reltol: Option<f64>, abstol: Option<f64>) -> PyResult<Self> {
         let mut inner = BypassConfig::default();
         if let Some(v) = enabled {
             inner.enabled = v;
         }
         if let Some(v) = reltol {
-            inner.reltol = v;
+            inner.reltol = validate_nonnegative("reltol", v)?;
         }
         if let Some(v) = abstol {
-            inner.abstol = v;
+            inner.abstol = validate_nonnegative("abstol", v)?;
         }
-        Self { inner }
+        Ok(Self { inner })
     }
 
     /// Create bypass config with custom tolerances (enabled)
     #[staticmethod]
-    fn with_tolerances(reltol: f64, abstol: f64) -> Self {
-        Self {
+    fn with_tolerances(reltol: f64, abstol: f64) -> PyResult<Self> {
+        let reltol = validate_nonnegative("reltol", reltol)?;
+        let abstol = validate_nonnegative("abstol", abstol)?;
+        Ok(Self {
             inner: BypassConfig::with_tolerances(reltol, abstol),
-        }
+        })
     }
 
     /// Whether bypass optimization is enabled
@@ -197,8 +239,9 @@ impl PyBypassConfig {
     }
 
     #[setter]
-    fn set_reltol(&mut self, value: f64) {
-        self.inner.reltol = value;
+    fn set_reltol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.reltol = validate_nonnegative("reltol", value)?;
+        Ok(())
     }
 
     /// Absolute voltage tolerance for bypass detection
@@ -208,8 +251,9 @@ impl PyBypassConfig {
     }
 
     #[setter]
-    fn set_abstol(&mut self, value: f64) {
-        self.inner.abstol = value;
+    fn set_abstol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.abstol = validate_nonnegative("abstol", value)?;
+        Ok(())
     }
 
     fn __repr__(&self) -> String {
@@ -263,7 +307,7 @@ impl PyConvergenceConfig {
         current_abstol: Option<f64>,
         charge_abstol: Option<f64>,
         verbose: Option<bool>,
-    ) -> Self {
+    ) -> PyResult<Self> {
         let mut inner = ConvergenceConfig::default();
         if let Some(v) = gmin_stepping {
             inner.gmin_stepping = v;
@@ -281,30 +325,30 @@ impl PyConvergenceConfig {
             inner.damping_strategy = v.into();
         }
         if let Some(v) = gmin_initial {
-            inner.gmin_initial = v;
+            inner.gmin_initial = validate_nonnegative("gmin_initial", v)?;
         }
         if let Some(v) = gmin_target {
-            inner.gmin_target = v;
+            inner.gmin_target = validate_nonnegative("gmin_target", v)?;
         }
         if let Some(v) = voltage_reltol {
-            inner.voltage_reltol = v;
+            inner.voltage_reltol = validate_positive("voltage_reltol", v)?;
         }
         if let Some(v) = residual_reltol {
-            inner.residual_reltol = v;
+            inner.residual_reltol = validate_positive("residual_reltol", v)?;
         }
         if let Some(v) = voltage_abstol {
-            inner.voltage_abstol = v;
+            inner.voltage_abstol = validate_nonnegative("voltage_abstol", v)?;
         }
         if let Some(v) = current_abstol {
-            inner.current_abstol = v;
+            inner.current_abstol = validate_nonnegative("current_abstol", v)?;
         }
         if let Some(v) = charge_abstol {
-            inner.charge_abstol = v;
+            inner.charge_abstol = validate_nonnegative("charge_abstol", v)?;
         }
         if let Some(v) = verbose {
             inner.verbose = v;
         }
-        Self { inner }
+        Ok(Self { inner })
     }
 
     /// Create minimal config (direct Newton only - fastest but may fail)
@@ -385,8 +429,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_gmin_initial(&mut self, value: f64) {
-        self.inner.gmin_initial = value;
+    fn set_gmin_initial(&mut self, value: f64) -> PyResult<()> {
+        self.inner.gmin_initial = validate_nonnegative("gmin_initial", value)?;
+        Ok(())
     }
 
     /// Target GMIN value (typically 1e-15)
@@ -396,8 +441,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_gmin_target(&mut self, value: f64) {
-        self.inner.gmin_target = value;
+    fn set_gmin_target(&mut self, value: f64) -> PyResult<()> {
+        self.inner.gmin_target = validate_nonnegative("gmin_target", value)?;
+        Ok(())
     }
 
     /// Relative voltage tolerance for Newton convergence checks.
@@ -407,8 +453,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_voltage_reltol(&mut self, value: f64) {
-        self.inner.voltage_reltol = value;
+    fn set_voltage_reltol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.voltage_reltol = validate_positive("voltage_reltol", value)?;
+        Ok(())
     }
 
     /// Relative equation residual tolerance for Newton convergence checks.
@@ -418,8 +465,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_residual_reltol(&mut self, value: f64) {
-        self.inner.residual_reltol = value;
+    fn set_residual_reltol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.residual_reltol = validate_positive("residual_reltol", value)?;
+        Ok(())
     }
 
     /// Absolute voltage tolerance for Newton convergence checks.
@@ -429,8 +477,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_voltage_abstol(&mut self, value: f64) {
-        self.inner.voltage_abstol = value;
+    fn set_voltage_abstol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.voltage_abstol = validate_nonnegative("voltage_abstol", value)?;
+        Ok(())
     }
 
     /// Absolute current tolerance for equation residual convergence checks.
@@ -440,8 +489,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_current_abstol(&mut self, value: f64) {
-        self.inner.current_abstol = value;
+    fn set_current_abstol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.current_abstol = validate_nonnegative("current_abstol", value)?;
+        Ok(())
     }
 
     /// Absolute charge tolerance for transient devices (CHGTOL).
@@ -451,8 +501,9 @@ impl PyConvergenceConfig {
     }
 
     #[setter]
-    fn set_charge_abstol(&mut self, value: f64) {
-        self.inner.charge_abstol = value;
+    fn set_charge_abstol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.charge_abstol = validate_nonnegative("charge_abstol", value)?;
+        Ok(())
     }
 
     /// Enable verbose convergence logging
@@ -542,33 +593,29 @@ impl PySimulationConfig {
     ) -> PyResult<Self> {
         let mut inner = SimulationConfig::default();
         if let Some(v) = tolerance {
-            inner.tolerance = v;
+            inner.tolerance = validate_positive("tolerance", v)?;
         }
         if let Some(v) = max_iterations {
-            inner.max_iterations = v;
+            inner.max_iterations = validate_positive_usize("max_iterations", v)?;
         }
         if let Some(v) = transient_max_iterations {
-            inner.transient_max_iterations = v;
+            inner.transient_max_iterations =
+                validate_positive_usize("transient_max_iterations", v)?;
         }
         if let Some(v) = min_timestep {
-            inner.min_timestep = v;
+            inner.min_timestep = validate_positive("min_timestep", v)?;
         }
         if let Some(v) = max_timestep {
-            inner.max_timestep = v;
+            inner.max_timestep = validate_positive("max_timestep", v)?;
         }
         if let Some(v) = temperature {
-            if !v.is_finite() || v <= 0.0 {
-                return Err(PyValueError::new_err(format!(
-                    "temperature must be a positive number of Kelvin, got {v}"
-                )));
-            }
-            inner.temperature = v;
+            inner.temperature = validate_positive("temperature", v)?;
         }
         if let Some(v) = integration_method {
             inner.integration_method = v.into();
         }
         if let Some(v) = transient_trtol {
-            inner.transient_trtol = v;
+            inner.transient_trtol = validate_positive("transient_trtol", v)?;
         }
         if let Some(v) = convergence {
             inner.convergence_config = v.inner;
@@ -576,6 +623,7 @@ impl PySimulationConfig {
         if let Some(v) = bypass {
             inner.bypass_config = v.inner;
         }
+        validate_timestep_window(inner.min_timestep, inner.max_timestep)?;
         Ok(Self { inner })
     }
 
@@ -586,8 +634,9 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    pub fn set_tolerance(&mut self, value: f64) {
-        self.inner.tolerance = value;
+    pub fn set_tolerance(&mut self, value: f64) -> PyResult<()> {
+        self.inner.tolerance = validate_positive("tolerance", value)?;
+        Ok(())
     }
 
     /// Maximum Newton-Raphson iterations (DC)
@@ -597,8 +646,9 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    pub fn set_max_iterations(&mut self, value: usize) {
-        self.inner.max_iterations = value;
+    pub fn set_max_iterations(&mut self, value: usize) -> PyResult<()> {
+        self.inner.max_iterations = validate_positive_usize("max_iterations", value)?;
+        Ok(())
     }
 
     /// Maximum Newton-Raphson iterations per transient timestep (ITL4)
@@ -608,8 +658,10 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    fn set_transient_max_iterations(&mut self, value: usize) {
-        self.inner.transient_max_iterations = value;
+    fn set_transient_max_iterations(&mut self, value: usize) -> PyResult<()> {
+        self.inner.transient_max_iterations =
+            validate_positive_usize("transient_max_iterations", value)?;
+        Ok(())
     }
 
     /// Minimum timestep for transient analysis
@@ -619,8 +671,11 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    fn set_min_timestep(&mut self, value: f64) {
+    fn set_min_timestep(&mut self, value: f64) -> PyResult<()> {
+        let value = validate_positive("min_timestep", value)?;
+        validate_timestep_window(value, self.inner.max_timestep)?;
         self.inner.min_timestep = value;
+        Ok(())
     }
 
     /// Maximum timestep for transient analysis
@@ -630,8 +685,11 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    fn set_max_timestep(&mut self, value: f64) {
+    fn set_max_timestep(&mut self, value: f64) -> PyResult<()> {
+        let value = validate_positive("max_timestep", value)?;
+        validate_timestep_window(self.inner.min_timestep, value)?;
         self.inner.max_timestep = value;
+        Ok(())
     }
 
     /// Temperature in Kelvin
@@ -641,8 +699,9 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    pub fn set_temperature(&mut self, value: f64) {
-        self.inner.temperature = value;
+    pub fn set_temperature(&mut self, value: f64) -> PyResult<()> {
+        self.inner.temperature = validate_positive("temperature", value)?;
+        Ok(())
     }
 
     /// Transient integration method
@@ -663,8 +722,9 @@ impl PySimulationConfig {
     }
 
     #[setter]
-    fn set_transient_trtol(&mut self, value: f64) {
-        self.inner.transient_trtol = value;
+    fn set_transient_trtol(&mut self, value: f64) -> PyResult<()> {
+        self.inner.transient_trtol = validate_positive("transient_trtol", value)?;
+        Ok(())
     }
 
     /// Convergence configuration (returns a copy; assign back to modify)

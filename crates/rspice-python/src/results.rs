@@ -576,6 +576,97 @@ impl PyAcResult {
             Err(invalid_freq_index_error(index, self.results.len()))
         }
     }
+
+    fn frequency_label(&self, freq_index: usize, result: &AcResult) -> String {
+        let frequency = self
+            .frequencies
+            .get(freq_index)
+            .copied()
+            .unwrap_or(result.frequency);
+        format!("{frequency:.6e} Hz")
+    }
+
+    fn node_label(&self, node: usize) -> String {
+        if node == 0 {
+            return "ground".to_string();
+        }
+        match self.node_names.get(node - 1) {
+            Some(name) => format!("{node} ('{name}')"),
+            None => node.to_string(),
+        }
+    }
+
+    fn branch_label(&self, branch: usize) -> String {
+        match self.branch_names.get(branch) {
+            Some(name) => format!("{branch} ('{name}')"),
+            None => branch.to_string(),
+        }
+    }
+
+    fn checked_voltage_phasor(
+        &self,
+        freq_index: usize,
+        node: usize,
+    ) -> PyResult<rspice_core::Complex64> {
+        let result = self
+            .results
+            .get(freq_index)
+            .ok_or_else(|| PyErr::from(invalid_freq_index_error(freq_index, self.results.len())))?;
+        self.voltage_phasor_from_row(freq_index, result, node)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn voltage_phasor_from_row(
+        &self,
+        freq_index: usize,
+        result: &AcResult,
+        node: usize,
+    ) -> Result<rspice_core::Complex64, String> {
+        if node == 0 {
+            return Ok(rspice_core::Complex64::new(0.0, 0.0));
+        }
+        result.voltages.get(node - 1).copied().ok_or_else(|| {
+            format!(
+                "malformed AC result row {freq_index} ({}): missing voltage for node {}; \
+                 row has {} voltage value(s), expected at least {}",
+                self.frequency_label(freq_index, result),
+                self.node_label(node),
+                result.voltages.len(),
+                node
+            )
+        })
+    }
+
+    fn checked_branch_current(
+        &self,
+        freq_index: usize,
+        branch: usize,
+    ) -> PyResult<rspice_core::Complex64> {
+        let result = self
+            .results
+            .get(freq_index)
+            .ok_or_else(|| PyErr::from(invalid_freq_index_error(freq_index, self.results.len())))?;
+        self.branch_current_from_row(freq_index, result, branch)
+            .map_err(PyValueError::new_err)
+    }
+
+    fn branch_current_from_row(
+        &self,
+        freq_index: usize,
+        result: &AcResult,
+        branch: usize,
+    ) -> Result<rspice_core::Complex64, String> {
+        result.currents.get(branch).copied().ok_or_else(|| {
+            format!(
+                "malformed AC result row {freq_index} ({}): missing current for branch {}; \
+                 row has {} current value(s), expected at least {}",
+                self.frequency_label(freq_index, result),
+                self.branch_label(branch),
+                result.currents.len(),
+                branch + 1
+            )
+        })
+    }
 }
 
 #[pymethods]
@@ -623,12 +714,16 @@ impl PyAcResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        let magnitudes: Vec<f64> = self
+        let magnitudes: PyResult<Vec<f64>> = self
             .results
             .iter()
-            .map(|r| r.voltage_magnitude(idx))
+            .enumerate()
+            .map(|(freq_index, _)| {
+                self.checked_voltage_phasor(freq_index, idx)
+                    .map(|v| v.norm())
+            })
             .collect();
-        Ok(magnitudes.to_pyarray(py))
+        Ok(magnitudes?.to_pyarray(py))
     }
 
     /// Get voltage phase at a node across all frequencies (radians)
@@ -638,8 +733,16 @@ impl PyAcResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        let phases: Vec<f64> = self.results.iter().map(|r| r.voltage_phase(idx)).collect();
-        Ok(phases.to_pyarray(py))
+        let phases: PyResult<Vec<f64>> = self
+            .results
+            .iter()
+            .enumerate()
+            .map(|(freq_index, _)| {
+                self.checked_voltage_phasor(freq_index, idx)
+                    .map(|v| v.arg())
+            })
+            .collect();
+        Ok(phases?.to_pyarray(py))
     }
 
     /// Get voltage phase at a node across all frequencies (degrees)
@@ -649,12 +752,16 @@ impl PyAcResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        let phases: Vec<f64> = self
+        let phases: PyResult<Vec<f64>> = self
             .results
             .iter()
-            .map(|r| r.voltage_phase(idx).to_degrees())
+            .enumerate()
+            .map(|(freq_index, _)| {
+                self.checked_voltage_phasor(freq_index, idx)
+                    .map(|v| v.arg().to_degrees())
+            })
             .collect();
-        Ok(phases.to_pyarray(py))
+        Ok(phases?.to_pyarray(py))
     }
 
     /// Get complex voltage at a node across all frequencies
@@ -670,19 +777,13 @@ impl PyAcResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        let zero = rspice_core::Complex64::new(0.0, 0.0);
-        let values: Vec<rspice_core::Complex64> = self
+        let values: PyResult<Vec<rspice_core::Complex64>> = self
             .results
             .iter()
-            .map(|r| {
-                if idx == 0 {
-                    zero
-                } else {
-                    r.voltages.get(idx - 1).copied().unwrap_or(zero)
-                }
-            })
+            .enumerate()
+            .map(|(freq_index, _)| self.checked_voltage_phasor(freq_index, idx))
             .collect();
-        Ok(values.to_pyarray(py))
+        Ok(values?.to_pyarray(py))
     }
 
     /// Get voltage magnitude in dB (20·log10 |V|) at a node across all frequencies
@@ -692,8 +793,16 @@ impl PyAcResult {
         node: NodeIdentifier,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        let db: Vec<f64> = self.results.iter().map(|r| r.voltage_db(idx)).collect();
-        Ok(db.to_pyarray(py))
+        let db: PyResult<Vec<f64>> = self
+            .results
+            .iter()
+            .enumerate()
+            .map(|(freq_index, _)| {
+                self.checked_voltage_phasor(freq_index, idx)
+                    .map(|v| 20.0 * v.norm().log10())
+            })
+            .collect();
+        Ok(db?.to_pyarray(py))
     }
 
     /// Get complex branch current through an element across all frequencies
@@ -711,13 +820,13 @@ impl PyAcResult {
         name: &str,
     ) -> PyResult<Bound<'py, PyArray1<rspice_core::Complex64>>> {
         let idx = self.resolve_branch(name).map_err(PyErr::from)?;
-        let zero = rspice_core::Complex64::new(0.0, 0.0);
-        let values: Vec<rspice_core::Complex64> = self
+        let values: PyResult<Vec<rspice_core::Complex64>> = self
             .results
             .iter()
-            .map(|r| r.currents.get(idx).copied().unwrap_or(zero))
+            .enumerate()
+            .map(|(freq_index, _)| self.checked_branch_current(freq_index, idx))
             .collect();
-        Ok(values.to_pyarray(py))
+        Ok(values?.to_pyarray(py))
     }
 
     /// Get branch current magnitude through an element across all frequencies
@@ -727,12 +836,16 @@ impl PyAcResult {
         name: &str,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
         let idx = self.resolve_branch(name).map_err(PyErr::from)?;
-        let values: Vec<f64> = self
+        let values: PyResult<Vec<f64>> = self
             .results
             .iter()
-            .map(|r| r.currents.get(idx).map(|c| c.norm()).unwrap_or(0.0))
+            .enumerate()
+            .map(|(freq_index, _)| {
+                self.checked_branch_current(freq_index, idx)
+                    .map(|c| c.norm())
+            })
             .collect();
-        Ok(values.to_pyarray(py))
+        Ok(values?.to_pyarray(py))
     }
 
     /// Get voltage magnitude at a specific frequency index and node
@@ -742,7 +855,7 @@ impl PyAcResult {
     pub fn magnitude_at(&self, freq_index: usize, node: NodeIdentifier) -> PyResult<f64> {
         self.checked_freq_index(freq_index).map_err(PyErr::from)?;
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        Ok(self.results[freq_index].voltage_magnitude(idx))
+        Ok(self.checked_voltage_phasor(freq_index, idx)?.norm())
     }
 
     /// Get phase at a specific frequency index and node (radians)
@@ -752,7 +865,7 @@ impl PyAcResult {
     fn phase_at(&self, freq_index: usize, node: NodeIdentifier) -> PyResult<f64> {
         self.checked_freq_index(freq_index).map_err(PyErr::from)?;
         let idx = self.resolve_node(&node).map_err(PyErr::from)?;
-        Ok(self.results[freq_index].voltage_phase(idx))
+        Ok(self.checked_voltage_phasor(freq_index, idx)?.arg())
     }
 
     fn __repr__(&self) -> String {
@@ -1756,6 +1869,22 @@ impl PyMeasurement {
             ok: false,
         }
     }
+
+    fn failure_message(&self) -> String {
+        if let Some(error) = &self.error {
+            return error.clone();
+        }
+        match (self.value, self.expected, self.tolerance) {
+            (Some(value), Some(expected), Some(tolerance)) => {
+                format!("value {value:.6e} is outside goal {expected:.6e} +/- {tolerance:.6e}")
+            }
+            (Some(value), Some(expected), None) => {
+                format!("value {value:.6e} did not meet goal {expected:.6e}")
+            }
+            (Some(value), None, _) => format!("measurement failed with value {value:.6e}"),
+            (None, _, _) => "evaluation failed".to_string(),
+        }
+    }
 }
 
 #[pymethods]
@@ -1768,24 +1897,34 @@ impl PyMeasurement {
 
     /// Convert to float; raises ValueError when the measurement failed
     fn __float__(&self) -> PyResult<f64> {
-        self.value.ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "measurement '{}' has no value: {}",
+        match (self.ok, self.value) {
+            (true, Some(value)) => Ok(value),
+            _ => Err(PyValueError::new_err(format!(
+                "measurement '{}' failed: {}",
                 self.name,
-                self.error.as_deref().unwrap_or("evaluation failed")
-            ))
-        })
+                self.failure_message()
+            ))),
+        }
     }
 
     fn __repr__(&self) -> String {
-        match self.value {
-            Some(v) => format!("Measurement({}={:.6e} [{}])", self.name, v, self.analysis),
-            None => format!(
+        if self.ok {
+            match self.value {
+                Some(v) => format!("Measurement({}={:.6e} [{}])", self.name, v, self.analysis),
+                None => format!(
+                    "Measurement({} FAILED [{}]: {})",
+                    self.name,
+                    self.analysis,
+                    self.failure_message()
+                ),
+            }
+        } else {
+            format!(
                 "Measurement({} FAILED [{}]: {})",
                 self.name,
                 self.analysis,
-                self.error.as_deref().unwrap_or("evaluation failed")
-            ),
+                self.failure_message()
+            )
         }
     }
 }
@@ -1847,8 +1986,8 @@ impl PyAnalysisRecord {
 /// plus all .MEAS verification results.
 ///
 /// Designed for CI: `report.assert_passed()` raises `MeasurementError` if
-/// any measurement failed (or none were evaluated), with a message listing
-/// each failure.
+/// any directive was skipped, any measurement failed (or none were evaluated),
+/// with a message listing each failure.
 ///
 /// Example:
 ///     >>> report = engine.run(netlist)
@@ -1901,18 +2040,19 @@ impl PyRunReport {
         self.measurements.len()
     }
 
-    /// True when every measurement produced a value (vacuously true with none)
+    /// True when no analysis directive was skipped and every measurement passed
+    /// (vacuously true with none)
     #[getter]
     fn all_passed(&self) -> bool {
-        self.measurements.iter().all(|m| m.value.is_some())
+        self.records.iter().all(|r| !r.skipped) && self.measurements.iter().all(|m| m.ok)
     }
 
-    /// Measurements that failed to evaluate
+    /// Measurements that failed to evaluate or failed their goal/tolerance check
     #[getter]
     fn failures(&self) -> Vec<PyMeasurement> {
         self.measurements
             .iter()
-            .filter(|m| m.value.is_none())
+            .filter(|m| !m.ok)
             .cloned()
             .collect()
     }
@@ -1933,12 +2073,28 @@ impl PyRunReport {
         self.records.iter().filter(|r| r.skipped).cloned().collect()
     }
 
-    /// Raise MeasurementError unless at least one measurement was evaluated
-    /// and all of them passed.
+    /// Raise MeasurementError unless every requested analysis ran, at least
+    /// one measurement was evaluated, and all of them passed.
     ///
     /// This is the CI primitive: a netlist whose .MEAS statements were
     /// silently skipped fails loudly instead of green-washing a pipeline.
     fn assert_passed(&self) -> PyResult<()> {
+        let skipped = self.skipped();
+        if !skipped.is_empty() {
+            let mut message = format!(
+                "{} of {} analysis directives were skipped:",
+                skipped.len(),
+                self.records.len()
+            );
+            for record in &skipped {
+                message.push_str(&format!(
+                    "\n  {}: {}",
+                    record.detail,
+                    record.reason.as_deref().unwrap_or("skipped")
+                ));
+            }
+            return Err(crate::errors::MeasurementError::new_err(message));
+        }
         if self.measurements.is_empty() {
             return Err(crate::errors::MeasurementError::new_err(
                 "no measurements were evaluated: the netlist has no .MEAS statements \
@@ -1959,7 +2115,7 @@ impl PyRunReport {
                 "\n  {} [{}]: {}",
                 f.name,
                 f.analysis,
-                f.error.as_deref().unwrap_or("evaluation failed")
+                f.failure_message()
             ));
         }
         Err(crate::errors::MeasurementError::new_err(message))
@@ -1985,4 +2141,58 @@ pub enum NodeIdentifier {
     Index(usize),
     #[pyo3(transparent)]
     Name(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rspice_core::Complex64;
+
+    fn ac_row(frequency: f64, voltages: Vec<Complex64>, currents: Vec<Complex64>) -> AcResult {
+        AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            voltages,
+            currents,
+        }
+    }
+
+    #[test]
+    fn ac_voltage_access_rejects_short_later_rows() {
+        let ac = PyAcResult::new(
+            vec![1.0, 2.0],
+            vec![
+                ac_row(1.0, vec![Complex64::new(1.0, 0.0)], Vec::new()),
+                ac_row(2.0, Vec::new(), Vec::new()),
+            ],
+        );
+
+        let message = ac
+            .voltage_phasor_from_row(1, &ac.results[1], 1)
+            .unwrap_err();
+        assert!(message.contains("malformed AC result row 1"), "{message}");
+        assert!(message.contains("missing voltage"), "{message}");
+    }
+
+    #[test]
+    fn ac_branch_access_rejects_short_later_rows() {
+        let ac = PyAcResult::new(
+            vec![1.0, 2.0],
+            vec![
+                ac_row(
+                    1.0,
+                    vec![Complex64::new(1.0, 0.0)],
+                    vec![Complex64::new(0.0, 1.0)],
+                ),
+                ac_row(2.0, vec![Complex64::new(1.0, 0.0)], Vec::new()),
+            ],
+        );
+
+        let message = ac
+            .branch_current_from_row(1, &ac.results[1], 0)
+            .unwrap_err();
+        assert!(message.contains("malformed AC result row 1"), "{message}");
+        assert!(message.contains("missing current"), "{message}");
+    }
 }

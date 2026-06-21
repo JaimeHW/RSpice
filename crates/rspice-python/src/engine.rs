@@ -181,7 +181,7 @@ impl PyEngine {
 
     /// Core noise runner shared by `run_noise` and `run()`.
     #[allow(clippy::too_many_arguments)]
-    fn noise_impl(
+    fn noise_core_impl(
         &self,
         py: Python<'_>,
         netlist: &PyNetlist,
@@ -190,7 +190,7 @@ impl PyEngine {
         input_source: Option<&str>,
         frequencies: &[f64],
         temperature: Option<f64>,
-    ) -> PyResult<Vec<PyNoiseResult>> {
+    ) -> PyResult<Vec<rspice_core::analysis::NoiseResult>> {
         let engine = self.engine_for_netlist(&netlist.inner);
         let temp = temperature.unwrap_or(engine.config().temperature);
         if !temp.is_finite() || temp <= 0.0 {
@@ -222,6 +222,30 @@ impl PyEngine {
             })
             .map_err(crate::errors::simulation_error_to_pyerr)?;
 
+        Ok(results)
+    }
+
+    /// Python noise runner shared by `run_noise` and direct API calls.
+    #[allow(clippy::too_many_arguments)]
+    fn noise_impl(
+        &self,
+        py: Python<'_>,
+        netlist: &PyNetlist,
+        output_node: usize,
+        output_neg: Option<usize>,
+        input_source: Option<&str>,
+        frequencies: &[f64],
+        temperature: Option<f64>,
+    ) -> PyResult<Vec<PyNoiseResult>> {
+        let results = self.noise_core_impl(
+            py,
+            netlist,
+            output_node,
+            output_neg,
+            input_source,
+            frequencies,
+            temperature,
+        )?;
         Ok(results.iter().map(PyNoiseResult::from_core).collect())
     }
 
@@ -302,6 +326,7 @@ impl PyEngine {
         let mut tran: Option<Py<PyTransientResult>> = None;
         let mut ac: Option<Py<PyAcResult>> = None;
         let mut noise: Option<Vec<PyNoiseResult>> = None;
+        let mut noise_core: Option<Vec<rspice_core::analysis::NoiseResult>> = None;
         let mut tf: Option<PyTransferFunctionResult> = None;
         let mut fourier: Vec<PyFourierResult> = Vec::new();
         let mut pending_fourier: Vec<(f64, Vec<String>, usize)> = Vec::new();
@@ -412,7 +437,7 @@ impl PyEngine {
                     } else {
                         Some(input_source.as_str())
                     };
-                    let results = self.noise_impl(
+                    let results = self.noise_core_impl(
                         py,
                         netlist,
                         output,
@@ -421,7 +446,8 @@ impl PyEngine {
                         &frequencies,
                         None,
                     )?;
-                    noise = Some(results);
+                    noise = Some(results.iter().map(PyNoiseResult::from_core).collect());
+                    noise_core = Some(results);
                     records.push(PyAnalysisRecord::executed(
                         "noise",
                         format!(".noise V({output_node}) {input_source}"),
@@ -548,6 +574,16 @@ impl PyEngine {
                 net,
                 "AC",
                 "requires a .ac analysis in the netlist",
+            )),
+        }
+        match &noise_core {
+            Some(noise_results) => {
+                measurements.extend(measure::evaluate_noise_measurements(net, noise_results));
+            }
+            None => measurements.extend(measure::unevaluated_measurements(
+                net,
+                "NOISE",
+                "requires a .noise analysis in the netlist",
             )),
         }
 
@@ -809,6 +845,7 @@ impl PyEngine {
     ///     >>> for r in results:
     ///     ...     print(f"{r.frequency:.0f}Hz: {r.output_noise_rms*1e9:.2f}nV/√Hz")
     #[pyo3(signature = (netlist, output_node, frequencies, temperature=None, input_source=None, reference_node=None))]
+    #[allow(clippy::too_many_arguments)]
     fn run_noise(
         &self,
         py: Python<'_>,
@@ -901,6 +938,7 @@ impl PyEngine {
     ///     ...                             distribution="uniform", spread=0.05)
     ///     >>> stats = mc.get_variable("V(OUT)")
     #[pyo3(signature = (netlist, num_runs, seed=None, distribution="gaussian", spread=0.01, params=None))]
+    #[allow(clippy::too_many_arguments)]
     fn run_monte_carlo(
         &self,
         py: Python<'_>,
@@ -1018,6 +1056,9 @@ impl PyEngine {
     ///
     /// Returns:
     ///     numpy.ndarray: Sensitivity at each frequency
+    ///
+    /// Raises:
+    ///     ValueError: For non-finite param_value or non-positive delta
     #[pyo3(signature = (netlist, output_node, param_name, param_value, frequencies, delta=None))]
     #[allow(clippy::too_many_arguments)]
     fn run_sensitivity_ac<'py>(
@@ -1031,6 +1072,18 @@ impl PyEngine {
         delta: Option<f64>,
     ) -> PyResult<Bound<'py, numpy::PyArray1<f64>>> {
         use numpy::ToPyArray;
+        if !param_value.is_finite() {
+            return Err(PyValueError::new_err(format!(
+                "param_value must be finite, got {param_value}"
+            )));
+        }
+        if let Some(d) = delta
+            && (!d.is_finite() || d <= 0.0)
+        {
+            return Err(PyValueError::new_err(format!(
+                "delta must be a positive finite number, got {d}"
+            )));
+        }
         validate_frequencies(&frequencies)?;
         let engine = self.engine_for_netlist(&netlist.inner);
         let output = self.resolve_node(&engine, &netlist.inner, &output_node, "output")?;
@@ -1075,6 +1128,14 @@ impl PyEngine {
         param_name: &str,
         values: Vec<f64>,
     ) -> PyResult<Vec<(f64, PySimulationResult)>> {
+        for (index, value) in values.iter().enumerate() {
+            if !value.is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "step value at index {index} must be finite, got {value}"
+                )));
+            }
+        }
+
         let engine = self.engine_for_netlist(&netlist.inner);
         let results = py
             .allow_threads(|| engine.run_step(&netlist.inner, param_name, &values))

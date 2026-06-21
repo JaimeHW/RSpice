@@ -69,6 +69,9 @@ Put the pass/fail criteria in the netlist as `.MEAS` statements, run the
 deck, and assert on the report — from pytest, a script, or a CI job:
 
 ```python
+import pytest
+import rspice
+
 DECK = """* RC step response regression
 V1 in 0 PULSE(0 1 0 1n 1n 1 2)
 R1 in out 1k
@@ -92,8 +95,9 @@ def test_rc_step_response():
 - `report.tran` / `report.ac` / `report.op` / `report.dc` / `report.noise` /
   `report.tf` / `report.fourier` — the analysis results
 - `report.measurements`, `report.measurement(name)`, `report.failures`,
-  `report.all_passed` — `.MEAS` outcomes for TRAN, DC, and AC analyses
-  (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data)
+  `report.all_passed` — `.MEAS` outcomes for TRAN, DC, AC, and NOISE analyses
+  (`.MEAS AC` supports magnitude, dB, phase, real, and imaginary data;
+  `.MEAS NOISE` supports `ONOISE`/`INOISE` spectral densities)
 - `report.records` — one record per directive; anything the engine could not
   execute is listed with `skipped=True` and a reason, never dropped silently
 - `report.assert_passed()` — raises `MeasurementError` unless at least one
@@ -110,7 +114,7 @@ for m in engine.measure(netlist, tran):
 ```
 
 `Engine.run(...)` is the automated-verification entry point and evaluates
-matching TRAN, DC, and AC `.MEAS` statements after it executes the deck.
+matching TRAN, DC, AC, and NOISE `.MEAS` statements after it executes the deck.
 Standalone `Engine.measure(...)` is intentionally narrower today: it accepts
 `TransientResult` and `DcSweepResult` only.
 
@@ -121,13 +125,19 @@ address node voltages (`V(out)`) and branch currents (`I(V1)`). For AC,
 plain `V(out)` / `VM(out)` measure magnitude; `VDB(out)` measures dB
 magnitude, `VP(out)` phase in degrees, `VR(out)` real, and `VI(out)`
 imaginary. The AC sweep axis is available as `TIME`, `FREQUENCY`, or `FREQ`;
-branch currents use the same `I*` variants.
+branch currents use the same `I*` variants. For NOISE, measure `ONOISE` or
+`INOISE` (also `ONOISE_SPECTRUM` / `INOISE_SPECTRUM`) against the noise
+frequency axis.
 
 ## API Overview
 
 ### Netlist
 
 ```python
+import pathlib
+import numpy as np
+import rspice
+
 netlist = rspice.Netlist.parse("V1 1 0 10\nR1 1 0 1k\n.end")
 
 # Raw SPICE deck: first line is always the title

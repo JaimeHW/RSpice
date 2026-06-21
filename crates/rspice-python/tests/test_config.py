@@ -1,5 +1,7 @@
 """Configuration classes: kwargs construction, copy semantics, enums."""
 
+import math
+
 import pytest
 
 import rspice
@@ -35,6 +37,50 @@ class TestSimulationConfig:
     def test_invalid_temperature_raises(self):
         with pytest.raises(ValueError):
             rspice.SimulationConfig(temperature=-10.0)
+
+    @pytest.mark.parametrize(
+        ("kwargs", "field", "bad_value"),
+        [
+            ({"tolerance": -1e-9}, "tolerance", -1e-9),
+            ({"tolerance": math.nan}, "tolerance", math.nan),
+            ({"max_iterations": 0}, "max_iterations", 0),
+            ({"transient_max_iterations": 0}, "transient_max_iterations", 0),
+            ({"min_timestep": -1e-12}, "min_timestep", -1e-12),
+            ({"max_timestep": math.inf}, "max_timestep", math.inf),
+            ({"transient_trtol": -1.0}, "transient_trtol", -1.0),
+        ],
+    )
+    def test_invalid_numeric_kwargs_raise(self, kwargs, field, bad_value):
+        with pytest.raises(ValueError):
+            rspice.SimulationConfig(**kwargs)
+
+        config = rspice.SimulationConfig()
+        with pytest.raises(ValueError):
+            setattr(config, field, bad_value)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"min_timestep": 1e-6, "max_timestep": 1e-9},
+            {"min_timestep": 1.0},
+            {"max_timestep": 1e-15},
+        ],
+    )
+    def test_invalid_timestep_ordering_raises(self, kwargs):
+        with pytest.raises(ValueError, match="min_timestep"):
+            rspice.SimulationConfig(**kwargs)
+
+        config = rspice.SimulationConfig()
+        if "min_timestep" in kwargs and "max_timestep" in kwargs:
+            config.max_timestep = kwargs["max_timestep"]
+            with pytest.raises(ValueError, match="min_timestep|max_timestep"):
+                config.min_timestep = kwargs["min_timestep"]
+        elif "min_timestep" in kwargs:
+            with pytest.raises(ValueError, match="min_timestep|max_timestep"):
+                config.min_timestep = kwargs["min_timestep"]
+        else:
+            with pytest.raises(ValueError, match="min_timestep|max_timestep"):
+                config.max_timestep = kwargs["max_timestep"]
 
     def test_nested_assignment_works(self):
         config = rspice.SimulationConfig()
@@ -96,6 +142,26 @@ class TestConvergenceConfig:
         assert conv.pseudo_transient is True
         assert conv.arc_length is True
 
+    @pytest.mark.parametrize(
+        ("kwargs", "field", "bad_value"),
+        [
+            ({"gmin_initial": -1e-12}, "gmin_initial", -1e-12),
+            ({"gmin_target": math.nan}, "gmin_target", math.nan),
+            ({"voltage_reltol": -1e-3}, "voltage_reltol", -1e-3),
+            ({"residual_reltol": math.inf}, "residual_reltol", math.inf),
+            ({"voltage_abstol": -1e-9}, "voltage_abstol", -1e-9),
+            ({"current_abstol": math.nan}, "current_abstol", math.nan),
+            ({"charge_abstol": -1e-15}, "charge_abstol", -1e-15),
+        ],
+    )
+    def test_invalid_numeric_fields_raise(self, kwargs, field, bad_value):
+        with pytest.raises(ValueError):
+            rspice.ConvergenceConfig(**kwargs)
+
+        conv = rspice.ConvergenceConfig()
+        with pytest.raises(ValueError):
+            setattr(conv, field, bad_value)
+
 
 class TestBypassConfig:
     def test_enabled_is_a_real_property(self):
@@ -114,6 +180,25 @@ class TestBypassConfig:
         bypass = rspice.BypassConfig.with_tolerances(1e-3, 1e-6)
         assert bypass.reltol == 1e-3
         assert bypass.abstol == 1e-6
+
+    @pytest.mark.parametrize(
+        ("kwargs", "field", "bad_value"),
+        [
+            ({"reltol": -1e-3}, "reltol", -1e-3),
+            ({"abstol": math.nan}, "abstol", math.nan),
+        ],
+    )
+    def test_invalid_numeric_fields_raise(self, kwargs, field, bad_value):
+        with pytest.raises(ValueError):
+            rspice.BypassConfig(**kwargs)
+
+        bypass = rspice.BypassConfig()
+        with pytest.raises(ValueError):
+            setattr(bypass, field, bad_value)
+
+    def test_with_tolerances_rejects_invalid_values(self):
+        with pytest.raises(ValueError):
+            rspice.BypassConfig.with_tolerances(math.inf, 1e-6)
 
 
 class TestEnums:
